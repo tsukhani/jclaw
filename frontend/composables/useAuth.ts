@@ -41,8 +41,8 @@ async function setupPassword(pass: string): Promise<{ ok: boolean, error?: strin
     if (err?.status === 409 || code === 'already_set') {
       return { ok: false, error: 'already_set' }
     }
-    if (code === 'password_too_short') {
-      return { ok: false, error: 'password_too_short' }
+    if (code === 'password_too_short' || code === 'password_too_long' || code === 'password_breached') {
+      return { ok: false, error: code }
     }
     return { ok: false, error: 'network' }
   }

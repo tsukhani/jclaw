@@ -7,10 +7,12 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.Play;
 import play.mvc.Controller;
+import services.BreachedPasswordChecker;
 import services.ConfigService;
 import services.EventLogger;
 import utils.ApiResponses;
 import utils.PasswordHasher;
+import utils.PlayConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -33,6 +35,19 @@ public class ApiAuthController extends Controller {
 
     private static final Gson gson = INSTANCE;
     public static final String PASSWORD_HASH_KEY = "auth.admin.passwordHash";
+
+    // JCLAW-741: password policy (length over complexity, NIST 800-63B) — a
+    // minimum length and a sane maximum that bounds per-attempt PBKDF2 cost,
+    // no composition rules. The floor is enforced here (authoritative); the
+    // frontend strength meter is advisory above it.
+    private static final int MIN_PASSWORD_LENGTH = 12;
+    private static final int MAX_PASSWORD_LENGTH = 128;
+
+    // JCLAW-741: failed-login throttle tunables (application.conf overridable).
+    private static final String CFG_LOGIN_MAX_FAILURES = "auth.login.rate-limit.max-failures";
+    private static final String CFG_LOGIN_WINDOW_SECONDS = "auth.login.rate-limit.window-seconds";
+    private static final int DEFAULT_LOGIN_MAX_FAILURES = 10;
+    private static final long DEFAULT_LOGIN_WINDOW_SECONDS = 300L;
 
     public record AuthStatusResponse(boolean passwordSet) {}
 
@@ -78,8 +93,20 @@ public class ApiAuthController extends Controller {
         if (body == null) badRequest();
         var password = JsonBodyReader.optString(body, "password", false);
         if (password == null) badRequest();
-        if (password.length() < 8) {
-            ApiResponses.error(400, "password_too_short", "Password must be at least 8 characters");
+        if (password.length() < MIN_PASSWORD_LENGTH) {
+            ApiResponses.error(400, "password_too_short",
+                    "Password must be at least %d characters".formatted(MIN_PASSWORD_LENGTH));
+        }
+        if (password.length() > MAX_PASSWORD_LENGTH) {
+            ApiResponses.error(400, "password_too_long",
+                    "Password must be at most %d characters".formatted(MAX_PASSWORD_LENGTH));
+        }
+        // JCLAW-741: reject passwords found in a known breach. Never blocks on
+        // the network — a slow/unreachable HIBP lookup degrades to the offline
+        // list (see BreachedPasswordChecker).
+        if (BreachedPasswordChecker.isBreached(password)) {
+            ApiResponses.error(400, "password_breached",
+                    "This password appears in a known data breach. Choose a different one.");
         }
         ConfigService.set(PASSWORD_HASH_KEY, PasswordHasher.hash(password));
         EventLogger.info("auth", "Admin password set for the first time");
@@ -90,6 +117,19 @@ public class ApiAuthController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = LoginRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoginResponse.class)))
     public static void login() {
+        // JCLAW-741: throttle brute-force / PBKDF2 CPU-exhaustion before any
+        // work. Keyed on the socket peer; a source with too many recent
+        // failures is rejected with 429 without touching the DB or the
+        // 600k-iteration verify. A stale lock-out window auto-clears.
+        // request.remoteAddress is null in the functional-test harness (Netty
+        // always populates it in production). Coalesce so the throttle's
+        // ConcurrentHashMap key is never null.
+        String clientIp = request.remoteAddress != null ? request.remoteAddress : "unknown";
+        if (!LoginRateLimiter.allow(clientIp, loginMaxFailures(), loginWindowSeconds())) {
+            EventLogger.warn("auth", "Login throttled for %s (too many failed attempts)".formatted(clientIp));
+            ApiResponses.error(429, "too_many_attempts", "Too many login attempts. Try again later.");
+        }
+
         // JCLAW-674: same migration as setup() — malformed body → 400 via
         // JsonBodyReader; ConfigService.get / PasswordHasher.verify run outside
         // any catch so a genuine infra failure surfaces as 500, not a
@@ -113,6 +153,7 @@ public class ApiAuthController extends Controller {
 
         if (constantTimeEquals(expectedUser, username)
                 && PasswordHasher.verify(password, storedHash)) {
+            LoginRateLimiter.recordSuccess(clientIp);
             session.put("authenticated", "true");
             session.put("username", username);
             // JCLAW-731: transparent rehash-on-login. We hold the plaintext and
@@ -132,9 +173,18 @@ public class ApiAuthController extends Controller {
             renderJSON(gson.toJson(new LoginResponse("ok", username)));
         }
         else {
+            LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
             EventLogger.warn("auth", "Admin login failed for username: %s".formatted(username));
             ApiResponses.error(401, "invalid_credentials", "Invalid credentials");
         }
+    }
+
+    private static int loginMaxFailures() {
+        return PlayConfig.intOr(CFG_LOGIN_MAX_FAILURES, DEFAULT_LOGIN_MAX_FAILURES);
+    }
+
+    private static long loginWindowSeconds() {
+        return PlayConfig.intOr(CFG_LOGIN_WINDOW_SECONDS, (int) DEFAULT_LOGIN_WINDOW_SECONDS);
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogoutResponse.class)))

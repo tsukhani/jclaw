@@ -28,8 +28,28 @@ onMounted(() => {
   document.documentElement.classList.toggle('dark', effective === 'dark')
 })
 
+// JCLAW-741: live strength meter + requirement checklist. Advisory — the
+// backend re-validates length and screens for breached passwords on submit.
+const strength = computed(() => estimatePasswordStrength(newPassword.value))
+const lengthOk = computed(() => newPassword.value.length >= MIN_PASSWORD_LENGTH)
+const passwordsMatch = computed(() =>
+  confirmPassword.value.length > 0 && newPassword.value === confirmPassword.value)
+
+const strengthBarClass = computed(() => {
+  const s = strength.value.score
+  if (s <= 1) return 'bg-red-500'
+  if (s === 2) return 'bg-amber-500'
+  return 'bg-emerald-500'
+})
+const strengthTextClass = computed(() => {
+  const s = strength.value.score
+  if (s <= 1) return 'text-red-600 dark:text-red-400'
+  if (s === 2) return 'text-amber-600 dark:text-amber-400'
+  return 'text-emerald-700 dark:text-emerald-400'
+})
+
 const canSubmit = computed(() =>
-  newPassword.value.length >= 8
+  lengthOk.value
   && newPassword.value === confirmPassword.value
   && !loading.value,
 )
@@ -58,7 +78,15 @@ async function handleSubmit() {
     return
   }
   if (result.error === 'password_too_short') {
-    error.value = 'Password must be at least 8 characters.'
+    error.value = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+    return
+  }
+  if (result.error === 'password_too_long') {
+    error.value = 'That password is too long.'
+    return
+  }
+  if (result.error === 'password_breached') {
+    error.value = 'This password appears in a known data breach. Please choose a different one.'
     return
   }
   error.value = 'Something went wrong. Please try again.'
@@ -190,8 +218,40 @@ const confirmPasswordId = useId()
           </div>
         </label>
 
-        <p class="text-xs text-fg-muted">
-          Must be at least 8 characters.
+        <!-- JCLAW-741: live strength meter + requirement checklist. Advisory;
+             the server re-validates length and screens for breaches on submit. -->
+        <div
+          v-if="newPassword"
+          class="space-y-2"
+        >
+          <div
+            class="flex gap-1"
+            aria-hidden="true"
+          >
+            <span
+              v-for="i in 4"
+              :key="i"
+              class="h-1 flex-1 rounded-full transition-colors"
+              :class="i <= strength.score ? strengthBarClass : 'bg-fg-muted/20'"
+            />
+          </div>
+          <p class="text-xs text-fg-muted">
+            Strength: <span :class="strengthTextClass">{{ strength.label }}</span>
+          </p>
+          <ul class="text-xs space-y-1">
+            <li :class="lengthOk ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-muted'">
+              {{ lengthOk ? '✓' : '○' }} At least {{ MIN_PASSWORD_LENGTH }} characters
+            </li>
+            <li :class="passwordsMatch ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-muted'">
+              {{ passwordsMatch ? '✓' : '○' }} Passwords match
+            </li>
+          </ul>
+        </div>
+        <p
+          v-else
+          class="text-xs text-fg-muted"
+        >
+          Use at least {{ MIN_PASSWORD_LENGTH }} characters. Longer passphrases are stronger.
         </p>
 
         <p

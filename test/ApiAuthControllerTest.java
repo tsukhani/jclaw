@@ -50,7 +50,7 @@ class ApiAuthControllerTest extends FunctionalTest {
     @Test
     void setupSucceedsOnFreshInstall() {
         var resp = POST("/api/auth/setup", "application/json",
-                "{\"password\":\"goodpass123\"}");
+                "{\"password\":\"goodpassword123\"}");
         assertIsOk(resp);
         assertTrue(getContent(resp).contains("\"status\":\"ok\""));
         // Subsequent status should now report passwordSet=true.
@@ -63,6 +63,27 @@ class ApiAuthControllerTest extends FunctionalTest {
                 "{\"password\":\"short\"}");
         assertEquals(400, resp.status.intValue());
         assertTrue(getContent(resp).contains("password_too_short"));
+    }
+
+    @Test
+    void setupRejectsPasswordUnderTwelveChars() {
+        // JCLAW-741: the floor rose from 8 to 12; an 11-char password is now
+        // rejected where it once would have been accepted.
+        var resp = POST("/api/auth/setup", "application/json",
+                "{\"password\":\"elevenchar1\"}");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).contains("password_too_short"), getContent(resp));
+    }
+
+    @Test
+    void setupRejectsKnownBreachedPasswordWith400() {
+        // JCLAW-741: online HIBP is disabled under %test, so this exercises the
+        // offline-list fallback. 1qaz2wsx3edc (12 chars, passes the length
+        // floor) is a keyboard-walk seeded in conf/common-passwords.txt.
+        var resp = POST("/api/auth/setup", "application/json",
+                "{\"password\":\"1qaz2wsx3edc\"}");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).contains("password_breached"), getContent(resp));
     }
 
     @Test
