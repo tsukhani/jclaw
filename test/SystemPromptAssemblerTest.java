@@ -180,6 +180,21 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
+    void roleFramingPresentAndInTheCacheablePrefix() {
+        // The harness/operator identity block is static, so it anchors the cacheable
+        // prefix; its lead position (before the persona) is guaranteed by buildPrompt.
+        var agent = newAgent("spa-role-framing");
+        var prompt = SystemPromptAssembler.assemble(agent, "hello", null, "web").systemPrompt();
+
+        int role = prompt.indexOf("## Your Role");
+        int marker = prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        assertTrue(role >= 0, "Your Role header missing");
+        assertTrue(marker > role, "Your Role must sit above the cache boundary (stable prefix)");
+        assertTrue(prompt.contains("single-operator automation harness"),
+                "role block must name JClaw's single-operator harness identity");
+    }
+
+    @Test
     void breakdownReportsPrefixAndSuffixCharsAroundMarker() {
         var agent = newAgent("spa-breakdown-split");
         var bd = SystemPromptAssembler.breakdown(agent, null, "web");
