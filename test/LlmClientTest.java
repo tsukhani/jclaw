@@ -160,9 +160,9 @@ class LlmClientTest extends UnitTest {
     void streamAccumulatorStartsEmpty() {
         var acc = new LlmProvider.StreamAccumulator();
         assertFalse(acc.complete());
-        assertEquals("", acc.content);
-        assertTrue(acc.toolCalls.isEmpty());
-        assertNull(acc.error);
+        assertEquals("", acc.content());
+        assertTrue(acc.toolCalls().isEmpty());
+        assertNull(acc.error());
     }
 
     @Test

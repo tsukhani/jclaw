@@ -31,25 +31,21 @@ interface LlmStreamCarriers {
      * finish reason, provider usage, reasoning text/timing, and JTokkit
      * estimates. One {@link StreamAccumulator} is produced per round; rounds
      * fold into a {@link TurnUsage} via {@link TurnUsage#addRound}.
+     *
+     * <p>Every field is package-private (JCLAW-725): {@link LlmProvider} — same
+     * package — writes them during stream accumulation, {@code app/agents} reads
+     * through the record-style accessors below, and the default-package
+     * streaming unit tests read through those same accessors and assemble round
+     * fixtures via {@link Builder}. No field is publicly mutable, so the former
+     * S1104 smell is gone.
      */
-    // S1104: the fields kept public below stay public for a structural reason,
-    // not a measured performance one — they are value-fixture points for the
-    // default-package usage-accounting/streaming unit tests, which are outside
-    // this change's editable scope. content / toolCalls / error are read
-    // directly by LlmClientTest; usage / reasoningDetected / the three *Estimate
-    // fields are written as round fixtures by AgentRunnerUsageTest. app/agents
-    // now reads every field it needs through the record-style accessors below
-    // (content()/toolCalls()/finishReason()/error()); finishReason therefore
-    // dropped to package-private, since only LlmProvider (same package) still
-    // writes it and no default-package test touches it.
-    @SuppressWarnings("java:S1104")
     class StreamAccumulator {
-        public volatile String content = "";
-        public volatile List<ToolCall> toolCalls = List.of();
+        volatile String content = "";
+        volatile List<ToolCall> toolCalls = List.of();
         volatile String finishReason;
         volatile boolean complete = false;
-        public volatile Exception error;
-        public volatile boolean reasoningDetected = false;
+        volatile Exception error;
+        volatile boolean reasoningDetected = false;
         volatile int reasoningTokens = 0;
         /**
          * Accumulated reasoning text across all streamed deltas. Populated even
@@ -68,13 +64,13 @@ interface LlmStreamCarriers {
         private final StringBuilder reasoningTextBuffer = new StringBuilder();
         private final ReentrantLock reasoningLock =
                 new ReentrantLock();
-        public volatile Usage usage;
+        volatile Usage usage;
         /** JTokkit-measured prompt tokens for this provider request, available even when provider usage is absent. */
-        public volatile TokenUsageEstimator.ChatRequestTokens promptTokenEstimate;
+        volatile TokenUsageEstimator.ChatRequestTokens promptTokenEstimate;
         /** JTokkit-measured completion tokens for streamed content/tool calls/reasoning. */
-        public volatile TokenUsageEstimator.TokenCount completionTokenEstimate;
+        volatile TokenUsageEstimator.TokenCount completionTokenEstimate;
         /** JTokkit-measured reasoning-token subset for streamed reasoning text. */
-        public volatile TokenUsageEstimator.TokenCount reasoningTokenEstimate;
+        volatile TokenUsageEstimator.TokenCount reasoningTokenEstimate;
         // Wall-clock nanoTime at first and latest reasoning chunk. Both remain 0
         // when the model emitted no reasoning. reasoningEndNanos is updated on
         // every append so it naturally captures "end of reasoning phase" — the
@@ -189,6 +185,28 @@ interface LlmStreamCarriers {
         public List<ToolCall> toolCalls() { return toolCalls; }
         public String finishReason() { return finishReason; }
         public Exception error() { return error; }
+
+        /**
+         * Fluent construction of a round fixture for the default-package unit
+         * tests, exposing only the value fields a fixture sets. Production writes
+         * the fields directly from {@link LlmProvider} (same package); reasoning
+         * text and content timing are set by calling {@link #appendReasoningText}
+         * / {@link #noteFirstContentChunk} on the built instance. Lets the fields
+         * stay package-private without public setters (JCLAW-725 residual).
+         */
+        public static Builder builder() { return new Builder(); }
+
+        public static final class Builder {
+            private final StreamAccumulator acc = new StreamAccumulator();
+
+            public Builder usage(Usage usage) { acc.usage = usage; return this; }
+            public Builder reasoningDetected(boolean detected) { acc.reasoningDetected = detected; return this; }
+            public Builder promptTokenEstimate(TokenUsageEstimator.ChatRequestTokens estimate) { acc.promptTokenEstimate = estimate; return this; }
+            public Builder completionTokenEstimate(TokenUsageEstimator.TokenCount estimate) { acc.completionTokenEstimate = estimate; return this; }
+            public Builder reasoningTokenEstimate(TokenUsageEstimator.TokenCount estimate) { acc.reasoningTokenEstimate = estimate; return this; }
+
+            public StreamAccumulator build() { return acc; }
+        }
     }
 
     /**
@@ -212,35 +230,32 @@ interface LlmStreamCarriers {
      *
      * <p>See JCLAW-76 for the accounting defect this class fixes.
      */
-    // S1104: cumulative-usage value carrier. app/agents/UsageMetricsBuilder now
-    // reads every field through the record-style accessors below, so the three
-    // fields with no default-package-test reader — jtokkitReasoningTokens,
-    // jtokkitEncoding, jtokkitModelMatched — dropped to package-private. The
-    // fields still public are read directly as value fixtures by the
-    // default-package AgentRunnerUsageTest (outside this change's editable
-    // scope), not for any measured hot-path reason; the two turn-local nanos
-    // have no cross-boundary reader and stay private.
-    @SuppressWarnings("java:S1104")
+    // Cumulative-usage value carrier (JCLAW-725). Every counter is
+    // package-private: addRound (this class) writes them, and both
+    // app/agents/UsageMetricsBuilder and the default-package AgentRunnerUsageTest
+    // read through the record-style accessors below — no field is publicly
+    // mutable. The two turn-local nanos have no cross-boundary reader and stay
+    // private.
     class TurnUsage {
-        public int promptTokens;
-        public int completionTokens;
-        public int totalTokens;
+        int promptTokens;
+        int completionTokens;
+        int totalTokens;
         /** Sum of provider-reported {@code reasoning_tokens} across all rounds. */
-        public int reasoningTokens;
-        public int cachedTokens;
-        public int cacheCreationTokens;
+        int reasoningTokens;
+        int cachedTokens;
+        int cacheCreationTokens;
         /** Sum of streamed reasoning-text chars, used as a token fallback when the provider returns 0 reasoning_tokens. */
-        public int reasoningChars;
+        int reasoningChars;
         /** True once any round has detected reasoning, used to gate the fallback estimate. */
-        public boolean reasoningDetected;
+        boolean reasoningDetected;
         /** True once any round returned a non-null {@link Usage}. Gates the zero-usage JSON path. */
-        public boolean hasProviderUsage;
+        boolean hasProviderUsage;
         /** True once any round has a JTokkit request/response measurement. */
-        public boolean hasJtokkitUsage;
-        public int jtokkitPromptTokens;
-        public int jtokkitCompletionTokens;
+        boolean hasJtokkitUsage;
+        int jtokkitPromptTokens;
+        int jtokkitCompletionTokens;
         int jtokkitReasoningTokens;
-        public int jtokkitTotalTokens;
+        int jtokkitTotalTokens;
         String jtokkitEncoding;
         boolean jtokkitModelMatched = true;
         /**

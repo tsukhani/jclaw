@@ -25,13 +25,13 @@ class AgentRunnerUsageTest extends UnitTest {
         t.addRound(roundWithUsage(new Usage(200, 50, 250, 15, 30, 2)));
         t.addRound(roundWithUsage(new Usage(150, 800, 950, 0, 25, 0)));
 
-        assertEquals(450, t.promptTokens);
-        assertEquals(860, t.completionTokens);
-        assertEquals(1310, t.totalTokens);
-        assertEquals(20, t.reasoningTokens);
-        assertEquals(75, t.cachedTokens);
-        assertEquals(2, t.cacheCreationTokens);
-        assertTrue(t.hasProviderUsage);
+        assertEquals(450, t.promptTokens());
+        assertEquals(860, t.completionTokens());
+        assertEquals(1310, t.totalTokens());
+        assertEquals(20, t.reasoningTokens());
+        assertEquals(75, t.cachedTokens());
+        assertEquals(2, t.cacheCreationTokens());
+        assertTrue(t.hasProviderUsage());
     }
 
     @Test
@@ -40,45 +40,45 @@ class AgentRunnerUsageTest extends UnitTest {
         t.addRound(roundWithUsage(null));                 // provider returned no usage
         t.addRound(roundWithUsage(null));
 
-        assertFalse(t.hasProviderUsage);
-        assertEquals(0, t.promptTokens);
-        assertEquals(0, t.completionTokens);
+        assertFalse(t.hasProviderUsage());
+        assertEquals(0, t.promptTokens());
+        assertEquals(0, t.completionTokens());
     }
 
     @Test
     void turnUsageTracksJtokkitMeasurementsSeparatelyFromProviderUsage() {
         var t = new LlmProvider.TurnUsage();
-        var round = roundWithUsage(new Usage(100, 10, 110, 0, 0, 0));
-        round.promptTokenEstimate = new TokenUsageEstimator.ChatRequestTokens(
-                40, 5, 45, "cl100k_base", false);
-        round.completionTokenEstimate = new TokenUsageEstimator.TokenCount(
-                12, "cl100k_base", false);
+        var round = LlmProvider.StreamAccumulator.builder()
+                .usage(new Usage(100, 10, 110, 0, 0, 0))
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(
+                        40, 5, 45, "cl100k_base", false))
+                .completionTokenEstimate(new TokenUsageEstimator.TokenCount(
+                        12, "cl100k_base", false))
+                .build();
 
         t.addRound(round);
 
-        assertTrue(t.hasProviderUsage);
-        assertTrue(t.hasJtokkitUsage);
-        assertEquals(100, t.promptTokens, "provider usage remains authoritative");
-        assertEquals(45, t.jtokkitPromptTokens);
-        assertEquals(12, t.jtokkitCompletionTokens);
-        assertEquals(57, t.jtokkitTotalTokens);
+        assertTrue(t.hasProviderUsage());
+        assertTrue(t.hasJtokkitUsage());
+        assertEquals(100, t.promptTokens(), "provider usage remains authoritative");
+        assertEquals(45, t.jtokkitPromptTokens());
+        assertEquals(12, t.jtokkitCompletionTokens());
+        assertEquals(57, t.jtokkitTotalTokens());
     }
 
     @Test
     void turnUsageAccumulatesReasoningCharsAndDetectedFlagAcrossRounds() {
         var t = new LlmProvider.TurnUsage();
-        var round1 = new LlmProvider.StreamAccumulator();
-        round1.reasoningDetected = true;
+        var round1 = LlmProvider.StreamAccumulator.builder().reasoningDetected(true).build();
         round1.appendReasoningText("First round reasoning text");    // 26 chars
         t.addRound(round1);
 
-        var round2 = new LlmProvider.StreamAccumulator();
-        round2.reasoningDetected = true;
+        var round2 = LlmProvider.StreamAccumulator.builder().reasoningDetected(true).build();
         round2.appendReasoningText("second round thinking");         // 21 chars
         t.addRound(round2);
 
-        assertTrue(t.reasoningDetected);
-        assertEquals(47, t.reasoningChars);
+        assertTrue(t.reasoningDetected());
+        assertEquals(47, t.reasoningChars());
     }
 
     // --- buildUsageJson output ---
@@ -137,14 +137,15 @@ class AgentRunnerUsageTest extends UnitTest {
 
     @Test
     void buildUsageJsonFallsBackToJtokkitWhenProviderUsageMissing() {
-        var round = new LlmProvider.StreamAccumulator();
-        round.promptTokenEstimate = new TokenUsageEstimator.ChatRequestTokens(
-                20, 4, 24, "cl100k_base", false);
-        round.completionTokenEstimate = new TokenUsageEstimator.TokenCount(
-                8, "cl100k_base", false);
-        round.reasoningTokenEstimate = new TokenUsageEstimator.TokenCount(
-                3, "cl100k_base", false);
-        round.reasoningDetected = true;
+        var round = LlmProvider.StreamAccumulator.builder()
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(
+                        20, 4, 24, "cl100k_base", false))
+                .completionTokenEstimate(new TokenUsageEstimator.TokenCount(
+                        8, "cl100k_base", false))
+                .reasoningTokenEstimate(new TokenUsageEstimator.TokenCount(
+                        3, "cl100k_base", false))
+                .reasoningDetected(true)
+                .build();
         round.appendReasoningText("reasoning");
 
         var turn = new LlmProvider.TurnUsage();
@@ -172,15 +173,17 @@ class AgentRunnerUsageTest extends UnitTest {
         // cumulative reasoningChars across rounds.
         var turn = new LlmProvider.TurnUsage();
 
-        var round1 = new LlmProvider.StreamAccumulator();
-        round1.usage = new Usage(100, 10, 110, 0, 0, 0);  // reasoning_tokens = 0
-        round1.reasoningDetected = true;
+        var round1 = LlmProvider.StreamAccumulator.builder()
+                .usage(new Usage(100, 10, 110, 0, 0, 0))  // reasoning_tokens = 0
+                .reasoningDetected(true)
+                .build();
         round1.appendReasoningText("A".repeat(200));
         turn.addRound(round1);
 
-        var round2 = new LlmProvider.StreamAccumulator();
-        round2.usage = new Usage(150, 400, 550, 0, 0, 0);  // reasoning_tokens = 0
-        round2.reasoningDetected = true;
+        var round2 = LlmProvider.StreamAccumulator.builder()
+                .usage(new Usage(150, 400, 550, 0, 0, 0))  // reasoning_tokens = 0
+                .reasoningDetected(true)
+                .build();
         round2.appendReasoningText("B".repeat(100));
         turn.addRound(round2);
 
@@ -197,8 +200,9 @@ class AgentRunnerUsageTest extends UnitTest {
         // streaming live — first reasoning chunk → first content chunk of the
         // turn. For a single-round turn that's just the round's own
         // appendReasoningText → noteFirstContentChunk span.
-        var round = new LlmProvider.StreamAccumulator();
-        round.usage = new Usage(100, 10, 110, 5, 0, 0);
+        var round = LlmProvider.StreamAccumulator.builder()
+                .usage(new Usage(100, 10, 110, 5, 0, 0))
+                .build();
         round.appendReasoningText("thinking");
         try { Thread.sleep(2); } catch (InterruptedException _) {}
         round.noteFirstContentChunk();
@@ -222,8 +226,9 @@ class AgentRunnerUsageTest extends UnitTest {
         // subsequent rounds. Now the turn-level measurement runs from the
         // first reasoning chunk of round 1 to the first content chunk of
         // whatever round eventually emits content.
-        var round1 = new LlmProvider.StreamAccumulator();
-        round1.usage = new Usage(100, 0, 100, 5, 0, 0);
+        var round1 = LlmProvider.StreamAccumulator.builder()
+                .usage(new Usage(100, 0, 100, 5, 0, 0))
+                .build();
         round1.appendReasoningText("planning the search");
         // round 1 emits no content (only tool calls fire in real flows)
 
@@ -236,8 +241,9 @@ class AgentRunnerUsageTest extends UnitTest {
         // underreport the user-perceived wait.
         try { Thread.sleep(20); } catch (InterruptedException _) {}
 
-        var round2 = new LlmProvider.StreamAccumulator();
-        round2.usage = new Usage(150, 50, 200, 0, 0, 0);
+        var round2 = LlmProvider.StreamAccumulator.builder()
+                .usage(new Usage(150, 50, 200, 0, 0, 0))
+                .build();
         round2.noteFirstContentChunk();   // round 2 streams content directly
         turn.addRound(round2);
 
@@ -260,8 +266,9 @@ class AgentRunnerUsageTest extends UnitTest {
         // no content ever streams). Per-frontend convention the timer stops
         // at stream completion; backend equivalent uses the turnEndNanos
         // passed by buildUsageJson at end-of-turn.
-        var round = new LlmProvider.StreamAccumulator();
-        round.usage = new Usage(50, 0, 50, 5, 0, 0);
+        var round = LlmProvider.StreamAccumulator.builder()
+                .usage(new Usage(50, 0, 50, 5, 0, 0))
+                .build();
         round.appendReasoningText("thought but never emitted content");
 
         var turn = new LlmProvider.TurnUsage();
@@ -434,8 +441,6 @@ class AgentRunnerUsageTest extends UnitTest {
     // --- Helpers ---
 
     private static LlmProvider.StreamAccumulator roundWithUsage(Usage u) {
-        var acc = new LlmProvider.StreamAccumulator();
-        acc.usage = u;
-        return acc;
+        return LlmProvider.StreamAccumulator.builder().usage(u).build();
     }
 }
