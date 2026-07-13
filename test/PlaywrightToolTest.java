@@ -140,6 +140,49 @@ class PlaywrightToolTest extends UnitTest {
         assertTrue(result.startsWith("Error"));
     }
 
+    // ─── JCLAW-731 residual: per-host DNS pin accumulation ────────────────
+    //
+    // getOrCreateSession relaunches the browser with the UNION of prior pins
+    // when a navigation targets a host not already pinned. The relaunch
+    // decision is factored into pinsForNavigation so it's testable without a
+    // real Chromium: empty result = reuse the live session, present result =
+    // relaunch with these pins.
+
+    @Test
+    void pinsForNavigationReusesWhenRuleEmpty() {
+        // A literal-IP or hostless URL yields no MAP clause → nothing to pin,
+        // so the live session is reused (empty result).
+        var existing = java.util.Set.of("MAP a.com 1.2.3.4");
+        assertTrue(PlaywrightBrowserTool.pinsForNavigation(existing, java.util.Optional.empty())
+                .isEmpty(), "empty rule must reuse the session, not relaunch");
+    }
+
+    @Test
+    void pinsForNavigationReusesWhenHostAlreadyPinned() {
+        // Navigating back to a host the browser was already launched with
+        // needs no relaunch — the pin is in effect.
+        var existing = java.util.Set.of("MAP a.com 1.2.3.4");
+        assertTrue(PlaywrightBrowserTool.pinsForNavigation(existing,
+                        java.util.Optional.of("MAP a.com 1.2.3.4"))
+                .isEmpty(), "already-pinned host must reuse the session, not relaunch");
+    }
+
+    @Test
+    void pinsForNavigationUnionsNewHostAndKeepsExisting() {
+        // AC: navigating a session across hosts A then B pins BOTH — the
+        // relaunch for B must carry A's rule too. The union signals a relaunch
+        // (non-empty result) and contains every previously-visited host.
+        var existing = java.util.Set.of("MAP a.com 1.2.3.4");
+        var merged = PlaywrightBrowserTool.pinsForNavigation(existing,
+                java.util.Optional.of("MAP b.com 5.6.7.8"));
+        assertTrue(merged.isPresent(), "cross-host navigation must trigger a relaunch");
+        assertTrue(merged.get().contains("MAP a.com 1.2.3.4"),
+                "entry host A must stay pinned after the relaunch: " + merged.get());
+        assertTrue(merged.get().contains("MAP b.com 5.6.7.8"),
+                "new host B must be added to the pin set: " + merged.get());
+        assertEquals(2, merged.get().size(), "union must hold exactly both hosts: " + merged.get());
+    }
+
     @Test
     void idleSessionCleanupDoesNotThrow() {
         // Just verify the cleanup method runs without error even with no sessions
@@ -550,10 +593,11 @@ class PlaywrightToolTest extends UnitTest {
                 com.microsoft.playwright.Browser.class,
                 com.microsoft.playwright.Page.class,
                 java.util.concurrent.locks.ReentrantLock.class,
+                java.util.Set.class,
                 long.class);
         ctor.setAccessible(true);
         return ctor.newInstance(null, null, null,
-                new java.util.concurrent.locks.ReentrantLock(), lastUsed);
+                new java.util.concurrent.locks.ReentrantLock(), java.util.Set.of(), lastUsed);
     }
 
     /**
