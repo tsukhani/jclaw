@@ -375,4 +375,208 @@ class ApiProvidersControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"providersScanned\""), "envelope missing providersScanned: " + body);
         assertTrue(body.contains("\"modelsUpdated\""), "envelope missing modelsUpdated: " + body);
     }
+
+    // --- discoverModels: the switch over DiscoveryResult (past both 400 guards) ---
+
+    private static void enqueueJson(mockwebserver3.MockWebServer server, int code, String json) {
+        var buf = new okio.Buffer();
+        buf.writeUtf8(json);
+        server.enqueue(new mockwebserver3.MockResponse.Builder()
+                .code(code).addHeader("Content-Type", "application/json").body(buf).build());
+    }
+
+    @Test
+    void discoverModelsReturnsOkCatalogFromLiveApi() throws Exception {
+        // Past both the baseUrl and apiKey guards, discover() runs and the
+        // DiscoveryResult.Ok switch arm renders the normalized catalog + count.
+        // Every existing discoverModels test stops at a 400 guard, so this is
+        // the only path that exercises the Ok arm.
+        login();
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.test-provider.baseUrl", server.url("/").toString());
+            ConfigService.set("provider.test-provider.apiKey", "sk-test");
+            enqueueJson(server, 200,
+                    "{\"data\":[{\"id\":\"acme/talker-one\"},{\"id\":\"acme/talker-two\"}]}");
+
+            var resp = POST("/api/providers/test-provider/discover-models",
+                    "application/json", "{}");
+            assertIsOk(resp);
+            assertContentType("application/json", resp);
+            var body = getContent(resp);
+            assertTrue(body.contains("\"count\":2"), "both live models counted: " + body);
+            assertTrue(body.contains("acme/talker-one"), "first model present: " + body);
+            assertTrue(body.contains("acme/talker-two"), "second model present: " + body);
+        }
+    }
+
+    @Test
+    void discoverModelsReturns502WhenUpstreamErrors() throws Exception {
+        // The DiscoveryResult.Error arm maps the service's status code straight
+        // to the HTTP response (502 for a non-200 upstream) with code=upstream_error.
+        login();
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.test-provider.baseUrl", server.url("/").toString());
+            ConfigService.set("provider.test-provider.apiKey", "sk-test");
+            enqueueJson(server, 500, "{\"error\":\"boom\"}");
+
+            var resp = POST("/api/providers/test-provider/discover-models",
+                    "application/json", "{}");
+            assertEquals(502, resp.status.intValue());
+            assertTrue(getContent(resp).contains("\"code\":\"upstream_error\""),
+                    "error body must carry the upstream_error code: " + getContent(resp));
+        }
+    }
+
+    // --- reachable: the live-probe path (baseUrl configured, not the "not configured" short-circuit) ---
+
+    @Test
+    void reachableReportsReachableWhenModelsEndpointResponds() throws Exception {
+        // baseUrl set → the not-configured short-circuit is skipped and the real
+        // probe runs. A 200 /models with a data array yields reachable=true and a
+        // model count equal to the array size.
+        login();
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.vllm.baseUrl", server.url("/").toString());
+            enqueueJson(server, 200, "{\"data\":[{\"id\":\"m1\"},{\"id\":\"m2\"}]}");
+
+            var resp = GET("/api/providers/vllm/reachable");
+            assertIsOk(resp);
+            var body = getContent(resp);
+            assertTrue(body.contains("\"reachable\":true"), "probe hit a live endpoint: " + body);
+            assertTrue(body.contains("\"modelCount\":2"), "modelCount reflects the data array: " + body);
+        }
+    }
+
+    @Test
+    void reachableReportsUnreachableWithReasonWhenEndpointErrors() throws Exception {
+        // A configured-but-erroring endpoint stays HTTP 200 (never an error) with
+        // reachable=false and a reason naming the upstream status, so the UI can
+        // render a hint. Distinct from the "not configured" reason.
+        login();
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.vllm.baseUrl", server.url("/").toString());
+            enqueueJson(server, 503, "unavailable");
+
+            var resp = GET("/api/providers/vllm/reachable");
+            assertIsOk(resp);
+            var body = getContent(resp);
+            assertTrue(body.contains("\"reachable\":false"), "erroring endpoint is not reachable: " + body);
+            assertTrue(body.contains("HTTP 503"), "reason names the upstream status: " + body);
+            assertFalse(body.contains("not configured"),
+                    "a configured endpoint must not report 'not configured': " + body);
+        }
+    }
+
+    // --- models (GET): parse-array edge cases (non-object rows, blank ids, non-array config) ---
+
+    @Test
+    void modelsSkipsNonObjectAndBlankIdEntries() {
+        login();
+        configureProvider();
+        // A number row (not an object), a blank-id object, and one real model.
+        ConfigService.set("provider.test-provider.models",
+                "[123, {\"id\":\"\"}, {\"id\":\"vendor/real\"}]");
+
+        var resp = GET("/api/providers/test-provider/models");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"count\":1"), "only the valid row survives: " + body);
+        assertTrue(body.contains("\"id\":\"vendor/real\""), "real model present: " + body);
+        // No display name in the stored row → deriveName picks the last path segment.
+        assertTrue(body.contains("\"name\":\"real\""), "name derived from id: " + body);
+    }
+
+    @Test
+    void modelsReturnsEmptyWhenConfigIsNotJsonArray() {
+        // parseModelsArray parses a valid-but-non-array config (a JSON object) and
+        // returns an empty array rather than throwing.
+        login();
+        configureProvider();
+        ConfigService.set("provider.test-provider.models", "{\"not\":\"an array\"}");
+
+        var resp = GET("/api/providers/test-provider/models");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"count\":0"),
+                "non-array config yields zero models: " + getContent(resp));
+    }
+
+    @Test
+    void modelsReturnsEmptyWhenConfigIsMalformedJson() {
+        // parseModelsArray's catch arm: unparseable JSON degrades to an empty list.
+        login();
+        configureProvider();
+        ConfigService.set("provider.test-provider.models", "{oops not json");
+
+        var resp = GET("/api/providers/test-provider/models");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"count\":0"),
+                "malformed config yields zero models: " + getContent(resp));
+    }
+
+    // --- addModel: id-validation sub-branches + buildModelObject branches ---
+
+    @Test
+    void addModelReturns400WhenIdIsExplicitNull() {
+        login();
+        configureProvider();
+        var resp = POST("/api/providers/test-provider/models",
+                "application/json", "{\"id\":null}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void addModelReturns400WhenIdIsBlank() {
+        login();
+        configureProvider();
+        var resp = POST("/api/providers/test-provider/models",
+                "application/json", "{\"id\":\"   \"}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void addModelPersistsAlwaysThinksWhenThinkingEnabled() {
+        // buildModelObject only writes alwaysThinks when supportsThinking is also
+        // true (alwaysThinks ⇒ supportsThinking). Both-true is the only path that
+        // emits the field.
+        login();
+        configureProvider();
+        var add = POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"reasoner\",\"supportsThinking\":true,\"alwaysThinks\":true}");
+        assertIsOk(add);
+        var saved = ConfigService.get("provider.test-provider.models");
+        assertTrue(saved.contains("\"supportsThinking\":true"), "thinking persisted: " + saved);
+        assertTrue(saved.contains("\"alwaysThinks\":true"), "alwaysThinks persisted: " + saved);
+    }
+
+    @Test
+    void addModelOmitsAlwaysThinksWhenThinkingWithoutAlwaysThinks() {
+        // supportsThinking=true but alwaysThinks unset → the field is omitted.
+        login();
+        configureProvider();
+        var add = POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"thinker\",\"supportsThinking\":true}");
+        assertIsOk(add);
+        var saved = ConfigService.get("provider.test-provider.models");
+        assertTrue(saved.contains("\"supportsThinking\":true"), "thinking persisted: " + saved);
+        assertFalse(saved.contains("alwaysThinks"),
+                "alwaysThinks must be omitted when not always-thinking: " + saved);
+    }
+
+    @Test
+    void addModelTreatsNonNumericPriceAsUnsetAndStripsIt() {
+        // optPrice catches NumberFormatException on a non-numeric price and returns
+        // -1, so addPriceIfSet omits the field (never poisoning the cost fallbacks).
+        login();
+        configureProvider();
+        var add = POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"m\",\"promptPrice\":\"abc\"}");
+        assertIsOk(add);
+        var saved = ConfigService.get("provider.test-provider.models");
+        assertFalse(saved.contains("promptPrice"),
+                "a non-numeric price must be stripped, not persisted: " + saved);
+    }
 }

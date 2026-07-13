@@ -197,4 +197,73 @@ class ApiSkillsControllerCatalogTest extends FunctionalTest {
         assertTrue(body.contains("\"status\":\"failed\""), "import must report failed: " + body);
         assertTrue(body.contains("missing skill id"), "message names the cause: " + body);
     }
+
+    /**
+     * With no page/pageSize the browse defaults to page 0 + pageSize 20 (both
+     * ternary-default branches), returning the full fixture in one page.
+     */
+    @Test
+    void catalogSearchUsesDefaultPagingWhenParamsOmitted() {
+        login();
+        var resp = GET("/api/skills/catalog/search?catalog=mastra");
+        assertIsOk(resp);
+        assertContentType("application/json", resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"total\":3"), "all fixture skills counted: " + body);
+        assertTrue(body.contains("git-commit-helper") && body.contains("react-dashboard")
+                        && body.contains("docker-deploy"),
+                "default page must hold all three fixture skills: " + body);
+    }
+
+    /**
+     * A refresh with a body that carries no {@code catalog} key falls back to the
+     * default (first, static) catalog — {@code CatalogRegistry.byId(null)} — and a
+     * static catalog reports {@code refreshed=true}. The existing refresh test only
+     * covers the dynamic (refreshed=false) arm, and never the null-id fallback.
+     */
+    @Test
+    void catalogRefreshWithoutCatalogKeyDefaultsToStaticCatalog() {
+        login();
+        var resp = POST("/api/skills/catalog/refresh", "application/json", "{}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"catalog\":\"mastra\""), "falls back to the default catalog: " + body);
+        assertTrue(body.contains("\"type\":\"static\""), "the default catalog is static: " + body);
+        assertTrue(body.contains("\"refreshed\":true"),
+                "a static catalog reports a real refresh: " + body);
+    }
+
+    /**
+     * An empty request body ({@code readJsonBody} → null) takes the
+     * {@code body == null} short-circuit and likewise defaults to the static
+     * catalog. Distinct from the has-no-key branch above.
+     */
+    @Test
+    void catalogRefreshWithEmptyBodyDefaultsToStaticCatalog() {
+        login();
+        var resp = POST("/api/skills/catalog/refresh", "application/json", "");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"catalog\":\"mastra\""), "empty body falls back to default catalog: " + body);
+        assertTrue(body.contains("\"refreshed\":true"), "static default reports refreshed: " + body);
+    }
+
+    /**
+     * Import reads the optional {@code provider} and {@code owner} fields when
+     * present and non-null (both ternary-true branches). A non-clawhub provider
+     * with a malformed source fails fast at "invalid source" — no network — so the
+     * failure is still surfaced with those fields supplied. The existing malformed
+     * -source test omits both fields, covering the null branches.
+     */
+    @Test
+    void catalogImportReadsProviderAndOwnerWhenSupplied() {
+        login();
+        var resp = POST("/api/skills/catalog/import", "application/json",
+                "{\"source\": \"not-owner-repo\", \"skillId\": \"foo\","
+                + " \"provider\": \"github\", \"owner\": \"someone\"}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"status\":\"failed\""), "import must report failed: " + body);
+        assertTrue(body.contains("invalid source"), "message names the cause: " + body);
+    }
 }

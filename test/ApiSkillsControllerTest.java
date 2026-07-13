@@ -1103,4 +1103,121 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertTrue(getContent(secondResp).contains("\"replaced\":true"),
                 "second copy must report replaced=true: " + getContent(secondResp));
     }
+
+    // ==================== resolveSkillTools — unresolved declared tool ====================
+
+    /**
+     * A skill declaring a tool the canonical {@code ToolRegistry} can't resolve
+     * still surfaces that tool in the file listing — with an empty description
+     * (the {@code lookupToolByName == null} branch of {@code resolveSkillTools}),
+     * not dropped. Distinct from the copy path, which rejects the same skill via
+     * a separate validator.
+     */
+    @Test
+    void listGlobalSkillFilesSurfacesUnknownDeclaredToolWithEmptyDescription() throws Exception {
+        login();
+        var dir = globalSkillsDir.resolve("unknown-tool-skill");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: unknown-tool-skill
+                description: declares a tool the registry does not know
+                version: 1.0.0
+                tools: [totally_unknown_tool_zzz]
+                ---
+                # body
+                """);
+        SkillLoader.clearCache();
+
+        var resp = GET("/api/skills/unknown-tool-skill/files");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"name\":\"totally_unknown_tool_zzz\",\"description\":\"\""),
+                "unknown declared tool must surface with an empty description: " + body);
+    }
+
+    // ==================== listForAgent — default enabled=true ====================
+
+    /**
+     * A workspace skill with no {@code AgentSkillConfig} row defaults to
+     * {@code enabled:true} via {@code getOrDefault(name, true)}. The existing
+     * suite only covers the config-present (enabled=false) case.
+     */
+    @Test
+    void listForAgentDefaultsEnabledTrueWhenNoConfigRow() throws Exception {
+        login();
+        var id = createAgent("default-enabled-agent");
+        seedAgentWorkspaceSkill("default-enabled-agent", "alpha", "alpha");
+
+        var resp = GET("/api/agents/" + id + "/skills");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"name\":\"alpha\""), "workspace skill listed: " + body);
+        assertTrue(body.contains("\"enabled\":true"),
+                "a skill with no config row defaults to enabled:true: " + body);
+    }
+
+    // ==================== updateForAgent — reuse existing config row ====================
+
+    /**
+     * When an {@code AgentSkillConfig} already exists, the toggle updates it in
+     * place (the {@code config != null} branch) rather than inserting a duplicate.
+     * Existing enable tests all start from no config row (the {@code config == null}
+     * branch).
+     */
+    @Test
+    void updateForAgentReusesExistingConfigRowInsteadOfDuplicating() throws Exception {
+        login();
+        var idStr = createAgent("toggle-reuse-config");
+        var agentId = Long.parseLong(idStr);
+        seedAgentWorkspaceSkill("toggle-reuse-config", "alpha", "alpha");
+
+        // Pre-seed a disabled config row (committed so the handler sees it).
+        commitInFreshTx(() -> {
+            var cfg = new AgentSkillConfig();
+            cfg.agent = Agent.findById(agentId);
+            cfg.skillName = "alpha";
+            cfg.enabled = false;
+            cfg.save();
+        });
+
+        // Skill is installed → the enable guard passes and the existing row is
+        // flipped to enabled=true in place.
+        var resp = PUT("/api/agents/" + idStr + "/skills/alpha", "application/json",
+                "{\"enabled\": true}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"enabled\":true"));
+
+        var rowCount = fetchInFreshTx(() ->
+                (int) AgentSkillConfig.findByAgent(Agent.<Agent>findById(agentId)).stream()
+                        .filter(c -> "alpha".equals(c.skillName)).count());
+        assertEquals(1, (int) rowCount,
+                "the pre-existing config row must be reused, not duplicated");
+        var enabled = fetchInFreshTx(() -> {
+            var cfg = AgentSkillConfig.findByAgentAndSkill(Agent.findById(agentId), "alpha");
+            return cfg != null && cfg.enabled;
+        });
+        assertTrue(enabled, "the reused row's enabled flag must flip to true");
+    }
+
+    // ==================== list — skip a directory with no SKILL.md ====================
+
+    /**
+     * The registry scan skips a subdirectory that has no {@code SKILL.md}
+     * (the {@code Files.exists(skillFile)} false branch) — a stray folder must
+     * not masquerade as a skill.
+     */
+    @Test
+    void listGlobalSkillsSkipsDirectoryWithoutSkillMd() throws Exception {
+        login();
+        seedGlobalSkill("real-skill", "real", "A real skill");
+        Files.createDirectories(globalSkillsDir.resolve("stray-no-skillmd"));
+
+        var resp = GET("/api/skills");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"name\":\"real\""), "valid skill listed: " + body);
+        assertFalse(body.contains("stray-no-skillmd"),
+                "a directory without SKILL.md must not appear as a skill: " + body);
+    }
 }
