@@ -16,9 +16,11 @@ import utils.SsrfGuard;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -54,11 +56,19 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * separate virtual threads, so the tool must serialize Page access itself.
      * The {@code lock} is held for the full duration of each {@code execute()}
      * call on this agent's session.
+     *
+     * <p>{@code pinnedRules} records the {@code --host-resolver-rules} MAP
+     * clauses this browser was launched with (JCLAW-731). Because that flag is
+     * a launch-time argument, the set grows only by relaunch: a navigation to a
+     * host not already pinned tears the browser down and relaunches it with the
+     * union, so every host visited in the session is connect-time pinned — not
+     * just the entry host.
      */
     private record BrowserSession(Playwright playwright, Browser browser, Page page,
-                                  ReentrantLock lock, long lastUsed) {
+                                  ReentrantLock lock, Set<String> pinnedRules, long lastUsed) {
         BrowserSession withLastUsed() {
-            return new BrowserSession(playwright, browser, page, lock, System.currentTimeMillis());
+            return new BrowserSession(playwright, browser, page, lock, pinnedRules,
+                    System.currentTimeMillis());
         }
     }
 
@@ -132,8 +142,11 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         // JCLAW-731: for a navigation, pin the browser's DNS to the guard-
         // validated IP via --host-resolver-rules, so Chromium connects only
         // where we checked (SNI-safe — the hostname stays in the URL, so the
-        // Host header and TLS SNI are preserved). Applied at launch, this pins
-        // the session's entry host; the route interceptor keeps re-validating
+        // Host header and TLS SNI are preserved). --host-resolver-rules is a
+        // launch arg, so getOrCreateSession relaunches the browser (carrying the
+        // union of all prior pins) whenever a navigation targets a host not
+        // already pinned — every navigated host, not just the entry host, ends
+        // up connect-time pinned. The route interceptor keeps re-validating
         // every other request as before. An unsafe URL is rejected here, before
         // a browser is even spun up.
         Optional<String> pinRule = Optional.empty();
@@ -282,45 +295,88 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 existing = null;
             }
             if (existing != null) {
-                // Reuse the live session as-is; the DNS pin is a launch-time arg,
-                // so a navigation to a host not covered by the original launch
-                // still relies on the route interceptor (unchanged behaviour).
-                return existing.withLastUsed();
-            }
-            EventLogger.info("tool", key, null, "Launching headless browser");
-            ensureBrowserInstalled();
-            var playwright = Playwright.create(new Playwright.CreateOptions()
-                    .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
-            // JCLAW-172: headless is hardcoded — there is no UX where running a
-            // visible browser on the host serves an LLM-driven agent. The
-            // previous {@code playwright.headless} config key is gone.
-            var launchOptions = new BrowserType.LaunchOptions().setHeadless(true);
-            // JCLAW-731: pin DNS for the navigation's validated host so Chromium
-            // resolves it to exactly the IP the SSRF guard approved.
-            hostResolverRule.ifPresent(rule ->
-                    launchOptions.setArgs(List.of("--host-resolver-rules=" + rule)));
-            var browser = playwright.chromium().launch(launchOptions);
-            var page = browser.newPage();
-            // JCLAW-116: abort any request (main frame, subresource, or
-            // redirect target) whose URL fails the SSRF guard. Catches
-            // three cases the entry-URL check in navigate() can't:
-            //   (a) subresources embedded in the loaded page that target
-            //       private networks (tracking pixels pointing at
-            //       169.254.169.254, script-loaders reaching loopback, etc.),
-            //   (b) HTTP redirects to unsafe hosts (Chromium follows them
-            //       automatically without re-invoking our one-shot check),
-            //   (c) any future navigation that bypasses navigate() (e.g.
-            //       a click handler that triggers page.navigate internally).
-            page.route("**/*", route -> {
-                if (SsrfGuard.isUrlSafe(route.request().url())) {
-                    route.resume();
-                } else {
-                    route.abort();
+                // The DNS pin is a launch-time arg, so a navigation to a host
+                // not already pinned can't be added to the running Chromium.
+                var relaunchPins = pinsForNavigation(existing.pinnedRules(), hostResolverRule);
+                if (relaunchPins.isEmpty()) {
+                    // Rule empty or already pinned — reuse the live session as-is.
+                    return existing.withLastUsed();
                 }
-            });
-            return new BrowserSession(playwright, browser, page,
-                    new ReentrantLock(), System.currentTimeMillis());
+                // Relaunch with the union of prior pins + the new host so every
+                // previously-visited host stays connect-time pinned. This discards
+                // the current page state, but a cross-host navigation loads a fresh
+                // page anyway, so nothing useful is lost.
+                destroySession(existing, key);
+                return launchSession(key, relaunchPins.get());
+            }
+            var initialPins = new LinkedHashSet<String>();
+            hostResolverRule.ifPresent(initialPins::add);
+            return launchSession(key, initialPins);
         });
+    }
+
+    /**
+     * Decide the DNS pin set a live session should run with for the next
+     * navigation (JCLAW-731). Returns empty when the session already covers the
+     * navigation — the rule is absent (literal-IP / hostless URL) or the host is
+     * already pinned — so the caller reuses the browser untouched. Otherwise
+     * returns the union of the existing pins and the new rule, signalling a
+     * relaunch so the new host is pinned without dropping any prior host.
+     *
+     * <p>Exposed for unit tests; not part of the public tool API.
+     */
+    public static Optional<Set<String>> pinsForNavigation(Set<String> existingPins,
+                                                          Optional<String> newRule) {
+        if (newRule.isEmpty() || existingPins.contains(newRule.get())) {
+            return Optional.empty();
+        }
+        var merged = new LinkedHashSet<>(existingPins);
+        merged.add(newRule.get());
+        return Optional.of(merged);
+    }
+
+    /**
+     * Launch a fresh headless Chromium session pinned to {@code pinnedRules}.
+     * The MAP clauses are joined into a single {@code --host-resolver-rules}
+     * flag ("MAP h1 ip1,MAP h2 ip2") because that flag is a single launch arg;
+     * this keeps every host validated so far in the session connect-time pinned,
+     * not just the entry host (JCLAW-731).
+     */
+    private static BrowserSession launchSession(String key, Set<String> pinnedRules) {
+        EventLogger.info("tool", key, null, "Launching headless browser");
+        ensureBrowserInstalled();
+        var playwright = Playwright.create(new Playwright.CreateOptions()
+                .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+        // JCLAW-172: headless is hardcoded — there is no UX where running a
+        // visible browser on the host serves an LLM-driven agent. The
+        // previous {@code playwright.headless} config key is gone.
+        var launchOptions = new BrowserType.LaunchOptions().setHeadless(true);
+        // JCLAW-731: pin DNS for every validated host in this session so Chromium
+        // resolves each to exactly the IP the SSRF guard approved.
+        if (!pinnedRules.isEmpty()) {
+            launchOptions.setArgs(List.of("--host-resolver-rules=" + String.join(",", pinnedRules)));
+        }
+        var browser = playwright.chromium().launch(launchOptions);
+        var page = browser.newPage();
+        // JCLAW-116: abort any request (main frame, subresource, or
+        // redirect target) whose URL fails the SSRF guard. Catches
+        // three cases the entry-URL check in navigate() can't:
+        //   (a) subresources embedded in the loaded page that target
+        //       private networks (tracking pixels pointing at
+        //       169.254.169.254, script-loaders reaching loopback, etc.),
+        //   (b) HTTP redirects to unsafe hosts (Chromium follows them
+        //       automatically without re-invoking our one-shot check),
+        //   (c) any future navigation that bypasses navigate() (e.g.
+        //       a click handler that triggers page.navigate internally).
+        page.route("**/*", route -> {
+            if (SsrfGuard.isUrlSafe(route.request().url())) {
+                route.resume();
+            } else {
+                route.abort();
+            }
+        });
+        return new BrowserSession(playwright, browser, page,
+                new ReentrantLock(), Set.copyOf(pinnedRules), System.currentTimeMillis());
     }
 
     public static void closeSession(String agentName) {
