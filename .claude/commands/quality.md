@@ -15,7 +15,9 @@ The bias throughout is **conservatism**: this codebase already scored A-/A on Cl
 **Arguments** — `$ARGUMENTS` may be:
 - *(empty)* → all four passes in order (comments → dead code → modernize → deps), scoped to `app/`.
 - a pass word — `comments` | `deadcode` | `modernize` | `deps` → run only that pass.
-- an optional **path scope** as the last token (e.g. `deadcode app/services`, `modernize app/tools/TaskTool.java`, or just `app/channels` to run all four on that subtree). Defaults to `app/`.
+- an optional **path scope** as the last token (e.g. `deadcode app/services`, `modernize app/tools/TaskTool.java`, or just `app/channels` to sweep that subtree). Defaults to `app/`.
+
+**Scope & the deps pass.** The comments, dead-code, and modernize passes honor the path scope. The **deps pass (Phase 4) is whole-tree by nature** — it analyzes `build.gradle.kts` against usage everywhere — so it runs **only when the scope is the full production tree**: an empty/default run, or an explicit `app/` / `app`. A narrower subtree scope (`app/utils`, a single file, …) runs passes 1–3 and **skips Phase 4 with a one-line note** pointing the user at `/quality deps`. Naming the pass explicitly (`/quality deps`) always analyzes the whole tree, ignoring any trailing path.
 
 Reject anything else with a clear message; do not guess.
 
@@ -93,7 +95,9 @@ Goal: upgrade stale syntax to modern Java 25, behavior-preserving. This codebase
 
 ---
 
-**Phase 4 — Remove dead dependencies**
+**Phase 4 — Remove dead dependencies** *(whole-tree scope only)*
+
+**Gate:** run this pass only when the scope is the full production tree — an empty/default run, or an explicit `app/` / `app` (or a direct `deps` invocation). For any **narrower subtree scope**, do not attempt a partial dependency analysis: skip the pass and report one line — *"Deps analysis is whole-tree; skipped for this subtree scope — run `/quality deps` to sweep dependencies."*
 
 Goal: remove `build.gradle.kts` dependencies **definitely** unused. This is the highest-risk pass — a dep can be needed at *runtime* with no compile-time import, so a dropped dep may only fail under `play autotest`, not `compileJava`.
 
@@ -114,7 +118,7 @@ Goal: remove `build.gradle.kts` dependencies **definitely** unused. This is the 
 
 16. Final gate from the worktree: `cd ../jclaw-quality && ./gradlew spotlessApply && play autotest`. Confirm the JCLAW-684 green signal — the log contains `~ All tests passed` **and** there are no `test-result/*.class.failed.html` sentinels (exit code alone can lie). 
     - **Env-flake guard:** if a broad batch of *unrelated* controller/functional tests fails (401s, FK violations, `awaitCommitted` timeouts), that's the known live-app / load interference (the primary tree's dev server adds load) — confirm the port is isolated (9350) and re-run once; don't chase it as a real failure.
-17. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, deps dropped (+ any "possibly unused" left) — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`.
+17. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, and deps dropped (+ any "possibly unused" left) **or the "skipped — subtree scope" note** — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`. **If no pass produced a commit** (e.g. an already-clean subtree, as `app/utils` is post-audit), say so plainly and remove the empty worktree (`/usr/bin/git worktree remove ../jclaw-quality`) rather than leaving an empty branch to review.
 
 ---
 
