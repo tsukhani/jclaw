@@ -71,6 +71,11 @@ public final class SsrfGuard {
      *  {@code ftp://}, {@code gopher://}, {@code data:}, etc. */
     private static final Set<String> ALLOWED_SCHEMES = Set.of("http", "https");
 
+    /** {@link UnknownHostException} message when a hostname resolves to a blocked IP —
+     *  {@code .formatted(hostname, blockedIp)} at each SSRF-guard call site. */
+    private static final String BLOCKED_ADDRESS_MSG =
+            "SSRF guard: host %s resolves to blocked address %s";
+
     /**
      * An OkHttp {@link Dns} that rejects any hostname resolving to a
      * non-routable range: loopback (127.0.0.0/8, ::1), link-local
@@ -84,7 +89,7 @@ public final class SsrfGuard {
         for (var addr : addrs) {
             if (isUnsafe(addr)) {
                 throw new UnknownHostException(
-                        "SSRF guard: host %s resolves to blocked address %s"
+                        BLOCKED_ADDRESS_MSG
                                 .formatted(hostname, addr.getHostAddress()));
             }
         }
@@ -221,7 +226,7 @@ public final class SsrfGuard {
             for (var addr : InetAddress.getAllByName(host)) {
                 if (isUnsafe(addr)) {
                     throw new SecurityException(
-                            "SSRF guard: host %s resolves to blocked address %s"
+                            BLOCKED_ADDRESS_MSG
                                     .formatted(host, addr.getHostAddress()));
                 }
             }
@@ -270,7 +275,7 @@ public final class SsrfGuard {
         }
         if (isUnsafe(pinned)) { // defence in depth: never emit an unsafe pin
             throw new SecurityException(
-                    "SSRF guard: host %s resolves to blocked address %s"
+                    BLOCKED_ADDRESS_MSG
                             .formatted(host, pinned.getHostAddress()));
         }
         var literal = pinned.getHostAddress();
@@ -320,7 +325,7 @@ public final class SsrfGuard {
         }
         if (isUnsafe(pinned)) { // defence in depth: never emit an unsafe pin
             throw new SecurityException(
-                    "SSRF guard: host %s resolves to blocked address %s"
+                    BLOCKED_ADDRESS_MSG
                             .formatted(host, pinned.getHostAddress()));
         }
         return Optional.of("MAP %s %s".formatted(host, pinned.getHostAddress()));

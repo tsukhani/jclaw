@@ -46,25 +46,25 @@ final class TaskListRenderer {
         if (reminders.isEmpty()) return "No upcoming reminders.";
         var sb = new StringBuilder("Reminders:\n");
         for (var task : reminders) {
-            // One-shot reminders: nextRunAt is the real fire instant (what the
-            // user cares about when editing). Recurring reminders: nextRunAt is
-            // only a create-time placeholder (the live next-fire lives in the
-            // scheduler), so show the cadence string instead — same choice
-            // recurring() makes.
-            boolean recurring = task.type == Task.Type.CRON || task.type == Task.Type.INTERVAL;
-            String when;
-            if (recurring) {
-                when = task.scheduleDisplay != null ? task.scheduleDisplay : task.type.name();
-            } else if (task.nextRunAt != null) {
-                when = task.nextRunAt.toString();
-            } else {
-                when = task.scheduleDisplay != null ? task.scheduleDisplay : "—";
-            }
             sb.append("- %s (%s) [%s] — %s\n".formatted(
-                    task.name, when, task.status.name(),
+                    task.name, whenLabel(task), task.status.name(),
                     task.description != null && task.description.length() > 100
                             ? task.description.substring(0, 100) + "..." : task.description));
         }
         return sb.toString();
+    }
+
+    /**
+     * The reminder's display "when". One-shot reminders: {@code nextRunAt} is the
+     * real fire instant (what the user cares about when editing). Recurring
+     * reminders: {@code nextRunAt} is only a create-time placeholder (the live
+     * next-fire lives in the scheduler), so show the cadence string instead — the
+     * same choice {@code recurring()} makes.
+     */
+    private static String whenLabel(Task task) {
+        boolean recurring = task.type == Task.Type.CRON || task.type == Task.Type.INTERVAL;
+        if (recurring) return task.scheduleDisplay != null ? task.scheduleDisplay : task.type.name();
+        if (task.nextRunAt != null) return task.nextRunAt.toString();
+        return task.scheduleDisplay != null ? task.scheduleDisplay : "—";
     }
 }

@@ -105,9 +105,11 @@ public final class SlackMarkdownFormatter {
         /** Slack has no heading/table/typographic grammar; the raw-HTML nodes are the
          *  only extra types its parser produces — escape them (Slack displays them). */
         @Override protected void emitFallback(Node node) {
-            if (node instanceof HtmlInline h) out.append(escape(h.getChars().toString()));
-            else if (node instanceof HtmlBlock h) out.append(escape(h.getChars().toString()));
-            else super.emitFallback(node);
+            switch (node) {
+                case HtmlInline h -> out.append(escape(h.getChars().toString()));
+                case HtmlBlock h -> out.append(escape(h.getChars().toString()));
+                default -> super.emitFallback(node);
+            }
         }
 
         void wrap(Node n, String delim) {

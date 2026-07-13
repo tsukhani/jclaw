@@ -20,9 +20,9 @@ record TelegramSendContext(String botToken,
      * JCLAW-383: remember that this bot sent {@code messageId} into {@code chatId}
      * so a later group reaction on it is recognized as a reaction on a bot message
      * ({@code notify=own}). No-op on null/blank chat id or null message id — the
-     * guard lives in {@link TelegramSentMessageCache#record}.
+     * guard lives in {@link TelegramSentMessageCache#remember}.
      */
     void recordSent(String chatId, Integer messageId) {
-        sentCache.record(chatId, messageId);
+        sentCache.remember(chatId, messageId);
     }
 }

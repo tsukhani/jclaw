@@ -51,7 +51,7 @@ final class TelegramSentMessageCache {
      * number of chats to {@link TelegramChannel#SENT_CHATS_CAP} (coldest chat
      * evicted).
      */
-    void record(String chatId, Integer messageId) {
+    void remember(String chatId, Integer messageId) {
         if (chatId == null || chatId.isBlank() || messageId == null) return;
         synchronized (sentByChat) {
             var ring = sentByChat.computeIfAbsent(chatId, _ ->
