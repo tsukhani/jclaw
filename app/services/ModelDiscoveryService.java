@@ -194,7 +194,7 @@ public class ModelDiscoveryService {
 
             if (statusCode != 200) {
                 Logger.warn("[discover/%s] upstream returned HTTP %d: %s",
-                        providerName, statusCode, Strings.truncate(responseBody, 500));
+                        providerName, statusCode, Strings.truncate(responseBody, Strings.ERROR_SNIPPET_MAX_CHARS));
                 return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
                         statusCode, Strings.truncate(responseBody, 200)));
             }
@@ -693,7 +693,7 @@ public class ModelDiscoveryService {
                 if (json.isJsonObject() && json.getAsJsonObject().has(FIELD_DATA)) {
                     return parseJsonLeaderboard(json.getAsJsonObject().getAsJsonArray(FIELD_DATA));
                 }
-            } catch (JsonSyntaxException _) {}
+            } catch (JsonSyntaxException _) { /* not JSON → fall through to HTML parse */ }
 
             return parseHtmlLeaderboard(body);
 

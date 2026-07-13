@@ -722,9 +722,6 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                 reply.statusCode(), config.name(), sanitizeErrorBody(reply.body(), config.apiKey()))));
     }
 
-    /** Max characters of an upstream error body surfaced into an exception/log. */
-    private static final int MAX_ERROR_BODY_CHARS = 500;
-
     /**
      * JCLAW-730: scrub the provider secret and cap the length of an upstream
      * error body before it enters an {@link LlmException} message — which flows
@@ -736,7 +733,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     private static String sanitizeErrorBody(String body, String secret) {
         if (body == null || body.isEmpty()) return "";
         var scrubbed = (secret == null || secret.isEmpty()) ? body : body.replace(secret, "<redacted>");
-        return Strings.truncate(scrubbed, MAX_ERROR_BODY_CHARS);
+        return Strings.truncate(scrubbed, Strings.ERROR_SNIPPET_MAX_CHARS);
     }
 
     private void backoffBeforeRetry(int attempt) {

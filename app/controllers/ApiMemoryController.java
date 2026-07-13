@@ -21,6 +21,7 @@ import utils.JpqlFilter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -333,7 +334,7 @@ public class ApiMemoryController extends Controller {
      * {@code status:superseded} or {@code status:all}.
      */
     private static String statusCondition(String status) {
-        var s = status == null ? "" : status.strip().toLowerCase(java.util.Locale.ROOT);
+        var s = status == null ? "" : status.strip().toLowerCase(Locale.ROOT);
         return switch (s) {
             case "all" -> null;
             case "superseded" -> "m.supersededAt IS NOT NULL";

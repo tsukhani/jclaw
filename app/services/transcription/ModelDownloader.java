@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.util.HexFormat;
 
 /**
@@ -71,7 +72,7 @@ public final class ModelDownloader {
         // Model files run to hundreds of MB: clear the per-call deadline
         // (read/connect timeouts still bound each socket operation).
         var download = client.newBuilder()
-                .callTimeout(java.time.Duration.ZERO)
+                .callTimeout(Duration.ZERO)
                 .build();
         try (Response resp = download.newCall(new Request.Builder().url(url).build()).execute();
              var sink = Files.newOutputStream(tmp)) {

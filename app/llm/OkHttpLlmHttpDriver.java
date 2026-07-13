@@ -139,9 +139,6 @@ final class OkHttpLlmHttpDriver {
         catch (NumberFormatException _) { return Optional.empty(); }
     }
 
-    /** Max characters of a non-200 SSE error body surfaced into an exception/log. */
-    private static final int MAX_ERROR_BODY_CHARS = 500;
-
     /**
      * JCLAW-730: scrub the bearer key and cap the length of a non-200 SSE error
      * body before it enters an {@link LlmProvider.LlmException} message (which
@@ -156,6 +153,6 @@ final class OkHttpLlmHttpDriver {
             var key = authHeader.substring(HttpKeys.BEARER_PREFIX.length());
             if (!key.isEmpty()) scrubbed = scrubbed.replace(key, "<redacted>");
         }
-        return Strings.truncate(scrubbed, MAX_ERROR_BODY_CHARS);
+        return Strings.truncate(scrubbed, Strings.ERROR_SNIPPET_MAX_CHARS);
     }
 }

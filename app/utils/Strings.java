@@ -13,6 +13,14 @@ public final class Strings {
     private Strings() {}
 
     /**
+     * Standard cap, in characters, for an error- or response-body excerpt kept
+     * for a log line or surfaced in a failure message. Every "truncate an
+     * upstream error body before we log/return it" site shares this bound so the
+     * amount of foreign payload we retain is decided in one place.
+     */
+    public static final int ERROR_SNIPPET_MAX_CHARS = 500;
+
+    /**
      * Return {@code s} unchanged if it fits in {@code maxLen} characters, or a
      * truncated version suffixed with {@code "…"} otherwise. Returns {@code ""}
      * for null input. Does not validate {@code maxLen} — a non-positive value

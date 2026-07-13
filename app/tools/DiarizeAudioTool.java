@@ -5,6 +5,7 @@ import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
@@ -17,16 +18,21 @@ import play.Logger;
 import services.AgentService;
 import services.ConfigService;
 import services.Tx;
+import services.transcription.LlmAudio;
 import utils.HttpFactories;
 import utils.JsonArgs;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * {@code diarize_audio} (JCLAW-654): speaker-attributed transcription via an
@@ -67,12 +73,20 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final String ACTION_ENROLL = "enroll_voice";
 
     /** Speaker names become file names — path traversal is rejected here. */
-    private static final java.util.regex.Pattern NAME_PATTERN =
-            java.util.regex.Pattern.compile("^[\\p{L}\\p{N} ._-]{1,60}$");
+    private static final Pattern NAME_PATTERN =
+            Pattern.compile("^[\\p{L}\\p{N} ._-]{1,60}$");
 
     /** Reference clips capped to keep the multi-audio request bounded. */
     private static final int MAX_REFERENCE_CLIPS = 8;
     private static final int REFERENCE_SECONDS = 8;
+
+    /** Diarization output-token ceiling and per-call deadline for the audio LLM. */
+    private static final int MAX_OUTPUT_TOKENS = 8192;
+    private static final int AUDIO_CALL_TIMEOUT_SECONDS = 600;
+
+    /** Chars of an upstream/ffmpeg error kept when surfacing a failure. */
+    private static final int ERROR_BODY_SNIPPET_CHARS = 300;
+    private static final int FFMPEG_ERROR_TAIL_CHARS = 200;
 
 
     private static final Gson GSON = new Gson();
@@ -215,7 +229,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         boolean emotionsArg = JsonArgs.optBool(args, ARG_EMOTIONS);
 
         try {
-            var audio = services.transcription.LlmAudio.prepare(path, att.mimeType);
+            var audio = LlmAudio.prepare(path, att.mimeType);
             boolean emotions = emotionsArg;
             var references = loadReferences();
             var prompt = buildPrompt(JsonArgs.optString(args, ARG_SPEAKER_NAMES),
@@ -233,7 +247,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     // ------------------------------------------------------------------ //
 
     private static String buildPrompt(String speakerNames, String language, boolean emotions,
-                                      java.util.Set<String> referenceNames) {
+                                      Set<String> referenceNames) {
         var sb = new StringBuilder("""
                 Listen to the attached audio and produce a complete diarized transcript. \
                 One line per speaker turn, formatted exactly as "SpeakerName: text". \
@@ -302,7 +316,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         var body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("temperature", 0);
-        body.addProperty("max_tokens", 8192);
+        body.addProperty("max_tokens", MAX_OUTPUT_TOKENS);
         var messages = new JsonArray();
         var user = new JsonObject();
         user.addProperty("role", "user");
@@ -319,7 +333,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         // Audio inference over a multi-minute recording routinely exceeds
         // the default single-shot timeout; give it room.
         var client = HttpFactories.llmSingleShot().newBuilder()
-                .callTimeout(Duration.ofSeconds(600)).build();
+                .callTimeout(Duration.ofSeconds(AUDIO_CALL_TIMEOUT_SECONDS)).build();
         try (var response = client.newCall(request.build()).execute()) {
             // OkHttp 5 guarantees a non-null body on a synchronously executed
             // call (may be empty, never null) — same contract note as
@@ -327,7 +341,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             var text = response.body().string();
             if (!response.isSuccessful()) {
                 throw new IOException("model call failed (HTTP %d): %s".formatted(
-                        response.code(), text.substring(0, Math.min(300, text.length()))));
+                        response.code(), text.substring(0, Math.min(ERROR_BODY_SNIPPET_CHARS, text.length()))));
             }
             var root = JsonParser.parseString(text).getAsJsonObject();
             var choices = root.getAsJsonArray("choices");
@@ -335,7 +349,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 throw new IOException("model returned no choices");
             }
             var message = choices.get(0).getAsJsonObject().getAsJsonObject("message");
-            com.google.gson.JsonElement contentEl = message == null ? null : message.get("content");
+            JsonElement contentEl = message == null ? null : message.get("content");
             var transcript = contentEl == null || contentEl.isJsonNull() ? "" : contentEl.getAsString();
             if (transcript.isBlank()) {
                 throw new IOException("model returned an empty transcript (a reasoning-only model? "
@@ -391,9 +405,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 String output = new String(proc.getInputStream().readAllBytes());
                 if (proc.waitFor() != 0) {
                     return "Error: could not extract a voice sample (%s).".formatted(
-                            output.substring(Math.max(0, output.length() - 200)));
+                            output.substring(Math.max(0, output.length() - FFMPEG_ERROR_TAIL_CHARS)));
                 }
-                Files.move(tmp, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING);
             } finally {
                 Files.deleteIfExists(tmp);
             }
@@ -418,10 +432,10 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     .sorted().limit(MAX_REFERENCE_CLIPS).toList();
             for (var clip : clips) {
                 var name = clip.getFileName().toString().replaceFirst("[.]mp3$", "");
-                out.put(name, java.util.Base64.getEncoder().encodeToString(Files.readAllBytes(clip)));
+                out.put(name, Base64.getEncoder().encodeToString(Files.readAllBytes(clip)));
             }
         } catch (IOException e) {
-            play.Logger.warn("DiarizeAudioTool: voice references unavailable: %s", e.getMessage());
+            Logger.warn("DiarizeAudioTool: voice references unavailable: %s", e.getMessage());
         }
         return out;
     }

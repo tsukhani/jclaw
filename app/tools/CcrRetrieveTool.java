@@ -38,8 +38,8 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
     public static final String TOOL_NAME = "ccr_retrieve";
 
     @Override
-    public java.util.List<ToolAction> actions() {
-        return java.util.List.of(new ToolAction("retrieve",
+    public List<ToolAction> actions() {
+        return List.of(new ToolAction("retrieve",
                 "Return the full original tool result for a compression hash"));
     }
 

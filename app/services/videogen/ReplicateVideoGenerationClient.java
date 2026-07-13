@@ -62,7 +62,7 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
             }
             var body = e.body();
             throw new VideoGenerationException("replicate submit failed: HTTP %d%s".formatted(
-                    e.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, 500)));
+                    e.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, Strings.ERROR_SNIPPET_MAX_CHARS)));
         }
         var id = prediction.get("id");
         if (id == null || id.isJsonNull() || id.getAsString().isBlank()) {

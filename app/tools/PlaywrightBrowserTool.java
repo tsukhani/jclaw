@@ -341,9 +341,11 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     /** Tear down a session's resources. Safe to call from any thread. */
     private static void destroySession(BrowserSession session, String agentName) {
-        try { session.page().close(); } catch (Exception _) {}
-        try { session.browser().close(); } catch (Exception _) {}
-        try { session.playwright().close(); } catch (Exception _) {}
+        // Best-effort teardown: close each resource independently so a failure on
+        // one (already closed, crashed) cannot leak the others.
+        try { session.page().close(); } catch (Exception _) { /* best-effort */ }
+        try { session.browser().close(); } catch (Exception _) { /* best-effort */ }
+        try { session.playwright().close(); } catch (Exception _) { /* best-effort */ }
         EventLogger.info("tool", agentName, null, "Browser session closed");
     }
 

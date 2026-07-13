@@ -9,21 +9,14 @@ import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import services.AgentService;
 import services.ConfigService;
-import services.EventLogger;
 import services.Tx;
 import utils.WorkspacePathGuard;
 
-import javax.imageio.ImageIO;
-
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -333,7 +326,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
         if (!args.has(PARAM_WORKDIR) || args.get(PARAM_WORKDIR).getAsString().strip().isEmpty()) {
             if (!Files.isDirectory(workspace)) {
-                try { Files.createDirectories(workspace); } catch (IOException _) {}
+                try { Files.createDirectories(workspace); } catch (IOException _) { /* best-effort; a real failure surfaces at first write */ }
             }
             return workspace;
         }
@@ -436,7 +429,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             }
 
             long durationMs = System.currentTimeMillis() - startTime;
-            var processedOutput = replaceTerminalImagesInOutput(out.toString(), agent);
+            var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(out.toString(), agent);
 
             var result = new JsonObject();
             result.addProperty("exitCode", timedOut.get() ? -1 : process.exitValue());
@@ -553,8 +546,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             for (int i = from; i < len; i++) {
                 char ch = out.charAt(i);
                 if (ch == '\n') {
-                    if (isBlockArtLine(lineBuf.toString())) {
-                        if (++blockRun >= 5) return true;
+                    if (TerminalImageRenderer.isBlockArtLine(lineBuf.toString())) {
+                        if (++blockRun >= TerminalImageRenderer.MIN_BLOCK_ART_LINES) return true;
                     } else {
                         blockRun = 0;
                     }
@@ -567,7 +560,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // scan's i==len branch, which counts the trailing segment on every
             // invocation. The run is left unconsumed so the same line isn't
             // double-counted when its newline finally arrives.
-            return blockRun + (isBlockArtLine(lineBuf.toString()) ? 1 : 0) >= 5;
+            return blockRun + (TerminalImageRenderer.isBlockArtLine(lineBuf.toString()) ? 1 : 0)
+                    >= TerminalImageRenderer.MIN_BLOCK_ART_LINES;
         }
     }
 
@@ -596,7 +590,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
      */
     private String buildTerminalImageEarlyReturn(String rawOutput, Agent agent,
                                                   int timeoutSec, long startTime, boolean truncated) {
-        var processedOutput = replaceTerminalImagesInOutput(rawOutput, agent);
+        var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(rawOutput, agent);
         long durationMs = System.currentTimeMillis() - startTime;
 
         var result = new JsonObject();
@@ -611,158 +605,4 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return result.toString();
     }
 
-    // --- Terminal image rendering ---
-
-    /**
-     * Detect QR codes or other terminal-rendered images in command output,
-     * render them as PNGs, and replace the block art in the output with
-     * markdown image URLs that the LLM will include in its response.
-     */
-    private String replaceTerminalImagesInOutput(String output, Agent agent) {
-        var lines = output.split("\n");
-        var result = new StringBuilder();
-        var qrLines = new ArrayList<String>();
-
-        for (var line : lines) {
-            if (isBlockArtLine(line)) {
-                qrLines.add(line);
-            } else {
-                flushQrBlock(qrLines, result, agent);
-                result.append(line).append("\n");
-            }
-        }
-        // Handle block art at end of output
-        flushQrBlock(qrLines, result, agent);
-
-        return result.toString().stripTrailing();
-    }
-
-    /**
-     * Drain the accumulated block-art lines into {@code result}: render as a
-     * PNG image link when the block is substantial enough ({@code >= 5}
-     * lines), or emit verbatim when it's too small to be a real terminal
-     * image. Either way the buffer ends empty so the caller can start a new
-     * block on the next non-block line.
-     */
-    private void flushQrBlock(ArrayList<String> qrLines,
-                              StringBuilder result, Agent agent) {
-        if (qrLines.isEmpty()) return;
-        if (qrLines.size() >= 5) {
-            var imageUrl = renderBlockArtToPng(qrLines, agent);
-            if (imageUrl != null) {
-                result.append(imageUrl).append("\n");
-            }
-        } else {
-            for (var ql : qrLines) result.append(ql).append("\n");
-        }
-        qrLines.clear();
-    }
-
-    private boolean isBlockArtLine(String line) {
-        if (line.length() <= 10) return false;
-        long blockChars = line.chars().filter(c ->
-                c == '\u2588' || c == '\u2580' || c == '\u2584' || c == '\u258C' || c == '\u2590' ||
-                c == '\u2591' || c == '\u2592' || c == '\u2593' || c == '\u258A' || c == '\u258B' ||
-                c == '\u258D' || c == '\u258E' || c == '\u258F' || c == ' '
-        ).count();
-        return blockChars > line.length() * 0.7;
-    }
-
-    /**
-     * Render Unicode block art (QR code, etc.) to a PNG image using Java2D.
-     *
-     * Unicode half-block characters encode two vertical pixels per character:
-     *   █ (U+2588) = top black, bottom black
-     *   ▀ (U+2580) = top black, bottom white
-     *   ▄ (U+2584) = top white, bottom black
-     *   ' ' (space) = top white, bottom white
-     *
-     * Each character cell maps to cellSize x (cellSize*2) pixels to preserve the
-     * 1:2 aspect ratio of half-block encoding.
-     */
-    private String renderBlockArtToPng(List<String> lines, Agent agent) {
-        try {
-            int cellW = 8;  // pixels per character width
-            int cellH = 8;  // pixels per HALF character height (each char = 2 vertical halves)
-            int maxWidth = lines.stream().mapToInt(String::length).max().orElse(0);
-            int imgWidth = maxWidth * cellW;
-            int imgHeight = lines.size() * cellH * 2; // *2 because each char line = 2 pixel rows
-
-            if (imgWidth <= 0 || imgHeight <= 0 || imgWidth > 8000 || imgHeight > 8000) return null;
-
-            var img = new BufferedImage(imgWidth, imgHeight, BufferedImage.TYPE_INT_RGB);
-            var g = img.createGraphics();
-            g.setColor(Color.WHITE);
-            g.fillRect(0, 0, imgWidth, imgHeight);
-
-            paintBlockArt(g, lines, cellW, cellH);
-            g.dispose();
-
-            var timestamp = System.currentTimeMillis();
-            var filename = "terminal-image-%d.png".formatted(timestamp);
-            var path = AgentService.workspacePath(agent.name).resolve(filename);
-            ImageIO.write(img, "PNG", path.toFile());
-
-            var url = "/api/agents/%d/files/%s".formatted(agent.id, filename);
-            // Use full markdown image syntax — this is a web URL for the chat UI, not a file path
-            return "![QR Code](%s)".formatted(url);
-
-        } catch (Exception e) {
-            EventLogger.warn("tool", "Failed to render terminal image: %s".formatted(e.getMessage()));
-            return null;
-        }
-    }
-
-    /**
-     * Paint the block-art {@code lines} into the {@link java.awt.Graphics2D}
-     * context using {@code cellW × cellH} cells (each character is two
-     * vertically-stacked half-cells per the Unicode half-block encoding).
-     */
-    private static void paintBlockArt(Graphics2D g, List<String> lines,
-                                      int cellW, int cellH) {
-        for (int row = 0; row < lines.size(); row++) {
-            var line = lines.get(row);
-            int py = row * cellH * 2; // pixel y for this character row
-            for (int col = 0; col < line.length(); col++) {
-                char c = line.charAt(col);
-                int px = col * cellW;
-                var halves = halfBlocksFor(c);
-                if (halves.topBlack()) {
-                    g.setColor(Color.BLACK);
-                    g.fillRect(px, py, cellW, cellH);
-                }
-                if (halves.bottomBlack()) {
-                    g.setColor(Color.BLACK);
-                    g.fillRect(px, py + cellH, cellW, cellH);
-                }
-            }
-        }
-    }
-
-    /** Encoded top/bottom-half occupancy for one half-block character. */
-    private record HalfBlock(boolean topBlack, boolean bottomBlack) {
-        private static final HalfBlock EMPTY = new HalfBlock(false, false);
-        private static final HalfBlock FULL = new HalfBlock(true, true);
-        private static final HalfBlock TOP = new HalfBlock(true, false);
-        private static final HalfBlock BOTTOM = new HalfBlock(false, true);
-    }
-
-    private static HalfBlock halfBlocksFor(char c) {
-        return switch (c) {
-            // █ full block, ▊, ▋ — treat as full for QR
-            case '\u2588', '\u258A', '\u258B' -> HalfBlock.FULL;
-            // ▀ upper half
-            case '\u2580' -> HalfBlock.TOP;
-            // ▄ lower half
-            case '\u2584' -> HalfBlock.BOTTOM;
-            // ▌ left half, ▐ right half — treat as full for QR
-            case '\u258C', '\u2590' -> HalfBlock.FULL;
-            // ▓ dark shade
-            case '\u2593' -> HalfBlock.FULL;
-            // ▒ medium shade, ░ light shade, literal space — treat as white
-            case '\u2592', '\u2591', ' ' -> HalfBlock.EMPTY;
-            // Unknown char — treat as black if it's a block-range char
-            default -> (c >= '\u2580' && c <= '\u259F') ? HalfBlock.FULL : HalfBlock.EMPTY;
-        };
-    }
 }

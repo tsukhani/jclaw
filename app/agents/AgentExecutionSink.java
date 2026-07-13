@@ -99,10 +99,10 @@ public interface AgentExecutionSink {
      * @return the persisted {@link models.MessageAttachment} rows (so the caller can surface them on
      *         the live SSE {@code tool_call} frame), empty when nothing was inlined
      */
-    default java.util.List<MessageAttachment> appendAssistantMessage(
-            String content, String toolCalls, java.util.List<GeneratedAttachment> attachments) {
+    default List<MessageAttachment> appendAssistantMessage(
+            String content, String toolCalls, List<GeneratedAttachment> attachments) {
         appendAssistantMessage(content, toolCalls);
-        return java.util.List.of();
+        return List.of();
     }
 
     /**

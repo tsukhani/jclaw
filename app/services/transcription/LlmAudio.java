@@ -7,6 +7,7 @@ import services.MimeExtensions;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Base64;
 
 /**
@@ -79,7 +80,7 @@ public final class LlmAudio {
                 throw new IOException("ffmpeg exited %d: %s".formatted(exit,
                         output.substring(Math.max(0, output.length() - 300))));
             }
-            Files.move(tmp, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING);
             Logger.info("LlmAudio: transcoded %s -> %s (%d KB)", src.getFileName(),
                     dest.getFileName(), Files.size(dest) / 1024);
         } finally {

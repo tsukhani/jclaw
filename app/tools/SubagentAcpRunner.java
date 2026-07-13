@@ -581,7 +581,7 @@ final class SubagentAcpRunner {
     private static AgentRunner.ToolCallEvent toToolCallEvent(HarnessEvent ev) {
         var arguments = ev.raw() == null ? "" : ev.raw().toString();
         return new AgentRunner.ToolCallEvent(null, ev.text(), "harness", arguments, "", null, null,
-                java.util.List.of());
+                List.of());
     }
 
     /**

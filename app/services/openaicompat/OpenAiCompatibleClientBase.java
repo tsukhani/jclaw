@@ -29,9 +29,6 @@ import java.io.IOException;
  */
 public abstract class OpenAiCompatibleClientBase {
 
-    /** Max chars of an error-response body echoed into an exception message. */
-    private static final int BODY_SNIPPET_LIMIT = 500;
-
     protected final String providerName;
     protected final OkHttpClient client;
 
@@ -72,7 +69,7 @@ public abstract class OpenAiCompatibleClientBase {
      * has already confirmed {@code !response.isSuccessful()} and read {@code responseBody}.
      */
     protected RuntimeException httpError(Response response, String responseBody) {
-        var snippet = Strings.truncate(responseBody, BODY_SNIPPET_LIMIT);
+        var snippet = Strings.truncate(responseBody, Strings.ERROR_SNIPPET_MAX_CHARS);
         return newException("%s %s failed: HTTP %d %s%s".formatted(
                 providerName, operationLabel(), response.code(), response.message(),
                 snippet.isEmpty() ? "" : (" — " + snippet)));

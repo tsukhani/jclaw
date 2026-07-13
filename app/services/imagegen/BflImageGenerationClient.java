@@ -99,7 +99,7 @@ public class BflImageGenerationClient implements ImageGenerationService {
             var body = response.body().string();
             if (!response.isSuccessful()) {
                 throw new ImageGenerationException("bfl submit failed: HTTP %d %s%s".formatted(
-                        response.code(), response.message(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, 500))));
+                        response.code(), response.message(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, Strings.ERROR_SNIPPET_MAX_CHARS))));
             }
             var json = JsonParser.parseString(body).getAsJsonObject();
             if (json.has(POLLING_URL) && !json.get(POLLING_URL).isJsonNull()) {
@@ -145,7 +145,7 @@ public class BflImageGenerationClient implements ImageGenerationService {
                 return readySampleUrl(json);
             }
             if ("Error".equalsIgnoreCase(status) || "Failed".equalsIgnoreCase(status)) {
-                throw new ImageGenerationException("bfl generation failed: " + Strings.truncate(body, 500));
+                throw new ImageGenerationException("bfl generation failed: " + Strings.truncate(body, Strings.ERROR_SNIPPET_MAX_CHARS));
             }
             return null; // Pending / Queued / Processing — keep polling until the deadline.
         } catch (IOException e) {

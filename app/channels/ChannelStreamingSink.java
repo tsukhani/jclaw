@@ -1,5 +1,7 @@
 package channels;
 
+import java.util.List;
+
 /**
  * JCLAW-442: the streaming-sink contract that
  * {@link agents.AgentRunner#processInboundForAgentStreaming} drives, so any
@@ -48,7 +50,7 @@ public interface ChannelStreamingSink {
      *  transport renders these inline from the SSE frame, and Slack has no native
      *  file-upload send, so both ignore it; {@link TelegramStreamingSink}
      *  overrides it to upload the files as native photo/voice/video messages. */
-    default void collectGeneratedAttachments(java.util.List<String> attachmentUuids) {
+    default void collectGeneratedAttachments(List<String> attachmentUuids) {
         // no-op by default
     }
 }

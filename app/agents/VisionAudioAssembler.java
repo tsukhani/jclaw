@@ -5,6 +5,7 @@ import models.Agent;
 import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
+import play.Logger;
 import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
@@ -13,6 +14,7 @@ import services.caption.ImageCaptionService;
 import services.transcription.PendingTranscripts;
 import services.video.VideoUnderstandingDispatcher;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -325,8 +327,8 @@ public final class VisionAudioAssembler {
                     inner.put("data", prepared.base64());
                     if (!prepared.format().isEmpty()) inner.put("format", prepared.format());
                     parts.add(Map.of("type", "input_audio", "input_audio", inner));
-                } catch (java.io.IOException e) {
-                    play.Logger.warn("VisionAudioAssembler: audio part skipped for %s (%s)",
+                } catch (IOException e) {
+                    Logger.warn("VisionAudioAssembler: audio part skipped for %s (%s)",
                             a.uuid, e.getMessage());
                 }
             }

@@ -216,7 +216,7 @@ public final class LocalSidecarDaemon {
             if (expectedModel == null || expectedModel.isBlank()) return true;
             var served = healthModel(body);
             if (served == null || served.equals(expectedModel)) return true;
-            play.Logger.warn("%s: adopted sidecar serves model '%s' but config wants '%s' — evicting",
+            Logger.warn("%s: adopted sidecar serves model '%s' but config wants '%s' — evicting",
                     cfg.displayName(), served, expectedModel);
             evict();
             return false;

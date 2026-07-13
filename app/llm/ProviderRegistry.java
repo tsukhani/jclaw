@@ -1,6 +1,7 @@
 package llm;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonParseException;
 import com.google.gson.reflect.TypeToken;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
@@ -170,7 +171,7 @@ public final class ProviderRegistry {
         if (modelsJson == null || modelsJson.isBlank()) return List.of();
         try {
             return gson.fromJson(modelsJson, new TypeToken<List<ModelInfo>>() {}.getType());
-        } catch (Exception _) {
+        } catch (JsonParseException _) {
             // Skip malformed model JSON
             return List.of();
         }

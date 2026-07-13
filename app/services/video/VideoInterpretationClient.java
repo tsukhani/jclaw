@@ -199,7 +199,7 @@ public class VideoInterpretationClient {
 
         try (var response = client.newCall(builder.build()).execute()) {
             if (!response.isSuccessful()) {
-                var snippet = Strings.truncate(response.body().string(), 500);
+                var snippet = Strings.truncate(response.body().string(), Strings.ERROR_SNIPPET_MAX_CHARS);
                 throw new VideoAdapterException("%s video interpretation failed: HTTP %d %s%s".formatted(
                         providerName, response.code(), response.message(),
                         snippet.isEmpty() ? "" : (" — " + snippet)));

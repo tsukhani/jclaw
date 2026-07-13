@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Function;
 
 /**
  * JPA-backed memory store. Text search runs on the direct Lucene index for H2
@@ -61,10 +62,10 @@ public class JpaMemoryStore implements MemoryStore {
      * Lucene KNN path with canned vectors. Volatile: tests set/clear it around
      * the {@code LuceneTestSync} lock while production threads read it.
      */
-    private static volatile java.util.function.Function<String, float[]> embedderOverride;
+    private static volatile Function<String, float[]> embedderOverride;
 
     /** Test-only: install (or clear with {@code null}) a canned embedder. */
-    public static void setEmbedderForTest(java.util.function.Function<String, float[]> override) {
+    public static void setEmbedderForTest(Function<String, float[]> override) {
         embedderOverride = override;
     }
 
@@ -225,7 +226,7 @@ public class JpaMemoryStore implements MemoryStore {
     private List<MemoryEntry> sqlLikeSearch(String agentId, String query, int limit) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
-        return models.Memory.likeFallback(pk, query, limit).stream()
+        return Memory.likeFallback(pk, query, limit).stream()
                 .map(s -> toEntry(s.memory(), s.relevance()))
                 .toList();
     }

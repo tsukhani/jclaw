@@ -101,7 +101,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             }
             var body = e.body();
             throw new ImageGenerationException("replicate create failed: HTTP %d %s%s".formatted(
-                    e.code(), e.statusMessage(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, 500))));
+                    e.code(), e.statusMessage(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, Strings.ERROR_SNIPPET_MAX_CHARS))));
         }
     }
 
@@ -122,7 +122,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             }
             if ("failed".equalsIgnoreCase(status) || "canceled".equalsIgnoreCase(status)) {
                 throw new ImageGenerationException("replicate prediction " + status + ": "
-                        + Strings.truncate(current.toString(), 500));
+                        + Strings.truncate(current.toString(), Strings.ERROR_SNIPPET_MAX_CHARS));
             }
             if (System.nanoTime() >= deadline) {
                 throw new ImageGenerationException("replicate generation timed out after " + (timeoutMs / 1000) + "s");

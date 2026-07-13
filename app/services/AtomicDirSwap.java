@@ -42,7 +42,7 @@ public final class AtomicDirSwap {
             atomicSwap(targetDir, stagingDir, backupDir, replacing);
         } catch (IOException | RuntimeException e) {
             if (Files.exists(stagingDir)) {
-                try { deleteRecursive(stagingDir); } catch (IOException _) {}
+                try { deleteRecursive(stagingDir); } catch (IOException _) { /* best-effort cleanup; original failure rethrown below */ }
             }
             if (e instanceof UncheckedIOException uioe) throw uioe.getCause();
             throw e instanceof IOException ioe ? ioe : new IOException(e.getMessage(), e);
@@ -62,7 +62,7 @@ public final class AtomicDirSwap {
             Files.move(stagingDir, targetDir);
         } catch (IOException swapEx) {
             if (replacing && Files.isDirectory(backupDir)) {
-                try { Files.move(backupDir, targetDir); } catch (IOException _) {}
+                try { Files.move(backupDir, targetDir); } catch (IOException _) { /* best-effort rollback; original swap error rethrown below */ }
             }
             throw swapEx;
         }
@@ -76,7 +76,7 @@ public final class AtomicDirSwap {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {
             walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try { Files.delete(p); } catch (IOException _) {}
+                try { Files.delete(p); } catch (IOException _) { /* best-effort per-entry delete */ }
             });
         }
     }
