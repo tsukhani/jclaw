@@ -482,4 +482,98 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         assertEquals("tg-webhook-agent", dm.name,
                 "a non-topic message (null threadId) must use the binding default agent");
     }
+
+    // ===== JCLAW-707: null stored secret + Content-Length ingress-guard branches =====
+
+    /** Like {@link #postWithSecretHeader} but injects arbitrary extra request headers
+     *  (content-length, x-forwarded-for) so the ingress-hardening branches that read
+     *  those headers can be exercised. */
+    private static play.mvc.Http.Response postWithExtraHeaders(Long bindingId, String pathSecret,
+            String headerSecret, java.util.Map<String, String> extraHeaders, String body) {
+        var req = newRequest();
+        req.method = "POST";
+        req.contentType = "application/json";
+        var url = "/api/webhooks/telegram/" + bindingId + "/" + pathSecret;
+        req.url = url;
+        req.path = url;
+        req.querystring = "";
+        req.body = new java.io.ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));
+        if (headerSecret != null) {
+            req.headers.put("x-telegram-bot-api-secret-token",
+                    new play.mvc.Http.Header("x-telegram-bot-api-secret-token", headerSecret));
+        }
+        extraHeaders.forEach((k, v) -> req.headers.put(k, new play.mvc.Http.Header(k, v)));
+        return makeRequest(req);
+    }
+
+    private Long seedBindingWithNullSecret() {
+        return commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "tg-null-secret-agent";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+
+            var b = new TelegramBinding();
+            b.agent = agent;
+            b.botToken = BOT_TOKEN;
+            b.telegramUserId = BOUND_USER_ID;
+            b.transport = ChannelTransport.WEBHOOK;
+            b.webhookSecret = null;   // no secret stored → verifySecret fails closed
+            b.webhookBaseUrl = "https://example.com/tg";
+            b.enabled = true;
+            b.save();
+            return b.id;
+        });
+    }
+
+    @Test
+    void nullStoredSecretRejectsWith401() {
+        // A binding with no webhook_secret can never pass verifySecret — the
+        // null-secret short-circuit rejects every request with 401 (fail closed),
+        // even one carrying a plausible-looking secret token.
+        var bindingId = seedBindingWithNullSecret();
+        var response = postWithSecretHeader(bindingId, SECRET, SECRET, "{}");
+        assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    void oversizedContentLengthHeaderReturns413AndLogsForwardedForIp() {
+        // Early ingress guard: a Content-Length header exceeding max-body-bytes is
+        // rejected with 413 BEFORE the body is read. With trusted-proxy on, the
+        // audit log records the left-most X-Forwarded-For hop, not the socket peer.
+        play.Play.configuration.setProperty("telegram.webhook.max-body-bytes", "8");
+        play.Play.configuration.setProperty("telegram.webhook.trusted-proxy", "true");
+        try {
+            EventLogger.clear();
+            var bindingId = seedBinding(true);
+            var headers = new java.util.HashMap<String, String>();
+            headers.put("content-length", "100000");        // far above the 8-byte cap
+            headers.put("x-forwarded-for", "203.0.113.7, 10.0.0.1");
+            var response = postWithExtraHeaders(bindingId, SECRET, SECRET, headers, "{}");
+            assertEquals(413, response.status.intValue());
+
+            EventLogger.flush();
+            var loggedXff = models.EventLog.findRecent(20).stream()
+                    .anyMatch(e -> e.message != null && e.message.contains("203.0.113.7"));
+            assertTrue(loggedXff,
+                    "the oversize audit log must record the trusted X-Forwarded-For client IP");
+        } finally {
+            play.Play.configuration.remove("telegram.webhook.max-body-bytes");
+            play.Play.configuration.remove("telegram.webhook.trusted-proxy");
+        }
+    }
+
+    @Test
+    void unparseableContentLengthHeaderIsIgnored() {
+        // A non-numeric Content-Length must not crash the guard: contentLengthExceeds
+        // swallows the NumberFormatException and falls through. The malformed-JSON
+        // body is then swallowed too, so the webhook still returns 200 (no retry).
+        var bindingId = seedBinding(true);
+        var headers = new java.util.HashMap<String, String>();
+        headers.put("content-length", "not-a-number");
+        var response = postWithExtraHeaders(bindingId, SECRET, SECRET, headers, "{not-json");
+        assertEquals(200, response.status.intValue());
+    }
 }

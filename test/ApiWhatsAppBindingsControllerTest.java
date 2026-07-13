@@ -425,4 +425,154 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
         assertIsOk(response);
         assertEquals("[]", getContent(GET("/api/channels/whatsapp/bindings")).trim());
     }
+
+    @Test
+    void deleteReturns404ForUnknownBinding() {
+        login();
+        assertEquals(404, DELETE("/api/channels/whatsapp/bindings/9999999").status.intValue());
+    }
+
+    // ===== JCLAW-707: update 404/blank-body, the 1:1 agent-reassignment invariant,
+    // phoneNumberId clearing, and the phone-number-change re-probe branches =====
+
+    @Test
+    void updateReturns404ForUnknownBinding() {
+        login();
+        assertEquals(404, PUT("/api/channels/whatsapp/bindings/9999999",
+                "application/json", "{}").status.intValue());
+    }
+
+    @Test
+    void updateRejectsBlankBody() {
+        login();
+        var agentId = seedAgent("wb-upd-blank");
+        var bindingId = seedCloudBinding(agentId, "phone-upd-blank");
+        assertEquals(400, PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "").status.intValue());
+    }
+
+    @Test
+    void updateReassignToAgentAlreadyBoundReturns409() {
+        // 1:1 privacy invariant on update: agent A already owns a binding, so
+        // re-pointing binding B onto agent A is a 409.
+        login();
+        var agentA = seedAgent("wb-reassign-a");
+        seedCloudBinding(agentA, "phone-ra");
+        var agentB = seedAgent("wb-reassign-b");
+        var bindingB = seedCloudBinding(agentB, "phone-rb");
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingB,
+                "application/json", "{\"agentId\": %d}".formatted(agentA));
+        assertEquals(409, response.status.intValue());
+    }
+
+    @Test
+    void updateReassignToUnknownAgentReturns400() {
+        login();
+        var agentId = seedAgent("wb-reassign-unknown");
+        var bindingId = seedCloudBinding(agentId, "phone-ru");
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "{\"agentId\": 9999999}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void updateReassignToItselfSucceeds() {
+        // Reassigning a binding to its own agent must not trip the 1:1 conflict
+        // (the guard filters by agent-matches AND id != current).
+        login();
+        var agentId = seedAgent("wb-reassign-self");
+        var bindingId = seedCloudBinding(agentId, "phone-rs");
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "{\"agentId\": %d}".formatted(agentId));
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals(agentId.longValue(), obj.get("agentId").getAsLong());
+    }
+
+    @Test
+    void updateReassignToDifferentUnboundAgentSucceeds() {
+        login();
+        var agentA = seedAgent("wb-reassign-from");
+        var bindingId = seedCloudBinding(agentA, "phone-rf");
+        var agentB = seedAgent("wb-reassign-to");
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "{\"agentId\": %d}".formatted(agentB));
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals("wb-reassign-to", obj.get("agentName").getAsString());
+    }
+
+    @Test
+    void updateClearsPhoneNumberIdToNull() {
+        // A present-but-blank phoneNumberId clears the identifier; the credential
+        // re-probe is a no-op once phoneNumberId is absent (helper returns true).
+        login();
+        var agentId = seedAgent("wb-clear-phone");
+        var bindingId = seedCloudBinding(agentId, "phone-to-clear");
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "{\"phoneNumberId\": \"\"}");
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertTrue(obj.get("phoneNumberId").isJsonNull(),
+                "a present-but-blank phoneNumberId must clear the stored value");
+    }
+
+    @Test
+    void updateReProbesWhenPhoneNumberIdChangesAndRejectsFailure() {
+        login();
+        var agentId = seedAgent("wb-phone-reprobe-fail");
+        var bindingId = seedCloudBinding(agentId, "phone-orig");
+        WhatsAppCloudApiProbe.installForTest((p, t) ->
+                new WhatsAppCloudApiProbe.Failed("number not registered"));
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "{\"phoneNumberId\": \"phone-changed\"}");
+        assertEquals(422, response.status.intValue(),
+                "changing the phone number id must re-probe and reject on failure");
+        assertTrue(getContent(response).contains("number not registered"),
+                "the 422 body must surface the probe reason: " + getContent(response));
+    }
+
+    @Test
+    void updateReProbesWhenPhoneNumberIdChangesAndCachesVerifiedIdentity() {
+        login();
+        var agentId = seedAgent("wb-phone-reprobe-ok");
+        var bindingId = seedCloudBinding(agentId, "phone-before");
+        WhatsAppCloudApiProbe.installForTest((p, t) ->
+                new WhatsAppCloudApiProbe.Verified("Renamed Biz", "+1 555-0199"));
+        var response = PUT("/api/channels/whatsapp/bindings/" + bindingId,
+                "application/json", "{\"phoneNumberId\": \"phone-after\"}");
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals("phone-after", obj.get("phoneNumberId").getAsString());
+        assertEquals("Renamed Biz", obj.get("verifiedName").getAsString(),
+                "a successful re-probe must cache the new verified name");
+        assertEquals("+1 555-0199", obj.get("displayPhoneNumber").getAsString());
+    }
+
+    @Test
+    void templateFieldsRoundTripOnCreateAndClearOnUpdate() {
+        login();
+        var agentId = seedAgent("wb-template");
+        var createBody = """
+                {"transport": "CLOUD_API", "phoneNumberId": "phone-tmpl",
+                 "accessToken": "tok", "templateName": "welcome",
+                 "templateLanguage": "en_US", "agentId": %d}
+                """.formatted(agentId);
+        var created = POST("/api/channels/whatsapp/bindings", "application/json", createBody);
+        assertIsOk(created);
+        var createdObj = JsonParser.parseString(getContent(created)).getAsJsonObject();
+        assertEquals("welcome", createdObj.get("templateName").getAsString());
+        assertEquals("en_US", createdObj.get("templateLanguage").getAsString());
+        var id = createdObj.get("id").getAsLong();
+
+        // templateName is plain config (present key replaces, including clearing to null).
+        var cleared = PUT("/api/channels/whatsapp/bindings/" + id,
+                "application/json", "{\"templateName\": \"\"}");
+        assertIsOk(cleared);
+        var clearedObj = JsonParser.parseString(getContent(cleared)).getAsJsonObject();
+        assertTrue(clearedObj.get("templateName").isJsonNull(),
+                "a present-but-blank templateName must clear the stored value");
+        assertEquals("en_US", clearedObj.get("templateLanguage").getAsString(),
+                "clearing templateName must leave templateLanguage untouched");
+    }
 }

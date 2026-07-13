@@ -737,4 +737,43 @@ class ApiMetricsControllerTest extends FunctionalTest {
                     "compress:null must NOT trip readBool's catch: " + body);
         }
     }
+
+    @Test
+    void loadtestRejectsNonStringProviderType() {
+        // readString's catch path: a non-string 'provider' (a JSON object) cannot be
+        // coerced, so the loadtest body parse rejects with 400 before any run —
+        // distinct from the readInt/readBool coercion catches covered above.
+        var response = POST(authedLoadtestRequest(), "/api/metrics/loadtest",
+                "application/json",
+                "{\"concurrency\":1,\"turns\":1,\"provider\":{},\"model\":\"gpt-4.1\"}");
+        assertEquals(400, response.status.intValue());
+        assertTrue(getContent(response).contains("Invalid string for"),
+                "a non-string provider must surface the readString rejection: " + getContent(response));
+    }
+
+    @Test
+    void costFiltersByAgentIdAndChannelTypeTogether() {
+        // Both server-side filters compose in one JPQL query — the agentId AND
+        // channelType WHERE clauses both bind and narrow to the single matching row.
+        login();
+        long agentA = seedAgentWithUsage("cost-both-a", "web", "alice",
+                "{\"prompt\":10,\"completion\":5,\"total\":15,\"reasoning\":0,\"cached\":0,"
+                        + "\"durationMs\":100,\"promptPrice\":0.5,\"completionPrice\":1.0}");
+        long agentB = seedAgentWithUsage("cost-both-b", "telegram", "bob",
+                "{\"prompt\":20,\"completion\":10,\"total\":30,\"reasoning\":0,\"cached\":0,"
+                        + "\"durationMs\":200,\"promptPrice\":0.5,\"completionPrice\":1.0}");
+
+        var response = GET("/api/metrics/cost?agentId=" + agentA + "&channelType=web");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"agentId\":" + agentA), "agent A/web row must appear: " + body);
+        assertFalse(body.contains("\"agentId\":" + agentB), "agent B row must be excluded: " + body);
+
+        // A combination no row satisfies (agent A but telegram) yields empty rows —
+        // proves both predicates are ANDed, not ORed.
+        var mismatch = GET("/api/metrics/cost?agentId=" + agentA + "&channelType=telegram");
+        assertIsOk(mismatch);
+        assertTrue(getContent(mismatch).contains("\"rows\":[]"),
+                "agentId+channelType that no row satisfies must yield empty rows: " + getContent(mismatch));
+    }
 }

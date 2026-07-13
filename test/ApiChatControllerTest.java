@@ -713,4 +713,38 @@ class ApiChatControllerTest extends FunctionalTest {
         assertNotNull(eventsStream.getAnnotation(play.db.jpa.NoTransaction.class),
                 "ApiEventsController.stream must keep @NoTransaction (JCLAW-199).");
     }
+
+    // =====================
+    // JCLAW-707: send() slash-branch conversation resolution
+    // =====================
+
+    @Test
+    void sendSlashCommandWithUnknownConversationIdReturns404() {
+        // /reset (a non-/new slash) pinned to a conversationId that doesn't exist
+        // hits the notFound() inside send()'s slash branch — the sync-send mirror
+        // of streamSlashCommandWithUnknownConversationIdReturns404.
+        login();
+        var id = createAgent("send-slash-unknown-conv");
+        var body = """
+                {"agentId": %s, "message": "/reset", "conversationId": 999999}
+                """.formatted(id);
+        var response = POST("/api/chat/send", "application/json", body);
+        assertEquals(404, response.status.intValue());
+    }
+
+    @Test
+    void sendSlashCommandWithExplicitNullConversationIdSucceeds() {
+        // resolveChatContext's conversationId branch: an explicit JSON null must be
+        // treated as "no conversation" (findOrCreate) rather than passed downstream
+        // as a lookup id. /help keeps this off the LLM path.
+        login();
+        var id = createAgent("send-slash-null-conv");
+        var body = """
+                {"agentId": %s, "message": "/help", "conversationId": null}
+                """.formatted(id);
+        var response = POST("/api/chat/send", "application/json", body);
+        assertIsOk(response);
+        assertTrue(getContent(response).contains("\"agentName\":\"send-slash-null-conv\""),
+                "an explicit null conversationId must still resolve the agent: " + getContent(response));
+    }
 }

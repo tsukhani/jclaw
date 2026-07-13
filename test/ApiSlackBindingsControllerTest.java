@@ -1,4 +1,5 @@
 import channels.ChannelTransport;
+import com.google.gson.JsonParser;
 import models.Agent;
 import models.SlackBinding;
 import org.junit.jupiter.api.BeforeEach;
@@ -398,5 +399,184 @@ class ApiSlackBindingsControllerTest extends FunctionalTest {
         var list = GET("/api/channels/slack/bindings");
         assertIsOk(list);
         assertEquals("[]", getContent(list).trim());
+    }
+
+    // ===== JCLAW-707: test() health probe, effectiveRequestUrl null branches, and
+    // update-helper branches. Seeds use a BLANK bot token so the delivery-scope /
+    // auth.test probes short-circuit with no network (SlackWebApi returns early for
+    // a blank token) — validation/conflict/null-url cases never reach the probe. =====
+
+    /** Seed a SOCKET binding (app token, no signing secret) directly via the model. */
+    private Long seedSocketBinding(Long agentId, String token) {
+        return commitInFreshTx(() -> {
+            var agent = (Agent) Agent.findById(agentId);
+            var b = new SlackBinding();
+            b.agent = agent;
+            b.botToken = token;
+            b.appToken = "xapp-seed";
+            b.transport = ChannelTransport.SOCKET;
+            b.webhookBaseUrl = "https://example.com";
+            b.enabled = true;
+            b.save();
+            return b.id;
+        });
+    }
+
+    /** Seed an HTTP binding with no public base URL (effectiveRequestUrl must be null). */
+    private Long seedBindingNoBaseUrl(Long agentId, String token) {
+        return commitInFreshTx(() -> {
+            var agent = (Agent) Agent.findById(agentId);
+            var b = new SlackBinding();
+            b.agent = agent;
+            b.botToken = token;
+            b.signingSecret = "seed-signing-secret";
+            b.transport = ChannelTransport.HTTP;
+            b.webhookBaseUrl = null;
+            b.enabled = true;
+            b.save();
+            return b.id;
+        });
+    }
+
+    /** Seed the main agent + an owner-scoped HTTP binding; returns the binding id. */
+    private Long seedMainAgentOwnerBinding() {
+        return commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "main";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+            var b = new SlackBinding();
+            b.agent = agent;
+            b.botToken = "";
+            b.signingSecret = "seed-signing-secret";
+            b.transport = ChannelTransport.HTTP;
+            b.webhookBaseUrl = "https://example.com";
+            b.ownerUserId = "U-owner";
+            b.enabled = true;
+            b.save();
+            return b.id;
+        });
+    }
+
+    @Test
+    void testEndpointReturns404ForUnknownBinding() {
+        login();
+        assertEquals(404, POST("/api/channels/slack/bindings/9999999/test",
+                "application/json", "{}").status.intValue());
+    }
+
+    @Test
+    void testEndpointReportsOkFalseForBlankToken() {
+        // A blank bot token fails auth.test WITHOUT a network call (SlackWebApi
+        // short-circuits blank tokens), so the health probe returns ok=false — the
+        // endpoint's failure verdict, surfaced at HTTP 200.
+        var agentId = seedAgent("sb-test-probe");
+        var bindingId = seedBinding(agentId, "");
+        login();
+        var response = POST("/api/channels/slack/bindings/" + bindingId + "/test",
+                "application/json", "{}");
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertFalse(obj.get("ok").getAsBoolean(),
+                "a blank bot token must report ok=false from the health probe: " + getContent(response));
+    }
+
+    @Test
+    void listOmitsRequestUrlForSocketBinding() {
+        // effectiveRequestUrl is null for a non-HTTP (SOCKET) binding — Socket Mode
+        // needs no public Request URL.
+        var agentId = seedAgent("sb-socket");
+        seedSocketBinding(agentId, "xoxb-socket");
+        login();
+        var arr = JsonParser.parseString(getContent(GET("/api/channels/slack/bindings")))
+                .getAsJsonArray();
+        assertEquals(1, arr.size());
+        var row = arr.get(0).getAsJsonObject();
+        assertEquals("SOCKET", row.get("transport").getAsString());
+        assertTrue(row.get("effectiveRequestUrl").isJsonNull(),
+                "a SOCKET binding must expose no Events API Request URL: " + row);
+    }
+
+    @Test
+    void listOmitsRequestUrlWhenBaseUrlMissing() {
+        // effectiveRequestUrl is null for an HTTP binding with no public base URL.
+        var agentId = seedAgent("sb-nobase");
+        seedBindingNoBaseUrl(agentId, "xoxb-nobase");
+        login();
+        var arr = JsonParser.parseString(getContent(GET("/api/channels/slack/bindings")))
+                .getAsJsonArray();
+        var row = arr.get(0).getAsJsonObject();
+        assertTrue(row.get("effectiveRequestUrl").isJsonNull(),
+                "an HTTP binding without a base URL must expose no Request URL: " + row);
+    }
+
+    @Test
+    void updateRebuildsRequestUrlAndSetsOptionalFields() {
+        // Update webhookBaseUrl + replyToMode + ownerUserId on an HTTP binding.
+        // effectiveRequestUrl must be recomputed against the new base.
+        var agentId = seedAgent("sb-optional");
+        var bindingId = seedBinding(agentId, "");
+        login();
+        var response = PUT("/api/channels/slack/bindings/" + bindingId, "application/json",
+                "{\"webhookBaseUrl\": \"https://new.example.org\", \"replyToMode\": \"thread\", \"ownerUserId\": \"U12345\"}");
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals("thread", obj.get("replyToMode").getAsString());
+        assertEquals("U12345", obj.get("ownerUserId").getAsString());
+        assertEquals("https://new.example.org/api/webhooks/slack/" + bindingId,
+                obj.get("effectiveRequestUrl").getAsString(),
+                "effectiveRequestUrl must be rebuilt from the updated base: " + obj);
+    }
+
+    @Test
+    void updateWithBlankBotTokenIsANoOp() {
+        // applyBotTokenUpdate returns false for a blank token (never nulls the
+        // required stored one), so the binding still saves and the sibling field
+        // still applies.
+        var agentId = seedAgent("sb-blank-token");
+        var bindingId = seedBinding(agentId, "");
+        login();
+        var response = PUT("/api/channels/slack/bindings/" + bindingId,
+                "application/json", "{\"botToken\": \"\", \"enabled\": false}");
+        assertIsOk(response);
+        var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertFalse(obj.get("enabled").getAsBoolean(),
+                "the sibling enabled toggle must still apply: " + obj);
+    }
+
+    @Test
+    void updateReassignsToDifferentUnboundAgent() {
+        var agentA = seedAgent("sb-from");
+        var bindingId = seedBinding(agentA, "");
+        var agentB = seedAgent("sb-to");
+        login();
+        var response = PUT("/api/channels/slack/bindings/" + bindingId,
+                "application/json", "{\"agentId\": %d}".formatted(agentB));
+        assertIsOk(response);
+        assertTrue(getContent(response).contains("\"agentName\":\"sb-to\""),
+                "reassigning to an unbound agent must update the binding: " + getContent(response));
+    }
+
+    @Test
+    void updateRejectsUnknownAgentIdWith400() {
+        var agentId = seedAgent("sb-unknown-reassign");
+        var bindingId = seedBinding(agentId, "");
+        login();
+        var response = PUT("/api/channels/slack/bindings/" + bindingId,
+                "application/json", "{\"agentId\": 9999999}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void updateRejectsClearingOwnerOnMainAgentBinding() {
+        // JCLAW-354: a main-agent binding must keep an owner user id — clearing it
+        // on update is rejected with 400 (the guard runs before save, no network).
+        var bindingId = seedMainAgentOwnerBinding();
+        login();
+        var response = PUT("/api/channels/slack/bindings/" + bindingId,
+                "application/json", "{\"ownerUserId\": \"\"}");
+        assertEquals(400, response.status.intValue());
     }
 }
