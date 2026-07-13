@@ -166,6 +166,20 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
+    void retrievalDisciplineSitsInTheCacheablePrefix() {
+        // The retrieval-calibration guidance is static, so it must stay above the
+        // cache boundary — below it would churn the per-agent-day prefix cache.
+        var agent = newAgent("spa-retrieval-discipline");
+        var prompt = SystemPromptAssembler.assemble(agent, "tell me about cats", null, "web").systemPrompt();
+
+        int retrieval = prompt.indexOf("## Retrieval Discipline");
+        int marker = prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        assertTrue(retrieval >= 0, "Retrieval Discipline header missing");
+        assertTrue(marker > retrieval,
+                "Retrieval Discipline must sit above the cache boundary (stable prefix)");
+    }
+
+    @Test
     void breakdownReportsPrefixAndSuffixCharsAroundMarker() {
         var agent = newAgent("spa-breakdown-split");
         var bd = SystemPromptAssembler.breakdown(agent, null, "web");

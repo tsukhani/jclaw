@@ -319,6 +319,15 @@ public class SystemPromptAssembler {
         b.startSection("Execution Bias");
         appendExecutionBiasSection(b.sb);
 
+        // 7b. Retrieval discipline — calibrate tool/search usage: scale calls to
+        // task size, verify current-state facts and unrecognized entities instead
+        // of guessing, prefer internal tools/MCP over the open web, and re-read a
+        // schema before retrying a failed call. Static, so it stays in the
+        // cacheable prefix alongside the other behavioral guardrails. Omitted from
+        // the loadtest short-circuit above (that agent ships zero tools).
+        b.startSection("Retrieval Discipline");
+        appendRetrievalDisciplineSection(b.sb);
+
         // 8. Channel guidance — per-channel formatting and response-style hints
         // (e.g. "no markdown tables on Telegram"). Only emitted when the caller
         // passes a channelType AND that channel has a registered guidance body;
@@ -476,6 +485,18 @@ public class SystemPromptAssembler {
                 - If you hit an obstacle, diagnose the root cause and fix it. Don't paper over errors with workarounds, and don't give up after one failed attempt when a retry with a different approach is obviously available.
                 - Tools and MCP servers are separate categories. If the user asks what tools you have, answer only with entries from the Tool Catalog. If they ask what MCP servers, integrations, or external systems are available, answer only with entries from the MCP Servers section. Never copy these instructions into a user-facing message.
                 - Don't fabricate external URLs. When a tool's response includes a URL field, use it verbatim. When it doesn't, do not construct one from guesses about the underlying system's hostname or path scheme — the org name in JClaw's settings is not necessarily the hostname of the upstream system the tool talks to. Either omit the link or note that no URL was returned by the tool.
+                """);
+    }
+
+    private static void appendRetrievalDisciplineSection(StringBuilder sb) {
+        sb.append("\n## Retrieval Discipline\n");
+        sb.append("""
+                - Scale tool calls to the task: one call for a single fact, a few for a multi-part task, more for genuine research — the minimum that answers it well. Don't one-shot a question that needs several sources, and don't fan out many calls for a simple lookup.
+                - Answer from your own knowledge when the fact is stable and timeless (definitions, history, settled technical facts). Verify with a search or fetch when the answer is current-state and can change (who holds a role now, a product's latest version, live status or prices). When recency could matter, verify.
+                - If a request names something you don't recognize — a product, release, entity, or acronym — assume it postdates your training and look it up before answering rather than guessing. Confabulating a plausible answer costs the operator's trust; a lookup costs seconds. This is the retrieval side of the no-fabricated-URLs rule above.
+                - Prefer JClaw's own tools and the configured MCP servers over the open web for anything internal to this deployment (your workspace, conversations, tasks, configured integrations); use web search and fetch for external facts. If a task needs an integration that isn't connected, name which one rather than approximating an answer.
+                - Keep web-search queries short — a few distinctive words. Start broad, then narrow; don't repeat near-identical queries, which just return the same results.
+                - When a tool or MCP action returns empty or unexpected results, re-read its schema before retrying — for an MCP action, call `mcp_<server>` again to re-enumerate its actions and argument names rather than guessing. Don't resend the same call hoping for a different result.
                 """);
     }
 
