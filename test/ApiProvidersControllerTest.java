@@ -1,6 +1,8 @@
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.ConfigService;
@@ -317,15 +319,6 @@ class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
-    void addModelReturns400WhenIdMissing() {
-        login();
-        configureProvider();
-        var resp = POST("/api/providers/test-provider/models",
-                "application/json", "{\"name\":\"no id here\"}");
-        assertEquals(400, resp.status.intValue());
-    }
-
-    @Test
     void addModelReturns409OnDuplicateId() {
         login();
         configureProvider();
@@ -519,21 +512,21 @@ class ApiProvidersControllerTest extends FunctionalTest {
 
     // --- addModel: id-validation sub-branches + buildModelObject branches ---
 
-    @Test
-    void addModelReturns400WhenIdIsExplicitNull() {
+    /**
+     * addModel rejects a missing, explicit-null, or blank id with 400 — one
+     * behavior, three malformed bodies (was three near-identical tests; S5976).
+     */
+    @ParameterizedTest(name = "addModelReturns400For[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "MissingId    | {\"name\":\"no id here\"}",
+            "ExplicitNull | {\"id\":null}",
+            "BlankId      | {\"id\":\"   \"}"
+    })
+    void addModelReturns400ForInvalidId(String label, String body) {
         login();
         configureProvider();
         var resp = POST("/api/providers/test-provider/models",
-                "application/json", "{\"id\":null}");
-        assertEquals(400, resp.status.intValue());
-    }
-
-    @Test
-    void addModelReturns400WhenIdIsBlank() {
-        login();
-        configureProvider();
-        var resp = POST("/api/providers/test-provider/models",
-                "application/json", "{\"id\":\"   \"}");
+                "application/json", body);
         assertEquals(400, resp.status.intValue());
     }
 
