@@ -9,6 +9,7 @@ import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import services.AgentService;
 import services.ConfigService;
+import services.EventLogger;
 import services.Tx;
 import utils.WorkspacePathGuard;
 
@@ -75,6 +76,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     public static final String DEFAULT_ALLOWLIST = "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip,test,pwd,which,whoami,uname,date,file,stat,env,printenv,awk,sed,tr,cut,tee,xargs,touch,cmp,sleep";
 
     private static final String PARAM_COMMAND = "command";
+    private static final String PARAM_WHY = "why";
     private static final String PARAM_WORKDIR = "workdir";
     private static final String PARAM_TIMEOUT = "timeout";
 
@@ -146,6 +148,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 SchemaKeys.PROPERTIES, Map.of(
                         PARAM_COMMAND, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "Shell command to execute"),
+                        PARAM_WHY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "One sentence: why you are running this command / what it "
+                                        + "accomplishes. Shown to the operator in the run log and in any approval prompt."),
                         PARAM_WORKDIR, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "Working directory (relative to workspace, or absolute if global paths enabled)"),
                         PARAM_TIMEOUT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
@@ -154,7 +159,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION, "Additional environment variables as key-value pairs",
                                 SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING))
                 ),
-                SchemaKeys.REQUIRED, List.of(PARAM_COMMAND)
+                SchemaKeys.REQUIRED, List.of(PARAM_COMMAND, PARAM_WHY)
         );
     }
 
@@ -167,6 +172,12 @@ public class ShellExecTool implements ToolRegistry.Tool {
         if (command.isEmpty()) {
             return "Error: command is required and must not be empty.";
         }
+        // JClaw operator audit trail: the schema marks `why` required so the model
+        // articulates intent, but execution never hard-fails on a missing rationale
+        // (keeps existing programmatic callers working). It rides in the tool-call
+        // arguments (persisted + shown in the UI) and the approval prompt regardless.
+        var why = args.has(PARAM_WHY) && !args.get(PARAM_WHY).isJsonNull()
+                ? args.get(PARAM_WHY).getAsString().strip() : "";
 
         // Allowlist validation (bypass only for the main agent — identity-checked by name, not config)
         boolean bypassAllowlist = agent.isMain() && "true".equals(
@@ -201,6 +212,13 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
         // Build environment
         var env = buildEnvironment(args);
+
+        // Operator audit line: exec runs are dangerous()=true, so record each one
+        // (command + the model's rationale) in the structured event log, not only
+        // in the conversation's tool-call record.
+        EventLogger.info("tool", agent.name, "exec", "exec: %s%s".formatted(
+                command.length() > 200 ? command.substring(0, 200) + "…" : command,
+                why.isEmpty() ? "" : " — why: " + why));
 
         // Execute
         return executeCommand(command, workdir, timeout, maxOutputBytes, env, startTime, agent);
