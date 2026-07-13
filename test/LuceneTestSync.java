@@ -4,9 +4,12 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Serializes Lucene-touching tests across play1's concurrent unit + functional
- * test lanes (JCLAW-428). The Lucene index is a JVM-global singleton — one
- * IndexWriter per scope — so without coordination two tests opening, wiping, or
- * closing it at once clobber each other:
+ * test lanes (JCLAW-428). The Lucene index is a single shared instance — one
+ * IndexWriter per scope — because play1 runs functional-test controllers on one
+ * shared executor thread ({@code TestEngine.functionalTestsExecutor}), so a
+ * test's seed and its subsequent search must resolve to the same index (a
+ * per-thread index would split them). Without coordination two tests opening,
+ * wiping, or closing it at once clobber each other:
  *
  * <ul>
  *   <li><b>Search tests</b> ({@link #openForTest()}) open the index, wipe it to
@@ -15,21 +18,28 @@ import java.util.concurrent.locks.ReentrantLock;
  *       DirectLuceneMessageSearchRepositoryTest and the functional
  *       Api...SearchTest classes.</li>
  *   <li><b>Closed-index tests</b> ({@link #closedForTest()}) exercise the
- *       {@code Memory.searchByText} DB-LIKE fallback, which only fires while the
- *       index is closed (Memory.java: "Backend not initialized — substring
- *       fallback"). A concurrent search test opening the global index would flip
- *       them onto an empty Lucene path → "expected 1 but was 0". Holding the lock
- *       and forcing the index closed keeps them deterministic.</li>
+ *       {@code Memory.searchByText} DB-LIKE fallback, which fires while the index
+ *       is closed. A concurrent lane opening the shared index used to flip them
+ *       onto an empty Lucene path → "expected 1 but was 0"; JCLAW-737 closes that
+ *       by having {@code closedForTest} tell {@link LuceneIndexer#holdClosedForTest}
+ *       to refuse any {@link LuceneIndexer#open()} for the duration of the window,
+ *       so the un-serialized lazy-open path can no longer flip it open.</li>
  * </ul>
  *
  * <p>Both modes acquire one global lock so only one Lucene test runs at a time,
- * and {@link #release()} closes the index + unlocks in {@code @AfterEach}. The
- * index path is the {@code %test.jclaw.search.lucenePath} dir
- * (data/jclaw-lucene-test), never the production index.
+ * and {@link #release()} closes the index, clears the hold, and unlocks in
+ * {@code @AfterEach}. The index path is the {@code %test.jclaw.search.lucenePath}
+ * dir (data/jclaw-lucene-test), never the production index.
  *
- * <p>Known residual (out of scope, JCLAW-428 AC4): a non-Lucene test that
- * incidentally indexes a same-scope entity during a search test's open window is
- * not covered — closing that fully would need a non-singleton LuceneIndexer.
+ * <p>Residual (JCLAW-428 AC4 / JCLAW-737): a non-Lucene test that incidentally
+ * indexes a same-scope entity during a search test's OPEN window can still add a
+ * doc to the shared index — a truly per-write-isolated index is precluded by the
+ * shared functional-test executor above. It is harmless because every Lucene
+ * test assertion is token-scoped (each searches for its own distinctive tokens),
+ * so a foreign doc can neither hide a seeded hit nor inflate a count. The two
+ * former global {@code docCount} checks (LuceneIndexerTest,
+ * DirectLuceneMessageSearchRepositoryTest) were converted to token-scoped
+ * assertions for exactly this reason.
  */
 public final class LuceneTestSync {
 
@@ -45,11 +55,13 @@ public final class LuceneTestSync {
     public static void openForTest() {
         LOCK.lock();
         try {
+            LuceneIndexer.holdClosedForTest(false);
             if (!LuceneIndexer.isOpen()) {
                 LuceneIndexer.open();
             }
             LuceneIndexer.wipeForTest();
         } catch (Exception e) {
+            LuceneIndexer.holdClosedForTest(false);
             LOCK.unlock();
             throw new RuntimeException("LuceneTestSync.openForTest failed", e);
         }
@@ -67,7 +79,11 @@ public final class LuceneTestSync {
             if (LuceneIndexer.isOpen()) {
                 LuceneIndexer.close();
             }
+            // JCLAW-737: hold the index shut for the whole window so a concurrent
+            // lane's un-serialized open() can't flip it open under this test.
+            LuceneIndexer.holdClosedForTest(true);
         } catch (RuntimeException e) {
+            LuceneIndexer.holdClosedForTest(false);
             LOCK.unlock();
             throw e;
         }
@@ -84,6 +100,7 @@ public final class LuceneTestSync {
                 LuceneIndexer.close();
             }
         } finally {
+            LuceneIndexer.holdClosedForTest(false);
             if (LOCK.isHeldByCurrentThread()) {
                 LOCK.unlock();
             }

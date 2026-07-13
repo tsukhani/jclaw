@@ -280,8 +280,13 @@ public class Memory extends Model {
         if (query == null || query.isBlank()) return List.of();
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();
-        if ("none".equals(MessageSearch.activeDialect())) {
-            // Backend not initialized — substring fallback, agent-bounded.
+        if ("none".equals(MessageSearch.activeDialect()) || !LuceneIndexer.isOpen()) {
+            // Backend not initialized, or the FTS index isn't open — substring
+            // fallback, agent-bounded. Production always has the index open
+            // (FullTextSearchInitJob), so the !isOpen() arm only diverges under a
+            // test's closed-mode window (JCLAW-737): recall stays on the DB scan
+            // there instead of an empty Lucene result, regardless of the
+            // process-global activeDialect a concurrent search lane may have set.
             return likeFallback(pk, query, limit);
         }
         List<MessageSearchRepository.ScoredId> scored;

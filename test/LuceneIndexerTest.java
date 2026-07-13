@@ -86,8 +86,11 @@ class LuceneIndexerTest extends UnitTest {
         assertTrue(repo.searchIds(SCOPE, "originalcontenttoken", 10).isEmpty(),
                 "old content must no longer match after overwrite");
         var hits = repo.searchIds(SCOPE, "replacementcontenttoken", 10);
-        assertEquals(1, hits.size(), "new content must match the same id");
+        // Exactly one hit proves the id was overwritten, not duplicated — a
+        // second copy of id 99 would surface as a second hit for this token.
+        // Token-scoped (not a global docCount) so a concurrent test lane's
+        // incidental doc can't perturb it (JCLAW-737: the shared-index residual).
+        assertEquals(1, hits.size(), "new content must match the same id exactly once, not duplicated");
         assertEquals(Long.valueOf(99L), hits.getFirst());
-        assertEquals(1, LuceneIndexer.docCount(SCOPE), "id must remain unique, not duplicated");
     }
 }

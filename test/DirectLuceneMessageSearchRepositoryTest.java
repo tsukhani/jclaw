@@ -247,12 +247,19 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         var runId = seedSubagentRunRow("run-label", "backfillruntoken");
         var trmId = seedMessage("backfilltrmtoken brown fox");
 
-        // Drop everything from the index — JPA rows survive.
+        // Drop the seeded rows from the index — JPA rows survive. Assert the
+        // wipe by seeded token rather than global docCount so a concurrent test
+        // lane's incidental doc (a different token) can't fail this pre-backfill
+        // check (JCLAW-737: the shared-index write residual).
         LuceneIndexer.wipeForTest();
-        for (var scope : LuceneIndexer.Scope.values()) {
-            assertEquals(0, LuceneIndexer.docCount(scope),
-                    "scope " + scope + " must be empty before backfill");
-        }
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "backfillconvtoken", 10).isEmpty(),
+                "CONVERSATION_MESSAGE must be wiped before backfill");
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.TASK, "backfilltasktoken", 10).isEmpty(),
+                "TASK must be wiped before backfill");
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.SUBAGENT_RUN, "backfillruntoken", 10).isEmpty(),
+                "SUBAGENT_RUN must be wiped before backfill");
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, "backfilltrmtoken", 10).isEmpty(),
+                "TASK_RUN_MESSAGE must be wiped before backfill");
 
         repo.init(); // backfill fires for every now-empty scope
 

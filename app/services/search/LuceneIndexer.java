@@ -165,6 +165,11 @@ public final class LuceneIndexer {
      * call while writers are alive is a no-op.
      */
     public static synchronized void open() throws IOException {
+        // JCLAW-737: while a closed-mode test holds the index shut for its
+        // LuceneTestSync window, refuse to open so a concurrent test lane can't
+        // flip the shared index open underneath it (the un-serialized lazy-open
+        // path). Only consulted in test mode; production never sets the flag.
+        if (heldClosedForTest && Play.runningInTestMode()) return;
         if (!WRITERS.isEmpty()) return;
         try {
             for (var scope : Scope.values()) {
@@ -491,6 +496,29 @@ public final class LuceneIndexer {
         } else {
             System.setProperty(INDEX_PATH_PROPERTY, path.toString());
         }
+    }
+
+    /**
+     * When true, {@link #open()} is a no-op in test mode: the running
+     * closed-mode test is holding the shared index shut for its
+     * {@code LuceneTestSync} window and no concurrent lane may open it (JCLAW-737).
+     * Set only by {@link #holdClosedForTest}; production leaves it false and
+     * {@link #open()} additionally gates the check on {@link Play#runningInTestMode()}.
+     */
+    private static volatile boolean heldClosedForTest = false;
+
+    /**
+     * Test-only seam (JCLAW-737): while a closed-mode test holds the index shut,
+     * {@code LuceneTestSync.closedForTest} sets this true so a concurrent test
+     * lane's bare {@link #open()} can't flip the shared index open underneath it;
+     * {@code openForTest}/{@code release} clear it. The shared-index model is kept
+     * (play1 functional tests run their controllers on a single shared executor
+     * thread, so the seed and the search must see the same index) — this gate,
+     * not per-instance isolation, is what makes the closed window immune to other
+     * lanes. Never called in production.
+     */
+    public static void holdClosedForTest(boolean held) {
+        heldClosedForTest = held;
     }
 
     /**
