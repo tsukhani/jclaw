@@ -249,14 +249,12 @@ class ApiSkillsControllerCatalogTest extends FunctionalTest {
     }
 
     /**
-     * Import reads the optional {@code provider} and {@code owner} fields when
-     * present and non-null (both ternary-true branches). A non-clawhub provider
-     * with a malformed source fails fast at "invalid source" — no network — so the
-     * failure is still surfaced with those fields supplied. The existing malformed
-     * -source test omits both fields, covering the null branches.
+     * A non-clawhub provider routes the import to the github/repo path, whose
+     * owner/repo split fails fast on an unparseable source ("invalid source", no
+     * network). Verifies that failure branch is surfaced with its reason.
      */
     @Test
-    void catalogImportReadsProviderAndOwnerWhenSupplied() {
+    void catalogImportOnGithubPathWithUnparseableSourceReportsInvalidSource() {
         login();
         var resp = POST("/api/skills/catalog/import", "application/json",
                 "{\"source\": \"not-owner-repo\", \"skillId\": \"foo\","

@@ -200,13 +200,11 @@ class SubagentHarnessPermissionsTest extends UnitTest {
         assertTrue(flag[0], "a live stream must be closed");
 
         // throwing close → IOException swallowed (reader VT must not be disturbed).
-        closeQuietly(new OutputStream() {
+        assertDoesNotThrow(() -> closeQuietly(new OutputStream() {
             @Override public void write(int b) { /* unused */ }
             @Override public void close() throws IOException {
                 throw new IOException("boom");
             }
-        });
-        // Reaching here without a propagated exception is the assertion.
-        assertTrue(true, "close() failure was swallowed");
+        }), "close() failure must be swallowed, not propagated");
     }
 }

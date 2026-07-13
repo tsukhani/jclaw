@@ -537,7 +537,7 @@ class ApiSlackBindingsControllerTest extends FunctionalTest {
         // required stored one), so the binding still saves and the sibling field
         // still applies.
         var agentId = seedAgent("sb-blank-token");
-        var bindingId = seedBinding(agentId, "");
+        var bindingId = seedBinding(agentId, "xoxb-real-stored-token");
         login();
         var response = PUT("/api/channels/slack/bindings/" + bindingId,
                 "application/json", "{\"botToken\": \"\", \"enabled\": false}");
@@ -545,6 +545,10 @@ class ApiSlackBindingsControllerTest extends FunctionalTest {
         var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
         assertFalse(obj.get("enabled").getAsBoolean(),
                 "the sibling enabled toggle must still apply: " + obj);
+        var storedToken = commitInFreshTx(() ->
+                ((SlackBinding) SlackBinding.findById(bindingId)).botToken);
+        assertEquals("xoxb-real-stored-token", storedToken,
+                "a blank botToken update must PRESERVE the stored token, never null it");
     }
 
     @Test
