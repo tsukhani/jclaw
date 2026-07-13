@@ -92,6 +92,21 @@
       matchPackageNames: ["nuxt"],
       allowedVersions: ">4.4.5",
     },
+    // Block TypeScript 7.x. TS7 is the native (tsgo) compiler rewrite; it
+    // dropped the `typescript/lib/tsc` package export that vue-tsc / Volar
+    // shim into, so `pnpm typecheck` (nuxi typecheck -> vue-tsc) hard-fails
+    // with ERR_PACKAGE_PATH_NOT_EXPORTED on every .vue file. vue-tsc's peer
+    // range is a misleading `>=5.0.0` that claims a TS7 support it lacks, so
+    // only the typecheck gate catches it — invisible to Renovate and pnpm,
+    // which is why the lone `renovate/typescript-7.x` branch recurred weekly
+    // and never merged. Tracking: vuejs/language-tools#5381 (waiting on a
+    // Volar port, likely gated on TS 7.1). TS 6.x minors/patches still flow.
+    // Lift to <8 (or drop) once a vue-tsc release > 3.3.7 supports the native
+    // compiler, and bump typescript + vue-tsc + @vue/language-core together.
+    {
+      matchPackageNames: ["typescript"],
+      allowedVersions: "<7",
+    },
     {
       groupName: "eslint",
       matchManagers: ["npm"],
