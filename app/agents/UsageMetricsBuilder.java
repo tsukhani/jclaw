@@ -51,10 +51,10 @@ public final class UsageMetricsBuilder {
      * truthy.
      */
     static int effectiveReasoningTokens(LlmProvider.TurnUsage turnUsage) {
-        if (turnUsage.reasoningTokens > 0) return turnUsage.reasoningTokens;
-        if (turnUsage.jtokkitReasoningTokens > 0) return turnUsage.jtokkitReasoningTokens;
-        if (!turnUsage.reasoningDetected) return 0;
-        var chars = turnUsage.reasoningChars;
+        if (turnUsage.reasoningTokens() > 0) return turnUsage.reasoningTokens();
+        if (turnUsage.jtokkitReasoningTokens() > 0) return turnUsage.jtokkitReasoningTokens();
+        if (!turnUsage.reasoningDetected()) return 0;
+        var chars = turnUsage.reasoningChars();
         if (chars <= 0) return 0;
         // Round up: a small amount of text still represents at least one
         // reasoning token on the wire, and rounding down would silently
@@ -94,18 +94,18 @@ public final class UsageMetricsBuilder {
                                         Conversation conversation, long streamBodyMs) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
         var reasoningMs = turnUsage.reasoningDurationMs(System.nanoTime());
-        if (!turnUsage.hasProviderUsage && !turnUsage.hasJtokkitUsage) {
+        if (!turnUsage.hasProviderUsage() && !turnUsage.hasJtokkitUsage()) {
             return buildNoProviderUsageJson(durationMs, reasoningMs, streamBodyMs);
         }
 
-        var providerUsage = turnUsage.hasProviderUsage;
+        var providerUsage = turnUsage.hasProviderUsage();
         var usageMap = new JsonObject();
-        usageMap.addProperty("prompt", providerUsage ? turnUsage.promptTokens : turnUsage.jtokkitPromptTokens);
-        usageMap.addProperty("completion", providerUsage ? turnUsage.completionTokens : turnUsage.jtokkitCompletionTokens);
-        usageMap.addProperty("total", providerUsage ? turnUsage.totalTokens : turnUsage.jtokkitTotalTokens);
+        usageMap.addProperty("prompt", providerUsage ? turnUsage.promptTokens() : turnUsage.jtokkitPromptTokens());
+        usageMap.addProperty("completion", providerUsage ? turnUsage.completionTokens() : turnUsage.jtokkitCompletionTokens());
+        usageMap.addProperty("total", providerUsage ? turnUsage.totalTokens() : turnUsage.jtokkitTotalTokens());
         usageMap.addProperty("reasoning", effectiveReasoningTokens(turnUsage));
-        usageMap.addProperty("cached", providerUsage ? turnUsage.cachedTokens : 0);
-        usageMap.addProperty("cacheCreation", providerUsage ? turnUsage.cacheCreationTokens : 0);
+        usageMap.addProperty("cached", providerUsage ? turnUsage.cachedTokens() : 0);
+        usageMap.addProperty("cacheCreation", providerUsage ? turnUsage.cacheCreationTokens() : 0);
         usageMap.addProperty("usageSource", providerUsage ? "provider" : "jtokkit");
         if (!providerUsage) usageMap.addProperty("estimated", true);
         usageMap.addProperty("durationMs", durationMs);
@@ -126,20 +126,20 @@ public final class UsageMetricsBuilder {
     private static void addJtokkitFields(JsonObject usageMap,
                                          LlmProvider.TurnUsage turnUsage,
                                          boolean providerUsage) {
-        if (!turnUsage.hasJtokkitUsage) return;
-        usageMap.addProperty("jtokkitPrompt", turnUsage.jtokkitPromptTokens);
-        usageMap.addProperty("jtokkitCompletion", turnUsage.jtokkitCompletionTokens);
-        usageMap.addProperty("jtokkitTotal", turnUsage.jtokkitTotalTokens);
-        usageMap.addProperty("jtokkitReasoning", turnUsage.jtokkitReasoningTokens);
-        if (turnUsage.jtokkitEncoding != null) {
-            usageMap.addProperty("jtokkitEncoding", turnUsage.jtokkitEncoding);
+        if (!turnUsage.hasJtokkitUsage()) return;
+        usageMap.addProperty("jtokkitPrompt", turnUsage.jtokkitPromptTokens());
+        usageMap.addProperty("jtokkitCompletion", turnUsage.jtokkitCompletionTokens());
+        usageMap.addProperty("jtokkitTotal", turnUsage.jtokkitTotalTokens());
+        usageMap.addProperty("jtokkitReasoning", turnUsage.jtokkitReasoningTokens());
+        if (turnUsage.jtokkitEncoding() != null) {
+            usageMap.addProperty("jtokkitEncoding", turnUsage.jtokkitEncoding());
         }
-        usageMap.addProperty("jtokkitModelMatched", turnUsage.jtokkitModelMatched);
+        usageMap.addProperty("jtokkitModelMatched", turnUsage.jtokkitModelMatched());
         if (providerUsage) {
-            usageMap.addProperty("jtokkitPromptDelta", turnUsage.promptTokens - turnUsage.jtokkitPromptTokens);
+            usageMap.addProperty("jtokkitPromptDelta", turnUsage.promptTokens() - turnUsage.jtokkitPromptTokens());
             usageMap.addProperty("jtokkitCompletionDelta",
-                    turnUsage.completionTokens - turnUsage.jtokkitCompletionTokens);
-            usageMap.addProperty("jtokkitTotalDelta", turnUsage.totalTokens - turnUsage.jtokkitTotalTokens);
+                    turnUsage.completionTokens() - turnUsage.jtokkitCompletionTokens());
+            usageMap.addProperty("jtokkitTotalDelta", turnUsage.totalTokens() - turnUsage.jtokkitTotalTokens());
         }
     }
 
@@ -194,7 +194,7 @@ public final class UsageMetricsBuilder {
                                       long streamStartMs, String usageJson,
                                       AgentRunner.StreamingCallbacks cb) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
-        var logMessage = (turnUsage.hasProviderUsage || turnUsage.hasJtokkitUsage)
+        var logMessage = (turnUsage.hasProviderUsage() || turnUsage.hasJtokkitUsage())
                 ? buildUsageLogLine(content, turnUsage, durationMs)
                 : "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0);
         EventLogger.info("llm", agent.name, channelType, logMessage);
@@ -208,9 +208,9 @@ public final class UsageMetricsBuilder {
      * {@code extras} live in their own method (S3776).
      */
     private static String buildUsageLogLine(String content, LlmProvider.TurnUsage turnUsage, long durationMs) {
-        var prompt = turnUsage.hasProviderUsage ? turnUsage.promptTokens : turnUsage.jtokkitPromptTokens;
-        var completion = turnUsage.hasProviderUsage ? turnUsage.completionTokens : turnUsage.jtokkitCompletionTokens;
-        var total = turnUsage.hasProviderUsage ? turnUsage.totalTokens : turnUsage.jtokkitTotalTokens;
+        var prompt = turnUsage.hasProviderUsage() ? turnUsage.promptTokens() : turnUsage.jtokkitPromptTokens();
+        var completion = turnUsage.hasProviderUsage() ? turnUsage.completionTokens() : turnUsage.jtokkitCompletionTokens();
+        var total = turnUsage.hasProviderUsage() ? turnUsage.totalTokens() : turnUsage.jtokkitTotalTokens();
         var extras = buildUsageLogExtras(turnUsage);
         var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
                 prompt, completion, total, extras, durationMs / 1000.0);
@@ -226,9 +226,9 @@ public final class UsageMetricsBuilder {
         var reasoningCount = effectiveReasoningTokens(turnUsage);
         var extras = new StringBuilder();
         if (reasoningCount > 0) extras.append(", %s reasoning".formatted(reasoningCount));
-        if (turnUsage.cachedTokens > 0) extras.append(", %d cached".formatted(turnUsage.cachedTokens));
-        if (turnUsage.cacheCreationTokens > 0) extras.append(", %d cache-write".formatted(turnUsage.cacheCreationTokens));
-        if (!turnUsage.hasProviderUsage) extras.append(", estimated by jtokkit");
+        if (turnUsage.cachedTokens() > 0) extras.append(", %d cached".formatted(turnUsage.cachedTokens()));
+        if (turnUsage.cacheCreationTokens() > 0) extras.append(", %d cache-write".formatted(turnUsage.cacheCreationTokens()));
+        if (!turnUsage.hasProviderUsage()) extras.append(", estimated by jtokkit");
         return extras.toString();
     }
 }

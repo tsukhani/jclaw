@@ -293,8 +293,8 @@ final class StreamingAgentRunner {
 
         // The AUDIO_PASSTHROUGH_OUTCOME log already fired inside the helper; here we only surface a
         // terminal round-1 error to the caller (a streamed error can't be un-sent, so this ends the turn).
-        if (accumulator.error != null) {
-            cb.onError().accept(accumulator.error);
+        if (accumulator.error() != null) {
+            cb.onError().accept(accumulator.error());
             return;
         }
 
@@ -305,8 +305,8 @@ final class StreamingAgentRunner {
         turnUsage.addRound(accumulator);
 
         // Check for truncated response (max tokens hit mid-tool-call)
-        if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
-            persistAndCompleteTruncatedToolCall(accumulator.content, agent, channelType, trace, sink, cb);
+        if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason()) && !accumulator.toolCalls().isEmpty()) {
+            persistAndCompleteTruncatedToolCall(accumulator.content(), agent, channelType, trace, sink, cb);
             return;
         }
 
@@ -366,8 +366,8 @@ final class StreamingAgentRunner {
         if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return null;
 
         // Retry once on transient 5xx errors
-        if (accumulator.error != null && accumulator.error.getMessage() != null
-                && accumulator.error.getMessage().contains("HTTP 5")) {
+        if (accumulator.error() != null && accumulator.error().getMessage() != null
+                && accumulator.error().getMessage().contains("HTTP 5")) {
             EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
             accumulator = primary.chatStreamAccumulate(
                     effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
@@ -409,8 +409,8 @@ final class StreamingAgentRunner {
 
         // Audio rode native (passthrough) and the model rejected the FORMAT before any token streamed:
         // await the transcript and re-stream as text.
-        if (acc.error != null && supportsAudio && acc.content.isEmpty()
-                && AudioRetryStrategy.isAudioFormatRejection(acc.error)) {
+        if (acc.error() != null && supportsAudio && acc.content().isEmpty()
+                && AudioRetryStrategy.isAudioFormatRejection(acc.error())) {
             var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(messages, prepared.audioBearers(), false);
             if (!AudioRetryStrategy.anyTranscriptAvailable(prepared.audioBearers())) {
                 AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary, OUTCOME_ERROR,
@@ -424,16 +424,16 @@ final class StreamingAgentRunner {
                     thinkingMode, channelType, isCancelled, agent);
             if (retry == null) return null;
             AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
-                    retry.error == null ? "downgraded" : OUTCOME_ERROR,
-                    retry.error == null ? null : AudioRetryStrategy.shortErrorTag(retry.error), true);
+                    retry.error() == null ? "downgraded" : OUTCOME_ERROR,
+                    retry.error() == null ? null : AudioRetryStrategy.shortErrorTag(retry.error()), true);
             return new StreamRound1(retry, rewritten);
         }
 
         // No fallback fired — log the plain passthrough outcome (accepted / error). transcript_awaited
         // is false for a happy native passthrough, true when the rewrite already ran (text-only model).
         AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
-                acc.error == null ? "accepted" : OUTCOME_ERROR,
-                acc.error == null ? null : AudioRetryStrategy.shortErrorTag(acc.error), !supportsAudio);
+                acc.error() == null ? "accepted" : OUTCOME_ERROR,
+                acc.error() == null ? null : AudioRetryStrategy.shortErrorTag(acc.error()), !supportsAudio);
         return new StreamRound1(acc, messages);
     }
 
@@ -458,18 +458,18 @@ final class StreamingAgentRunner {
                                                                         AtomicBoolean isCancelled, LatencyTrace trace,
                                                                         LlmProvider.TurnUsage turnUsage,
                                                                         AgentExecutionSink sink) {
-        var content = accumulator.content;
+        var content = accumulator.content();
 
         // JCLAW-291: detect the empty-toolCalls truncation case — a plain
         // assistant reply that hit max_tokens. Sibling to the tool-call
         // truncation guard in the caller; that one fires only when toolCalls is
         // non-empty (incomplete JSON args), this one fires when toolCalls
         // is empty (the model just ran out of output budget mid-reply).
-        boolean replyTruncated = TruncationDiagnostics.isTruncationFinish(accumulator.finishReason)
-                && accumulator.toolCalls.isEmpty();
+        boolean replyTruncated = TruncationDiagnostics.isTruncationFinish(accumulator.finishReason())
+                && accumulator.toolCalls().isEmpty();
         if (replyTruncated) {
             TruncationDiagnostics.logEmptyToolCallsTruncation("streamLlmLoop", agent, conversation, primary,
-                    channelType, accumulator.finishReason, messages, tools);
+                    channelType, accumulator.finishReason(), messages, tools);
         }
 
         // Handle tool calls if present. JCLAW-104: the image collector lives
@@ -477,9 +477,9 @@ final class StreamingAgentRunner {
         // mid-chain — say in round 1 — still reaches buildImagePrefix when
         // the final synthesis happens in round N.
         var turnImages = new ArrayList<String>();
-        if (!accumulator.toolCalls.isEmpty()) {
+        if (!accumulator.toolCalls().isEmpty()) {
             content = ToolCallLoopRunner.handleToolCallsStreaming(agent, conversation, conversation.id, messages, tools,
-                    accumulator.toolCalls, content, primary, cb, thinkingMode, 0,
+                    accumulator.toolCalls(), content, primary, cb, thinkingMode, 0,
                     isCancelled, trace, turnUsage, turnImages, channelType, sink);
         }
         return new StreamingPostAccumulator(content, replyTruncated);

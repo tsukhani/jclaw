@@ -792,7 +792,9 @@ public class TaskTool implements ToolRegistry.Tool {
             if (task.status == Task.Status.CANCELLED) {
                 // Revive — otherwise TaskExecutionHandler skips the fire body.
                 // Recurring tasks get ACTIVE; one-shot tasks get PENDING.
-                task.status = Task.initialStatusFor(task.type);
+                // JCLAW-733: genuine CANCELLED -> ACTIVE/PENDING transition, route
+                // through the guard (both edges are legal for an existing task).
+                task.transitionTo(Task.initialStatusFor(task.type));
                 task.save();
                 revivedRef[0]++;
             } else if (task.status == Task.Status.LOST) {
@@ -801,7 +803,9 @@ public class TaskTool implements ToolRegistry.Tool {
                 // state and remember the id so we can force-remove the
                 // picked-but-stale scheduled_tasks row outside the Tx
                 // before registering a fresh fire below.
-                task.status = Task.initialStatusFor(task.type);
+                // JCLAW-733: genuine LOST -> ACTIVE/PENDING transition, route
+                // through the guard (both edges are legal for an existing task).
+                task.transitionTo(Task.initialStatusFor(task.type));
                 task.save();
                 lostIds.add(task.id);
             }
@@ -827,6 +831,11 @@ public class TaskTool implements ToolRegistry.Tool {
                     name, agent, Task.Status.CANCELLED);
             var ids = new ArrayList<Long>(tasks.size());
             for (var task : tasks) {
+                // JCLAW-733: intentionally NOT routed through transitionTo. The
+                // finder matches every non-CANCELLED state, including LOST /
+                // COMPLETED / FAILED, whose edge to CANCELLED the lifecycle guard
+                // deliberately forbids — routing here would throw on a cancel
+                // that is legal today. Direct assignment preserves that behavior.
                 task.status = Task.Status.CANCELLED;
                 task.save();
                 ids.add(task.id);
