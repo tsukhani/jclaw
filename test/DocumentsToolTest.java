@@ -393,6 +393,43 @@ class DocumentsToolTest extends UnitTest {
         assertTrue(result.contains("escapes"), "must surface SecurityException as escape: " + result);
     }
 
+    // ----- output-extension correction ---------------------------------------
+
+    @ParameterizedTest(name = "withFormatExtension[{0}]")
+    @CsvSource(delimiter = '|', value = {
+            "ReplacesMdToPdf   | report.md  | pdf  | report.pdf",
+            "ReplacesPdfToDocx | report.pdf | docx | report.docx",
+            "AppendsWhenNoExt  | report     | pdf  | report.pdf",
+            "AppendsToDotfile  | .gitignore | pdf  | .gitignore.pdf"
+    })
+    void withFormatExtension_replacesOrAppends(String label, String fileName, String format, String expected) {
+        assertEquals(expected, DocumentsTool.withFormatExtension(fileName, format));
+    }
+
+    @Test
+    void execute_writeDocumentPdfFormatToMdPathProducesPdfFile() throws Exception {
+        // Reproduces the append->render footgun: an explicit pdf format handed a
+        // .md target must yield a .pdf file with real PDF bytes, not a .md file
+        // whose name lies about its binary contents.
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-ext-correct");
+        var result = tool.execute(
+                "{\"action\":\"writeDocument\",\"path\":\"report.md\","
+                        + "\"format\":\"pdf\",\"content\":\"# Audit\\n\\nBody text.\"}",
+                agent);
+
+        assertFalse(result.startsWith("Error"), "write failed: " + result);
+        assertTrue(result.contains("report.pdf"), "response must reference the .pdf name: " + result);
+        assertFalse(result.contains("report.md"), "response must not reference the .md path: " + result);
+
+        var workspace = services.AgentService.workspacePath("docs-ext-correct");
+        assertTrue(Files.exists(workspace.resolve("report.pdf")), "report.pdf must exist");
+        assertFalse(Files.exists(workspace.resolve("report.md")), "report.md must NOT be written");
+        var head = Files.readAllBytes(workspace.resolve("report.pdf"));
+        var magic = new String(head, 0, 4, java.nio.charset.StandardCharsets.ISO_8859_1);
+        assertEquals("%PDF", magic, "written file must be a real PDF");
+    }
+
     private models.Agent freshAgent(String name) {
         play.test.Fixtures.deleteDatabase();
         // Reset the on-disk workspace too so files (drafts, rendered outputs,

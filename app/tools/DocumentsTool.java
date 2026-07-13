@@ -192,6 +192,19 @@ public class DocumentsTool implements ToolRegistry.Tool {
                     .formatted(resolved, String.join(", ", WRITE_FORMATS));
         }
 
+        // The resolved format is authoritative for the file's bytes, so the
+        // filename's extension must agree with it. The appendDocument ->
+        // renderDocument flow drafts into a .md file, then renders it with an
+        // explicit format; without this a PDF/DOCX would be written to a path
+        // still named ".md" — a file whose name misreports its contents.
+        // Retarget to the format's canonical extension whenever the path
+        // extension denotes a different format (or none).
+        if (!resolved.equals(resolveFormat(null, relativePath))) {
+            var corrected = withFormatExtension(target.getFileName().toString(), resolved);
+            relativePath = replaceFinalSegment(relativePath, corrected);
+            target = target.resolveSibling(corrected);
+        }
+
         // Avoid clobbering existing files. If the target exists we pick the next
         // free " (N).ext" slot in the same parent directory. Both the filesystem
         // target and the relativePath string we report back must be updated so
@@ -293,6 +306,18 @@ public class DocumentsTool implements ToolRegistry.Tool {
     public static String replaceFinalSegment(String relativePath, String newFileName) {
         int slash = relativePath.lastIndexOf('/');
         return slash < 0 ? newFileName : relativePath.substring(0, slash + 1) + newFileName;
+    }
+
+    /**
+     * Replace (or append) a filename's extension with {@code format}'s canonical
+     * extension — html/pdf/docx, each identical to its format name. Operates on
+     * a bare filename (no path separators); a leading-dot dotfile with no other
+     * dot gets the extension appended rather than being treated as all-suffix.
+     * Public + static so {@code DocumentsToolTest} can exercise the pure logic.
+     */
+    public static String withFormatExtension(String fileName, String format) {
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot + 1) + format : fileName + "." + format;
     }
 
     private static String resolveFormat(String explicit, String path) {
