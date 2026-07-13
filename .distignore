@@ -1,7 +1,6 @@
 # Exclude project management artifacts from distribution
 _bmad/
 _bmad-output/
-openspec/
 # docs/architecture/ holds internal design docs — excluded from the dist.
 # docs/user-guide/ is intentionally NOT excluded: it ships in the bundle so the
 # in-app user-guide lookup can read it at runtime (Play.applicationPath/docs/user-guide/).
