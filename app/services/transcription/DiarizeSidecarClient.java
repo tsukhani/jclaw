@@ -126,6 +126,50 @@ public class DiarizeSidecarClient {
         }
     }
 
+    /** Download status for the given HF repos (raw JSON body) — the on-device
+     *  diarization weights on the Settings page. Not under SIDECAR_LOCK, so it
+     *  never queues behind an in-flight diarization. */
+    public String models(String commaSeparatedRepos) {
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : DiarizeSidecarManager.ensureRunning();
+        var encoded = java.net.URLEncoder.encode(commaSeparatedRepos, java.nio.charset.StandardCharsets.UTF_8);
+        var call = client.newCall(new Request.Builder()
+                .url(baseUrl + "/diarize/models?ids=" + encoded).get().build());
+        call.timeout().timeout(60, TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            var text = resp.body().string();
+            if (!resp.isSuccessful()) {
+                throw new TranscriptionException("diarize model status failed: HTTP %d — %s"
+                        .formatted(resp.code(), truncate(text)));
+            }
+            return text;
+        } catch (IOException e) {
+            throw new TranscriptionException("diarize sidecar unreachable: " + e.getMessage(), e);
+        }
+    }
+
+    /** Kick a DETACHED download of an HF repo (pyannote or SER model); returns
+     *  immediately with a downloading ack. The sidecar polls its own progress. */
+    public String prefetch(String repo) {
+        var baseUrl = baseUrlOverride != null ? baseUrlOverride : DiarizeSidecarManager.ensureRunning();
+        var body = new JsonObject();
+        body.addProperty("model", repo);
+        var call = client.newCall(new Request.Builder()
+                .url(baseUrl + "/diarize/prefetch")
+                .post(RequestBody.create(body.toString(), JSON))
+                .build());
+        call.timeout().timeout(60, TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
+            var text = resp.body().string();
+            if (!resp.isSuccessful()) {
+                throw new TranscriptionException("diarize prefetch failed: HTTP %d — %s"
+                        .formatted(resp.code(), truncate(text)));
+            }
+            return text;
+        } catch (IOException e) {
+            throw new TranscriptionException("diarize sidecar unreachable: " + e.getMessage(), e);
+        }
+    }
+
     /** The optional {@code emotion} object on a turn, or null if absent. */
     private static Emotion parseEmotion(JsonObject turn) {
         if (!turn.has("emotion") || turn.get("emotion").isJsonNull()) return null;

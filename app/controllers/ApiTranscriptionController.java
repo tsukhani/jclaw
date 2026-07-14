@@ -10,6 +10,7 @@ import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 import services.transcription.AsrModelStore;
+import services.transcription.DiarizeModelStore;
 import services.transcription.FfmpegProbe;
 import services.transcription.AsrModel;
 import utils.ApiResponses;
@@ -50,6 +51,15 @@ public class ApiTranscriptionController extends Controller {
                                              List<AsrModelEntry> models) {}
 
     public record DownloadStartedResponse(String status, String modelId) {}
+
+    /** One on-device diarization weight for the Settings UI. {@code role} is
+     *  {@code "diarizer"} (pyannote) or {@code "emotion"} (SER), so the frontend
+     *  renders each next to its control. No {@code totalBytes} — repo sizes are
+     *  unknown/free-text, so the UI shows a downloaded-MB counter. */
+    public record DiarizeModelEntry(String repo, String displayName, String role,
+                                    String status, long bytesDownloaded, String engine, String error) {}
+
+    public record DiarizationModelsResponse(List<DiarizeModelEntry> models) {}
 
     /** GET /api/transcription/state — snapshot for the Settings UI. */
     @SuppressWarnings("java:S2259")
@@ -113,5 +123,42 @@ public class ApiTranscriptionController extends Controller {
         EventLogger.info("transcription",
                 "ASR model download requested: %s".formatted(id));
         renderJSON(gson.toJson(new DownloadStartedResponse("downloading", id)));
+    }
+
+    /** GET /api/transcription/diarization/models — download status for the
+     *  on-device diarization weights (the pyannote diarizer + the configured
+     *  SER emotion model). Polled by the Settings page like the ASR models. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiarizationModelsResponse.class)))
+    public static void diarizationModels() {
+        var serRepo = DiarizeModelStore.serRepo();
+        var statuses = DiarizeModelStore.statusAll(serRepo);
+        var models = new ArrayList<DiarizeModelEntry>();
+        models.add(entryFor(statuses, DiarizeModelStore.PYANNOTE_REPO, "Speaker diarizer", "diarizer"));
+        models.add(entryFor(statuses, serRepo, "Emotion model", "emotion"));
+        renderJSON(gson.toJson(new DiarizationModelsResponse(models)));
+    }
+
+    private static DiarizeModelEntry entryFor(java.util.Map<String, DiarizeModelStore.Status> statuses,
+                                              String repo, String displayName, String role) {
+        var s = statuses.get(repo);
+        if (s == null) return new DiarizeModelEntry(repo, displayName, role, "UNAVAILABLE", 0, null, null);
+        return new DiarizeModelEntry(repo, displayName, role, s.state().wireName(),
+                s.bytesDownloaded(), s.engine(), s.error());
+    }
+
+    /** POST /api/transcription/diarization/download?repo=&lt;hf-repo&gt; — kick a
+     *  background download of a diarization weight (pyannote or the SER model).
+     *  Returns immediately; progress is observed through diarizationModels. */
+    @SuppressWarnings("java:S2259")  // ApiResponses.error(400) halts; repo is non-null past the guard
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
+    @ChatHidden("triggers an on-device diarization weight download -- disk/network resource action")
+    public static void diarizationDownload(String repo) {
+        if (repo == null || !repo.matches("[\\w.-]+/[\\w.-]+")) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "repo must be a Hugging Face id like org/name: " + repo);
+        }
+        DiarizeModelStore.prefetch(repo);
+        EventLogger.info("transcription", "diarization weight download requested: %s".formatted(repo));
+        renderJSON(gson.toJson(new DownloadStartedResponse("downloading", repo)));
     }
 }
