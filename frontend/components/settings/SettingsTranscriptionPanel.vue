@@ -531,7 +531,7 @@ onUnmounted(() => stopTranscriptionPolling())
         <span class="font-medium">audio-capable</span> chat model (cloud or local) — the recording
         is sent with a verbatim-diarization prompt — or from the fully on-device
         <span class="font-mono">pyannote</span> diarizer (speaker turns fused with the local ASR
-        transcript; no audio leaves the host, no emotion tags). Pick a provider below
+        transcript, with optional per-turn emotion; no audio leaves the host). Pick a provider below
         (chat-model API keys come from <span class="text-fg-muted">LLM Providers</span> above).
         Ordinary voice-note transcription stays local and is unaffected.
       </div>
@@ -730,9 +730,10 @@ onUnmounted(() => stopTranscriptionPolling())
             <span class="font-mono">uv</span> + a Hugging Face token, shared with
             <span class="text-fg-muted">Image Generation</span>). Per-turn emotion — when the
             diarize-audio tool is asked for it — runs the SER model above. Leave blank for
-            <span class="font-mono">MERaLiON-SER-v1</span> (7-class + valence/arousal/dominance,
-            best for Malay/telephony; the wav2vec2 options are English-trained and weaker on
-            8&nbsp;kHz calls). Any Hugging Face audio-classification SER model works.
+            <span class="font-mono">MERaLiON-SER-v1</span>, a robust multilingual default
+            (English, Chinese, Malay, Tamil, Indonesian; 7 emotions + valence/arousal/dominance).
+            Match the model to your audio — the wav2vec2 options are English, categorical-only, and
+            can suit English-heavy content. Any Hugging Face audio-classification SER model works.
           </p>
         </div>
       </template>

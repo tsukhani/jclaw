@@ -54,12 +54,15 @@ without labels). Turns under 1 s are skipped (too little signal).
 The SER model is **operator-configurable** (`transcription.diarization.emotionModel`
 → `emotion_model` in the `/diarize` request; the worker caches per model). Any
 Hugging Face `AutoModelForAudioClassification` SER model loads — `AutoProcessor`,
-falling back to `AutoFeatureExtractor` for audio-only wav2vec2 models. But
-**MERaLiON is the default and the only one verified accurate on 8 kHz Malay
-telephony**; the wav2vec2 alternatives (superb, Dpngtm — English/RAVDESS-trained)
-load fine but collapse on this domain (e.g. "happy" on a hostile turn). MERaLiON
-is ungated but under the **MERaLiON Public License** — check commercial terms
-before a paid-edition ship.
+falling back to `AutoFeatureExtractor` for audio-only wav2vec2 models.
+**MERaLiON is a robust multilingual default** (English/Chinese/Malay/Tamil/
+Indonesian, conversational training, + V/A/D) — and the one verified accurate on
+the hardest tested domain (8 kHz Malay telephony), where the wav2vec2
+alternatives (superb, Dpngtm — English/RAVDESS-trained) load fine but collapse
+(e.g. "happy" on a hostile turn). Match the model to the audio: an English
+wav2vec2 SER can be fine on clean English content. MERaLiON is ungated but under
+the **MERaLiON Public License** — check commercial terms before a paid-edition
+ship.
 
 ## Running by hand (debugging)
 

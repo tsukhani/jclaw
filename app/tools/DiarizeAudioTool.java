@@ -80,9 +80,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final String DEGENERATE_NOTE =
             "[Speaker-separation note: the on-device diarizer attributed (nearly) all turns to a "
             + "single speaker. If this recording is actually a multi-party conversation, acoustic "
-            + "separation was low-confidence — common on short or narrowband (e.g. 8 kHz phone) "
-            + "audio with similar-sounding voices. Attribute speakers from conversational context "
-            + "(who greets, who asks vs. answers) rather than the SPEAKER_NN labels above.]";
+            + "separation was low-confidence — common with short clips, similar-sounding or heavily "
+            + "overlapping voices, or narrowband audio. Attribute speakers from conversational "
+            + "context (who greets, who asks vs. answers) rather than the SPEAKER_NN labels above.]";
 
     private static final String ARG_ACTION = "action";
     private static final String ARG_UUID = "attachment_uuid";
