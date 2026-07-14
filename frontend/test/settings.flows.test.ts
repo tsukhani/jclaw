@@ -1568,7 +1568,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
 
     const component = await mountSettingsSection('transcription')
 
-    const select = component.find<HTMLSelectElement>('select[aria-label="Whisper model size"]')
+    const select = component.find<HTMLSelectElement>('select[aria-label="ASR model"]')
     expect(select.exists()).toBe(true)
     // The small.en model is AVAILABLE in our fixture, so the "Ready" pill should appear.
     expect(component.text()).toContain('Ready')
@@ -1607,14 +1607,14 @@ describe('Settings page — Transcription enable + provider switch', () => {
     // than the model dropdown (proves it wasn't suspended on the fetch).
     expect(component.text()).toContain('Enable transcription')
     expect(component.text()).toContain('Starting the transcription engine')
-    expect(component.find('select[aria-label="Whisper model size"]').exists()).toBe(false)
+    expect(component.find('select[aria-label="ASR model"]').exists()).toBe(false)
 
     // Once the boot-triggering request resolves, real status fills in.
     resolveState({ ...DEFAULT_TRANSCRIPTION_STATE })
     await flushPromises()
     await nextTick()
     await flushPromises()
-    expect(component.find('select[aria-label="Whisper model size"]').exists()).toBe(true)
+    expect(component.find('select[aria-label="ASR model"]').exists()).toBe(true)
     expect(component.text()).toContain('Ready')
   })
 
@@ -1660,7 +1660,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(downloadCaptured.hit).toBe(true)
   })
 
-  it('shows the active-backend status line (Self-Hosted Whisper + model)', async () => {
+  it('shows the active-backend status line (Self-Hosted ASR + model)', async () => {
     registerEndpoint('/api/agents', () => [])
     registerEndpoint('/api/channels', () => [])
     registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
@@ -1677,7 +1677,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     const component = await mountSettingsSection('transcription')
 
     // Mirrors the Image Captioning "Active:" line — resolves the whisper model's display name.
-    expect(component.text()).toContain('Active: Self-Hosted Whisper (Small (English))')
+    expect(component.text()).toContain('Active: Self-Hosted ASR (Small (English))')
   })
 })
 

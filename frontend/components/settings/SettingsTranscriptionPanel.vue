@@ -247,7 +247,7 @@ onUnmounted(() => stopTranscriptionPolling())
       Audio-capable models still receive native audio; text-only models receive the
       transcript as text. Cloud options reuse the API keys configured in
       <span class="text-fg-muted">LLM Providers</span> above; the self-hosted option
-      runs <span class="font-mono">whisper.cpp</span> locally and downloads its model
+      runs a local ASR model and downloads it
       from Hugging Face on first use.
     </p>
 
@@ -262,7 +262,7 @@ onUnmounted(() => stopTranscriptionPolling())
         Active: cloud transcription via {{ selectedTranscriptionProvider }}.
       </template>
       <template v-else-if="transcriptionActiveBackend === 'local'">
-        Active: Self-Hosted Whisper ({{ selectedLocalModelStatus?.displayName || 'default model' }}).
+        Active: Self-Hosted ASR ({{ selectedLocalModelStatus?.displayName || 'default model' }}).
       </template>
       <template v-else>
         Transcription is off — enable it and pick a backend below. Until then, audio attachments
@@ -381,7 +381,7 @@ onUnmounted(() => stopTranscriptionPolling())
                 class="accent-emerald-600"
                 @change="setTranscriptionProvider('whisper-local')"
               >
-              <span class="flex-1 text-sm text-fg-primary">Self-Hosted Whisper</span>
+              <span class="flex-1 text-sm text-fg-primary">Self-Hosted ASR</span>
               <span
                 class="text-[10px] px-1 border"
                 :class="selectedTranscriptionProvider === 'whisper-local'
@@ -406,10 +406,10 @@ onUnmounted(() => stopTranscriptionPolling())
             v-else
             class="px-4 py-2.5 flex items-center gap-3"
           >
-            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model size</span>
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model</span>
             <select
               :value="selectedLocalModel"
-              aria-label="Whisper model size"
+              aria-label="ASR model"
               class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="setLocalModel(($event.target as HTMLSelectElement).value)"
             >

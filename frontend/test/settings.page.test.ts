@@ -490,7 +490,7 @@ describe('Settings page — Transcription section (JCLAW-164)', () => {
     registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
     const component = await mountSettingsSection('transcription')
 
-    // Self-Hosted Whisper is always enabled — it doesn't depend on a remote key.
+    // Self-Hosted ASR is always enabled — it doesn't depend on a remote key.
     const whisper = component.find('input[name="transcription-provider"][value="whisper-local"]')
     expect(whisper.exists()).toBe(true)
     expect(whisper.attributes('disabled')).toBeUndefined()
