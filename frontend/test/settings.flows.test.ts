@@ -1458,6 +1458,50 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(component.text()).toContain('Ready')
   })
 
+  it('paints the panel without blocking on the ASR sidecar cold-start (lazy state fetch)', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    // Simulate the sidecar cold-start: /api/transcription/state stays pending.
+    // A top-level `await useFetch` here would suspend the whole panel behind the
+    // settings "Loading…" fallback; useLazyFetch must let it paint immediately.
+    let resolveState: (v: unknown) => void = () => {}
+    registerEndpoint('/api/transcription/state', () => new Promise((r) => {
+      resolveState = r
+    }))
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries(),
+          { key: 'transcription.provider', value: 'whisper-local',
+            updatedAt: '2026-04-22T10:00:00Z' },
+          { key: 'transcription.localModel', value: 'small.en',
+            updatedAt: '2026-04-22T10:00:00Z' },
+        ],
+      }),
+    })
+    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
+
+    const component = await mountSettingsSection('transcription')
+
+    // Panel is interactive while the state fetch is still pending: the master
+    // toggle rendered and the model area shows the "starting" indicator rather
+    // than the model dropdown (proves it wasn't suspended on the fetch).
+    expect(component.text()).toContain('Enable transcription')
+    expect(component.text()).toContain('Starting the transcription engine')
+    expect(component.find('select[aria-label="Whisper model size"]').exists()).toBe(false)
+
+    // Once the boot-triggering request resolves, real status fills in.
+    resolveState({ ...DEFAULT_TRANSCRIPTION_STATE })
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+    expect(component.find('select[aria-label="Whisper model size"]').exists()).toBe(true)
+    expect(component.text()).toContain('Ready')
+  })
+
   it('shows the Download button for an ABSENT local whisper model and round-trips the download POST', async () => {
     const downloadCaptured: { hit?: boolean } = {}
     registerEndpoint('/api/agents', () => [])

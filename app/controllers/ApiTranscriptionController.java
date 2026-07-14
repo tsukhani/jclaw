@@ -76,7 +76,7 @@ public class ApiTranscriptionController extends Controller {
                     m.id(),
                     m.displayName(),
                     m.approxSizeMb(),
-                    status.state().name(),
+                    status.state().wireName(),
                     status.bytesDownloaded(),
                     status.totalBytes(),
                     status.engine(),

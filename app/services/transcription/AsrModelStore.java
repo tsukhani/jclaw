@@ -18,7 +18,28 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class AsrModelStore {
 
-    public enum State { NOT_DOWNLOADED, DOWNLOADING, DOWNLOADED, ERROR, UNAVAILABLE }
+    public enum State {
+        NOT_DOWNLOADED, DOWNLOADING, DOWNLOADED, ERROR, UNAVAILABLE;
+
+        /**
+         * Wire status string the Settings frontend consumes — the vocabulary
+         * shared with the imagegen panel (ABSENT / DOWNLOADING / AVAILABLE /
+         * ERROR / UNAVAILABLE). JCLAW-650 renamed this internal enum
+         * (ABSENT→NOT_DOWNLOADED, AVAILABLE→DOWNLOADED) without updating the
+         * frontend contract, so the Download button and Ready badge silently
+         * stopped rendering; this projection restores it. Keep in lockstep with
+         * the {@code TranscriptionModelStatus} union in SettingsTranscriptionPanel.vue.
+         */
+        public String wireName() {
+            return switch (this) {
+                case NOT_DOWNLOADED -> "ABSENT";
+                case DOWNLOADED -> "AVAILABLE";
+                case DOWNLOADING -> "DOWNLOADING";
+                case ERROR -> "ERROR";
+                case UNAVAILABLE -> "UNAVAILABLE";
+            };
+        }
+    }
 
     public record Status(State state, long bytesDownloaded, long totalBytes,
                          String engine, String error) {}

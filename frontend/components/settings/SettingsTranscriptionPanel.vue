@@ -20,7 +20,7 @@ type TranscriptionModelStatus = {
   id: string
   displayName: string
   approxSizeMb: number
-  status: 'ABSENT' | 'DOWNLOADING' | 'VERIFYING' | 'AVAILABLE' | 'ERROR'
+  status: 'ABSENT' | 'DOWNLOADING' | 'VERIFYING' | 'AVAILABLE' | 'ERROR' | 'UNAVAILABLE'
   bytesDownloaded: number
   totalBytes: number
   error: string | null
@@ -32,8 +32,19 @@ type TranscriptionState = {
   ffmpegReason: string | null
   models: TranscriptionModelStatus[]
 }
-const { data: transcriptionState, refresh: refreshTranscriptionState }
-  = await useFetch<TranscriptionState>('/api/transcription/state')
+// Lazy (non-blocking) fetch: /api/transcription/state cold-boots the Python ASR
+// sidecar (uv run + heavy ML imports, ~seconds; the sidecar idle-drains after
+// ~15 min so this recurs). A top-level `await` here would suspend the whole
+// panel behind the settings-page "Loading…" fallback for that entire duration.
+// useLazyFetch lets the panel paint immediately; the model-status area shows a
+// "starting engine" indicator until the request resolves (JCLAW UI perf fix).
+const { data: transcriptionState, refresh: refreshTranscriptionState, status: transcriptionStateStatus }
+  = useLazyFetch<TranscriptionState>('/api/transcription/state')
+// Initial load only (not a refresh, which keeps stale data visible): the engine
+// is booting and no per-model status has arrived yet.
+const transcriptionStateLoading = computed(() =>
+  transcriptionStateStatus.value === 'pending' && !transcriptionState.value,
+)
 
 const selectedTranscriptionProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.provider')?.value ?? '',
@@ -187,7 +198,9 @@ function stopTranscriptionPolling() {
     transcriptionPollTimer = null
   }
 }
-onMounted(() => {
+// The state loads lazily, so a download already in flight when the panel opens
+// only becomes visible once the fetch resolves — resume the progress poll then.
+watch(transcriptionState, () => {
   if (anyDownloadInFlight()) startTranscriptionPolling()
 })
 onUnmounted(() => stopTranscriptionPolling())
@@ -352,7 +365,16 @@ onUnmounted(() => stopTranscriptionPolling())
           v-if="selectedTranscriptionProvider === 'whisper-local'"
           class="border-t border-border"
         >
-          <div class="px-4 py-2.5 flex items-center gap-3">
+          <div
+            v-if="transcriptionStateLoading"
+            class="px-4 py-2.5 text-xs text-fg-muted italic"
+          >
+            Starting the transcription engine… <span class="opacity-70">(first load spins up the local ASR sidecar)</span>
+          </div>
+          <div
+            v-else
+            class="px-4 py-2.5 flex items-center gap-3"
+          >
             <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model size</span>
             <select
               :value="selectedLocalModel"
@@ -407,9 +429,12 @@ onUnmounted(() => stopTranscriptionPolling())
                 Retry
               </button>
             </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'UNAVAILABLE'">
+              <span class="text-[10px] px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30">unavailable</span>
+            </template>
           </div>
           <div
-            v-if="selectedLocalModelStatus?.status === 'ERROR' && selectedLocalModelStatus?.error"
+            v-if="(selectedLocalModelStatus?.status === 'ERROR' || selectedLocalModelStatus?.status === 'UNAVAILABLE') && selectedLocalModelStatus?.error"
             class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
           >
             {{ selectedLocalModelStatus.error }}
