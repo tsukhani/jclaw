@@ -94,7 +94,8 @@ public final class BreachedPasswordChecker {
             Call call = HttpFactories.general().newCall(req);
             call.timeout().timeout(timeoutMs(), TimeUnit.MILLISECONDS);
             try (Response resp = call.execute()) {
-                if (!resp.isSuccessful() || resp.body() == null) return Optional.empty();
+                // OkHttp 5's Response.body() is non-null, so no null check here.
+                if (!resp.isSuccessful()) return Optional.empty();
                 return Optional.of(suffixInRange(resp.body().string(), suffix));
             }
         } catch (Exception e) {
@@ -112,8 +113,8 @@ public final class BreachedPasswordChecker {
     public static boolean suffixInRange(String body, String suffix) {
         for (String line : body.split("\\r?\\n")) {
             int colon = line.indexOf(':');
-            if (colon < 0) continue;
-            if (!line.substring(0, colon).trim().equalsIgnoreCase(suffix)) continue;
+            // Short-circuit protects substring() when there is no colon.
+            if (colon < 0 || !line.substring(0, colon).trim().equalsIgnoreCase(suffix)) continue;
             try {
                 return Long.parseLong(line.substring(colon + 1).trim()) > 0;
             } catch (NumberFormatException _) {
