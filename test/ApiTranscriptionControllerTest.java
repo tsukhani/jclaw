@@ -124,11 +124,16 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
         assertTrue(body.contains(DiarizeModelStore.PYANNOTE_REPO), "pyannote repo present: " + body);
         // emotionModel config is blank in tests -> the default SER repo
         assertTrue(body.contains(DiarizeModelStore.DEFAULT_SER_REPO), "default SER repo present: " + body);
+        // the fixed SER picker is offered as serOptions
+        for (var m : DiarizeModelStore.SER_MODELS) {
+            assertTrue(body.contains(m.repo()), "SER option %s in serOptions: %s".formatted(m.repo(), body));
+        }
     }
 
     @Test
-    void diarizationDownloadRejectsMalformedRepo() {
-        var response = POST("/api/transcription/diarization/download?repo=notarepo",
+    void diarizationDownloadRejectsRepoOutsideTheAllowlist() {
+        // well-formed HF id but not the pyannote diarizer or a selectable SER model
+        var response = POST("/api/transcription/diarization/download?repo=some/unlisted-model",
                 "application/json", "{}");
         assertEquals(400, response.status.intValue());
     }

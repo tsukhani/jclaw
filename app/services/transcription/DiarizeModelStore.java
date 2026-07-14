@@ -22,8 +22,26 @@ public final class DiarizeModelStore {
 
     /** The fixed pyannote diarizer repo — matches diarize.py's MODEL constant. */
     public static final String PYANNOTE_REPO = "pyannote/speaker-diarization-community-1";
-    /** SER model used when {@code transcription.diarization.emotionModel} is blank. */
-    public static final String DEFAULT_SER_REPO = "MERaLiON/MERaLiON-SER-v1";
+
+    /** A selectable SER emotion model: its HF repo + a Settings label. */
+    public record SerOption(String repo, String displayName) {}
+
+    /** The SER models the operator may pick — a fixed trio, not free-text (the
+     *  download endpoint downloads whatever is chosen, so the set is bounded).
+     *  The first is the default, used when the config is unset or stale. */
+    public static final java.util.List<SerOption> SER_MODELS = java.util.List.of(
+            new SerOption("MERaLiON/MERaLiON-SER-v1", "MERaLiON-SER v1 — multilingual SEA (default)"),
+            new SerOption("superb/wav2vec2-base-superb-er", "wav2vec2 SUPERB-ER — English"),
+            new SerOption("Dpngtm/wav2vec2-emotion-recognition", "wav2vec2 emotion — English"));
+
+    /** SER model used when {@code transcription.diarization.emotionModel} is
+     *  blank or no longer one of {@link #SER_MODELS}. */
+    public static final String DEFAULT_SER_REPO = SER_MODELS.get(0).repo();
+
+    /** Whether {@code repo} is one of the selectable SER models. */
+    public static boolean isAllowedSer(String repo) {
+        return SER_MODELS.stream().anyMatch(m -> m.repo().equals(repo));
+    }
 
     public enum State {
         NOT_DOWNLOADED, DOWNLOADING, DOWNLOADED, ERROR, UNAVAILABLE;
@@ -55,10 +73,12 @@ public final class DiarizeModelStore {
         PREFETCH_ERRORS.clear();
     }
 
-    /** The SER repo the operator has configured (blank → the default). */
+    /** The SER repo the operator has configured, coerced to the default when
+     *  blank or not one of {@link #SER_MODELS} (e.g. a stale free-text value
+     *  from before the picker was restricted to a fixed set). */
     public static String serRepo() {
         var v = ConfigService.get("transcription.diarization.emotionModel", "");
-        return v == null || v.isBlank() ? DEFAULT_SER_REPO : v.trim();
+        return v != null && isAllowedSer(v.trim()) ? v.trim() : DEFAULT_SER_REPO;
     }
 
     /** Status of the pyannote diarizer + the given SER repo in ONE sidecar round

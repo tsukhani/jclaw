@@ -59,7 +59,8 @@ public class ApiTranscriptionController extends Controller {
     public record DiarizeModelEntry(String repo, String displayName, String role,
                                     String status, long bytesDownloaded, String engine, String error) {}
 
-    public record DiarizationModelsResponse(List<DiarizeModelEntry> models) {}
+    public record DiarizationModelsResponse(List<DiarizeModelEntry> models,
+                                            List<DiarizeModelStore.SerOption> serOptions) {}
 
     /** GET /api/transcription/state — snapshot for the Settings UI. */
     @SuppressWarnings("java:S2259")
@@ -135,7 +136,7 @@ public class ApiTranscriptionController extends Controller {
         var models = new ArrayList<DiarizeModelEntry>();
         models.add(entryFor(statuses, DiarizeModelStore.PYANNOTE_REPO, "Speaker diarizer", "diarizer"));
         models.add(entryFor(statuses, serRepo, "Emotion model", "emotion"));
-        renderJSON(gson.toJson(new DiarizationModelsResponse(models)));
+        renderJSON(gson.toJson(new DiarizationModelsResponse(models, DiarizeModelStore.SER_MODELS)));
     }
 
     private static DiarizeModelEntry entryFor(java.util.Map<String, DiarizeModelStore.Status> statuses,
@@ -153,9 +154,10 @@ public class ApiTranscriptionController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
     @ChatHidden("triggers an on-device diarization weight download -- disk/network resource action")
     public static void diarizationDownload(String repo) {
-        if (repo == null || !repo.matches("[\\w.-]+/[\\w.-]+")) {
+        if (repo == null
+                || (!repo.equals(DiarizeModelStore.PYANNOTE_REPO) && !DiarizeModelStore.isAllowedSer(repo))) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "repo must be a Hugging Face id like org/name: " + repo);
+                    "repo must be the pyannote diarizer or one of the selectable SER models: " + repo);
         }
         DiarizeModelStore.prefetch(repo);
         EventLogger.info("transcription", "diarization weight download requested: %s".formatted(repo));

@@ -135,8 +135,8 @@ async function setDiarizationModel(value: string) {
   finally { saving.value = false }
 }
 
-// On-device (pyannote-local) per-turn emotion model (SER). Any HF
-// audio-classification model works; blank = MERaLiON-SER-v1 (the sidecar default).
+// On-device (pyannote-local) per-turn emotion model (SER). The operator picks
+// from a fixed set (serOptions, from the backend); blank = the default.
 const selectedEmotionModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.diarization.emotionModel')?.value ?? '',
 )
@@ -163,16 +163,28 @@ interface DiarizeModelEntry {
   engine: string | null
   error: string | null
 }
+interface SerOption {
+  repo: string
+  displayName: string
+}
 const diarizationModels = ref<DiarizeModelEntry[]>([])
+const serOptions = ref<SerOption[]>([])
 const diarizerModelStatus = computed(() => diarizationModels.value.find(m => m.role === 'diarizer') ?? null)
 const emotionModelStatus = computed(() => diarizationModels.value.find(m => m.role === 'emotion') ?? null)
+// The selected SER repo, coerced to the default when blank or not one of the
+// offered options (e.g. a stale free-text value from before the fixed picker).
+const currentSerRepo = computed(() => {
+  const v = selectedEmotionModel.value
+  return serOptions.value.some(o => o.repo === v) ? v : (serOptions.value[0]?.repo ?? '')
+})
 function downloadedMb(bytes: number): number {
   return Math.round((bytes || 0) / 1e6)
 }
 async function refreshDiarizationModels() {
   try {
-    const r = await $fetch<{ models: DiarizeModelEntry[] }>('/api/transcription/diarization/models')
+    const r = await $fetch<{ models: DiarizeModelEntry[], serOptions: SerOption[] }>('/api/transcription/diarization/models')
     diarizationModels.value = r.models ?? []
+    serOptions.value = r.serOptions ?? []
   }
   catch {
     diarizationModels.value = []
@@ -822,20 +834,21 @@ onUnmounted(() => stopTranscriptionPolling())
           <!-- Emotion (SER) model — operator-selectable, download status -->
           <div class="px-4 py-2.5 flex items-center gap-3 border-t border-border">
             <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Emotion model</span>
-            <input
+            <select
               id="diarization-emotion-model"
-              :value="selectedEmotionModel"
-              list="diarization-emotion-model-suggestions"
-              placeholder="MERaLiON/MERaLiON-SER-v1 (default)"
+              :value="currentSerRepo"
               aria-label="On-device emotion (SER) model"
               class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="setEmotionModel(($event.target as HTMLInputElement).value.trim())"
+              @change="setEmotionModel(($event.target as HTMLSelectElement).value)"
             >
-            <datalist id="diarization-emotion-model-suggestions">
-              <option value="MERaLiON/MERaLiON-SER-v1" />
-              <option value="superb/wav2vec2-base-superb-er" />
-              <option value="Dpngtm/wav2vec2-emotion-recognition" />
-            </datalist>
+              <option
+                v-for="o in serOptions"
+                :key="o.repo"
+                :value="o.repo"
+              >
+                {{ o.displayName }}
+              </option>
+            </select>
             <span
               v-if="!emotionModelStatus"
               class="text-[10px] text-fg-muted shrink-0"
@@ -882,11 +895,11 @@ onUnmounted(() => stopTranscriptionPolling())
             <span class="font-mono">pyannote/speaker-diarization-community-1</span> (needs
             <span class="font-mono">uv</span> + a Hugging Face token, shared with
             <span class="text-fg-muted">Image Generation</span>). Per-turn emotion — when the
-            diarize-audio tool is asked for it — runs the SER model above. Leave blank for
-            <span class="font-mono">MERaLiON-SER-v1</span>, a robust multilingual default
+            diarize-audio tool is asked for it — runs the SER model above.
+            <span class="font-mono">MERaLiON-SER-v1</span> is a robust multilingual default
             (English, Chinese, Malay, Tamil, Indonesian; 7 emotions + valence/arousal/dominance).
             Match the model to your audio — the wav2vec2 options are English, categorical-only, and
-            can suit English-heavy content. Any Hugging Face audio-classification SER model works.
+            can suit English-heavy content.
           </p>
         </div>
       </template>

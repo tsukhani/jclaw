@@ -1472,6 +1472,17 @@ describe('Settings page — Transcription enable + provider switch', () => {
     registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
     registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
     registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/transcription/diarization/models', () => ({
+      models: [
+        { repo: 'pyannote/speaker-diarization-community-1', displayName: 'Speaker diarizer', role: 'diarizer', status: 'AVAILABLE', bytesDownloaded: 0, engine: 'pyannote', error: null },
+        { repo: 'MERaLiON/MERaLiON-SER-v1', displayName: 'Emotion model', role: 'emotion', status: 'AVAILABLE', bytesDownloaded: 0, engine: 'ser', error: null },
+      ],
+      serOptions: [
+        { repo: 'MERaLiON/MERaLiON-SER-v1', displayName: 'MERaLiON-SER v1' },
+        { repo: 'superb/wav2vec2-base-superb-er', displayName: 'wav2vec2 SUPERB-ER' },
+        { repo: 'Dpngtm/wav2vec2-emotion-recognition', displayName: 'wav2vec2 emotion' },
+      ],
+    }))
     registerEndpoint('/api/config', {
       method: 'GET',
       handler: () => ({
@@ -1491,13 +1502,14 @@ describe('Settings page — Transcription enable + provider switch', () => {
     })
 
     const component = await mountSettingsSection('transcription')
+    await flushPromises() // let the diarization-models fetch populate the SER <select> options
 
-    // The local path has no audio-model dropdown but DOES have an emotion-model field.
+    // The local path has no audio-model dropdown but DOES have an emotion-model
+    // <select> populated from the fixed serOptions.
     expect(component.find('select[aria-label="Diarization audio model"]').exists()).toBe(false)
-    const input = component.find('#diarization-emotion-model')
-    expect(input.exists()).toBe(true)
-    await input.setValue('superb/wav2vec2-base-superb-er')
-    await input.trigger('change')
+    const select = component.find('#diarization-emotion-model')
+    expect(select.exists()).toBe(true)
+    await select.setValue('superb/wav2vec2-base-superb-er')
     await flushPromises()
     expect(captured.find(b => b.key === 'transcription.diarization.emotionModel')?.value)
       .toBe('superb/wav2vec2-base-superb-er')
