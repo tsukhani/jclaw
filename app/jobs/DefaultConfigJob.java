@@ -172,6 +172,18 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.vllm.apiKey", "vllm");
         seedIfAbsent("provider.vllm.models", "[]");
 
+        // llama.cpp (self-hosted llama-server): OpenAI-compatible /v1/chat/completions
+        // + /v1/models, same factory default (OpenAiProvider) and discovery path as
+        // lm-studio/vllm. Default serving port is 8080. Unlike Ollama, llama-server's
+        // OpenAI endpoint accepts input_audio content parts (base64 mp3/wav/flac via
+        // libmtmd), so it can back local audio diarization (audio is experimental
+        // upstream). Same non-blank sentinel apiKey so ProviderRegistry registers the
+        // row (llama-server ignores Authorization unless --api-key was set, which the
+        // operator then overrides).
+        seedIfAbsent("provider.llama-cpp.baseUrl", "http://localhost:8080/v1");
+        seedIfAbsent("provider.llama-cpp.apiKey", "llama-cpp");
+        seedIfAbsent("provider.llama-cpp.models", "[]");
+
         seedIfAbsent("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
         seedIfAbsent("provider.openrouter.apiKey", "");
         seedIfAbsent("provider.openrouter.leaderboardUrl", "https://openrouter.ai/rankings");

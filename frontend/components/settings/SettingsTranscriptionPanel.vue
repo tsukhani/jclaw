@@ -507,22 +507,45 @@ onUnmounted(() => stopTranscriptionPolling())
               >no API key — configure in LLM Providers</span>
             </label>
             <label
-              for="diarization-provider-ollama-local"
+              for="diarization-provider-llama-cpp"
               class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+              title="llama.cpp (llama-server) accepts audio input over its OpenAI-compatible API — the local audio-diarization path. Audio support is experimental upstream."
             >
               <input
-                id="diarization-provider-ollama-local"
+                id="diarization-provider-llama-cpp"
                 type="radio"
                 name="diarization-provider"
-                value="ollama-local"
-                :checked="diarizationProvider === 'ollama-local'"
+                value="llama-cpp"
+                :checked="diarizationProvider === 'llama-cpp'"
                 class="accent-emerald-600"
-                @change="setDiarizationProvider('ollama-local')"
+                @change="setDiarizationProvider('llama-cpp')"
               >
-              <span class="flex-1 text-sm text-fg-primary">Ollama Local</span>
+              <span class="flex-1 text-sm text-fg-primary">llama.cpp</span>
               <span
                 class="text-[10px] px-1 border"
-                :class="diarizationProvider === 'ollama-local'
+                :class="diarizationProvider === 'llama-cpp'
+                  ? 'text-green-700 dark:text-green-400 border-green-400/30'
+                  : 'text-fg-muted border-input'"
+              >local</span>
+            </label>
+            <label
+              for="diarization-provider-vllm"
+              class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+              title="vLLM audio input over the OpenAI-compatible API depends on the vLLM version and model — verify with your setup."
+            >
+              <input
+                id="diarization-provider-vllm"
+                type="radio"
+                name="diarization-provider"
+                value="vllm"
+                :checked="diarizationProvider === 'vllm'"
+                class="accent-emerald-600"
+                @change="setDiarizationProvider('vllm')"
+              >
+              <span class="flex-1 text-sm text-fg-primary">vLLM</span>
+              <span
+                class="text-[10px] px-1 border"
+                :class="diarizationProvider === 'vllm'
                   ? 'text-green-700 dark:text-green-400 border-green-400/30'
                   : 'text-fg-muted border-input'"
               >local</span>

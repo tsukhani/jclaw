@@ -518,6 +518,7 @@ const PROVIDER_GROUPS: Record<string, 'remote' | 'local'> = {
   'ollama-local': 'local',
   'lm-studio': 'local',
   'vllm': 'local',
+  'llama-cpp': 'local',
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -528,6 +529,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   'ollama-local': 'Ollama Local',
   'lm-studio': 'LM Studio',
   'vllm': 'vLLM',
+  'llama-cpp': 'llama.cpp',
 }
 
 function providerGroup(name: string): 'remote' | 'local' {
