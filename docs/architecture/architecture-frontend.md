@@ -19,7 +19,7 @@ The frontend is a Nuxt 4 SPA (`ssr: false`) serving as the single-page control p
 | Validation | Zod (`types/schemas.ts`, via `useApiParsed`) | 4.4 |
 | Tables | `@tanstack/vue-table` | 8.21 |
 | Markdown rendering | `marked` + `dompurify` | 18.0 / 3.4 |
-| Package manager | pnpm | 11.11.0 (pinned with `+sha512` in `package.json`) |
+| Package manager | pnpm | 11.13.0 (pinned with `+sha512` in `package.json`) |
 | Unit tests | Vitest (`jsdom` env) | 4.1 |
 | Component test utils | `@vue/test-utils` + `@nuxt/test-utils` | 2.4 / 4.0 |
 | E2E tests | Playwright | 1.61.0 |

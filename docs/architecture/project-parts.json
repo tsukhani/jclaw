@@ -47,7 +47,7 @@
       ],
       "build": "nuxi generate -> public/spa/",
       "test": "Vitest 4 (jsdom), @nuxt/test-utils, Playwright 1.61.0 (e2e)",
-      "package_manager": "pnpm 11.11.0 (+sha512 pin)",
+      "package_manager": "pnpm 11.13.0 (+sha512 pin)",
       "entry_points": ["frontend/app.vue", "frontend/pages"],
       "critical_directories": [
         "frontend/pages", "frontend/components", "frontend/composables",

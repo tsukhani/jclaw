@@ -101,7 +101,7 @@ jclaw/
 │   ├── tests/e2e/, playwright.config.ts  # Playwright E2E harness.
 │   ├── vitest.config.ts          # jsdom env.
 │   ├── nuxt.config.ts, components.json, eslint.config.mjs, stylelint.config.mjs
-│   └── package.json              # pnpm; pinned 11.11.0 (+sha512).
+│   └── package.json              # pnpm; pinned 11.13.0 (+sha512).
 │
 ├── sidecar/                      # Python local-generation daemons (uv-run).
 │   ├── image/                    # Local diffusion image model (FLUX.2 klein).

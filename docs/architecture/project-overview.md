@@ -34,7 +34,7 @@ Current version: **0.16.19** (status: pre-v1 / alpha, work in progress per AGENT
 | Document handling | Apache Tika 3.3.1, flexmark 0.64.8, flying-saucer PDF, Tesseract OCR | `marked` + `DOMPurify` for markdown rendering |
 | Tokenization | JTokkit 1.1.0 (`llm.TokenUsageEstimator`, Caffeine-memoized) | — |
 | Styling | Play Groovy templates (auth + error pages only) | Tailwind CSS v4 (via `@tailwindcss/vite`), shadcn-nuxt on Reka UI |
-| Package manager | Gradle (`build.gradle.kts`, `org.playframework.play1` plugin) | pnpm 11.11.0 (pinned with `+sha512` integrity hash) |
+| Package manager | Gradle (`build.gradle.kts`, `org.playframework.play1` plugin) | pnpm 11.13.0 (pinned with `+sha512` integrity hash) |
 | Testing | JUnit 6 (Jupiter 6.x, bundled by the fork), Play `UnitTest`/`FunctionalTest`, `play autotest` | Vitest 4, `@vue/test-utils`, `@nuxt/test-utils`, jsdom, Playwright 1.61.0 |
 | Build | `play precompile` + `gradle playBundle` / `play dist` | `nuxi generate` → `public/spa/` |
 | CI | Jenkins (`Jenkinsfile`, tools `jdk 'JDK25'` + `nodejs 'node-24'`) | — |
