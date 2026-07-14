@@ -67,7 +67,7 @@ Play backend
 
 ### Browser automation
 
-- Microsoft Playwright for Java 1.60. Chromium installed into `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` during Docker build (no runtime download). Reaped by `BrowserCleanupJob`.
+- Microsoft Playwright for Java 1.61.0. Chromium installed into `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` during Docker build (no runtime download). Reaped by `BrowserCleanupJob`.
 
 ### File / document handling & media
 

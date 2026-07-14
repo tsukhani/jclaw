@@ -67,6 +67,16 @@ All endpoints are defined in `conf/routes`. Unless noted, they are JSON-over-HTT
 
 Task **execution is owned by db-scheduler** (atomic row-claim, retries, heartbeat recovery) — not a custom `@Every` poller. A task with `agent != null` runs its description as a prompt through `AgentRunner` against a synthetic `"task"` channel; reminders are tasks with `auto_delete_on_complete`.
 
+## Memory
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/memories` | List agent-scoped memories (filter / paginate). |
+| PUT | `/api/memories/{memoryId}` | Update a memory row. |
+| DELETE | `/api/memories` · `/{memoryId}` | Bulk delete · single delete. |
+
+Backed by `JpaMemoryStore` — agent-scoped rows with hybrid keyword + vector recall (see [Backend Architecture](architecture-backend.md) → Memory).
+
 ## Bindings, channels & webhooks
 
 | Method | Path | Purpose |

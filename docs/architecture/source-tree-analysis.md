@@ -39,9 +39,10 @@ jclaw/
 │   │   ├── McpClient.java        # JSON-RPC state machine.
 │   │   ├── McpStdioTransport, McpStreamableHttpTransport, McpConnectionManager
 │   │   └── McpToolAdapter.java   # Bridges discovered MCP tools into agents.ToolRegistry.
-│   ├── memory/                   # Pluggable memory store.
-│   │   ├── MemoryStore.java (iface), JpaMemoryStore.java (default), MemoryStoreFactory.java
-│   │   └── Neo4jMemoryStore.java # Optional; reflection-loaded if the Neo4j driver is present.
+│   ├── memory/                   # Memory store (single JPA-backed impl; Neo4j dropped).
+│   │   ├── MemoryStore.java (iface), JpaMemoryStore.java, MemoryStoreFactory.java
+│   │   ├── PgVectorProvisioner.java, ReciprocalRankFusion.java   # hybrid vector recall (pgvector / Lucene-HNSW)
+│   │   └── MemoryAutoCapture.java, MemoryReranker.java, MemoryDecay.java, MemoryAttentionGate.java, MemoryCategory.java, MemorySafety.java
 │   ├── tools/                    # Tool implementations exposed to agents (~22).
 │   │   ├── ShellExecTool.java    # Shell exec (consults AgentSkillAllowedTool at call time).
 │   │   ├── FileSystemTools, WebFetchTool (SSRF-guarded), WebSearchTool
@@ -100,7 +101,7 @@ jclaw/
 │   ├── tests/e2e/, playwright.config.ts  # Playwright E2E harness.
 │   ├── vitest.config.ts          # jsdom env.
 │   ├── nuxt.config.ts, components.json, eslint.config.mjs, stylelint.config.mjs
-│   └── package.json              # pnpm; pinned 11.7.0 (+sha512).
+│   └── package.json              # pnpm; pinned 11.11.0 (+sha512).
 │
 ├── sidecar/                      # Python local-generation daemons (uv-run).
 │   ├── image/                    # Local diffusion image model (FLUX.2 klein).
@@ -122,7 +123,7 @@ jclaw/
 ├── Dockerfile                    # Multi-stage build → GHCR image.
 ├── docker-compose.yml            # Consumer-facing single-container deploy.
 ├── Jenkinsfile                   # CI (build, test, dist/bundle, release to GitHub + GHCR).
-├── .play-version                 # Pinned play1 fork version (1.13.44).
+├── .play-version                 # Pinned play1 fork version (1.13.45).
 └── README.md, CLAUDE.md, AGENTS.md, LICENSE  # Root docs.
 ```
 

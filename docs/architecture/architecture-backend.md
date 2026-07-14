@@ -14,7 +14,7 @@ The architectural style is **service-oriented with a static-method convention** 
 
 | Category | Choice | Version | Rationale |
 |---|---|---|---|
-| Framework | Play Framework | 1.13.x (custom fork `tsukhani/play1`, pinned `.play-version` = `1.13.44`) | Established convention in the org; fast hot-reload; no Spring weight. Fork adds JDK 25, Jakarta Persistence, HTTP/2+HTTP/3. |
+| Framework | Play Framework | 1.13.x (custom fork `tsukhani/play1`, pinned `.play-version` = `1.13.45`) | Established convention in the org; fast hot-reload; no Spring weight. Fork adds JDK 25, Jakarta Persistence, HTTP/2+HTTP/3. |
 | Language | Java | 25 (`java.source=25`) | Virtual threads used across task execution and LLM streaming. |
 | ORM | JPA via Hibernate | bundled | `play.db.jpa.Model` superclass; `jpa.ddl=update` in both dev and prod; Caffeine L2 + query cache (JCLAW-205). |
 | DB (dev) | H2 file | `jdbc:h2:file:./data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE` | Persists across restarts; MySQL mode for fewer surprises when switching to Postgres. |
@@ -22,9 +22,9 @@ The architectural style is **service-oriented with a static-method convention** 
 | Pool | HikariCP (Play-bundled) | dev 5–20, prod 5–64 | Prod pool raised to 64 (chat streams hold a JPA connection for the SSE wait). |
 | Outbound HTTP | **OkHttp 5** | `okhttp-jvm` 5.4.0 + `okhttp-sse` | Single outbound stack via `utils.HttpFactories`; virtual-thread dispatcher; pluggable DNS for SSRF. No `java.net.http.HttpClient` in `app/`. |
 | LLM | OpenAI/Ollama/OpenRouter/TogetherAI | — | Sealed `LlmProvider` hierarchy; OpenAI-compatible wire format. |
-| Full-text search | Apache Lucene | 10.4.0 | `services.search.LuceneIndexer` owns per-scope `FSDirectory` under `data/jclaw-lucene/`. |
+| Full-text search | Apache Lucene | 10.5.0 | `services.search.LuceneIndexer` owns per-scope `FSDirectory` under `data/jclaw-lucene/`. |
 | Scheduling | db-scheduler | 16.x | Persistent task scheduling (`scheduled_tasks` table) with atomic row-claim, retries, heartbeat recovery. |
-| Browser automation | Playwright for Java | 1.60 | Chromium installed at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` in Docker. |
+| Browser automation | Playwright for Java | 1.61.0 | Chromium installed at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` in Docker. |
 | Document parsing | Apache Tika | 3.3.1 | Tika parsers package with several excludes (lucene, cxf, mail) to slim the deploy; Tesseract OCR subprocess. |
 | Markdown | flexmark | 0.64.8 | Plus extensions: tables, strikethrough, tasklist, autolink, typographic. |
 | PDF | flying-saucer | 9.4 | PDF output for exports. |
@@ -93,7 +93,7 @@ For channel webhooks, the prelude changes: `WebhookXController.webhook` → veri
 
 ### Memory (`app/memory/`)
 
-`MemoryStore` interface with two backends selected by `memory.backend`: `JpaMemoryStore` (default, `memory` table) and `Neo4jMemoryStore` (optional, reflection-loaded if the Neo4j driver is on the classpath). Memory rows are agent-scoped and full-text-indexed in Lucene.
+`MemoryStore` interface with a single implementation, `JpaMemoryStore` (the `memory` table) — the former pluggable `Neo4jMemoryStore` was dropped (`MemoryStoreFactory.create()`), so vector similarity and graph/ontology now live in Postgres. Memory rows are agent-scoped. Recall is hybrid — keyword plus vector similarity, blended by reciprocal-rank fusion (`ReciprocalRankFusion`) — and the vector backend is dialect-driven: `pgvector` on Postgres (provisioned by `PgVectorProvisioner`), an embedded Lucene HNSW index on H2. Supporting pieces: `MemoryAutoCapture`, `MemoryReranker`, `MemoryDecay`, `MemoryAttentionGate`, `MemoryCategory`, `MemorySafety`.
 
 ### Background jobs (`app/jobs/`)
 

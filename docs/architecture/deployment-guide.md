@@ -126,4 +126,4 @@ If fronting with nginx:
 
 - `/deploy` bumps `application.version` in `conf/application.conf`, creates the signed release commit + tag (`v0.X.Y`), and pushes to both remotes.
 - Jenkins triggers on push; release builds (tag + GitHub Release + GHCR) are gated by the `RELEASE` parameter.
-- Latest observed on `main`: `v0.14.47`.
+- Latest observed on `main`: `v0.16.19`.
