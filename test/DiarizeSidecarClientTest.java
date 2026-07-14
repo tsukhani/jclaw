@@ -49,13 +49,14 @@ class DiarizeSidecarClientTest extends UnitTest {
                   {"startMs": 7070, "endMs": 7540, "speaker": "SPEAKER_01"}
                 ]}"""));
 
-        var turns = client().diarize(audio, null);
+        var turns = client().diarize(audio, null, false);
 
         assertEquals(2, turns.size());
         assertEquals(1769, turns.get(0).startMs());
         assertEquals(2393, turns.get(0).endMs());
         assertEquals("SPEAKER_00", turns.get(0).speaker());
         assertEquals("SPEAKER_01", turns.get(1).speaker());
+        assertNull(turns.get(0).emotion(), "no emotion field → null");
 
         var recorded = server.takeRequest();
         assertEquals("/diarize", recorded.getUrl().encodedPath());
@@ -70,11 +71,33 @@ class DiarizeSidecarClientTest extends UnitTest {
     void diarize_includesSpeakerHintWhenGiven() throws Exception {
         server.enqueue(json(200, "{\"turns\": []}"));
 
-        client().diarize(audio, 2);
+        client().diarize(audio, 2, false);
 
         var body = server.takeRequest().getBody().utf8();
         assertTrue(body.contains("\"num_speakers\":2"),
                 "request carries the speaker-count hint: " + body);
+        assertFalse(body.contains("emotions"), "no emotions flag when false: " + body);
+    }
+
+    @Test
+    void diarize_sendsEmotionsFlagAndParsesPerTurnEmotion() throws Exception {
+        server.enqueue(json(200, """
+                {"turns": [
+                  {"startMs": 0, "endMs": 9000, "speaker": "SPEAKER_00",
+                   "emotion": {"label": "angry", "confidence": 0.83,
+                               "valence": 0.54, "arousal": 0.85, "dominance": 0.79}},
+                  {"startMs": 9000, "endMs": 9200, "speaker": "SPEAKER_01"}
+                ]}"""));
+
+        var turns = client().diarize(audio, null, true);
+
+        assertTrue(server.takeRequest().getBody().utf8().contains("\"emotions\":true"),
+                "request carries the emotions flag");
+        var emo = turns.get(0).emotion();
+        assertNotNull(emo, "first turn parsed an emotion");
+        assertEquals("angry", emo.label());
+        assertEquals(0.85, emo.arousal(), 1e-9);
+        assertNull(turns.get(1).emotion(), "turn without an emotion field → null");
     }
 
     @Test
@@ -83,7 +106,7 @@ class DiarizeSidecarClientTest extends UnitTest {
 
         var client = client();
         var e = assertThrows(TranscriptionException.class,
-                () -> client.diarize(audio, null));
+                () -> client.diarize(audio, null, false));
         assertTrue(e.getMessage().contains("diarize sidecar failed: HTTP 500"),
                 "names the sidecar and status: " + e.getMessage());
     }
@@ -94,7 +117,7 @@ class DiarizeSidecarClientTest extends UnitTest {
 
         var client = client();
         var e = assertThrows(TranscriptionException.class,
-                () -> client.diarize(audio, null));
+                () -> client.diarize(audio, null, false));
         assertTrue(e.getMessage().contains("unparseable"),
                 "names the parse failure: " + e.getMessage());
     }

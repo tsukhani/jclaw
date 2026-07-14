@@ -13,8 +13,10 @@ classical-SER path (DiaRemot) did not transfer to 8kHz telephony.
 
 Protocol (bound to 127.0.0.1 only):
   GET  /health  -> 200 {status, model, loaded}
-  POST /diarize {audio_path, num_speakers?}
-        -> 200 {turns: [{startMs, endMs, speaker}, ...]}
+  POST /diarize {audio_path, num_speakers?, emotions?}
+        -> 200 {turns: [{startMs, endMs, speaker, emotion?}, ...]}
+        emotions=true adds a MERaLiON-SER pass (ser.py) per turn — a
+        categorical label + valence/arousal/dominance — best-effort.
   POST /shutdown -> 200 (JCLAW-637: evict an adopted orphan)
 
 The audio file is passed by path, not uploaded: both processes run on the
@@ -46,6 +48,7 @@ class SidecarState:
         self.last_activity = time.monotonic()
         self.run_lock = threading.Lock()
         self._worker = None
+        self._ser_worker = None
         self.io_lock = threading.Lock()  # serializes worker line-protocol I/O
 
     def worker(self):
@@ -65,6 +68,26 @@ class SidecarState:
         if not ready or not json.loads(ready).get("ready"):
             raise RuntimeError("pyannote worker failed to start: %r" % ready)
         self._worker = w
+        return w
+
+    def ser_worker(self):
+        """Persistent MERaLiON-SER worker — spawned lazily on the first
+        emotions=true request (the transformers env + model load are paid once,
+        then amortized). Caller must hold io_lock."""
+        import subprocess
+        w = self._ser_worker
+        if w is not None and w.poll() is None:
+            return w
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        sys.stderr.write("[diarize-sidecar] spawning persistent SER worker\n")
+        w = subprocess.Popen(["uv", "run", "ser.py", "--worker"],
+                             cwd=script_dir, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             text=True, bufsize=1)
+        ready = w.stdout.readline()
+        if not ready or not json.loads(ready).get("ready"):
+            raise RuntimeError("SER worker failed to start: %r" % ready)
+        self._ser_worker = w
         return w
 
     def touch(self):
@@ -154,15 +177,41 @@ class Handler(BaseHTTPRequestHandler):
             out = json.loads(line)
             if "error" in out:
                 raise RuntimeError(out["error"])
-            sys.stderr.write("[diarize-sidecar] diarized %s: %d turn(s) in %.1fs\n"
-                             % (os.path.basename(audio_path),
-                                len(out.get("turns", [])), time.time() - t0))
+            turns = out.get("turns", [])
+            if req.get("emotions") and turns:
+                self._attach_emotions(audio_path, turns)
+            sys.stderr.write("[diarize-sidecar] diarized %s: %d turn(s)%s in %.1fs\n"
+                             % (os.path.basename(audio_path), len(turns),
+                                " +emotion" if req.get("emotions") else "", time.time() - t0))
             self._send_json(200, out)
         except Exception as e:  # noqa: BLE001 — reported to the client verbatim
             self._send_json(500, {"error": str(e)})
         finally:
             self.state.touch()
             self.state.run_lock.release()
+
+    def _attach_emotions(self, audio_path, turns):
+        """Second pass: MERaLiON-SER per turn, merged onto the turns in place.
+        Best-effort (JCLAW-563 pattern) — an emotion failure must not sink the
+        diarization; the turns still return, just without labels."""
+        spans = [[t["startMs"], t["endMs"]] for t in turns]
+        try:
+            with self.state.io_lock:
+                w = self.state.ser_worker()
+                w.stdin.write(json.dumps({"audio_path": audio_path, "spans": spans}) + "\n")
+                w.stdin.flush()
+                line = w.stdout.readline()
+            if not line:
+                self.state._ser_worker = None
+                raise RuntimeError("SER worker died mid-request")
+            res = json.loads(line)
+            if "error" in res:
+                raise RuntimeError(res["error"])
+            for turn, emo in zip(turns, res.get("emotions", [])):
+                if emo:
+                    turn["emotion"] = emo
+        except Exception as e:  # noqa: BLE001 — emotion is best-effort
+            sys.stderr.write("[diarize-sidecar] emotion pass failed: %s\n" % e)
 
 
 def _prewarm(state: SidecarState):

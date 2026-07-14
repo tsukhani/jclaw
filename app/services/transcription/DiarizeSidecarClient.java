@@ -24,8 +24,19 @@ import java.util.concurrent.TimeUnit;
  */
 public class DiarizeSidecarClient {
 
-    /** One speaker turn: {@code [startMs, endMs)} attributed to {@code speaker}. */
-    public record Turn(long startMs, long endMs, String speaker) {}
+    /** One speaker turn: {@code [startMs, endMs)} attributed to {@code speaker},
+     *  optionally with a per-turn emotion (null unless emotions were requested
+     *  and the turn was long enough to score). */
+    public record Turn(long startMs, long endMs, String speaker, Emotion emotion) {
+        public Turn(long startMs, long endMs, String speaker) {
+            this(startMs, endMs, speaker, null);
+        }
+    }
+
+    /** MERaLiON-SER per-turn emotion: a categorical {@code label} plus optional
+     *  valence/arousal/dominance in [0,1] (null when the model emits no VAD). */
+    public record Emotion(String label, double confidence,
+                          Double valence, Double arousal, Double dominance) {}
 
     private static final MediaType JSON = MediaType.get("application/json");
 
@@ -63,20 +74,21 @@ public class DiarizeSidecarClient {
      * call may build the script env, download the gated weights, and load the
      * pipeline. {@code numSpeakers} is an optional hint ({@code null} = auto).
      */
-    public List<Turn> diarize(Path audioFile, Integer numSpeakers) {
+    public List<Turn> diarize(Path audioFile, Integer numSpeakers, boolean emotions) {
         SIDECAR_LOCK.lock();
         try {
-            return diarizeLocked(audioFile, numSpeakers);
+            return diarizeLocked(audioFile, numSpeakers, emotions);
         } finally {
             SIDECAR_LOCK.unlock();
         }
     }
 
-    private List<Turn> diarizeLocked(Path audioFile, Integer numSpeakers) {
+    private List<Turn> diarizeLocked(Path audioFile, Integer numSpeakers, boolean emotions) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : DiarizeSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("audio_path", audioFile.toAbsolutePath().toString());
         if (numSpeakers != null && numSpeakers > 0) body.addProperty("num_speakers", numSpeakers);
+        if (emotions) body.addProperty("emotions", true);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/diarize")
                 .post(RequestBody.create(body.toString(), JSON))
@@ -93,8 +105,8 @@ public class DiarizeSidecarClient {
             var turns = new ArrayList<Turn>();
             for (var el : root.getAsJsonArray("turns")) {
                 var o = el.getAsJsonObject();
-                turns.add(new Turn(o.get("startMs").getAsLong(),
-                        o.get("endMs").getAsLong(), o.get("speaker").getAsString()));
+                turns.add(new Turn(o.get("startMs").getAsLong(), o.get("endMs").getAsLong(),
+                        o.get("speaker").getAsString(), parseEmotion(o)));
             }
             return turns;
         } catch (IOException e) {
@@ -104,6 +116,18 @@ public class DiarizeSidecarClient {
             throw new TranscriptionException(
                     "diarize sidecar returned an unparseable response: " + e.getMessage(), e);
         }
+    }
+
+    /** The optional {@code emotion} object on a turn, or null if absent. */
+    private static Emotion parseEmotion(JsonObject turn) {
+        if (!turn.has("emotion") || turn.get("emotion").isJsonNull()) return null;
+        var e = turn.getAsJsonObject("emotion");
+        return new Emotion(
+                e.get("label").getAsString(),
+                e.has("confidence") ? e.get("confidence").getAsDouble() : 0.0,
+                e.has("valence") ? e.get("valence").getAsDouble() : null,
+                e.has("arousal") ? e.get("arousal").getAsDouble() : null,
+                e.has("dominance") ? e.get("dominance").getAsDouble() : null);
     }
 
     private static String truncate(String s) {

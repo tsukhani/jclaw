@@ -256,12 +256,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             return enrollVoice(path, JsonArgs.optString(args, ARG_SPEAKER_NAME));
         }
 
+        boolean emotionsArg = JsonArgs.optBool(args, ARG_EMOTIONS);
         if (local) {
             return diarizeLocal(path, att.originalFilename, JsonArgs.optString(args, ARG_LANGUAGE),
-                    JsonArgs.optInteger(args, ARG_NUM_SPEAKERS));
+                    JsonArgs.optInteger(args, ARG_NUM_SPEAKERS), emotionsArg);
         }
-
-        boolean emotionsArg = JsonArgs.optBool(args, ARG_EMOTIONS);
 
         try {
             var audio = LlmAudio.prepare(path, att.mimeType);
@@ -286,13 +285,14 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      * No audio leaves the host — the privacy/cost path. No per-turn emotion
      * (pyannote yields turns only); the cloud path stays for that case.
      */
-    private String diarizeLocal(Path path, String filename, String language, Integer numSpeakers) {
+    private String diarizeLocal(Path path, String filename, String language,
+                                Integer numSpeakers, boolean emotions) {
         try {
             var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                     .orElse(WhisperModel.DEFAULT);
             var segments = WhisperTranscriber.transcribeSegments(
                     path, model, language != null && !language.isBlank() ? language : null);
-            var turns = new DiarizeSidecarClient().diarize(path, numSpeakers);
+            var turns = new DiarizeSidecarClient().diarize(path, numSpeakers, emotions);
             var transcript = DiarizationFusion.fuse(segments, turns);
             if (transcript.isBlank()) {
                 return "No speech was found in %s.".formatted(filename);

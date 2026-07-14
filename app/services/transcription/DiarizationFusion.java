@@ -2,6 +2,7 @@ package services.transcription;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Fuses ASR segments (WHAT + WHEN) with diarization turns (WHO + WHEN) into a
@@ -22,42 +23,50 @@ public final class DiarizationFusion {
     public static String fuse(List<WhisperTranscriber.Segment> segments,
                               List<DiarizeSidecarClient.Turn> turns) {
         var sb = new StringBuilder();
-        String currentSpeaker = null;
+        String curSpeaker = null;
+        String curEmotion = null;
         var buffer = new ArrayList<String>();
         for (var seg : segments) {
             var text = seg.text() == null ? "" : seg.text().strip();
             if (text.isEmpty()) continue;
-            var speaker = speakerFor(seg.startMs(), seg.endMs(), turns);
-            if (!speaker.equals(currentSpeaker)) {
-                flush(sb, currentSpeaker, buffer);
-                currentSpeaker = speaker;
+            var turn = turnFor(seg.startMs(), seg.endMs(), turns);
+            var speaker = turn != null ? turn.speaker() : "?";
+            var emotion = turn != null && turn.emotion() != null ? turn.emotion().label() : null;
+            // A new line whenever the speaker OR the emotion changes — so a turn
+            // carries one delivery, matching the cloud "(delivery)" line shape.
+            if (!speaker.equals(curSpeaker) || !Objects.equals(emotion, curEmotion)) {
+                flush(sb, curSpeaker, curEmotion, buffer);
+                curSpeaker = speaker;
+                curEmotion = emotion;
                 buffer.clear();
             }
             buffer.add(text);
         }
-        flush(sb, currentSpeaker, buffer);
+        flush(sb, curSpeaker, curEmotion, buffer);
         return sb.toString();
     }
 
-    private static void flush(StringBuilder sb, String speaker, List<String> buffer) {
+    private static void flush(StringBuilder sb, String speaker, String emotion, List<String> buffer) {
         if (speaker == null || buffer.isEmpty()) return;
         if (sb.length() > 0) sb.append('\n');
-        sb.append(speaker).append(": ").append(String.join(" ", buffer));
+        sb.append(speaker);
+        if (emotion != null) sb.append(" (").append(emotion).append(')');
+        sb.append(": ").append(String.join(" ", buffer));
     }
 
-    /** Speaker of the turn with the most time-overlap with {@code [startMs,endMs)};
-     *  the earliest such turn wins ties, {@code "?"} when no turn overlaps. */
-    private static String speakerFor(long startMs, long endMs,
-                                     List<DiarizeSidecarClient.Turn> turns) {
-        String best = null;
+    /** The turn with the most time-overlap with {@code [startMs,endMs)}; the
+     *  earliest such turn wins ties, null when no turn overlaps. */
+    private static DiarizeSidecarClient.Turn turnFor(long startMs, long endMs,
+                                                     List<DiarizeSidecarClient.Turn> turns) {
+        DiarizeSidecarClient.Turn best = null;
         long bestOverlap = 0;
         for (var t : turns) {
             long overlap = Math.min(endMs, t.endMs()) - Math.max(startMs, t.startMs());
             if (overlap > bestOverlap) {
                 bestOverlap = overlap;
-                best = t.speaker();
+                best = t;
             }
         }
-        return best != null ? best : "?";
+        return best;
     }
 }

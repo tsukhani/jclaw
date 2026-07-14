@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.DiarizationFusion;
+import services.transcription.DiarizeSidecarClient.Emotion;
 import services.transcription.DiarizeSidecarClient.Turn;
 import services.transcription.WhisperTranscriber.Segment;
 
@@ -56,6 +57,20 @@ class DiarizationFusionTest extends UnitTest {
         var turns = List.of(new Turn(0, 1000, "SPEAKER_00"));
 
         assertEquals("?: orphan", DiarizationFusion.fuse(segments, turns));
+    }
+
+    @Test
+    void emitsEmotionLabelAndSplitsLineWhenEmotionChanges() {
+        var segments = List.of(
+                new Segment(0, 1000, "calm bit"),
+                new Segment(1000, 2000, "then heated"));
+        var turns = List.of(
+                new Turn(0, 1000, "SPEAKER_00", new Emotion("neutral", 0.8, 0.5, 0.4, 0.5)),
+                new Turn(1000, 2000, "SPEAKER_00", new Emotion("angry", 0.7, 0.4, 0.85, 0.8)));
+
+        // Same speaker, but the emotion change starts a new line — one delivery per line.
+        assertEquals("SPEAKER_00 (neutral): calm bit\nSPEAKER_00 (angry): then heated",
+                DiarizationFusion.fuse(segments, turns));
     }
 
     @Test
