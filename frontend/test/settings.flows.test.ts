@@ -1274,7 +1274,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     // No transcription.diarization.provider entry in the default fixture →
     // diarization renders OFF; flipping the toggle enables it with a
     // provider default.
-    const toggle = component.find('button[aria-label="Enable speaker diarization via a cloud audio model"]')
+    const toggle = component.find('button[aria-label="Enable speaker diarization"]')
     expect(toggle.exists()).toBe(true)
     expect(toggle.attributes('aria-pressed')).toBe('false')
     await toggle.trigger('click')
@@ -1385,6 +1385,48 @@ describe('Settings page — Transcription enable + provider switch', () => {
     const hit = captured.find(b => b.key === 'transcription.diarization.model')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('qwen2.5-omni')
+  })
+
+  it('diarization pyannote-local provider posts the provider, clears the model, and hides the audio-model select', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries(),
+          { key: 'transcription.diarization.provider', value: 'pyannote-local' },
+        ],
+      }),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key?: string, value?: string }
+        captured.push(body)
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSettingsSection('transcription')
+
+    // The on-device pyannote radio is present (local — no API key gate).
+    const radio = component.find('#diarization-provider-pyannote-local')
+    expect(radio.exists()).toBe(true)
+    expect(radio.attributes('value')).toBe('pyannote-local')
+
+    // No audio-model dropdown on the local pyannote path (one fixed model).
+    expect(component.find('select[aria-label="Diarization audio model"]').exists()).toBe(false)
+
+    // Selecting it posts the provider AND clears the model (parallel writes).
+    await radio.trigger('change')
+    await flushPromises()
+    expect(captured.find(b => b.key === 'transcription.diarization.provider')?.value).toBe('pyannote-local')
+    expect(captured.find(b => b.key === 'transcription.diarization.model')?.value).toBe('')
   })
 
   it('POSTs transcription.provider on @change of an enabled cloud-provider radio', async () => {

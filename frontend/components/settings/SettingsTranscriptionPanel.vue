@@ -75,12 +75,11 @@ async function toggleTranscriptionEnabled() {
   finally { saving.value = false }
 }
 
-// JCLAW-654: diarization runs through an audio-capable chat model — cloud
-// (OpenRouter/OpenAI) or a local Ollama model (ollama-local). The former
-// fully-on-device diarization sidecar was deferred (JCLAW-656) and stays an
-// "unavailable" option. The operator picks provider + model here; the
-// diarize_audio tool errors clearly when unset. Mirrors the Image Captioning
-// provider/model pattern.
+// Diarization runs either through an audio-capable chat model — cloud
+// (OpenRouter/OpenAI) or local (llama.cpp/vLLM), which need an audio-model
+// pick — or through the fully on-device pyannote sidecar (JCLAW-565 revival),
+// which has one fixed model and needs no picker. The operator picks the
+// provider here; the diarize_audio tool errors clearly when unset.
 const diarizationProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.diarization.provider')?.value ?? '',
 )
@@ -88,6 +87,9 @@ const diarizationModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.diarization.model')?.value ?? '',
 )
 const diarizationEnabled = computed(() => diarizationProvider.value.trim().length > 0)
+// The fully on-device pyannote path: no audio-model picker (one fixed model),
+// no API key — its speaker turns are fused with the local ASR transcript.
+const diarizationIsLocal = computed(() => diarizationProvider.value === 'pyannote-local')
 // Audio-capable models the operator configured for the chosen provider — the picker
 // filters provider.{name}.models to the audio-tagged ones, so the operator selects
 // rather than free-types (a non-audio model would just fail on every recording).
@@ -452,7 +454,7 @@ onUnmounted(() => stopTranscriptionPolling())
         <button
           type="button"
           :aria-pressed="diarizationEnabled"
-          aria-label="Enable speaker diarization via a cloud audio model"
+          aria-label="Enable speaker diarization"
           :class="diarizationEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
           class="relative w-9 h-5 rounded-full transition-colors"
           @click="toggleDiarizationEnabled"
@@ -465,10 +467,12 @@ onUnmounted(() => stopTranscriptionPolling())
         <span class="text-[11px] text-fg-muted">{{ diarizationEnabled ? 'on' : 'off' }}</span>
       </div>
       <div class="px-4 pt-2.5 text-[11px] text-fg-muted">
-        Who-said-what transcripts (the diarize-audio tool) are produced by an
-        <span class="font-medium">audio-capable</span> chat model — the recording is sent to it
-        with a verbatim-diarization prompt. Pick a provider and one of its audio-capable models
-        below (API keys come from <span class="text-fg-muted">LLM Providers</span> above).
+        Who-said-what transcripts (the diarize-audio tool) come from an
+        <span class="font-medium">audio-capable</span> chat model (cloud or local) — the recording
+        is sent with a verbatim-diarization prompt — or from the fully on-device
+        <span class="font-mono">pyannote</span> diarizer (speaker turns fused with the local ASR
+        transcript; no audio leaves the host, no emotion tags). Pick a provider below
+        (chat-model API keys come from <span class="text-fg-muted">LLM Providers</span> above).
         Ordinary voice-note transcription stays local and is unaffected.
       </div>
       <template v-if="diarizationEnabled">
@@ -575,9 +579,34 @@ onUnmounted(() => stopTranscriptionPolling())
                   : 'text-fg-muted border-input'"
               >local</span>
             </label>
+            <label
+              for="diarization-provider-pyannote-local"
+              class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+              title="On-device pyannote speaker diarization (community-1), fused with the local ASR transcript — no audio leaves the host. Speaker turns only, no emotion. Needs a Hugging Face token (shared with Image Generation) for the gated weights."
+            >
+              <input
+                id="diarization-provider-pyannote-local"
+                type="radio"
+                name="diarization-provider"
+                value="pyannote-local"
+                :checked="diarizationProvider === 'pyannote-local'"
+                class="accent-emerald-600"
+                @change="setDiarizationProvider('pyannote-local')"
+              >
+              <span class="flex-1 text-sm text-fg-primary">pyannote (on-device)</span>
+              <span
+                class="text-[10px] px-1 border"
+                :class="diarizationProvider === 'pyannote-local'
+                  ? 'text-green-700 dark:text-green-400 border-green-400/30'
+                  : 'text-fg-muted border-input'"
+              >local</span>
+            </label>
           </div>
         </fieldset>
-        <div class="border-t border-border">
+        <div
+          v-if="!diarizationIsLocal"
+          class="border-t border-border"
+        >
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Audio model</span>
             <select
@@ -613,6 +642,16 @@ onUnmounted(() => stopTranscriptionPolling())
             The saved model “{{ diarizationModel }}” is not marked audio-capable — pick one
             from the list so recordings can actually be heard.
           </p>
+        </div>
+        <div
+          v-else
+          class="border-t border-border px-4 py-2.5 text-[11px] text-fg-muted"
+        >
+          Uses <span class="font-mono">pyannote/speaker-diarization-community-1</span> on-device —
+          speaker turns fused with the local ASR transcript, no model to pick. Needs
+          <span class="font-mono">uv</span> and a Hugging Face token (shared with
+          <span class="text-fg-muted">Image Generation</span>) for the gated weights, downloaded
+          on first use. Speaker turns only — no per-turn emotion.
         </div>
       </template>
     </div>
