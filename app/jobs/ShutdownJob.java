@@ -12,6 +12,7 @@ import services.TailscaleFunnel;
 import services.imagegen.LocalImageSidecarManager;
 import services.search.LuceneIndexer;
 import services.transcription.AsrSidecarManager;
+import services.transcription.DiarizeSidecarManager;
 import services.videogen.LocalVideoSidecarManager;
 import tools.PlaywrightBrowserTool;
 
@@ -67,6 +68,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("whatsapp-cobalt", WhatsAppCobaltRunner::stop),
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("asr-sidecar", AsrSidecarManager::stop),
+                new Component("diarize-sidecar", DiarizeSidecarManager::stop),
                 new Component("imagegen-sidecar", LocalImageSidecarManager::stop),
                 new Component("videogen-sidecar", LocalVideoSidecarManager::stop),
                 new Component("mcp-connections", McpConnectionManager::shutdown),
