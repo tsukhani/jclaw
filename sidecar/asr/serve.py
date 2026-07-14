@@ -40,6 +40,11 @@ REQUEST_TIMEOUT_SEC = int(os.environ.get("SIDECAR_REQUEST_TIMEOUT_SEC", "1740"))
 
 DEFAULT_IDENTITY = "asr"
 
+# ASR ids that route through the MERaLiON speech-LLM (plain transcript) + forced
+# alignment (segment times) instead of the Whisper engine, which emits times
+# natively. Maps the stable config id -> the HF repo passed to meralion.py.
+MERALION_HF = {"meralion-3-3b": "MERaLiON/MERaLiON-3-3B-ASR"}
+
 
 class SidecarState:
     def __init__(self, model: str, idle_timeout_s: float):
@@ -48,29 +53,60 @@ class SidecarState:
         self.last_activity = time.monotonic()
         self.run_lock = threading.Lock()
         self._asr_worker = None
+        # MERaLiON path: the speech-LLM emits a plain transcript, forced
+        # alignment (align.py) recovers the segment times Whisper gives natively.
+        self._meralion_worker = None
+        self._align_worker = None
         # JCLAW-650: serializes ALL worker line-protocol I/O — status and
         # prefetch share the worker with transcription.
         self.asr_io_lock = threading.Lock()
 
-    def asr_worker(self):
-        """JCLAW-649: persistent ASR worker — one-shot calls paid a python
-        start + engine import + model load (~5s) per request. Caller must
-        hold asr_io_lock."""
+    def _spawn(self, attr, script):
+        """JCLAW-649: lazily (re)spawn a persistent PEP-723 worker for `script`,
+        cached on `self.<attr>` — one-shot calls paid a python start + engine
+        import + model load (~5s) per request. Every ASR-family worker
+        (transcribe/meralion/align) shares this line-protocol lifecycle. Caller
+        must hold asr_io_lock."""
         import subprocess
-        w = self._asr_worker
+        w = getattr(self, attr)
         if w is not None and w.poll() is None:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        sys.stderr.write("[asr-sidecar] spawning persistent asr worker\n")
-        w = subprocess.Popen(["uv", "run", "transcribe.py", "--worker"],
+        sys.stderr.write("[asr-sidecar] spawning persistent %s worker\n" % script)
+        w = subprocess.Popen(["uv", "run", script, "--worker"],
                              cwd=script_dir, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              text=True, bufsize=1)
         ready = w.stdout.readline()
         if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("asr worker failed to start: %r" % ready)
-        self._asr_worker = w
+            raise RuntimeError("%s worker failed to start: %r" % (script, ready))
+        setattr(self, attr, w)
         return w
+
+    def asr_worker(self):
+        return self._spawn("_asr_worker", "transcribe.py")
+
+    def meralion_worker(self):
+        return self._spawn("_meralion_worker", "meralion.py")
+
+    def align_worker(self):
+        return self._spawn("_align_worker", "align.py")
+
+    def ask(self, attr, spawn, req):
+        """One line-protocol round trip on a worker: write request, read reply,
+        clear the cached handle if the worker died, raise on an {"error"} reply.
+        Caller must hold asr_io_lock."""
+        w = spawn()
+        w.stdin.write(json.dumps(req) + "\n")
+        w.stdin.flush()
+        line = w.stdout.readline()
+        if not line:
+            setattr(self, attr, None)
+            raise RuntimeError("%s died mid-request" % attr.lstrip("_"))
+        payload = json.loads(line)
+        if "error" in payload:
+            raise RuntimeError(payload["error"])
+        return payload
 
     def touch(self):
         self.last_activity = time.monotonic()
@@ -133,7 +169,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {
                 "status": "ok",
                 "model": self.state.model,
-                "loaded": self.state._asr_worker is not None,
+                "loaded": any(w is not None for w in (
+                    self.state._asr_worker, self.state._meralion_worker,
+                    self.state._align_worker)),
             })
         else:
             self._send_json(404, {"error": "unknown path %s" % self.path})
@@ -195,17 +233,19 @@ class Handler(BaseHTTPRequestHandler):
         try:
             t0 = time.time()
             with self.state.asr_io_lock:
-                w = self.state.asr_worker()
-                w.stdin.write(json.dumps({"audio": audio_path, "model": model,
-                                          "language": None if language == "-" else language}) + "\n")
-                w.stdin.flush()
-                line = w.stdout.readline()
-            if not line:
-                self.state._asr_worker = None
-                raise RuntimeError("asr worker died mid-request")
-            payload = json.loads(line)
-            if "error" in payload:
-                raise RuntimeError(payload["error"])
+                if model in MERALION_HF:
+                    # MERaLiON -> plain transcript, then forced-align to segments.
+                    text = self.state.ask(
+                        "_meralion_worker", self.state.meralion_worker,
+                        {"audio_path": audio_path, "model": MERALION_HF[model]}).get("text", "")
+                    payload = {"segments": self.state.ask(
+                        "_align_worker", self.state.align_worker,
+                        {"audio_path": audio_path, "text": text}).get("segments", [])}
+                else:
+                    payload = self.state.ask(
+                        "_asr_worker", self.state.asr_worker,
+                        {"audio": audio_path, "model": model,
+                         "language": None if language == "-" else language})
             sys.stderr.write("[asr-sidecar] transcribed %s: %d segment(s) in %.1fs\n"
                              % (os.path.basename(audio_path),
                                 len(payload.get("segments", [])), time.time() - t0))
