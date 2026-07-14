@@ -79,6 +79,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private static final String ARG_LANGUAGE = "language";
     private static final String ARG_EMOTIONS = "emotions";
     private static final String ARG_SPEAKER_NAME = "speaker_name";
+    private static final String ARG_NUM_SPEAKERS = "num_speakers";
 
     private static final String ACTION_DIARIZE = "diarize";
     private static final String ACTION_ENROLL = "enroll_voice";
@@ -124,7 +125,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 host is Anthony, the guest is Firdaus") so turns carry real names instead of \
                 Speaker 1/Speaker 2. Set 'emotions' true when the user asks for emotions or tone \
                 — each turn gets a perceived-emotion tag judged from the voice. 'language' \
-                (ISO 639-1) hints the recording's language when known. Known voices are matched \
+                (ISO 639-1) hints the recording's language when known. Pass 'num_speakers' when \
+                you know how many people are talking — for a phone call that's usually 2 — so the \
+                on-device diarizer doesn't merge similar voices into one speaker. Known voices are matched \
                 automatically: action 'enroll_voice' with 'speaker_name' saves a short reference \
                 sample of the attachment's voice (use it when the user asks to remember/enroll a \
                 voice — the attachment should contain ONLY that person speaking), and every later \
@@ -174,6 +177,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION,
                                 "Optional ISO 639-1 language hint (e.g. 'en', 'ms') when the "
                                         + "recording's language is known."),
+                        ARG_NUM_SPEAKERS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION,
+                                "Optional: how many people are in the recording, when known. "
+                                        + "Used by the on-device diarizer to avoid merging "
+                                        + "similar voices — phone calls are usually 2. Omit to "
+                                        + "auto-detect."),
                         ARG_EMOTIONS, Map.of(SchemaKeys.TYPE, "boolean",
                                 SchemaKeys.DESCRIPTION,
                                 "Tag each turn with the speaker's perceived emotion (from tone of "
@@ -248,7 +257,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
 
         if (local) {
-            return diarizeLocal(path, att.originalFilename, JsonArgs.optString(args, ARG_LANGUAGE));
+            return diarizeLocal(path, att.originalFilename, JsonArgs.optString(args, ARG_LANGUAGE),
+                    JsonArgs.optInteger(args, ARG_NUM_SPEAKERS));
         }
 
         boolean emotionsArg = JsonArgs.optBool(args, ARG_EMOTIONS);
@@ -276,13 +286,13 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      * No audio leaves the host — the privacy/cost path. No per-turn emotion
      * (pyannote yields turns only); the cloud path stays for that case.
      */
-    private String diarizeLocal(Path path, String filename, String language) {
+    private String diarizeLocal(Path path, String filename, String language, Integer numSpeakers) {
         try {
             var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
                     .orElse(WhisperModel.DEFAULT);
             var segments = WhisperTranscriber.transcribeSegments(
                     path, model, language != null && !language.isBlank() ? language : null);
-            var turns = new DiarizeSidecarClient().diarize(path, null);
+            var turns = new DiarizeSidecarClient().diarize(path, numSpeakers);
             var transcript = DiarizationFusion.fuse(segments, turns);
             if (transcript.isBlank()) {
                 return "No speech was found in %s.".formatted(filename);
