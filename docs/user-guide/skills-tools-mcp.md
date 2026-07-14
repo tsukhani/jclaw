@@ -51,7 +51,7 @@ A skill that's too narrow gets duplicated. A skill that's too broad gets attache
 The [Tools](/tools) page is a catalog of every built-in capability JClaw ships with. Each card shows:
 
 - **Icon and name.**
-- **Category** — `System`, `Web`, `Files`, or `Utilities`. (MCP-server tools aren't listed here — they live on the [MCP Servers](#mcp-servers) page.)
+- **Category** — `System`, `Web`, `Files`, or `Utilities`. (MCP-server tools aren't listed here — they live on the [MCP Servers](#skills-tools-mcp-mcp-servers) page.)
 - **Description** — what the tool does in one or two sentences.
 - **Functions** — the individual actions the tool exposes. Expand the card to see the per-function detail.
 

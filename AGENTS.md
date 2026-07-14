@@ -43,7 +43,7 @@ Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm 
 - Nuxt 4 SPA in `frontend/` with Tailwind CSS v4
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
 - Backend calls use Nuxt's auto-imported `useFetch` / `$fetch` directly; `frontend/composables/` adds `useApiParsed` (schema-validated reads, JCLAW-287) and `useApiMutation` (POST/PUT/DELETE) as consistent wrappers
-- Package manager: **pnpm** (pinned at 11.9.0)
+- Package manager: **pnpm** (pinned at 11.11.0)
 
 ### API Contract
 Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `GET /api/status`). The frontend consumes these through the proxy — no CORS configuration needed.

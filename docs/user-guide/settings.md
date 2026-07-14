@@ -80,7 +80,7 @@ Master toggle, then a backend radio group:
 
 - **OpenRouter** — reuses your OpenRouter API key from LLM Providers; captions with a vision model on OpenRouter.
 - **OpenAI** — reuses your OpenAI API key.
-- **Local VLM (Ollama)** — captions with a vision model you run in your own local Ollama (at `localhost:11434/v1`). There is **no bundled model**: pull a vision model in Ollama (e.g. `ollama pull moondream` or `llava`), add it under [LLM Providers](#llm-providers) and mark it **supports vision**, then pick it here.
+- **Local VLM (Ollama)** — captions with a vision model you run in your own local Ollama (at `localhost:11434/v1`). There is **no bundled model**: pull a vision model in Ollama (e.g. `ollama pull moondream` or `llava`), add it under [LLM Providers](#settings-llm-providers) and mark it **supports vision**, then pick it here.
 
 The model picker is a dropdown of that backend's **vision-tagged** models — cloud backends are disabled until their key is set. An **Active:** status line shows the current backend and model. With captioning off, non-vision models receive a "description unavailable" note for images.
 
@@ -91,7 +91,7 @@ How JClaw makes a video attachment legible to your chat model. The strategy is c
 1. **The chat model handles video natively** — it watches the clip directly; nothing else runs.
 2. **A dedicated video-interpretation model is configured** — when the chat model can't do video, this model interprets the clip and its description is spliced into the conversation as text.
 3. **The chat model has vision** — JClaw samples still frames from the clip and sends them as images.
-4. **Text-only chat model with [Image Captioning](#image-captioning) on** — sampled frames are captioned into a timestamped text summary.
+4. **Text-only chat model with [Image Captioning](#settings-image-captioning) on** — sampled frames are captioned into a timestamped text summary.
 
 The **dedicated video-interpretation model** has a master toggle, then a provider and a model picker; the picker is live-discovered from the provider and filtered to its **video-capable** models — the same shape as Image Captioning above.
 
@@ -139,7 +139,7 @@ To delegate a subagent to an **external coding harness** (Pi / Claude Code / Cod
 |------------------------|------------|-----------------------------------------------------------------------------------------------------|
 | `subagent.acp.command` | *(unset)*  | Absolute path to the harness command run for `subagent_spawn { runtime:"acp" }` (e.g. `/usr/local/bin/pi`). Read from config only, never the model. |
 
-The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](/agents) page; the main agent always may), and each run is bounded by `subagent.maxWallClockSeconds` (default 1800). See [External coding harness](/guide#acp-harness) for the full setup.
+The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](/agents) page; the main agent always may), and each run is bounded by `subagent.maxWallClockSeconds` (default 1800). See [External coding harness](/guide#subagents-acp-harness) for the full setup.
 
 ## Tasks
 
@@ -211,6 +211,8 @@ Off by default; turn on for environments where users can upload arbitrary skill 
 ## Password
 
 The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out — on the next access you'll be routed to the setup screen to choose a new password.
+
+When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
 
 ## Unmanaged keys
 

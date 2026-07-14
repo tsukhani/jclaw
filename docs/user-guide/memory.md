@@ -43,7 +43,7 @@ Two paths return memories to the agent:
 - **Core auto-load** — `core`-category memories at or above the importance threshold (default 0.8) are injected into every session at start, capped at 20 entries within a small token budget so they can never crowd out the context window.
 - **Per-turn recall** — each message triggers a relevance search over the agent's store; the best matches (up to 10) are injected for that turn only. Recalled text is framed to the model as stored reference data, **not** instructions — the soft counterpart of the write-time injection guard.
 
-By default relevance is keyword-based. Enabling **vector search** adds semantic recall — "what did we decide about invoicing?" finds a memory that never uses the word "invoicing" — with the two result lists blended by reciprocal-rank fusion. The backend is picked automatically: `pgvector` on PostgreSQL, an embedded Lucene HNSW index otherwise. See [Tuning](#tuning) below.
+By default relevance is keyword-based. Enabling **vector search** adds semantic recall — "what did we decide about invoicing?" finds a memory that never uses the word "invoicing" — with the two result lists blended by reciprocal-rank fusion. The backend is picked automatically: `pgvector` on PostgreSQL, an embedded Lucene HNSW index otherwise. See [Tuning](#memory-tuning) below.
 
 ## The Memories page
 
