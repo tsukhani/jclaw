@@ -25,7 +25,11 @@ public enum WhisperModel {
     LARGE_TURBO("large-turbo", "Large v3 Turbo (Multilingual)", 1650),
     LARGE("large", "Large v3 (Multilingual)", 3100);
 
-    public static final WhisperModel DEFAULT = SMALL_EN;
+    /** Multilingual by default: JClaw is general-purpose and must not assume
+     *  English audio. {@code small} is the same 950 MB as {@code small.en} but
+     *  handles every language — the safe default; the operator can pick an
+     *  English-only or larger model in Settings. */
+    public static final WhisperModel DEFAULT = SMALL_MULTILINGUAL;
 
     private final String id;
     private final String displayName;

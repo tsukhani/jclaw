@@ -150,7 +150,7 @@ async function setEmotionModel(value: string) {
 }
 
 const selectedLocalModel = computed(() =>
-  configData.value?.entries?.find(e => e.key === 'transcription.localModel')?.value ?? 'small.en',
+  configData.value?.entries?.find(e => e.key === 'transcription.localModel')?.value ?? 'small',
 )
 
 const selectedLocalModelStatus = computed<TranscriptionModelStatus | null>(() => {
