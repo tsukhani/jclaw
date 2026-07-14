@@ -6,6 +6,7 @@
 #   "accelerate",
 #   "soundfile",
 #   "numpy",
+#   "silero-vad",
 # ]
 # ///
 """MERaLiON-3-ASR worker for the jclaw ASR sidecar (SEA-tuned speech LLM).
@@ -20,9 +21,11 @@ usage (worker): uv run meralion.py --worker
   request per line on stdin:  {"audio_path": path, "model": hf-id (optional)}
   response per line on stdout: {"text": transcript}  or  {"error": ...}
 
-The model is trained on <=30 s windows, so audio is transcoded to 16 kHz mono
-via ffmpeg then chunked into 30 s non-overlapping slices; each is transcribed
-and the texts are joined. GPU when available (CUDA/MPS), else CPU.
+The model is trained on <=30 s windows. Audio is transcoded to 16 kHz mono via
+ffmpeg, then silero-VAD extracts speech regions (<=30 s each) — only those are
+transcribed, and the texts are joined. Dropping the silence is what stops the
+model hallucinating (it fabricates text — often in another language — on silent
+tails). GPU when available (CUDA/MPS), else CPU.
 """
 import json
 import os
@@ -37,7 +40,6 @@ DEFAULT_MODEL = "MERaLiON/MERaLiON-3-3B-ASR"
 # audio placeholder the processor expands into speech tokens.
 ASR_CONTENT = ("Instruction: Please transcribe this speech. \n"
                "Follow the text instruction based on the following audio: <SpeechHere>")
-CHUNK = 30 * 16000
 GEN = {"max_new_tokens": 512, "do_sample": False, "no_repeat_ngram_size": 6}
 
 
@@ -71,13 +73,16 @@ def _load(model_id):
     model.to(device)
     prompt = proc.tokenizer.apply_chat_template(
         [{"role": "user", "content": ASR_CONTENT}], tokenize=False, add_generation_prompt=True)
+    from silero_vad import load_silero_vad
     sys.stderr.write("[meralion] %s loaded on %s\n" % (model_id, device))
     return {"proc": proc, "model": model, "torch": torch, "device": device,
-            "dtype": next(model.parameters()).dtype, "prompt": prompt}
+            "dtype": next(model.parameters()).dtype, "prompt": prompt, "vad": load_silero_vad()}
 
 
 def _transcribe(state, audio_path):
+    import numpy as np
     import soundfile as sf
+    from silero_vad import get_speech_timestamps
     torch = state["torch"]
     wav = _to_wav16k(audio_path)
     try:
@@ -86,11 +91,29 @@ def _transcribe(state, audio_path):
         os.remove(wav)
     if data.ndim > 1:
         data = data.mean(1)
+    # Pause-aware CONTINUOUS chunking: each chunk is a real audio slice from a
+    # speech-region start to a speech-region end (<=30s), split at the pause that
+    # crosses 30s. Continuous (no concatenation discontinuity, which hurt short
+    # clips) AND every chunk ends at speech, not silence (which is what the model
+    # hallucinates on). Beats both trim-only and merge-only.
+    speech = get_speech_timestamps(
+        torch.from_numpy(np.ascontiguousarray(data)), state["vad"],
+        sampling_rate=16000, return_seconds=False)
+    if not speech:
+        return ""
+    maxs = 30 * 16000
+    chunks = []
+    cs, last_end = speech[0]["start"], speech[0]["end"]
+    for seg in speech[1:]:
+        if seg["end"] - cs > maxs:
+            chunks.append(data[cs:last_end])
+            cs = seg["start"]
+        last_end = seg["end"]
+    chunks.append(data[cs:last_end])
     dev, dtype = state["device"], state["dtype"]
     texts = []
-    for i in range(0, len(data), CHUNK):
-        chunk = data[i:i + CHUNK]
-        if chunk.size < 1600:  # <0.1s tail — skip
+    for chunk in chunks:
+        if chunk.size < 1600:  # <0.1s — skip
             continue
         inputs = state["proc"](text=[state["prompt"]], audios=[chunk],
                                return_tensors="pt", padding=True)
