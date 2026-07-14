@@ -42,6 +42,62 @@ REQUEST_TIMEOUT_SEC = int(os.environ.get("SIDECAR_REQUEST_TIMEOUT_SEC", "1740"))
 DEFAULT_IDENTITY = "diarize"
 
 
+def _hf_hub_cache():
+    """HF hub cache dir (stdlib mirror of huggingface_hub's default resolution)
+    so status can size an in-flight download without importing huggingface_hub
+    into this stdlib-only daemon. HF_HOME is set to the --cache-dir in main()."""
+    c = os.environ.get("HF_HUB_CACHE")
+    if c:
+        return c
+    home = os.environ.get("HF_HOME")
+    if home:
+        return os.path.join(home, "hub")
+    xdg = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(xdg, "huggingface", "hub")
+
+
+def _repo_bytes(repo):
+    """Real on-disk bytes for a repo's cache dir. Skips symlinks so a completed
+    snapshot isn't double-counted; mid-download only the growing blobs exist,
+    giving an honest progress numerator."""
+    d = os.path.join(_hf_hub_cache(), "models--" + repo.replace("/", "--"))
+    total = 0
+    for root, _, files in os.walk(d):
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                if not os.path.islink(fp):
+                    total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+
+def _read_error(path):
+    """Best-effort error text from a finished prefetch subprocess's captured
+    output: the last JSON {"error":...} line, else the tail."""
+    try:
+        with open(path) as f:
+            text = f.read().strip()
+    except OSError:
+        return "download failed"
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                e = json.loads(line).get("error")
+                if e:
+                    return e
+            except ValueError:
+                pass
+    return text[-300:] or "download failed"
+
+
+def _engine_of(repo):
+    """Cosmetic engine label for the Settings row."""
+    return "pyannote" if "diarization" in repo.lower() else "ser"
+
+
 class SidecarState:
     def __init__(self, model: str, idle_timeout_s: float):
         self.model = model  # identity string echoed on /health
@@ -51,6 +107,12 @@ class SidecarState:
         self._worker = None
         self._ser_worker = None
         self.io_lock = threading.Lock()  # serializes worker line-protocol I/O
+        # Model downloads run as DETACHED subprocesses (via hf_prefetch.py, not
+        # the heavy pyannote/SER workers) so a multi-GB pull can't stall status
+        # polling; status sizes them straight off the cache dir instead.
+        self._prefetches = {}        # repo -> {proc, out}
+        self._prefetch_errors = {}   # repo -> error
+        self._prefetch_lock = threading.Lock()
 
     def worker(self):
         """Persistent pyannote worker — the ~20s pipeline load is paid once,
@@ -91,6 +153,54 @@ class SidecarState:
         self._ser_worker = w
         return w
 
+    def start_prefetch(self, repo):
+        """Launch a DETACHED download of `repo` via hf_prefetch.py. Holds no
+        lock or worker pipe, so the download can't stall status polling.
+        Idempotent per repo; subprocess output is captured for error reporting."""
+        import subprocess
+        import tempfile
+        with self._prefetch_lock:
+            cur = self._prefetches.get(repo)
+            if cur is not None and cur["proc"].poll() is None:
+                return
+            self._prefetch_errors.pop(repo, None)
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            fd, outpath = tempfile.mkstemp(suffix=".prefetch")
+            fh = os.fdopen(fd, "w")
+            proc = subprocess.Popen(["uv", "run", "hf_prefetch.py", "--prefetch", repo],
+                                    cwd=script_dir, stdout=fh, stderr=subprocess.STDOUT)
+            fh.close()
+            self._prefetches[repo] = {"proc": proc, "out": outpath}
+
+    def prefetch_state(self, repo):
+        """Worker-free status for a repo with an active/failed download:
+        {engine, repo, cached, downloading, bytesOnDisk[, error]}. Returns None
+        when nothing is in flight (caller does a lightweight cache check)."""
+        engine = _engine_of(repo)
+        with self._prefetch_lock:
+            entry = self._prefetches.get(repo)
+            if entry is None:
+                err = self._prefetch_errors.get(repo)
+                if err is None:
+                    return None
+                return {"engine": engine, "repo": repo, "cached": False,
+                        "downloading": False, "bytesOnDisk": _repo_bytes(repo), "error": err}
+            proc, outf = entry["proc"], entry["out"]
+            if proc.poll() is None:
+                return {"engine": engine, "repo": repo, "cached": False,
+                        "downloading": True, "bytesOnDisk": _repo_bytes(repo)}
+            self._prefetches.pop(repo, None)
+            err = _read_error(outf) if proc.returncode != 0 else None
+            try:
+                os.remove(outf)
+            except OSError:
+                pass
+            if err:
+                self._prefetch_errors[repo] = err
+                return {"engine": engine, "repo": repo, "cached": False,
+                        "downloading": False, "bytesOnDisk": _repo_bytes(repo), "error": err}
+            return None  # success -> a cache check now reports cached=true
+
     def touch(self):
         self.last_activity = time.monotonic()
 
@@ -120,7 +230,47 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass  # client went away mid-response — not worth a traceback
 
+    def _hf_status(self, repos):
+        """Cache status for repos NOT in flight, via a one-shot hf_prefetch.py
+        (minimal env — no pyannote/SER worker spawned). Returns the same shape
+        as prefetch_state so the JVM sees one contract."""
+        import subprocess
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        proc = subprocess.run(["uv", "run", "hf_prefetch.py", "--status", *repos],
+                              cwd=script_dir, capture_output=True, text=True,
+                              timeout=REQUEST_TIMEOUT_SEC)
+        if proc.returncode != 0:
+            raise RuntimeError("hf_prefetch --status failed: %s"
+                               % (proc.stderr or proc.stdout)[:300])
+        raw = json.loads(proc.stdout.strip().splitlines()[-1])["status"]
+        return {repo: {"engine": _engine_of(repo), "repo": repo, "cached": s["cached"],
+                       "downloading": False, "bytesOnDisk": s["bytesOnDisk"]}
+                for repo, s in raw.items()}
+
     def do_GET(self):
+        if self.path.startswith("/diarize/models"):
+            # Download status for the on-device diarization weights (pyannote +
+            # the operator's SER model). An in-flight/failed download is sized
+            # off the cache dir (worker-free); everything else gets a lightweight
+            # cache check. Query: ?ids=repo1,repo2 (HF repos).
+            self.state.touch()
+            try:
+                from urllib.parse import urlparse, parse_qs, unquote
+                ids = unquote(parse_qs(urlparse(self.path).query).get("ids", [""])[0])
+                repos = [r for r in ids.split(",") if r]
+                status, pending = {}, []
+                for r in repos:
+                    ps = self.state.prefetch_state(r)
+                    if ps is not None:
+                        status[r] = ps
+                    else:
+                        pending.append(r)
+                if pending:
+                    status.update(self._hf_status(pending))
+                self._send_json(200, {"status": status})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"error": str(e)})
+            return
         if self.path == "/health":
             # A health probe signals imminent use — touching the idle clock
             # closes the evict race between the JVM's check and its POST.
@@ -134,6 +284,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if self.path == "/diarize/prefetch":
+            # Kick a DETACHED download of a diarization weight (pyannote or SER
+            # repo) and return immediately — the download never holds a lock or
+            # worker, so /diarize/models stays responsive with live progress.
+            self.state.touch()
+            try:
+                repo = self._read_json().get("model")
+                if not repo:
+                    self._send_json(400, {"error": "model (HF repo) required"})
+                    return
+                self.state.start_prefetch(repo)
+                self._send_json(200, {"status": "downloading", "model": repo})
+            except Exception as e:  # noqa: BLE001
+                self._send_json(500, {"error": str(e)})
+            finally:
+                self.state.touch()
+            return
         if self.path == "/shutdown":
             # JCLAW-637: lets a restarted JVM evict an adopted orphan whose
             # identity no longer matches config. Localhost-only server.
