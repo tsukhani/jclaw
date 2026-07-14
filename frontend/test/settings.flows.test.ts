@@ -1334,6 +1334,59 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(hit!.value).toBe('google/gemini-3-flash-preview')
   })
 
+  it('diarization ollama-local provider offers an audio-filtered model select from provider.ollama-local.models', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries(),
+          { key: 'transcription.diarization.provider', value: 'ollama-local' },
+          {
+            key: 'provider.ollama-local.models',
+            value: JSON.stringify([
+              { id: 'qwen2.5-omni', name: 'Qwen2.5 Omni', supportsAudio: true },
+              { id: 'llama3.2-vision', name: 'Llama 3.2 Vision', supportsAudio: false },
+            ]),
+          },
+        ],
+      }),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key?: string, value?: string }
+        captured.push(body)
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSettingsSection('transcription')
+
+    // The Ollama Local diarization provider radio is present (local — no API key gate).
+    const ollamaRadio = component.find('#diarization-provider-ollama-local')
+    expect(ollamaRadio.exists()).toBe(true)
+    expect(ollamaRadio.attributes('value')).toBe('ollama-local')
+
+    // The audio model picker lists ONLY audio-capable ollama-local models.
+    const select = component.find('select[aria-label="Diarization audio model"]')
+    expect(select.exists()).toBe(true)
+    const optionValues = select.findAll('option').map(o => o.attributes('value'))
+    expect(optionValues).toContain('qwen2.5-omni')
+    expect(optionValues).not.toContain('llama3.2-vision')
+
+    await select.setValue('qwen2.5-omni')
+    await flushPromises()
+    const hit = captured.find(b => b.key === 'transcription.diarization.model')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('qwen2.5-omni')
+  })
+
   it('POSTs transcription.provider on @change of an enabled cloud-provider radio', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerEndpoint('/api/agents', () => [])

@@ -36,15 +36,18 @@ import java.util.regex.Pattern;
 
 /**
  * {@code diarize_audio} (JCLAW-654): speaker-attributed transcription via an
- * audio-capable CLOUD chat model. Local diarization was removed after the
- * measured tier comparison — an audio-native LLM through a single
- * {@code input_audio} chat call beat every local configuration on turn
- * attribution (18/18 vs 13/17 on the human-arbitrated benchmark) at a
- * fraction of the wall-clock. This tool is the thin wrapper: it sends the
- * recording plus a verbatim-diarization prompt to the model the operator
- * picked in Settings → Transcription → Diarization
- * ({@code transcription.diarization.provider} / {@code .model}, filtered to
- * audio-capable models) and returns the model's transcript.
+ * audio-capable chat model — cloud (OpenRouter/OpenAI) or a local audio-native
+ * model served by Ollama ({@code ollama-local}). The former fully-on-device
+ * diarization sidecar was removed after the measured tier comparison — an
+ * audio-native LLM through a single {@code input_audio} chat call beat every
+ * on-device sidecar configuration on turn attribution (18/18 vs 13/17 on the
+ * human-arbitrated benchmark) at a fraction of the wall-clock; a local
+ * audio-native LLM via Ollama is that same single-call shape, run locally.
+ * This tool is the thin wrapper: it sends the recording plus a
+ * verbatim-diarization prompt to the model the operator picked in Settings →
+ * Transcription → Diarization ({@code transcription.diarization.provider} /
+ * {@code .model}, filtered to audio-capable models) and returns the model's
+ * transcript.
  *
  * <p>Attachment resolution: an explicit {@code attachment_uuid} wins;
  * otherwise the newest non-deleted, non-generated audio attachment in the

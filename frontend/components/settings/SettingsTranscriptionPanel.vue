@@ -64,10 +64,12 @@ async function toggleTranscriptionEnabled() {
   finally { saving.value = false }
 }
 
-// JCLAW-654: diarization runs through an audio-capable CLOUD chat model —
-// local diarization was removed after the measured tier comparison. The
-// operator picks provider + model here; the diarize_audio tool errors
-// clearly when unset. Mirrors the Image Captioning provider/model pattern.
+// JCLAW-654: diarization runs through an audio-capable chat model — cloud
+// (OpenRouter/OpenAI) or a local Ollama model (ollama-local). The former
+// fully-on-device diarization sidecar was deferred (JCLAW-656) and stays an
+// "unavailable" option. The operator picks provider + model here; the
+// diarize_audio tool errors clearly when unset. Mirrors the Image Captioning
+// provider/model pattern.
 const diarizationProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.diarization.provider')?.value ?? '',
 )
@@ -492,6 +494,22 @@ onUnmounted(() => stopTranscriptionPolling())
               >
               <span class="flex-1 text-sm text-fg-primary">Local audio model (on-device)</span>
               <span class="text-[10px] px-1 border text-fg-muted border-input">unavailable</span>
+            </label>
+            <label
+              for="diarization-provider-ollama-local"
+              class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+            >
+              <input
+                id="diarization-provider-ollama-local"
+                type="radio"
+                name="diarization-provider"
+                value="ollama-local"
+                :checked="diarizationProvider === 'ollama-local'"
+                class="accent-emerald-600"
+                @change="setDiarizationProvider('ollama-local')"
+              >
+              <span class="flex-1 text-sm text-fg-primary">Local audio model (Ollama)</span>
+              <span class="text-[10px] px-1 border text-fg-muted border-input">on-device via Ollama</span>
             </label>
             <label
               for="diarization-provider-openai"
