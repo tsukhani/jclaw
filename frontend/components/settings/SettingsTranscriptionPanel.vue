@@ -165,6 +165,21 @@ async function setLocalModel(value: string) {
   }
   finally { saving.value = false }
 }
+
+// Cloud transcription model (transcription.model). The backend defaults to
+// whisper-1 when blank; the operator can pick any model the provider's
+// /audio/transcriptions endpoint accepts (e.g. gpt-4o-transcribe).
+const selectedTranscriptionModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'transcription.model')?.value ?? '',
+)
+async function setTranscriptionModel(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.model', value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
 async function downloadLocalModel(modelId: string) {
   saving.value = true
   try {
@@ -441,6 +456,37 @@ onUnmounted(() => stopTranscriptionPolling())
           >
             {{ selectedLocalModelStatus.error }}
           </div>
+        </div>
+
+        <!-- Cloud providers: pick the transcription model (blank = whisper-1). -->
+        <div
+          v-if="transcriptionIsCloud"
+          class="border-t border-border"
+        >
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model</span>
+            <input
+              id="transcription-model"
+              :value="selectedTranscriptionModel"
+              list="transcription-model-suggestions"
+              placeholder="whisper-1 (default)"
+              aria-label="Cloud transcription model"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              @change="setTranscriptionModel(($event.target as HTMLInputElement).value.trim())"
+            >
+            <datalist id="transcription-model-suggestions">
+              <option value="whisper-1" />
+              <option value="gpt-4o-transcribe" />
+              <option value="gpt-4o-mini-transcribe" />
+            </datalist>
+          </div>
+          <p class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted">
+            The model on {{ selectedTranscriptionProvider }}'s
+            <span class="font-mono">/audio/transcriptions</span> endpoint. Leave blank for
+            <span class="font-mono">whisper-1</span>. Common options:
+            <span class="font-mono">whisper-1</span>, <span class="font-mono">gpt-4o-transcribe</span>,
+            <span class="font-mono">gpt-4o-mini-transcribe</span>.
+          </p>
         </div>
       </template>
     </div>

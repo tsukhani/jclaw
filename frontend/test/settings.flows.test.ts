@@ -1429,6 +1429,42 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(captured.find(b => b.key === 'transcription.diarization.model')?.value).toBe('')
   })
 
+  it('cloud transcription provider exposes a model field that POSTs transcription.model', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries(),
+          { key: 'transcription.provider', value: 'openai' },
+        ],
+      }),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key?: string, value?: string }
+        captured.push(body)
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSettingsSection('transcription')
+
+    // A cloud provider is selected -> the transcription-model field appears.
+    const input = component.find('#transcription-model')
+    expect(input.exists()).toBe(true)
+    await input.setValue('gpt-4o-transcribe')
+    await input.trigger('change')
+    await flushPromises()
+    expect(captured.find(b => b.key === 'transcription.model')?.value).toBe('gpt-4o-transcribe')
+  })
+
   it('POSTs transcription.provider on @change of an enabled cloud-provider radio', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerEndpoint('/api/agents', () => [])
