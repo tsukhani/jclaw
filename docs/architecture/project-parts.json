@@ -1,7 +1,7 @@
 {
   "repository_type": "monorepo",
   "name": "jclaw",
-  "version": "0.16.19",
+  "version": "see conf/application.conf (application.version)",
   "generated": "2026-06-29",
   "generator": "bmad-document-project (deep rescan)",
   "parts": [
@@ -11,15 +11,15 @@
       "project_type_id": "backend",
       "root_path": "/",
       "language": "Java 25",
-      "framework": "Play Framework 1.13.x (fork tsukhani/play1, pinned .play-version=1.13.45)",
+      "framework": "Play Framework 1.13.x (fork tsukhani/play1, exact patch pinned in .play-version)",
       "tech": [
         "JPA/Hibernate on H2 (dev, MODE=MYSQL) / PostgreSQL (prod template)",
-        "OkHttp 5 (okhttp-jvm 5.4.0 + okhttp-sse) — single outbound HTTP stack",
-        "Apache Lucene 10.5.0 — full-text search",
+        "OkHttp 5 (okhttp-jvm + okhttp-sse) — single outbound HTTP stack",
+        "Apache Lucene 10 — full-text search",
         "db-scheduler 16.x — persistent task scheduling",
-        "JTokkit 1.1.0 — tokenization",
-        "Apache Tika 3.3.1 + Tesseract OCR",
-        "Microsoft Playwright for Java 1.61.0",
+        "JTokkit — tokenization",
+        "Apache Tika 3 + Tesseract OCR",
+        "Microsoft Playwright for Java",
         "Caffeine L2 cache (JCache)"
       ],
       "build": "Gradle (org.playframework.play1 plugin); play dist / gradle playBundle",
@@ -36,7 +36,7 @@
       "project_type_id": "web",
       "root_path": "/frontend",
       "language": "TypeScript",
-      "framework": "Nuxt 4.4.8 (SPA, ssr: false)",
+      "framework": "Nuxt 4 (SPA, ssr: false)",
       "tech": [
         "Vue 3 Composition API",
         "Tailwind CSS v4 via @tailwindcss/vite",
@@ -46,8 +46,8 @@
         "useState-based state (no Pinia); singleton EventSource SSE"
       ],
       "build": "nuxi generate -> public/spa/",
-      "test": "Vitest 4 (jsdom), @nuxt/test-utils, Playwright 1.61.0 (e2e)",
-      "package_manager": "pnpm 11.13.0 (+sha512 pin)",
+      "test": "Vitest 4 (jsdom), @nuxt/test-utils, Playwright (e2e)",
+      "package_manager": "pnpm (exact version + +sha512 hash pinned in package.json packageManager)",
       "entry_points": ["frontend/app.vue", "frontend/pages"],
       "critical_directories": [
         "frontend/pages", "frontend/components", "frontend/composables",

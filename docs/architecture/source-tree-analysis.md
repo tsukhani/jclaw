@@ -101,7 +101,7 @@ jclaw/
 │   ├── tests/e2e/, playwright.config.ts  # Playwright E2E harness.
 │   ├── vitest.config.ts          # jsdom env.
 │   ├── nuxt.config.ts, components.json, eslint.config.mjs, stylelint.config.mjs
-│   └── package.json              # pnpm; pinned 11.13.0 (+sha512).
+│   └── package.json              # pnpm pinned via packageManager (version + +sha512 hash).
 │
 ├── sidecar/                      # Python local-generation daemons (uv-run).
 │   ├── image/                    # Local diffusion image model (FLUX.2 klein).
@@ -120,7 +120,7 @@ jclaw/
 ├── Dockerfile                    # Multi-stage build → GHCR image.
 ├── docker-compose.yml            # Consumer-facing single-container deploy.
 ├── Jenkinsfile                   # CI (build, test, dist/bundle, release to GitHub + GHCR).
-├── .play-version                 # Pinned play1 fork version (1.13.45).
+├── .play-version                 # Pinned play1 fork version (the exact patch of the 1.13.x line).
 └── README.md, CLAUDE.md, AGENTS.md, LICENSE  # Root docs.
 ```
 

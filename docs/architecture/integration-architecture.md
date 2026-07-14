@@ -67,11 +67,11 @@ Play backend
 
 ### Browser automation
 
-- Microsoft Playwright for Java 1.61.0. Chromium installed into `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` during Docker build (no runtime download). Reaped by `BrowserCleanupJob`.
+- Microsoft Playwright for Java (version pinned in `build.gradle.kts`). Chromium installed into `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` during Docker build (no runtime download). Reaped by `BrowserCleanupJob`.
 
 ### File / document handling & media
 
-- Apache Tika 3.3.1 for text extraction (+ Tesseract OCR) in `app/tools/DocumentsTool.java`.
+- Apache Tika 3 for text extraction (+ Tesseract OCR) in `app/tools/DocumentsTool.java`.
 - `app/services/scanners/` integrations (VirusTotal, MetaDefender, MalwareBazaar, etc.) scan skill binaries before promotion/allowlisting.
 - Local image/video generation runs in Python `sidecar/` daemons launched on demand and reached over `127.0.0.1`.
 

@@ -101,8 +101,8 @@ On first boot the entrypoint generates a 64-char `PLAY_SECRET` (persisted to `./
 
 ## Dockerfile stages
 
-1. **bundle stage** (`azul/zulu-openjdk:25.0.3`) — Node 24 (NodeSource) + corepack + Gradle 9.5.0; downloads the `tsukhani/play1` release pinned in `.play-version`, runs `pnpm install` + `nuxi generate` (SPA → `public/spa/`), `play precompile`, and `gradle playBundle` to produce the self-contained bundle.
-2. **chromium stage** (`azul/zulu-openjdk:25.0.3`) — installs Playwright Chromium into `/opt/pw-browsers`.
+1. **bundle stage** (`azul/zulu-openjdk:25`) — Node 24 (NodeSource) + corepack + Gradle 9; downloads the `tsukhani/play1` release pinned in `.play-version`, runs `pnpm install` + `nuxi generate` (SPA → `public/spa/`), `play precompile`, and `gradle playBundle` to produce the self-contained bundle. (Exact base-image tag and Gradle version are pinned in the `Dockerfile`.)
+2. **chromium stage** (`azul/zulu-openjdk:25`) — installs Playwright Chromium into `/opt/pw-browsers`.
 3. **runtime** (`ubuntu:26.04` + Zulu 25 JRE) — copies the unpacked bundle + Chromium libs; bakes `workspace/main/` (SOUL.md, IDENTITY.md, USER.md, BOOTSTRAP.md, AGENT.md) as the main-agent seed (the `./workspace` bind-mount shadows it at runtime); `EXPOSE 9000 9443/tcp 9443/udp`; entrypoint auto-provisions `PLAY_SECRET` + certs, then `./play run --%prod --https.port=9443`.
 
 ## Production configuration
@@ -126,4 +126,4 @@ If fronting with nginx:
 
 - `/deploy` bumps `application.version` in `conf/application.conf`, creates the signed release commit + tag (`v0.X.Y`), and pushes to both remotes.
 - Jenkins triggers on push; release builds (tag + GitHub Release + GHCR) are gated by the `RELEASE` parameter.
-- Latest observed on `main`: `v0.16.19`.
+- Current release version is `application.version` in `conf/application.conf`; the matching tag is `v<application.version>`.

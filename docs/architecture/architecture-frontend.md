@@ -6,24 +6,26 @@ The frontend is a Nuxt 4 SPA (`ssr: false`) serving as the single-page control p
 
 ## Technology stack
 
+> The **Version** column lists the stable major line only. Exact pinned versions are the source of truth in `frontend/package.json` (`dependencies` / `devDependencies` and the `packageManager` field) — this table is not maintained per patch bump.
+
 | Category | Choice | Version |
 |---|---|---|
-| Framework | Nuxt | 4.4.8 |
+| Framework | Nuxt | 4 |
 | Render mode | SPA (`ssr: false`) | — |
 | View layer | Vue 3 Composition API | via Nuxt |
 | Language | TypeScript | 6.x |
-| UI components | shadcn-nuxt on Reka UI, `class-variance-authority` + `tailwind-merge` | 2.7 / 2.9 |
-| Styling | Tailwind CSS v4 via `@tailwindcss/vite` | 4.3 |
+| UI components | shadcn-nuxt on Reka UI, `class-variance-authority` + `tailwind-merge` | 2.x |
+| Styling | Tailwind CSS v4 via `@tailwindcss/vite` | v4 |
 | Icons / font | Lucide + Heroicons; Inter variable font | — |
 | HTTP | `$fetch` (Nitro/ofetch) | — |
-| Validation | Zod (`types/schemas.ts`, via `useApiParsed`) | 4.4 |
-| Tables | `@tanstack/vue-table` | 8.21 |
-| Markdown rendering | `marked` + `dompurify` | 18.0 / 3.4 |
-| Package manager | pnpm | 11.13.0 (pinned with `+sha512` in `package.json`) |
-| Unit tests | Vitest (`jsdom` env) | 4.1 |
-| Component test utils | `@vue/test-utils` + `@nuxt/test-utils` | 2.4 / 4.0 |
-| E2E tests | Playwright | 1.61.0 |
-| A11y | `vue-axe` / `axe-core` (dev-only runtime scanner) | 3.1 / 4.11 |
+| Validation | Zod (`types/schemas.ts`, via `useApiParsed`) | 4 |
+| Tables | `@tanstack/vue-table` | 8 |
+| Markdown rendering | `marked` + `dompurify` | 18 / 3 |
+| Package manager | pnpm | pinned in `package.json` `packageManager` (version + `+sha512`) |
+| Unit tests | Vitest (`jsdom` env) | 4 |
+| Component test utils | `@vue/test-utils` + `@nuxt/test-utils` | 2.x / 4.x |
+| E2E tests | Playwright | pinned in `package.json` |
+| A11y | `vue-axe` / `axe-core` (dev-only runtime scanner) | 3.x / 4.x |
 
 ## File layout
 

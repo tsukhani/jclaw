@@ -6,7 +6,7 @@
 
 JClaw is Abundent's **AI-powered automation platform**: a long-running Java service that hosts conversational LLM agents, schedules background tasks, executes tools (shell, filesystem, web, browser, documents, image/video generation), and exposes a unified Web/Slack/Telegram/WhatsApp chat surface. It draws feature designs from two predecessor projects (`OpenClaw` Node.js, `JavaClaw` Spring Boot) but shares no code — it's an original Java-first runtime on a customized Play 1.x fork + a Nuxt 4 SPA.
 
-Current version: **0.16.19** (status: pre-v1 / alpha, work in progress per AGENTS.md).
+Current version: see `application.version` in `conf/application.conf` (the source of truth; status: pre-v1 / alpha, work in progress per AGENTS.md).
 
 ## Repository type
 
@@ -22,20 +22,20 @@ Current version: **0.16.19** (status: pre-v1 / alpha, work in progress per AGENT
 | Category | Backend | Frontend |
 |---|---|---|
 | Language | Java 25 (`java.source=25`) | TypeScript (Nuxt 4) |
-| Framework | Play Framework 1.13.x (custom fork `tsukhani/play1`, pinned in `.play-version` = `1.13.45`) | Nuxt 4.4.8 (SSR off, SPA only) |
+| Framework | Play Framework 1.13.x (custom fork `tsukhani/play1`, exact patch pinned in `.play-version`) | Nuxt 4 (SSR off, SPA only; pinned in `frontend/package.json`) |
 | HTTP (inbound) | Netty (Play built-in), HTTP/1.1 + HTTP/2 + HTTP/3 (QUIC) via the fork | Nitro dev proxy → `:9000/api` |
-| HTTP (outbound) | **OkHttp 5** single stack (`okhttp-jvm` 5.4.0 + `okhttp-sse`), provisioned via `utils.HttpFactories` | — |
+| HTTP (outbound) | **OkHttp 5** single stack (`okhttp-jvm` + `okhttp-sse`), provisioned via `utils.HttpFactories` | — |
 | Persistence | JPA/Hibernate on H2 file DB (dev, `MODE=MYSQL`) or PostgreSQL (prod template, commented) | — |
 | Full-text search | **Lucene 10** (`services.search.LuceneIndexer`, per-scope `FSDirectory` under `data/jclaw-lucene/`) | — |
 | Scheduling | User Tasks on **db-scheduler** 16.x (`scheduled_tasks` table); internal maintenance on Play `@Every`/`@OnApplicationStart` | — |
 | DI / model pattern | Play `Model` + static finders, `@With(AuthCheck.class)` interceptors | Vue Composition API, `useState`-based singletons (no Pinia) |
 | LLM | Sealed `LlmProvider` hierarchy: OpenAI, Ollama, OpenRouter, TogetherAI (OpenAI-compatible) + local probes (Ollama, LM Studio, vLLM) | — |
-| Browser automation | Microsoft Playwright for Java 1.61.0 | Playwright 1.61.0 (E2E tests only) |
-| Document handling | Apache Tika 3.3.1, flexmark 0.64.8, flying-saucer PDF, Tesseract OCR | `marked` + `DOMPurify` for markdown rendering |
-| Tokenization | JTokkit 1.1.0 (`llm.TokenUsageEstimator`, Caffeine-memoized) | — |
+| Browser automation | Microsoft Playwright for Java | Playwright (E2E tests only) |
+| Document handling | Apache Tika 3, flexmark, flying-saucer PDF, Tesseract OCR | `marked` + `DOMPurify` for markdown rendering |
+| Tokenization | JTokkit (`llm.TokenUsageEstimator`, Caffeine-memoized) | — |
 | Styling | Play Groovy templates (auth + error pages only) | Tailwind CSS v4 (via `@tailwindcss/vite`), shadcn-nuxt on Reka UI |
-| Package manager | Gradle (`build.gradle.kts`, `org.playframework.play1` plugin) | pnpm 11.13.0 (pinned with `+sha512` integrity hash) |
-| Testing | JUnit 6 (Jupiter 6.x, bundled by the fork), Play `UnitTest`/`FunctionalTest`, `play autotest` | Vitest 4, `@vue/test-utils`, `@nuxt/test-utils`, jsdom, Playwright 1.61.0 |
+| Package manager | Gradle (`build.gradle.kts`, `org.playframework.play1` plugin) | pnpm (exact version + `+sha512` hash pinned in `frontend/package.json`'s `packageManager`) |
+| Testing | JUnit 6 (Jupiter 6.x, bundled by the fork), Play `UnitTest`/`FunctionalTest`, `play autotest` | Vitest 4, `@vue/test-utils`, `@nuxt/test-utils`, jsdom, Playwright |
 | Build | `play precompile` + `gradle playBundle` / `play dist` | `nuxi generate` → `public/spa/` |
 | CI | Jenkins (`Jenkinsfile`, tools `jdk 'JDK25'` + `nodejs 'node-24'`) | — |
 | Container | Multi-stage Dockerfile (Zulu 25 build → Ubuntu 26.04 runtime) → GHCR `ghcr.io/tsukhani/jclaw:latest` | built into backend image |
