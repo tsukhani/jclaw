@@ -18,7 +18,11 @@ import play.Logger;
 import services.AgentService;
 import services.ConfigService;
 import services.Tx;
+import services.transcription.DiarizationFusion;
+import services.transcription.DiarizeSidecarClient;
 import services.transcription.LlmAudio;
+import services.transcription.WhisperModel;
+import services.transcription.WhisperTranscriber;
 import utils.HttpFactories;
 import utils.JsonArgs;
 
@@ -64,6 +68,10 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     public static final String PROVIDER_KEY = "transcription.diarization.provider";
     public static final String MODEL_KEY = "transcription.diarization.model";
+
+    /** Sentinel {@code provider} value selecting the fully-local pyannote
+     *  diarization sidecar instead of a cloud audio-model (JCLAW-565 revival). */
+    public static final String PROVIDER_LOCAL = "pyannote-local";
 
     private static final String ARG_ACTION = "action";
     private static final String ARG_UUID = "attachment_uuid";
@@ -198,23 +206,28 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
         var provider = ConfigService.get(PROVIDER_KEY, "");
         var model = ConfigService.get(MODEL_KEY, "");
-        if (provider.isBlank() || model.isBlank()) {
+        boolean local = PROVIDER_LOCAL.equals(provider);
+        if (provider.isBlank() || (!local && model.isBlank())) {
             return "Error: no diarization model is configured. The operator must pick an "
-                    + "audio-capable model under Settings → Transcription → Diarization "
-                    + "before recordings can be speaker-labeled.";
+                    + "audio-capable model (or the local pyannote diarizer) under "
+                    + "Settings → Transcription → Diarization before recordings can be "
+                    + "speaker-labeled.";
         }
-        var baseUrl = ConfigService.get(PROVIDER_PREFIX + provider + ".baseUrl", "");
-        if (baseUrl.isBlank()) {
-            return "Error: provider '%s' has no base URL configured.".formatted(provider);
-        }
-        // Guard: a non-audio model fails upstream with a cryptic 400
-        // ("content blocks must be text or image_url"). When the provider's
-        // model registry knows the model and does NOT tag it audio-capable,
-        // say so actionably instead of making the call.
-        if (audioCapability(provider, model) == AudioCapability.NOT_AUDIO) {
-            return ("Error: the configured diarization model '%s' (%s) is not audio-capable — "
-                    + "it cannot listen to recordings. The operator must pick an audio-capable "
-                    + "model under Settings → Transcription → Diarization.").formatted(model, provider);
+        String baseUrl = "";
+        if (!local) {
+            baseUrl = ConfigService.get(PROVIDER_PREFIX + provider + ".baseUrl", "");
+            if (baseUrl.isBlank()) {
+                return "Error: provider '%s' has no base URL configured.".formatted(provider);
+            }
+            // Guard: a non-audio model fails upstream with a cryptic 400
+            // ("content blocks must be text or image_url"). When the provider's
+            // model registry knows the model and does NOT tag it audio-capable,
+            // say so actionably instead of making the call.
+            if (audioCapability(provider, model) == AudioCapability.NOT_AUDIO) {
+                return ("Error: the configured diarization model '%s' (%s) is not audio-capable — "
+                        + "it cannot listen to recordings. The operator must pick an audio-capable "
+                        + "model under Settings → Transcription → Diarization.").formatted(model, provider);
+            }
         }
 
         var attachment = Tx.run(() -> resolveAttachment(JsonArgs.optString(args, ARG_UUID)));
@@ -226,7 +239,16 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
 
         if (ACTION_ENROLL.equals(action)) {
+            if (local) {
+                return "Voice enrollment is only used by the cloud audio-model diarizer. The "
+                        + "local pyannote diarizer labels speakers by in-recording voice "
+                        + "similarity (Speaker 1, Speaker 2, …) and ignores enrolled references.";
+            }
             return enrollVoice(path, JsonArgs.optString(args, ARG_SPEAKER_NAME));
+        }
+
+        if (local) {
+            return diarizeLocal(path, att.originalFilename, JsonArgs.optString(args, ARG_LANGUAGE));
         }
 
         boolean emotionsArg = JsonArgs.optBool(args, ARG_EMOTIONS);
@@ -243,6 +265,32 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     .formatted(att.originalFilename, provider, model, transcript);
         } catch (IOException | RuntimeException e) {
             Logger.warn("DiarizeAudioTool: %s", e.getMessage());
+            return "Speaker diarization failed: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Fully-local speaker-attributed transcript (JCLAW-565 revival): the ASR
+     * sidecar transcribes (WHAT + WHEN), the diarize sidecar produces speaker
+     * turns (WHO + WHEN), and {@link DiarizationFusion} aligns them by time.
+     * No audio leaves the host — the privacy/cost path. No per-turn emotion
+     * (pyannote yields turns only); the cloud path stays for that case.
+     */
+    private String diarizeLocal(Path path, String filename, String language) {
+        try {
+            var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
+                    .orElse(WhisperModel.DEFAULT);
+            var segments = WhisperTranscriber.transcribeSegments(
+                    path, model, language != null && !language.isBlank() ? language : null);
+            var turns = new DiarizeSidecarClient().diarize(path, null);
+            var transcript = DiarizationFusion.fuse(segments, turns);
+            if (transcript.isBlank()) {
+                return "No speech was found in %s.".formatted(filename);
+            }
+            return "Diarized transcript of %s (local: pyannote + %s):\n\n%s"
+                    .formatted(filename, model.id(), transcript);
+        } catch (RuntimeException e) {
+            Logger.warn("DiarizeAudioTool local: %s", e.getMessage());
             return "Speaker diarization failed: " + e.getMessage();
         }
     }
