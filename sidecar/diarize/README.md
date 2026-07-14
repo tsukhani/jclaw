@@ -1,7 +1,7 @@
 # jclaw diarization sidecar (JCLAW-565 revival; local privacy path)
 
-Lifecycle-owned by `services.transcription.DiarizeSidecarManager` (JVM). CPU
-speaker diarization for jclaw — produces speaker **turns** (who spoke when),
+Lifecycle-owned by `services.transcription.DiarizeSidecarManager` (JVM).
+Speaker diarization for jclaw — produces speaker **turns** (who spoke when),
 which the JVM fuses with the ASR sidecar's transcript to build a
 speaker-attributed transcript. Diarization only — **no transcription, no
 emotion**. Emotion is deliberately absent: the classical-SER path (DiaRemot)
@@ -56,6 +56,12 @@ supervisor holds no ML deps and shells every request to `diarize.py`, whose
 (numpy ≥ 2; isolated from the asr env's numpy pin). The pyannote pipeline
 (~20 s load) is held in a persistent worker so the load is paid once, then
 amortized across `/diarize` calls until the daemon self-evicts on idle.
+
+The worker auto-selects the fastest torch device — CUDA on NVIDIA, Apple
+**MPS** on Apple silicon (~7× faster than CPU in testing: 8 s vs 57 s on a
+110 s clip), else CPU — with `PYTORCH_ENABLE_MPS_FALLBACK=1` set and a
+one-shot CPU retry if a GPU op fails. Set `DIARIZE_DEVICE=cpu` to force CPU
+(e.g. for bit-reproducible output).
 
 Word-level speaker attribution (forced alignment of the ASR transcript, the
 WhisperX principle) is a later phase — v1 fuses at ASR-segment granularity in

@@ -31,6 +31,10 @@ import subprocess
 import sys
 import tempfile
 
+# Metal (MPS) has gaps in op coverage; let unsupported ops fall back to CPU
+# instead of erroring. Harmless on CUDA/CPU. Must be set before torch runs.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 MODEL = "pyannote/speaker-diarization-community-1"
 
 
@@ -43,15 +47,45 @@ def _to_wav16k(src):
     return wav
 
 
-def _diarize(pipe, audio_path, num_speakers=None):
+def _pick_device():
+    """cuda > mps > cpu, unless DIARIZE_DEVICE forces one (e.g. cpu for
+    bit-reproducibility). torch is already imported by the caller."""
+    import torch
+    forced = os.environ.get("DIARIZE_DEVICE", "").strip().lower()
+    if forced:
+        return forced
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _run(pipe, wav, num_speakers):
+    kw = {"num_speakers": int(num_speakers)} if num_speakers else {}
+    try:
+        return pipe(wav, **kw)
+    except (TypeError, ValueError):
+        # community-1 rejected the hint — fall back to auto speaker count.
+        return pipe(wav)
+
+
+def _diarize(state, audio_path, num_speakers=None):
     wav = _to_wav16k(audio_path)
     try:
-        kw = {"num_speakers": int(num_speakers)} if num_speakers else {}
         try:
-            out = pipe(wav, **kw)
-        except (TypeError, ValueError):
-            # community-1 rejected the hint — fall back to auto speaker count.
-            out = pipe(wav)
+            out = _run(state["pipe"], wav, num_speakers)
+        except Exception:  # noqa: BLE001 — GPU op may be unimplemented/OOM
+            if state["device"] == "cpu":
+                raise
+            # Move the persistent pipeline to CPU and retry once; stay on CPU
+            # for later calls rather than thrash back to the failing device.
+            import torch
+            sys.stderr.write("[diarize] %s inference failed — falling back to CPU\n"
+                             % state["device"])
+            state["pipe"].to(torch.device("cpu"))
+            state["device"] = "cpu"
+            out = _run(state["pipe"], wav, num_speakers)
     finally:
         os.remove(wav)
     diar = getattr(out, "exclusive_speaker_diarization", None) \
@@ -66,12 +100,14 @@ def _load_pipeline():
     import torch
     from pyannote.audio import Pipeline
     pipe = Pipeline.from_pretrained(MODEL)
-    pipe.to(torch.device("cpu"))
-    return pipe
+    device = _pick_device()
+    pipe.to(torch.device(device))
+    sys.stderr.write("[diarize] pipeline loaded on %s\n" % device)
+    return {"pipe": pipe, "device": device}
 
 
 def worker():
-    pipe = _load_pipeline()
+    state = _load_pipeline()
     sys.stderr.write("[diarize] worker ready\n")
     print(json.dumps({"ready": True}), flush=True)
     for line in sys.stdin:
@@ -80,7 +116,7 @@ def worker():
             continue
         try:
             req = json.loads(line)
-            turns = _diarize(pipe, req["audio_path"], req.get("num_speakers"))
+            turns = _diarize(state, req["audio_path"], req.get("num_speakers"))
             print(json.dumps({"turns": turns}), flush=True)
         except Exception as e:  # noqa: BLE001 — reported per-request
             print(json.dumps({"error": str(e)}), flush=True)
@@ -90,9 +126,9 @@ def worker():
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
         return worker()
-    pipe = _load_pipeline()
+    state = _load_pipeline()
     ns = sys.argv[2] if len(sys.argv) > 2 else None
-    print(json.dumps({"turns": _diarize(pipe, sys.argv[1], ns)}))
+    print(json.dumps({"turns": _diarize(state, sys.argv[1], ns)}))
     return 0
 
 
