@@ -43,6 +43,38 @@ ASR_CONTENT = ("Instruction: Please transcribe this speech. \n"
 GEN = {"max_new_tokens": 512, "do_sample": False, "no_repeat_ngram_size": 6}
 
 
+def _cache_dir_bytes(repo):
+    from huggingface_hub.constants import HF_HUB_CACHE
+    d = os.path.join(HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
+    total = 0
+    for root, _, files in os.walk(d):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def _status(repo):
+    """Is the MERaLiON snapshot cached? (Settings download state, JCLAW-650.)"""
+    from huggingface_hub import snapshot_download
+    try:
+        snapshot_download(repo, local_files_only=True)
+        cached = True
+    except Exception:  # noqa: BLE001 — any miss means not fully cached
+        cached = False
+    return {"engine": "meralion", "repo": repo, "cached": cached,
+            "bytesOnDisk": _cache_dir_bytes(repo)}
+
+
+def _prefetch(repo):
+    from huggingface_hub import snapshot_download
+    sys.stderr.write("[meralion] prefetching %s\n" % repo)
+    snapshot_download(repo)
+    return _status(repo)
+
+
 def _to_wav16k(src):
     fd, wav = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
@@ -137,10 +169,17 @@ def worker():
             continue
         try:
             req = json.loads(line)
-            model_id = req.get("model") or DEFAULT_MODEL
-            if model_id not in cache:
-                cache[model_id] = _load(model_id)
-            print(json.dumps({"text": _transcribe(cache[model_id], req["audio_path"])}), flush=True)
+            op = req.get("op", "transcribe")
+            if op == "status":
+                print(json.dumps({"status": {m: _status(m)
+                                             for m in req.get("models", [])}}), flush=True)
+            elif op == "prefetch":
+                print(json.dumps({"prefetched": _prefetch(req["model"])}), flush=True)
+            else:
+                model_id = req.get("model") or DEFAULT_MODEL
+                if model_id not in cache:
+                    cache[model_id] = _load(model_id)
+                print(json.dumps({"text": _transcribe(cache[model_id], req["audio_path"])}), flush=True)
         except Exception as e:  # noqa: BLE001 — reported per-request
             print(json.dumps({"error": str(e)}), flush=True)
     return 0

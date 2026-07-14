@@ -148,15 +148,22 @@ class Handler(BaseHTTPRequestHandler):
                 from urllib.parse import urlparse, parse_qs
                 ids = parse_qs(urlparse(self.path).query).get("ids", [""])[0]
                 models = [m for m in ids.split(",") if m]
+                whisper = [m for m in models if m not in MERALION_HF]
+                mer = [m for m in models if m in MERALION_HF]
+                status = {}
                 with self.state.asr_io_lock:
-                    w = self.state.asr_worker()
-                    w.stdin.write(json.dumps({"op": "status", "models": models}) + "\n")
-                    w.stdin.flush()
-                    line = w.stdout.readline()
-                if not line:
-                    self.state._asr_worker = None
-                    raise RuntimeError("asr worker died mid-request")
-                self._send_json(200, json.loads(line))
+                    if whisper:
+                        status.update(self.state.ask(
+                            "_asr_worker", self.state.asr_worker,
+                            {"op": "status", "models": whisper})["status"])
+                    if mer:
+                        # workers key status by their engine-native artifact
+                        # name (HF repo); re-key back to the config ids.
+                        got = self.state.ask(
+                            "_meralion_worker", self.state.meralion_worker,
+                            {"op": "status", "models": [MERALION_HF[m] for m in mer]})["status"]
+                        status.update({m: got[MERALION_HF[m]] for m in mer})
+                self._send_json(200, {"status": status})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"error": str(e)})
             return
@@ -183,17 +190,17 @@ class Handler(BaseHTTPRequestHandler):
             # shares the worker, so an in-flight ASR request queues behind it.
             self.state.touch()
             try:
-                req = self._read_json()
+                model = self._read_json().get("model")
                 with self.state.asr_io_lock:
-                    w = self.state.asr_worker()
-                    w.stdin.write(json.dumps({"op": "prefetch",
-                                              "model": req.get("model")}) + "\n")
-                    w.stdin.flush()
-                    line = w.stdout.readline()
-                if not line:
-                    self.state._asr_worker = None
-                    raise RuntimeError("asr worker died mid-request")
-                self._send_json(200, json.loads(line))
+                    if model in MERALION_HF:
+                        payload = self.state.ask(
+                            "_meralion_worker", self.state.meralion_worker,
+                            {"op": "prefetch", "model": MERALION_HF[model]})
+                    else:
+                        payload = self.state.ask(
+                            "_asr_worker", self.state.asr_worker,
+                            {"op": "prefetch", "model": model})
+                self._send_json(200, payload)
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"error": str(e)})
             finally:
