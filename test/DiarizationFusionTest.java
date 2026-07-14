@@ -74,6 +74,35 @@ class DiarizationFusionTest extends UnitTest {
     }
 
     @Test
+    void degenerateWhenOneSpeakerSwallowsMultipleTurns() {
+        // one speaker across >=3 turns — the short/narrowband merge
+        assertTrue(DiarizationFusion.isDegenerate(List.of(
+                new Turn(0, 1000, "SPEAKER_00"),
+                new Turn(1000, 2000, "SPEAKER_00"),
+                new Turn(2000, 3000, "SPEAKER_00"))));
+        // lopsided: one speaker >=85% of turns (the num_speakers=2 case)
+        var lopsided = new java.util.ArrayList<Turn>();
+        for (int i = 0; i < 10; i++) {
+            lopsided.add(new Turn(i * 1000L, i * 1000L + 500, "SPEAKER_00"));
+        }
+        lopsided.add(new Turn(20000, 24000, "SPEAKER_01"));
+        assertTrue(DiarizationFusion.isDegenerate(lopsided));
+    }
+
+    @Test
+    void notDegenerateWhenBalancedOrTooFewTurns() {
+        assertFalse(DiarizationFusion.isDegenerate(List.of(
+                new Turn(0, 1000, "SPEAKER_00"),
+                new Turn(1000, 2000, "SPEAKER_01"),
+                new Turn(2000, 3000, "SPEAKER_00"),
+                new Turn(3000, 4000, "SPEAKER_01"))));
+        assertFalse(DiarizationFusion.isDegenerate(List.of(
+                new Turn(0, 1000, "SPEAKER_00"),
+                new Turn(1000, 2000, "SPEAKER_00"))),
+                "fewer than 3 turns is too little to judge");
+    }
+
+    @Test
     void skipsBlankSegmentsAndHandlesEmptyInput() {
         assertEquals("", DiarizationFusion.fuse(List.of(), List.of()));
         assertEquals("", DiarizationFusion.fuse(

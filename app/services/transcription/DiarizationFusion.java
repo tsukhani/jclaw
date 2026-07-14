@@ -1,6 +1,7 @@
 package services.transcription;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 
@@ -68,5 +69,22 @@ public final class DiarizationFusion {
             }
         }
         return best;
+    }
+
+    /**
+     * Whether the diarization looks degenerate — one speaker swallowing a
+     * multi-turn recording. This is the failure mode on short/narrowband audio
+     * with similar voices: acoustic separation can't split them, so everything
+     * clusters onto one label. The caller warns the agent to attribute
+     * speakers from conversational context instead of trusting the labels.
+     * Fewer than 3 turns is too little to judge (a real short monologue).
+     */
+    public static boolean isDegenerate(List<DiarizeSidecarClient.Turn> turns) {
+        if (turns.size() < 3) return false;
+        var perSpeaker = new HashMap<String, Integer>();
+        for (var t : turns) perSpeaker.merge(t.speaker(), 1, Integer::sum);
+        if (perSpeaker.size() <= 1) return true;
+        long max = perSpeaker.values().stream().mapToLong(Integer::longValue).max().orElse(0);
+        return max >= turns.size() * 0.85;  // one speaker dominates ≥85% of turns
     }
 }

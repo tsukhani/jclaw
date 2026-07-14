@@ -73,6 +73,17 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      *  diarization sidecar instead of a cloud audio-model (JCLAW-565 revival). */
     public static final String PROVIDER_LOCAL = "pyannote-local";
 
+    /** Appended to a local transcript when the on-device diarizer collapsed a
+     *  multi-turn recording onto one speaker (the short/narrowband failure
+     *  mode) — tells the agent to attribute speakers from conversational
+     *  context, the one signal acoustic diarization can't use. */
+    private static final String DEGENERATE_NOTE =
+            "[Speaker-separation note: the on-device diarizer attributed (nearly) all turns to a "
+            + "single speaker. If this recording is actually a multi-party conversation, acoustic "
+            + "separation was low-confidence — common on short or narrowband (e.g. 8 kHz phone) "
+            + "audio with similar-sounding voices. Attribute speakers from conversational context "
+            + "(who greets, who asks vs. answers) rather than the SPEAKER_NN labels above.]";
+
     private static final String ARG_ACTION = "action";
     private static final String ARG_UUID = "attachment_uuid";
     private static final String ARG_SPEAKER_NAMES = "speaker_names";
@@ -297,8 +308,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             if (transcript.isBlank()) {
                 return "No speech was found in %s.".formatted(filename);
             }
-            return "Diarized transcript of %s (local: pyannote + %s):\n\n%s"
+            var result = "Diarized transcript of %s (local: pyannote + %s):\n\n%s"
                     .formatted(filename, model.id(), transcript);
+            if (DiarizationFusion.isDegenerate(turns)) {
+                result += "\n\n" + DEGENERATE_NOTE;
+            }
+            return result;
         } catch (RuntimeException e) {
             Logger.warn("DiarizeAudioTool local: %s", e.getMessage());
             return "Speaker diarization failed: " + e.getMessage();
