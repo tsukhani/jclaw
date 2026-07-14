@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperTranscriber;
-import services.transcription.WhisperModel;
+import services.transcription.AsrModel;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -48,7 +48,7 @@ class WhisperTranscriberTest extends UnitTest {
         services.UvProbe.setForTest(new services.UvProbe.ProbeResult(false, "forced off"));
         try {
             var ex = assertThrows(TranscriptionException.class,
-                    () -> WhisperTranscriber.transcribeSegments(tempWav, WhisperModel.DEFAULT, null));
+                    () -> WhisperTranscriber.transcribeSegments(tempWav, AsrModel.DEFAULT, null));
             assertTrue(ex.getMessage().contains("uv"), ex.getMessage());
             assertTrue(ex.getMessage().contains("setup"), ex.getMessage());
         } finally {

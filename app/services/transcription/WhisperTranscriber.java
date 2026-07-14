@@ -31,7 +31,7 @@ public final class WhisperTranscriber {
      * <p>Weights download on first use in the sidecar (or ahead of time via
      * the Settings page, which provisions the host engine's artifact).
      */
-    public static String transcribe(Path audioFile, WhisperModel model) {
+    public static String transcribe(Path audioFile, AsrModel model) {
         var sb = new StringBuilder();
         for (var segment : transcribeSegments(audioFile, model, null)) {
             sb.append(segment.text());
@@ -49,7 +49,7 @@ public final class WhisperTranscriber {
      * models and whisper-jni's {@code "en"} default on English-only models
      * (whisper.cpp rejects detection on {@code .en} models).
      */
-    public static List<Segment> transcribeSegments(Path audioFile, WhisperModel model, String language) {
+    public static List<Segment> transcribeSegments(Path audioFile, AsrModel model, String language) {
         // JCLAW-650: sidecar-or-error, the JCLAW-614 pattern. The engine is
         // host-relevant (mlx-whisper on Apple silicon, faster-whisper on
         // CUDA/CPU) and its only prerequisite is uv — whisper weights are

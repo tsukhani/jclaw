@@ -23,7 +23,7 @@ public final class WhisperLocalTranscriptionService implements TranscriptionServ
     public String transcribe(MessageAttachment attachment) {
         if (attachment == null) throw new TranscriptionException("attachment is null");
         var modelId = ConfigService.get("transcription.localModel");
-        var model = WhisperModel.byId(modelId).orElse(WhisperModel.DEFAULT);
+        var model = AsrModel.byId(modelId).orElse(AsrModel.DEFAULT);
         var path = AgentService.workspaceRoot().resolve(attachment.storagePath);
         // Language follows the model selection (JCLAW-556): multilingual
         // models auto-detect per clip, .en models decode English. Before,

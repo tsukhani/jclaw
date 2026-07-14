@@ -11,7 +11,7 @@ import services.ConfigService;
 import services.EventLogger;
 import services.transcription.AsrModelStore;
 import services.transcription.FfmpegProbe;
-import services.transcription.WhisperModel;
+import services.transcription.AsrModel;
 import utils.ApiResponses;
 
 import java.util.ArrayList;
@@ -43,11 +43,11 @@ public class ApiTranscriptionController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
-    public record WhisperModelEntry(String id, String displayName, int approxSizeMb, String status, long bytesDownloaded, long totalBytes, String engine, String error) {}
+    public record AsrModelEntry(String id, String displayName, int approxSizeMb, String status, long bytesDownloaded, long totalBytes, String engine, String error) {}
 
     public record TranscriptionStateResponse(String provider, String localModel,
                                              boolean ffmpegAvailable, String ffmpegReason,
-                                             List<WhisperModelEntry> models) {}
+                                             List<AsrModelEntry> models) {}
 
     public record DownloadStartedResponse(String status, String modelId) {}
 
@@ -69,10 +69,10 @@ public class ApiTranscriptionController extends Controller {
         // Apple silicon, faster-whisper CT2 elsewhere) — the artifact the
         // Download button provisions is the one that actually runs.
         var statuses = AsrModelStore.statusAll();
-        var models = new ArrayList<WhisperModelEntry>();
-        for (var m : WhisperModel.values()) {
+        var models = new ArrayList<AsrModelEntry>();
+        for (var m : AsrModel.values()) {
             var status = statuses.get(m.id());
-            models.add(new WhisperModelEntry(
+            models.add(new AsrModelEntry(
                     m.id(),
                     m.displayName(),
                     m.approxSizeMb(),
@@ -104,7 +104,7 @@ public class ApiTranscriptionController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
     @ChatHidden("triggers a Whisper model download -- disk/network resource action")
     public static void download(String id) {
-        var model = WhisperModel.byId(id);
+        var model = AsrModel.byId(id);
         if (model.isEmpty()) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown whisper model id: " + id);
         // Single-flight per model id; concurrent calls from the polling UI
         // attach to the same in-flight prefetch, no harm done (JCLAW-650:

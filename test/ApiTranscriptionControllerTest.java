@@ -5,7 +5,7 @@ import play.test.FunctionalTest;
 import services.ConfigService;
 import services.Tx;
 import services.transcription.FfmpegProbe;
-import services.transcription.WhisperModel;
+import services.transcription.AsrModel;
 import services.transcription.AsrModelStore;
 
 /**
@@ -54,16 +54,16 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
     void stateReturnsModelListAndConfigKeys() {
         runInFreshTx(() -> {
             ConfigService.set("transcription.provider", "whisper-local");
-            ConfigService.set("transcription.localModel", WhisperModel.DEFAULT.id());
+            ConfigService.set("transcription.localModel", AsrModel.DEFAULT.id());
         });
         var response = GET("/api/transcription/state");
         assertIsOk(response);
         assertContentType("application/json", response);
         var body = getContent(response);
         assertTrue(body.contains("\"provider\":\"whisper-local\""), "provider key in payload: " + body);
-        assertTrue(body.contains("\"localModel\":\"" + WhisperModel.DEFAULT.id() + "\""),
+        assertTrue(body.contains("\"localModel\":\"" + AsrModel.DEFAULT.id() + "\""),
                 "localModel key in payload: " + body);
-        for (var m : WhisperModel.values()) {
+        for (var m : AsrModel.values()) {
             assertTrue(body.contains("\"id\":\"" + m.id() + "\""),
                     "model %s present in payload".formatted(m.id()));
         }
@@ -101,12 +101,12 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
         // error map (ensureRunning throws before any spawn); the endpoint
         // still acks with the expected shape, matching production behavior
         // where downloads are fire-and-poll.
-        var response = POST("/api/transcription/models/" + WhisperModel.DEFAULT.id() + "/download",
+        var response = POST("/api/transcription/models/" + AsrModel.DEFAULT.id() + "/download",
                 "application/json", "{}");
         assertIsOk(response);
         var body = getContent(response);
         assertTrue(body.contains("\"status\":\"downloading\""), "ack body: " + body);
-        assertTrue(body.contains("\"modelId\":\"" + WhisperModel.DEFAULT.id() + "\""),
+        assertTrue(body.contains("\"modelId\":\"" + AsrModel.DEFAULT.id() + "\""),
                 "modelId echoed: " + body);
     }
 }

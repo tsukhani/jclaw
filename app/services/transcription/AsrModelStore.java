@@ -66,26 +66,26 @@ public final class AsrModelStore {
         if (!services.UvProbe.isAvailable()) {
             var reason = "ASR requires the 'uv' launcher on PATH: "
                     + services.UvProbe.lastResult().reason();
-            for (var m : WhisperModel.values()) {
+            for (var m : AsrModel.values()) {
                 out.put(m.id(), new Status(State.UNAVAILABLE, 0, 0, null, reason));
             }
             return out;
         }
         var ids = new StringBuilder();
-        for (var m : WhisperModel.values()) {
+        for (var m : AsrModel.values()) {
             if (!ids.isEmpty()) ids.append(',');
             ids.append(m.id());
         }
         try {
             var body = new AsrSidecarClient().asrModels(ids.toString());
             var status = JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("status");
-            for (var m : WhisperModel.values()) {
+            for (var m : AsrModel.values()) {
                 var s = status.getAsJsonObject(m.id());
                 if (s == null) continue;
                 out.put(m.id(), rowFor(m, s));
             }
         } catch (RuntimeException e) {
-            for (var m : WhisperModel.values()) {
+            for (var m : AsrModel.values()) {
                 out.putIfAbsent(m.id(), new Status(State.UNAVAILABLE, 0, 0, null,
                         "ASR sidecar unavailable: " + e.getMessage()));
             }
@@ -95,7 +95,7 @@ public final class AsrModelStore {
 
     /** One Settings row from the sidecar's per-model status object, folding
      *  in the in-JVM prefetch/error state (S3776: lifted out of statusAll). */
-    private static Status rowFor(WhisperModel m, com.google.gson.JsonObject s) {
+    private static Status rowFor(AsrModel m, com.google.gson.JsonObject s) {
         boolean cached = s.get("cached").getAsBoolean();
         long onDisk = s.get("bytesOnDisk").getAsLong();
         var engine = s.get("engine").getAsString();
@@ -114,7 +114,7 @@ public final class AsrModelStore {
 
     /** Kick a background prefetch of the HOST engine's weights; single-flight
      *  per model id, mirroring WhisperModelManager.ensureAvailable. */
-    public static void prefetch(WhisperModel model) {
+    public static void prefetch(AsrModel model) {
         PREFETCH_ERRORS.remove(model.id());
         PREFETCHES.compute(model.id(), (id, existing) -> {
             if (existing != null && !existing.isDone()) return existing;

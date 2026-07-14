@@ -16,7 +16,7 @@ import services.Tx;
 import services.UvProbe;
 import services.scanners.ScannerRegistry;
 import services.transcription.FfmpegProbe;
-import services.transcription.WhisperModel;
+import services.transcription.AsrModel;
 import tools.ShellExecTool;
 import tools.SubagentSpawnTool;
 import utils.HttpFactories;
@@ -83,7 +83,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("transcription.diarization.provider", "");
         seedIfAbsent("transcription.diarization.model", "");
         seedIfAbsent("transcription.localModel",
-                WhisperModel.DEFAULT.id());
+                AsrModel.DEFAULT.id());
         // JCLAW-563: per-turn acoustic emotion labels on diarized
         // transcripts. On by default (best-effort — failures never break a
         // transcript); set false to skip the ~95 MB model download and the

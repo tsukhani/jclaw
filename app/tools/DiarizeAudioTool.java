@@ -21,7 +21,7 @@ import services.Tx;
 import services.transcription.DiarizationFusion;
 import services.transcription.DiarizeSidecarClient;
 import services.transcription.LlmAudio;
-import services.transcription.WhisperModel;
+import services.transcription.AsrModel;
 import services.transcription.WhisperTranscriber;
 import utils.HttpFactories;
 import utils.JsonArgs;
@@ -299,8 +299,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     private String diarizeLocal(Path path, String filename, String language,
                                 Integer numSpeakers, boolean emotions) {
         try {
-            var model = WhisperModel.byId(ConfigService.get("transcription.localModel"))
-                    .orElse(WhisperModel.DEFAULT);
+            var model = AsrModel.byId(ConfigService.get("transcription.localModel"))
+                    .orElse(AsrModel.DEFAULT);
             var segments = WhisperTranscriber.transcribeSegments(
                     path, model, language != null && !language.isBlank() ? language : null);
             var emotionModel = ConfigService.get("transcription.diarization.emotionModel", "");
