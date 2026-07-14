@@ -228,7 +228,8 @@ onUnmounted(() => stopTranscriptionPolling())
 
     <!-- Master toggle: ON when transcription.provider is non-empty. -->
     <div class="bg-surface-elevated border border-border">
-      <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+      <div class="px-4 py-2.5 border-b border-border flex items-center gap-3">
+        <span class="text-sm font-medium text-fg-strong flex-1">Enable transcription</span>
         <button
           type="button"
           :aria-pressed="transcriptionEnabled"
@@ -242,185 +243,184 @@ onUnmounted(() => stopTranscriptionPolling())
             class="block w-4 h-4 bg-white rounded-full transition-transform"
           />
         </button>
-        <span class="text-sm font-medium text-fg-strong">Enable transcription</span>
-        <span class="ml-auto text-[11px] text-fg-muted">
+        <span class="text-[11px] text-fg-muted">
           {{ transcriptionEnabled ? 'on' : 'off' }}
         </span>
       </div>
+
+      <template v-if="transcriptionEnabled">
+        <div
+          v-if="transcriptionState && !transcriptionState.ffmpegAvailable && selectedTranscriptionProvider === 'whisper-local'"
+          class="border-t border-border px-4 py-2 bg-amber-50 dark:bg-amber-900/20 text-[11px] text-amber-800 dark:text-amber-300"
+        >
+          ⚠ <span class="font-mono">ffmpeg</span> is not on PATH. The self-hosted Whisper backend
+          needs ffmpeg to convert audio attachments to PCM before inference.
+          Install it (e.g. <span class="font-mono">brew install ffmpeg</span>) and reload this page.
+          <span
+            v-if="transcriptionState?.ffmpegReason"
+            class="block opacity-70 mt-0.5"
+          >Probe: {{ transcriptionState.ffmpegReason }}</span>
+        </div>
+        <fieldset class="border-t border-border">
+          <legend class="sr-only">
+            Transcription backend
+          </legend>
+          <div class="divide-y divide-border">
+            <label
+              for="transcription-provider-openrouter"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="openrouterApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
+            >
+              <input
+                id="transcription-provider-openrouter"
+                type="radio"
+                name="transcription-provider"
+                value="openrouter"
+                :checked="selectedTranscriptionProvider === 'openrouter'"
+                :disabled="!openrouterApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setTranscriptionProvider('openrouter')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="openrouterApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >OpenRouter</span>
+              <span
+                v-if="!openrouterApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <label
+              for="transcription-provider-openai"
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="openaiApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
+            >
+              <input
+                id="transcription-provider-openai"
+                type="radio"
+                name="transcription-provider"
+                value="openai"
+                :checked="selectedTranscriptionProvider === 'openai'"
+                :disabled="!openaiApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setTranscriptionProvider('openai')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="openaiApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >OpenAI</span>
+              <span
+                v-if="!openaiApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <label
+              for="transcription-provider-whisper-local"
+              class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+            >
+              <input
+                id="transcription-provider-whisper-local"
+                type="radio"
+                name="transcription-provider"
+                value="whisper-local"
+                :checked="selectedTranscriptionProvider === 'whisper-local'"
+                class="accent-emerald-600"
+                @change="setTranscriptionProvider('whisper-local')"
+              >
+              <span class="flex-1 text-sm text-fg-primary">Self-Hosted Whisper</span>
+              <span
+                class="text-[10px] px-1 border"
+                :class="selectedTranscriptionProvider === 'whisper-local'
+                  ? 'text-green-700 dark:text-green-400 border-green-400/30'
+                  : 'text-fg-muted border-input'"
+              >local</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div
+          v-if="selectedTranscriptionProvider === 'whisper-local'"
+          class="border-t border-border"
+        >
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model size</span>
+            <select
+              :value="selectedLocalModel"
+              aria-label="Whisper model size"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              @change="setLocalModel(($event.target as HTMLSelectElement).value)"
+            >
+              <option
+                v-for="m in (transcriptionState?.models ?? [])"
+                :key="m.id"
+                :value="m.id"
+              >
+                {{ m.displayName }} (~{{ m.approxSizeMb }} MB)
+              </option>
+            </select>
+            <template v-if="selectedLocalModelStatus?.status === 'ABSENT'">
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                :disabled="saving"
+                @click="downloadLocalModel(selectedLocalModel)"
+              >
+                Download
+              </button>
+            </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'DOWNLOADING'">
+              <div class="flex items-center gap-2">
+                <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
+                  <div
+                    class="h-full bg-emerald-600 transition-[width] duration-300"
+                    :style="{ width: selectedLocalModelDownloadPct + '%' }"
+                  />
+                </div>
+                <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
+                  {{ selectedLocalModelDownloadPct }}%
+                </span>
+              </div>
+            </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'VERIFYING'">
+              <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
+            </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'AVAILABLE'">
+              <span class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1">Ready</span>
+            </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'ERROR'">
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                :disabled="saving"
+                @click="downloadLocalModel(selectedLocalModel)"
+              >
+                Retry
+              </button>
+            </template>
+          </div>
+          <div
+            v-if="selectedLocalModelStatus?.status === 'ERROR' && selectedLocalModelStatus?.error"
+            class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+          >
+            {{ selectedLocalModelStatus.error }}
+          </div>
+        </div>
+      </template>
     </div>
 
-    <template v-if="transcriptionEnabled">
-      <div
-        v-if="transcriptionState && !transcriptionState.ffmpegAvailable && selectedTranscriptionProvider === 'whisper-local'"
-        class="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-[11px] text-amber-800 dark:text-amber-300"
-      >
-        ⚠ <span class="font-mono">ffmpeg</span> is not on PATH. The self-hosted Whisper backend
-        needs ffmpeg to convert audio attachments to PCM before inference.
-        Install it (e.g. <span class="font-mono">brew install ffmpeg</span>) and reload this page.
-        <span
-          v-if="transcriptionState?.ffmpegReason"
-          class="block opacity-70 mt-0.5"
-        >Probe: {{ transcriptionState.ffmpegReason }}</span>
-      </div>
-      <fieldset class="bg-surface-elevated border border-border">
-        <legend class="sr-only">
-          Transcription backend
-        </legend>
-        <div class="divide-y divide-border">
-          <label
-            for="transcription-provider-openrouter"
-            class="px-4 py-2.5 flex items-center gap-3"
-            :class="openrouterApiKeyConfigured
-              ? 'cursor-pointer'
-              : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
-            :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
-          >
-            <input
-              id="transcription-provider-openrouter"
-              type="radio"
-              name="transcription-provider"
-              value="openrouter"
-              :checked="selectedTranscriptionProvider === 'openrouter'"
-              :disabled="!openrouterApiKeyConfigured"
-              class="accent-emerald-600"
-              @change="setTranscriptionProvider('openrouter')"
-            >
-            <span
-              class="flex-1 text-sm"
-              :class="openrouterApiKeyConfigured
-                ? 'text-fg-primary'
-                : 'text-amber-800 dark:text-amber-300 opacity-80'"
-            >OpenRouter</span>
-            <span
-              v-if="!openrouterApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
-            >no API key — configure in LLM Providers</span>
-          </label>
-          <label
-            for="transcription-provider-openai"
-            class="px-4 py-2.5 flex items-center gap-3"
-            :class="openaiApiKeyConfigured
-              ? 'cursor-pointer'
-              : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
-            :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
-          >
-            <input
-              id="transcription-provider-openai"
-              type="radio"
-              name="transcription-provider"
-              value="openai"
-              :checked="selectedTranscriptionProvider === 'openai'"
-              :disabled="!openaiApiKeyConfigured"
-              class="accent-emerald-600"
-              @change="setTranscriptionProvider('openai')"
-            >
-            <span
-              class="flex-1 text-sm"
-              :class="openaiApiKeyConfigured
-                ? 'text-fg-primary'
-                : 'text-amber-800 dark:text-amber-300 opacity-80'"
-            >OpenAI</span>
-            <span
-              v-if="!openaiApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
-            >no API key — configure in LLM Providers</span>
-          </label>
-          <label
-            for="transcription-provider-whisper-local"
-            class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
-          >
-            <input
-              id="transcription-provider-whisper-local"
-              type="radio"
-              name="transcription-provider"
-              value="whisper-local"
-              :checked="selectedTranscriptionProvider === 'whisper-local'"
-              class="accent-emerald-600"
-              @change="setTranscriptionProvider('whisper-local')"
-            >
-            <span class="flex-1 text-sm text-fg-primary">Self-Hosted Whisper</span>
-            <span
-              class="text-[10px] px-1 border"
-              :class="selectedTranscriptionProvider === 'whisper-local'
-                ? 'text-green-700 dark:text-green-400 border-green-400/30'
-                : 'text-fg-muted border-input'"
-            >local</span>
-          </label>
-        </div>
-      </fieldset>
-
-      <div
-        v-if="selectedTranscriptionProvider === 'whisper-local'"
-        class="bg-surface-elevated border border-border"
-      >
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model size</span>
-          <select
-            :value="selectedLocalModel"
-            aria-label="Whisper model size"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            @change="setLocalModel(($event.target as HTMLSelectElement).value)"
-          >
-            <option
-              v-for="m in (transcriptionState?.models ?? [])"
-              :key="m.id"
-              :value="m.id"
-            >
-              {{ m.displayName }} (~{{ m.approxSizeMb }} MB)
-            </option>
-          </select>
-          <template v-if="selectedLocalModelStatus?.status === 'ABSENT'">
-            <button
-              type="button"
-              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-              :disabled="saving"
-              @click="downloadLocalModel(selectedLocalModel)"
-            >
-              Download
-            </button>
-          </template>
-          <template v-else-if="selectedLocalModelStatus?.status === 'DOWNLOADING'">
-            <div class="flex items-center gap-2">
-              <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
-                <div
-                  class="h-full bg-emerald-600 transition-[width] duration-300"
-                  :style="{ width: selectedLocalModelDownloadPct + '%' }"
-                />
-              </div>
-              <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
-                {{ selectedLocalModelDownloadPct }}%
-              </span>
-            </div>
-          </template>
-          <template v-else-if="selectedLocalModelStatus?.status === 'VERIFYING'">
-            <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
-          </template>
-          <template v-else-if="selectedLocalModelStatus?.status === 'AVAILABLE'">
-            <span class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1">Ready</span>
-          </template>
-          <template v-else-if="selectedLocalModelStatus?.status === 'ERROR'">
-            <button
-              type="button"
-              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-              :disabled="saving"
-              @click="downloadLocalModel(selectedLocalModel)"
-            >
-              Retry
-            </button>
-          </template>
-        </div>
-        <div
-          v-if="selectedLocalModelStatus?.status === 'ERROR' && selectedLocalModelStatus?.error"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
-        >
-          {{ selectedLocalModelStatus.error }}
-        </div>
-      </div>
-    </template>
-
-    <!-- JCLAW-654: Diarization = audio-capable cloud chat model. Outside the
-           master-toggle template — the diarize_audio tool works whatever the
-           inbound-transcription provider is. -->
+    <!-- Diarization = audio-capable chat model (cloud or Ollama Local). Outside
+           the master-toggle template — the diarize_audio tool works whatever the
+           inbound-transcription provider is (JCLAW-654). -->
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-2.5 border-b border-border flex items-center gap-3">
         <span class="text-sm font-medium text-fg-strong flex-1">Diarization</span>
@@ -480,38 +480,6 @@ onUnmounted(() => stopTranscriptionPolling())
               >no API key — configure in LLM Providers</span>
             </label>
             <label
-              for="diarization-provider-local"
-              class="px-4 py-2.5 flex items-center gap-3 cursor-not-allowed opacity-50"
-              title="Coming in a future release: fully on-device diarization once local audio models mature (JCLAW-656)"
-            >
-              <input
-                id="diarization-provider-local"
-                type="radio"
-                name="diarization-provider"
-                value="local"
-                disabled
-                class="accent-emerald-600"
-              >
-              <span class="flex-1 text-sm text-fg-primary">Local audio model (on-device)</span>
-              <span class="text-[10px] px-1 border text-fg-muted border-input">unavailable</span>
-            </label>
-            <label
-              for="diarization-provider-ollama-local"
-              class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
-            >
-              <input
-                id="diarization-provider-ollama-local"
-                type="radio"
-                name="diarization-provider"
-                value="ollama-local"
-                :checked="diarizationProvider === 'ollama-local'"
-                class="accent-emerald-600"
-                @change="setDiarizationProvider('ollama-local')"
-              >
-              <span class="flex-1 text-sm text-fg-primary">Local audio model (Ollama)</span>
-              <span class="text-[10px] px-1 border text-fg-muted border-input">on-device via Ollama</span>
-            </label>
-            <label
               for="diarization-provider-openai"
               class="px-4 py-2.5 flex items-center gap-3"
               :class="openaiApiKeyConfigured
@@ -537,6 +505,27 @@ onUnmounted(() => stopTranscriptionPolling())
                 v-if="!openaiApiKeyConfigured"
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — configure in LLM Providers</span>
+            </label>
+            <label
+              for="diarization-provider-ollama-local"
+              class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+            >
+              <input
+                id="diarization-provider-ollama-local"
+                type="radio"
+                name="diarization-provider"
+                value="ollama-local"
+                :checked="diarizationProvider === 'ollama-local'"
+                class="accent-emerald-600"
+                @change="setDiarizationProvider('ollama-local')"
+              >
+              <span class="flex-1 text-sm text-fg-primary">Ollama Local</span>
+              <span
+                class="text-[10px] px-1 border"
+                :class="diarizationProvider === 'ollama-local'
+                  ? 'text-green-700 dark:text-green-400 border-green-400/30'
+                  : 'text-fg-muted border-input'"
+              >local</span>
             </label>
           </div>
         </fieldset>
