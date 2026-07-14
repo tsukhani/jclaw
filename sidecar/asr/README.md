@@ -75,7 +75,7 @@ curl -s -X POST localhost:9529/transcribe \
 ## Platform notes
 
 - macOS / Apple Silicon: mlx-whisper on Metal — no extra config.
-- Linux + NVIDIA: faster-whisper picks up CUDA automatically
-  (`UV_TORCH_BACKEND=cu124 uv run serve.py ...` to force the CUDA wheel).
+- Linux + NVIDIA: faster-whisper (CTranslate2) picks up CUDA automatically
+  when the CUDA runtime is present — no extra config.
 - CPU-only also works (faster-whisper int8) — slower but correct. There is
   no fallback engine (JCLAW-614): a sidecar failure surfaces as an error.

@@ -1,33 +1,12 @@
 [project]
 name = "jclaw-asr-sidecar"
 version = "0.1.0"
-description = "Local speaker-diarization sidecar for jclaw — pyannote community-1 (JCLAW-565)"
+description = "ASR transcription sidecar for jclaw — Faster-Whisper (CUDA/CPU) / mlx-whisper (Apple silicon)"
 requires-python = ">=3.11"
-# pyannote.audio 4 brings torch/torchaudio/pyannote.core transitively; the explicit
-# torch floor documents the MPS requirement (Apple-GPU inference needs torch>=2.4's
-# MPS coverage). `uv run` resolves and writes uv.lock on first launch.
-dependencies = [
-    "pyannote.audio>=4.0",
-    "torch>=2.4",
-    "torchaudio>=2.4",
-    "huggingface_hub>=0.26",
-    # JCLAW-634: resident WeSpeaker embedding — sherpa-onnx is numpy>=2
-    # compatible so it lives in the daemon env (no per-call subprocess).
-    # sherpa-onnx-core must be EXPLICIT: it carries the native dylibs
-    # (installed into sherpa_onnx/lib), and uv's universal project
-    # resolution drops it from the lock even though per-platform script
-    # envs resolve it fine — without it dlopen fails on libonnxruntime.
-    "sherpa-onnx>=1.12",
-    "sherpa-onnx-core>=1.12",
-]
-# NOTE (JCLAW-605): the MossFormer2 separator does NOT live in this env —
-# clearvoice pins numpy<2 while pyannote-core 6 needs numpy>=2. It runs in
-# its own uv-managed script env (separate.py, PEP 723 inline metadata),
-# shelled out from serve.py per /separate call.
-
-# torch wheels are platform-specific (same posture as sidecar/image):
-#  - macOS / Apple Silicon: the default PyPI wheel ships CPU + MPS — no extra config.
-#  - Linux + NVIDIA: the default PyPI wheel is CPU-only; install the CUDA build via
-#      UV_TORCH_BACKEND=cu124 uv run serve.py ...
-# Diarization also runs acceptably on CPU (roughly 0.2x realtime for the community-1
-# pipeline), so unlike imagegen there is no hard GPU requirement.
+# The daemon (serve.py) is a stdlib-only HTTP supervisor: it holds no ML
+# dependencies and shells every request to the ASR worker (transcribe.py),
+# which carries faster-whisper + mlx-whisper in its own PEP 723 inline
+# script env. So this project env has an empty runtime dependency set.
+# (Local diarization / embedding / separation were removed in JCLAW-654;
+# their torch / pyannote / sherpa-onnx dependencies went with them.)
+dependencies = []
