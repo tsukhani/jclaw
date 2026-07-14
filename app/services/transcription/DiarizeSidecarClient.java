@@ -73,22 +73,30 @@ public class DiarizeSidecarClient {
      * Speaker turns via the sidecar (pyannote community-1 on GPU/CPU). First
      * call may build the script env, download the gated weights, and load the
      * pipeline. {@code numSpeakers} is an optional hint ({@code null} = auto).
+     * {@code emotions} runs a per-turn SER pass; {@code emotionModel} picks the
+     * SER model (null/blank = the sidecar default, MERaLiON-SER-v1).
      */
-    public List<Turn> diarize(Path audioFile, Integer numSpeakers, boolean emotions) {
+    public List<Turn> diarize(Path audioFile, Integer numSpeakers, boolean emotions, String emotionModel) {
         SIDECAR_LOCK.lock();
         try {
-            return diarizeLocked(audioFile, numSpeakers, emotions);
+            return diarizeLocked(audioFile, numSpeakers, emotions, emotionModel);
         } finally {
             SIDECAR_LOCK.unlock();
         }
     }
 
-    private List<Turn> diarizeLocked(Path audioFile, Integer numSpeakers, boolean emotions) {
+    private List<Turn> diarizeLocked(Path audioFile, Integer numSpeakers, boolean emotions,
+                                     String emotionModel) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : DiarizeSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("audio_path", audioFile.toAbsolutePath().toString());
         if (numSpeakers != null && numSpeakers > 0) body.addProperty("num_speakers", numSpeakers);
-        if (emotions) body.addProperty("emotions", true);
+        if (emotions) {
+            body.addProperty("emotions", true);
+            if (emotionModel != null && !emotionModel.isBlank()) {
+                body.addProperty("emotion_model", emotionModel);
+            }
+        }
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/diarize")
                 .post(RequestBody.create(body.toString(), JSON))

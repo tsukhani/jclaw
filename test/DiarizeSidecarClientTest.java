@@ -49,7 +49,7 @@ class DiarizeSidecarClientTest extends UnitTest {
                   {"startMs": 7070, "endMs": 7540, "speaker": "SPEAKER_01"}
                 ]}"""));
 
-        var turns = client().diarize(audio, null, false);
+        var turns = client().diarize(audio, null, false, null);
 
         assertEquals(2, turns.size());
         assertEquals(1769, turns.get(0).startMs());
@@ -71,7 +71,7 @@ class DiarizeSidecarClientTest extends UnitTest {
     void diarize_includesSpeakerHintWhenGiven() throws Exception {
         server.enqueue(json(200, "{\"turns\": []}"));
 
-        client().diarize(audio, 2, false);
+        client().diarize(audio, 2, false, null);
 
         var body = server.takeRequest().getBody().utf8();
         assertTrue(body.contains("\"num_speakers\":2"),
@@ -89,10 +89,11 @@ class DiarizeSidecarClientTest extends UnitTest {
                   {"startMs": 9000, "endMs": 9200, "speaker": "SPEAKER_01"}
                 ]}"""));
 
-        var turns = client().diarize(audio, null, true);
+        var turns = client().diarize(audio, null, true, "MERaLiON/MERaLiON-SER-v1");
 
-        assertTrue(server.takeRequest().getBody().utf8().contains("\"emotions\":true"),
-                "request carries the emotions flag");
+        var body = server.takeRequest().getBody().utf8();
+        assertTrue(body.contains("\"emotions\":true"), "request carries the emotions flag");
+        assertTrue(body.contains("MERaLiON/MERaLiON-SER-v1"), "request carries the emotion model");
         var emo = turns.get(0).emotion();
         assertNotNull(emo, "first turn parsed an emotion");
         assertEquals("angry", emo.label());
@@ -106,7 +107,7 @@ class DiarizeSidecarClientTest extends UnitTest {
 
         var client = client();
         var e = assertThrows(TranscriptionException.class,
-                () -> client.diarize(audio, null, false));
+                () -> client.diarize(audio, null, false, null));
         assertTrue(e.getMessage().contains("diarize sidecar failed: HTTP 500"),
                 "names the sidecar and status: " + e.getMessage());
     }
@@ -117,7 +118,7 @@ class DiarizeSidecarClientTest extends UnitTest {
 
         var client = client();
         var e = assertThrows(TranscriptionException.class,
-                () -> client.diarize(audio, null, false));
+                () -> client.diarize(audio, null, false, null));
         assertTrue(e.getMessage().contains("unparseable"),
                 "names the parse failure: " + e.getMessage());
     }

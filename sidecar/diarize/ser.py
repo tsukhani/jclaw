@@ -18,7 +18,8 @@ continuous valence/arousal/dominance. Runs in its OWN uv script env
 worker's env.
 
 usage (worker): uv run ser.py --worker
-  request per line on stdin:  {"audio_path": path, "spans": [[startMs,endMs],...]}
+  request per line on stdin:  {"audio_path": path, "spans": [[startMs,endMs],...],
+                               "model": hf-id (optional; defaults MERaLiON-SER-v1)}
   response per line on stdout: {"emotions": [ {label,confidence,valence,arousal,dominance} | null, ... ]}
   aligned 1:1 with spans; null for spans under the min-duration floor (too
   little signal to score).
@@ -39,7 +40,7 @@ import tempfile
 # than erroring. Harmless on CUDA/CPU. Must be set before torch runs.
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-MODEL = "MERaLiON/MERaLiON-SER-v1"
+DEFAULT_MODEL = "MERaLiON/MERaLiON-SER-v1"
 MIN_MS = 1000   # skip turns under 1s — too little signal for a reliable label
 MAX_S = 15      # the model's evaluation cap
 BATCH = 8
@@ -67,17 +68,35 @@ def _pick_device():
     return "cpu"
 
 
-def _load_model():
+def _load_model(model_id):
     import torch
-    from transformers import AutoModelForAudioClassification, AutoProcessor
-    proc = AutoProcessor.from_pretrained(MODEL, trust_remote_code=True)
+    from transformers import AutoModelForAudioClassification
+    # AutoProcessor covers models with a tokenizer (MERaLiON's Whisper stack);
+    # audio-only wav2vec2 SER models have only a feature extractor, so fall
+    # back to that. Any AutoModelForAudioClassification SER model then works.
+    try:
+        from transformers import AutoProcessor
+        proc = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    except Exception:  # noqa: BLE001 — no tokenizer → feature-extractor only
+        from transformers import AutoFeatureExtractor
+        proc = AutoFeatureExtractor.from_pretrained(model_id, trust_remote_code=True)
     model = AutoModelForAudioClassification.from_pretrained(
-        MODEL, trust_remote_code=True).eval()
+        model_id, trust_remote_code=True).eval()
     device = _pick_device()
     model.to(torch.device(device))
-    sys.stderr.write("[ser] model loaded on %s\n" % device)
+    sys.stderr.write("[ser] %s loaded on %s\n" % (model_id, device))
     return {"proc": proc, "model": model, "id2label": model.config.id2label,
-            "torch": torch, "device": device}
+            "torch": torch, "device": device, "pad": _needs_pad(proc)}
+
+
+def _needs_pad(proc):
+    """wav2vec2 feature extractors must be told to pad, to batch
+    variable-length slices; Whisper ones already pad to a fixed mel length
+    (padding=True would pad to the batch's longest and break the model).
+    Detect by the output key on a 0.1s dummy: Whisper -> input_features."""
+    import numpy as np
+    out = proc(np.zeros(1600, dtype="float32"), sampling_rate=16000, return_tensors="pt")
+    return "input_features" not in out
 
 
 def _infer(state, batch):
@@ -85,7 +104,10 @@ def _infer(state, batch):
     CPU and retries once, staying on CPU thereafter. Returns (probs, dims) on
     CPU."""
     torch = state["torch"]
-    inputs = state["proc"](batch, sampling_rate=16000, return_tensors="pt")
+    kw = {"return_tensors": "pt"}
+    if state["pad"]:
+        kw["padding"] = True
+    inputs = state["proc"](batch, sampling_rate=16000, **kw)
     dev = state["device"]
     on_dev = {k: (v.to(dev) if hasattr(v, "to") else v) for k, v in inputs.items()}
     try:
@@ -109,7 +131,8 @@ def _infer(state, batch):
 def _label(state, probs_row, dims_row):
     torch = state["torch"]
     ci = int(torch.argmax(probs_row))
-    emo = {"label": state["id2label"][str(ci)],
+    id2label = state["id2label"]  # keys may be int or str depending on the model
+    emo = {"label": id2label.get(ci, id2label.get(str(ci), str(ci))),
            "confidence": round(float(probs_row[ci]), 3)}
     if dims_row is not None:
         v, a, d = dims_row.tolist()
@@ -148,7 +171,7 @@ def _emotions(state, audio_path, spans):
 
 
 def worker():
-    state = _load_model()
+    cache = {}  # model_id -> loaded state, lazily loaded per requested model
     sys.stderr.write("[ser] worker ready\n")
     print(json.dumps({"ready": True}), flush=True)
     for line in sys.stdin:
@@ -157,7 +180,10 @@ def worker():
             continue
         try:
             req = json.loads(line)
-            emos = _emotions(state, req["audio_path"], req["spans"])
+            model_id = req.get("model") or DEFAULT_MODEL
+            if model_id not in cache:
+                cache[model_id] = _load_model(model_id)
+            emos = _emotions(cache[model_id], req["audio_path"], req["spans"])
             print(json.dumps({"emotions": emos}), flush=True)
         except Exception as e:  # noqa: BLE001 — reported per-request
             print(json.dumps({"error": str(e)}), flush=True)

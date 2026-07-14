@@ -303,7 +303,9 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                     .orElse(WhisperModel.DEFAULT);
             var segments = WhisperTranscriber.transcribeSegments(
                     path, model, language != null && !language.isBlank() ? language : null);
-            var turns = new DiarizeSidecarClient().diarize(path, numSpeakers, emotions);
+            var emotionModel = ConfigService.get("transcription.diarization.emotionModel", "");
+            var turns = new DiarizeSidecarClient().diarize(path, numSpeakers, emotions,
+                    emotionModel.isBlank() ? null : emotionModel);
             var transcript = DiarizationFusion.fuse(segments, turns);
             if (transcript.isBlank()) {
                 return "No speech was found in %s.".formatted(filename);

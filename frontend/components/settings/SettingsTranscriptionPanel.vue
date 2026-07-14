@@ -135,6 +135,20 @@ async function setDiarizationModel(value: string) {
   finally { saving.value = false }
 }
 
+// On-device (pyannote-local) per-turn emotion model (SER). Any HF
+// audio-classification model works; blank = MERaLiON-SER-v1 (the sidecar default).
+const selectedEmotionModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'transcription.diarization.emotionModel')?.value ?? '',
+)
+async function setEmotionModel(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.emotionModel', value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+
 const selectedLocalModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.localModel')?.value ?? 'small.en',
 )
@@ -691,13 +705,35 @@ onUnmounted(() => stopTranscriptionPolling())
         </div>
         <div
           v-else
-          class="border-t border-border px-4 py-2.5 text-[11px] text-fg-muted"
+          class="border-t border-border"
         >
-          Uses <span class="font-mono">pyannote/speaker-diarization-community-1</span> on-device —
-          speaker turns fused with the local ASR transcript, no model to pick. Needs
-          <span class="font-mono">uv</span> and a Hugging Face token (shared with
-          <span class="text-fg-muted">Image Generation</span>) for the gated weights, downloaded
-          on first use. Speaker turns only — no per-turn emotion.
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Emotion model</span>
+            <input
+              id="diarization-emotion-model"
+              :value="selectedEmotionModel"
+              list="diarization-emotion-model-suggestions"
+              placeholder="MERaLiON/MERaLiON-SER-v1 (default)"
+              aria-label="On-device emotion (SER) model"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              @change="setEmotionModel(($event.target as HTMLInputElement).value.trim())"
+            >
+            <datalist id="diarization-emotion-model-suggestions">
+              <option value="MERaLiON/MERaLiON-SER-v1" />
+              <option value="superb/wav2vec2-base-superb-er" />
+              <option value="Dpngtm/wav2vec2-emotion-recognition" />
+            </datalist>
+          </div>
+          <p class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted">
+            On-device diarization uses
+            <span class="font-mono">pyannote/speaker-diarization-community-1</span> (needs
+            <span class="font-mono">uv</span> + a Hugging Face token, shared with
+            <span class="text-fg-muted">Image Generation</span>). Per-turn emotion — when the
+            diarize-audio tool is asked for it — runs the SER model above. Leave blank for
+            <span class="font-mono">MERaLiON-SER-v1</span> (7-class + valence/arousal/dominance,
+            best for Malay/telephony; the wav2vec2 options are English-trained and weaker on
+            8&nbsp;kHz calls). Any Hugging Face audio-classification SER model works.
+          </p>
         </div>
       </template>
     </div>

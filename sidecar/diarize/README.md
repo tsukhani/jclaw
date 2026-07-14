@@ -49,9 +49,17 @@ neutral on the rest). Runs in its own PEP 723 env (`ser.py`, transformers)
 shelled from `serve.py`, GPU when available (CUDA/MPS — ~2× faster than CPU
 with identical labels; `DIARIZE_DEVICE` forces one, `PYTORCH_ENABLE_MPS_FALLBACK`
 + a CPU retry cover MPS op gaps), **best-effort** (a failure returns turns
-without labels). Turns under 1 s are skipped (too little signal). Ungated, but
-the **MERaLiON Public License** — check commercial terms before a paid-edition
-ship.
+without labels). Turns under 1 s are skipped (too little signal).
+
+The SER model is **operator-configurable** (`transcription.diarization.emotionModel`
+→ `emotion_model` in the `/diarize` request; the worker caches per model). Any
+Hugging Face `AutoModelForAudioClassification` SER model loads — `AutoProcessor`,
+falling back to `AutoFeatureExtractor` for audio-only wav2vec2 models. But
+**MERaLiON is the default and the only one verified accurate on 8 kHz Malay
+telephony**; the wav2vec2 alternatives (superb, Dpngtm — English/RAVDESS-trained)
+load fine but collapse on this domain (e.g. "happy" on a hostile turn). MERaLiON
+is ungated but under the **MERaLiON Public License** — check commercial terms
+before a paid-edition ship.
 
 ## Running by hand (debugging)
 

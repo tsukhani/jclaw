@@ -13,10 +13,11 @@ classical-SER path (DiaRemot) did not transfer to 8kHz telephony.
 
 Protocol (bound to 127.0.0.1 only):
   GET  /health  -> 200 {status, model, loaded}
-  POST /diarize {audio_path, num_speakers?, emotions?}
+  POST /diarize {audio_path, num_speakers?, emotions?, emotion_model?}
         -> 200 {turns: [{startMs, endMs, speaker, emotion?}, ...]}
-        emotions=true adds a MERaLiON-SER pass (ser.py) per turn — a
-        categorical label + valence/arousal/dominance — best-effort.
+        emotions=true adds an SER pass (ser.py) per turn — a categorical label
+        + valence/arousal/dominance — best-effort; emotion_model picks the SER
+        model (defaults MERaLiON-SER-v1).
   POST /shutdown -> 200 (JCLAW-637: evict an adopted orphan)
 
 The audio file is passed by path, not uploaded: both processes run on the
@@ -179,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise RuntimeError(out["error"])
             turns = out.get("turns", [])
             if req.get("emotions") and turns:
-                self._attach_emotions(audio_path, turns)
+                self._attach_emotions(audio_path, turns, req.get("emotion_model"))
             sys.stderr.write("[diarize-sidecar] diarized %s: %d turn(s)%s in %.1fs\n"
                              % (os.path.basename(audio_path), len(turns),
                                 " +emotion" if req.get("emotions") else "", time.time() - t0))
@@ -190,15 +191,19 @@ class Handler(BaseHTTPRequestHandler):
             self.state.touch()
             self.state.run_lock.release()
 
-    def _attach_emotions(self, audio_path, turns):
-        """Second pass: MERaLiON-SER per turn, merged onto the turns in place.
-        Best-effort (JCLAW-563 pattern) — an emotion failure must not sink the
-        diarization; the turns still return, just without labels."""
+    def _attach_emotions(self, audio_path, turns, model=None):
+        """Second pass: SER per turn (MERaLiON by default, or the operator's
+        chosen model), merged onto the turns in place. Best-effort (JCLAW-563
+        pattern) — an emotion failure must not sink the diarization; the turns
+        still return, just without labels."""
         spans = [[t["startMs"], t["endMs"]] for t in turns]
+        payload = {"audio_path": audio_path, "spans": spans}
+        if model:
+            payload["model"] = model
         try:
             with self.state.io_lock:
                 w = self.state.ser_worker()
-                w.stdin.write(json.dumps({"audio_path": audio_path, "spans": spans}) + "\n")
+                w.stdin.write(json.dumps(payload) + "\n")
                 w.stdin.flush()
                 line = w.stdout.readline()
             if not line:

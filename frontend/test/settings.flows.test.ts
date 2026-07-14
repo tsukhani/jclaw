@@ -1465,6 +1465,44 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(captured.find(b => b.key === 'transcription.model')?.value).toBe('gpt-4o-transcribe')
   })
 
+  it('pyannote-local exposes an emotion-model field that POSTs transcription.diarization.emotionModel', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [
+          ...defaultConfigEntries(),
+          { key: 'transcription.diarization.provider', value: 'pyannote-local' },
+        ],
+      }),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key?: string, value?: string }
+        captured.push(body)
+        return { ok: true }
+      },
+    })
+
+    const component = await mountSettingsSection('transcription')
+
+    // The local path has no audio-model dropdown but DOES have an emotion-model field.
+    expect(component.find('select[aria-label="Diarization audio model"]').exists()).toBe(false)
+    const input = component.find('#diarization-emotion-model')
+    expect(input.exists()).toBe(true)
+    await input.setValue('superb/wav2vec2-base-superb-er')
+    await input.trigger('change')
+    await flushPromises()
+    expect(captured.find(b => b.key === 'transcription.diarization.emotionModel')?.value)
+      .toBe('superb/wav2vec2-base-superb-er')
+  })
+
   it('POSTs transcription.provider on @change of an enabled cloud-provider radio', async () => {
     const captured: Array<{ key?: string, value?: string }> = []
     registerEndpoint('/api/agents', () => [])
