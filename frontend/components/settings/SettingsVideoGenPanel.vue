@@ -85,8 +85,11 @@ interface VideoCapabilitySnapshot {
   capability: VideoCapability | null
   error: string | null
 }
+// Lazy (non-blocking): don't suspend the whole panel behind the settings
+// "Loading…" fallback while /api/videogen/capability resolves. The computeds
+// below default gracefully until it arrives (mirrors the transcription panel).
 const { data: videoCapability, refresh: refreshVideoCapability }
-  = await useFetch<VideoCapabilitySnapshot>('/api/videogen/capability')
+  = useLazyFetch<VideoCapabilitySnapshot>('/api/videogen/capability')
 const videoCapState = computed(() => videoCapability.value?.state ?? 'NEEDS_PROBE')
 const videoEngines = computed<VideoEngine[]>(() => videoCapability.value?.capability?.models ?? [])
 const videogenLocalModel = computed(() =>
@@ -167,7 +170,9 @@ watch(videoCapState, (s) => {
   const best = videoEngines.value.find(e => e.runnable)
   if (best) void selectLocalEngine(best) // nothing runnable -> leave provider as-is; the list shows why
 })
-onMounted(() => {
+// State loads lazily, so a probe already PROBING when the panel opens only
+// becomes visible once the fetch resolves — resume the capability poll then.
+watch(videoCapability, () => {
   if (videoCapState.value === 'PROBING') startVideoCapPolling()
 })
 onUnmounted(() => stopVideoCapPolling())

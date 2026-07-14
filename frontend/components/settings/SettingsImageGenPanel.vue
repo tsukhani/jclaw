@@ -110,8 +110,11 @@ type ImagegenLocalState = {
   totalBytes: number
   error: string | null
 }
+// Lazy (non-blocking): don't suspend the whole panel behind the settings
+// "Loading…" fallback while /api/imagegen/local/state resolves. The computeds
+// below default gracefully until it arrives (mirrors the transcription panel).
 const { data: imagegenLocalState, refresh: refreshImagegenLocalState }
-  = await useFetch<ImagegenLocalState>('/api/imagegen/local/state')
+  = useLazyFetch<ImagegenLocalState>('/api/imagegen/local/state')
 
 const fluxUvAvailable = computed(() => imagegenLocalState.value?.uvAvailable ?? false)
 const fluxModelStatus = computed(() => imagegenLocalState.value?.modelStatus ?? 'ABSENT')
@@ -136,7 +139,7 @@ interface ImageCapabilitySnapshot {
   error: string | null
 }
 const { data: imageCapability, refresh: refreshImageCapability }
-  = await useFetch<ImageCapabilitySnapshot>('/api/imagegen/capability')
+  = useLazyFetch<ImageCapabilitySnapshot>('/api/imagegen/capability')
 const imageCapState = computed(() => imageCapability.value?.state ?? 'NEEDS_PROBE')
 const imageCapDetectLabel = computed(() => {
   switch (imageCapState.value) {
@@ -167,7 +170,9 @@ async function probeImageCapability() {
   await refreshImageCapability()
   startImageCapPolling()
 }
-onMounted(() => {
+// State loads lazily, so a probe already PROBING when the panel opens only
+// becomes visible once the fetch resolves — resume the capability poll then.
+watch(imageCapability, () => {
   if (imageCapState.value === 'PROBING') startImageCapPolling()
 })
 onUnmounted(() => stopImageCapPolling())
@@ -217,7 +222,9 @@ function stopImagegenLocalPolling() {
     imagegenLocalPollTimer = null
   }
 }
-onMounted(() => {
+// Same as the capability poll: resume the download poll once the lazily-loaded
+// state reveals a pull already in flight.
+watch(imagegenLocalState, () => {
   if (fluxDownloadInFlight()) startImagegenLocalPolling()
 })
 onUnmounted(() => stopImagegenLocalPolling())
