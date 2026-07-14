@@ -1,0 +1,10 @@
+[project]
+name = "jclaw-diarize-sidecar"
+version = "0.1.0"
+description = "Speaker-diarization sidecar for jclaw — pyannote speaker-diarization-community-1 (JCLAW-565 revival)"
+requires-python = ">=3.11"
+# The daemon (serve.py) is a stdlib-only HTTP supervisor: it holds no ML
+# dependencies and shells every request to the pyannote worker (diarize.py),
+# which carries pyannote.audio + torch in its own PEP 723 inline script env.
+# So this project env has an empty runtime dependency set.
+dependencies = []

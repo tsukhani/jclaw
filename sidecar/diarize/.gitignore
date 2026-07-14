@@ -1,0 +1,8 @@
+# Resolved per machine on first `uv run`, not committed (repo-wide sidecar policy).
+# The project env is dependency-free — serve.py is stdlib-only — and pyannote
+# resolves in diarize.py's own PEP 723 script env (torch is per-platform).
+.venv/
+uv.lock
+__pycache__/
+*.pyc
+data/
