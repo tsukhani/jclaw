@@ -25,15 +25,19 @@ usage (worker): uv run ser.py --worker
 
 Audio is transcoded to 16kHz mono via ffmpeg (the model resamples to 16k;
 jclaw's audio is commonly 8kHz telephony). Slices are batched through the
-model. MERaLiON-SER-v1 is ungated (license: MERaLiON Public License). CPU by
-design — the custom LoRA/ECAPA head is not MPS-safe; emotion is opt-in so the
-latency is acceptable.
+model. MERaLiON-SER-v1 is ungated (license: MERaLiON Public License). Runs on
+GPU when available (CUDA/MPS — measured ~2x faster than CPU with identical
+labels), else CPU; DIARIZE_DEVICE (shared with the pyannote worker) forces one.
 """
 import json
 import os
 import subprocess
 import sys
 import tempfile
+
+# Metal (MPS) has op-coverage gaps; let unsupported ops fall back to CPU rather
+# than erroring. Harmless on CUDA/CPU. Must be set before torch runs.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 MODEL = "MERaLiON/MERaLiON-SER-v1"
 MIN_MS = 1000   # skip turns under 1s — too little signal for a reliable label
@@ -49,13 +53,57 @@ def _to_wav16k(src):
     return wav
 
 
+def _pick_device():
+    """cuda > mps > cpu, unless DIARIZE_DEVICE forces one (shared with the
+    pyannote worker). torch is already imported by the caller."""
+    import torch
+    forced = os.environ.get("DIARIZE_DEVICE", "").strip().lower()
+    if forced:
+        return forced
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def _load_model():
     import torch
     from transformers import AutoModelForAudioClassification, AutoProcessor
     proc = AutoProcessor.from_pretrained(MODEL, trust_remote_code=True)
     model = AutoModelForAudioClassification.from_pretrained(
         MODEL, trust_remote_code=True).eval()
-    return {"proc": proc, "model": model, "id2label": model.config.id2label, "torch": torch}
+    device = _pick_device()
+    model.to(torch.device(device))
+    sys.stderr.write("[ser] model loaded on %s\n" % device)
+    return {"proc": proc, "model": model, "id2label": model.config.id2label,
+            "torch": torch, "device": device}
+
+
+def _infer(state, batch):
+    """Batch forward on the picked device; a GPU failure moves the model to
+    CPU and retries once, staying on CPU thereafter. Returns (probs, dims) on
+    CPU."""
+    torch = state["torch"]
+    inputs = state["proc"](batch, sampling_rate=16000, return_tensors="pt")
+    dev = state["device"]
+    on_dev = {k: (v.to(dev) if hasattr(v, "to") else v) for k, v in inputs.items()}
+    try:
+        with torch.inference_mode():
+            res = state["model"](**on_dev)
+    except Exception:  # noqa: BLE001 — GPU op unimplemented/OOM
+        if dev == "cpu":
+            raise
+        sys.stderr.write("[ser] %s inference failed — falling back to CPU\n" % dev)
+        state["model"].to(torch.device("cpu"))
+        state["device"] = "cpu"
+        on_cpu = {k: (v.to("cpu") if hasattr(v, "to") else v) for k, v in inputs.items()}
+        with torch.inference_mode():
+            res = state["model"](**on_cpu)
+    logits = res["logits"] if "logits" in res else res.logits
+    probs = torch.softmax(logits, dim=1).cpu()
+    dims = res["dims"].cpu() if "dims" in res else None
+    return probs, dims
 
 
 def _label(state, probs_row, dims_row):
@@ -71,7 +119,6 @@ def _label(state, probs_row, dims_row):
 
 def _emotions(state, audio_path, spans):
     import soundfile as sf
-    torch = state["torch"]
     wav = _to_wav16k(audio_path)
     try:
         data, sr = sf.read(wav, dtype="float32")
@@ -94,12 +141,7 @@ def _emotions(state, audio_path, spans):
 
     for b in range(0, len(slices), BATCH):
         batch = slices[b:b + BATCH]
-        inputs = state["proc"](batch, sampling_rate=16000, return_tensors="pt")
-        with torch.inference_mode():
-            res = state["model"](**inputs)
-        logits = res["logits"] if "logits" in res else res.logits
-        probs = torch.softmax(logits, dim=1)
-        dims = res["dims"] if "dims" in res else None
+        probs, dims = _infer(state, batch)
         for j in range(len(batch)):
             out[idxs[b + j]] = _label(state, probs[j], dims[j] if dims is not None else None)
     return out

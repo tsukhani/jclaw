@@ -46,10 +46,12 @@ RAVDESS-lineage SER pinned to "angry" on every 8 kHz Malay turn, while
 MERaLiON — trained on conversational corpora with Malay coverage — produced a
 differentiated spread that tracked the call (angry on the confrontation turns,
 neutral on the rest). Runs in its own PEP 723 env (`ser.py`, transformers)
-shelled from `serve.py`, on **CPU** (the custom LoRA/ECAPA head isn't
-MPS-safe), **best-effort** (a failure returns turns without labels). Turns
-under 1 s are skipped (too little signal). Ungated, but the **MERaLiON Public
-License** — check commercial terms before a paid-edition ship.
+shelled from `serve.py`, GPU when available (CUDA/MPS — ~2× faster than CPU
+with identical labels; `DIARIZE_DEVICE` forces one, `PYTORCH_ENABLE_MPS_FALLBACK`
++ a CPU retry cover MPS op gaps), **best-effort** (a failure returns turns
+without labels). Turns under 1 s are skipped (too little signal). Ungated, but
+the **MERaLiON Public License** — check commercial terms before a paid-edition
+ship.
 
 ## Running by hand (debugging)
 
