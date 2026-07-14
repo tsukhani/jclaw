@@ -7,6 +7,7 @@ import services.Tx;
 import services.transcription.FfmpegProbe;
 import services.transcription.AsrModel;
 import services.transcription.AsrModelStore;
+import services.transcription.DiarizeModelStore;
 
 /**
  * JCLAW-164: smoke coverage for the transcription Settings backend.
@@ -23,6 +24,7 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
     void seedAndLogin() {
         AuthFixture.seedAdminPassword(TEST_PASSWORD);
         AsrModelStore.resetForTest();
+        DiarizeModelStore.resetForTest();
         services.UvProbe.setForTest(new services.UvProbe.ProbeResult(false, "forced off in test"));
         FfmpegProbe.setForTest(new FfmpegProbe.ProbeResult(true, "available"));
         var loginBody = """
@@ -36,6 +38,7 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
     void cleanup() {
         AuthFixture.clearAdminPassword();
         AsrModelStore.resetForTest();
+        DiarizeModelStore.resetForTest();
         services.UvProbe.setForTest(null);
         FfmpegProbe.setForTest(null);
     }
@@ -108,5 +111,25 @@ class ApiTranscriptionControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"status\":\"downloading\""), "ack body: " + body);
         assertTrue(body.contains("\"modelId\":\"" + AsrModel.DEFAULT.id() + "\""),
                 "modelId echoed: " + body);
+    }
+
+    @Test
+    void diarizationModelsReturnsDiarizerAndEmotionRoles() {
+        var response = GET("/api/transcription/diarization/models");
+        assertIsOk(response);
+        assertContentType("application/json", response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"role\":\"diarizer\""), "diarizer role present: " + body);
+        assertTrue(body.contains("\"role\":\"emotion\""), "emotion role present: " + body);
+        assertTrue(body.contains(DiarizeModelStore.PYANNOTE_REPO), "pyannote repo present: " + body);
+        // emotionModel config is blank in tests -> the default SER repo
+        assertTrue(body.contains(DiarizeModelStore.DEFAULT_SER_REPO), "default SER repo present: " + body);
+    }
+
+    @Test
+    void diarizationDownloadRejectsMalformedRepo() {
+        var response = POST("/api/transcription/diarization/download?repo=notarepo",
+                "application/json", "{}");
+        assertEquals(400, response.status.intValue());
     }
 }
