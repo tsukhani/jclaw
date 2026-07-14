@@ -84,7 +84,7 @@ Never use `--no-verify`.
 
 Every code change goes through this order — do not skip steps:
 
-1. **Write tests first** (see CLAUDE.md & feedback memory).
+1. **Write tests first** (see AGENTS.md & feedback memory).
 2. `play autotest` — backend green.
 3. `cd frontend && pnpm test` — frontend green (required if any file under `frontend/` was touched).
 4. **Stop at the local commit.** The `pre-commit` hook runs here; fix every issue it surfaces and re-commit (never `--no-verify`).
