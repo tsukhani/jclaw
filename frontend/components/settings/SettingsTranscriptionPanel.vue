@@ -145,9 +145,75 @@ async function setEmotionModel(value: string) {
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.emotionModel', value } })
     refresh()
+    refreshDiarizationModels() // the SER repo changed — re-check its download status
   }
   finally { saving.value = false }
 }
+
+// On-device diarization weights (pyannote diarizer + SER model): download
+// status + live progress, mirroring the ASR model provisioning. Fetched only
+// when the on-device path is active, so the diarize sidecar isn't spawned for
+// operators who don't use it.
+interface DiarizeModelEntry {
+  repo: string
+  displayName: string
+  role: 'diarizer' | 'emotion'
+  status: 'ABSENT' | 'DOWNLOADING' | 'AVAILABLE' | 'ERROR' | 'UNAVAILABLE'
+  bytesDownloaded: number
+  engine: string | null
+  error: string | null
+}
+const diarizationModels = ref<DiarizeModelEntry[]>([])
+const diarizerModelStatus = computed(() => diarizationModels.value.find(m => m.role === 'diarizer') ?? null)
+const emotionModelStatus = computed(() => diarizationModels.value.find(m => m.role === 'emotion') ?? null)
+function downloadedMb(bytes: number): number {
+  return Math.round((bytes || 0) / 1e6)
+}
+async function refreshDiarizationModels() {
+  try {
+    const r = await $fetch<{ models: DiarizeModelEntry[] }>('/api/transcription/diarization/models')
+    diarizationModels.value = r.models ?? []
+  }
+  catch {
+    diarizationModels.value = []
+  }
+}
+async function downloadDiarizationModel(repo: string) {
+  if (!repo) return
+  saving.value = true
+  try {
+    await $fetch(`/api/transcription/diarization/download?repo=${encodeURIComponent(repo)}`, { method: 'POST' })
+    startDiarizationModelPolling()
+  }
+  finally { saving.value = false }
+}
+let diarizationModelPollTimer: ReturnType<typeof setInterval> | null = null
+function anyDiarizationDownloadInFlight(): boolean {
+  return diarizationModels.value.some(m => m.status === 'DOWNLOADING')
+}
+function startDiarizationModelPolling() {
+  if (diarizationModelPollTimer != null) return
+  diarizationModelPollTimer = setInterval(async () => {
+    await refreshDiarizationModels()
+    if (!anyDiarizationDownloadInFlight()) stopDiarizationModelPolling()
+  }, 1500)
+}
+function stopDiarizationModelPolling() {
+  if (diarizationModelPollTimer != null) {
+    clearInterval(diarizationModelPollTimer)
+    diarizationModelPollTimer = null
+  }
+}
+// Fetch weight status when the on-device path becomes active; resume polling if
+// a download was already in flight when the panel opened.
+watch(diarizationIsLocal, (local) => {
+  if (local) {
+    refreshDiarizationModels().then(() => {
+      if (anyDiarizationDownloadInFlight()) startDiarizationModelPolling()
+    })
+  }
+}, { immediate: true })
+onBeforeUnmount(() => stopDiarizationModelPolling())
 
 const selectedLocalModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.localModel')?.value ?? 'small',
@@ -707,7 +773,54 @@ onUnmounted(() => stopTranscriptionPolling())
           v-else
           class="border-t border-border"
         >
+          <!-- Speaker diarizer (pyannote) — fixed model, download status -->
           <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Diarizer</span>
+            <span class="flex-1 text-sm font-mono text-fg-muted truncate">pyannote/speaker-diarization-community-1</span>
+            <span
+              v-if="!diarizerModelStatus"
+              class="text-[10px] text-fg-muted shrink-0"
+            >checking…</span>
+            <span
+              v-else-if="diarizerModelStatus.status === 'AVAILABLE'"
+              class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1 shrink-0"
+            >Ready</span>
+            <span
+              v-else-if="diarizerModelStatus.status === 'DOWNLOADING'"
+              class="text-xs font-mono text-fg-muted tabular-nums shrink-0"
+            >↓ {{ downloadedMb(diarizerModelStatus.bytesDownloaded) }} MB</span>
+            <button
+              v-else-if="diarizerModelStatus.status === 'ERROR'"
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors shrink-0"
+              :disabled="saving"
+              @click="downloadDiarizationModel(diarizerModelStatus.repo)"
+            >
+              Retry
+            </button>
+            <span
+              v-else-if="diarizerModelStatus.status === 'UNAVAILABLE'"
+              class="text-[10px] px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30 shrink-0"
+            >unavailable</span>
+            <button
+              v-else
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors shrink-0"
+              :disabled="saving"
+              @click="downloadDiarizationModel(diarizerModelStatus.repo)"
+            >
+              Download
+            </button>
+          </div>
+          <div
+            v-if="diarizerModelStatus?.status === 'ERROR' && diarizerModelStatus?.error"
+            class="px-4 pb-2 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+          >
+            {{ diarizerModelStatus.error }}
+          </div>
+
+          <!-- Emotion (SER) model — operator-selectable, download status -->
+          <div class="px-4 py-2.5 flex items-center gap-3 border-t border-border">
             <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Emotion model</span>
             <input
               id="diarization-emotion-model"
@@ -723,8 +836,48 @@ onUnmounted(() => stopTranscriptionPolling())
               <option value="superb/wav2vec2-base-superb-er" />
               <option value="Dpngtm/wav2vec2-emotion-recognition" />
             </datalist>
+            <span
+              v-if="!emotionModelStatus"
+              class="text-[10px] text-fg-muted shrink-0"
+            >checking…</span>
+            <span
+              v-else-if="emotionModelStatus.status === 'AVAILABLE'"
+              class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1 shrink-0"
+            >Ready</span>
+            <span
+              v-else-if="emotionModelStatus.status === 'DOWNLOADING'"
+              class="text-xs font-mono text-fg-muted tabular-nums shrink-0"
+            >↓ {{ downloadedMb(emotionModelStatus.bytesDownloaded) }} MB</span>
+            <button
+              v-else-if="emotionModelStatus.status === 'ERROR'"
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors shrink-0"
+              :disabled="saving"
+              @click="downloadDiarizationModel(emotionModelStatus.repo)"
+            >
+              Retry
+            </button>
+            <span
+              v-else-if="emotionModelStatus.status === 'UNAVAILABLE'"
+              class="text-[10px] px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30 shrink-0"
+            >unavailable</span>
+            <button
+              v-else
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors shrink-0"
+              :disabled="saving"
+              @click="downloadDiarizationModel(emotionModelStatus.repo)"
+            >
+              Download
+            </button>
           </div>
-          <p class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted">
+          <div
+            v-if="emotionModelStatus?.status === 'ERROR' && emotionModelStatus?.error"
+            class="px-4 pb-2 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+          >
+            {{ emotionModelStatus.error }}
+          </div>
+          <p class="px-4 pb-2.5 pt-1 text-[11px] text-fg-muted">
             On-device diarization uses
             <span class="font-mono">pyannote/speaker-diarization-community-1</span> (needs
             <span class="font-mono">uv</span> + a Hugging Face token, shared with
