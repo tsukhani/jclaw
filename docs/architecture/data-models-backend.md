@@ -58,7 +58,7 @@ Per-turn transcript of a run (`turn_index`, `role`, `content`, tool calls/result
 | `SkillRegistryTool` | `skill_registry_tool` | Registry snapshot per `(skill, tool)`; install-time source only, not consulted at validation time. |
 | `ToolApprovalGrant` | `tool_approval_grant` | Durable "APPROVED_ALWAYS" record per `(agent, tool)` for dangerous tools (JCLAW-385). |
 
-Effective shell allowlist = `global shell.allowlist ∪ (AgentSkillAllowedTool WHERE agent=:agent AND skill ∈ enabled AgentSkillConfig)`. See `openspec/specs/shell-exec/`.
+Effective shell allowlist = `global shell.allowlist ∪ (AgentSkillAllowedTool WHERE agent=:agent AND skill ∈ enabled AgentSkillConfig)`.
 
 ## Config & auth
 

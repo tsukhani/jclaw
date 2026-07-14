@@ -110,10 +110,6 @@ Every code change goes through this order — do not skip steps:
 - **Latency metrics:** `/api/metrics/latency` returns HdrHistogram buckets per segment; `/api/metrics/cost` is durable.
 - **Load testing:** `./jclaw.sh loadtest` drives the in-process harness against `/api/chat/stream` (mock or a real `--provider`/`--model`).
 
-## OpenSpec workflow
-
-Ratified specs live under `openspec/specs/` (e.g. `shell-exec`); completed change proposals are archived under `openspec/archive/` (e.g. `v020-backlog`, `performance-critical-fixes`). Use the `/opsx:*` commands (see skill list) to create, continue, and archive change proposals.
-
 ## Gotchas
 
 - H2 file DB is configured `AUTO_SERVER=TRUE`, so you can attach with a GUI client while Play is running.
