@@ -188,7 +188,17 @@ def worker():
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
         return worker()
-    sys.stderr.write("usage: uv run meralion.py --worker\n")
+    if len(sys.argv) > 2 and sys.argv[1] == "--prefetch":
+        # One-shot download (serve.py runs this detached so it can't stall the
+        # worker/status). Prints a JSON line; nonzero exit signals failure.
+        try:
+            _prefetch(sys.argv[2])
+            print(json.dumps({"ok": True}), flush=True)
+            return 0
+        except Exception as e:  # noqa: BLE001
+            print(json.dumps({"error": str(e)}), flush=True)
+            return 1
+    sys.stderr.write("usage: uv run meralion.py --worker | --prefetch <repo>\n")
     return 2
 
 

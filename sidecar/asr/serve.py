@@ -46,6 +46,57 @@ DEFAULT_IDENTITY = "asr"
 MERALION_HF = {"meralion-3-3b": "MERaLiON/MERaLiON-3-3B-ASR"}
 
 
+def _hf_hub_cache():
+    """HF hub cache dir (stdlib mirror of huggingface_hub's default resolution),
+    so status can size an in-flight download WITHOUT importing huggingface_hub
+    into this stdlib-only daemon."""
+    c = os.environ.get("HF_HUB_CACHE")
+    if c:
+        return c
+    home = os.environ.get("HF_HOME")
+    if home:
+        return os.path.join(home, "hub")
+    xdg = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return os.path.join(xdg, "huggingface", "hub")
+
+
+def _repo_bytes(repo):
+    """Real on-disk bytes for a repo's cache dir. Skips symlinks so a completed
+    snapshot isn't double-counted (blob + snapshot link); mid-download only the
+    growing blobs exist, giving an honest progress numerator."""
+    d = os.path.join(_hf_hub_cache(), "models--" + repo.replace("/", "--"))
+    total = 0
+    for root, _, files in os.walk(d):
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                if not os.path.islink(fp):
+                    total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+
+def _read_error(path):
+    """Best-effort error text from a finished prefetch subprocess's captured
+    output: the last JSON {"error":...} line, else the tail."""
+    try:
+        with open(path) as f:
+            text = f.read().strip()
+    except OSError:
+        return "download failed"
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                e = json.loads(line).get("error")
+                if e:
+                    return e
+            except ValueError:
+                pass
+    return text[-300:] or "download failed"
+
+
 class SidecarState:
     def __init__(self, model: str, idle_timeout_s: float):
         self.model = model  # identity string echoed on /health (JCLAW-637)
@@ -58,8 +109,14 @@ class SidecarState:
         self._meralion_worker = None
         self._align_worker = None
         # JCLAW-650: serializes ALL worker line-protocol I/O — status and
-        # prefetch share the worker with transcription.
+        # transcription share the worker.
         self.asr_io_lock = threading.Lock()
+        # Model downloads run as DETACHED subprocesses (not the worker pipe, not
+        # under asr_io_lock) so a multi-GB pull can't stall status polling; the
+        # status endpoint sizes them straight off the cache dir instead.
+        self._prefetches = {}        # model id -> {proc, repo, out}
+        self._prefetch_errors = {}   # model id -> {repo, error}
+        self._prefetch_lock = threading.Lock()
 
     def _spawn(self, attr, script):
         """JCLAW-649: lazily (re)spawn a persistent PEP-723 worker for `script`,
@@ -108,6 +165,58 @@ class SidecarState:
             raise RuntimeError(payload["error"])
         return payload
 
+    def start_prefetch(self, model, repo, script):
+        """Launch a DETACHED download of `repo` via `script --prefetch`. Holds
+        neither asr_io_lock nor the worker pipe, so the download can't stall
+        status polling. Idempotent per model (a live download is left running).
+        Subprocess stdout+stderr is captured to a temp file for error reporting."""
+        import subprocess
+        import tempfile
+        with self._prefetch_lock:
+            cur = self._prefetches.get(model)
+            if cur is not None and cur["proc"].poll() is None:
+                return
+            self._prefetch_errors.pop(model, None)
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            fd, outpath = tempfile.mkstemp(suffix=".prefetch")
+            fh = os.fdopen(fd, "w")
+            proc = subprocess.Popen(["uv", "run", script, "--prefetch", repo],
+                                    cwd=script_dir, stdout=fh, stderr=subprocess.STDOUT)
+            fh.close()
+            self._prefetches[model] = {"proc": proc, "repo": repo, "out": outpath}
+
+    def prefetch_state(self, model):
+        """Worker-free status for a model with an active or failed download:
+        {engine, repo, cached, downloading, bytesOnDisk[, error]}. Returns None
+        when nothing is in flight (caller falls back to the worker's cached
+        status). Sizes progress off the cache dir, so it never blocks."""
+        engine = "meralion" if model in MERALION_HF else "whisper"
+        with self._prefetch_lock:
+            entry = self._prefetches.get(model)
+            if entry is None:
+                err = self._prefetch_errors.get(model)
+                if err is None:
+                    return None
+                return {"engine": engine, "repo": err["repo"], "cached": False,
+                        "downloading": False, "bytesOnDisk": _repo_bytes(err["repo"]),
+                        "error": err["error"]}
+            proc, repo, outf = entry["proc"], entry["repo"], entry["out"]
+            if proc.poll() is None:
+                return {"engine": engine, "repo": repo, "cached": False,
+                        "downloading": True, "bytesOnDisk": _repo_bytes(repo)}
+            self._prefetches.pop(model, None)
+            err = _read_error(outf) if proc.returncode != 0 else None
+            try:
+                os.remove(outf)
+            except OSError:
+                pass
+            if err:
+                self._prefetch_errors[model] = {"repo": repo, "error": err}
+                return {"engine": engine, "repo": repo, "cached": False,
+                        "downloading": False, "bytesOnDisk": _repo_bytes(repo),
+                        "error": err}
+            return None  # success -> the worker now reports cached=true
+
     def touch(self):
         self.last_activity = time.monotonic()
 
@@ -131,6 +240,15 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length else b"{}"
         return json.loads(raw.decode("utf-8"))
 
+    def _whisper_repo(self, model):
+        """The host-engine HF repo for a Whisper id, from the worker itself
+        (authoritative — avoids duplicating the mlx/faster-whisper table here).
+        A quick cache-check status call, not a download."""
+        with self.state.asr_io_lock:
+            st = self.state.ask("_asr_worker", self.state.asr_worker,
+                                {"op": "status", "models": [model]})["status"]
+        return st[model]["repo"]
+
     def handle(self):
         try:
             super().handle()
@@ -148,9 +266,19 @@ class Handler(BaseHTTPRequestHandler):
                 from urllib.parse import urlparse, parse_qs
                 ids = parse_qs(urlparse(self.path).query).get("ids", [""])[0]
                 models = [m for m in ids.split(",") if m]
-                whisper = [m for m in models if m not in MERALION_HF]
-                mer = [m for m in models if m in MERALION_HF]
                 status = {}
+                whisper, mer = [], []
+                for m in models:
+                    # A model with an in-flight/failed download is sized off the
+                    # cache dir WITHOUT the worker, so a running download never
+                    # blocks status. Everything else asks its engine's worker.
+                    ps = self.state.prefetch_state(m)
+                    if ps is not None:
+                        status[m] = ps
+                    elif m in MERALION_HF:
+                        mer.append(m)
+                    else:
+                        whisper.append(m)
                 with self.state.asr_io_lock:
                     if whisper:
                         status.update(self.state.ask(
@@ -185,22 +313,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/asr/prefetch":
-            # JCLAW-650: download the host engine's weights for a model.
-            # Synchronous (the JVM tracks async state and polls /asr/models);
-            # shares the worker, so an in-flight ASR request queues behind it.
+            # JCLAW-650: download the host engine's weights for a model. Kicks a
+            # DETACHED subprocess and returns immediately — the download never
+            # holds asr_io_lock or the worker pipe, so /asr/models stays
+            # responsive and reports live progress. The JVM polls it.
             self.state.touch()
             try:
                 model = self._read_json().get("model")
-                with self.state.asr_io_lock:
-                    if model in MERALION_HF:
-                        payload = self.state.ask(
-                            "_meralion_worker", self.state.meralion_worker,
-                            {"op": "prefetch", "model": MERALION_HF[model]})
-                    else:
-                        payload = self.state.ask(
-                            "_asr_worker", self.state.asr_worker,
-                            {"op": "prefetch", "model": model})
-                self._send_json(200, payload)
+                if model in MERALION_HF:
+                    repo, script = MERALION_HF[model], "meralion.py"
+                else:
+                    repo, script = self._whisper_repo(model), "transcribe.py"
+                self.state.start_prefetch(model, repo, script)
+                self._send_json(200, {"status": "downloading", "model": model, "repo": repo})
             except Exception as e:  # noqa: BLE001
                 self._send_json(500, {"error": str(e)})
             finally:

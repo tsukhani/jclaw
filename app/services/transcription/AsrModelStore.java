@@ -97,12 +97,16 @@ public final class AsrModelStore {
      *  in the in-JVM prefetch/error state (S3776: lifted out of statusAll). */
     private static Status rowFor(AsrModel m, com.google.gson.JsonObject s) {
         boolean cached = s.get("cached").getAsBoolean();
+        boolean downloading = s.has("downloading") && s.get("downloading").getAsBoolean();
         long onDisk = s.get("bytesOnDisk").getAsLong();
-        var engine = s.get("engine").getAsString();
-        var inflight = PREFETCHES.get(m.id());
-        String error = PREFETCH_ERRORS.get(m.id());
+        var engine = s.has("engine") && !s.get("engine").isJsonNull() ? s.get("engine").getAsString() : null;
+        // The sidecar now owns download state (it runs the pull as a detached
+        // subprocess and reports progress off the cache dir); PREFETCH_ERRORS
+        // only carries a failure to even reach the sidecar to kick it off.
+        String error = s.has("error") && !s.get("error").isJsonNull()
+                ? s.get("error").getAsString() : PREFETCH_ERRORS.get(m.id());
         State state;
-        if (inflight != null && !inflight.isDone()) {
+        if (downloading) {
             state = State.DOWNLOADING;
         } else if (error != null && !cached) {
             state = State.ERROR;

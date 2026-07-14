@@ -166,6 +166,17 @@ def worker():
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
         return worker()
+    if len(sys.argv) > 2 and sys.argv[1] == "--prefetch":
+        # One-shot download of an already-resolved HF repo (serve.py runs this
+        # detached so it can't stall the worker/status). JSON line; nonzero=fail.
+        try:
+            from huggingface_hub import snapshot_download
+            snapshot_download(sys.argv[2])
+            print(json.dumps({"ok": True}), flush=True)
+            return 0
+        except Exception as e:  # noqa: BLE001
+            print(json.dumps({"error": str(e)}), flush=True)
+            return 1
     audio = sys.argv[1]
     size = SIZES.get(sys.argv[2], sys.argv[2])
     language = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "-" else None
