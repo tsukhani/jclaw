@@ -61,22 +61,6 @@ def run_mlx(audio, size, language):
             for s in result["segments"]]
 
 
-def run_ct2(audio, size, language):
-    from faster_whisper import WhisperModel
-    try:
-        model = WhisperModel(size, device="cuda", compute_type="float16")
-        sys.stderr.write("[transcribe] faster-whisper %s on cuda\n" % size)
-    except Exception:  # noqa: BLE001 — no CUDA: int8 CPU
-        model = WhisperModel(size, device="cpu", compute_type="int8")
-        sys.stderr.write("[transcribe] faster-whisper %s on cpu/int8\n" % size)
-    # JCLAW-635: VAD pre-filter suppresses hallucination on silence/music;
-    segments, _ = model.transcribe(audio, language=language,
-                                   condition_on_previous_text=False,
-                                   vad_filter=True)
-    return [(s.start, s.end, s.text)
-            for s in segments]
-
-
 _CT2_CACHE = {}
 
 
@@ -97,6 +81,7 @@ def run_ct2_cached(audio, size, language):
             model = WhisperModel(size, device="cpu", compute_type="int8")
             sys.stderr.write("[transcribe] faster-whisper %s on cpu/int8\n" % size)
         _CT2_CACHE[size] = model
+    # JCLAW-635: VAD pre-filter suppresses hallucination on silence/music.
     segments, _ = model.transcribe(audio, language=language,
                                    condition_on_previous_text=False,
                                    vad_filter=True)
@@ -184,8 +169,7 @@ def main():
     audio = sys.argv[1]
     size = SIZES.get(sys.argv[2], sys.argv[2])
     language = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "-" else None
-    triples = run_mlx(audio, size, language) if is_apple_silicon() \
-        else run_ct2(audio, size, language)
+    triples = _transcribe(audio, size, language)
     print(json.dumps(_payload(triples)))
     return 0
 

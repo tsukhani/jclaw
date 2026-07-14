@@ -8,10 +8,6 @@ docs/architecture/
 # Internal spike/investigation notes — dev docs, not runtime reading
 # (docs/user-guide/ stays: the in-app guide reads it at runtime).
 docs/spikes/
-# The ASR sidecar ships (runtime scripts), but its offline measurement
-# harness does not: golden-reference transcripts + scorers are dev
-# tooling (prefix match covers eval/ and eval.py).
-sidecar/asr/eval
 test/
 loadtest/
 app/

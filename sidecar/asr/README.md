@@ -36,32 +36,6 @@ the JVM-wide fair lock.
 
 - ASR: [mlx-whisper](https://github.com/ml-explore/mlx-examples) (MIT) on Apple silicon; [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) elsewhere — OpenAI Whisper weights (MIT), same as whisper.cpp (JCLAW-627).
 
-## Evaluation harness (`eval/`, dev tree only)
-
-`eval/` and `eval.py` are offline measurement tooling — excluded from the
-distribution bundle by `.distignore`; they exist only in the source tree.
-They anchored every architecture decision of the diarization campaign
-(JCLAW-617/643/653/654) and remain the yardstick for ASR-quality and
-diarized-transcript regressions.
-
-- `eval/gold/haram-debate-transcript.json` — the human-arbitrated golden
-  transcript (English/Malay code-switched, 2 speakers, 35 turns / 633
-  words). The measurement anchor: it scored the local pipeline's rounds,
-  the cloud-tier decision (Gemini 23.56 cpWER at perfect attribution vs
-  local 34.32), and the 2026-07 ASR bake-off (whisper-large-v3 17.0% WER
-  / 4-10 Malay key phrases vs Voxtral-Mini-3B 19.7% / 7-10).
-- `eval.py cpwer <diarized-output.json> eval/gold/haram-debate-transcript.json`
-  — concatenated-permutation WER of a final diarized transcript against
-  gold. Works on any producer, including the shipped cloud tier's output.
-- `eval/parity.py` — turn-attribution parity: how many gold turns landed
-  on the right speaker.
-- `eval/gold/haram-debate.{rttm,uem}` + `eval.py score` — DER/JER timing
-  ground truth from the local-diarization era. The pipeline they measured
-  was removed in JCLAW-653/654; they remain valid ground truth for
-  scoring any future diarizer that emits timed segments.
-- `eval/fetch-ami.sh` — pulls AMI ES2004a (4 speakers, CC-BY-4.0) for
-  broader-than-one-recording evaluation.
-
 ## Running by hand (debugging)
 
 ```bash
