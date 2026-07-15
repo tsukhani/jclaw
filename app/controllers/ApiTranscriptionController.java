@@ -9,10 +9,10 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
+import services.transcription.AsrModel;
 import services.transcription.AsrModelStore;
 import services.transcription.DiarizeModelStore;
 import services.transcription.FfmpegProbe;
-import services.transcription.AsrModel;
 import utils.ApiResponses;
 
 import java.util.ArrayList;
