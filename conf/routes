@@ -247,6 +247,9 @@ POST    /api/metrics/loadtest                   ApiMetricsController.loadtest
 DELETE  /api/metrics/loadtest                   ApiMetricsController.stopLoadtest
 DELETE  /api/metrics/loadtest/data              ApiMetricsController.cleanLoadtest
 
+# Apps registry (SPEC-apps): operator-hosted mini-apps under public/apps/<slug>/
+GET     /api/apps                               ApiAppsController.list
+
 # Unknown /api/* paths -> clean 404 JSON (JCLAW-336). Must be after all real /api
 # routes and before the SPA + {controller}/{action} catch-alls, so scanners hitting
 # e.g. /api/graphql get a 404 instead of an ActionNotFound ERROR + stack trace.
@@ -255,8 +258,14 @@ DELETE  /api/metrics/loadtest/data              ApiMetricsController.cleanLoadte
 # SPA static assets (production build: nuxi generate output copied to public/spa/)
 GET     /_nuxt/                                 staticDir:public/spa/_nuxt
 
+# Hosted apps (SPEC-apps): /apps/<slug>/... serves the static site under
+# public/apps/<slug>/. Must precede the SPA catch-all, and `apps/` is excluded
+# from it below, so /apps/<slug>/ serves files while /apps (no slash) stays the
+# SPA listing page.
+GET     /apps/                                  staticDir:public/apps
+
 # SPA catch-all — serves index.html for all frontend routes (must be after API routes)
-GET     /{<(?!api/|public/|_nuxt/).+>path}      Application.spa
+GET     /{<(?!api/|public/|_nuxt/|apps/).+>path}      Application.spa
 
 # Catch all
 *       /{controller}/{action}                  {controller}.{action}
