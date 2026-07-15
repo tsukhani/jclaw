@@ -123,8 +123,15 @@ const agg = computed(() => {
   const ccrHitRate = ccrTotal ? ccrHits / ccrTotal : 0
 
   const alerts: string[] = []
+  // A very low kept-ratio is the *designed* outcome for json-smartcrush /
+  // code-structural / text-statistical, so on its own it doesn't mean data loss:
+  // the elided originals stay durably stored and reachable via ccr_retrieve. It
+  // only signals risk when the model actually tries and fails to recover them —
+  // so gate the per-type warning on unhealthy CCR retrieval. A low ratio with
+  // healthy retrieval (or no retrievals at all) is a well-tuned pipeline.
+  const retrievalUnhealthy = ccrTotal > 0 && ccrHitRate < 0.9
   for (const t of byType) {
-    if (t.ratio > 0 && t.ratio < 0.1) {
+    if (t.ratio > 0 && t.ratio < 0.1 && retrievalUnhealthy) {
       alerts.push(`${t.type} compression ratio is very low (${Math.round(t.ratio * 100)}% kept) — verify it isn't dropping needed data`)
     }
   }

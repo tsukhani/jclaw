@@ -37,8 +37,29 @@ describe('ChatCompressionSection', () => {
     expect(text).toContain('JSON')
     expect(text).toContain('json-smartcrush')
     expect(text).toContain('1 / 2 hits') // CCR hits / total tile
-    // JSON ratio 600/10000 = 6% kept (< 10%) → low-ratio alert
+    // JSON ratio 600/10000 = 6% kept (< 10%) AND CCR hit rate 1/2 = 50% (< 90%,
+    // retrieval unhealthy) → low-ratio alert fires.
     expect(text).toContain('JSON compression ratio is very low')
+  })
+
+  it('suppresses low-ratio alerts when CCR retrieval is healthy', async () => {
+    // JSON is still 6% kept, but every ccr_retrieve hit → elided originals are
+    // recoverable, so the aggressive ratio is by-design, not data loss.
+    registerEndpoint('/api/metrics/compression', () => ({
+      since: '2026-01-01T00:00:00Z',
+      rows: [
+        { timestamp: '2026-06-01T00:00:00Z', agentId: '1', channel: 'web', contentType: 'JSON', algorithm: 'json-smartcrush', tokensBefore: 10000, tokensAfter: 600, kind: 'COMPRESSION', ccrHit: null },
+        { timestamp: '2026-06-01T00:00:00Z', agentId: null, channel: null, contentType: null, algorithm: 'ccr', tokensBefore: 0, tokensAfter: 0, kind: 'CCR_RETRIEVAL', ccrHit: true },
+        { timestamp: '2026-06-01T00:00:00Z', agentId: null, channel: null, contentType: null, algorithm: 'ccr', tokensBefore: 0, tokensAfter: 0, kind: 'CCR_RETRIEVAL', ccrHit: true },
+        { timestamp: '2026-06-01T00:00:00Z', agentId: null, channel: null, contentType: null, algorithm: 'ccr', tokensBefore: 0, tokensAfter: 0, kind: 'CCR_RETRIEVAL', ccrHit: true },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
+    await flushPromises()
+    const text = wrapper.text()
+
+    expect(text).toContain('JSON') // still rendered in the breakdown
+    expect(text).not.toContain('compression ratio is very low')
   })
 
   it('shows an empty state when there is no activity', async () => {
