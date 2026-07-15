@@ -49,7 +49,7 @@ class AsrSidecarClientTest extends UnitTest {
                   {"startMs": 1200, "endMs": 2400, "text": "general"}
                 ]}"""));
 
-        var segments = client().transcribe(audio, "base.en", null);
+        var segments = client().transcribe(audio, "large", null);
 
         assertEquals(2, segments.size());
         assertEquals("hello there", segments.get(0).text());
@@ -62,7 +62,7 @@ class AsrSidecarClientTest extends UnitTest {
         var body = recorded.getBody().utf8();
         assertTrue(body.contains(audio.toAbsolutePath().toString()),
                 "request carries the audio path: " + body);
-        assertTrue(body.contains("base.en"), "request carries the model id: " + body);
+        assertTrue(body.contains("large"), "request carries the model id: " + body);
     }
 
     @Test
@@ -71,7 +71,7 @@ class AsrSidecarClientTest extends UnitTest {
 
         var client = client();
         var e = assertThrows(TranscriptionException.class,
-                () -> client.transcribe(audio, "base.en", null));
+                () -> client.transcribe(audio, "large", null));
         assertTrue(e.getMessage().contains("ASR sidecar transcribe failed: HTTP 500"),
                 "names the sidecar and status: " + e.getMessage());
     }
@@ -82,7 +82,7 @@ class AsrSidecarClientTest extends UnitTest {
 
         var client = client();
         var e = assertThrows(TranscriptionException.class,
-                () -> client.transcribe(audio, "base.en", null));
+                () -> client.transcribe(audio, "large", null));
         assertTrue(e.getMessage().contains("unparseable"),
                 "names the parse failure: " + e.getMessage());
     }

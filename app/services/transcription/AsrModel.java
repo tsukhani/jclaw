@@ -9,10 +9,10 @@ import java.util.Optional;
  * the transcription path:
  *
  * <ul>
- *   <li><b>Whisper</b> ({@code base.en} … {@code large}) — an mlx-community
- *       snapshot on Apple silicon, Systran faster-whisper CT2 weights on
- *       CUDA/CPU hosts (see transcribe.py's SIZES/MLX_REPOS). Segment times
- *       are emitted natively.</li>
+ *   <li><b>Whisper</b> ({@code small} … {@code large}, all multilingual) — an
+ *       mlx-community snapshot on Apple silicon, Systran faster-whisper CT2
+ *       weights on CUDA/CPU hosts (see transcribe.py's SIZES/MLX_REPOS).
+ *       Segment times are emitted natively.</li>
  *   <li><b>MERaLiON</b> ({@code meralion-3-3b}) — a Southeast-Asian-tuned
  *       speech LLM (meralion.py) that produces a plain transcript, paired with
  *       forced alignment (align.py) to recover segment times. Richer on SEA
@@ -24,14 +24,12 @@ import java.util.Optional;
  * (fp16-class), used as the Settings progress denominator until the live
  * X-Linked-Size from HF replaces it once a download begins.
  *
- * <p>Whisper's large model is multilingual-only — there is no {@code large.en}.
- * Two large options are exposed: canonical {@code large} (v3) and
- * {@code large-turbo} (v3-turbo).
+ * <p>Only multilingual Whisper variants are exposed — the English-only
+ * {@code *.en} models were dropped since jclaw is general-purpose and must not
+ * assume English audio. Two large options remain: canonical {@code large} (v3)
+ * and {@code large-turbo} (v3-turbo).
  */
 public enum AsrModel {
-    BASE_EN("base.en", "Base (English)", 300),
-    SMALL_EN("small.en", "Small (English)", 950),
-    MEDIUM_EN("medium.en", "Medium (English)", 1550),
     SMALL_MULTILINGUAL("small", "Small (Multilingual)", 950),
     MEDIUM_MULTILINGUAL("medium", "Medium (Multilingual)", 1550),
     LARGE_TURBO("large-turbo", "Large v3 Turbo (Multilingual)", 1650),
@@ -39,9 +37,8 @@ public enum AsrModel {
     MERALION_3_3B("meralion-3-3b", "MERaLiON-3 3B (SE Asian)", 6600);
 
     /** Multilingual by default: JClaw is general-purpose and must not assume
-     *  English audio. {@code small} is the same 950 MB as {@code small.en} but
-     *  handles every language — the safe default; the operator can pick an
-     *  English-only, larger, or SEA-tuned model in Settings. */
+     *  English audio. {@code small} handles every language at 950 MB — the safe
+     *  default; the operator can pick a larger or SEA-tuned model in Settings. */
     public static final AsrModel DEFAULT = SMALL_MULTILINGUAL;
 
     private final String id;

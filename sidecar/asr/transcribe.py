@@ -33,9 +33,6 @@ import sys
 
 SIZES = {"large": "large-v3", "large-turbo": "large-v3-turbo"}
 MLX_REPOS = {
-    "base.en": "mlx-community/whisper-base.en-mlx",
-    "small.en": "mlx-community/whisper-small.en-mlx",
-    "medium.en": "mlx-community/whisper-medium.en-mlx",
     "small": "mlx-community/whisper-small-mlx",
     "medium": "mlx-community/whisper-medium-mlx",
     "large-v3": "mlx-community/whisper-large-v3-mlx",
