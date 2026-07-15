@@ -93,18 +93,23 @@ public final class AsrModelStore {
         return out;
     }
 
+    /** A string field on a JSON object, or null when absent/JSON-null. */
+    private static String strOrNull(com.google.gson.JsonObject o, String field) {
+        return o.has(field) && !o.get(field).isJsonNull() ? o.get(field).getAsString() : null;
+    }
+
     /** One Settings row from the sidecar's per-model status object, folding
      *  in the in-JVM prefetch/error state (S3776: lifted out of statusAll). */
     private static Status rowFor(AsrModel m, com.google.gson.JsonObject s) {
         boolean cached = s.get("cached").getAsBoolean();
         boolean downloading = s.has("downloading") && s.get("downloading").getAsBoolean();
         long onDisk = s.get("bytesOnDisk").getAsLong();
-        var engine = s.has("engine") && !s.get("engine").isJsonNull() ? s.get("engine").getAsString() : null;
+        var engine = strOrNull(s, "engine");
         // The sidecar now owns download state (it runs the pull as a detached
         // subprocess and reports progress off the cache dir); PREFETCH_ERRORS
         // only carries a failure to even reach the sidecar to kick it off.
-        String error = s.has("error") && !s.get("error").isJsonNull()
-                ? s.get("error").getAsString() : PREFETCH_ERRORS.get(m.id());
+        var sidecarError = strOrNull(s, "error");
+        String error = sidecarError != null ? sidecarError : PREFETCH_ERRORS.get(m.id());
         State state;
         if (downloading) {
             state = State.DOWNLOADING;

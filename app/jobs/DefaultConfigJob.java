@@ -82,15 +82,15 @@ public class DefaultConfigJob extends Job<Void> {
         // tool explains what to set up.
         seedIfAbsent("transcription.diarization.provider", "");
         seedIfAbsent("transcription.diarization.model", "");
-        seedIfAbsent("transcription.localModel",
-                AsrModel.DEFAULT.id());
+        final String localModelKey = "transcription.localModel";
+        seedIfAbsent(localModelKey, AsrModel.DEFAULT.id());
         // Coerce a stored selection that's no longer a valid AsrModel — e.g. the
         // retired English-only base.en/small.en/medium.en — back to the default,
         // so the Settings dropdown and the runtime don't disagree on a dead id.
-        var storedLocalModel = ConfigService.get("transcription.localModel");
+        var storedLocalModel = ConfigService.get(localModelKey);
         if (storedLocalModel != null && !storedLocalModel.isBlank()
                 && AsrModel.byId(storedLocalModel).isEmpty()) {
-            ConfigService.set("transcription.localModel", AsrModel.DEFAULT.id());
+            ConfigService.set(localModelKey, AsrModel.DEFAULT.id());
         }
         // JCLAW-563: per-turn acoustic emotion labels on diarized
         // transcripts. On by default (best-effort — failures never break a

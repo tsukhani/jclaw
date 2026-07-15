@@ -218,11 +218,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         }
 
         var action = JsonArgs.optString(args, ARG_ACTION);
-        if (action != null && !action.isBlank()
-                && !ACTION_DIARIZE.equals(action) && !ACTION_ENROLL.equals(action)) {
-            return "Error: unknown action '%s' (expected %s or %s).".formatted(
-                    action, ACTION_DIARIZE, ACTION_ENROLL);
-        }
+        var actionError = unknownActionError(action);
+        if (actionError != null) return actionError;
 
         var provider = ConfigService.get(PROVIDER_KEY, "");
         var model = ConfigService.get(MODEL_KEY, "");
@@ -236,18 +233,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         String baseUrl = "";
         if (!local) {
             baseUrl = ConfigService.get(PROVIDER_PREFIX + provider + ".baseUrl", "");
-            if (baseUrl.isBlank()) {
-                return "Error: provider '%s' has no base URL configured.".formatted(provider);
-            }
-            // Guard: a non-audio model fails upstream with a cryptic 400
-            // ("content blocks must be text or image_url"). When the provider's
-            // model registry knows the model and does NOT tag it audio-capable,
-            // say so actionably instead of making the call.
-            if (audioCapability(provider, model) == AudioCapability.NOT_AUDIO) {
-                return ("Error: the configured diarization model '%s' (%s) is not audio-capable — "
-                        + "it cannot listen to recordings. The operator must pick an audio-capable "
-                        + "model under Settings → Transcription → Diarization.").formatted(model, provider);
-            }
+            var cloudError = cloudProviderError(provider, model, baseUrl);
+            if (cloudError != null) return cloudError;
         }
 
         var attachment = Tx.run(() -> resolveAttachment(JsonArgs.optString(args, ARG_UUID)));
@@ -287,6 +274,33 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             Logger.warn("DiarizeAudioTool: %s", e.getMessage());
             return "Speaker diarization failed: " + e.getMessage();
         }
+    }
+
+    /** Error string for an unrecognized action arg, or null when valid (blank/
+     *  absent defaults to diarize). Lifted from execute to shed complexity (S3776). */
+    private static String unknownActionError(String action) {
+        if (action != null && !action.isBlank()
+                && !ACTION_DIARIZE.equals(action) && !ACTION_ENROLL.equals(action)) {
+            return "Error: unknown action '%s' (expected %s or %s).".formatted(
+                    action, ACTION_DIARIZE, ACTION_ENROLL);
+        }
+        return null;
+    }
+
+    /** Error string when the configured cloud provider can't diarize the model —
+     *  missing base URL, or a model the registry knows isn't audio-capable (which
+     *  would otherwise fail upstream with a cryptic 400). Null when OK. Lifted
+     *  from execute to shed complexity (S3776). */
+    private static String cloudProviderError(String provider, String model, String baseUrl) {
+        if (baseUrl.isBlank()) {
+            return "Error: provider '%s' has no base URL configured.".formatted(provider);
+        }
+        if (audioCapability(provider, model) == AudioCapability.NOT_AUDIO) {
+            return ("Error: the configured diarization model '%s' (%s) is not audio-capable — "
+                    + "it cannot listen to recordings. The operator must pick an audio-capable "
+                    + "model under Settings → Transcription → Diarization.").formatted(model, provider);
+        }
+        return null;
     }
 
     /**

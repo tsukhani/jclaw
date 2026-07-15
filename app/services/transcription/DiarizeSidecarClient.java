@@ -172,8 +172,9 @@ public class DiarizeSidecarClient {
 
     /** The optional {@code emotion} object on a turn, or null if absent. */
     private static Emotion parseEmotion(JsonObject turn) {
-        if (!turn.has("emotion") || turn.get("emotion").isJsonNull()) return null;
-        var e = turn.getAsJsonObject("emotion");
+        final var field = "emotion";
+        if (!turn.has(field) || turn.get(field).isJsonNull()) return null;
+        var e = turn.getAsJsonObject(field);
         return new Emotion(
                 e.get("label").getAsString(),
                 e.has("confidence") ? e.get("confidence").getAsDouble() : 0.0,

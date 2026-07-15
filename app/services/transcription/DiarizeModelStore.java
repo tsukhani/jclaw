@@ -109,6 +109,11 @@ public final class DiarizeModelStore {
         return out;
     }
 
+    /** A string field on a JSON object, or null when absent/JSON-null. */
+    private static String strOrNull(com.google.gson.JsonObject o, String field) {
+        return o.has(field) && !o.get(field).isJsonNull() ? o.get(field).getAsString() : null;
+    }
+
     /** One Settings row from the sidecar's per-repo status object. The sidecar
      *  owns download state (detached subprocess + cache-dir progress); the JVM
      *  PREFETCH_ERRORS map only carries a failure to even reach the sidecar. */
@@ -116,9 +121,9 @@ public final class DiarizeModelStore {
         boolean cached = s.get("cached").getAsBoolean();
         boolean downloading = s.has("downloading") && s.get("downloading").getAsBoolean();
         long onDisk = s.get("bytesOnDisk").getAsLong();
-        var engine = s.has("engine") && !s.get("engine").isJsonNull() ? s.get("engine").getAsString() : null;
-        String error = s.has("error") && !s.get("error").isJsonNull()
-                ? s.get("error").getAsString() : PREFETCH_ERRORS.get(repo);
+        var engine = strOrNull(s, "engine");
+        var sidecarError = strOrNull(s, "error");
+        String error = sidecarError != null ? sidecarError : PREFETCH_ERRORS.get(repo);
         State state;
         if (downloading) {
             state = State.DOWNLOADING;

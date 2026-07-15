@@ -49,7 +49,7 @@ public final class DiarizationFusion {
 
     private static void flush(StringBuilder sb, String speaker, String emotion, List<String> buffer) {
         if (speaker == null || buffer.isEmpty()) return;
-        if (sb.length() > 0) sb.append('\n');
+        if (!sb.isEmpty()) sb.append('\n');
         sb.append(speaker);
         if (emotion != null) sb.append(" (").append(emotion).append(')');
         sb.append(": ").append(String.join(" ", buffer));
