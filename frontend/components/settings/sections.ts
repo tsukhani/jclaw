@@ -25,7 +25,6 @@ import {
   CpuChipIcon,
   DocumentMagnifyingGlassIcon,
   DocumentTextIcon,
-  ExclamationTriangleIcon,
   EyeIcon,
   FilmIcon,
   KeyIcon,
@@ -53,7 +52,6 @@ import SettingsSkillsPanel from './SettingsSkillsPanel.vue'
 import SettingsSubagentsPanel from './SettingsSubagentsPanel.vue'
 import SettingsTasksPanel from './SettingsTasksPanel.vue'
 import SettingsTranscriptionPanel from './SettingsTranscriptionPanel.vue'
-import SettingsUnmanagedPanel from './SettingsUnmanagedPanel.vue'
 import SettingsUploadsPanel from './SettingsUploadsPanel.vue'
 import SettingsVideoGenPanel from './SettingsVideoGenPanel.vue'
 import SettingsVideoInterpPanel from './SettingsVideoInterpPanel.vue'
@@ -87,7 +85,6 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
       { id: 'password', title: 'Password', icon: KeyIcon, component: SettingsPasswordPanel },
-      { id: 'unmanaged', title: 'Unmanaged Config', icon: ExclamationTriangleIcon, component: SettingsUnmanagedPanel },
     ],
   },
   {

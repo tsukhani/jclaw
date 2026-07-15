@@ -147,11 +147,11 @@ describe('Settings page', () => {
   })
 
   it('does not expose an add-entry form for ad-hoc config', async () => {
-    // The generic config list is a read-only diagnostic for stale/unmanaged keys,
-    // not a place to create new rows — arbitrary keys aren't read by anything.
-    // It lives in the Unmanaged Config section, so open that section to assert.
+    // Unmanaged keys are surfaced read-only via a warning banner, never an
+    // editor — arbitrary config rows aren't read by anything, so there's no
+    // affordance to create them.
     setupMockApi()
-    const component = await mountSuspended(Settings, { route: '/settings?section=unmanaged' })
+    const component = await mountSuspended(Settings)
     await flushPromises()
 
     expect(component.text()).not.toContain('Add Entry')

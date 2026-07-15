@@ -1,16 +1,19 @@
 <script setup lang="ts">
-// Unmanaged config entries (diagnostic) settings panel (JCLAW-680). Renders the
-// Config DB rows not owned by any managed UI section — usually stale keys from a
-// prior schema. Moved verbatim from pages/settings.vue; owns the managed-prefix
-// list, the provider grouping, and the derived `providerEntries.other` list.
+// Unmanaged-config warning banner. Config DB rows not owned by any managed
+// Settings section shouldn't exist in normal operation — they're usually stale
+// keys from a prior schema. Rather than a permanent "Unmanaged Config" nav
+// section (which implies they're an expected, ongoing thing), this surfaces
+// them at the top of the Settings page ONLY when present, as a cleanup signal.
+// Renders nothing when the config is clean.
+import { ChevronDownIcon, ExclamationTriangleIcon } from '@heroicons/vue/24/outline'
 import type { ConfigEntry } from '~/types/api'
 
 const { configData } = useSettingsConfig()
 
 // Top-level Config DB prefixes claimed by a UI domain. Any row whose key starts
-// with one of these is owned somewhere in the app and should not surface in the
-// Unmanaged diagnostic list — regardless of which page actually manages it.
-// Keeps Settings free of exact-key knowledge about other pages' config.
+// with one of these is owned somewhere in the app and is NOT unmanaged —
+// regardless of which page actually manages it. Keeps Settings free of
+// exact-key knowledge about other pages' config.
 const MANAGED_PREFIXES = [
   'app.', // Operator-wide settings — Settings (General). app.timezone = the
   // assistant's wall-clock zone injected into the system prompt.
@@ -44,65 +47,59 @@ const MANAGED_PREFIXES = [
   // per-(provider, model) `jtokkit.safetyMultiplier.<provider>.<modelId>`
   // entries are written autonomously by TokenizerCalibrationJob every 30 min
   // based on observed provider-vs-jtokkit deltas — operators don't manage
-  // these directly. Surfacing them in "Unmanaged keys" would imply they're
-  // stale or operator-actionable, neither of which is true.
+  // these directly. Surfacing them here would imply they're stale or
+  // operator-actionable, neither of which is true.
 ]
 
 function isManagedKey(key: string): boolean {
   return MANAGED_PREFIXES.some(p => key.startsWith(p))
 }
 
-// JCLAW-229: image-generation-only providers are NOT chat LLM providers (excluded from the backend
-// ProviderRegistry too) — their keys are set in the Image Generation section, not here, so skip them
-// when grouping the LLM Providers list.
-const IMAGE_ONLY_PROVIDERS = new Set(['bfl', 'replicate'])
-
-// Group config entries by LLM provider; everything else (non-managed) falls through
-// to the generic Configuration list.
-const providerEntries = computed(() => {
-  const entries = configData.value?.entries ?? []
-  const providers = new Map<string, ConfigEntry[]>()
-  const other: ConfigEntry[] = []
-
-  for (const e of entries) {
-    if (e.key.startsWith('provider.')) {
-      const parts = e.key.split('.')
-      const name = parts[1]!
-      if (IMAGE_ONLY_PROVIDERS.has(name)) continue // set in the Image Generation section
-      if (!providers.has(name)) providers.set(name, [])
-      providers.get(name)!.push(e)
-    }
-    else if (!isManagedKey(e.key)) {
-      other.push(e)
-    }
-  }
-  return { providers, other }
-})
+const unmanaged = computed<ConfigEntry[]>(() =>
+  (configData.value?.entries ?? []).filter(e => !isManagedKey(e.key)),
+)
+const expanded = ref(false)
 </script>
 
 <template>
-  <!-- Unmanaged config entries (diagnostic) -->
-  <!-- Only rendered when the Config DB contains keys not owned by any managed UI
-       section above. Typically shows stale rows from a prior schema or mid-migration
-       state — a signal that something needs cleanup, not a place to add new config. -->
   <div
-    v-if="providerEntries.other.length"
-    class="bg-surface-elevated border border-border"
+    v-if="unmanaged.length"
+    class="mb-6 border border-amber-400/40 bg-amber-50/60 dark:bg-amber-900/15 rounded-lg overflow-hidden"
   >
-    <div class="px-4 py-3 border-b border-border">
-      <h2 class="text-sm font-medium text-fg-primary">
-        Unmanaged keys
-      </h2>
-      <p class="text-[11px] text-fg-muted mt-0.5">
-        Config DB rows not owned by any section above — usually stale keys from a prior
-        version. Safe to ignore; they're shown here so migrations don't hide data.
-      </p>
-    </div>
-    <div class="divide-y divide-border">
+    <button
+      type="button"
+      class="w-full flex items-start gap-2 px-4 py-3 text-left"
+      :aria-expanded="expanded"
+      data-testid="unmanaged-banner-toggle"
+      @click="expanded = !expanded"
+    >
+      <ExclamationTriangleIcon
+        class="w-4 h-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400"
+        aria-hidden="true"
+      />
+      <span class="min-w-0 flex-1">
+        <span class="text-sm font-medium text-amber-800 dark:text-amber-300">
+          {{ unmanaged.length }} unmanaged config {{ unmanaged.length === 1 ? 'key' : 'keys' }}
+        </span>
+        <span class="block text-[11px] text-amber-700/80 dark:text-amber-400/70">
+          Config DB rows not owned by any Settings section — usually stale keys from a prior
+          version. They shouldn't exist; review and remove them.
+        </span>
+      </span>
+      <ChevronDownIcon
+        class="w-4 h-4 mt-0.5 shrink-0 text-amber-600/70 dark:text-amber-400/70 transition-transform"
+        :class="expanded ? 'rotate-180' : ''"
+        aria-hidden="true"
+      />
+    </button>
+    <div
+      v-if="expanded"
+      class="border-t border-amber-400/30 divide-y divide-amber-400/20"
+    >
       <div
-        v-for="entry in providerEntries.other"
+        v-for="entry in unmanaged"
         :key="entry.key"
-        class="px-4 py-2.5 flex items-center gap-3"
+        class="px-4 py-2 flex items-center gap-3"
       >
         <span class="text-xs font-mono text-fg-muted w-64 shrink-0 truncate">{{ entry.key }}</span>
         <span class="flex-1 text-sm text-fg-muted font-mono truncate">{{ entry.value }}</span>

@@ -60,6 +60,10 @@ watch(() => route.query.section, (s) => {
       Settings
     </h1>
 
+    <!-- Anomaly notice: surfaces Config DB rows not owned by any section. Renders
+         nothing when the config is clean, so it's a signal, not a fixture. -->
+    <SettingsUnmanagedBanner />
+
     <!-- Mobile TOC toggle. On md+ the sticky rail is always visible; on
          narrower viewports it collapses behind this button so the active
          section gets the full width. -->

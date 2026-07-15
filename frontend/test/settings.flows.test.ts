@@ -1932,12 +1932,12 @@ describe('Settings page — Subagents maxChildrenPerParent', () => {
   })
 })
 
-describe('Settings page — Unmanaged keys diagnostic', () => {
+describe('Settings page — Unmanaged config warning banner', () => {
   beforeEach(() => {
     clearNuxtData()
   })
 
-  it('renders an Unmanaged keys section when the config contains rows outside the managed-prefix list', async () => {
+  it('surfaces a page-level banner (any section) when the config has rows outside the managed-prefix list', async () => {
     registerEndpoint('/api/agents', () => [])
     registerEndpoint('/api/channels', () => [])
     registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
@@ -1948,7 +1948,7 @@ describe('Settings page — Unmanaged keys diagnostic', () => {
       handler: () => ({
         entries: [
           ...defaultConfigEntries(),
-          // No managed prefix — falls into the Unmanaged diagnostic list.
+          // No managed prefix — surfaces in the unmanaged-config banner.
           { key: 'legacy.holdover.foo', value: 'bar',
             updatedAt: '2026-04-22T10:00:00Z' },
         ],
@@ -1956,18 +1956,22 @@ describe('Settings page — Unmanaged keys diagnostic', () => {
     })
     registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
 
-    const component = await mountSettingsSection('unmanaged')
-
-    const text = component.text()
-    expect(text).toContain('Unmanaged keys')
-    expect(text).toContain('legacy.holdover.foo')
+    // The banner is page-level, so it shows regardless of the open section.
+    const component = await mountSettingsSection('timezone')
+    expect(component.text()).toContain('1 unmanaged config key')
+    // The key list is behind the Review toggle — collapsed by default.
+    expect(component.text()).not.toContain('legacy.holdover.foo')
+    await component.find('[data-testid="unmanaged-banner-toggle"]').trigger('click')
+    await flushPromises()
+    expect(component.text()).toContain('legacy.holdover.foo')
   })
 
-  it('does not render the Unmanaged keys section when no orphan rows exist', async () => {
+  it('renders no banner when every config row is owned by a managed section', async () => {
     setupDefaultApi()
-    const component = await mountSettingsSection('unmanaged')
+    const component = await mountSettingsSection('timezone')
 
-    expect(component.text()).not.toContain('Unmanaged keys')
+    expect(component.find('[data-testid="unmanaged-banner-toggle"]').exists()).toBe(false)
+    expect(component.text()).not.toContain('unmanaged config')
   })
 })
 

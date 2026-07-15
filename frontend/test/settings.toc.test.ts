@@ -29,7 +29,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     await flushPromises()
 
     // Every section has a rail button.
-    for (const id of ['timezone', 'providers', 'transcription', 'shell', 'unmanaged']) {
+    for (const id of ['timezone', 'providers', 'transcription', 'shell', 'password']) {
       expect(component.find(`[data-testid="settings-toc-item-${id}"]`).exists()).toBe(true)
     }
     // Default active section is the first (timezone).
