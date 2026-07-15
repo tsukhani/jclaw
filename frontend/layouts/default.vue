@@ -20,6 +20,7 @@ import {
   MegaphoneIcon,
   MoonIcon,
   PuzzlePieceIcon,
+  Squares2X2Icon,
   SunIcon,
   WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
@@ -214,6 +215,8 @@ const navGroups: NavGroup[] = [
       // because the two are conceptually paired — Agents configures the
       // workforce, Subagents shows what that workforce is currently doing.
       { label: 'Subagents', to: '/subagents', icon: UsersRound },
+      // Apps: operator-hosted mini-apps under public/apps/<slug>/ (SPEC-apps).
+      { label: 'Apps', to: '/apps', icon: Squares2X2Icon },
       { label: 'Tasks', to: '/tasks', icon: ClipboardDocumentCheckIcon },
       // Reminders are payloadType=reminder Tasks, surfaced on their own page;
       // placed directly below Tasks since they're the same underlying entity.
