@@ -1672,7 +1672,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     expect(downloadCaptured.hit).toBe(true)
   })
 
-  it('shows the active-backend status line (Self-Hosted ASR + model)', async () => {
+  it('shows the active-backend status line (Local ASR + model)', async () => {
     registerEndpoint('/api/agents', () => [])
     registerEndpoint('/api/channels', () => [])
     registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
@@ -1689,7 +1689,7 @@ describe('Settings page — Transcription enable + provider switch', () => {
     const component = await mountSettingsSection('transcription')
 
     // Mirrors the Image Captioning "Active:" line — resolves the whisper model's display name.
-    expect(component.text()).toContain('Active: Self-Hosted ASR (Small (English))')
+    expect(component.text()).toContain('Active: Local (Small (English))')
   })
 })
 

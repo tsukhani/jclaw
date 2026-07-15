@@ -340,7 +340,7 @@ onUnmounted(() => stopTranscriptionPolling())
         Active: cloud transcription via {{ selectedTranscriptionProvider }}.
       </template>
       <template v-else-if="transcriptionActiveBackend === 'local'">
-        Active: Self-Hosted ASR ({{ selectedLocalModelStatus?.displayName || 'default model' }}).
+        Active: Local ({{ selectedLocalModelStatus?.displayName || 'default model' }}).
       </template>
       <template v-else>
         Transcription is off — enable it and pick a backend below. Until then, audio attachments
@@ -459,7 +459,7 @@ onUnmounted(() => stopTranscriptionPolling())
                 class="accent-emerald-600"
                 @change="setTranscriptionProvider('whisper-local')"
               >
-              <span class="flex-1 text-sm text-fg-primary">Self-Hosted ASR</span>
+              <span class="flex-1 text-sm text-fg-primary">Local</span>
               <span
                 class="text-[10px] px-1 border"
                 :class="selectedTranscriptionProvider === 'whisper-local'
@@ -731,7 +731,7 @@ onUnmounted(() => stopTranscriptionPolling())
                 class="accent-emerald-600"
                 @change="setDiarizationProvider('pyannote-local')"
               >
-              <span class="flex-1 text-sm text-fg-primary">pyannote (on-device)</span>
+              <span class="flex-1 text-sm text-fg-primary">Local</span>
               <span
                 class="text-[10px] px-1 border"
                 :class="diarizationProvider === 'pyannote-local'
@@ -891,15 +891,16 @@ onUnmounted(() => stopTranscriptionPolling())
             {{ emotionModelStatus.error }}
           </div>
           <p class="px-4 pb-2.5 pt-1 text-[11px] text-fg-muted">
-            On-device diarization uses
-            <span class="font-mono">pyannote/speaker-diarization-community-1</span> (needs
-            <span class="font-mono">uv</span> + a Hugging Face token, shared with
-            <span class="text-fg-muted">Image Generation</span>). Per-turn emotion — when the
-            diarize-audio tool is asked for it — runs the SER model above.
+            On-device diarization runs
+            <span class="font-mono">pyannote/speaker-diarization-community-1</span> (gated — needs
+            <span class="font-mono">uv</span> and a Hugging Face token, shared with
+            <span class="text-fg-muted">Image Generation</span>), fusing its speaker turns with the
+            local ASR transcript. Per-turn emotion — when the diarize-audio tool asks for it — runs
+            the SER model picked above. Fetch each weight with its Download button above (Ready once
+            cached).
             <span class="font-mono">MERaLiON-SER-v1</span> is a robust multilingual default
-            (English, Chinese, Malay, Tamil, Indonesian; 7 emotions + valence/arousal/dominance).
-            Match the model to your audio — the wav2vec2 options are English, categorical-only, and
-            can suit English-heavy content.
+            (English, Chinese, Malay, Tamil, Indonesian; 7 emotions + valence/arousal/dominance);
+            the wav2vec2 options are English and categorical-only, for English-heavy audio.
           </p>
         </div>
       </template>
