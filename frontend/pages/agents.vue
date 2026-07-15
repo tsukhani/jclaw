@@ -13,12 +13,14 @@ import {
   CommandLineIcon,
   ComputerDesktopIcon,
   DocumentTextIcon,
+  EyeIcon,
   FolderIcon,
   GlobeAltIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
   PaperAirplaneIcon,
   PauseIcon,
+  PencilSquareIcon,
   PhotoIcon,
   PlusIcon,
   PuzzlePieceIcon,
@@ -29,6 +31,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { Save } from 'lucide-vue-next'
+import { renderMarkdown } from '~/utils/chat-markdown'
 import type {
   Agent,
   AgentSkill,
@@ -102,6 +105,22 @@ const formDirty = computed(() =>
   JSON.stringify(form.value) !== JSON.stringify(formBaseline.value),
 )
 const workspaceDirty = computed(() => workspaceContent.value !== workspaceBaseline.value)
+// MacDown-style split view for the workspace markdown editor: the editor
+// (textarea) and the live HTML preview can each be shown/hidden, but at least
+// one pane always stays visible so the panel never collapses to nothing.
+// Both on = side-by-side split (the default).
+const showWorkspaceEditor = ref(true)
+const showWorkspacePreview = ref(true)
+function toggleWorkspaceEditor() {
+  // Refuse to hide the editor when it's the only visible pane.
+  if (showWorkspaceEditor.value && !showWorkspacePreview.value) return
+  showWorkspaceEditor.value = !showWorkspaceEditor.value
+}
+function toggleWorkspacePreview() {
+  // Refuse to hide the preview when it's the only visible pane.
+  if (showWorkspacePreview.value && !showWorkspaceEditor.value) return
+  showWorkspacePreview.value = !showWorkspacePreview.value
+}
 const agentTools = ref<AgentTool[]>([])
 const agentSkills = ref<AgentSkill[]>([])
 // Effective shell allowlist for the current agent: global entries + per-skill
@@ -2369,27 +2388,93 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         v-if="editing"
         class="bg-surface-elevated border border-border"
       >
-        <div class="flex border-b border-border">
-          <button
-            v-for="file in workspaceFiles"
-            :key="file"
-            :class="workspaceTab === file ? 'text-fg-strong border-b border-white' : 'text-fg-muted'"
-            class="px-4 py-2 text-xs font-mono transition-colors"
-            @click="loadWorkspaceFile(editing.id, file)"
-          >
-            {{ file }}
-          </button>
+        <div class="flex items-center justify-between border-b border-border">
+          <div class="flex">
+            <button
+              v-for="file in workspaceFiles"
+              :key="file"
+              :class="workspaceTab === file ? 'text-fg-strong border-b border-white' : 'text-fg-muted'"
+              class="px-4 py-2 text-xs font-mono transition-colors"
+              @click="loadWorkspaceFile(editing.id, file)"
+            >
+              {{ file }}
+            </button>
+          </div>
+          <!-- MacDown-style pane toggles: editor, preview, or both (split). At
+               least one stays on, so a pressed-looking button can't be un-toggled
+               into an empty panel. -->
+          <div class="flex items-center gap-1 pr-2">
+            <button
+              type="button"
+              :class="showWorkspaceEditor ? 'text-fg-strong bg-muted' : 'text-fg-muted'"
+              class="p-1.5 rounded hover:text-fg-strong transition-colors"
+              :aria-pressed="showWorkspaceEditor"
+              title="Toggle editor"
+              @click="toggleWorkspaceEditor"
+            >
+              <PencilSquareIcon
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+              <span class="sr-only">Toggle editor pane</span>
+            </button>
+            <button
+              type="button"
+              :class="showWorkspacePreview ? 'text-fg-strong bg-muted' : 'text-fg-muted'"
+              class="p-1.5 rounded hover:text-fg-strong transition-colors"
+              :aria-pressed="showWorkspacePreview"
+              title="Toggle preview"
+              @click="toggleWorkspacePreview"
+            >
+              <EyeIcon
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+              <span class="sr-only">Toggle preview pane</span>
+            </button>
+          </div>
         </div>
-        <label :for="agentWorkspaceTextareaId">
-          <span class="sr-only">Workspace file contents</span>
-          <textarea
-            :id="agentWorkspaceTextareaId"
-            v-model="workspaceContent"
-            rows="16"
-            class="w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono
-                   resize-y focus:outline-hidden"
-          />
-        </label>
+        <!-- Split editor / live-preview body. resize-y on the container grows
+             both panes together, keeping them height-aligned. -->
+        <div class="flex resize-y overflow-hidden h-96 min-h-32">
+          <div
+            v-if="showWorkspaceEditor"
+            class="flex min-w-0"
+            :class="showWorkspacePreview ? 'w-1/2 border-r border-border' : 'w-full'"
+          >
+            <label
+              :for="agentWorkspaceTextareaId"
+              class="flex w-full min-w-0"
+            >
+              <span class="sr-only">Workspace file contents</span>
+              <textarea
+                :id="agentWorkspaceTextareaId"
+                v-model="workspaceContent"
+                class="w-full h-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono
+                       resize-none focus:outline-hidden"
+              />
+            </label>
+          </div>
+          <div
+            v-if="showWorkspacePreview"
+            class="min-w-0 overflow-auto px-4 py-3"
+            :class="showWorkspaceEditor ? 'w-1/2' : 'w-full'"
+          >
+            <!-- eslint-disable vue/no-v-html -- renderMarkdown output is DOMPurify-sanitized -->
+            <div
+              v-if="workspaceContent"
+              class="md-preview text-sm text-fg-primary"
+              v-html="renderMarkdown(workspaceContent)"
+            />
+            <!-- eslint-enable vue/no-v-html -->
+            <p
+              v-else
+              class="text-sm text-fg-muted italic"
+            >
+              Nothing to preview yet.
+            </p>
+          </div>
+        </div>
         <div class="px-4 py-2 border-t border-border flex">
           <button
             :disabled="!workspaceDirty"
@@ -2798,3 +2883,88 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
     </div>
   </div>
 </template>
+
+<style>
+/*
+ * Typographic styles for the workspace markdown live-preview pane.
+ *
+ * Plain CSS against the design-token CSS variables (not Tailwind @apply, which
+ * the scoped-style flow can't see in Tailwind 4). Mirrors the per-surface prose
+ * convention used by pages/chat.vue (.prose-chat) and GuideRenderer
+ * (.guide-section): each markdown surface owns a namespaced block so styles
+ * don't leak. Because --fg-* / --border / --muted are redefined under `.dark`,
+ * the token references below flip for dark mode automatically — no mirrored
+ * `html.dark` overrides needed.
+ */
+.md-preview { overflow-wrap: anywhere; }
+.md-preview > :first-child { margin-top: 0; }
+.md-preview > :last-child { margin-bottom: 0; }
+
+.md-preview p { margin: 0.5em 0; line-height: 1.6; }
+
+.md-preview h1, .md-preview h2, .md-preview h3, .md-preview h4 {
+  font-weight: 600;
+  color: var(--fg-strong);
+  margin: 1em 0 0.5em;
+}
+.md-preview h1 { font-size: 1.25em; }
+.md-preview h2 { font-size: 1.1em; }
+.md-preview h3 { font-size: 1em; }
+.md-preview h4 { font-size: 0.9em; }
+
+.md-preview ul, .md-preview ol { margin: 0.5em 0; padding-left: 1.5em; }
+.md-preview ul { list-style: disc; }
+.md-preview ol { list-style: decimal; }
+.md-preview li { margin: 0.25em 0; line-height: 1.6; }
+
+.md-preview strong { color: var(--fg-strong); font-weight: 600; }
+.md-preview em { font-style: italic; }
+
+.md-preview a { color: hsl(160 84% 30%); text-decoration: underline; }
+html.dark .md-preview a { color: hsl(152 76% 60%); }
+
+.md-preview code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  border-radius: 0.25rem;
+  background: var(--muted);
+}
+
+.md-preview pre {
+  margin: 0.5em 0;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  border-radius: 0.25rem;
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+.md-preview pre code { background: none; padding: 0; font-size: 0.85em; }
+
+.md-preview blockquote {
+  margin: 0.5em 0;
+  padding-left: 0.75em;
+  border-left: 2px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.md-preview hr { border: none; border-top: 1px solid var(--border); margin: 0.75em 0; }
+
+.md-preview img { max-width: 100%; height: auto; border-radius: 0.4em; margin: 0.5em 0; }
+
+.md-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+  font-size: 0.95em;
+}
+
+.md-preview th, .md-preview td {
+  padding: 0.4em 0.75em;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: break-word;
+}
+.md-preview th { color: var(--fg-strong); font-weight: 600; }
+</style>

@@ -638,6 +638,41 @@ describe('Agents page — workspace file edit/save', () => {
     await flushPromises()
     await vi.waitFor(() => expect(textarea().element.value).toContain('helper soul'))
   })
+
+  it('renders a live preview and toggles the editor/preview panes', async () => {
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+
+    const toggle = (title: string) =>
+      component.findAll('button').find(b => b.attributes('title') === title)
+
+    // Default = split view: editor textarea AND preview both present, and the
+    // preview renders the loaded markdown (renderMarkdown wraps plain text in <p>).
+    expect(component.find('textarea').exists()).toBe(true)
+    const preview = () => component.find('.md-preview')
+    expect(preview().exists()).toBe(true)
+    expect(preview().html()).toContain('helper instructions')
+
+    // Hide the editor → preview-only.
+    await toggle('Toggle editor')!.trigger('click')
+    await flushPromises()
+    expect(component.find('textarea').exists()).toBe(false)
+    expect(preview().exists()).toBe(true)
+
+    // Guard: hiding the preview when it's the only visible pane is refused.
+    await toggle('Toggle preview')!.trigger('click')
+    await flushPromises()
+    expect(preview().exists()).toBe(true)
+
+    // Bring the editor back → split view again.
+    await toggle('Toggle editor')!.trigger('click')
+    await flushPromises()
+    expect(component.find('textarea').exists()).toBe(true)
+    expect(preview().exists()).toBe(true)
+  })
 })
 
 describe('Agents page — Inspect prompt dialog', () => {
