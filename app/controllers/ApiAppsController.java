@@ -54,7 +54,7 @@ public class ApiAppsController extends Controller {
                     var entry = readApp(dir);
                     if (entry != null) apps.add(entry);
                 });
-            } catch (IOException e) {
+            } catch (IOException _) {
                 // public/apps unreadable — return whatever we have (likely empty)
             }
         }
@@ -83,7 +83,7 @@ public class ApiAppsController extends Controller {
                     icon != null ? "/apps/" + id + "/" + icon : null,
                     str(m, "price"),
                     str(m, "description"));
-        } catch (RuntimeException | IOException e) {  // malformed manifest — skip, don't fail the list
+        } catch (RuntimeException | IOException _) {  // malformed manifest — skip, don't fail the list
             return null;
         }
     }

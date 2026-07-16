@@ -26,6 +26,7 @@ import static utils.GsonHolder.INSTANCE;
 public class ApiAcpHarnessController extends Controller {
 
     private static final Gson gson = INSTANCE;
+    private static final String COMMAND_FIELD = "command";
 
     /** One probed harness: adapter {@code id}, a display {@code name}, the
      *  suggested {@code command} (the {@code subagent.acp.command} value), the
@@ -57,10 +58,10 @@ public class ApiAcpHarnessController extends Controller {
     @Operation(summary = "Add + probe a custom ACP harness command")
     public static void add() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("command") || body.get("command").isJsonNull()) {
+        if (body == null || !body.has(COMMAND_FIELD) || body.get(COMMAND_FIELD).isJsonNull()) {
             badRequest();
         }
-        var probed = AcpHarnessProbe.addCustom(body.get("command").getAsString());
+        var probed = AcpHarnessProbe.addCustom(body.get(COMMAND_FIELD).getAsString());
         renderJSON(gson.toJson(toEntry(probed)));
     }
 

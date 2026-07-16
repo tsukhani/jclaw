@@ -44,7 +44,7 @@ public final class AcpEventMapper {
             case AgentMessageChunk c -> new HarnessEvent(HarnessEvent.TOKEN, text(c.content()), null);
             case AgentThoughtChunk c -> new HarnessEvent(HarnessEvent.STEP, text(c.content()), null);
             case ToolCall t -> new HarnessEvent(HarnessEvent.TOOL_CALL, toolLabel(t.title(), t.kind(), t.status()), null);
-            case Plan p -> new HarnessEvent(HarnessEvent.STEP, "updated its plan", null);
+            case Plan _ -> new HarnessEvent(HarnessEvent.STEP, "updated its plan", null);
             case null, default -> null;
         };
     }
@@ -54,8 +54,12 @@ public final class AcpEventMapper {
     }
 
     private static String toolLabel(String title, Object kind, Object status) {
-        var label = (title != null && !title.isBlank()) ? title
-                : (kind != null ? kind.toString() : "tool");
+        String label;
+        if (title != null && !title.isBlank()) {
+            label = title;
+        } else {
+            label = kind != null ? kind.toString() : "tool";
+        }
         return status != null ? label + " (" + status + ")" : label;
     }
 

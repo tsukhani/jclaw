@@ -103,12 +103,12 @@ class ApiAppsControllerTest extends FunctionalTest {
                 try {
                     Files.deleteIfExists(p);
                 }
-                catch (IOException ignored) {
+                catch (IOException _) {
                     // best-effort cleanup
                 }
             });
         }
-        catch (IOException ignored) {
+        catch (IOException _) {
             // best-effort cleanup
         }
     }

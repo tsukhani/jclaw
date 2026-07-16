@@ -24,6 +24,9 @@ public final class AcpHarnessProbe {
      *  like a built-in and, when its binary resolves, shows as a custom chip. */
     public static final String CUSTOM_COMMANDS_KEY = "subagent.acp.customCommands";
 
+    /** Id prefix marking an operator-added custom chip ({@code "custom:" + command}). */
+    private static final String CUSTOM_ID_PREFIX = "custom:";
+
     /** A known ACP harness: its adapter id (matches SubagentAcpRunner's
      *  adapters / ACP_HARNESS_IDS), the CLI binary to probe, the suggested
      *  {@code subagent.acp.command}, and a display name. "generic" is a
@@ -85,7 +88,7 @@ public final class AcpHarnessProbe {
     public static Detected addCustom(String command) {
         var trimmed = command == null ? "" : command.strip();
         if (trimmed.isEmpty()) {
-            return new Detected("custom:", "", "", "generic", false, "empty command", true,
+            return new Detected(CUSTOM_ID_PREFIX, "", "", "generic", false, "empty command", true,
                     AcpCapabilityCatalog.NONE, "");
         }
         var probe = probeCustom(trimmed);
@@ -124,8 +127,8 @@ public final class AcpHarnessProbe {
         var r = ExecutableProbeSupport.probeOnPath(binary, "--version", "AcpHarnessProbe",
                 " — the harness binary must be installed on PATH");
         // Custom commands aren't in the ACP catalog — no ACP, stdin/stdout only.
-        var acp = AcpCapabilityCatalog.classify("custom:" + command, r.available());
-        return new Detected("custom:" + command, binary, command, "generic", r.available(), r.reason(), true,
+        var acp = AcpCapabilityCatalog.classify(CUSTOM_ID_PREFIX + command, r.available());
+        return new Detected(CUSTOM_ID_PREFIX + command, binary, command, "generic", r.available(), r.reason(), true,
                 acp.support(), acp.detail());
     }
 
@@ -138,7 +141,7 @@ public final class AcpHarnessProbe {
                 if (!e.isJsonNull()) out.add(e.getAsString());
             });
             return out;
-        } catch (RuntimeException e) {  // malformed stored JSON — treat as none
+        } catch (RuntimeException _) {  // malformed stored JSON — treat as none
             return List.of();
         }
     }
