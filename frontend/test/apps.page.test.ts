@@ -372,4 +372,58 @@ describe('Apps page', () => {
 
     expect(deleted).toBe(false)
   })
+
+  const twoApps = () => [
+    { id: 'calc', url: '/apps/calc/', name: 'Calculator', version: '1.0.0',
+      creator: null, icon: null, price: null, description: null, agent: null },
+    { id: 'dice', url: '/apps/dice/', name: 'Dice Roller', version: '1.0.0',
+      creator: null, icon: null, price: null, description: null, agent: null },
+  ]
+
+  it('the floating search bar filters the grid by name in real time (case-insensitive)', async () => {
+    appsEndpoint(twoApps())
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    // Both cards render before any query.
+    expect(c.find('[data-testid="app-card-calc"]').exists()).toBe(true)
+    expect(c.find('[data-testid="app-card-dice"]').exists()).toBe(true)
+
+    await c.find('#apps-search').setValue('DICE') // uppercase → still matches "Dice Roller"
+    expect(c.find('[data-testid="app-card-calc"]').exists()).toBe(false)
+    expect(c.find('[data-testid="app-card-dice"]').exists()).toBe(true)
+  })
+
+  it('shows a no-match message when the query matches no app', async () => {
+    appsEndpoint(twoApps())
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    await c.find('#apps-search').setValue('nonexistent')
+    expect(c.find('[data-testid="app-card-calc"]').exists()).toBe(false)
+    expect(c.find('[data-testid="app-card-dice"]').exists()).toBe(false)
+    expect(c.text()).toContain('No apps match')
+  })
+
+  it('the clear button resets the query and restores the full grid', async () => {
+    appsEndpoint(twoApps())
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    await c.find('#apps-search').setValue('dice')
+    expect(c.find('[data-testid="app-card-calc"]').exists()).toBe(false)
+
+    // The clear (X) button appears only once there's a query.
+    await c.find('[aria-label="Clear search"]').trigger('click')
+    expect(c.find('[data-testid="app-card-calc"]').exists()).toBe(true)
+    expect(c.find('[data-testid="app-card-dice"]').exists()).toBe(true)
+  })
+
+  it('hides the search bar when there are no apps to search', async () => {
+    appsEndpoint([])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    expect(c.find('#apps-search').exists()).toBe(false)
+  })
 })

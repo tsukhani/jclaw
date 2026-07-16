@@ -3,7 +3,7 @@
 // discovered from public/apps/<slug>/ via GET /api/apps. Clicking a card opens
 // the app in a new tab at /apps/<slug>/. Pricing is metadata-only — a label.
 // The "Create app" affordance (slice 3) will sit above the grid.
-import { PencilSquareIcon, PlusIcon, Squares2X2Icon, TrashIcon } from '@heroicons/vue/24/outline'
+import { MagnifyingGlassIcon, PencilSquareIcon, PlusIcon, Squares2X2Icon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 
 interface AppEntry {
@@ -21,6 +21,15 @@ interface AppEntry {
 
 const { data, pending, refresh } = useLazyFetch<{ apps: AppEntry[] }>('/api/apps')
 const apps = computed(() => data.value?.apps ?? [])
+
+// Real-time name filter driven by the floating search bar (smartphone-style).
+// Case-insensitive substring match on the app name; empty query = show all.
+const search = ref('')
+const filteredApps = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return apps.value
+  return apps.value.filter(a => a.name.toLowerCase().includes(q))
+})
 
 const { confirm } = useConfirm()
 
@@ -167,7 +176,7 @@ async function deleteApp(app: AppEntry) {
 </script>
 
 <template>
-  <div>
+  <div class="flex flex-col min-h-full">
     <h1 class="text-lg font-semibold text-fg-strong mb-2">
       Apps
     </h1>
@@ -378,11 +387,18 @@ async function deleteApp(app: AppEntry) {
     </div>
 
     <div
+      v-else-if="!filteredApps.length"
+      class="text-sm text-fg-muted border border-dashed border-border rounded-lg px-4 py-8 text-center"
+    >
+      No apps match “<span class="font-medium text-fg-strong">{{ search }}</span>”.
+    </div>
+
+    <div
       v-else
       class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"
     >
       <div
-        v-for="app in apps"
+        v-for="app in filteredApps"
         :key="app.id"
         class="group relative"
       >
@@ -454,6 +470,45 @@ async function deleteApp(app: AppEntry) {
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- Floating search bar (smartphone-style): pinned to the bottom-center of
+         the content, filters the grid by app name in real time. mt-auto pushes
+         it to the bottom; sticky keeps it there as the grid scrolls under it. -->
+    <div
+      v-if="apps.length"
+      class="sticky bottom-6 z-20 mt-auto mx-auto flex items-center gap-2 w-full max-w-xs px-4 py-2.5 rounded-full bg-surface-elevated/80 backdrop-blur-md border border-border shadow-lg"
+    >
+      <MagnifyingGlassIcon
+        class="w-4 h-4 text-fg-muted shrink-0"
+        aria-hidden="true"
+      />
+      <label
+        for="apps-search"
+        class="flex-1 min-w-0"
+      >
+        <span class="sr-only">Search apps by name</span>
+        <input
+          id="apps-search"
+          v-model="search"
+          type="search"
+          placeholder="Search apps"
+          class="w-full bg-transparent text-sm text-fg-strong placeholder:text-fg-muted focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
+          @keydown.escape="search = ''"
+        >
+      </label>
+      <button
+        v-if="search"
+        type="button"
+        aria-label="Clear search"
+        class="shrink-0 text-fg-muted hover:text-fg-strong transition-colors"
+        @click="search = ''"
+      >
+        <XMarkIcon
+          class="w-4 h-4"
+          aria-hidden="true"
+        />
+      </button>
     </div>
   </div>
 </template>
