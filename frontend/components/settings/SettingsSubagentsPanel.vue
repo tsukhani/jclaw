@@ -77,10 +77,12 @@ interface DetectedHarness {
   id: string
   name: string
   command: string
+  harness: string // the subagent.acp.harness adapter id to write (generic for custom)
   available: boolean
   reason: string
+  custom: boolean
 }
-const { data: harnessData, pending: harnessPending }
+const { data: harnessData, pending: harnessPending, refresh: refreshHarnesses }
   = useLazyFetch<{ harnesses: DetectedHarness[] }>('/api/subagents/acp-harnesses')
 const detectedHarnesses = computed(() => harnessData.value?.harnesses ?? [])
 
@@ -89,13 +91,56 @@ async function useHarness(h: DetectedHarness) {
   saving.value = true
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.acp.command', value: h.command } })
-    await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.acp.harness', value: h.id } })
+    await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.acp.harness', value: h.harness } })
     editingSubagentField.value = null
     refresh()
   }
   finally {
     saving.value = false
   }
+}
+
+// Border/text styling for a chip: dim when unavailable, emerald when it's the
+// currently-active command, neutral-with-hover otherwise.
+function chipClass(h: DetectedHarness): string {
+  if (!h.available) return 'border-border text-fg-muted opacity-60'
+  if (subagentAcpCommand.value === h.command) {
+    return 'border-emerald-500 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
+  }
+  return 'border-input text-fg-primary hover:border-emerald-500'
+}
+
+// Add a custom harness: submit the command, JClaw probes whether its binary
+// resolves on PATH, and on success it's persisted + shown as a new chip.
+const customCommandInput = ref('')
+const customError = ref('')
+const addingCustom = ref(false)
+
+async function addCustomHarness() {
+  const cmd = customCommandInput.value.trim()
+  if (!cmd) return
+  addingCustom.value = true
+  customError.value = ''
+  try {
+    const res = await $fetch<DetectedHarness>('/api/subagents/acp-harnesses', {
+      method: 'POST', body: { command: cmd },
+    })
+    if (res.available) {
+      customCommandInput.value = ''
+      await refreshHarnesses()
+    }
+    else {
+      customError.value = res.reason || 'That command’s binary was not found on PATH.'
+    }
+  }
+  finally {
+    addingCustom.value = false
+  }
+}
+
+async function removeCustomHarness(command: string) {
+  await $fetch('/api/subagents/acp-harnesses', { method: 'DELETE', query: { command } })
+  await refreshHarnesses()
 }
 
 // JCLAW-422: subagent model. Unset (the default) = inherit the conversation's
@@ -357,34 +402,74 @@ async function saveSubagentModel(value: string) {
               class="text-xs text-fg-muted"
             >Probing host…</span>
             <template v-else>
-              <button
+              <span
                 v-for="h in detectedHarnesses"
                 :key="h.id"
-                type="button"
-                :disabled="!h.available || saving"
-                :title="h.available ? `Use ${h.command}` : h.reason"
-                class="inline-flex items-center gap-1.5 px-2 py-1 text-xs border transition-colors"
-                :class="h.available
-                  ? (subagentAcpCommand === h.command
-                    ? 'border-emerald-500 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
-                    : 'border-input text-fg-primary hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400 cursor-pointer')
-                  : 'border-border text-fg-muted opacity-60 cursor-not-allowed'"
-                @click="h.available && useHarness(h)"
+                class="inline-flex items-center border transition-colors"
+                :class="chipClass(h)"
               >
-                <span
-                  class="w-1.5 h-1.5 rounded-full"
-                  :class="h.available ? 'bg-emerald-500' : 'bg-fg-muted'"
-                  aria-hidden="true"
-                />
-                {{ h.name }}
-                <span class="font-mono opacity-70">{{ h.command }}</span>
-                <CheckIcon
-                  v-if="h.available && subagentAcpCommand === h.command"
-                  class="w-3 h-3"
-                  aria-hidden="true"
-                />
-              </button>
+                <button
+                  type="button"
+                  :disabled="!h.available || saving"
+                  :title="h.available ? `Use ${h.command}` : h.reason"
+                  class="inline-flex items-center gap-1.5 px-2 py-1 text-xs"
+                  :class="h.available ? 'cursor-pointer' : 'cursor-not-allowed'"
+                  @click="h.available && useHarness(h)"
+                >
+                  <span
+                    class="w-1.5 h-1.5 rounded-full"
+                    :class="h.available ? 'bg-emerald-500' : 'bg-fg-muted'"
+                    aria-hidden="true"
+                  />
+                  {{ h.name }}
+                  <span class="font-mono opacity-70">{{ h.command }}</span>
+                  <CheckIcon
+                    v-if="h.available && subagentAcpCommand === h.command"
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  v-if="h.custom"
+                  type="button"
+                  :disabled="saving"
+                  title="Remove custom harness"
+                  aria-label="Remove custom harness"
+                  class="px-1.5 py-1 self-stretch flex items-center text-fg-muted hover:text-rose-600 dark:hover:text-rose-400 border-l border-inherit"
+                  @click="removeCustomHarness(h.command)"
+                >
+                  <XMarkIcon
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                </button>
+              </span>
             </template>
+            <!-- Add a custom harness: probe on submit; a resolvable binary becomes a chip. -->
+            <div class="flex items-center gap-1.5 w-full mt-1">
+              <input
+                v-model="customCommandInput"
+                type="text"
+                placeholder="Add a harness command (e.g. aider --message)"
+                aria-label="Custom harness command"
+                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                @keydown.enter.prevent="addCustomHarness"
+              >
+              <button
+                type="button"
+                :disabled="addingCustom || saving || !customCommandInput.trim()"
+                class="px-2 py-1 text-xs border border-input text-fg-primary hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                @click="addCustomHarness"
+              >
+                {{ addingCustom ? 'Checking…' : 'Add' }}
+              </button>
+            </div>
+            <p
+              v-if="customError"
+              class="text-[10px] text-rose-600 dark:text-rose-400 w-full"
+            >
+              {{ customError }}
+            </p>
           </div>
         </div>
         <!-- JCLAW-422: model subagents run on. Default (inherit) tracks the

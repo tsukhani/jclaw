@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -16,32 +17,69 @@ import static utils.GsonHolder.INSTANCE;
 /**
  * ACP coding-harness detection: probes the host PATH for the CLIs the ACP
  * runtime ({@code runtime=acp}) can drive — {@code claude}, {@code pi}, {@code
- * codex}, {@code gemini}, {@code opencode}. Surfaced in Settings → Subagents so
- * the operator picks a detected
- * harness (auto-filling {@code subagent.acp.command} + {@code
- * subagent.acp.harness}) instead of typing the command by hand. Probed fresh
- * on each call; the panel queries it once on open.
+ * codex}, {@code gemini}, {@code opencode}, plus operator-added custom commands.
+ * Surfaced in Settings → Subagents so the operator picks a detected harness
+ * (auto-filling {@code subagent.acp.command} + {@code subagent.acp.harness})
+ * instead of typing the command by hand. Probed fresh on each call.
  */
 @With(AuthCheck.class)
 public class ApiAcpHarnessController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
-    /** One probed harness: adapter {@code id} (the {@code subagent.acp.harness}
-     *  value), a display {@code name}, the suggested {@code command} (the {@code
-     *  subagent.acp.command} value), whether the binary is on PATH, and a
-     *  human-readable reason (version line or the not-found detail). */
-    public record HarnessEntry(String id, String name, String command, boolean available, String reason) {}
+    /** One probed harness: adapter {@code id}, a display {@code name}, the
+     *  suggested {@code command} (the {@code subagent.acp.command} value), the
+     *  {@code harness} adapter id to write ({@code subagent.acp.harness}),
+     *  whether the binary is on PATH, a human-readable reason, and whether it's
+     *  an operator-added {@code custom} chip (removable). */
+    public record HarnessEntry(String id, String name, String command, String harness,
+                               boolean available, String reason, boolean custom) {}
 
     public record HarnessesResponse(List<HarnessEntry> harnesses) {}
 
-    /** GET /api/subagents/acp-harnesses — probe every known harness on PATH. */
-    @Operation(summary = "Detect installed ACP coding harnesses (claude/pi/codex) on the host PATH")
+    public record CustomHarnessRequest(String command) {}
+
+    /** GET /api/subagents/acp-harnesses — probe every known + custom harness. */
+    @Operation(summary = "Detect installed ACP coding harnesses (claude/pi/codex/gemini/opencode + custom) on PATH")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = HarnessesResponse.class)))
     public static void list() {
-        var harnesses = AcpHarnessProbe.probeAll().stream()
-                .map(d -> new HarnessEntry(d.id(), d.displayName(), d.command(), d.available(), d.reason()))
-                .toList();
-        renderJSON(gson.toJson(new HarnessesResponse(harnesses)));
+        renderJSON(gson.toJson(new HarnessesResponse(toEntries(AcpHarnessProbe.probeAll()))));
+    }
+
+    /** POST /api/subagents/acp-harnesses — probe an operator-entered command;
+     *  when its binary resolves it's persisted and returned as a custom chip,
+     *  otherwise the {@code available:false} result carries the reason. */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = CustomHarnessRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = HarnessEntry.class)))
+    @Operation(summary = "Add + probe a custom ACP harness command")
+    public static void add() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null || !body.has("command") || body.get("command").isJsonNull()) {
+            badRequest();
+        }
+        var probed = AcpHarnessProbe.addCustom(body.get("command").getAsString());
+        renderJSON(gson.toJson(toEntry(probed)));
+    }
+
+    /** DELETE /api/subagents/acp-harnesses?command=... — remove an
+     *  operator-added custom command (identified by its command string) and
+     *  return the refreshed list. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = HarnessesResponse.class)))
+    @Operation(summary = "Remove a custom ACP harness command")
+    public static void remove(String command) {
+        if (command == null || command.isBlank()) {
+            badRequest();
+        }
+        AcpHarnessProbe.removeCustom(command);
+        renderJSON(gson.toJson(new HarnessesResponse(toEntries(AcpHarnessProbe.probeAll()))));
+    }
+
+    private static List<HarnessEntry> toEntries(List<AcpHarnessProbe.Detected> detected) {
+        return detected.stream().map(ApiAcpHarnessController::toEntry).toList();
+    }
+
+    private static HarnessEntry toEntry(AcpHarnessProbe.Detected d) {
+        return new HarnessEntry(d.id(), d.displayName(), d.command(), d.harness(),
+                d.available(), d.reason(), d.custom());
     }
 }

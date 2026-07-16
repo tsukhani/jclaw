@@ -228,6 +228,8 @@ GET     /api/logs                               ApiLogsController.list
 
 # ACP coding-harness detection (Settings → Subagents)
 GET     /api/subagents/acp-harnesses            ApiAcpHarnessController.list
+POST    /api/subagents/acp-harnesses            ApiAcpHarnessController.add
+DELETE  /api/subagents/acp-harnesses            ApiAcpHarnessController.remove
 
 # Subagent Runs API (JCLAW-271)
 GET     /api/subagent-runs                      ApiSubagentRunsController.list
