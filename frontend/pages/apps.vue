@@ -440,35 +440,33 @@ async function deleteApp(app: AppEntry) {
             </div>
           </div>
         </a>
-        <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-          <button
-            type="button"
-            :data-testid="`update-app-${app.id}`"
-            class="p-1 rounded-md bg-surface-elevated/90 border border-border text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-            title="Update this app"
-            aria-label="Update this app"
-            @click="startUpdate(app)"
-          >
-            <PencilSquareIcon
-              class="w-3.5 h-3.5"
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            :data-testid="`delete-app-${app.id}`"
-            :disabled="deletingId === app.id"
-            class="p-1 rounded-md bg-surface-elevated/90 border border-border text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            title="Delete this app"
-            aria-label="Delete this app"
-            @click="deleteApp(app)"
-          >
-            <TrashIcon
-              class="w-3.5 h-3.5"
-              aria-hidden="true"
-            />
-          </button>
-        </div>
+        <button
+          type="button"
+          :data-testid="`update-app-${app.id}`"
+          class="absolute top-1 left-1 p-1 rounded-md text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-emerald-700 dark:hover:text-emerald-400 transition-opacity"
+          title="Update this app"
+          aria-label="Update this app"
+          @click="startUpdate(app)"
+        >
+          <PencilSquareIcon
+            class="w-3.5 h-3.5"
+            aria-hidden="true"
+          />
+        </button>
+        <button
+          type="button"
+          :data-testid="`delete-app-${app.id}`"
+          :disabled="deletingId === app.id"
+          class="absolute top-1 right-1 p-1 rounded-md text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+          title="Delete this app"
+          aria-label="Delete this app"
+          @click="deleteApp(app)"
+        >
+          <TrashIcon
+            class="w-3.5 h-3.5"
+            aria-hidden="true"
+          />
+        </button>
       </div>
     </div>
 
