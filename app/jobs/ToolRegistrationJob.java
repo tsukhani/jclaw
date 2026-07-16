@@ -6,6 +6,7 @@ import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.ConfigService;
 import services.EventLogger;
+import tools.AppInstallTool;
 import tools.CcrRetrieveTool;
 import tools.CheckListTool;
 import tools.ConversationHistoryTool;
@@ -65,6 +66,7 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new CheckListTool());
         toolList.add(new FileSystemTools());
         toolList.add(new DocumentsTool());
+        toolList.add(new AppInstallTool()); // JCLAW-768: sandbox-safe hosted-app stage/validate/install
         toolList.add(new WebFetchTool());
         toolList.add(new WebSearchTool());
         // JCLAW-172: PlaywrightBrowserTool and ShellExecTool used to be gated
