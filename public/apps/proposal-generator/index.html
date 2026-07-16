@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proposal Generator</title>
+  <link rel="icon" href="icon.svg">
+  <style>
+    :root {
+      --bg: #f6f7f9; --surface: #ffffff; --border: #e3e6ea; --fg: #1c2430;
+      --fg-muted: #6b7684; --accent: #4f46e5; --accent-fg: #ffffff;
+      --ok: #059669; --danger: #dc2626; --shadow: 0 1px 3px rgba(16,24,40,.08);
+      --radius: 10px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1218; --surface: #171b22; --border: #2a303a; --fg: #e6e9ee;
+        --fg-muted: #9aa4b2; --accent: #6366f1; --shadow: 0 1px 3px rgba(0,0,0,.4);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 18px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+    }
+    header .logo { width: 32px; height: 32px; }
+    header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+    header .tag { color: var(--fg-muted); font-size: 13px; }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+    nav.tabs { display: flex; gap: 4px; margin-bottom: 20px; }
+    nav.tabs button {
+      background: none; border: none; padding: 8px 16px; border-radius: 8px;
+      font: inherit; font-weight: 550; color: var(--fg-muted); cursor: pointer;
+    }
+    nav.tabs button.active { background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    @media (min-width: 760px) { .grid { grid-template-columns: 5fr 4fr; } }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px;
+    }
+    .card h2 { font-size: 15px; margin: 0 0 14px; font-weight: 600; }
+    label { display: block; font-size: 12px; color: var(--fg-muted); margin: 12px 0 4px; font-weight: 550; }
+    label:first-of-type { margin-top: 0; }
+    input, textarea, select {
+      width: 100%; padding: 8px 10px; font: inherit; color: var(--fg);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 7px;
+    }
+    input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    textarea { resize: vertical; min-height: 64px; }
+    .row { display: flex; gap: 10px; }
+    .row > * { flex: 1; }
+    button.btn {
+      padding: 8px 14px; font: inherit; font-weight: 550; border-radius: 7px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer;
+    }
+    button.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+    button.btn.ghost { background: none; border: none; color: var(--fg-muted); padding: 6px 8px; }
+    button.btn.danger { color: var(--danger); }
+    button.btn:disabled { opacity: .5; cursor: not-allowed; }
+    .actions { display: flex; gap: 8px; margin-top: 16px; }
+    .items { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+    .items th { text-align: left; color: var(--fg-muted); font-weight: 550; padding: 4px 6px; }
+    .items td { padding: 3px 4px; }
+    .items td input { padding: 6px 8px; }
+    .items .num { width: 84px; }
+    .items .total-cell { text-align: right; white-space: nowrap; padding-right: 8px; }
+    .total-line { display: flex; justify-content: space-between; font-weight: 650; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .list-item {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+    }
+    .list-item:last-child { border-bottom: none; }
+    .list-item .meta { min-width: 0; }
+    .list-item .meta strong { display: block; }
+    .list-item .meta span { color: var(--fg-muted); font-size: 13px; }
+    .list-item .ops { display: flex; gap: 2px; flex-shrink: 0; }
+    .empty { color: var(--fg-muted); font-size: 13px; padding: 8px 0; }
+    .hidden { display: none !important; }
+    /* Print view */
+    #print-area { display: none; }
+    @media print {
+      body > *:not(#print-area) { display: none !important; }
+      #print-area { display: block !important; padding: 0; color: #000; }
+      #print-area h1 { font-size: 24px; margin: 0 0 4px; }
+      #print-area .p-meta { color: #555; margin-bottom: 24px; }
+      #print-area table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+      #print-area th, #print-area td { border-bottom: 1px solid #ccc; padding: 8px; text-align: left; }
+      #print-area td.amt, #print-area th.amt { text-align: right; }
+      #print-area .grand { font-size: 18px; font-weight: 700; text-align: right; margin-top: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="icon.svg" alt="" class="logo">
+    <div>
+      <h1>Proposal Generator</h1>
+      <div class="tag">Draft RFPs and turn them into client-ready proposals — saved in your browser.</div>
+    </div>
+  </header>
+
+  <main>
+    <nav class="tabs">
+      <button data-tab="rfps" class="active">RFPs</button>
+      <button data-tab="proposals">Proposals</button>
+    </nav>
+
+    <!-- ============ RFPs ============ -->
+    <section id="tab-rfps" class="grid">
+      <div class="card">
+        <h2 id="rfp-form-title">New RFP</h2>
+        <form id="rfp-form">
+          <input type="hidden" id="rfp-id">
+          <label for="rfp-title">Title</label>
+          <input id="rfp-title" required placeholder="Website redesign RFP">
+          <label for="rfp-client">Client / organization</label>
+          <input id="rfp-client" placeholder="Acme Corp">
+          <label for="rfp-summary">Summary</label>
+          <textarea id="rfp-summary" placeholder="What the client is asking for."></textarea>
+          <label for="rfp-reqs">Requirements (one per line)</label>
+          <textarea id="rfp-reqs" placeholder="Responsive marketing site&#10;CMS for the blog&#10;Analytics integration"></textarea>
+          <div class="row">
+            <div>
+              <label for="rfp-budget">Budget</label>
+              <input id="rfp-budget" placeholder="$25,000">
+            </div>
+            <div>
+              <label for="rfp-due">Response due</label>
+              <input id="rfp-due" type="date">
+            </div>
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn primary">Save RFP</button>
+            <button type="button" class="btn ghost" id="rfp-reset">Clear</button>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Saved RFPs (<span id="rfp-count">0</span>)</h2>
+        <div id="rfp-list"></div>
+      </div>
+    </section>
+
+    <!-- ============ Proposals ============ -->
+    <section id="tab-proposals" class="grid hidden">
+      <div class="card">
+        <h2 id="prop-form-title">New proposal</h2>
+        <form id="prop-form">
+          <input type="hidden" id="prop-id">
+          <label for="prop-title">Proposal title</label>
+          <input id="prop-title" required placeholder="Proposal: Website redesign">
+          <label for="prop-client">Client</label>
+          <input id="prop-client" placeholder="Acme Corp">
+          <label for="prop-intro">Introduction</label>
+          <textarea id="prop-intro" placeholder="A short cover note to the client."></textarea>
+          <label>Line items</label>
+          <table class="items">
+            <thead>
+              <tr><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th></th></tr>
+            </thead>
+            <tbody id="prop-items"></tbody>
+          </table>
+          <button type="button" class="btn ghost" id="prop-add-item">+ Add line item</button>
+          <div class="total-line"><span>Total</span><span id="prop-total">$0.00</span></div>
+          <label for="prop-terms">Terms</label>
+          <textarea id="prop-terms" placeholder="Payment terms, timeline, validity."></textarea>
+          <div class="actions">
+            <button type="submit" class="btn primary">Save proposal</button>
+            <button type="button" class="btn ghost" id="prop-reset">Clear</button>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <h2>Saved proposals (<span id="prop-count">0</span>)</h2>
+        <div id="prop-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="print-area"></div>
+
+  <script>
+    (function () {
+      "use strict";
+      const $ = (id) => document.getElementById(id);
+      const money = (n) => "$" + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+      const load = (k) => { try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; } };
+      const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+
+      let rfps = load("pg.rfps");
+      let proposals = load("pg.proposals");
+
+      // ---- Tabs ----
+      const showTab = (name) => {
+        document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+        $("tab-rfps").classList.toggle("hidden", name !== "rfps");
+        $("tab-proposals").classList.toggle("hidden", name !== "proposals");
+      };
+      document.querySelectorAll("nav.tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+
+      // ---- RFPs ----
+      const rfpForm = $("rfp-form");
+      const rfpFields = ["title", "client", "summary", "reqs", "budget", "due"];
+      const readRfp = () => ({
+        id: $("rfp-id").value || uid(),
+        title: $("rfp-title").value.trim(),
+        client: $("rfp-client").value.trim(),
+        summary: $("rfp-summary").value.trim(),
+        reqs: $("rfp-reqs").value.split("\n").map((s) => s.trim()).filter(Boolean),
+        budget: $("rfp-budget").value.trim(),
+        due: $("rfp-due").value,
+      });
+      const resetRfp = () => {
+        rfpForm.reset(); $("rfp-id").value = ""; $("rfp-form-title").textContent = "New RFP";
+      };
+      const editRfp = (r) => {
+        $("rfp-id").value = r.id; $("rfp-title").value = r.title; $("rfp-client").value = r.client || "";
+        $("rfp-summary").value = r.summary || ""; $("rfp-reqs").value = (r.reqs || []).join("\n");
+        $("rfp-budget").value = r.budget || ""; $("rfp-due").value = r.due || "";
+        $("rfp-form-title").textContent = "Edit RFP"; showTab("rfps"); window.scrollTo(0, 0);
+      };
+      const renderRfps = () => {
+        $("rfp-count").textContent = rfps.length;
+        const el = $("rfp-list");
+        if (!rfps.length) { el.innerHTML = '<div class="empty">No RFPs yet. Draft one on the left.</div>'; return; }
+        el.innerHTML = rfps.map((r) => `
+          <div class="list-item">
+            <div class="meta">
+              <strong>${esc(r.title)}</strong>
+              <span>${esc(r.client || "—")}${r.budget ? " · " + esc(r.budget) : ""}${r.reqs && r.reqs.length ? " · " + r.reqs.length + " req" + (r.reqs.length > 1 ? "s" : "") : ""}</span>
+            </div>
+            <div class="ops">
+              <button class="btn ghost" data-act="propose" data-id="${r.id}">New proposal</button>
+              <button class="btn ghost" data-act="edit" data-id="${r.id}">Edit</button>
+              <button class="btn ghost danger" data-act="del" data-id="${r.id}">Delete</button>
+            </div>
+          </div>`).join("");
+      };
+      rfpForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const r = readRfp();
+        const i = rfps.findIndex((x) => x.id === r.id);
+        if (i >= 0) rfps[i] = r; else rfps.push(r);
+        save("pg.rfps", rfps); resetRfp(); renderRfps();
+      });
+      $("rfp-reset").addEventListener("click", resetRfp);
+      $("rfp-list").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-act]"); if (!btn) return;
+        const r = rfps.find((x) => x.id === btn.dataset.id); if (!r) return;
+        if (btn.dataset.act === "edit") editRfp(r);
+        else if (btn.dataset.act === "del") { if (confirm("Delete this RFP?")) { rfps = rfps.filter((x) => x.id !== r.id); save("pg.rfps", rfps); renderRfps(); } }
+        else if (btn.dataset.act === "propose") proposeFromRfp(r);
+      });
+
+      // ---- Proposals ----
+      const propForm = $("prop-form");
+      const itemsBody = $("prop-items");
+      const addItem = (desc = "", qty = 1, price = 0) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input class="i-desc" aria-label="Line item description" value="${esc(desc)}" placeholder="Discovery & design"></td>
+          <td><input class="i-qty num" aria-label="Quantity" type="number" min="0" step="1" value="${esc(qty)}"></td>
+          <td><input class="i-price num" aria-label="Unit price" type="number" min="0" step="0.01" value="${esc(price)}"></td>
+          <td><button type="button" class="btn ghost danger i-del" title="Remove">✕</button></td>`;
+        itemsBody.appendChild(tr);
+        recalcTotal();
+      };
+      const lineItems = () => Array.from(itemsBody.querySelectorAll("tr")).map((tr) => ({
+        desc: tr.querySelector(".i-desc").value.trim(),
+        qty: Number(tr.querySelector(".i-qty").value) || 0,
+        price: Number(tr.querySelector(".i-price").value) || 0,
+      }));
+      const recalcTotal = () => {
+        const total = lineItems().reduce((s, it) => s + it.qty * it.price, 0);
+        $("prop-total").textContent = money(total);
+      };
+      itemsBody.addEventListener("input", recalcTotal);
+      itemsBody.addEventListener("click", (e) => { if (e.target.closest(".i-del")) { e.target.closest("tr").remove(); recalcTotal(); } });
+      $("prop-add-item").addEventListener("click", () => addItem());
+
+      const readProp = () => ({
+        id: $("prop-id").value || uid(),
+        title: $("prop-title").value.trim(),
+        client: $("prop-client").value.trim(),
+        intro: $("prop-intro").value.trim(),
+        items: lineItems().filter((it) => it.desc || it.price),
+        terms: $("prop-terms").value.trim(),
+        savedAt: new Date().toISOString(),
+      });
+      const resetProp = () => {
+        propForm.reset(); $("prop-id").value = ""; itemsBody.innerHTML = ""; addItem();
+        $("prop-form-title").textContent = "New proposal"; recalcTotal();
+      };
+      const fillProp = (p) => {
+        $("prop-id").value = p.id || ""; $("prop-title").value = p.title || ""; $("prop-client").value = p.client || "";
+        $("prop-intro").value = p.intro || ""; $("prop-terms").value = p.terms || "";
+        itemsBody.innerHTML = "";
+        (p.items && p.items.length ? p.items : [{}]).forEach((it) => addItem(it.desc || "", it.qty != null ? it.qty : 1, it.price != null ? it.price : 0));
+        recalcTotal();
+      };
+      const editProp = (p) => { fillProp(p); $("prop-form-title").textContent = "Edit proposal"; showTab("proposals"); window.scrollTo(0, 0); };
+      const proposeFromRfp = (r) => {
+        fillProp({
+          title: "Proposal: " + r.title,
+          client: r.client,
+          intro: r.summary ? "In response to your RFP, here is our proposal.\n\n" + r.summary : "In response to your RFP, here is our proposal.",
+          items: (r.reqs && r.reqs.length ? r.reqs : ["Scope of work"]).map((d) => ({ desc: d, qty: 1, price: 0 })),
+          terms: "50% on acceptance, 50% on delivery. Valid for 30 days.",
+        });
+        $("prop-form-title").textContent = "New proposal (from RFP)"; showTab("proposals"); window.scrollTo(0, 0);
+      };
+      const renderProps = () => {
+        $("prop-count").textContent = proposals.length;
+        const el = $("prop-list");
+        if (!proposals.length) { el.innerHTML = '<div class="empty">No proposals yet. Create one, or start from an RFP.</div>'; return; }
+        el.innerHTML = proposals.map((p) => {
+          const total = (p.items || []).reduce((s, it) => s + it.qty * it.price, 0);
+          return `
+          <div class="list-item">
+            <div class="meta">
+              <strong>${esc(p.title)}</strong>
+              <span>${esc(p.client || "—")} · ${money(total)}</span>
+            </div>
+            <div class="ops">
+              <button class="btn ghost" data-act="print" data-id="${p.id}">Open / Print</button>
+              <button class="btn ghost" data-act="edit" data-id="${p.id}">Edit</button>
+              <button class="btn ghost danger" data-act="del" data-id="${p.id}">Delete</button>
+            </div>
+          </div>`;
+        }).join("");
+      };
+      propForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const p = readProp();
+        const i = proposals.findIndex((x) => x.id === p.id);
+        if (i >= 0) proposals[i] = p; else proposals.push(p);
+        save("pg.proposals", proposals); resetProp(); renderProps();
+      });
+      $("prop-reset").addEventListener("click", resetProp);
+      $("prop-list").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-act]"); if (!btn) return;
+        const p = proposals.find((x) => x.id === btn.dataset.id); if (!p) return;
+        if (btn.dataset.act === "edit") editProp(p);
+        else if (btn.dataset.act === "del") { if (confirm("Delete this proposal?")) { proposals = proposals.filter((x) => x.id !== p.id); save("pg.proposals", proposals); renderProps(); } }
+        else if (btn.dataset.act === "print") printProp(p);
+      });
+
+      const printProp = (p) => {
+        const total = (p.items || []).reduce((s, it) => s + it.qty * it.price, 0);
+        const rows = (p.items || []).map((it) => `
+          <tr><td>${esc(it.desc)}</td><td class="amt">${it.qty}</td><td class="amt">${money(it.price)}</td><td class="amt">${money(it.qty * it.price)}</td></tr>`).join("");
+        $("print-area").innerHTML = `
+          <h1>${esc(p.title)}</h1>
+          <div class="p-meta">Prepared for ${esc(p.client || "the client")}</div>
+          ${p.intro ? "<p>" + esc(p.intro).replace(/\n/g, "<br>") + "</p>" : ""}
+          <table>
+            <thead><tr><th>Description</th><th class="amt">Qty</th><th class="amt">Unit</th><th class="amt">Amount</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="grand">Total: ${money(total)}</div>
+          ${p.terms ? "<p><strong>Terms.</strong> " + esc(p.terms).replace(/\n/g, "<br>") + "</p>" : ""}`;
+        window.print();
+      };
+
+      // ---- Boot ----
+      resetProp();
+      renderRfps();
+      renderProps();
+    })();
+  </script>
+</body>
+</html>
