@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -157,7 +158,7 @@ public class ConversationListTool implements ToolRegistry.Tool {
         var statusStr = JsonArgs.optString(args, PARAM_STATUS);
         if (statusStr != null && !statusStr.isBlank()) {
             try {
-                status = SubagentRun.Status.valueOf(statusStr.toUpperCase());
+                status = SubagentRun.Status.valueOf(statusStr.toUpperCase(Locale.ROOT));
             } catch (IllegalArgumentException _) {
                 return ParsedArgs.fail("Error: 'status' must be one of "
                         + Arrays.toString(SubagentRun.Status.values())

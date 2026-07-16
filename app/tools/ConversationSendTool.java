@@ -15,6 +15,7 @@ import utils.JsonArgs;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -176,14 +177,14 @@ public class ConversationSendTool implements ToolRegistry.Tool {
         }
         var explicitTarget = JsonArgs.optString(args, PARAM_TARGET);
         if (explicitTarget != null && !explicitTarget.isBlank()
-                && !ALLOWED_TARGETS.contains(explicitTarget.toLowerCase())) {
+                && !ALLOWED_TARGETS.contains(explicitTarget.toLowerCase(Locale.ROOT))) {
             return "Error: 'target' must be one of " + ALLOWED_TARGETS
                     + " (got '" + explicitTarget + "').";
         }
         var payloadType = JsonArgs.optString(args, PARAM_PAYLOAD_TYPE);
         if (payloadType == null || payloadType.isBlank()) {
             payloadType = DEFAULT_PAYLOAD_TYPE;
-        } else if (!ALLOWED_PAYLOAD_TYPES.contains(payloadType.toLowerCase())) {
+        } else if (!ALLOWED_PAYLOAD_TYPES.contains(payloadType.toLowerCase(Locale.ROOT))) {
             return "Error: 'payloadType' must be one of " + ALLOWED_PAYLOAD_TYPES
                     + " (got '" + payloadType + "').";
         }
@@ -197,8 +198,8 @@ public class ConversationSendTool implements ToolRegistry.Tool {
             }
         }
         final var finalMessage = message;
-        final var finalPayloadType = payloadType.toLowerCase();
-        final var finalExplicitTarget = explicitTarget != null ? explicitTarget.toLowerCase() : null;
+        final var finalPayloadType = payloadType.toLowerCase(Locale.ROOT);
+        final var finalExplicitTarget = explicitTarget != null ? explicitTarget.toLowerCase(Locale.ROOT) : null;
         final var finalExplicitRunId = explicitRunId;
         final var callingAgentId = callingAgent.id;
         return Tx.run(() -> dispatch(callingAgentId, finalExplicitTarget, finalExplicitRunId,

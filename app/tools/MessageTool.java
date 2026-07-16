@@ -20,6 +20,7 @@ import utils.JsonArgs;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -280,7 +281,7 @@ public class MessageTool implements ToolRegistry.Tool {
         if (action == null || action.isBlank()) {
             return "Error: 'action' is required.";
         }
-        var normalized = action.toLowerCase();
+        var normalized = action.toLowerCase(Locale.ROOT);
         if (!ALLOWED_ACTIONS.contains(normalized)) {
             return "Error: 'action' must be one of " + ALLOWED_ACTIONS
                     + " (got '" + action + "').";

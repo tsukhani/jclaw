@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * JCLAW-667: {@link HarnessAdapter} for Anthropic's Claude Code CLI driven
@@ -102,7 +103,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
         if (type == null) {
             return new HarnessEvent(HarnessEvent.STEP, line, obj);
         }
-        return switch (type.toLowerCase()) {
+        return switch (type.toLowerCase(Locale.ROOT)) {
             case "assistant" -> fromAssistant(obj, line);
             case "tool_use" -> new HarnessEvent(HarnessEvent.TOOL_CALL, toolName(obj, line), obj);
             case "user" -> fromUser(obj);

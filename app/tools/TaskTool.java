@@ -18,6 +18,7 @@ import services.Tx;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -460,14 +461,14 @@ public class TaskTool implements ToolRegistry.Tool {
         // hint. If the conversation lookup doesn't yield a usable target,
         // fall back to the inference shape (which will be null and produce
         // NOT_REQUESTED rather than a fire-time spec rejection).
-        if (!DeliveryDispatcher.isSupported(trimmed.toLowerCase())) {
+        if (!DeliveryDispatcher.isSupported(trimmed.toLowerCase(Locale.ROOT))) {
             return explicit;  // Unknown channel — let dispatchSpec surface it.
         }
         var inferred = DeliveryResolver.inferSpec(agent).orElse(null);
         if (inferred == null) return null;
         var colon = inferred.indexOf(':');
         if (colon < 0) return null;
-        return "%s:%s".formatted(trimmed.toLowerCase(), inferred.substring(colon + 1));
+        return "%s:%s".formatted(trimmed.toLowerCase(Locale.ROOT), inferred.substring(colon + 1));
     }
 
     /**
