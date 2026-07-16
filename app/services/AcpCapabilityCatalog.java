@@ -39,8 +39,11 @@ public final class AcpCapabilityCatalog {
                     "retired for personal Google accounts — needs a Gemini API key / Vertex auth"),
             "opencode", new Cap(NATIVE, "opencode acp", null, null, null),
             "codex", new Cap(ADAPTER, "codex app-server", null, null, null),
-            "claude", new Cap(ADAPTER, "claude-code-acp", "claude-code-acp",
-                    "npm i -g @zed-industries/claude-code-acp", null),
+            // The maintained adapter (@zed-industries/claude-code-acp is deprecated +
+            // has a newSession bug; the renamed package works end-to-end — verified
+            // full round-trip via the acp-core SDK).
+            "claude", new Cap(ADAPTER, "claude-agent-acp", "claude-agent-acp",
+                    "npm i -g @agentclientprotocol/claude-agent-acp", null),
             "pi", new Cap(ADAPTER, "pi-acp", "pi-acp", "install the pi-acp adapter", null));
 
     /** The effective ACP support for a harness plus a human-readable tooltip. */
