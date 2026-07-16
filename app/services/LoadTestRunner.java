@@ -117,21 +117,6 @@ public final class LoadTestRunner {
                           String provider, String model,
                           String userMessage,
                           List<String> prompts) {
-
-        /** Backwards-compat constructor — defaults userMessage to {@link #DEFAULT_USER_MESSAGE} and prompts to {@code null}. */
-        public Request(int concurrency, int turns, boolean compress,
-                       LoadTestHarness.Scenario scenario,
-                       boolean realProvider, String provider, String model) {
-            this(concurrency, turns, compress, scenario, realProvider, provider, model, null, null);
-        }
-
-        /** Backwards-compat constructor — defaults prompts to {@code null} (single-message mode). */
-        public Request(int concurrency, int turns, boolean compress,
-                       LoadTestHarness.Scenario scenario,
-                       boolean realProvider, String provider, String model,
-                       String userMessage) {
-            this(concurrency, turns, compress, scenario, realProvider, provider, model, userMessage, null);
-        }
     }
 
     /**

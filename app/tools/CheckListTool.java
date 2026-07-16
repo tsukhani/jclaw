@@ -2,11 +2,9 @@ package tools;
 
 import agents.ToolAction;
 import agents.ToolRegistry;
-import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import models.Agent;
-import utils.GsonHolder;
 import utils.JsonArgs;
 
 import java.util.List;
@@ -14,13 +12,9 @@ import java.util.Map;
 
 public class CheckListTool implements ToolRegistry.Tool {
 
-    private static final Gson gson = GsonHolder.INSTANCE;
-
     private static final String FIELD_CONTENT = "content";
     private static final String FIELD_STATUS = "status";
     private static final String FIELD_ACTIVE_FORM = "activeForm";
-
-    public record CheckListItem(String content, String status, String activeForm) {}
 
     @Override
     public String name() { return "checklist"; }

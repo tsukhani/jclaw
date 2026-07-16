@@ -54,15 +54,6 @@ public class SkillPromotionService {
 
     private SkillPromotionService() {}
 
-    // --- Result types ---
-
-    /** Outcome of a copy or promote operation. */
-    public sealed interface Result {
-        record Ok(Map<String, Object> data) implements Result {}
-        record Noop(String reason) implements Result {}
-        record Failed(int statusCode, String message) implements Result {}
-    }
-
     /**
      * Outcome of tool validation for a skill.
      *

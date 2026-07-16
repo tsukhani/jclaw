@@ -75,27 +75,6 @@ public class SkillLoader {
                          List<String> tools, boolean toolsDeclared, String version) {
             this(name, description, location, tools, toolsDeclared, version, List.of(), "", "", List.of());
         }
-
-        /** Backwards-compatible 7-arg constructor predating the {@code author}/{@code icon}/{@code mcpServers} fields. */
-        public SkillInfo(String name, String description, Path location,
-                         List<String> tools, boolean toolsDeclared, String version,
-                         List<String> commands) {
-            this(name, description, location, tools, toolsDeclared, version, commands, "", "", List.of());
-        }
-
-        /** Backwards-compatible 8-arg constructor predating the {@code icon}/{@code mcpServers} fields. */
-        public SkillInfo(String name, String description, Path location,
-                         List<String> tools, boolean toolsDeclared, String version,
-                         List<String> commands, String author) {
-            this(name, description, location, tools, toolsDeclared, version, commands, author, "", List.of());
-        }
-
-        /** Backwards-compatible 9-arg constructor predating the {@code mcpServers} field (JCLAW-281). */
-        public SkillInfo(String name, String description, Path location,
-                         List<String> tools, boolean toolsDeclared, String version,
-                         List<String> commands, String author, String icon) {
-            this(name, description, location, tools, toolsDeclared, version, commands, author, icon, List.of());
-        }
     }
 
     /** Emoji substituted in user-visible skill listings when a SKILL.md omits the {@code icon:} frontmatter key. */

@@ -23,7 +23,7 @@ import java.time.Instant;
  *
  * <p>The channel posts to the fixed {@code https://graph.facebook.com} host
  * through the shared {@code HttpFactories.general()} client (no per-class URL
- * seam, unlike {@code TelegramChannel.TELEGRAM_API_BASE}), and swapping that
+ * seam), and swapping that
  * shared client would flip a process-global static the concurrent test lanes
  * depend on. So every test here drives the channel only down paths that return
  * before a socket would open: missing config, missing file, missing target,

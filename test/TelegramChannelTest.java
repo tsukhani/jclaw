@@ -17,19 +17,15 @@ import play.test.UnitTest;
 class TelegramChannelTest extends UnitTest {
 
     private MockTelegramServer mock;
-    private String prevBase;
 
     @BeforeEach
     void setup() throws Exception {
         mock = new MockTelegramServer();
         mock.start();
-        prevBase = TelegramChannel.TELEGRAM_API_BASE;
-        TelegramChannel.TELEGRAM_API_BASE = "http://127.0.0.1:" + mock.port();
     }
 
     @AfterEach
     void teardown() {
-        TelegramChannel.TELEGRAM_API_BASE = prevBase;
         // JCLAW-369: the reply-mode tests set this property; clear it so they
         // can't leak into other tests in the suite.
         play.Play.configuration.remove("telegram.replyTo.mode");

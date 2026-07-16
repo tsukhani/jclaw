@@ -1,7 +1,6 @@
 package agents;
 
 import channels.ChannelStreamingSink;
-import com.google.gson.Gson;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
@@ -27,15 +26,12 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import static utils.GsonHolder.INSTANCE;
-
 /**
  * Core agent pipeline: receive message → load conversation → assemble prompt →
  * call LLM → handle tool calls (loop) → persist response → return.
  */
 public class AgentRunner {
 
-    private static final Gson gson = INSTANCE;
     /**
      * Default per-turn tool-round cap. Raised from 10 to 100 ahead of
      * JCLAW-21 Tasks: scheduled task fires have no human in the loop to

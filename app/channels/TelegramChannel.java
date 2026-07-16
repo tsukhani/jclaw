@@ -252,13 +252,6 @@ public class TelegramChannel implements Channel {
                 allowsMultipleAnswers, openPeriod);
     }
 
-    /**
-     * Telegram Bot API base URL used by the raw-HTTP helpers. Package-visible
-     * so tests targeting {@code MockTelegramServer} can redirect traffic
-     * without touching the SDK's {@code TelegramUrl} override (which only
-     * affects {@code OkHttpTelegramClient} calls).
-     */
-    public static String TELEGRAM_API_BASE = "https://api.telegram.org";
 
     // ── JCLAW-369: outbound reply targeting + topic-aware sends ──────────
 

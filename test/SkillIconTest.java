@@ -57,7 +57,7 @@ class SkillIconTest extends UnitTest {
         var info = new SkillLoader.SkillInfo(
                 "sky-blue", "Explain why the sky is blue", Paths.get("sky-blue/SKILL.md"),
                 java.util.List.of(), false, "0.0.0",
-                java.util.List.of(), "", "🧠");
+                java.util.List.of(), "", "🧠", java.util.List.of());
         var xml = SkillLoader.formatSkillsXml(java.util.List.of(info));
         assertTrue(xml.contains("<icon>🧠</icon>"));
         assertFalse(xml.contains(SkillLoader.DEFAULT_SKILL_ICON));
@@ -70,16 +70,6 @@ class SkillIconTest extends UnitTest {
         var info = new SkillLoader.SkillInfo("old", "legacy caller", Paths.get("old/SKILL.md"),
                 java.util.List.of(), false, "0.0.0");
         assertEquals("", info.icon());
-    }
-
-    @Test
-    void eightArgConstructorStillWorks_iconDefaultsEmpty() {
-        // Added for JCLAW-71 — lets pre-icon call sites compile unchanged.
-        var info = new SkillLoader.SkillInfo("old2", "legacy 8-arg", Paths.get("old2/SKILL.md"),
-                java.util.List.of(), false, "0.0.0",
-                java.util.List.of(), "author-a");
-        assertEquals("", info.icon());
-        assertEquals("author-a", info.author());
     }
 
     @Test
