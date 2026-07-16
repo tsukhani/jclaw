@@ -98,4 +98,30 @@ describe('Apps page', () => {
     expect(c.find('[data-testid="build-app-submit"]').attributes('disabled')).toBeDefined()
     expect(navigateToMock).not.toHaveBeenCalled()
   })
+
+  it('per-card update affordance hands off a scoped update request with a version bump', async () => {
+    appsEndpoint([
+      { id: 'proposal-generator', url: '/apps/proposal-generator/', name: 'Proposal Generator',
+        version: '1.2.3', creator: 'Tarun', icon: null, price: null, description: null },
+    ])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    // The update form is hidden until the card's update button is clicked.
+    expect(c.find('#update-app-brief').exists()).toBe(false)
+    await c.find('[data-testid="update-app-proposal-generator"]').trigger('click')
+    expect(c.find('#update-app-brief').exists()).toBe(true)
+
+    await c.find('#update-app-brief').setValue('Add a dark-mode toggle.')
+    await c.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(navigateToMock).toHaveBeenCalledTimes(1)
+    const arg = navigateToMock.mock.calls[0]![0] as { path: string, query: { compose: string } }
+    expect(arg.path).toBe('/chat')
+    expect(arg.query.compose).toContain('update the existing hosted app "Proposal Generator"')
+    expect(arg.query.compose).toContain('public/apps/proposal-generator/')
+    expect(arg.query.compose).toContain('Add a dark-mode toggle.')
+    expect(arg.query.compose).toContain('bump the version')
+  })
 })

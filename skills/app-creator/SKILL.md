@@ -9,7 +9,7 @@ icon: 🧩
 ---
 # App Creator
 
-Build a small, self-contained web app and install it as a JClaw **hosted app** — a static site served at `/apps/<slug>/` that shows up on the **Apps** page. Use this when the operator asks to "create an app", "build an app", or describes a mini-tool they want hosted (e.g. an RFP/proposal builder, a calculator, a form).
+Build a small, self-contained web app and install it as a JClaw **hosted app** — a static site served at `/apps/<slug>/` that shows up on the **Apps** page — or **update** one that's already there. Use this when the operator asks to "create an app", "build an app", or describes a mini-tool they want hosted (e.g. an RFP/proposal builder, a calculator, a form), or asks to "update" / change an existing app (see **Updating an existing app** below).
 
 ## What you produce
 
@@ -73,6 +73,15 @@ Either path must produce `public/apps/<slug>/app.json`:
 ## 4. Confirm
 
 Tell the operator it's installed: it now appears on the **Apps** page and launches in a new tab at `/apps/<slug>/`. (The Apps page enumerates `public/apps/*/` via `GET /api/apps`.)
+
+## Updating an existing app
+
+When the operator asks to **update** an existing app — the Apps page's per-card update affordance sends a request naming the app, its slug (`public/apps/<slug>/`), and the current version — edit it **in place** and bump its version; do NOT create a new app:
+
+1. **Locate + read.** Open `public/apps/<slug>/` (the slug is in the request). Read its `app.json` (current `name`, `version`, `creator`, `price`, `icon`) and its `index.html` (+ any other sources) so you change the right app and keep its identity.
+2. **Apply the changes.** Modify per the operator's requirements, keeping the SAME shape it already uses (a self-contained `index.html`, or a Nuxt rebuild with the same `app.baseURL: '/apps/<slug>/'`). Preserve the slug, name, creator, and price unless the operator asked to change them. Prefer delegating to the harness (`runtime=acp`) with the existing files as context; otherwise edit directly with your `exec` + `filesystem` tools.
+3. **Bump the version** in `public/apps/<slug>/app.json`: **patch** for small fixes, **minor** for new features, **major** for breaking changes or a redesign.
+4. **Confirm.** The bumped version shows on the app's card immediately (the Apps page re-reads `app.json` via `GET /api/apps`).
 
 ## Guardrails
 
