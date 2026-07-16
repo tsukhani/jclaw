@@ -111,6 +111,13 @@ frontend/dist/
 frontend/.cache/
 public/spa/
 
+# Operator-hosted apps (public/apps/<slug>/) are runtime data, not source.
+# The app_install tool creates public/apps/ on demand and writes each app
+# there. The whole directory is excluded from version control — and, since
+# .distignore inherits .gitignore, from the dist bundle too — so a fresh
+# checkout and the bundle have no public/apps/ until an app is installed.
+/public/apps/
+
 # SSL certificates/keys (defense-in-depth wildcards — the certs/ directory
 # itself is handled above with a !certs/.gitkeep negation). `.cert` is
 # jclaw's chosen extension via `./jclaw.sh cert` and `play enable-https`;

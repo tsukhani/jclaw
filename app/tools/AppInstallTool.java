@@ -174,6 +174,8 @@ public class AppInstallTool implements ToolRegistry.Tool {
         if (target == null) return err("slug '" + slug + "' resolves outside public/apps/.");
         try {
             deleteTree(target);            // clean replace so an update drops removed files
+            // Creates public/apps/<slug> AND its parent public/apps/ when absent —
+            // public/apps/ is gitignored runtime data that need not exist on a fresh checkout.
             Files.createDirectories(target);
             int files = copyTree(src, target);
             var payload = new LinkedHashMap<String, Object>();
