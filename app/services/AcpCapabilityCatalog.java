@@ -27,16 +27,21 @@ public final class AcpCapabilityCatalog {
     /** How a known harness reaches ACP. {@code acpCommand} is the ACP launch
      *  form (Stage 2). {@code adapterBinary} is a separate CLI to probe on PATH
      *  ({@code null} = ACP rides the harness's own binary, e.g. {@code codex
-     *  app-server}). {@code installHint} names how to get a missing adapter. */
-    private record Cap(String base, String acpCommand, String adapterBinary, String installHint) {}
+     *  app-server}). {@code installHint} names how to get a missing adapter.
+     *  {@code note} is an optional caveat appended to the tooltip. */
+    private record Cap(String base, String acpCommand, String adapterBinary, String installHint, String note) {}
 
     private static final Map<String, Cap> CATALOG = Map.of(
-            "gemini", new Cap(NATIVE, "gemini --acp", null, null),
-            "opencode", new Cap(NATIVE, "opencode acp", null, null),
-            "codex", new Cap(ADAPTER, "codex app-server", null, null),
+            // Native ACP, but Google retired it for personal accounts (2025) — the
+            // gemini --acp handshake succeeds yet session/new is rejected on the
+            // free tier. Keep it native (it implements ACP) but warn.
+            "gemini", new Cap(NATIVE, "gemini --acp", null, null,
+                    "retired for personal Google accounts — needs a Gemini API key / Vertex auth"),
+            "opencode", new Cap(NATIVE, "opencode acp", null, null, null),
+            "codex", new Cap(ADAPTER, "codex app-server", null, null, null),
             "claude", new Cap(ADAPTER, "claude-code-acp", "claude-code-acp",
-                    "npm i -g @zed-industries/claude-code-acp"),
-            "pi", new Cap(ADAPTER, "pi-acp", "pi-acp", "install the pi-acp adapter"));
+                    "npm i -g @zed-industries/claude-code-acp", null),
+            "pi", new Cap(ADAPTER, "pi-acp", "pi-acp", "install the pi-acp adapter", null));
 
     /** The effective ACP support for a harness plus a human-readable tooltip. */
     public record Classification(String support, String detail) {}
@@ -63,7 +68,9 @@ public final class AcpCapabilityCatalog {
         var cap = CATALOG.get(id);
         if (cap == null) return NO_ACP;
         if (NATIVE.equals(cap.base())) {
-            return new Classification(NATIVE, "Speaks ACP natively — " + cap.acpCommand());
+            var detail = "Speaks ACP natively — " + cap.acpCommand();
+            if (cap.note() != null) detail += " (" + cap.note() + ")";
+            return new Classification(NATIVE, detail);
         }
         // adapter
         if (cap.adapterBinary() == null) {

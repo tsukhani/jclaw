@@ -51,7 +51,10 @@ public final class AcpHarnessProbe {
             new Harness("pi", "pi", "pi -p", "Pi"),
             new Harness("codex", "codex", "codex exec", "Codex"),
             new Harness("gemini", "gemini", "gemini -p", "Gemini CLI"),
-            new Harness("opencode", "opencode", "opencode run", "opencode"));
+            new Harness("opencode", "opencode", "opencode run", "opencode"),
+            // Antigravity (agy) is Google's gemini-cli successor: batch/stdin only
+            // (agy -p), no native ACP — so it falls in the stdin/stdout catalog.
+            new Harness("antigravity", "agy", "agy -p", "Antigravity"));
 
     private static volatile List<Detected> forced;
 

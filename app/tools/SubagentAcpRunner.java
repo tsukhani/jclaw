@@ -52,7 +52,8 @@ final class SubagentAcpRunner {
     // they run via the batch/generic path (an unregistered id degrades to batch,
     // never errors) until a bespoke adapter lands. "generic" is the fallback.
     private static final Set<String> ACP_HARNESS_IDS =
-            Set.of("pi", "claude", "codex", "gemini", "opencode", SubagentSpawnTool.DEFAULT_ACP_HARNESS);
+            Set.of("pi", "claude", "codex", "gemini", "opencode", "antigravity",
+                    SubagentSpawnTool.DEFAULT_ACP_HARNESS);
     private static final Set<String> ACP_MODES = Set.of(SubagentSpawnTool.DEFAULT_ACP_MODE, "json", "rpc");
 
     /** JCLAW-499: the per-spawn external-harness command for a run, set when
