@@ -84,6 +84,17 @@ public final class SubagentRegistry {
      */
     private static final Map<Long, Process> HARNESS_PROCS = new ConcurrentHashMap<>();
 
+    /**
+     * Cancellation hooks for harness runs whose subprocess is owned by a library
+     * (the ACP SDK's stdio transport) rather than started directly — so there's
+     * no {@link Process} to register. Closing the hook ({@code AcpSyncClient})
+     * tears down the transport and its subprocess, which unblocks the run's
+     * blocking {@code prompt()} call. Closed alongside the process on
+     * kill/timeout via {@link #destroyHarnessProcess}. Best-effort, like the
+     * process handle.
+     */
+    private static final Map<Long, AutoCloseable> HARNESS_CLOSERS = new ConcurrentHashMap<>();
+
     /** Register the VT-bearing Future under {@code runId}. Called by the
      *  spawn path right after dispatching the VT. The cancellation flag is
      *  allocated here so {@link #isCancelled} works the instant the entry
@@ -162,6 +173,19 @@ public final class SubagentRegistry {
         HARNESS_PROCS.remove(runId);
     }
 
+    /** Register a cancellation hook (the ACP {@code AcpSyncClient}) for a run
+     *  whose subprocess the SDK owns; closed on kill/timeout to tear it down. */
+    public static void registerCloser(Long runId, AutoCloseable closer) {
+        if (runId == null || closer == null) return;
+        HARNESS_CLOSERS.put(runId, closer);
+    }
+
+    /** Drop the cancellation hook once the run ends (from a {@code finally}). */
+    public static void unregisterCloser(Long runId) {
+        if (runId == null) return;
+        HARNESS_CLOSERS.remove(runId);
+    }
+
     /**
      * JCLAW-664: force-terminate the external-harness process for {@code runId},
      * if any — descendants first (snapshotted before the parent dies so the whole
@@ -171,6 +195,16 @@ public final class SubagentRegistry {
      * because the harness reader VT touches the DB.
      */
     private static void destroyHarnessProcess(Long runId) {
+        // SDK-owned runs (ACP): close the client to tear down its transport +
+        // subprocess and unblock the run's prompt() call. Best-effort.
+        var closer = HARNESS_CLOSERS.remove(runId);
+        if (closer != null) {
+            try {
+                closer.close();
+            } catch (Exception _) {
+                // teardown is best-effort — the run's own finally closes it too
+            }
+        }
         var proc = HARNESS_PROCS.remove(runId);
         if (proc == null) return;
         var descendants = proc.descendants().toList();
@@ -183,6 +217,7 @@ public final class SubagentRegistry {
     public static void clear() {
         ACTIVE.clear();
         HARNESS_PROCS.clear();
+        HARNESS_CLOSERS.clear();
     }
 
     /**

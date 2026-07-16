@@ -214,6 +214,13 @@ repositories {
 }
 
 dependencies {
+    // Agent Client Protocol (ACP) SDK — the official Java client for driving a
+    // coding harness over ACP (JSON-RPC/stdio). Used by the runtime=acp subagent
+    // path (Stage 2) to speak real ACP instead of the stdin/stdout wrapper.
+    // Pulls Jackson + Reactor transitively. Verified full round-trip against
+    // claude-agent-acp.
+    implementation("com.agentclientprotocol:acp-core:0.14.0")
+
     // JCLAW-735: JSpecify nullness annotations (@Nullable / @NonNull, TYPE_USE).
     // The tree-wide standard for expressing null contracts; introduced first on
     // the security-utility public surface (PasswordHasher / SsrfGuard /

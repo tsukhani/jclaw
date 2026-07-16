@@ -1,12 +1,17 @@
 package tools;
 
 import agents.AgentRunner;
+import com.agentclientprotocol.sdk.client.AcpClient;
+import com.agentclientprotocol.sdk.client.transport.AgentParameters;
+import com.agentclientprotocol.sdk.client.transport.StdioAcpClientTransport;
+import com.agentclientprotocol.sdk.spec.AcpSchema;
 import com.google.gson.JsonObject;
 import models.Agent;
 import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
+import services.AcpCapabilityCatalog;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
@@ -32,6 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -158,6 +164,16 @@ final class SubagentAcpRunner {
             // flags, sandboxing). acpAllowed is the security boundary today.
             var workdir = resolveAcpWorkdir(childAgent, task);
             recordWorkdir(runId, workdir);
+            // Stage 2: if the configured harness speaks real ACP (natively or via
+            // a detected adapter) over stdio, drive it over the protocol via the
+            // acp-core SDK instead of the stdin/stdout wrapper — real streaming +
+            // mid-run permission prompts through the gate. WebSocket-only harnesses
+            // (opencode) and ones whose ACP binary isn't installed fall through to
+            // the batch/streaming path below.
+            var acpLaunch = AcpCapabilityCatalog.stdioAcpLaunchCommand(resolveHarnessId());
+            if (acpLaunch != null) {
+                return runAcpSdk(runId, acpLaunch, task, childAgent, workdir);
+            }
             // JCLAW-660: batch stays one-shot; json/rpc stream the harness output
             // line-by-line through the selected adapter.
             var mode = resolveAcpMode();
@@ -424,6 +440,81 @@ final class SubagentAcpRunner {
             SubagentHarnessPermissions.closeQuietly(stdin);
             SubagentRegistry.unregisterProcess(runId);
         }
+    }
+
+    /**
+     * Stage 2: drive an ACP-capable harness over the real Agent Client Protocol
+     * via the {@code acp-core} SDK, instead of the one-shot stdin/stdout wrapper.
+     * The SDK's stdio transport owns the (sandboxed) subprocess and speaks
+     * JSON-RPC over its pipes; we map its {@code session/update} stream onto the
+     * run rails ({@link #dispatchHarnessEvent}), route its {@code
+     * session/request_permission} requests through {@link
+     * agents.DangerousActionGate}, and decline fs/terminal capabilities so the
+     * harness keeps its own {@link HarnessSandbox}-wrapped filesystem access.
+     * Kill/timeout closes the client (registered as a {@link
+     * SubagentRegistry#registerCloser closer}), tearing down the transport +
+     * subprocess and unblocking the blocking {@code prompt()}.
+     */
+    private static AgentRunner.RunResult runAcpSdk(Long runId, String acpCommand, String task,
+                                                   Agent childAgent, File workdir) {
+        var conversationId = parentConversationId(runId);
+        var acc = new ReplyAccumulator();
+        var seq = new AtomicInteger(1);   // seq 0 is the channel-approval step (when gated)
+
+        // Sandbox the launch command, then hand it to the SDK's stdio transport.
+        var argv = HarnessSandbox.wrap(List.of(acpCommand.strip().split("\\s+")),
+                workdir, resolveAdapter(), sandboxTrustedOrigin(runId));
+        var params = AgentParameters.builder(argv.get(0)).args(argv.subList(1, argv.size())).build();
+
+        var client = AcpClient.sync(new StdioAcpClientTransport(params))
+                .clientCapabilities(new AcpSchema.ClientCapabilities())   // decline fs + terminal
+                .sessionUpdateConsumer(n -> {
+                    SubagentRegistry.touch(runId);   // harness activity resets the idle clock
+                    var ev = AcpEventMapper.toHarnessEvent(n.update());
+                    if (ev != null) {
+                        synchronized (acc) {   // keep seq + dispatch + fold ordered
+                            dispatchHarnessEvent(runId, ev, seq.getAndIncrement());
+                            acc.fold(ev);
+                        }
+                    }
+                })
+                .requestPermissionHandler(req -> {
+                    SubagentRegistry.touch(runId);   // operator deliberation isn't idle
+                    var decision = agents.DangerousActionGate.guardHarnessPermission(childAgent, conversationId,
+                            AcpEventMapper.permissionToolName(req), AcpEventMapper.permissionArgsJson(req));
+                    return AcpEventMapper.permissionResponse(req, decision);
+                })
+                .build();
+
+        SubagentRegistry.registerCloser(runId, client);
+        try (client) {
+            client.initialize();
+            var cwd = workdir != null ? workdir.getAbsolutePath() : System.getProperty("user.dir");
+            var session = client.newSession(new AcpSchema.NewSessionRequest(cwd, List.of()));
+            client.prompt(new AcpSchema.PromptRequest(session.sessionId(),
+                    List.of(new AcpSchema.TextContent(task))));
+            String reply;
+            synchronized (acc) {
+                reply = acc.reply();
+            }
+            publishRunDone(runId, seq.get(), reply);
+            return new AgentRunner.RunResult(reply.isBlank() ? NO_OUTPUT : reply, null);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("ACP harness failed: " + e.getMessage(), e);
+        } finally {
+            SubagentRegistry.unregisterCloser(runId);
+        }
+    }
+
+    /** JCLAW-662: signal terminal once per run so a live monitor stops tailing
+     *  and falls back to the persisted transcript on reconnect — the SDK path's
+     *  equivalent of {@link #streamStdout}'s EOF publish. */
+    private static void publishRunDone(Long runId, int seq, String reply) {
+        var done = new LinkedHashMap<String, Object>();
+        done.put(SubagentSpawnTool.BUS_RUN_ID, runId);
+        done.put("seq", seq);
+        done.put(SubagentSpawnTool.FIELD_REPLY, reply);
+        NotificationBus.publish(NotificationBus.BUS_CODINGRUN_DONE, done);
     }
 
     /**

@@ -28,23 +28,32 @@ public final class AcpCapabilityCatalog {
      *  form (Stage 2). {@code adapterBinary} is a separate CLI to probe on PATH
      *  ({@code null} = ACP rides the harness's own binary, e.g. {@code codex
      *  app-server}). {@code installHint} names how to get a missing adapter.
-     *  {@code note} is an optional caveat appended to the tooltip. */
-    private record Cap(String base, String acpCommand, String adapterBinary, String installHint, String note) {}
+     *  {@code note} is an optional caveat appended to the tooltip. {@code
+     *  transport} is how the runtime speaks ACP to it — {@link #STDIO}
+     *  (subprocess) or {@link #WEBSOCKET} (a listening server, e.g. opencode). */
+    private record Cap(String base, String acpCommand, String adapterBinary, String installHint,
+                       String note, String transport) {}
+
+    /** ACP transports (how the runtime connects for Stage 2). */
+    public static final String STDIO = "stdio";
+    public static final String WEBSOCKET = "websocket";
 
     private static final Map<String, Cap> CATALOG = Map.of(
             // Native ACP, but Google retired it for personal accounts (2025) — the
             // gemini --acp handshake succeeds yet session/new is rejected on the
             // free tier. Keep it native (it implements ACP) but warn.
             "gemini", new Cap(NATIVE, "gemini --acp", null, null,
-                    "retired for personal Google accounts — needs a Gemini API key / Vertex auth"),
-            "opencode", new Cap(NATIVE, "opencode acp", null, null, null),
-            "codex", new Cap(ADAPTER, "codex app-server", null, null, null),
+                    "retired for personal Google accounts — needs a Gemini API key / Vertex auth", STDIO),
+            // opencode's `opencode acp` is a WebSocket SERVER (--port), not a stdio
+            // subprocess — the runtime needs the WebSocket transport for it.
+            "opencode", new Cap(NATIVE, "opencode acp", null, null, null, WEBSOCKET),
+            "codex", new Cap(ADAPTER, "codex app-server", null, null, null, STDIO),
             // The maintained adapter (@zed-industries/claude-code-acp is deprecated +
             // has a newSession bug; the renamed package works end-to-end — verified
             // full round-trip via the acp-core SDK).
             "claude", new Cap(ADAPTER, "claude-agent-acp", "claude-agent-acp",
-                    "npm i -g @agentclientprotocol/claude-agent-acp", null),
-            "pi", new Cap(ADAPTER, "pi-acp", "pi-acp", "install the pi-acp adapter", null));
+                    "npm i -g @agentclientprotocol/claude-agent-acp", null, STDIO),
+            "pi", new Cap(ADAPTER, "pi-acp", "pi-acp", "install the pi-acp adapter", null, STDIO));
 
     /** The effective ACP support for a harness plus a human-readable tooltip. */
     public record Classification(String support, String detail) {}
@@ -58,6 +67,21 @@ public final class AcpCapabilityCatalog {
     public static String acpCommand(String id) {
         var cap = CATALOG.get(id);
         return cap == null ? null : cap.acpCommand();
+    }
+
+    /**
+     * The ACP launch command to drive a harness over STDIO on THIS host, or
+     * {@code null} when it isn't stdio-ACP-usable: not in the catalog,
+     * WebSocket-only (opencode), or its ACP binary/adapter isn't installed.
+     * This is the runtime's Stage-2 gate — a non-null result means "speak real
+     * ACP via this command instead of the stdin/stdout wrapper."
+     */
+    public static String stdioAcpLaunchCommand(String id) {
+        var cap = CATALOG.get(id);
+        if (cap == null || !STDIO.equals(cap.transport())) return null;
+        var binary = cap.acpCommand().strip().split("\\s+")[0];
+        return ExecutableProbeSupport.probeOnPath(binary, "--version", "AcpCapabilityCatalog", "").available()
+                ? cap.acpCommand() : null;
     }
 
     /**
