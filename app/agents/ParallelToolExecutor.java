@@ -357,7 +357,7 @@ public final class ParallelToolExecutor {
      */
     private static String generatedAttachmentsJson(List<MessageAttachment> atts) {
         if (atts == null || atts.isEmpty()) return null;
-        var list = new java.util.ArrayList<Map<String, Object>>(atts.size());
+        var list = new ArrayList<Map<String, Object>>(atts.size());
         for (var att : atts) {
             var m = new LinkedHashMap<String, Object>();
             m.put("uuid", att.uuid);

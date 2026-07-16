@@ -1,5 +1,6 @@
 package services.transcription;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import play.Logger;
 import services.EventLogger;
@@ -94,13 +95,13 @@ public final class AsrModelStore {
     }
 
     /** A string field on a JSON object, or null when absent/JSON-null. */
-    private static String strOrNull(com.google.gson.JsonObject o, String field) {
+    private static String strOrNull(JsonObject o, String field) {
         return o.has(field) && !o.get(field).isJsonNull() ? o.get(field).getAsString() : null;
     }
 
     /** One Settings row from the sidecar's per-model status object, folding
      *  in the in-JVM prefetch/error state (S3776: lifted out of statusAll). */
-    private static Status rowFor(AsrModel m, com.google.gson.JsonObject s) {
+    private static Status rowFor(AsrModel m, JsonObject s) {
         boolean cached = s.get("cached").getAsBoolean();
         boolean downloading = s.has("downloading") && s.get("downloading").getAsBoolean();
         long onDisk = s.get("bytesOnDisk").getAsLong();

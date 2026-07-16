@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -308,7 +309,7 @@ public class ApiMemoryController extends Controller {
         badRequest();
     }
 
-    private static String stringField(com.google.gson.JsonObject obj, String key) {
+    private static String stringField(JsonObject obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         var v = obj.get(key).getAsString();
         return (v == null || v.isBlank()) ? null : v;

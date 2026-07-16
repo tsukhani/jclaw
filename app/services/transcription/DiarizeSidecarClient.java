@@ -10,11 +10,14 @@ import services.ConfigService;
 import utils.HttpFactories;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * HTTP client for the local diarization sidecar (JCLAW-565 revival): pyannote
@@ -44,8 +47,8 @@ public class DiarizeSidecarClient {
      *  Serialize all sidecar calls JVM-wide with a FAIR lock so concurrent
      *  conversations queue instead of surfacing a retryable busy condition as
      *  a user-facing failure. */
-    private static final java.util.concurrent.locks.ReentrantLock SIDECAR_LOCK =
-            new java.util.concurrent.locks.ReentrantLock(true);
+    private static final ReentrantLock SIDECAR_LOCK =
+            new ReentrantLock(true);
 
     private final String baseUrlOverride;
     private final OkHttpClient client;
@@ -131,7 +134,7 @@ public class DiarizeSidecarClient {
      *  never queues behind an in-flight diarization. */
     public String models(String commaSeparatedRepos) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : DiarizeSidecarManager.ensureRunning();
-        var encoded = java.net.URLEncoder.encode(commaSeparatedRepos, java.nio.charset.StandardCharsets.UTF_8);
+        var encoded = URLEncoder.encode(commaSeparatedRepos, StandardCharsets.UTF_8);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/diarize/models?ids=" + encoded).get().build());
         call.timeout().timeout(60, TimeUnit.SECONDS);

@@ -17,6 +17,7 @@ import utils.ApiResponses;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -139,7 +140,7 @@ public class ApiTranscriptionController extends Controller {
         renderJSON(gson.toJson(new DiarizationModelsResponse(models, DiarizeModelStore.SER_MODELS)));
     }
 
-    private static DiarizeModelEntry entryFor(java.util.Map<String, DiarizeModelStore.Status> statuses,
+    private static DiarizeModelEntry entryFor(Map<String, DiarizeModelStore.Status> statuses,
                                               String repo, String displayName, String role) {
         var s = statuses.get(repo);
         if (s == null) return new DiarizeModelEntry(repo, displayName, role, "UNAVAILABLE", 0, null, null);

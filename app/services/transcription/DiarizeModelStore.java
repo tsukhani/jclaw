@@ -1,5 +1,6 @@
 package services.transcription;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import play.Logger;
 import services.ConfigService;
@@ -7,6 +8,7 @@ import services.EventLogger;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,7 +31,7 @@ public final class DiarizeModelStore {
     /** The SER models the operator may pick — a fixed trio, not free-text (the
      *  download endpoint downloads whatever is chosen, so the set is bounded).
      *  The first is the default, used when the config is unset or stale. */
-    public static final java.util.List<SerOption> SER_MODELS = java.util.List.of(
+    public static final List<SerOption> SER_MODELS = List.of(
             new SerOption("MERaLiON/MERaLiON-SER-v1", "MERaLiON-SER v1 — multilingual SEA (default)"),
             new SerOption("superb/wav2vec2-base-superb-er", "wav2vec2 SUPERB-ER — English"),
             new SerOption("Dpngtm/wav2vec2-emotion-recognition", "wav2vec2 emotion — English"));
@@ -110,14 +112,14 @@ public final class DiarizeModelStore {
     }
 
     /** A string field on a JSON object, or null when absent/JSON-null. */
-    private static String strOrNull(com.google.gson.JsonObject o, String field) {
+    private static String strOrNull(JsonObject o, String field) {
         return o.has(field) && !o.get(field).isJsonNull() ? o.get(field).getAsString() : null;
     }
 
     /** One Settings row from the sidecar's per-repo status object. The sidecar
      *  owns download state (detached subprocess + cache-dir progress); the JVM
      *  PREFETCH_ERRORS map only carries a failure to even reach the sidecar. */
-    private static Status rowFor(String repo, com.google.gson.JsonObject s) {
+    private static Status rowFor(String repo, JsonObject s) {
         boolean cached = s.get("cached").getAsBoolean();
         boolean downloading = s.has("downloading") && s.get("downloading").getAsBoolean();
         long onDisk = s.get("bytesOnDisk").getAsLong();

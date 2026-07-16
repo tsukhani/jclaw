@@ -1,5 +1,6 @@
 package services;
 
+import com.google.gson.JsonParser;
 import okhttp3.Request;
 import play.Logger;
 import play.Play;
@@ -228,7 +229,7 @@ public final class LocalSidecarDaemon {
     /** The "model" field of a /health JSON body, or null if unparseable. */
     public static String healthModel(String healthJson) {
         try {
-            var root = com.google.gson.JsonParser.parseString(healthJson).getAsJsonObject();
+            var root = JsonParser.parseString(healthJson).getAsJsonObject();
             return root.has("model") ? root.get("model").getAsString() : null;
         } catch (RuntimeException _) {
             return null;

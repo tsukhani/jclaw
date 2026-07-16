@@ -7,6 +7,7 @@ import services.AttachmentService;
 import services.ConversationService;
 import services.EventLogger;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -103,7 +104,7 @@ public class ConversationSink implements AgentExecutionSink {
         // JCLAW-228/562: inline every tool-produced attachment on the ONE assistant turn that
         // carried the call, and return the rows so the runner can push them onto the live SSE
         // tool_call frame.
-        var persisted = new java.util.ArrayList<MessageAttachment>(attachments.size());
+        var persisted = new ArrayList<MessageAttachment>(attachments.size());
         for (var a : attachments) {
             persisted.add(AttachmentService.persistGeneratedAttachment(
                     managed.agent, msg, a.bytes(), a.mimeType(), a.metadata(), a.filename()));

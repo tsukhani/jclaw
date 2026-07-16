@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * HTTP client for the local ASR sidecar (JCLAW-565 lineage; ASR-only since
@@ -32,8 +33,8 @@ public class AsrSidecarClient {
      *  409 when busy). Serialize all sidecar calls JVM-wide with a FAIR
      *  lock so concurrent conversations queue instead of surfacing a
      *  retryable busy condition as a user-facing failure. */
-    private static final java.util.concurrent.locks.ReentrantLock SIDECAR_LOCK =
-            new java.util.concurrent.locks.ReentrantLock(true);
+    private static final ReentrantLock SIDECAR_LOCK =
+            new ReentrantLock(true);
 
     private final String baseUrlOverride;
     private final OkHttpClient client;

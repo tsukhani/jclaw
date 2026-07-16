@@ -31,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -393,7 +394,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                                         String prompt, String base64, String format,
                                         Map<String, String> references)
             throws IOException {
-        var content = new java.util.ArrayList<Map<String, Object>>();
+        var content = new ArrayList<Map<String, Object>>();
         for (var ref : references.entrySet()) {
             content.add(Map.of("type", "text", "text",
                     "Voice reference — this is %s speaking:".formatted(ref.getKey())));
@@ -516,7 +517,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     /** Stored reference clips as name -> base64 MP3, oldest first, capped. */
     private static Map<String, String> loadReferences() {
-        var out = new java.util.LinkedHashMap<String, String>();
+        var out = new LinkedHashMap<String, String>();
         var dir = voiceRefsDir();
         if (!Files.isDirectory(dir)) return out;
         try (var files = Files.list(dir)) {

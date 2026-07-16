@@ -1,6 +1,8 @@
 package services;
 
 import com.github.kagkarlsson.scheduler.SchedulerClient;
+import com.github.kagkarlsson.scheduler.exceptions.TaskInstanceCurrentlyExecutingException;
+import com.github.kagkarlsson.scheduler.exceptions.TaskInstanceNotFoundException;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import jobs.DbSchedulerBootstrapJob;
@@ -175,7 +177,7 @@ public final class TaskSchedulingService {
         boolean rescheduled = false;
         try {
             rescheduled = client.reschedule(instanceId, Instant.now());
-        } catch (com.github.kagkarlsson.scheduler.exceptions.TaskInstanceCurrentlyExecutingException _) {
+        } catch (TaskInstanceCurrentlyExecutingException _) {
             // Fire is already in progress — that IS the outcome the
             // operator wanted. Log and no-op rather than racing with
             // the executor.
@@ -183,7 +185,7 @@ public final class TaskSchedulingService {
                     "Task id %d run-now: fire already in progress; not rescheduling"
                             .formatted(taskId));
             return;
-        } catch (com.github.kagkarlsson.scheduler.exceptions.TaskInstanceNotFoundException _) {
+        } catch (TaskInstanceNotFoundException _) {
             // Row was removed (terminal one-shot completion, cancel, etc.)
             // — fall through to registration. Common after operators
             // re-run a COMPLETED or CANCELLED Task.
