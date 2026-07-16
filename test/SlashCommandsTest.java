@@ -863,7 +863,14 @@ class SlashCommandsTest extends UnitTest {
     private int[] findLatestAssistantUsage(java.util.List<models.Message> messages) throws Exception {
         var m = Commands.class.getDeclaredMethod("findLatestAssistantUsage", java.util.List.class);
         m.setAccessible(true);
-        return (int[]) m.invoke(null, messages);
+        var opt = (java.util.Optional<?>) m.invoke(null, messages);
+        if (opt.isEmpty()) return null;
+        var usage = opt.get();
+        var prompt = usage.getClass().getMethod("prompt");
+        var completion = usage.getClass().getMethod("completion");
+        prompt.setAccessible(true);
+        completion.setAccessible(true);
+        return new int[] {(int) prompt.invoke(usage), (int) completion.invoke(usage)};
     }
 
     @Test

@@ -751,30 +751,28 @@ public class TaskTool implements ToolRegistry.Tool {
         var name = args.get(KEY_NAME).getAsString();
 
         // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELLED too.
-        var revivedRef = new int[] { 0 };
-        var lostIds = new ArrayList<Long>();
-        var ranIds = Tx.run(() -> collectRunNowTargets(name, agent, revivedRef, lostIds));
-        if (ranIds.isEmpty()) return MSG_NO_TASK_FOUND.formatted(name);
-        for (var id : lostIds) {
+        var scan = Tx.run(() -> collectRunNowTargets(name, agent));
+        if (scan.ranIds().isEmpty()) return MSG_NO_TASK_FOUND.formatted(name);
+        for (var id : scan.lostIds()) {
             TaskSchedulingService.forceRemoveStaleRow(id);
             var fresh = Tx.run(() -> (Task) Task.findById(id));
             if (fresh != null) TaskSchedulingService.register(fresh);
         }
-        for (var id : ranIds) {
-            if (lostIds.contains(id)) continue;
+        for (var id : scan.ranIds()) {
+            if (scan.lostIds().contains(id)) continue;
             TaskSchedulingService.runNow(id);
         }
 
-        var revived = revivedRef[0];
+        var revived = scan.revived();
         EventLogger.info("TASK_MGMT_MANUAL_RUN", agent.name, null,
                 ("Task '%s' (%d match%s) run-now via tool"
                         + (revived > 0 ? " (%d revived from CANCELLED)" : ""))
-                        .formatted(name, ranIds.size(), ranIds.size() == 1 ? "" : "es",
+                        .formatted(name, scan.ranIds().size(), scan.ranIds().size() == 1 ? "" : "es",
                                 revived > 0 ? revived : 0));
         String revivedSuffix = revived > 0 ? " (revived %d from CANCELLED)".formatted(revived) : "";
-        return ranIds.size() == 1
+        return scan.ranIds().size() == 1
                 ? "Task '%s' run-now triggered%s.".formatted(name, revivedSuffix)
-                : "%d tasks named '%s' run-now triggered%s.".formatted(ranIds.size(), name, revivedSuffix);
+                : "%d tasks named '%s' run-now triggered%s.".formatted(scan.ranIds().size(), name, revivedSuffix);
     }
 
     /**
@@ -784,10 +782,13 @@ public class TaskTool implements ToolRegistry.Tool {
      * so the caller can force-remove their stale scheduled_tasks row.
      * Returns the full list of matched task ids (any state).
      */
-    private static List<Long> collectRunNowTargets(String name, Agent agent,
-                                                   int[] revivedRef, List<Long> lostIds) {
+    private record RunNowScan(List<Long> ranIds, int revived, List<Long> lostIds) {}
+
+    private static RunNowScan collectRunNowTargets(String name, Agent agent) {
         var tasks = findTasks("name = ?1 AND agent = ?2", name, agent);
         var ids = new ArrayList<Long>(tasks.size());
+        var lostIds = new ArrayList<Long>();
+        int revived = 0;
         for (var task : tasks) {
             if (task.status == Task.Status.CANCELLED) {
                 // Revive — otherwise TaskExecutionHandler skips the fire body.
@@ -796,7 +797,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 // through the guard (both edges are legal for an existing task).
                 task.transitionTo(Task.initialStatusFor(task.type));
                 task.save();
-                revivedRef[0]++;
+                revived++;
             } else if (task.status == Task.Status.LOST) {
                 // JCLAW-258: operator pre-empts db-scheduler's
                 // auto-recovery. Flip back to the type-appropriate "alive"
@@ -811,7 +812,7 @@ public class TaskTool implements ToolRegistry.Tool {
             }
             ids.add(task.id);
         }
-        return ids;
+        return new RunNowScan(ids, revived, lostIds);
     }
 
     private String cancelTask(JsonObject args, Agent agent) {

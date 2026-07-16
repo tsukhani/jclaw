@@ -860,8 +860,8 @@ public final class Commands {
         if (newWindow <= 0) return null;
         var messages = ConversationService.loadRecentMessages(current);
         var latest = findLatestAssistantUsage(messages);
-        if (latest == null) return null;
-        int currentInput = latest[0];
+        if (latest.isEmpty()) return null;
+        int currentInput = latest.get().prompt();
         if (currentInput <= newWindow) return null;
         return "Warning: %s's %s context window is smaller than the current context (%s estimated). "
                 .formatted(newModel.id(), formatTokenCapacity(newWindow), formatTokens(currentInput))
@@ -910,8 +910,8 @@ public final class Commands {
         var effectiveModel = effectiveModelIdFor(agent, current);
         var messages = ConversationService.loadRecentMessages(current);
         var latest = findLatestAssistantUsage(messages);
-        int prompt = latest != null ? latest[0] : 0;
-        int completion = latest != null ? latest[1] : 0;
+        int prompt = latest.map(TokenUsage::prompt).orElse(0);
+        int completion = latest.map(TokenUsage::completion).orElse(0);
         int total = prompt + completion;
 
         var sb = new StringBuilder();
@@ -927,15 +927,16 @@ public final class Commands {
     }
 
     /**
-     * Walk messages newest-first, returning {@code [prompt, completion]} from the
+     * Walk messages newest-first, returning a {@code TokenUsage} from the
      * most recent assistant turn that has usage data. Skips user, tool, and
      * assistant-without-usage rows (fresh conversations, turns without provider
-     * usage, slash-command acks). Returns {@code null} when no such turn
+     * usage, slash-command acks). Returns an empty Optional when no such turn
      * exists — callers render zeros in that case.
      */
-    @SuppressWarnings("java:S1168") // null is a documented sentinel meaning "no usage data found"; callers render zeros
-    private static int[] findLatestAssistantUsage(List<Message> messages) {
-        if (messages == null || messages.isEmpty()) return null;
+    private record TokenUsage(int prompt, int completion) {}
+
+    private static Optional<TokenUsage> findLatestAssistantUsage(List<Message> messages) {
+        if (messages == null || messages.isEmpty()) return Optional.empty();
         for (int i = messages.size() - 1; i >= 0; i--) {
             var m = messages.get(i);
             if (!"assistant".equals(m.role)) continue;
@@ -950,12 +951,12 @@ public final class Commands {
                 if (!obj.has("prompt")) continue;
                 int prompt = obj.get("prompt").getAsInt();
                 int completion = obj.has("completion") ? obj.get("completion").getAsInt() : 0;
-                return new int[]{prompt, completion};
+                return Optional.of(new TokenUsage(prompt, completion));
             } catch (Exception _) {
                 // Malformed usageJson — skip and keep scanning.
             }
         }
-        return null;
+        return Optional.empty();
     }
 
     private static String renderContextLine(int prompt, Optional<ModelInfo> model) {

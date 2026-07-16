@@ -300,10 +300,10 @@ public final class TelegramOutboundPlanner {
         var out = new ArrayList<Segment>(segments.size());
         for (var segment : segments) {
             if (segment instanceof FileSegment fs && !fs.isBackground() && fs.caption() == null
-                    && !out.isEmpty() && out.get(out.size() - 1) instanceof TextSegment(String prose)) {
+                    && !out.isEmpty() && out.getLast() instanceof TextSegment(String prose)) {
                 var trimmed = prose.strip();
                 if (!trimmed.isEmpty() && trimmed.length() <= CAPTION_MAX) {
-                    out.remove(out.size() - 1);
+                    out.removeLast();
                     out.add(fs.withCaption(trimmed));
                     continue;
                 }
@@ -466,7 +466,7 @@ public final class TelegramOutboundPlanner {
      * in one markdown blob.
      */
     private static void appendOrMergeText(List<Segment> segments, String text) {
-        if (!segments.isEmpty() && segments.get(segments.size() - 1) instanceof TextSegment(String markdown)) {
+        if (!segments.isEmpty() && segments.getLast() instanceof TextSegment(String markdown)) {
             segments.set(segments.size() - 1, new TextSegment(markdown + text));
         } else {
             segments.add(new TextSegment(text));
