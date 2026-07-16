@@ -257,7 +257,20 @@ const {
 // Deep-link: if ?conversation=ID is present, load that conversation and switch
 // to its agent on mount.
 const route = useRoute()
+const router = useRouter()
 const deepLinkConvoId = route.query.conversation ? Number(route.query.conversation) : null
+
+// Hand-off from the Apps "Create app" affordance: ?compose=<request> prefills
+// the composer with the app-creator request so the operator can review + send.
+// Strip the query afterward so an in-page nav / refresh doesn't re-prefill.
+onMounted(() => {
+  const compose = route.query.compose
+  if (typeof compose === 'string' && compose.trim()) {
+    input.value = compose
+    router.replace({ query: { ...route.query, compose: undefined } })
+    focusInput()
+  }
+})
 
 // Deep-link: once conversations are loaded, find and select the target conversation.
 // The useFetch URL function above re-fires when selectedAgentId changes, so we

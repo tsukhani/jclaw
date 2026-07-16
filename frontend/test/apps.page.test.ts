@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import Apps from '~/pages/apps.vue'
+
+const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn().mockResolvedValue(undefined) }))
+mockNuxtImport('navigateTo', () => navigateToMock)
 
 // useLazyFetch caches by URL across mounts; clear it so each test's /api/apps
 // mock is the one that renders (JClaw test convention).
@@ -11,7 +14,10 @@ function appsEndpoint(apps: unknown[]) {
 }
 
 describe('Apps page', () => {
-  beforeEach(() => clearNuxtData())
+  beforeEach(() => {
+    clearNuxtData()
+    navigateToMock.mockClear()
+  })
 
   it('renders a card per app with name/version/creator/price and a new-tab launch link', async () => {
     appsEndpoint([
@@ -57,5 +63,39 @@ describe('Apps page', () => {
     expect(card.find('img').exists()).toBe(false) // no <img> — placeholder div instead
     expect(card.find('svg').exists()).toBe(true) // the Squares2X2Icon placeholder
     expect(card.text()).not.toContain('$') // no price label
+  })
+
+  it('create-app affordance assembles an app-creator brief and hands off to Chat', async () => {
+    appsEndpoint([])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    // The form is hidden until the affordance is clicked.
+    expect(c.find('#new-app-brief').exists()).toBe(false)
+    await c.find('[data-testid="create-app-button"]').trigger('click')
+
+    await c.find('#new-app-name').setValue('Proposal Generator')
+    await c.find('#new-app-brief').setValue('An RFP + proposal builder.')
+    // Trigger the form's submit (a submit-button click doesn't dispatch submit in jsdom).
+    await c.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(navigateToMock).toHaveBeenCalledTimes(1)
+    const arg = navigateToMock.mock.calls[0]![0] as { path: string, query: { compose: string } }
+    expect(arg.path).toBe('/chat')
+    expect(arg.query.compose).toContain('app-creator skill')
+    expect(arg.query.compose).toContain('App name: Proposal Generator')
+    expect(arg.query.compose).toContain('What it should do: An RFP + proposal builder.')
+  })
+
+  it('does not hand off when the brief is empty (submit stays disabled)', async () => {
+    appsEndpoint([])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    await c.find('[data-testid="create-app-button"]').trigger('click')
+    // No brief → the submit button is disabled, so no navigation.
+    expect(c.find('[data-testid="build-app-submit"]').attributes('disabled')).toBeDefined()
+    expect(navigateToMock).not.toHaveBeenCalled()
   })
 })
