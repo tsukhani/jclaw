@@ -1,7 +1,7 @@
 ---
 name: app-creator
 description: Builds a hosted mini-app in your workspace and installs it to public/apps/<slug>/ via the app_install tool — delegates the coding to an external harness (pi/claude/codex via runtime=acp) when one is configured, else builds it directly. The app then appears on the JClaw Apps page.
-version: 1.1.0
+version: 1.2.0
 author: jclaw
 tools: [exec, subagent_spawn, filesystem, app_install]
 commands: []
@@ -37,15 +37,24 @@ Default to self-contained static unless the requirements clearly demand Nuxt —
 
 ### Preferred — delegate to a coding harness (runtime=acp)
 
-A coding harness (`pi -p`, `claude -p`, `codex`, …) is a far stronger multi-file coder than inline tool calls. Hand it the whole build with the `subagent_spawn` tool using **`runtime: "acp"`** and a self-contained task. The harness works inside the same workspace, so point it at the workspace `<slug>/` directory (relative paths), **not** `public/apps/`. For a self-contained static app:
+A coding harness (`pi -p`, `claude -p`, `codex`, …) is a far stronger multi-file coder than inline tool calls. Hand it the whole build with the `subagent_spawn` tool using **`runtime: "acp"`** and a **fully self-contained task** — the harness sees only the task string (not this skill), so spell out the exact files and the exact manifest. For a self-contained static app:
 
-> Build a **self-contained static** web app for: `<the operator's requirements>`. A single `index.html` with inline `<style>` and `<script>` — no framework, no build step, no external CDN/font/image requests (embed assets). Persist data client-side (localStorage) — there is no backend. Write it to `<slug>/index.html` (relative to the workspace), then write `<slug>/app.json` = `{name, version, creator, icon, price, description, agent}` (see the manifest section; include `agent` only when the request designates one). Do NOT write to public/apps — that is outside the workspace.
+> Build a **self-contained static** web app for: `<the operator's requirements>`. A single `index.html` with inline `<style>` and `<script>` — no framework, no build step, no external CDN/font/image requests (embed assets). Persist data client-side (localStorage) — there is no backend.
+> Create a `<slug>/` directory in your current working directory and write **exactly** `<slug>/index.html` and `<slug>/app.json` into it (plus `<slug>/icon.svg` only if you set an icon). Write nothing anywhere else.
+> `<slug>/app.json` must be EXACTLY this object — **these keys only, and no others** (do NOT add `slug`, `entry`, or any extra key):
+> ```json
+> {"name": "<Display Name>", "version": "1.0.0", "creator": "<creator>", "description": "<one-sentence summary>", "icon": "", "price": "", "agent": <id>}
+> ```
+> Set `icon` to `"icon.svg"` only if you created that file, else `""`. Leave `price` as `""` for a free app. Set `agent` to the designated agent id when one is given, otherwise **omit the `agent` key entirely**.
 
-For the Nuxt shape, instead instruct: build a Nuxt 4 app with `ssr: false` and `app: { baseURL: '/apps/<slug>/' }` (trailing slash required — without it the assets break), run `nuxi generate`, and place `.output/public/*` into the workspace `<slug>/`.
+For the Nuxt shape, instead instruct: build a Nuxt 4 app with `ssr: false` and `app: { baseURL: '/apps/<slug>/' }` (trailing slash required — without it the assets break), run `nuxi generate`, and place `.output/public/*` into the `<slug>/` directory.
 
-The harness does the coding, any static generate, and the manifest — all inside the workspace. `runtime=acp` runs the operator-configured harness (`subagent.acp.command`). When it finishes, **you** install it (section 4).
+**Where the harness writes — and how to install it.** A `runtime=acp` harness runs in its OWN per-session directory under `coding/<name>/` in your workspace (JCLAW-666), **not** your workspace root — so it writes the app to `coding/<name>/<slug>/`, which is not where `app_install`'s default `source` (`<slug>/` at your workspace root) looks. After the harness finishes, install from the harness's dir:
 
-**If `runtime=acp` reports no harness is configured**, fall through to the direct path below — do NOT ask the operator to configure one unless they want the harness.
+1. Find the session dir: `exec` `ls -td coding/*/ | head -1` — the newest entry is the run you just spawned; take the directory name as `<session>`.
+2. `app_install` `action: "validate"` then `action: "install"`, `slug: "<slug>"`, **`source: "coding/<session>/<slug>"`** — do not rely on the default source for a harness build.
+
+`runtime=acp` runs the operator-configured harness (`subagent.acp.command`). **If it reports no harness is configured**, fall through to the direct path below — do NOT ask the operator to configure one unless they want the harness.
 
 ### Fallback — build it yourself
 
@@ -71,6 +80,7 @@ Write `<slug>/app.json` in your workspace (it travels into `public/apps/<slug>/`
 - `price` is a **display label only** — no payments or access control. Omit for free apps.
 - `name`, `version`, `creator` are shown on the card. `name` and `version` are **required** — install refuses a manifest missing either.
 - `agent` (JCLAW-763) is the **designated agent id** the app is allowed to invoke — the numeric id from `GET /api/agents`. Set it to exactly the id the operator's request names (the Create/Update App form passes it as *"Designated agent id … : `<id>`"*). **Omit the field** when the request names no agent (or says to remove it) — the app is then non-invoking. Never invent an id.
+- **Use exactly these keys** — `name`, `version`, `creator`, `description`, and the optional `icon` / `price` / `agent`. Do NOT add non-standard keys (`slug`, `entry`, …); the Apps page reads only these.
 
 ## 4. Install
 

@@ -38,6 +38,7 @@ function hasIcon(app: AppEntry): boolean {
 // request rather than auto-firing a multi-file build.
 const creating = ref(false)
 const newAppName = ref('')
+const newAppAuthor = ref('') // app.json "creator"
 const newAppBrief = ref('')
 const newAppAgent = ref('') // designated agent id ('' = none), JCLAW-763
 
@@ -45,8 +46,10 @@ function buildApp() {
   const brief = newAppBrief.value.trim()
   if (!brief) return
   const name = newAppName.value.trim()
+  const author = newAppAuthor.value.trim()
   const lines = ['Use the app-creator skill to build a hosted app.', '']
   if (name) lines.push(`App name: ${name}`)
+  if (author) lines.push(`Author (write it as the app.json "creator" field): ${author}`)
   lines.push(`What it should do: ${brief}`)
   if (newAppAgent.value) {
     lines.push(`Designated agent id (write it as the app.json "agent" field so the app can invoke this agent): ${newAppAgent.value}`)
@@ -57,6 +60,7 @@ function buildApp() {
 function cancelCreate() {
   creating.value = false
   newAppName.value = ''
+  newAppAuthor.value = ''
   newAppBrief.value = ''
   newAppAgent.value = ''
 }
@@ -228,6 +232,19 @@ function cancelUpdate() {
             v-model="newAppName"
             type="text"
             placeholder="Proposal Generator"
+            class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+          >
+        </label>
+        <label
+          for="new-app-author"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">Author <span class="text-fg-muted/70">(optional)</span></span>
+          <input
+            id="new-app-author"
+            v-model="newAppAuthor"
+            type="text"
+            placeholder="Your name"
             class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
           >
         </label>

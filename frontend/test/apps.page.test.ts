@@ -166,6 +166,22 @@ describe('Apps page', () => {
     expect(arg.query.compose).toContain('7')
   })
 
+  it('create brief includes the author as the app.json creator when provided', async () => {
+    appsEndpoint([])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    await c.find('[data-testid="create-app-button"]').trigger('click')
+    await c.find('#new-app-name').setValue('Widget')
+    await c.find('#new-app-author').setValue('Ada Lovelace')
+    await c.find('#new-app-brief').setValue('A widget.')
+    await c.find('form').trigger('submit')
+    await flushPromises()
+
+    const arg = navigateToMock.mock.calls[0]![0] as { query: { compose: string } }
+    expect(arg.query.compose).toContain('Author (write it as the app.json "creator" field): Ada Lovelace')
+  })
+
   it('update form prefills the designated agent and surfaces a stale id as a removable option', async () => {
     appsEndpoint([
       { id: 'a1', url: '/apps/a1/', name: 'A1', version: '1.0.0',
