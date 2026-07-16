@@ -83,7 +83,8 @@ class AcpHarnessConfigValidationTest extends UnitTest {
         assertTrue(reply.contains(SubagentSpawnTool.ACP_HARNESS_KEY),
                 "the error must name the misconfigured key subagent.acp.harness: " + reply);
         assertTrue(reply.contains("pi") && reply.contains("claude")
-                        && reply.contains("codex") && reply.contains("generic"),
+                        && reply.contains("codex") && reply.contains("gemini")
+                        && reply.contains("opencode") && reply.contains("generic"),
                 "the error must enumerate the allowed harness ids: " + reply);
     }
 

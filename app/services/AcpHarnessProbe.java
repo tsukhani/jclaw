@@ -4,7 +4,8 @@ import java.util.List;
 
 /**
  * Probes the host PATH for external coding-harness CLIs usable by the ACP
- * runtime ({@code runtime=acp} / {@code subagent.acp.command}). Surfaced in
+ * runtime ({@code runtime=acp} / {@code subagent.acp.command}) — {@code claude},
+ * {@code pi}, {@code codex}, {@code gemini}, {@code opencode}. Surfaced in
  * Settings → Subagents so the operator can pick a detected harness instead of
  * typing the command by hand. Fresh on each call (a quick {@code --version}
  * per binary); only queried when the Subagents panel opens.
@@ -20,10 +21,17 @@ public final class AcpHarnessProbe {
     /** Probe result for one harness. */
     public record Detected(String id, String displayName, String command, boolean available, String reason) {}
 
+    // Suggested commands are the harness's headless form with the task delivered
+    // on STDIN (the generic/batch path runs the command verbatim and pipes the
+    // task in) — so each must read its prompt from stdin, not expect it as a
+    // trailing arg. gemini's -p triggers non-interactive mode and appends the
+    // -p value to stdin; opencode run reads the piped message.
     public static final List<Harness> HARNESSES = List.of(
             new Harness("claude", "claude", "claude -p", "Claude Code"),
             new Harness("pi", "pi", "pi -p", "Pi"),
-            new Harness("codex", "codex", "codex exec", "Codex"));
+            new Harness("codex", "codex", "codex exec", "Codex"),
+            new Harness("gemini", "gemini", "gemini -p", "Gemini CLI"),
+            new Harness("opencode", "opencode", "opencode run", "opencode"));
 
     private static volatile List<Detected> forced;
 

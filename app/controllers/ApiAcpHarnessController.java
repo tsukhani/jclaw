@@ -16,7 +16,8 @@ import static utils.GsonHolder.INSTANCE;
 /**
  * ACP coding-harness detection: probes the host PATH for the CLIs the ACP
  * runtime ({@code runtime=acp}) can drive — {@code claude}, {@code pi}, {@code
- * codex}. Surfaced in Settings → Subagents so the operator picks a detected
+ * codex}, {@code gemini}, {@code opencode}. Surfaced in Settings → Subagents so
+ * the operator picks a detected
  * harness (auto-filling {@code subagent.acp.command} + {@code
  * subagent.acp.harness}) instead of typing the command by hand. Probed fresh
  * on each call; the panel queries it once on open.
