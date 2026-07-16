@@ -22,7 +22,7 @@ No server, no database — a hosted app is a **static bundle**. It may use clien
 
 ## 1. Clarify + name
 
-Pin down what the app does (its pages, the core action) and a display name. Derive `<slug>` = the name lowercased, spaces → hyphens, non-alphanumerics stripped (e.g. "Proposal Generator" → `proposal-generator`); confirm it if ambiguous. Capture: **name**, **creator** (default the operator), **version** (default `1.0.0`), an optional **price/plan** label (metadata only), and an optional **icon**.
+Pin down what the app does (its pages, the core action) and a display name. Derive `<slug>` = the name lowercased, spaces → hyphens, non-alphanumerics stripped (e.g. "Proposal Generator" → `proposal-generator`); confirm it if ambiguous. Capture: **name**, **creator** (default the operator), **version** (default `1.0.0`), an optional **price/plan** label (metadata only), an optional **icon**, and an optional **designated agent id** (JCLAW-763 — the one agent the app may invoke; passed by the Create/Update form).
 
 ## 2. Build the app
 
@@ -39,7 +39,7 @@ Default to self-contained static unless the requirements clearly demand Nuxt —
 
 A coding harness (`pi -p`, `claude -p`, `codex`, …) is a far stronger multi-file coder than inline tool calls. Hand it the whole build with the `subagent_spawn` tool using **`runtime: "acp"`** and a self-contained task. For a self-contained static app:
 
-> Build a **self-contained static** web app for: `<the operator's requirements>`. A single `index.html` with inline `<style>` and `<script>` — no framework, no build step, no external CDN/font/image requests (embed assets). Persist data client-side (localStorage) — there is no backend. Write it to `public/apps/<slug>/index.html`, then write `public/apps/<slug>/app.json` = `{name, version, creator, icon, price, description}` (see the manifest section).
+> Build a **self-contained static** web app for: `<the operator's requirements>`. A single `index.html` with inline `<style>` and `<script>` — no framework, no build step, no external CDN/font/image requests (embed assets). Persist data client-side (localStorage) — there is no backend. Write it to `public/apps/<slug>/index.html`, then write `public/apps/<slug>/app.json` = `{name, version, creator, icon, price, description, agent}` (see the manifest section; include `agent` only when the request designates one).
 
 For the Nuxt shape, instead instruct: build a Nuxt 4 app with `ssr: false` and `app: { baseURL: '/apps/<slug>/' }` (trailing slash required — without it the assets break), run `nuxi generate`, and copy `.output/public/*` into `public/apps/<slug>/`.
 
@@ -62,13 +62,15 @@ Either path must produce `public/apps/<slug>/app.json`:
   "creator": "<operator>",
   "icon": "icon.png",
   "price": "$9/mo",
-  "description": "Create RFPs and proposals."
+  "description": "Create RFPs and proposals.",
+  "agent": 3
 }
 ```
 
 - `icon` is a path **relative to the app dir** (drop e.g. `icon.png` into `public/apps/<slug>/`); omit it to use the Apps page's default tile.
 - `price` is a **display label only** — no payments or access control. Omit for free apps.
 - `name`, `version`, `creator` are shown on the card.
+- `agent` (JCLAW-763) is the **designated agent id** the app is allowed to invoke — the numeric id from `GET /api/agents`. Set it to exactly the id the operator's request names (the Create/Update App form passes it as *"Designated agent id … : `<id>`"*). **Omit the field** when the request names no agent (or says to remove it) — the app is then non-invoking. Never invent an id.
 
 ## 4. Confirm
 
@@ -79,7 +81,7 @@ Tell the operator it's installed: it now appears on the **Apps** page and launch
 When the operator asks to **update** an existing app — the Apps page's per-card update affordance sends a request naming the app, its slug (`public/apps/<slug>/`), and the current version — edit it **in place** and bump its version; do NOT create a new app:
 
 1. **Locate + read.** Open `public/apps/<slug>/` (the slug is in the request). Read its `app.json` (current `name`, `version`, `creator`, `price`, `icon`) and its `index.html` (+ any other sources) so you change the right app and keep its identity.
-2. **Apply the changes.** Modify per the operator's requirements, keeping the SAME shape it already uses (a self-contained `index.html`, or a Nuxt rebuild with the same `app.baseURL: '/apps/<slug>/'`). Preserve the slug, name, creator, and price unless the operator asked to change them. Prefer delegating to the harness (`runtime=acp`) with the existing files as context; otherwise edit directly with your `exec` + `filesystem` tools.
+2. **Apply the changes.** Modify per the operator's requirements, keeping the SAME shape it already uses (a self-contained `index.html`, or a Nuxt rebuild with the same `app.baseURL: '/apps/<slug>/'`). Preserve the slug, name, creator, and price unless the operator asked to change them. If the request sets, changes, or removes the **designated agent**, write (or delete) the `agent` field in `app.json` to match the named id — that's the one agent the app may invoke. Prefer delegating to the harness (`runtime=acp`) with the existing files as context; otherwise edit directly with your `exec` + `filesystem` tools.
 3. **Bump the version** in `public/apps/<slug>/app.json`: **patch** for small fixes, **minor** for new features, **major** for breaking changes or a redesign.
 4. **Confirm.** The bumped version shows on the app's card immediately (the Apps page re-reads `app.json` via `GET /api/apps`).
 

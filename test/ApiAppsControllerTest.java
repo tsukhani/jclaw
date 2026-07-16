@@ -71,6 +71,25 @@ class ApiAppsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void surfacesDesignatedAgentId() throws IOException {
+        var slug = makeApp("""
+                {"name":"Bot","version":"1.0.0","creator":"Tarun","agent":42}
+                """, true);
+        var body = getContent(GET("/api/apps"));
+        assertTrue(body.contains("\"id\":\"" + slug + "\""), "app listed: " + body);
+        assertTrue(body.contains("\"agent\":\"42\""), "designated agent id surfaced: " + body);
+    }
+
+    @Test
+    void agentIsNullWhenManifestOmitsIt() throws IOException {
+        makeApp("""
+                {"name":"NoAgent","version":"1.0.0","creator":"Tarun"}
+                """, true);
+        assertTrue(getContent(GET("/api/apps")).contains("\"agent\":null"),
+                "an app without an agent field surfaces agent:null");
+    }
+
+    @Test
     void skipsDirWithoutManifest() throws IOException {
         var slug = makeApp(null, true); // index.html but no app.json
         assertFalse(getContent(GET("/api/apps")).contains(slug), "dir without app.json is not listed");

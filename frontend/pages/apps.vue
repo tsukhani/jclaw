@@ -4,6 +4,7 @@
 // the app in a new tab at /apps/<slug>/. Pricing is metadata-only — a label.
 // The "Create app" affordance (slice 3) will sit above the grid.
 import { PencilSquareIcon, PlusIcon, Squares2X2Icon } from '@heroicons/vue/24/outline'
+import type { Agent } from '~/types/api'
 
 interface AppEntry {
   id: string
@@ -14,10 +15,17 @@ interface AppEntry {
   icon: string | null
   price: string | null
   description: string | null
+  // JCLAW-763: designated agent id this app may invoke, or null when non-invoking.
+  agent: string | null
 }
 
 const { data, pending } = useLazyFetch<{ apps: AppEntry[] }>('/api/apps')
 const apps = computed(() => data.value?.apps ?? [])
+
+// Agent picker source (JCLAW-763). Resilient default so the page still renders
+// if the agents endpoint is slow/unavailable — the picker just shows "none".
+const { data: agentsData } = useLazyFetch<Agent[]>('/api/agents', { default: () => [] })
+const agents = computed(() => agentsData.value ?? [])
 
 // Icons that are absent or fail to load fall back to a placeholder tile.
 const iconFailed = reactive(new Set<string>())
@@ -31,6 +39,7 @@ function hasIcon(app: AppEntry): boolean {
 const creating = ref(false)
 const newAppName = ref('')
 const newAppBrief = ref('')
+const newAppAgent = ref('') // designated agent id ('' = none), JCLAW-763
 
 function buildApp() {
   const brief = newAppBrief.value.trim()
@@ -39,6 +48,9 @@ function buildApp() {
   const lines = ['Use the app-creator skill to build a hosted app.', '']
   if (name) lines.push(`App name: ${name}`)
   lines.push(`What it should do: ${brief}`)
+  if (newAppAgent.value) {
+    lines.push(`Designated agent id (write it as the app.json "agent" field so the app can invoke this agent): ${newAppAgent.value}`)
+  }
   navigateTo({ path: '/chat', query: { compose: lines.join('\n') } })
 }
 
@@ -46,6 +58,7 @@ function cancelCreate() {
   creating.value = false
   newAppName.value = ''
   newAppBrief.value = ''
+  newAppAgent.value = ''
 }
 
 // Update-app affordance: same app-creator hand-off, but scoped to an existing
@@ -53,32 +66,51 @@ function cancelCreate() {
 // the app's slug so the skill edits public/apps/<slug>/ in place.
 const updatingApp = ref<AppEntry | null>(null)
 const updateBrief = ref('')
+const updateAgent = ref('') // designated agent id ('' = none), JCLAW-763
+
+// The picked agent differs from what's on disk — lets an agent-only change submit
+// without also typing a change brief.
+const updateAgentChanged = computed(() =>
+  !!updatingApp.value && (updateAgent.value || null) !== (updatingApp.value.agent || null))
+// The app's stored agent id resolves to no current agent (deleted/renamed) — AC5:
+// surface it as a selectable option so it's visible and removable, not silently blank.
+const updateAgentStale = computed(() =>
+  !!updateAgent.value && !agents.value.some(a => String(a.id) === updateAgent.value))
 
 function startUpdate(app: AppEntry) {
   updatingApp.value = app
   updateBrief.value = ''
+  updateAgent.value = app.agent ?? ''
   creating.value = false // one affordance form at a time
 }
 
 function submitUpdate() {
   const app = updatingApp.value
+  if (!app) return
   const changes = updateBrief.value.trim()
-  if (!app || !changes) return
+  const agentChanged = (updateAgent.value || null) !== (app.agent || null)
+  if (!changes && !agentChanged) return
   const lines = [
     `Use the app-creator skill to update the existing hosted app "${app.name}" (public/apps/${app.id}/, currently v${app.version}).`,
     '',
-    'Requested changes:',
-    changes,
-    '',
-    'Apply the changes in place and bump the version in public/apps/'
-    + `${app.id}/app.json (patch for small fixes, minor for new features, major for breaking changes).`,
   ]
+  if (changes) {
+    lines.push('Requested changes:', changes, '')
+  }
+  if (agentChanged) {
+    lines.push(updateAgent.value
+      ? `Set the designated agent: write app.json "agent" = ${updateAgent.value} (the id of the agent this app may invoke).`
+      : 'Remove the designated agent: delete the "agent" field from app.json so the app is non-invoking.', '')
+  }
+  lines.push('Apply the changes in place and bump the version in public/apps/'
+    + `${app.id}/app.json (patch for small fixes, minor for new features, major for breaking changes).`)
   navigateTo({ path: '/chat', query: { compose: lines.join('\n') } })
 }
 
 function cancelUpdate() {
   updatingApp.value = null
   updateBrief.value = ''
+  updateAgent.value = ''
 }
 </script>
 
@@ -117,10 +149,39 @@ function cancelUpdate() {
             class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden resize-y"
           />
         </label>
+        <label
+          for="update-app-agent"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">Designated agent</span>
+          <select
+            id="update-app-agent"
+            v-model="updateAgent"
+            data-testid="update-app-agent"
+            class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+          >
+            <option value="">
+              — No agent (non-invoking) —
+            </option>
+            <option
+              v-for="a in agents"
+              :key="a.id"
+              :value="String(a.id)"
+            >
+              {{ a.name }}
+            </option>
+            <option
+              v-if="updateAgentStale"
+              :value="updateAgent"
+            >
+              Unknown agent (id {{ updateAgent }}) — removed
+            </option>
+          </select>
+        </label>
         <div class="flex items-center gap-2">
           <button
             type="submit"
-            :disabled="!updateBrief.trim()"
+            :disabled="!updateBrief.trim() && !updateAgentChanged"
             data-testid="update-app-submit"
             class="px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
@@ -182,6 +243,28 @@ function cancelUpdate() {
             placeholder="An RFP + proposal builder where users create RFPs and generate proposals from them."
             class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden resize-y"
           />
+        </label>
+        <label
+          for="new-app-agent"
+          class="block"
+        >
+          <span class="block text-xs text-fg-muted mb-1">Designated agent <span class="text-fg-muted/70">(optional — lets the app invoke this agent)</span></span>
+          <select
+            id="new-app-agent"
+            v-model="newAppAgent"
+            class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+          >
+            <option value="">
+              — No agent (non-invoking) —
+            </option>
+            <option
+              v-for="a in agents"
+              :key="a.id"
+              :value="String(a.id)"
+            >
+              {{ a.name }}
+            </option>
+          </select>
         </label>
         <div class="flex items-center gap-2">
           <button

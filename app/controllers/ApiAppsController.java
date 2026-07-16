@@ -34,9 +34,12 @@ public class ApiAppsController extends Controller {
     /** One hosted app: the parsed manifest plus derived launch fields. {@code id}
      *  is the directory name under {@code public/apps/}; {@code url} = {@code
      *  /apps/<id>/}; {@code icon} is resolved to an app-root-relative URL (null
-     *  when the manifest omits it — the card supplies a default). */
+     *  when the manifest omits it — the card supplies a default). {@code agent}
+     *  is the designated agent id the app may invoke (JCLAW-763; null when the
+     *  manifest omits it — the app is non-invoking). */
     public record AppEntry(String id, String url, String name, String version,
-                           String creator, String icon, String price, String description) {}
+                           String creator, String icon, String price, String description,
+                           String agent) {}
 
     public record AppsResponse(List<AppEntry> apps) {}
 
@@ -82,7 +85,8 @@ public class ApiAppsController extends Controller {
                     str(m, "creator"),
                     icon != null ? "/apps/" + id + "/" + icon : null,
                     str(m, "price"),
-                    str(m, "description"));
+                    str(m, "description"),
+                    str(m, "agent"));
         } catch (RuntimeException | IOException _) {  // malformed manifest — skip, don't fail the list
             return null;
         }
