@@ -3,7 +3,7 @@
 // discovered from public/apps/<slug>/ via GET /api/apps. Clicking a card opens
 // the app in a new tab at /apps/<slug>/. Pricing is metadata-only — a label.
 // The "Create app" affordance (slice 3) will sit above the grid.
-import { PencilSquareIcon, PlusIcon, Squares2X2Icon } from '@heroicons/vue/24/outline'
+import { PencilSquareIcon, PlusIcon, Squares2X2Icon, TrashIcon } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 
 interface AppEntry {
@@ -19,8 +19,10 @@ interface AppEntry {
   agent: string | null
 }
 
-const { data, pending } = useLazyFetch<{ apps: AppEntry[] }>('/api/apps')
+const { data, pending, refresh } = useLazyFetch<{ apps: AppEntry[] }>('/api/apps')
 const apps = computed(() => data.value?.apps ?? [])
+
+const { confirm } = useConfirm()
 
 // Agent picker source (JCLAW-763). Resilient default so the page still renders
 // if the agents endpoint is slow/unavailable — the picker just shows "none".
@@ -134,6 +136,33 @@ function cancelUpdate() {
   updateBrief.value = ''
   updateAgent.value = ''
   updatePrice.value = null
+}
+
+// Delete a hosted app from its card's trash button, behind a danger confirm. An
+// app is purely a public/apps/<slug>/ directory (no DB row), so the DELETE fully
+// removes it. `deletingId` disables just this card while the request is in flight.
+const deletingId = ref<string | null>(null)
+
+async function deleteApp(app: AppEntry) {
+  const ok = await confirm({
+    title: 'Delete app',
+    message: `Delete "${app.name}"? This permanently removes public/apps/${app.id}/ and can't be undone.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  deletingId.value = app.id
+  try {
+    await $fetch(`/api/apps/${app.id}`, { method: 'DELETE' })
+    if (updatingApp.value?.id === app.id) cancelUpdate() // close the update form if it targeted this app
+    await refresh()
+  }
+  catch (e) {
+    console.error('Failed to delete app:', e)
+  }
+  finally {
+    deletingId.value = null
+  }
 }
 </script>
 
@@ -395,19 +424,35 @@ function cancelUpdate() {
             </div>
           </div>
         </a>
-        <button
-          type="button"
-          :data-testid="`update-app-${app.id}`"
-          class="absolute top-1 right-1 p-1 rounded-md bg-surface-elevated/90 border border-border text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-emerald-700 dark:hover:text-emerald-400 transition-opacity"
-          title="Update this app"
-          aria-label="Update this app"
-          @click="startUpdate(app)"
-        >
-          <PencilSquareIcon
-            class="w-3.5 h-3.5"
-            aria-hidden="true"
-          />
-        </button>
+        <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <button
+            type="button"
+            :data-testid="`update-app-${app.id}`"
+            class="p-1 rounded-md bg-surface-elevated/90 border border-border text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+            title="Update this app"
+            aria-label="Update this app"
+            @click="startUpdate(app)"
+          >
+            <PencilSquareIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            :data-testid="`delete-app-${app.id}`"
+            :disabled="deletingId === app.id"
+            class="p-1 rounded-md bg-surface-elevated/90 border border-border text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title="Delete this app"
+            aria-label="Delete this app"
+            @click="deleteApp(app)"
+          >
+            <TrashIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
       </div>
     </div>
   </div>

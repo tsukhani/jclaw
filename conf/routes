@@ -254,6 +254,7 @@ DELETE  /api/metrics/loadtest/data              ApiMetricsController.cleanLoadte
 
 # Apps registry (SPEC-apps): operator-hosted mini-apps under public/apps/<slug>/
 GET     /api/apps                               ApiAppsController.list
+DELETE  /api/apps/{slug}                        ApiAppsController.delete
 
 # Unknown /api/* paths -> clean 404 JSON (JCLAW-336). Must be after all real /api
 # routes and before the SPA + {controller}/{action} catch-alls, so scanners hitting

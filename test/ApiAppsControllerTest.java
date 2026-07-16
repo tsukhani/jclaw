@@ -115,6 +115,39 @@ class ApiAppsControllerTest extends FunctionalTest {
         assertEquals(401, GET("/api/apps").status.intValue());
     }
 
+    @Test
+    void deleteRemovesTheAppDirectory() throws IOException {
+        var slug = makeApp("{\"name\":\"Gone\",\"version\":\"1.0.0\"}", true);
+        var dir = appsDir.resolve(slug);
+        assertTrue(Files.isDirectory(dir), "app exists before delete");
+        var response = DELETE("/api/apps/" + slug);
+        assertIsOk(response);
+        assertTrue(getContent(response).contains("\"deleted\":true"), "delete ack: " + getContent(response));
+        assertFalse(Files.exists(dir), "app directory removed from disk");
+        assertFalse(getContent(GET("/api/apps")).contains(slug), "deleted app no longer listed");
+    }
+
+    @Test
+    void deleteRejectsInvalidSlug() {
+        // An uppercase slug reaches the action but fails the lowercase-only regex,
+        // so a malformed/traversal slug can never resolve to a directory to remove.
+        assertEquals(400, DELETE("/api/apps/Not-A-Valid-Slug").status.intValue());
+    }
+
+    @Test
+    void deleteReturns404ForMissingApp() {
+        var slug = TEST_PREFIX + "missing-" + UUID.randomUUID().toString().substring(0, 8);
+        assertEquals(404, DELETE("/api/apps/" + slug).status.intValue());
+    }
+
+    @Test
+    void deleteRequiresAuth() throws IOException {
+        var slug = makeApp("{\"name\":\"Keep\",\"version\":\"1.0.0\"}", true);
+        POST("/api/auth/logout", "application/json", "{}");
+        assertEquals(401, DELETE("/api/apps/" + slug).status.intValue());
+        assertTrue(Files.exists(appsDir.resolve(slug)), "app untouched by an unauthenticated delete");
+    }
+
     private static void deleteRecursive(Path root) {
         if (!Files.exists(root)) return;
         try (Stream<Path> walk = Files.walk(root)) {

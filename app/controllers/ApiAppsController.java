@@ -15,7 +15,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -31,6 +33,10 @@ public class ApiAppsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    /** A hosted-app slug is a single path segment of lowercase alphanumerics and
+     *  hyphens — no dots or slashes, so it can never traverse out of public/apps/. */
+    private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
+
     /** One hosted app: the parsed manifest plus derived launch fields. {@code id}
      *  is the directory name under {@code public/apps/}; {@code url} = {@code
      *  /apps/<id>/}; {@code icon} is resolved to an app-root-relative URL (null
@@ -42,6 +48,8 @@ public class ApiAppsController extends Controller {
                            String agent) {}
 
     public record AppsResponse(List<AppEntry> apps) {}
+
+    public record DeleteResponse(boolean deleted, String slug) {}
 
     /** GET /api/apps — every {@code public/apps/<slug>/} carrying both {@code
      *  app.json} and {@code index.html}. A missing or malformed manifest is
@@ -62,6 +70,45 @@ public class ApiAppsController extends Controller {
             }
         }
         renderJSON(gson.toJson(new AppsResponse(apps)));
+    }
+
+    /** DELETE /api/apps/{slug} — remove a hosted app by deleting its
+     *  {@code public/apps/<slug>/} directory. The filesystem is the whole
+     *  registry (no DB row, no app-owned state yet), so removing the directory
+     *  fully removes the app. Rejects a slug that isn't a well-formed, existing
+     *  app directory — the {@link #SLUG} regex plus a parent-containment check
+     *  guard against path traversal. */
+    @Operation(summary = "Delete an operator-hosted mini-app (removes its public/apps/<slug>/ directory)")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeleteResponse.class)))
+    public static void delete(String slug) {
+        if (slug == null || !SLUG.matcher(slug).matches()) {
+            badRequest("Invalid app slug");
+        }
+        var appsDir = Play.getFile("public/apps").toPath().toAbsolutePath().normalize();
+        var target = appsDir.resolve(slug).normalize();
+        // Defense in depth beyond the regex: the target must be a direct child of
+        // public/apps/ — never public/apps itself, never anything outside it.
+        if (!appsDir.equals(target.getParent())) {
+            badRequest("Invalid app slug");
+        }
+        if (!Files.isDirectory(target) || !Files.isRegularFile(target.resolve("app.json"))) {
+            notFound("No such app: " + slug);
+        }
+        try {
+            deleteRecursively(target);
+        } catch (IOException e) {
+            error("Failed to delete app: " + e.getMessage());
+        }
+        renderJSON(gson.toJson(new DeleteResponse(true, slug)));
+    }
+
+    /** Remove a directory tree depth-first (children before parents). */
+    private static void deleteRecursively(Path root) throws IOException {
+        try (var walk = Files.walk(root)) {
+            for (var p : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
     }
 
     /** Parse one app directory into an entry, or null when it isn't a valid,

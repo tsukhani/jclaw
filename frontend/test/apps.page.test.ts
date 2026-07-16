@@ -1,11 +1,20 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { clearNuxtData } from '#app'
+import { useConfirm } from '~/composables/useConfirm'
 import Apps from '~/pages/apps.vue'
+import ConfirmDialog from '~/components/ConfirmDialog.vue'
 
 const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn().mockResolvedValue(undefined) }))
 mockNuxtImport('navigateTo', () => navigateToMock)
+
+// The ConfirmDialog is normally mounted once at the app root; mount it beside
+// Apps so the delete-confirm flow's dialog renders (mirrors agents.flows.test).
+const AppsHarness = defineComponent({
+  setup: () => () => h('div', [h(Apps), h(ConfirmDialog)]),
+})
 
 // useLazyFetch caches by URL across mounts; clear it so each test's /api/apps
 // mock is the one that renders (JClaw test convention).
@@ -26,6 +35,14 @@ describe('Apps page', () => {
     navigateToMock.mockClear()
     agentsMock = []
     registerEndpoint('/api/agents', () => agentsMock)
+  })
+
+  afterEach(() => {
+    // Drain any ConfirmDialog left open by a delete test so its module-singleton
+    // state doesn't leak into the next case.
+    const { _state, _resolve } = useConfirm()
+    if (_state.open) _resolve(false)
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
   })
 
   it('renders a card per app with name/version/creator/price and a new-tab launch link', async () => {
@@ -285,5 +302,74 @@ describe('Apps page', () => {
 
     const arg = navigateToMock.mock.calls[0]![0] as { query: { compose: string } }
     expect(arg.query.compose).toContain('app.json "price" = "$5"')
+  })
+
+  it('renders a delete button per app card', async () => {
+    appsEndpoint([
+      { id: 'to-remove', url: '/apps/to-remove/', name: 'To Remove', version: '1.0.0',
+        creator: null, icon: null, price: null, description: null, agent: null },
+    ])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    const del = c.find('[data-testid="delete-app-to-remove"]')
+    expect(del.exists()).toBe(true)
+    expect(del.attributes('aria-label')).toBe('Delete this app')
+  })
+
+  it('confirming the delete dialog fires DELETE /api/apps/:slug', async () => {
+    let deletedSlug: string | null = null
+    registerEndpoint('/api/apps/to-remove', {
+      method: 'DELETE',
+      handler: () => {
+        deletedSlug = 'to-remove'
+        return { deleted: true, slug: 'to-remove' }
+      },
+    })
+    appsEndpoint([
+      { id: 'to-remove', url: '/apps/to-remove/', name: 'To Remove', version: '1.0.0',
+        creator: null, icon: null, price: null, description: null, agent: null },
+    ])
+    const c = await mountSuspended(AppsHarness)
+    await flushPromises()
+
+    await c.find('[data-testid="delete-app-to-remove"]').trigger('click')
+    await flushPromises()
+
+    // Click the danger confirm button (label 'Delete') on the teleported dialog.
+    const confirmBtn = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(b => (b.textContent ?? '').trim() === 'Delete')
+    expect(confirmBtn, 'Delete confirm button should exist on the dialog').toBeTruthy()
+    confirmBtn!.click()
+    await vi.waitFor(() => expect(deletedSlug).toBe('to-remove'))
+  })
+
+  it('cancelling the delete dialog skips the DELETE', async () => {
+    let deleted = false
+    registerEndpoint('/api/apps/keep-me', {
+      method: 'DELETE',
+      handler: () => {
+        deleted = true
+        return { deleted: true, slug: 'keep-me' }
+      },
+    })
+    appsEndpoint([
+      { id: 'keep-me', url: '/apps/keep-me/', name: 'Keep Me', version: '1.0.0',
+        creator: null, icon: null, price: null, description: null, agent: null },
+    ])
+    const c = await mountSuspended(AppsHarness)
+    await flushPromises()
+
+    await c.find('[data-testid="delete-app-keep-me"]').trigger('click')
+    await flushPromises()
+
+    const cancelBtn = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(b => (b.textContent ?? '').trim() === 'Cancel')
+    expect(cancelBtn).toBeTruthy()
+    cancelBtn!.click()
+    await flushPromises()
+    await flushPromises()
+
+    expect(deleted).toBe(false)
   })
 })
