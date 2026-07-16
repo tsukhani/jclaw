@@ -34,9 +34,12 @@ public final class AcpHarnessProbe {
      *  subagent.acp.harness} adapter id to write when this chip is picked — its
      *  own id for a built-in, {@code "generic"} for a custom command (no
      *  dedicated adapter). {@code custom} distinguishes operator-added chips
-     *  (removable) from the built-in catalog. */
+     *  (removable) from the built-in catalog. {@code acpSupport} is the ACP
+     *  badge (native/adapter/adapter-missing/none per {@link
+     *  AcpCapabilityCatalog}) and {@code acpDetail} its tooltip. */
     public record Detected(String id, String displayName, String command, String harness,
-                           boolean available, String reason, boolean custom) {}
+                           boolean available, String reason, boolean custom,
+                           String acpSupport, String acpDetail) {}
 
     // Suggested commands are the harness's headless form with the task delivered
     // on STDIN (the generic/batch path runs the command verbatim and pipes the
@@ -79,7 +82,8 @@ public final class AcpHarnessProbe {
     public static Detected addCustom(String command) {
         var trimmed = command == null ? "" : command.strip();
         if (trimmed.isEmpty()) {
-            return new Detected("custom:", "", "", "generic", false, "empty command", true);
+            return new Detected("custom:", "", "", "generic", false, "empty command", true,
+                    AcpCapabilityCatalog.NONE, "");
         }
         var probe = probeCustom(trimmed);
         if (probe.available()) {
@@ -104,7 +108,9 @@ public final class AcpHarnessProbe {
     private static Detected probeBuiltIn(Harness h) {
         var r = ExecutableProbeSupport.probeOnPath(h.binary(), "--version", "AcpHarnessProbe",
                 " — install it to use runtime=acp with this harness");
-        return new Detected(h.id(), h.displayName(), h.command(), h.id(), r.available(), r.reason(), false);
+        var acp = AcpCapabilityCatalog.classify(h.id(), r.available());
+        return new Detected(h.id(), h.displayName(), h.command(), h.id(), r.available(), r.reason(), false,
+                acp.support(), acp.detail());
     }
 
     /** Probe a custom command by its first token (the binary); the operator's
@@ -114,7 +120,10 @@ public final class AcpHarnessProbe {
         var binary = command.strip().split("\\s+", 2)[0];
         var r = ExecutableProbeSupport.probeOnPath(binary, "--version", "AcpHarnessProbe",
                 " — the harness binary must be installed on PATH");
-        return new Detected("custom:" + command, binary, command, "generic", r.available(), r.reason(), true);
+        // Custom commands aren't in the ACP catalog — no ACP, stdin/stdout only.
+        var acp = AcpCapabilityCatalog.classify("custom:" + command, r.available());
+        return new Detected("custom:" + command, binary, command, "generic", r.available(), r.reason(), true,
+                acp.support(), acp.detail());
     }
 
     private static List<String> customCommands() {

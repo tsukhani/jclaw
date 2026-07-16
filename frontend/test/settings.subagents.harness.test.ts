@@ -23,6 +23,8 @@ interface DetectedHarness {
   available: boolean
   reason: string
   custom: boolean
+  acpSupport: string
+  acpDetail: string
 }
 
 const Harness = defineComponent({
@@ -61,6 +63,7 @@ registerEndpoint('/api/subagents/acp-harnesses', {
     const chip: DetectedHarness = {
       id: `custom:${cmd}`, name: cmd.split(/\s+/)[0]!, command: cmd, harness: 'generic',
       available, reason: available ? 'available' : 'binary not found on PATH', custom: true,
+      acpSupport: 'none', acpDetail: '',
     }
     if (available) harnesses.push(chip)
     return chip
@@ -83,8 +86,8 @@ beforeEach(() => {
   addedCommands = []
   removedCommands = []
   harnesses = [
-    { id: 'claude', name: 'Claude Code', command: 'claude -p', harness: 'claude', available: true, reason: 'available', custom: false },
-    { id: 'codex', name: 'Codex', command: 'codex exec', harness: 'codex', available: false, reason: 'codex not found on PATH', custom: false },
+    { id: 'claude', name: 'Claude Code', command: 'claude -p', harness: 'claude', available: true, reason: 'available', custom: false, acpSupport: 'adapter-missing', acpDetail: 'Needs the claude-code-acp adapter' },
+    { id: 'codex', name: 'Codex', command: 'codex exec', harness: 'codex', available: false, reason: 'codex not found on PATH', custom: false, acpSupport: 'none', acpDetail: 'No ACP — runs via the stdin/stdout wrapper' },
   ]
 })
 
@@ -99,6 +102,16 @@ describe('SettingsSubagentsPanel — ACP harness detection', () => {
     expect(claude.text()).toContain('claude -p')
     expect(claude.attributes('disabled')).toBeUndefined()
     expect(codex.attributes('disabled')).toBeDefined()
+  })
+
+  it('badges each chip with its ACP support', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    // claude → adapter-missing → the "ACP · adapter" badge; codex → none → stdin/stdout.
+    expect(c.find('[data-testid="acp-badge-claude"]').text()).toBe('ACP · adapter')
+    expect(c.find('[data-testid="acp-badge-claude"]').attributes('title')).toContain('claude-code-acp')
+    expect(c.find('[data-testid="acp-badge-codex"]').text()).toBe('stdin/stdout')
   })
 
   it('clicking an available harness POSTs both acp.command and acp.harness', async () => {
@@ -144,7 +157,7 @@ describe('SettingsSubagentsPanel — ACP harness detection', () => {
   it('removing a custom chip deletes it', async () => {
     harnesses.push({
       id: 'custom:aider --message', name: 'aider', command: 'aider --message', harness: 'generic',
-      available: true, reason: 'available', custom: true,
+      available: true, reason: 'available', custom: true, acpSupport: 'none', acpDetail: '',
     })
     const c = await mountSuspended(Harness)
     await flushPromises()

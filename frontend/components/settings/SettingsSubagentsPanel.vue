@@ -81,10 +81,26 @@ interface DetectedHarness {
   available: boolean
   reason: string
   custom: boolean
+  acpSupport: string // native | adapter | adapter-missing | none
+  acpDetail: string // tooltip: the ACP command, or the adapter install hint
 }
 const { data: harnessData, pending: harnessPending, refresh: refreshHarnesses }
   = useLazyFetch<{ harnesses: DetectedHarness[] }>('/api/subagents/acp-harnesses')
 const detectedHarnesses = computed(() => harnessData.value?.harnesses ?? [])
+
+// ACP-support badge per chip: shows whether the harness speaks ACP natively,
+// via a detected adapter, via an adapter that still needs installing, or not at
+// all (stdin/stdout fallback). Mirrors CodingRunMonitor's KIND_META pattern.
+const STDIO_BADGE = { label: 'stdin/stdout', cls: 'text-fg-muted border-border' }
+const ACP_BADGE: Record<string, { label: string, cls: string }> = {
+  'native': { label: 'ACP native', cls: 'text-emerald-700 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10' },
+  'adapter': { label: 'ACP · adapter', cls: 'text-sky-700 dark:text-sky-400 border-sky-500/40 bg-sky-500/10' },
+  'adapter-missing': { label: 'ACP · adapter', cls: 'text-amber-700 dark:text-amber-400 border-amber-500/40 bg-amber-500/10' },
+  'none': STDIO_BADGE,
+}
+function acpBadge(h: DetectedHarness) {
+  return ACP_BADGE[h.acpSupport] ?? STDIO_BADGE
+}
 
 // One click fills both the command and the adapter id so runtime="acp" is ready.
 async function useHarness(h: DetectedHarness) {
@@ -423,6 +439,12 @@ async function saveSubagentModel(value: string) {
                   />
                   {{ h.name }}
                   <span class="font-mono opacity-70">{{ h.command }}</span>
+                  <span
+                    class="px-1 py-px text-[9px] leading-none border rounded"
+                    :class="acpBadge(h).cls"
+                    :title="h.acpDetail"
+                    :data-testid="`acp-badge-${h.id}`"
+                  >{{ acpBadge(h).label }}</span>
                   <CheckIcon
                     v-if="h.available && subagentAcpCommand === h.command"
                     class="w-3 h-3"

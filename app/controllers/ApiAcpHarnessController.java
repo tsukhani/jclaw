@@ -30,10 +30,13 @@ public class ApiAcpHarnessController extends Controller {
     /** One probed harness: adapter {@code id}, a display {@code name}, the
      *  suggested {@code command} (the {@code subagent.acp.command} value), the
      *  {@code harness} adapter id to write ({@code subagent.acp.harness}),
-     *  whether the binary is on PATH, a human-readable reason, and whether it's
-     *  an operator-added {@code custom} chip (removable). */
+     *  whether the binary is on PATH, a human-readable reason, whether it's an
+     *  operator-added {@code custom} chip (removable), the ACP support badge
+     *  ({@code acpSupport}: native/adapter/adapter-missing/none) and its tooltip
+     *  ({@code acpDetail}). */
     public record HarnessEntry(String id, String name, String command, String harness,
-                               boolean available, String reason, boolean custom) {}
+                               boolean available, String reason, boolean custom,
+                               String acpSupport, String acpDetail) {}
 
     public record HarnessesResponse(List<HarnessEntry> harnesses) {}
 
@@ -80,6 +83,6 @@ public class ApiAcpHarnessController extends Controller {
 
     private static HarnessEntry toEntry(AcpHarnessProbe.Detected d) {
         return new HarnessEntry(d.id(), d.displayName(), d.command(), d.harness(),
-                d.available(), d.reason(), d.custom());
+                d.available(), d.reason(), d.custom(), d.acpSupport(), d.acpDetail());
     }
 }

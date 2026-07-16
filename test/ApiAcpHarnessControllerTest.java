@@ -48,8 +48,12 @@ class ApiAcpHarnessControllerTest extends FunctionalTest {
     @Test
     void reportsDetectedAndMissingHarnesses() {
         AcpHarnessProbe.setForTest(List.of(
-                new AcpHarnessProbe.Detected("claude", "Claude Code", "claude -p", "claude", true, "available", false),
-                new AcpHarnessProbe.Detected("codex", "Codex", "codex exec", "codex", false, "codex not found on PATH", false)));
+                new AcpHarnessProbe.Detected("gemini", "Gemini CLI", "gemini -p", "gemini", true, "available", false,
+                        "native", "Speaks ACP natively — gemini --acp"),
+                new AcpHarnessProbe.Detected("claude", "Claude Code", "claude -p", "claude", true, "available", false,
+                        "adapter-missing", "Needs the claude-code-acp adapter — npm i -g @zed-industries/claude-code-acp"),
+                new AcpHarnessProbe.Detected("codex", "Codex", "codex exec", "codex", false, "codex not found on PATH", false,
+                        "none", "No ACP — runs via the stdin/stdout wrapper")));
         var response = GET("/api/subagents/acp-harnesses");
         assertIsOk(response);
         assertContentType("application/json", response);
@@ -59,6 +63,10 @@ class ApiAcpHarnessControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"harness\":\"claude\""), "adapter id present: " + body);
         assertTrue(body.contains("\"available\":true"), "claude reported available: " + body);
         assertTrue(body.contains("\"available\":false"), "codex reported missing: " + body);
+        // ACP badge classification rides the same payload.
+        assertTrue(body.contains("\"acpSupport\":\"native\""), "gemini badged ACP-native: " + body);
+        assertTrue(body.contains("\"acpSupport\":\"adapter-missing\""), "claude badged adapter-missing: " + body);
+        assertTrue(body.contains("\"acpSupport\":\"none\""), "codex badged none: " + body);
     }
 
     @Test
