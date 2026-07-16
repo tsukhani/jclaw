@@ -1,9 +1,9 @@
 ---
 name: app-creator
-description: Builds and installs a hosted mini-app into public/apps/<slug>/ — scaffolds a Nuxt 4 static site, generates it, places the output, and writes the app.json manifest so it appears on the JClaw Apps page.
+description: Builds and installs a hosted mini-app into public/apps/<slug>/ — delegates the coding to an external harness (pi/claude/codex via runtime=acp) when one is configured, else builds it directly, then places the static output and writes the app.json manifest so it appears on the JClaw Apps page.
 version: 1.0.0
 author: jclaw
-tools: [exec, filesystem]
+tools: [exec, subagent_spawn, filesystem]
 commands: []
 icon: 🧩
 ---
@@ -20,40 +20,31 @@ A directory `public/apps/<slug>/` containing:
 
 No server, no database — a hosted app is a **static bundle**. It may use client-side storage (localStorage/IndexedDB) or call an external API, but it must not depend on a JClaw backend.
 
-## Steps
-
-### 1. Clarify + name
+## 1. Clarify + name
 
 Pin down what the app does (its pages, the core action) and a display name. Derive `<slug>` = the name lowercased, spaces → hyphens, non-alphanumerics stripped (e.g. "Proposal Generator" → `proposal-generator`); confirm it if ambiguous. Capture: **name**, **creator** (default the operator), **version** (default `1.0.0`), an optional **price/plan** label (metadata only), and an optional **icon**.
 
-### 2. Scaffold a Nuxt 4 app
+## 2. Build the app
 
-In a working directory — **NOT** `public/`, e.g. `workspace/app-build-<slug>/` — create a minimal Nuxt 4 project matching JClaw's frontend conventions (Vue 3 + TypeScript + Tailwind v4). Keep it lean. Install deps with your shell tool.
+**Prefer delegating the coding to an external harness; build it yourself only when none is configured.**
 
-The one config that makes the static output work under the subpath — set it in `nuxt.config.ts`:
+### Preferred — delegate to a coding harness (runtime=acp)
 
-```ts
-export default defineNuxtConfig({
-  ssr: false,                          // SPA/SSG — no server runtime
-  app: { baseURL: '/apps/<slug>/' },   // trailing slash required; resolves asset + route links under the subpath
-})
-```
+A coding harness (`pi -p`, `claude -p`, `codex`, …) is a far stronger multi-file coder than inline tool calls. Hand it the whole build with the `subagent_spawn` tool using **`runtime: "acp"`** and a self-contained task, e.g.:
 
-### 3. Implement
+> Build a Nuxt 4 **static** web app for: `<the operator's requirements>`. In `nuxt.config.ts` set `ssr: false` and `app: { baseURL: '/apps/<slug>/' }` (trailing slash required — without it the assets break). Vue 3 + TypeScript + Tailwind v4 to match the JClaw frontend; keep it lean. Persist data client-side (localStorage) — there is no backend. Run `nuxi generate`, copy `.output/public/*` into `public/apps/<slug>/`, then write `public/apps/<slug>/app.json` = `{name, version, creator, icon, price, description}` (see the manifest section).
 
-Build the pages/components per the operator's requirements. Persist data **client-side** (localStorage) unless the operator specifies an external API — there is no JClaw backend for the app.
+The harness does the multi-file coding, the static generate, the placement, and the manifest. `runtime=acp` runs the operator-configured harness (`subagent.acp.command`).
 
-### 4. Generate (static)
+**If `runtime=acp` reports no harness is configured**, fall through to the direct path below — do NOT ask the operator to configure one unless they want the harness.
 
-Run `npx nuxi generate` (or `pnpm generate`) in the working dir. The self-contained static site lands in `.output/public/` — an `index.html` plus `_nuxt/` assets, all referencing `/apps/<slug>/…`.
+### Fallback — build it yourself
 
-### 5. Place it
+With no harness configured, do it directly using your `exec` + `filesystem` tools: scaffold a lean Nuxt 4 app in a working dir (**NOT** `public/`, e.g. `workspace/app-build-<slug>/`), set `ssr: false` + `app.baseURL: '/apps/<slug>/'`, implement per the requirements, run `npx nuxi generate`, copy `.output/public/*` into `public/apps/<slug>/`, then write the manifest.
 
-Copy `.output/public/*` into `public/apps/<slug>/`, giving you `public/apps/<slug>/index.html` and its assets. Overwrite cleanly when rebuilding an existing app.
+## 3. The app.json manifest
 
-### 6. Write the manifest
-
-Write `public/apps/<slug>/app.json`:
+Either path must produce `public/apps/<slug>/app.json`:
 
 ```json
 {
@@ -70,12 +61,12 @@ Write `public/apps/<slug>/app.json`:
 - `price` is a **display label only** — no payments or access control. Omit for free apps.
 - `name`, `version`, `creator` are shown on the card.
 
-### 7. Confirm
+## 4. Confirm
 
 Tell the operator it's installed: it now appears on the **Apps** page and launches in a new tab at `/apps/<slug>/`. (The Apps page enumerates `public/apps/*/` via `GET /api/apps`.)
 
 ## Guardrails
 
 - **Static only.** Never wire the app into a JClaw route or the JClaw DB. Persistence = client-side storage or a third-party API the operator provides.
-- **Base path is mandatory.** Without `app.baseURL = '/apps/<slug>/'` the generated assets point at `/_nuxt/…` (JClaw's own SPA assets) and the app breaks. Always set it.
+- **Base path is mandatory.** Without `app.baseURL = '/apps/<slug>/'` the generated assets point at `/_nuxt/…` (JClaw's own SPA assets) and the app breaks. Always set it — and pass it to the harness in the task.
 - **Trusted, same-origin.** The app runs on JClaw's origin; only build apps the operator authored or asked for.
