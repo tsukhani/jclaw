@@ -70,6 +70,34 @@ async function saveSubagentField(configKey: string, value: string) {
   }
 }
 
+// Auto-detect the ACP coding harnesses installed on the host (claude/pi/codex).
+// The probe shells out per binary, so use useLazyFetch — a slow/hung probe must
+// never suspend the panel. Re-probed only on Settings (re)open.
+interface DetectedHarness {
+  id: string
+  name: string
+  command: string
+  available: boolean
+  reason: string
+}
+const { data: harnessData, pending: harnessPending }
+  = useLazyFetch<{ harnesses: DetectedHarness[] }>('/api/subagents/acp-harnesses')
+const detectedHarnesses = computed(() => harnessData.value?.harnesses ?? [])
+
+// One click fills both the command and the adapter id so runtime="acp" is ready.
+async function useHarness(h: DetectedHarness) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.acp.command', value: h.command } })
+    await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.acp.harness', value: h.id } })
+    editingSubagentField.value = null
+    refresh()
+  }
+  finally {
+    saving.value = false
+  }
+}
+
 // JCLAW-422: subagent model. Unset (the default) = inherit the conversation's
 // model — your agent's default unless you switch mid-chat. A specific value
 // pins ALL fan-outs to that model (e.g. a cheaper one for large evaluations).
@@ -307,6 +335,57 @@ async function saveSubagentModel(value: string) {
               />
             </button>
           </template>
+        </div>
+        <!-- Auto-detected harnesses on this host. Click an available one to fill
+             acp.command + acp.harness so runtime="acp" is ready with no typing. -->
+        <div class="px-4 py-2.5 flex items-start gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5 pt-1">
+            detected
+            <span class="relative group/tip">
+              <InformationCircleIcon
+                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                aria-hidden="true"
+              />
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                Coding-harness CLIs found on this host's PATH. Click an available one to fill acp.command + acp.harness. Re-open Settings to re-probe.
+              </span>
+            </span>
+          </span>
+          <div class="flex-1 flex flex-wrap items-center gap-2 pt-0.5">
+            <span
+              v-if="harnessPending"
+              class="text-xs text-fg-muted"
+            >Probing host…</span>
+            <template v-else>
+              <button
+                v-for="h in detectedHarnesses"
+                :key="h.id"
+                type="button"
+                :disabled="!h.available || saving"
+                :title="h.available ? `Use ${h.command}` : h.reason"
+                class="inline-flex items-center gap-1.5 px-2 py-1 text-xs border transition-colors"
+                :class="h.available
+                  ? (subagentAcpCommand === h.command
+                    ? 'border-emerald-500 text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
+                    : 'border-input text-fg-primary hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-400 cursor-pointer')
+                  : 'border-border text-fg-muted opacity-60 cursor-not-allowed'"
+                @click="h.available && useHarness(h)"
+              >
+                <span
+                  class="w-1.5 h-1.5 rounded-full"
+                  :class="h.available ? 'bg-emerald-500' : 'bg-fg-muted'"
+                  aria-hidden="true"
+                />
+                {{ h.name }}
+                <span class="font-mono opacity-70">{{ h.command }}</span>
+                <CheckIcon
+                  v-if="h.available && subagentAcpCommand === h.command"
+                  class="w-3 h-3"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+          </div>
         </div>
         <!-- JCLAW-422: model subagents run on. Default (inherit) tracks the
              conversation's model; a specific value pins all fan-outs. -->
