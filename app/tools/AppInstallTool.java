@@ -323,16 +323,17 @@ public class AppInstallTool implements ToolRegistry.Tool {
         }
         try {
             var m = JsonParser.parseString(Files.readString(appJson)).getAsJsonObject();
-            if (!m.has("name") || m.get("name").isJsonNull() || m.get("name").getAsString().isBlank()) {
-                issues.add("app.json is missing a non-empty 'name'");
-            }
-            if (!m.has("version") || m.get("version").isJsonNull() || m.get("version").getAsString().isBlank()) {
-                issues.add("app.json is missing a non-empty 'version'");
-            }
+            if (!hasNonBlank(m, "name")) issues.add("app.json is missing a non-empty 'name'");
+            if (!hasNonBlank(m, "version")) issues.add("app.json is missing a non-empty 'version'");
         } catch (IOException | RuntimeException e) {
             issues.add("app.json is not valid JSON: " + e.getMessage());
         }
         return issues;
+    }
+
+    /** True when {@code m} carries a non-null, non-blank string value at {@code field}. */
+    private static boolean hasNonBlank(JsonObject m, String field) {
+        return m.has(field) && !m.get(field).isJsonNull() && !m.get(field).getAsString().isBlank();
     }
 
     /** Recursively copy the {@code src} tree into {@code dst}; returns the file count. */

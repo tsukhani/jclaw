@@ -37,6 +37,9 @@ public class ApiAppsController extends Controller {
      *  hyphens — no dots or slashes, so it can never traverse out of public/apps/. */
     private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
 
+    /** The manifest filename every hosted app carries under {@code public/apps/<slug>/}. */
+    private static final String APP_JSON = "app.json";
+
     /** One hosted app: the parsed manifest plus derived launch fields. {@code id}
      *  is the directory name under {@code public/apps/}; {@code url} = {@code
      *  /apps/<id>/}; {@code icon} is resolved to an app-root-relative URL (null
@@ -91,7 +94,7 @@ public class ApiAppsController extends Controller {
         if (!appsDir.equals(target.getParent())) {
             badRequest("Invalid app slug");
         }
-        if (!Files.isDirectory(target) || !Files.isRegularFile(target.resolve("app.json"))) {
+        if (!Files.isDirectory(target) || !Files.isRegularFile(target.resolve(APP_JSON))) {
             notFound("No such app: " + slug);
         }
         try {
@@ -114,12 +117,12 @@ public class ApiAppsController extends Controller {
     /** Parse one app directory into an entry, or null when it isn't a valid,
      *  launchable app (missing app.json/index.html, or unparseable manifest). */
     private static AppEntry readApp(Path dir) {
-        if (!Files.isRegularFile(dir.resolve("app.json"))
+        if (!Files.isRegularFile(dir.resolve(APP_JSON))
                 || !Files.isRegularFile(dir.resolve("index.html"))) {
             return null;
         }
         try {
-            var m = JsonParser.parseString(Files.readString(dir.resolve("app.json"))).getAsJsonObject();
+            var m = JsonParser.parseString(Files.readString(dir.resolve(APP_JSON))).getAsJsonObject();
             var id = dir.getFileName().toString();
             var name = str(m, "name");
             var version = str(m, "version");
