@@ -217,4 +217,73 @@ describe('Apps page', () => {
     const arg = navigateToMock.mock.calls[0]![0] as { query: { compose: string } }
     expect(arg.query.compose).toContain('app.json "agent" = 5')
   })
+
+  it('create brief assembles a subscription pricing label with billing period', async () => {
+    appsEndpoint([])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    await c.find('[data-testid="create-app-button"]').trigger('click')
+    await c.find('#new-app-brief').setValue('A tool.')
+    await c.find('[data-testid="cost-type"]').setValue('subscription')
+    await c.find('[data-testid="cost-amount"]').setValue('9') // USD ($) + monthly are the defaults
+    await c.find('form').trigger('submit')
+    await flushPromises()
+
+    const arg = navigateToMock.mock.calls[0]![0] as { query: { compose: string } }
+    expect(arg.query.compose).toContain('app.json "price" field): $9/mo')
+  })
+
+  it('create brief reflects the chosen currency for a fixed price', async () => {
+    appsEndpoint([])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    await c.find('[data-testid="create-app-button"]').trigger('click')
+    await c.find('#new-app-brief').setValue('A tool.')
+    await c.find('[data-testid="cost-type"]').setValue('fixed')
+    await c.find('[data-testid="cost-currency"]').setValue('EUR')
+    await c.find('[data-testid="cost-amount"]').setValue('20')
+    await c.find('form').trigger('submit')
+    await flushPromises()
+
+    const arg = navigateToMock.mock.calls[0]![0] as { query: { compose: string } }
+    expect(arg.query.compose).toContain('app.json "price" field): €20')
+    expect(arg.query.compose).not.toContain('/mo') // fixed price has no billing period
+  })
+
+  it('create brief defaults to a Free pricing label', async () => {
+    appsEndpoint([])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    await c.find('[data-testid="create-app-button"]').trigger('click')
+    await c.find('#new-app-brief').setValue('A tool.')
+    await c.find('form').trigger('submit') // cost untouched -> defaults to Free
+    await flushPromises()
+
+    const arg = navigateToMock.mock.calls[0]![0] as { query: { compose: string } }
+    expect(arg.query.compose).toContain('app.json "price" field): Free')
+  })
+
+  it('update brief carries a new pricing label with no text or agent change', async () => {
+    appsEndpoint([
+      { id: 'a1', url: '/apps/a1/', name: 'A1', version: '2.0.0',
+        creator: null, icon: null, price: '$1/mo', description: null, agent: null },
+    ])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    await c.find('[data-testid="update-app-a1"]').trigger('click')
+    // "keep current pricing" is the default, so submit is disabled until something changes
+    expect(c.find('[data-testid="update-app-submit"]').attributes('disabled')).toBeDefined()
+    await c.find('[data-testid="cost-type"]').setValue('fixed')
+    await c.find('[data-testid="cost-amount"]').setValue('5')
+    expect(c.find('[data-testid="update-app-submit"]').attributes('disabled')).toBeUndefined()
+    await c.find('form').trigger('submit')
+    await flushPromises()
+
+    const arg = navigateToMock.mock.calls[0]![0] as { query: { compose: string } }
+    expect(arg.query.compose).toContain('app.json "price" = "$5"')
+  })
 })

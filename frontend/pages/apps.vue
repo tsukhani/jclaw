@@ -41,6 +41,9 @@ const newAppName = ref('')
 const newAppAuthor = ref('') // app.json "creator"
 const newAppBrief = ref('')
 const newAppAgent = ref('') // designated agent id ('' = none), JCLAW-763
+// Assembled pricing label from <AppCostFields> ("Free" | "$9/mo" | "$29"), the
+// app.json "price" metadata. Null while the choice is incomplete.
+const newAppPrice = ref<string | null>(null)
 
 function buildApp() {
   const brief = newAppBrief.value.trim()
@@ -54,6 +57,9 @@ function buildApp() {
   if (newAppAgent.value) {
     lines.push(`Designated agent id (write it as the app.json "agent" field so the app can invoke this agent): ${newAppAgent.value}`)
   }
+  if (newAppPrice.value) {
+    lines.push(`Pricing label (write it as the app.json "price" field): ${newAppPrice.value}`)
+  }
   navigateTo({ path: '/chat', query: { compose: lines.join('\n') } })
 }
 
@@ -63,6 +69,7 @@ function cancelCreate() {
   newAppAuthor.value = ''
   newAppBrief.value = ''
   newAppAgent.value = ''
+  newAppPrice.value = null
 }
 
 // Update-app affordance: same app-creator hand-off, but scoped to an existing
@@ -71,11 +78,17 @@ function cancelCreate() {
 const updatingApp = ref<AppEntry | null>(null)
 const updateBrief = ref('')
 const updateAgent = ref('') // designated agent id ('' = none), JCLAW-763
+// New pricing label from <AppCostFields allow-unchanged> — null means "keep
+// current pricing" (the default), so a price edit isn't forced on every update.
+const updatePrice = ref<string | null>(null)
 
 // The picked agent differs from what's on disk — lets an agent-only change submit
 // without also typing a change brief.
 const updateAgentChanged = computed(() =>
   !!updatingApp.value && (updateAgent.value || null) !== (updatingApp.value.agent || null))
+// A new pricing label was chosen (not "keep current") — like the agent change,
+// it alone can enable submit without a text brief.
+const updatePriceChanged = computed(() => updatePrice.value !== null)
 // The app's stored agent id resolves to no current agent (deleted/renamed) — AC5:
 // surface it as a selectable option so it's visible and removable, not silently blank.
 const updateAgentStale = computed(() =>
@@ -85,6 +98,7 @@ function startUpdate(app: AppEntry) {
   updatingApp.value = app
   updateBrief.value = ''
   updateAgent.value = app.agent ?? ''
+  updatePrice.value = null
   creating.value = false // one affordance form at a time
 }
 
@@ -93,7 +107,8 @@ function submitUpdate() {
   if (!app) return
   const changes = updateBrief.value.trim()
   const agentChanged = (updateAgent.value || null) !== (app.agent || null)
-  if (!changes && !agentChanged) return
+  const priceChanged = updatePrice.value !== null
+  if (!changes && !agentChanged && !priceChanged) return
   const lines = [
     `Use the app-creator skill to update the existing hosted app "${app.name}" (public/apps/${app.id}/, currently v${app.version}).`,
     '',
@@ -106,6 +121,9 @@ function submitUpdate() {
       ? `Set the designated agent: write app.json "agent" = ${updateAgent.value} (the id of the agent this app may invoke).`
       : 'Remove the designated agent: delete the "agent" field from app.json so the app is non-invoking.', '')
   }
+  if (priceChanged) {
+    lines.push(`Set the pricing label: write app.json "price" = "${updatePrice.value}".`, '')
+  }
   lines.push('Apply the changes in place and bump the version in public/apps/'
     + `${app.id}/app.json (patch for small fixes, minor for new features, major for breaking changes).`)
   navigateTo({ path: '/chat', query: { compose: lines.join('\n') } })
@@ -115,6 +133,7 @@ function cancelUpdate() {
   updatingApp.value = null
   updateBrief.value = ''
   updateAgent.value = ''
+  updatePrice.value = null
 }
 </script>
 
@@ -182,10 +201,15 @@ function cancelUpdate() {
             </option>
           </select>
         </label>
+        <AppCostFields
+          :key="updatingApp.id"
+          v-model:price-label="updatePrice"
+          allow-unchanged
+        />
         <div class="flex items-center gap-2">
           <button
             type="submit"
-            :disabled="!updateBrief.trim() && !updateAgentChanged"
+            :disabled="!updateBrief.trim() && !updateAgentChanged && !updatePriceChanged"
             data-testid="update-app-submit"
             class="px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
@@ -283,6 +307,7 @@ function cancelUpdate() {
             </option>
           </select>
         </label>
+        <AppCostFields v-model:price-label="newAppPrice" />
         <div class="flex items-center gap-2">
           <button
             type="submit"
