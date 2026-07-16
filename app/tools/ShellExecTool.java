@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -398,11 +399,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     public static boolean isSensitiveEnvVar(String name) {
-        var upper = name.toUpperCase();
+        var upper = name.toUpperCase(Locale.ROOT);
         for (var prefix : SENSITIVE_PREFIXES) {
             if (upper.startsWith(prefix)) return true;
         }
-        var lower = name.toLowerCase();
+        var lower = name.toLowerCase(Locale.ROOT);
         for (var pattern : SENSITIVE_NAME_PATTERNS) {
             if (lower.contains(pattern)) return true;
         }

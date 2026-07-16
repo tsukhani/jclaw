@@ -13,6 +13,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -85,7 +86,7 @@ final class SubagentHarnessPermissions {
         if (raw == null) return null;
         var discriminator = firstJsonString(raw, "type", "kind", "event", "method", "subtype");
         if (discriminator == null
-                || !PERMISSION_EVENT_TYPES.contains(discriminator.strip().toLowerCase())) {
+                || !PERMISSION_EVENT_TYPES.contains(discriminator.strip().toLowerCase(Locale.ROOT))) {
             return null;
         }
         // The tool/args may sit at the top level or under a nested request envelope.

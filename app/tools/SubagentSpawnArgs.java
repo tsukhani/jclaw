@@ -3,6 +3,7 @@ package tools;
 import com.google.gson.JsonObject;
 import utils.JsonArgs;
 
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -42,7 +43,7 @@ record SubagentSpawnArgs(
         var requestedMode = optString(args, "mode");
         var mode = requestedMode == null || requestedMode.isBlank()
                 ? SubagentSpawnTool.DEFAULT_MODE
-                : requestedMode.toLowerCase();
+                : requestedMode.toLowerCase(Locale.ROOT);
         if (!ALLOWED_MODES.contains(mode)) {
             return fail("Error: 'mode' must be one of " + ALLOWED_MODES
                     + SubagentSpawnTool.GOT_LITERAL + requestedMode + "').");
@@ -54,7 +55,7 @@ record SubagentSpawnArgs(
         var requestedContext = optString(args, SubagentSpawnTool.ARG_CONTEXT);
         var context = requestedContext == null || requestedContext.isBlank()
                 ? SubagentSpawnTool.DEFAULT_CONTEXT
-                : requestedContext.toLowerCase();
+                : requestedContext.toLowerCase(Locale.ROOT);
         if (!SubagentSpawnTool.ALLOWED_CONTEXTS.contains(context)) {
             return fail("Error: 'context' must be one of " + SubagentSpawnTool.ALLOWED_CONTEXTS
                     + SubagentSpawnTool.GOT_LITERAL + requestedContext + "').");

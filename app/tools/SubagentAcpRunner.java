@@ -31,6 +31,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -774,13 +775,13 @@ final class SubagentAcpRunner {
         // with a clear message, rather than silently falling back to defaults.
         var harness = ConfigService.get(SubagentSpawnTool.ACP_HARNESS_KEY, SubagentSpawnTool.DEFAULT_ACP_HARNESS);
         if (harness != null && !harness.isBlank()
-                && !ACP_HARNESS_IDS.contains(harness.strip().toLowerCase())) {
+                && !ACP_HARNESS_IDS.contains(harness.strip().toLowerCase(Locale.ROOT))) {
             return "Error: '" + SubagentSpawnTool.ACP_HARNESS_KEY + "' must be one of " + ACP_HARNESS_IDS
                     + SubagentSpawnTool.GOT_LITERAL + harness.strip() + "').";
         }
         var mode = ConfigService.get(SubagentSpawnTool.ACP_MODE_KEY, SubagentSpawnTool.DEFAULT_ACP_MODE);
         if (mode != null && !mode.isBlank()
-                && !ACP_MODES.contains(mode.strip().toLowerCase())) {
+                && !ACP_MODES.contains(mode.strip().toLowerCase(Locale.ROOT))) {
             return "Error: '" + SubagentSpawnTool.ACP_MODE_KEY + "' must be one of " + ACP_MODES
                     + SubagentSpawnTool.GOT_LITERAL + mode.strip() + "').";
         }
@@ -803,7 +804,7 @@ final class SubagentAcpRunner {
     private static String resolveHarnessId() {
         var configured = ConfigService.get(SubagentSpawnTool.ACP_HARNESS_KEY, SubagentSpawnTool.DEFAULT_ACP_HARNESS);
         if (configured == null || configured.isBlank()) return SubagentSpawnTool.DEFAULT_ACP_HARNESS;
-        var id = configured.strip().toLowerCase();
+        var id = configured.strip().toLowerCase(Locale.ROOT);
         return ACP_HARNESS_IDS.contains(id) ? id : SubagentSpawnTool.DEFAULT_ACP_HARNESS;
     }
 
@@ -812,7 +813,7 @@ final class SubagentAcpRunner {
     static String resolveAcpMode() {
         var configured = ConfigService.get(SubagentSpawnTool.ACP_MODE_KEY, SubagentSpawnTool.DEFAULT_ACP_MODE);
         if (configured == null || configured.isBlank()) return SubagentSpawnTool.DEFAULT_ACP_MODE;
-        var mode = configured.strip().toLowerCase();
+        var mode = configured.strip().toLowerCase(Locale.ROOT);
         return ACP_MODES.contains(mode) ? mode : SubagentSpawnTool.DEFAULT_ACP_MODE;
     }
 

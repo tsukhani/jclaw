@@ -507,12 +507,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
         // Batch is inherently async + session-scoped; inline has no batch semantics.
         var rawMode = SubagentSpawnArgs.optString(args, "mode");
-        var mode = (rawMode == null || rawMode.isBlank()) ? DEFAULT_MODE : rawMode.toLowerCase();
+        var mode = (rawMode == null || rawMode.isBlank()) ? DEFAULT_MODE : rawMode.toLowerCase(Locale.ROOT);
         if (MODE_INLINE.equals(mode)) {
             return "Error: batch 'tasks' is only compatible with mode=\"session\" (inline embeds a single child into the parent transcript).";
         }
         var rawContext = SubagentSpawnArgs.optString(args, ARG_CONTEXT);
-        var context = (rawContext == null || rawContext.isBlank()) ? DEFAULT_CONTEXT : rawContext.toLowerCase();
+        var context = (rawContext == null || rawContext.isBlank()) ? DEFAULT_CONTEXT : rawContext.toLowerCase(Locale.ROOT);
         if (!ALLOWED_CONTEXTS.contains(context)) {
             return "Error: 'context' must be one of " + ALLOWED_CONTEXTS + ".";
         }
