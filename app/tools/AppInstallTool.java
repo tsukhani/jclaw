@@ -94,15 +94,16 @@ public class AppInstallTool implements ToolRegistry.Tool {
                 - `stage`: copy an already-installed app from public/apps/<slug>/ into your workspace (default \
                 dir `<slug>`) so you can edit it for an update. Idempotent — an existing workspace copy is kept \
                 unless `overwrite` is true.
-                - `validate`: check that the built app in your workspace (`source`, default `<slug>`) is \
-                well-formed — a parseable app.json with name and version, an index.html, and a valid slug — \
-                without writing anything.
-                - `install`: validate, then publish the built app from your workspace (`source`, default \
-                `<slug>`) to public/apps/<slug>/, replacing any existing app at that slug. Returns the \
-                /apps/<slug>/ url.
+                - `validate`: check that the built app is well-formed — a parseable app.json with name and \
+                version, an index.html, and a valid slug — without writing anything. The app is auto-located \
+                (see install), so just pass the slug.
+                - `install`: validate, then publish the built app to public/apps/<slug>/, replacing any \
+                existing app at that slug. The source is auto-located — the workspace-root `<slug>/` (direct \
+                build) or the newest `coding/<session>/<slug>/` (a runtime=acp harness build lands there) — so \
+                just pass the slug; set `source` only to override. Returns the /apps/<slug>/ url.
                 Params: `action` (required: stage|validate|install), `slug` (required; lowercase letters, \
-                digits, hyphens), `source` (validate/install; workspace dir), `dest` (stage; workspace dir), \
-                `overwrite` (stage; default false).""";
+                digits, hyphens), `source` (optional override for validate/install; auto-located otherwise), \
+                `dest` (stage; workspace dir), `overwrite` (stage; default false).""";
     }
 
     @Override public Map<String, Object> parameters() {
@@ -117,7 +118,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
                 "App id under public/apps/. Lowercase letters, digits, and hyphens only."));
         props.put(PARAM_SOURCE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
-                "For validate/install: workspace-relative directory holding the built app (app.json + index.html). Defaults to the slug."));
+                "Optional override for validate/install: workspace-relative directory holding the built app. Omit to auto-locate it (workspace-root <slug>/, or the newest coding/<session>/<slug>/ from a harness build)."));
         props.put(PARAM_DEST, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "For stage: workspace-relative directory to copy the app into. Defaults to the slug."));
@@ -154,19 +155,21 @@ public class AppInstallTool implements ToolRegistry.Tool {
     // ---- actions -------------------------------------------------------------
 
     private String validate(JsonObject args, String slug, Agent agent) {
-        Path src = resolveWorkspaceDir(args, PARAM_SOURCE, slug, agent);
-        if (src == null) return err("source escapes your workspace.");
-        if (!Files.isDirectory(src)) {
-            return jsonValid(false, List.of("no directory at that workspace path — build the app there first."));
+        Path src = resolveBuildSource(args, slug, agent);
+        if (src == null || !Files.isDirectory(src)) {
+            return jsonValid(false, List.of("no built app found for slug '" + slug
+                    + "' at the workspace root or under coding/ — build it first."));
         }
         var issues = validateBuiltApp(src);
         return jsonValid(issues.isEmpty(), issues);
     }
 
     private String install(JsonObject args, String slug, Agent agent) {
-        Path src = resolveWorkspaceDir(args, PARAM_SOURCE, slug, agent);
-        if (src == null) return err("source escapes your workspace.");
-        if (!Files.isDirectory(src)) return err("no directory at that workspace path — build the app there first.");
+        Path src = resolveBuildSource(args, slug, agent);
+        if (src == null || !Files.isDirectory(src)) {
+            return err("no built app found for slug '" + slug
+                    + "' at the workspace root or under coding/ — build it in your workspace first.");
+        }
         var issues = validateBuiltApp(src);
         if (!issues.isEmpty()) return err("built app is not well-formed: " + String.join("; ", issues));
 
@@ -183,6 +186,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
             payload.put("slug", slug);
             payload.put("url", "/apps/" + slug + "/");
             payload.put("files", files);
+            payload.put("source", workspaceRelative(agent, src));   // where the app was found
             return GsonHolder.INSTANCE.toJson(payload, Map.class);
         } catch (IOException e) {
             return err("install failed: " + e.getMessage());
@@ -232,6 +236,73 @@ public class AppInstallTool implements ToolRegistry.Tool {
             return WorkspaceFiles.acquireWorkspacePath(agent.name, dir);
         } catch (SecurityException _) {
             return null;
+        }
+    }
+
+    /** Resolve the built-app source for validate/install. An explicit {@code source}
+     *  arg is honored verbatim (containment-checked). Otherwise auto-locate the built
+     *  app so the agent only has to pass the slug, however it was built: the
+     *  workspace-root {@code <slug>/} first (direct build), else the newest
+     *  {@code coding/<session>/<slug>/} — a {@code runtime=acp} harness runs in a
+     *  per-session {@code coding/} workdir (JCLAW-666), so its output lands there,
+     *  not at the workspace root. Returns {@code null} when nothing valid is found. */
+    private static Path resolveBuildSource(JsonObject args, String slug, Agent agent) {
+        var explicit = JsonArgs.optString(args, PARAM_SOURCE);
+        if (explicit != null && !explicit.isBlank()) {
+            try {
+                return WorkspaceFiles.acquireWorkspacePath(agent.name, explicit);
+            } catch (SecurityException _) {
+                return null;
+            }
+        }
+        Path root;
+        try {
+            root = WorkspaceFiles.acquireWorkspacePath(agent.name, slug);
+        } catch (SecurityException _) {
+            return null;
+        }
+        if (Files.isDirectory(root) && isBuiltApp(root)) return root;
+        return newestCodingBuild(agent, slug);
+    }
+
+    /** Newest {@code coding/<session>/<slug>/} that is a well-formed built app, or
+     *  {@code null}. Bridges the harness path: a {@code runtime=acp} build lands
+     *  under its per-session coding workdir, not the workspace root where the
+     *  default source looks. */
+    private static Path newestCodingBuild(Agent agent, String slug) {
+        Path codingRoot;
+        try {
+            codingRoot = WorkspaceFiles.acquireWorkspacePath(agent.name, "coding");
+        } catch (SecurityException _) {
+            return null;
+        }
+        if (!Files.isDirectory(codingRoot)) return null;
+        try (Stream<Path> sessions = Files.list(codingRoot)) {
+            return sessions
+                    .filter(Files::isDirectory)
+                    .map(session -> session.resolve(slug))
+                    .filter(p -> Files.isDirectory(p) && isBuiltApp(p))
+                    .max(Comparator.comparingLong(AppInstallTool::mtime))
+                    .orElse(null);
+        } catch (IOException _) {
+            return null;
+        }
+    }
+
+    private static long mtime(Path p) {
+        try {
+            return Files.getLastModifiedTime(p).toMillis();
+        } catch (IOException _) {
+            return 0L;
+        }
+    }
+
+    /** The install source relative to the agent workspace (for the result payload). */
+    private static String workspaceRelative(Agent agent, Path p) {
+        try {
+            return WorkspaceFiles.workspacePath(agent.name).relativize(p).toString();
+        } catch (RuntimeException _) {
+            return p.toString();
         }
     }
 

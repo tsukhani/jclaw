@@ -122,6 +122,37 @@ class AppInstallToolTest extends UnitTest {
     }
 
     @Test
+    void installAutoLocatesAppFromCodingSession() throws IOException {
+        var slug = slug();
+        // Simulate a runtime=acp harness build: the app lands under a per-session
+        // coding/<name>/<slug>/ dir (JCLAW-666), NOT the workspace root.
+        var appDir = workspace.resolve("coding").resolve("build-" + slug).resolve(slug);
+        Files.createDirectories(appDir);
+        Files.writeString(appDir.resolve("index.html"), "<html><body>from coding</body></html>");
+        Files.writeString(appDir.resolve("app.json"), manifest("FromCoding", "1.0.0"));
+        // No workspace-root <slug>/ exists — install must auto-locate it under coding/.
+        var res = run("{\"action\":\"install\",\"slug\":\"" + slug + "\"}");
+        var o = JsonParser.parseString(res).getAsJsonObject();
+        assertTrue(o.get("installed").getAsBoolean(), "auto-located coding build: " + res);
+        assertTrue(o.get("source").getAsString().startsWith("coding/"), "source is the coding dir: " + res);
+        assertTrue(Files.isRegularFile(Play.getFile("public/apps/" + slug).toPath().resolve("index.html")),
+                "installed from the coding session");
+    }
+
+    @Test
+    void installPrefersWorkspaceRootOverCodingBuild() throws IOException {
+        var slug = slug();
+        buildInWorkspace(slug, manifest("RootWins", "9.9.9")); // workspace-root <slug>/
+        var codingApp = workspace.resolve("coding").resolve("s").resolve(slug);
+        Files.createDirectories(codingApp);
+        Files.writeString(codingApp.resolve("index.html"), "<html></html>");
+        Files.writeString(codingApp.resolve("app.json"), manifest("CodingLoses", "1.0.0"));
+        var res = run("{\"action\":\"install\",\"slug\":\"" + slug + "\"}");
+        var o = JsonParser.parseString(res).getAsJsonObject();
+        assertEquals(slug, o.get("source").getAsString(), "workspace-root build preferred: " + res);
+    }
+
+    @Test
     void stageCopiesInstalledAppIntoWorkspace() throws IOException {
         var slug = slug();
         buildInWorkspace(slug, manifest("Demo", "1.0.0"));

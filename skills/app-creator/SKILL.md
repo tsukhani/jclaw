@@ -1,7 +1,7 @@
 ---
 name: app-creator
 description: Builds a hosted mini-app in your workspace and installs it to public/apps/<slug>/ via the app_install tool — delegates the coding to an external harness (pi/claude/codex via runtime=acp) when one is configured, else builds it directly. The app then appears on the JClaw Apps page.
-version: 1.2.0
+version: 1.2.1
 author: jclaw
 tools: [exec, subagent_spawn, filesystem, app_install]
 commands: []
@@ -49,10 +49,7 @@ A coding harness (`pi -p`, `claude -p`, `codex`, …) is a far stronger multi-fi
 
 For the Nuxt shape, instead instruct: build a Nuxt 4 app with `ssr: false` and `app: { baseURL: '/apps/<slug>/' }` (trailing slash required — without it the assets break), run `nuxi generate`, and place `.output/public/*` into the `<slug>/` directory.
 
-**Where the harness writes — and how to install it.** A `runtime=acp` harness runs in its OWN per-session directory under `coding/<name>/` in your workspace (JCLAW-666), **not** your workspace root — so it writes the app to `coding/<name>/<slug>/`, which is not where `app_install`'s default `source` (`<slug>/` at your workspace root) looks. After the harness finishes, install from the harness's dir:
-
-1. Find the session dir: `exec` `ls -td coding/*/ | head -1` — the newest entry is the run you just spawned; take the directory name as `<session>`.
-2. `app_install` `action: "validate"` then `action: "install"`, `slug: "<slug>"`, **`source: "coding/<session>/<slug>"`** — do not rely on the default source for a harness build.
+**Where the harness writes — and how to install it.** A `runtime=acp` harness runs in its OWN per-session directory under `coding/<name>/` in your workspace (JCLAW-666), **not** your workspace root — so it writes the app to `coding/<name>/<slug>/`. You don't need to track that: after the harness finishes, just call `app_install` `action: "validate"` then `action: "install"` with `slug: "<slug>"`. It **auto-locates** the built app — the workspace-root `<slug>/` (direct build) or the newest `coding/<session>/<slug>/` (harness build) — and copies it to `public/apps/<slug>/`. (The install result echoes the `source` it used.)
 
 `runtime=acp` runs the operator-configured harness (`subagent.acp.command`). **If it reports no harness is configured**, fall through to the direct path below — do NOT ask the operator to configure one unless they want the harness.
 
