@@ -4,7 +4,10 @@ import agents.AgentRunner;
 import com.agentclientprotocol.sdk.client.AcpClient;
 import com.agentclientprotocol.sdk.client.transport.AgentParameters;
 import com.agentclientprotocol.sdk.client.transport.StdioAcpClientTransport;
+import com.agentclientprotocol.sdk.json.AcpJsonMapper;
+import com.agentclientprotocol.sdk.json.JacksonAcpJsonMapper;
 import com.agentclientprotocol.sdk.spec.AcpSchema;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.google.gson.JsonObject;
 import models.Agent;
 import models.Conversation;
@@ -466,7 +469,7 @@ final class SubagentAcpRunner {
                 workdir, resolveAdapter(), sandboxTrustedOrigin(runId));
         var params = AgentParameters.builder(argv.get(0)).args(argv.subList(1, argv.size())).build();
 
-        var client = AcpClient.sync(new StdioAcpClientTransport(params))
+        var client = AcpClient.sync(new StdioAcpClientTransport(params, lenientAcpJsonMapper()))
                 .clientCapabilities(new AcpSchema.ClientCapabilities())   // decline fs + terminal
                 .sessionUpdateConsumer(n -> {
                     SubagentRegistry.touch(runId);   // harness activity resets the idle clock
@@ -504,6 +507,31 @@ final class SubagentAcpRunner {
         } finally {
             SubagentRegistry.unregisterCloser(runId);
         }
+    }
+
+    /**
+     * The SDK's own JSON mapper, made tolerant of {@code session/update}
+     * subtypes this acp-core version doesn't yet know (e.g. claude-agent-acp's
+     * {@code session_info_update}): an unresolvable subtype deserializes to
+     * {@code null} instead of raising, so {@link AcpEventMapper} drops it quietly
+     * rather than the SDK logging a deserialization error.
+     *
+     * <p>Forward-safe by construction: it reuses the SDK's <em>own</em>
+     * configured {@link com.fasterxml.jackson.databind.ObjectMapper} (via {@code
+     * getObjectMapper}) and adds only {@code FAIL_ON_INVALID_SUBTYPE=false}, so
+     * it stays in lockstep with whatever the SDK configures. The flag is a no-op
+     * once a future SDK learns the type (it's no longer an unknown subtype), and
+     * if a future SDK swaps the mapper impl the {@code instanceof} guard falls
+     * back to the default untouched.
+     */
+    private static AcpJsonMapper lenientAcpJsonMapper() {
+        var def = AcpJsonMapper.createDefault();
+        if (def instanceof JacksonAcpJsonMapper jackson) {
+            var mapper = jackson.getObjectMapper().copy()
+                    .configure(DeserializationFeature.FAIL_ON_INVALID_SUBTYPE, false);
+            return new JacksonAcpJsonMapper(mapper);
+        }
+        return def;
     }
 
     /** JCLAW-662: signal terminal once per run so a live monitor stops tailing
