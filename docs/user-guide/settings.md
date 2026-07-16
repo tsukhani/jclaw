@@ -43,7 +43,7 @@ Web search engines available to the `web_search` tool. Drag rows to **reorder pr
 - **needs API key** — enabled but the key is missing.
 - **disabled** — turned off.
 
-Typical providers: **Tavily**, **Brave Search**, **DuckDuckGo** (no key needed), **Serper**, **Bing**, **Google**, **Perplexity**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
+Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
 
 ## OCR
 
@@ -84,6 +84,22 @@ Master toggle, then a backend radio group:
 
 The model picker is a dropdown of that backend's **vision-tagged** models — cloud backends are disabled until their key is set. An **Active:** status line shows the current backend and model. With captioning off, non-vision models receive a "description unavailable" note for images.
 
+## Image Generation
+
+Backend for the agent's `generate_image` tool (off per-agent by default; toggle it on the [Tools](/tools) page). The tool stays hidden from agents until you pick a backend here — the master switch is the `imagegen.provider` key, unset by default.
+
+Master toggle, then a backend radio group:
+
+- **BFL (Black Forest Labs)** — the Flux image API. Paste the BFL key **in this panel** — it's image-generation-only, separate from [LLM Providers](#settings-llm-providers).
+- **OpenAI** — reuses your OpenAI key from LLM Providers; renders with `gpt-image-1`.
+- **Replicate** — hosted models. Set the Replicate key **in this panel** (it's shared with [Video Generation](#settings-video-generation)). The model dropdown is live-discovered from Replicate's curated text-to-image collection, split into **text-to-image** and **image-to-image (Kontext style transfer)** groups; leave it on *Provider default* (`black-forest-labs/flux-schnell`) to let Replicate pick.
+- **Self-Hosted (Flux 2 Klein)** — runs the local image sidecar on your own GPU, no API key. Three runtime gates must clear, each shown inline:
+  1. **uv on PATH** — the sidecar runs under [uv](https://astral.sh/uv); install it and restart if the panel reports it missing.
+  2. **GPU capability** — click **detect GPU** to probe VRAM. The verdict (runnable, free/total VRAM, and a reason) decides whether the radio is selectable.
+  3. **Model download** — pull `black-forest-labs/FLUX.2-klein-4B` (~13 GB, Apache-2.0) with a progress bar; weights land under `data/image-models/` and are recognized across restarts.
+
+Cloud radios are disabled until their key is set (amber **no API key** badge). Saved keys are masked, so editing one means retyping the whole value. Changes apply live.
+
 ## Video Interpretation
 
 How JClaw makes a video attachment legible to your chat model. The strategy is chosen automatically, in this order:
@@ -103,6 +119,21 @@ Two knobs govern the frame-sampling fallbacks (strategies 3 and 4):
 | `sampleFrames`    | 8     | Hard ceiling on frames extracted from a single clip (2–32), regardless of length.                        |
 
 The effective frame count is `clamp(round(duration ÷ secondsPerFrame), 2, sampleFrames)`. An **Active:** status line shows which strategy your current main-agent model would use — watch, summarize, sample, or caption. If none apply, the video comes through with a note telling you to enable one of the above.
+
+## Video Generation
+
+Backend for the agent's `generate_video` tool (off per-agent by default). Like image generation, the tool is hidden from agents until you pick a backend — `videogen.provider` is unset by default. Video generation is **asynchronous**: the chat shows a placeholder and polls job status until the clip is ready.
+
+Master toggle, then a backend radio group:
+
+- **Replicate** — hosted text-to-video models, live-discovered from Replicate's curated collection (leave on *Provider default*, `wan-video/wan-2.2-t2v-fast`, to let Replicate pick). The Replicate key is **not** set here — it reuses the one from [Image Generation](#settings-image-generation), so this radio is disabled until that key is configured.
+- **Self-Hosted (on this machine)** — runs the local video sidecar. Gated on **uv on PATH**; click **detect GPU** to probe. The probe returns the WAN / LTX engine variants your hardware can run, each tagged **ready** (green), **runs slow** (amber, still selectable), or unavailable (disabled, with the reason). Picking Self-Hosted auto-selects the best runnable engine; the per-engine radios refine the variant.
+
+| Key                      | Default | Meaning                                                                                        |
+|--------------------------|---------|------------------------------------------------------------------------------------------------|
+| `videogen.maxJobMinutes` | 30      | Wall-clock ceiling for a single generation job; a run that overruns is failed. Minimum 1 minute. |
+
+Changes apply live.
 
 ## Chat
 
@@ -151,6 +182,15 @@ Two knobs for the [Tasks](/guide#tasks) subsystem:
 | `defaultTimezone`         | `UTC`   | IANA timezone applied to `CRON` / `SCHEDULED` tasks that don't specify their own. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
 
 The retention TTL is also displayed next to the [Tasks](/tasks) page title so you don't get surprised by auto-deletes.
+
+## Logging
+
+Per-logger log-level overrides for the running JVM — the operator counterpart to the [Logs](/logs) page. Add a row naming a logger and the level you want; the change applies **live** (no restart) and persists across restarts.
+
+- **Logger** — any dotted name: a single class (`controllers.ApiChatController`) or a whole subtree (`play`). The alias **`root`** targets the root logger (the global floor). An autocomplete list suggests loggers that have already emitted a line; a name that hasn't logged yet is accepted with a soft amber hint, not rejected.
+- **Level** — one of `OFF`, `FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `ALL` (least to most verbose).
+
+Overrides are applied through log4j2 *after* Play's own logging init, so a row here **wins over both `conf/log4j2.xml` and `application.conf`**. Deleting a row reverts that logger to its inherited (parent) level; deleting the `root` override restores the baseline captured before you first changed it (falling back to `INFO`). They're stored under reserved `logging.level.<logger>` config keys, so they never show up in the [Unmanaged keys](#settings-unmanaged-keys) list.
 
 ## Performance
 

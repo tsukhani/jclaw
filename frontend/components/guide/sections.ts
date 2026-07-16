@@ -28,6 +28,7 @@ import {
   Cog6ToothIcon,
   LinkIcon,
   PuzzlePieceIcon,
+  Squares2X2Icon,
 } from '@heroicons/vue/24/outline'
 import { BotMessageSquare, UsersRound } from 'lucide-vue-next'
 import type { Component } from 'vue'
@@ -44,6 +45,7 @@ import tasksMd from '../../../docs/user-guide/tasks.md?raw'
 import remindersMd from '../../../docs/user-guide/reminders.md?raw'
 import subagentsTasksRemindersMd from '../../../docs/user-guide/subagents-tasks-reminders.md?raw'
 import skillsToolsMcpMd from '../../../docs/user-guide/skills-tools-mcp.md?raw'
+import appsMd from '../../../docs/user-guide/apps.md?raw'
 import settingsMd from '../../../docs/user-guide/settings.md?raw'
 import memoryMd from '../../../docs/user-guide/memory.md?raw'
 import logsDashboardMd from '../../../docs/user-guide/logs-and-dashboard.md?raw'
@@ -114,6 +116,12 @@ export const sections: GuideSection[] = [
     title: 'Skills, Tools & MCP Servers',
     icon: PuzzlePieceIcon,
     content: skillsToolsMcpMd,
+  },
+  {
+    id: 'apps',
+    title: 'Apps',
+    icon: Squares2X2Icon,
+    content: appsMd,
   },
   {
     id: 'settings',

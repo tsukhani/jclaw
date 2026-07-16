@@ -16,7 +16,7 @@ You don't have to think about any of the parameters. Just ask:
 
 > "Spawn a subagent to research nose trimmers on Lazada and Shopee, then summarize."
 
-The parent agent picks sensible defaults: a new sidebar conversation, no inherited context, blocking until done, with a 5-minute budget. You'll see the child appear on the [Chat](/chat) page as a separate row in the sidebar, and when it finishes the parent reads its reply and continues.
+The parent agent picks sensible defaults: a new sidebar conversation, no inherited context, blocking until done, with a 5-minute idle budget. You'll see the child appear on the [Chat](/chat) page as a separate row in the sidebar, and when it finishes the parent reads its reply and continues.
 
 The rest of this section is what you reach for when the defaults aren't quite right.
 
@@ -78,15 +78,15 @@ The parent's behavior settings (system prompt, granted tools when `context=inher
 
 ## Async plus yield (the two-stage pattern) {#async-yield}
 
-For long-running async work where the parent eventually needs the child's reply, pair `spawn_subagent` with the companion tool `yield_to_subagent`:
+For long-running async work where the parent eventually needs the child's reply, pair `subagent_spawn` with the companion tool `subagent_yield`:
 
-1. Parent calls `spawn_subagent` with `async=true, mode=session, task="..."`. Receives a `runId` immediately.
+1. Parent calls `subagent_spawn` with `async=true, mode=session, task="..."`. Receives a `runId` immediately.
 2. Parent does whatever else is useful — talks to you, calls other tools, summarizes the spawn intent.
-3. When the parent needs the child's result, it calls `yield_to_subagent` with that `runId`. The parent's turn ends without emitting a final assistant reply.
+3. When the parent needs the child's result, it calls `subagent_yield` with that `runId`. The parent's turn ends without emitting a final assistant reply.
 4. When the child terminates, JClaw delivers the child's reply back as the parent's next user-role message and resumes the parent's loop. The parent picks up the conversation seamlessly with the child's output as fresh user input.
 
 :::note
-Without `yield_to_subagent`, the parent never gets to use the child's reply — the announce card surfaces it to *you*, not back into the parent. Use yield when you want the parent to keep working with the result.
+Without `subagent_yield`, the parent never gets to use the child's reply — the announce card surfaces it to *you*, not back into the parent. Use yield when you want the parent to keep working with the result.
 :::
 
 ## External coding harness (`runtime=acp`) {#acp-harness}
@@ -162,14 +162,14 @@ Operator surface for the parent agent's *own* runs. Five subcommands:
 | `/subagent kill <id>`    | Cooperatively cancel a running child.                                          |
 | `/subagent history <id>` | Inline render of the child's transcript (capped to ~20 messages, 500 chars).   |
 
-### 4. The `sessions_history` tool
+### 4. The `conversation_history` tool
 
 For the parent agent itself to recall what a previous child did. Returns the full message list (role, content, tool calls and results, timestamps) for a child conversation given the run id. Useful when the parent wants to summarize across multiple historical runs, debug its own delegation pattern, or splice intermediate results into a follow-up turn. The calling agent must be the run's parent.
 
 ## Quick reference
 
 ```text
-spawn_subagent
+subagent_spawn
   task              string   required — instruction for the child
   label             string   short display name
   agentId           int      use an existing agent row instead of cloning current
@@ -178,14 +178,14 @@ spawn_subagent
   modelProvider     string   override child's provider
   modelId           string   override child's model
   async             bool     return run id immediately (session mode only)
-  runTimeoutSeconds int      wall-clock budget, default 300
+  runTimeoutSeconds int      idle budget (seconds of inactivity), default 300
 
-yield_to_subagent
+subagent_yield
   runId             string   required — the run id from a prior async spawn
 
-sessions_history
+conversation_history
   runId             string   required
-  limit             int      1–200, default 100
+  limit             int      1–200, default 50
   beforeMessageId   string   pagination cursor
 ```
 

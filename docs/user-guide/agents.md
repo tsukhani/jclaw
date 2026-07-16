@@ -24,7 +24,7 @@ Click **New Agent** at the top of the page, or click any existing row to edit it
 | **Name**             | How the agent appears in the sidebar and breadcrumbs.                                                          |
 | **Description**      | A short blurb shown under the name. Optional but useful when you have many agents.                             |
 | **Default Provider** | Which model provider to use. Must be configured in [Settings → LLM Providers](/guide#settings) first.          |
-| **Default Model**    | The specific model id within that provider. The capability pills (text / image / audio / reasoning) update to reflect what that model supports. |
+| **Default Model**    | The specific model id within that provider. The capability pills (text / image / audio / video / reasoning) update to reflect what that model supports. |
 
 ### System prompt
 
@@ -115,6 +115,7 @@ Each agent row shows a strip of capability pills derived from the chosen model:
 - **Text** — the baseline; every model has this.
 - **Image** — the model accepts image inputs natively.
 - **Audio** — the model handles voice notes directly (no transcript pre-step).
+- **Video** — the model accepts video inputs natively (others fall back to the dedicated video model or frame extraction).
 - **Reasoning** — the model surfaces its internal thought process.
 
 Click a pill to toggle a per-listing capability filter — useful when you want to find "every agent that can see images" at a glance.

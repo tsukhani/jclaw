@@ -45,6 +45,7 @@ For something that should happen **once** on a given day, use the absolute date-
 | `cancelTask`          | Set status to `CANCELLED` — stops fires but keeps the row so `runNow` can revive it later.                  |
 | `deleteTask`          | Permanently delete the task and its run history. Irreversible.                                              |
 | `listRecurringTasks`  | List every recurring task currently configured for this agent.                                              |
+| `listReminders`       | List every reminder (`payloadType="reminder"`) currently scheduled for this agent.                          |
 
 For the agent to be able to use any of these actions, **Tools → task_manager** must be ticked for that agent on the [Agents](/agents) page.
 

@@ -44,7 +44,7 @@ A reminder targeted at the web channel writes a row to your notifications feed, 
 
 ### Via Telegram
 
-A reminder routed to `telegram:<chat-id>` sends a regular Bot API message in that chat, prefixed with `🔔 Reminder:` so you can distinguish it from agent replies in busy scrollback. The agent's Telegram binding (configured under **Settings → Channels → Telegram**, or inherited from an ancestor agent) supplies the bot token.
+A reminder routed to `telegram:<chat-id>` sends a regular Bot API message in that chat, prefixed with `🔔 Reminder:` so you can distinguish it from agent replies in busy scrollback. The agent's Telegram binding (configured on the [Channels](/channels) page → Telegram card, or inherited from an ancestor agent) supplies the bot token.
 
 Other channels (Slack, WhatsApp) aren't supported for reminder delivery yet — both surfaces would need a dedicated "notification" rendering rather than the regular chat-append behavior.
 

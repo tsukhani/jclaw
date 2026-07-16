@@ -57,10 +57,11 @@ Checked-in hooks live in `.githooks/`. They're wired up automatically by `./jcla
 git config core.hooksPath .githooks
 ```
 
-Two hooks, layered by speed:
+Three hooks. The first two run on the commit/push path, layered by speed:
 
 - **`pre-commit`** — runs `lint-staged` on staged frontend files only (ESLint + Stylelint `--fix`). Target: < 5 s typical. Auto-fixes formatting and re-stages; blocks the commit if a non-fixable rule violates. Short-circuits instantly when no `frontend/**` file is staged, so backend-only commits pay zero cost. Requires `cd frontend && pnpm install` first; before that, the hook fails open with a note.
 - **`pre-push`** — runs the full backend + frontend test suite. Caches per-HEAD so the two-remote deploy flow (origin + github) only pays the ~30 s cost once.
+- **`post-checkout`** — fires `./jclaw.sh init-worktree` when `git worktree add` (or a fresh clone) creates a working tree, seeding its `certs/.env` secret and a deterministic `PLAY_TEST_PORT` so parallel `play autotest` runs across worktrees don't collide. No-op on routine branch switches.
 
 Bypass for a single commit / push (use sparingly):
 
