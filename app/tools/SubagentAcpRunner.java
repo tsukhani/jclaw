@@ -28,6 +28,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -466,7 +467,21 @@ final class SubagentAcpRunner {
                 workdir, resolveAdapter(), sandboxTrustedOrigin(runId));
         var params = AgentParameters.builder(argv.get(0)).args(argv.subList(1, argv.size())).build();
 
+        // The acp-core SDK applies its per-request timeout (default 30s) to EVERY
+        // request — including prompt(), which in ACP spans the whole agent turn
+        // (minutes for a real coding build). JClaw's own idle + wall-clock budget
+        // (SubagentSyncRunner.awaitFuture, which closes this client on timeout via
+        // the registered closer) is the real governor, so size the SDK's request
+        // timeout to the wall-clock ceiling — a generous fallback when the ceiling
+        // is disabled — so it never preempts a legitimate long turn. Without this,
+        // the 30s default aborted every substantial harness prompt ~40s in, right
+        // after initialize + newSession (JCLAW-768 UAT).
+        int ceilingSeconds = ConfigService.getInt(SubagentSpawnTool.MAX_WALLCLOCK_KEY,
+                SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS);
+        var requestTimeout = Duration.ofSeconds(ceilingSeconds > 0 ? ceilingSeconds : 21600L);
+
         var client = AcpClient.sync(new StdioAcpClientTransport(params))
+                .requestTimeout(requestTimeout)                           // JClaw's idle/ceiling budget governs, not the SDK's 30s default
                 .clientCapabilities(new AcpSchema.ClientCapabilities())   // decline fs + terminal
                 .sessionUpdateConsumer(n -> {
                     SubagentRegistry.touch(runId);   // harness activity resets the idle clock
