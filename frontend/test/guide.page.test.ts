@@ -147,6 +147,40 @@ describe('User Guide page', () => {
     expect(apiCalls).toEqual([])
   })
 
+  it('fades the "Scroll to the top" hint in only when the reader has left the top', async () => {
+    // The guide's scroll container is the layout <main> (overflow-auto in
+    // default.vue). Component tests don't mount the layout, so provide a
+    // <main> for the page's onMounted to bind its scroll listener to, then
+    // drive its scrollTop to simulate the reader moving down and back up.
+    const main = document.createElement('main')
+    document.body.appendChild(main)
+    try {
+      const component = await mountSuspended(Guide)
+      await flushPromises()
+
+      // At the top: the mascot is present but the hint text is not. (The
+      // button's aria-label is an attribute, so .text() excludes it — the
+      // only way "Scroll to the top" lands in text content is the visible
+      // hint span.)
+      expect(component.text()).not.toContain('Scroll to the top')
+
+      // Reader scrolls down → the hint fades in.
+      main.scrollTop = 500
+      main.dispatchEvent(new Event('scroll'))
+      await flushPromises()
+      expect(component.text()).toContain('Scroll to the top')
+
+      // Returned to the top → the hint disappears.
+      main.scrollTop = 0
+      main.dispatchEvent(new Event('scroll'))
+      await flushPromises()
+      expect(component.text()).not.toContain('Scroll to the top')
+    }
+    finally {
+      main.remove()
+    }
+  })
+
   it('mounts cleanly with an unknown URL hash', async () => {
     // Hard-refresh on /guide#some-unknown-anchor must still render —
     // falling back silently to the first section.

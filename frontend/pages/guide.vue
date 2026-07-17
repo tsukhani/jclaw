@@ -20,13 +20,27 @@
  */
 import { computed, onMounted, onUnmounted, ref, nextTick, watch } from 'vue'
 import { useRoute } from '#imports'
-import { Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { ArrowUpIcon, Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { sections } from '~/components/guide/sections'
 import GuideRenderer from '~/components/guide/GuideRenderer.vue'
 
 const route = useRoute()
 const activeSectionId = ref<string>(sections[0]?.id ?? '')
 const mobileNavOpen = ref(false)
+
+// Back-to-top affordance. The layout's <main> owns the scroll (overflow-auto
+// in default.vue), so we track its scrollTop rather than window's. `scrolledDown`
+// gates the "Scroll to the top" hint under the Clawdia mascot: it flips true the
+// moment the reader leaves the top — whether by scrolling or by jumping to any
+// section past the first (a TOC click smooth-scrolls <main>, firing scroll
+// events) — and back to false once they're returned to the top.
+const scroller = ref<HTMLElement | null>(null)
+const scrolledDown = ref(false)
+
+function updateScrolled() {
+  const el = scroller.value
+  if (el) scrolledDown.value = el.scrollTop > 8
+}
 
 // One IntersectionObserver watches the section sentinels. The topmost
 // intersecting sentinel wins the active highlight. RootMargin pulls the
@@ -84,9 +98,9 @@ function jumpTo(sectionId: string, anchorId?: string) {
  * back to window scroll if the element isn't reachable (test envs).
  */
 function scrollToTop() {
-  const scroller = document.querySelector('main')
-  if (scroller) {
-    scroller.scrollTo({ top: 0, behavior: 'smooth' })
+  const el = scroller.value ?? document.querySelector('main')
+  if (el) {
+    el.scrollTo({ top: 0, behavior: 'smooth' })
   }
   else {
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -119,6 +133,9 @@ onMounted(async () => {
   await nextTick()
   setupObserver()
   jumpToHash(route.hash)
+  scroller.value = document.querySelector('main')
+  scroller.value?.addEventListener('scroll', updateScrolled, { passive: true })
+  updateScrolled()
 })
 
 // Same-route hash changes (a click on a `/guide#section-id` link from
@@ -130,6 +147,7 @@ watch(() => route.hash, (h) => {
 onUnmounted(() => {
   observer?.disconnect()
   observer = null
+  scroller.value?.removeEventListener('scroll', updateScrolled)
 })
 
 const tocItems = computed(() => sections.map(s => ({
@@ -244,24 +262,26 @@ const tocItems = computed(() => sections.map(s => ({
         </div>
 
         <!-- Reading-Clawdia mascot, pinned in the right gutter alongside
-             the TOC. xl:block (not md:block) because at md/lg the reading
+             the TOC. xl:flex (not md:flex) because at md/lg the reading
              column already eats most of the horizontal budget — squeezing
              a 134px mascot into a narrow gutter there would crowd the
              text. shrink-0 keeps the mascot at its natural width so the
              reading column gives ground first on tighter widths. Wraps
              the <img> in a <button> so a click scrolls the page back to
-             the top — handy when the operator is deep in the guide. The
-             button's aria-label conveys the action; the img's alt is
+             the top — handy when the operator is deep in the guide; a
+             flex-col stacks the fading "Scroll to the top" hint beneath
+             the mascot, so clicking the image or the hint both scroll up.
+             The button's aria-label conveys the action; the img's alt is
              empty because inside an interactive container the picture
              is the visual handle, not independent content. -->
         <button
           type="button"
-          title="Scroll back to top"
-          aria-label="Scroll back to top"
-          class="hidden xl:block shrink-0 xl:sticky xl:top-4 cursor-pointer
-                 hover:opacity-80 focus-visible:outline focus-visible:outline-2
+          title="Scroll to the top"
+          aria-label="Scroll to the top"
+          class="group hidden xl:flex xl:flex-col xl:items-center shrink-0 xl:sticky xl:top-4 cursor-pointer
+                 hover:brightness-110 focus-visible:outline focus-visible:outline-2
                  focus-visible:outline-emerald-500 focus-visible:outline-offset-4
-                 rounded-lg transition-opacity"
+                 rounded-lg transition"
           @click="scrollToTop"
         >
           <img
@@ -270,6 +290,31 @@ const tocItems = computed(() => sections.map(s => ({
             width="134"
             height="150"
           >
+          <!-- "Scroll to the top" hint: fades in below Clawdia whenever the
+               reader has left the top of the guide (scrolled down or jumped to
+               a section past the first), and fades back out once they're
+               returned to the top. aria-hidden because the button's aria-label
+               already names the action for assistive tech. -->
+          <Transition
+            enter-active-class="transition duration-300 ease-out"
+            enter-from-class="opacity-0 translate-y-1"
+            enter-to-class="opacity-100 translate-y-0"
+            leave-active-class="transition duration-200 ease-in"
+            leave-from-class="opacity-100 translate-y-0"
+            leave-to-class="opacity-0 translate-y-1"
+          >
+            <span
+              v-if="scrolledDown"
+              aria-hidden="true"
+              class="mt-2 flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400 whitespace-nowrap transition-colors group-hover:text-emerald-500 dark:group-hover:text-emerald-300"
+            >
+              <ArrowUpIcon
+                class="w-3.5 h-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              Scroll to the top
+            </span>
+          </Transition>
         </button>
       </div>
     </div>
