@@ -56,7 +56,7 @@
 }
 
 .driver-popover.jclaw-tour .driver-popover-description strong {
-  color: hsl(160 64% 32%); /* emerald-700 */
+  color: hsl(160 64% 28%); /* emerald-800 — WCAG AA: ≥4.5:1 on light elevated (was 32%/emerald-700 ≈4.42:1) */
   font-weight: 600;
 }
 
@@ -150,12 +150,12 @@
 
 .dark .driver-popover.jclaw-tour .driver-popover-prev-btn,
 .dark .driver-popover.jclaw-tour .jclaw-tour-back-btn {
-  background-color: hsl(0 84% 60%); /* red-500 */
+  background-color: hsl(0 72% 51%); /* red-600 — WCAG AA: white label ≥4.5:1 (was red-500 ≈3.78:1) */
 }
 
 .dark .driver-popover.jclaw-tour .driver-popover-prev-btn:hover,
 .dark .driver-popover.jclaw-tour .jclaw-tour-back-btn:hover {
-  background-color: hsl(0 72% 51%); /* red-600 */
+  background-color: hsl(0 74% 42%); /* red-700 — darker hover feedback below the new red-600 base */
 }
 
 /* Paired-button popovers (steps 4 & 5): force Finish and Continue to render at
