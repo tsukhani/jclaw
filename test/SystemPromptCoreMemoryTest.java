@@ -63,6 +63,9 @@ class SystemPromptCoreMemoryTest extends UnitTest {
         assertTrue(coreIdx < marker, "core memories must sit in the cacheable prefix (before the boundary)");
         assertTrue(prompt.contains("not instructions"),
                 "core memory block must carry the untrusted-data framing (JCLAW-535)");
+        assertTrue(prompt.contains("prefer the core memory") && prompt.contains("USER.md"),
+                "core memory block must instruct the model to prefer a core memory over a "
+                        + "more general, conflicting profile field like USER.md's Location");
     }
 
     @Test
