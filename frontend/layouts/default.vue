@@ -571,16 +571,16 @@ const navGroups: NavGroup[] = [
         </div>
 
         <!-- Right: search + theme toggle -->
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
           <button
-            class="w-64 flex items-center justify-between pl-3 pr-2.5 py-1.5
+            class="w-64 min-w-0 flex items-center justify-between pl-3 pr-2.5 py-1.5
                    bg-transparent border border-fg-muted/40 rounded-lg text-sm
                    text-neutral-600 dark:text-neutral-400
                    hover:border-ring transition-colors cursor-pointer"
             @click="paletteOpen = true"
           >
-            <span>Search...</span>
-            <kbd class="px-1.5 py-0.5 bg-transparent border border-fg-muted/40 rounded text-[10px] font-mono tracking-widest">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
+            <span class="truncate">Search...</span>
+            <kbd class="max-sm:hidden shrink-0 px-1.5 py-0.5 bg-transparent border border-fg-muted/40 rounded text-[10px] font-mono tracking-widest">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
           </button>
           <div class="flex items-center gap-0.5 p-0.5 border border-fg-muted/40 rounded-full">
             <button
