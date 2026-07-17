@@ -1290,7 +1290,7 @@ defineExpose({ refresh })
                          same as a bare InformationCircleIcon. -->
                     <button
                       type="button"
-                      class="inline-flex p-0 m-0 bg-transparent border-0 cursor-help"
+                      class="inline-flex items-center justify-center min-h-6 min-w-6 -my-1 p-0 m-0 bg-transparent border-0 cursor-help"
                       aria-label="Cost column information"
                       @mouseenter="showCostTooltip"
                       @mouseleave="hideCostTooltip"
