@@ -320,7 +320,7 @@ const navGroups: NavGroup[] = [
           class="inline-flex items-center justify-center
                  rounded-full border border-blue-700 dark:border-blue-400
                  px-[5px] py-[2px]
-                 text-[8px] font-medium leading-none tracking-[0.04em]
+                 text-[10px] font-medium leading-none tracking-[0.04em]
                  text-blue-700 dark:text-blue-400"
         >BETA</span>
         <button

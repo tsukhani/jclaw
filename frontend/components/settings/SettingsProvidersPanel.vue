@@ -1666,7 +1666,7 @@ const groupedProviders = computed(() => {
               </select>
               <span class="text-[10px] text-fg-muted shrink-0">{{ filteredDiscoveredModels.length }}</span>
               <button
-                class="text-[10px] text-fg-muted hover:text-fg-strong transition-colors shrink-0"
+                class="text-xs text-fg-muted hover:text-fg-strong transition-colors shrink-0"
                 @click="selectAllDiscovered"
               >
                 {{ discoverySelected.size === filteredDiscoveredModels.length ? 'None' : 'All' }}

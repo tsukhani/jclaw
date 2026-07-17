@@ -354,7 +354,7 @@ async function setVideoModel(value: string) {
             <button
               v-if="vllmConfigured && !vllmReachable"
               type="button"
-              class="text-[10px] text-fg-muted underline hover:text-fg-strong disabled:opacity-50"
+              class="text-xs text-fg-muted underline hover:text-fg-strong disabled:opacity-50"
               :disabled="vllmProbing"
               title="Re-check whether vLLM is reachable now"
               @click.prevent="probeVllm"
@@ -466,7 +466,7 @@ async function setVideoModel(value: string) {
           </select>
           <button
             type="button"
-            class="text-[10px] text-fg-muted underline hover:text-fg-strong disabled:opacity-50 shrink-0"
+            class="text-xs text-fg-muted underline hover:text-fg-strong disabled:opacity-50 shrink-0"
             :disabled="videoModelsLoading"
             title="Re-fetch video models from the provider"
             @click="discoverVideoModels"

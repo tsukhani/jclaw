@@ -290,7 +290,7 @@ onUnmounted(() => stopVideoCapPolling())
             </select>
             <button
               type="button"
-              class="shrink-0 text-[11px] text-fg-muted hover:text-fg-strong disabled:opacity-50"
+              class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
               :disabled="videogenModelsStatus === 'pending'"
               @click="refreshVideogenModels()"
             >
@@ -340,7 +340,7 @@ onUnmounted(() => stopVideoCapPolling())
             <button
               v-else
               type="button"
-              class="shrink-0 text-[11px] text-fg-muted hover:text-fg-strong disabled:opacity-50"
+              class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
               :disabled="videoCapState === 'PROBING'"
               @click="probeVideoCapability()"
             >

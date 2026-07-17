@@ -1278,7 +1278,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                         <button
                           v-if="editingNameId !== task.id"
                           type="button"
-                          class="inline-flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+                          class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
                           @click="startEditName(task)"
                         >
                           <PencilSquareIcon
@@ -1352,7 +1352,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                         <button
                           v-if="editingId !== task.id"
                           type="button"
-                          class="inline-flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+                          class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
                           @click="startEditSteps(task)"
                         >
                           <PencilSquareIcon
@@ -1501,7 +1501,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                         <button
                           v-if="editingDeliveryId !== task.id"
                           type="button"
-                          class="inline-flex items-center gap-1 text-[10px] text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+                          class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
                           @click="startEditDelivery(task)"
                         >
                           <PencilSquareIcon

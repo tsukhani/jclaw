@@ -1462,7 +1462,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           </h2>
           <button
             v-if="editing"
-            class="px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400
+            class="px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400
                    bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20
                    hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-600
                    dark:hover:border-emerald-500/50 transition-colors"
@@ -2540,7 +2540,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </label>
             <button
               v-if="promptBreakdownData"
-              class="px-2 py-1 text-[10px] text-fg-muted border border-input hover:text-fg-strong hover:border-neutral-500"
+              class="px-2 py-1 text-xs text-fg-muted border border-input hover:text-fg-strong hover:border-neutral-500"
               title="Copy the raw breakdown JSON (useful for bug reports)"
               @click="copyPromptBreakdownJson()"
             >

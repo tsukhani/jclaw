@@ -992,7 +992,7 @@ function totalSkillCount(agentId: number) {
               >
               <button
                 v-if="globalFilter"
-                class="text-[10px] text-fg-muted hover:text-fg-strong shrink-0"
+                class="text-xs text-fg-muted hover:text-fg-strong shrink-0"
                 title="Clear filter"
                 @click="globalFilter = ''"
               >
@@ -1168,7 +1168,7 @@ function totalSkillCount(agentId: number) {
               >
               <button
                 v-if="agentFilter"
-                class="text-[10px] text-fg-muted hover:text-fg-strong shrink-0"
+                class="text-xs text-fg-muted hover:text-fg-strong shrink-0"
                 title="Clear filter"
                 @click="agentFilter = ''"
               >
@@ -1263,7 +1263,7 @@ function totalSkillCount(agentId: number) {
                       <span class="text-xs text-fg-strong font-mono truncate">{{ skill.name }}</span>
                       <button
                         v-if="updateAvailable(skill)"
-                        class="text-[9px] text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shrink-0"
+                        class="text-xs text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shrink-0"
                         :title="`Update to v${updateAvailable(skill)}`"
                         @click.stop="updateAgentSkillFromGlobal(agent.id, skill)"
                       >

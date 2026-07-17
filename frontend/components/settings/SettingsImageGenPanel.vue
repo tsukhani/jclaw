@@ -529,7 +529,7 @@ onUnmounted(() => stopImagegenLocalPolling())
             </select>
             <button
               type="button"
-              class="shrink-0 text-[11px] text-fg-muted hover:text-fg-strong disabled:opacity-50"
+              class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
               :disabled="imagegenModelsStatus === 'pending'"
               @click="refreshImagegenModels()"
             >
@@ -582,7 +582,7 @@ onUnmounted(() => stopImagegenLocalPolling())
             <button
               v-else
               type="button"
-              class="shrink-0 text-[11px] text-fg-muted hover:text-fg-strong disabled:opacity-50"
+              class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
               :disabled="imageCapState === 'PROBING'"
               @click="probeImageCapability()"
             >

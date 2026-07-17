@@ -46,7 +46,7 @@ const emit = defineEmits<{
       </button>
       <button
         type="button"
-        class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[11px] text-fg-muted hover:text-fg-strong transition-colors"
+        class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs text-fg-muted hover:text-fg-strong transition-colors"
         :title="copied ? 'Copied' : 'Copy reasoning'"
         @click.stop="emit('copy')"
       >
