@@ -325,6 +325,16 @@ function focusInput() {
   })
 }
 
+// After a model pick, land the cursor back in the composer — the same focus
+// the page does on load — so the user can start typing without a second click.
+// The combobox suppresses reka-ui's default focus-return-to-trigger on a pick
+// (see ChatModelCombobox's close-auto-focus handler); without that, reka's
+// setTimeout(0) refocus would steal focus back from the composer.
+function onModelPicked(key: string) {
+  onModelKeyChange(key)
+  focusInput()
+}
+
 // Sidebar Recents deep-link from within /chat: NuxtLink swaps the query
 // without remounting the page, so the one-shot deep-link watcher above
 // doesn't re-fire. This route-query watcher catches in-page navigations
@@ -572,7 +582,7 @@ function exportConversation() {
             :providers="providers"
             :model-key="selectedModelKey"
             :status-tone="streaming ? 'busy' : (selectedAgent?.providerConfigured === false ? 'offline' : 'ok')"
-            @update:model-key="onModelKeyChange"
+            @update:model-key="onModelPicked"
           />
         </div>
         <span class="ml-auto flex items-center gap-2">

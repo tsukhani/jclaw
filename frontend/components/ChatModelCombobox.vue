@@ -25,6 +25,11 @@ const emit = defineEmits<(e: 'update:modelKey', key: string) => void>()
 
 const open = ref(false)
 const query = ref('')
+// True for the brief window around a model pick so onCloseAutoFocus can
+// suppress reka-ui's focus-return-to-trigger — the parent lands focus in the
+// composer instead. Dismissals that aren't picks (Escape, outside-click) leave
+// this false, so the trigger correctly reclaims focus for keyboard users.
+const picking = ref(false)
 
 interface Row { provider: string, model: string, label: string, sublabel: string }
 
@@ -73,9 +78,21 @@ const statusClass = computed(() => {
 })
 
 function pick(row: Row) {
+  picking.value = true
   emit('update:modelKey', `${row.provider}::${row.model}`)
   open.value = false
   query.value = ''
+}
+
+// On a pick, stop the popover from snapping focus back to the trigger button so
+// the parent can land the cursor in the chat composer instead. reka-ui's
+// FocusScope returns focus via a setTimeout(0) unless the close-auto-focus
+// event is prevented — without this it fires after the parent's focus and wins.
+function onCloseAutoFocus(event: Event) {
+  if (picking.value) {
+    event.preventDefault()
+    picking.value = false
+  }
 }
 </script>
 
@@ -111,6 +128,7 @@ function pick(row: Row) {
     <PopoverContent
       align="start"
       class="w-[440px] p-2 rounded-[10px] border-[#dfe7e3] dark:border-[#2e3035]"
+      @close-auto-focus="onCloseAutoFocus"
     >
       <div class="space-y-2">
         <div class="relative">
