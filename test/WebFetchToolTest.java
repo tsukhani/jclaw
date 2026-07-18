@@ -410,6 +410,21 @@ class WebFetchToolTest extends UnitTest {
                 "JSON must pass through unchanged (no Markdown/Tika): " + result);
     }
 
+    @Test
+    void extractTextDropsElementIdAnnotations() throws Exception {
+        // flexmark-html2md would otherwise emit element ids as Kramdown-style
+        // {#id} annotations (rife in Parsoid/Wikipedia HTML). Verify they're gone.
+        var html = "<html><head><title>T</title></head><body>"
+                + "<h2 id=\"section-one\">A Heading</h2>"
+                + "<p id=\"para-1\">Some readable paragraph text.</p>"
+                + "</body></html>";
+        var text = extractText(html, "http://example.test/");
+        assertFalse(text.contains("{#"),
+                "id attributes must not leak as {#id} annotations: " + text);
+        assertTrue(text.contains("A Heading"), "heading text preserved: " + text);
+        assertTrue(text.contains("Some readable paragraph text"), "body preserved: " + text);
+    }
+
     /** Build a one-page PDF containing {@code text}, using the PDFBox 3.x that
      *  ships transitively with tika-parsers-standard. */
     private static byte[] makePdf(String text) throws java.io.IOException {

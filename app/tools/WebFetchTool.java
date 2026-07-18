@@ -62,7 +62,13 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private static final int MIN_READABILITY_CHARS = 200;
 
     private static final FlexmarkHtmlConverter HTML_TO_MARKDOWN =
-            FlexmarkHtmlConverter.builder(new MutableDataSet()).build();
+            FlexmarkHtmlConverter.builder(new MutableDataSet()
+                    // Suppress the {#id} inline-attribute annotations flexmark emits
+                    // for element ids. Parsoid-rendered HTML (e.g. Wikipedia) tags
+                    // nearly every node with an id, which is pure noise in LLM-facing
+                    // Markdown and carries no semantic value.
+                    .set(FlexmarkHtmlConverter.OUTPUT_ATTRIBUTES_ID, false))
+                    .build();
 
     /** Shared Tika facade for non-HTML document extraction. {@code maxStringLength}
      *  is set once here (never mutated per-call) so {@code parseToString} stays
