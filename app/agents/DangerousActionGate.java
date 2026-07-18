@@ -12,6 +12,7 @@ import models.ToolApprovalGrant;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import utils.ChannelOriginTrust;
 
 import java.time.Duration;
 import java.util.Optional;
@@ -53,6 +54,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * still proceeds under any policy. Non-dangerous tools never reach the
  * gate — it returns {@link Decision#PROCEED} before any I/O.
  *
+ * <p>JCLAW-777 / VULN-001: the permissive {@code allow} default applies only to a
+ * <em>trusted operator origin</em> — the web UI or a context-less internal turn
+ * ({@link utils.ChannelOriginTrust}). An <em>untrusted external channel peer</em>
+ * (whatsapp, or a telegram/slack turn that fell through with no usable approval
+ * binding) has no interactive surface and no authenticated caller, so it fails
+ * <em>closed</em> at the off-channel fallback rather than running ungated — an
+ * external peer could otherwise prompt-inject the agent into unsandboxed shell.
+ * An explicit {@code ask} still lets the operator confirm such a turn on the bound DM.
+ *
  * <h2>Session / always scope</h2>
  * <p>An {@code APPROVED_SESSION} or {@code APPROVED_ALWAYS} tap records a
  * grant keyed by {@code (agentId, toolName)} in {@link #GRANTS}, so the same
@@ -86,11 +96,13 @@ public final class DangerousActionGate {
     /**
      * JCLAW-423: policy for a dangerous tool dispatched on a channel with no
      * interactive approval surface (anything but Telegram). {@code allow}
-     * (default) runs it ungated, preserving the pre-423 behavior where non-
-     * Telegram channels never gated dangerous tools; {@code deny} fails closed;
+     * (default) runs it ungated on a <em>trusted operator origin</em> (web UI /
+     * no conversation), preserving the pre-423 behavior; {@code deny} fails closed;
      * JCLAW-709 {@code ask} routes the confirmation to the agent's bound Telegram
      * DM (fail-closed if there is none). An explicit standing grant still proceeds
-     * under any policy.
+     * under any policy. JCLAW-777: {@code allow} does <em>not</em> apply to an
+     * untrusted external channel peer (see {@link utils.ChannelOriginTrust}) — such
+     * an origin fails closed unless {@code ask} routes it to the operator's DM.
      */
     public static final String CFG_OFF_CHANNEL_POLICY = "tool.approval.offChannelPolicy";
     private static final String DEFAULT_OFF_CHANNEL_POLICY = "allow";
@@ -204,19 +216,44 @@ public final class DangerousActionGate {
 
     /**
      * Off-channel fallback: there is no interactive approval surface on THIS
-     * dispatch's own channel, so apply the operator-configured policy
-     * ({@value #CFG_OFF_CHANNEL_POLICY}, default {@code allow}). {@code allow}
-     * proceeds ungated (the pre-JCLAW-423 behavior); {@code deny} fails closed;
-     * JCLAW-709 {@code ask} routes a confirmation to the agent's bound Telegram
-     * DM (fail-closed if there is none). A standing grant has already
-     * short-circuited before this point.
+     * dispatch's own channel, so resolve the dispatch by origin trust.
+     *
+     * <p>JCLAW-777 / VULN-001: an <em>untrusted external origin</em> — any named
+     * inbound channel peer ({@code whatsapp}, or a {@code telegram}/{@code slack} turn
+     * that fell through here with no usable approval binding) — reached this point
+     * with no interactive surface AND no authenticated caller. It must never run a
+     * dangerous tool ungated, so its floor is fail-closed ({@link Decision#ABORT});
+     * the operator can still opt into {@code ask} to route a confirmation to the
+     * bound Telegram DM, and a standing grant has already short-circuited before this
+     * point. The permissive {@code allow} default applies only to the
+     * <em>trusted operator origin</em> (the web UI, or a context-less internal turn —
+     * see {@link ChannelOriginTrust#isOperatorOrigin}), where it preserves the
+     * pre-JCLAW-423 behavior. {@code deny} fails closed on any origin; JCLAW-709
+     * {@code ask} routes a confirmation to the agent's bound Telegram DM (fail-closed
+     * if there is none).
      */
     private static Decision offChannelDecision(Agent agent, String toolName, String argsJson, String channelType) {
         var chan = channelType == null ? "none" : channelType;
         var policy = ConfigService.get(CFG_OFF_CHANNEL_POLICY, DEFAULT_OFF_CHANNEL_POLICY);
+
+        // An untrusted external channel peer must not run a dangerous tool ungated: the
+        // permissive "allow" default is only for the trusted operator origin. "ask" may
+        // still reach the operator's DM; anything else is fail-closed.
+        if (!ChannelOriginTrust.isOperatorOrigin(channelType)) {
+            if ("ask".equalsIgnoreCase(policy)) {
+                return askViaTelegram(agent, toolName, argsJson, chan);
+            }
+            EventLogger.warn(LOG_CATEGORY, agent.name, chan,
+                    "Dangerous tool '%s' from untrusted origin '%s' has no approval surface — denying (fail-closed)"
+                            .formatted(toolName, chan));
+            return Decision.ABORT;
+        }
+
+        // Trusted operator origin (web UI, or no conversation context): honor the
+        // configured policy — the default "allow" preserves the pre-JCLAW-423 behavior.
         if ("deny".equalsIgnoreCase(policy)) {
             EventLogger.warn(LOG_CATEGORY, agent.name, chan,
-                    "Dangerous tool '%s' on non-Telegram channel '%s' has no approval surface — denying (%s=deny)"
+                    "Dangerous tool '%s' on trusted origin '%s' has no approval surface — denying (%s=deny)"
                             .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
             return Decision.ABORT;
         }
@@ -224,7 +261,7 @@ public final class DangerousActionGate {
             return askViaTelegram(agent, toolName, argsJson, chan);
         }
         EventLogger.info(LOG_CATEGORY, agent.name, chan,
-                "Dangerous tool '%s' on non-Telegram channel '%s' — proceeding ungated (%s=allow)"
+                "Dangerous tool '%s' on trusted origin '%s' — proceeding ungated (%s=allow)"
                         .formatted(toolName, chan, CFG_OFF_CHANNEL_POLICY));
         return Decision.PROCEED;
     }

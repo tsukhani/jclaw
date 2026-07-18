@@ -241,6 +241,92 @@ class DangerousActionGateTest extends UnitTest {
                 "ask with no Telegram binding must fail closed, with no prompt");
     }
 
+    // ── JCLAW-777 / VULN-001: an UNTRUSTED external channel peer (whatsapp, or a
+    //    telegram/slack turn with no usable approval binding) must NOT run a
+    //    dangerous tool ungated under the default off-channel policy. Only the
+    //    trusted operator origin (web / no conversation) keeps the permissive
+    //    default; every inbound channel peer fails closed. ──
+
+    @Test
+    void whatsappUntrustedOriginDeniesDangerousToolByDefault() {
+        // Default off-channel policy is "allow" — but that permissive default exists
+        // only for the operator's own web UI. An untrusted WhatsApp peer has no
+        // interactive approval surface and no authenticated caller, so a dangerous
+        // tool must fail closed rather than reach ShellExecTool's /bin/sh -c ungated.
+        var agent = unboundAgent("gate-wa-default");
+        var convId = whatsappConvId(agent);
+
+        assertEquals(Decision.ABORT,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"id > /tmp/pwned\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "an untrusted whatsapp origin must not raise a Telegram prompt either");
+    }
+
+    @Test
+    void whatsappUntrustedOriginHonorsStandingGrant() {
+        // The escape hatch survives: an explicit operator standing grant still proceeds
+        // on any channel (it short-circuits arbitration before the origin is resolved).
+        var agent = unboundAgent("gate-wa-grant");
+        var convId = whatsappConvId(agent);
+        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL); return null; });
+
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a standing grant proceeds for an untrusted origin with no prompt");
+    }
+
+    @Test
+    void telegramConversationWithNoUsableBindingFailsClosed() {
+        // A telegram-origin turn whose agent has no usable Telegram binding falls
+        // through to the off-channel path. It is still an untrusted external peer, so
+        // it must fail closed rather than proceed ungated (the pre-fix behavior).
+        var agent = unboundAgent("gate-tg-nobinding");
+        var convId = commitInFreshTx(() -> {
+            Agent a = Agent.findById(agent.id);
+            return ConversationService.create(a, "telegram", TG_USER).id;
+        });
+
+        assertEquals(Decision.ABORT,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"whoami\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a telegram turn with no bot to prompt on must fail closed, not run ungated");
+    }
+
+    @Test
+    void whatsappUntrustedOriginAskPolicyConfirmsOnTelegramAndProceeds() throws Exception {
+        // offChannelPolicy=ask lets the operator still authorize an untrusted-origin
+        // dangerous tool by confirming on the agent's bound Telegram DM — the middle
+        // ground between blanket allow and hard deny for untrusted peers.
+        commitInFreshTx(() -> { ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "ask"); return null; });
+        ConfigService.clearCache();
+        var agent = boundAgent("gate-wa-ask");
+        var convId = whatsappConvId(agent);
+
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}");
+        var approvalId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_ONCE, TG_USER);
+
+        assertEquals(Decision.PROCEED, verdict.get(2, TimeUnit.SECONDS));
+        assertTrue(server.countRequests("sendMessage") >= 1,
+                "ask routes a Telegram confirmation even for an untrusted whatsapp origin");
+    }
+
+    @Test
+    void nullConversationOriginProceedsUngated() {
+        // Task / scheduled runs (AgentRunner.runForTask) drive the tool loop with a
+        // null conversationId — a trusted internal origin, not an external peer. A
+        // dangerous tool must still proceed ungated so operator-configured automation
+        // that uses exec keeps working (the JCLAW-777 fix treats null as trusted,
+        // matching ChannelOriginTrust and SubagentAcpRunner.sandboxTrustedOrigin).
+        var agent = unboundAgent("gate-null-origin");
+
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, null, DANGEROUS_TOOL, "{\"command\":\"echo task\"}"));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a context-less (task) origin must not raise a prompt");
+    }
+
     // ── Session/Always scope suppresses re-prompt ──────────────────────
 
     @Test
@@ -387,6 +473,14 @@ class DangerousActionGateTest extends UnitTest {
         return commitInFreshTx(() -> {
             Agent a = Agent.findById(agent.id);
             return ConversationService.create(a, "web", null).id;
+        });
+    }
+
+    /** A committed WhatsApp conversation for {@code agent} — an untrusted external peer. */
+    private Long whatsappConvId(Agent agent) {
+        return commitInFreshTx(() -> {
+            Agent a = Agent.findById(agent.id);
+            return ConversationService.create(a, "whatsapp", "15551234567").id;
         });
     }
 

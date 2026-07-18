@@ -19,6 +19,7 @@ import services.EventLogger;
 import services.NotificationBus;
 import services.SubagentRegistry;
 import services.Tx;
+import utils.ChannelOriginTrust;
 import utils.GsonHolder;
 
 import java.io.File;
@@ -124,7 +125,7 @@ final class SubagentAcpRunner {
      */
     private static void enforceChannelApproval(Long runId, Agent childAgent, String task) {
         var originChannel = parentChannelType(runId);
-        if (originChannel == null || "web".equals(originChannel)) return;
+        if (ChannelOriginTrust.isOperatorOrigin(originChannel)) return;
         var decision = agents.DangerousActionGate.guardHarnessPermission(
                 childAgent, parentConversationId(runId), "coding_harness_run", task);
         var approved = decision == agents.DangerousActionGate.Decision.PROCEED;
@@ -589,7 +590,7 @@ final class SubagentAcpRunner {
      *  runs this returns {@code false} for. */
     private static boolean sandboxTrustedOrigin(Long runId) {
         var origin = parentChannelType(runId);
-        return origin == null || "web".equals(origin);
+        return ChannelOriginTrust.isOperatorOrigin(origin);
     }
 
     /**
