@@ -231,6 +231,15 @@ dependencies {
     // parent POM pins for its parser modules; keeps resolved/declared in sync.
     implementation("org.jsoup:jsoup:1.22.2")
 
+    // Readability4J — Kotlin port of Mozilla Readability, drives WebFetchTool's
+    // main-content extraction (JCLAW-775). Pins an old jsoup transitively; the
+    // 1.22.2 above wins on the resolved classpath. WebFetchTool falls back to a
+    // Jsoup boilerplate strip if this yields no article, so a readability miss
+    // (or throw) never surfaces as an empty result.
+    implementation("net.dankito.readability4j:readability4j:1.0.8") {
+        exclude(group = "org.slf4j", module = "slf4j-simple")
+    }
+
     // JavaParser — AST-aware Java compression for CodeCompressor (JCLAW-463).
     // Self-contained (no transitive deps); its classes load lazily, only when
     // Java source is actually compressed, so non-Java paths never touch it.
@@ -309,12 +318,16 @@ dependencies {
     }
 
     // Each flexmark-ext-* re-pulls flexmark-core-test → replicate the excludes.
+    // flexmark-html2md-converter (JCLAW-775) is the reverse of the HtmlRenderer
+    // DocumentWriter uses: it turns extracted HTML into LLM-friendly Markdown in
+    // WebFetchTool. Same 0.64.8 family, same test-util excludes.
     listOf(
         "flexmark-ext-tables",
         "flexmark-ext-gfm-strikethrough",
         "flexmark-ext-gfm-tasklist",
         "flexmark-ext-autolink",
         "flexmark-ext-typographic",
+        "flexmark-html2md-converter",
     ).forEach { module ->
         implementation("com.vladsch.flexmark:$module:0.64.8") {
             exclude(group = "com.vladsch.flexmark", module = "flexmark-test-util")

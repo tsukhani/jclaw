@@ -96,6 +96,24 @@ class WebFetchToolTest extends UnitTest {
                         MediaType.parse(contentType)));
     }
 
+    /** Like {@link #ok} but also sets the Content-Type response header, so
+     *  WebFetchTool's content-type routing (not just body sniffing) is driven. */
+    private static Response.Builder okHtml(String html) {
+        return new Response.Builder()
+                .code(200)
+                .message("OK")
+                .addHeader("Content-Type", "text/html; charset=utf-8")
+                .body(ResponseBody.create(html, MediaType.parse("text/html")));
+    }
+
+    private static Response.Builder okBytes(byte[] body, String contentType) {
+        return new Response.Builder()
+                .code(200)
+                .message("OK")
+                .addHeader("Content-Type", contentType)
+                .body(ResponseBody.create(body, MediaType.parse(contentType)));
+    }
+
     private static Response.Builder redirect(String location) {
         var b = new Response.Builder()
                 .code(302)
@@ -316,5 +334,99 @@ class WebFetchToolTest extends UnitTest {
         assertTrue(text.contains("[Truncated:"),
                 "long input must trip truncation marker: tail=" +
                 text.substring(Math.max(0, text.length() - 100)));
+    }
+
+    // =====================
+    // 7. JCLAW-775: readability + Markdown + Tika text-mode pipeline
+    // =====================
+
+    @Test
+    void textModeArticleReturnsMarkdown() {
+        // An article-shaped page: the main <article> is surrounded by nav +
+        // footer boilerplate. Readability should keep the article body (link,
+        // list, prose) and drop the chrome; flexmark renders it as Markdown.
+        var body = new StringBuilder("<html><head><title>The Title</title></head><body>");
+        body.append("<nav>Home About Contact NAVLINK</nav>");
+        body.append("<article><h2>The Headline</h2>");
+        body.append("<p>").append("Meaningful opening prose about the subject. ".repeat(8)).append("</p>");
+        body.append("<p>See the <a href=\"https://example.com/x\">example link</a> for details. ")
+            .append("Additional explanatory sentence to bulk up the article body. ".repeat(6)).append("</p>");
+        body.append("<ul><li>Alpha bullet item</li><li>Beta bullet item</li></ul>");
+        body.append("<p>").append("Closing paragraph that keeps the article substantial. ".repeat(8)).append("</p>");
+        body.append("</article><footer>FOOTERJUNK 2026</footer></body></html>");
+
+        queue.enqueue(okHtml(body.toString()));
+        var tool = new WebFetchTool();
+        var result = tool.execute("{\"url\":\"http://example.test/article\"}", null);
+
+        assertTrue(result.contains("[example link](https://example.com/x)"),
+                "anchor should render as a Markdown link (proves HTML->MD ran): " + result);
+        assertTrue(result.contains("Alpha bullet item"),
+                "article list content must survive extraction: " + result);
+        assertFalse(result.contains("FOOTERJUNK"), "footer boilerplate must be stripped: " + result);
+        assertFalse(result.contains("NAVLINK"), "nav boilerplate must be stripped: " + result);
+    }
+
+    @Test
+    void textModeReadabilityMissFallsBackToJsoup() {
+        // Too little prose for Readability to score an article (< 200 chars), so
+        // the Jsoup boilerplate-strip fallback must run — never an empty result.
+        var html = "<html><head><title>Tiny</title></head><body>"
+                + "<nav>NAVMENU</nav>"
+                + "<div>Short standalone note that is not article shaped.</div>"
+                + "<footer>FOOTERBOILER</footer>"
+                + "</body></html>";
+        queue.enqueue(okHtml(html));
+        var tool = new WebFetchTool();
+        var result = tool.execute("{\"url\":\"http://example.test/tiny\"}", null);
+
+        assertFalse(result.isBlank(), "fallback must return non-empty content");
+        assertTrue(result.contains("Short standalone note"),
+                "fallback returns the page's readable text: " + result);
+        assertFalse(result.contains("NAVMENU"), "fallback strips nav: " + result);
+        assertFalse(result.contains("FOOTERBOILER"), "fallback strips footer: " + result);
+    }
+
+    @Test
+    void textModePdfExtractedWithTika() throws Exception {
+        var pdf = makePdf("PDF-EXTRACTED-CONTENT hello world");
+        queue.enqueue(okBytes(pdf, "application/pdf"));
+        var tool = new WebFetchTool();
+        var result = tool.execute("{\"url\":\"http://example.test/doc.pdf\"}", null);
+
+        assertTrue(result.contains("PDF-EXTRACTED-CONTENT"),
+                "Tika must extract text from a PDF rather than return raw bytes: " + result);
+    }
+
+    @Test
+    void textModeJsonPassesThroughUnchanged() {
+        var json = "{\"key\":\"value\",\"n\":42}";
+        queue.enqueue(okBytes(json.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                "application/json"));
+        var tool = new WebFetchTool();
+        var result = tool.execute("{\"url\":\"http://example.test/data.json\"}", null);
+
+        assertTrue(json.equals(result),
+                "JSON must pass through unchanged (no Markdown/Tika): " + result);
+    }
+
+    /** Build a one-page PDF containing {@code text}, using the PDFBox 3.x that
+     *  ships transitively with tika-parsers-standard. */
+    private static byte[] makePdf(String text) throws java.io.IOException {
+        try (var doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            var page = new org.apache.pdfbox.pdmodel.PDPage();
+            doc.addPage(page);
+            try (var cs = new org.apache.pdfbox.pdmodel.PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                        org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA), 12);
+                cs.newLineAtOffset(50, 700);
+                cs.showText(text);
+                cs.endText();
+            }
+            var baos = new java.io.ByteArrayOutputStream();
+            doc.save(baos);
+            return baos.toByteArray();
+        }
     }
 }

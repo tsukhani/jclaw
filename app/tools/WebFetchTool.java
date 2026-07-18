@@ -3,26 +3,43 @@ package tools;
 import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
+import com.vladsch.flexmark.html2md.converter.FlexmarkHtmlConverter;
+import com.vladsch.flexmark.util.data.MutableDataSet;
 import models.Agent;
+import net.dankito.readability4j.Readability4J;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.apache.tika.Tika;
+import org.apache.tika.metadata.HttpHeaders;
+import org.apache.tika.metadata.Metadata;
+import org.apache.tika.metadata.TikaCoreProperties;
 import org.jsoup.Jsoup;
 import services.AgentService;
 import utils.SsrfGuard;
 
 import javax.net.ssl.SSLException;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Fetch the content of a URL. Supports two modes:
- * - "text" (default): Extract readable text from HTML using Jsoup. Best for reading/summarizing.
- * - "html": Return raw HTML. Best for saving the actual page to a file.
+ * <ul>
+ *   <li>"text" (default): Extract readable content and return it as Markdown.
+ *       HTML is run through a Readability main-content pass (falling back to a
+ *       Jsoup boilerplate strip) and converted to Markdown; PDF / Office / other
+ *       non-HTML documents are extracted to text with Apache Tika; JSON, XML and
+ *       plain text pass through unchanged. Best for reading/summarizing.</li>
+ *   <li>"html": Return raw HTML. Best for saving the actual page to a file.</li>
+ * </ul>
  *
  * <p>Because this tool consumes URLs emitted by the LLM, every request goes
  * through {@link SsrfGuard}: the scheme is pinned to http/https and the DNS
@@ -39,6 +56,22 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private static final int TIMEOUT_SECONDS = 30;
     private static final int MAX_REDIRECTS = 5;
 
+    /** Below this many extracted characters the Readability pass is treated as a
+     *  miss and the Jsoup boilerplate-strip fallback runs instead — small pages
+     *  and non-article fragments aren't article-shaped enough to score well. */
+    private static final int MIN_READABILITY_CHARS = 200;
+
+    private static final FlexmarkHtmlConverter HTML_TO_MARKDOWN =
+            FlexmarkHtmlConverter.builder(new MutableDataSet()).build();
+
+    /** Shared Tika facade for non-HTML document extraction. {@code maxStringLength}
+     *  is set once here (never mutated per-call) so {@code parseToString} stays
+     *  thread-safe under the parallel tool dispatch. */
+    private static final Tika TIKA = new Tika();
+    static {
+        TIKA.setMaxStringLength(MAX_TEXT_LENGTH + 10_000);
+    }
+
     /**
      * Package-private and non-final so {@code WebFetchToolTest} can substitute
      * a loopback-friendly client (SsrfGuard's {@code SAFE_DNS} blocks 127.0.0.1
@@ -47,6 +80,11 @@ public class WebFetchTool implements ToolRegistry.Tool {
      */
     static OkHttpClient CLIENT = SsrfGuard.buildGuardedClient(
             CONNECT_TIMEOUT_SECONDS, TIMEOUT_SECONDS);
+
+    /** Raw fetch result: undecoded body bytes plus the response Content-Type and
+     *  the final (post-redirect) URL. Bytes — not a decoded String — so binary
+     *  documents (PDF, Office) reach Tika intact. */
+    private record FetchResult(byte[] body, String contentType, String finalUrl) {}
 
     @Override
     public String name() { return "web_fetch"; }
@@ -65,7 +103,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
     @Override
     public List<ToolAction> actions() {
         return List.of(
-                new ToolAction("fetch (text)", "Retrieve a URL and extract clean, readable text content"),
+                new ToolAction("fetch (text)", "Retrieve a URL and extract clean, readable content as Markdown"),
                 new ToolAction("fetch (html)", "Retrieve a URL and return the raw HTML source")
         );
     }
@@ -74,7 +112,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
     public String description() {
         return """
                 Fetch the content of a URL. \
-                Use mode "text" (default) to extract readable text — best for reading, summarizing, saving content, or answering questions about a page. \
+                Use mode "text" (default) to extract readable content as Markdown — best for reading, summarizing, saving content, or answering questions about a page. Handles HTML articles, PDFs and Office documents. \
                 Use mode "html" ONLY when the user explicitly asks for the raw HTML source code of a page.""";
     }
 
@@ -86,7 +124,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
                         "url", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "The URL to fetch"),
                         "mode", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.ENUM, List.of("text", "html"),
-                                SchemaKeys.DESCRIPTION, "Extraction mode: 'text' extracts readable content (default), 'html' returns raw HTML")
+                                SchemaKeys.DESCRIPTION, "Extraction mode: 'text' extracts readable content as Markdown (default), 'html' returns raw HTML")
                 ),
                 SchemaKeys.REQUIRED, List.of("url")
         );
@@ -103,8 +141,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
         var mode = args.has("mode") ? args.get("mode").getAsString() : "text";
 
         try {
-            var body = fetchUrl(url);
-            return processResponse(body, mode, url, agent);
+            var fetched = fetchUrl(url);
+            return processResponse(fetched, mode, url, agent);
         } catch (SecurityException e) {
             // SsrfGuard rejected a scheme or host — surface plainly so the LLM
             // understands why and doesn't keep retrying the same URL.
@@ -130,8 +168,12 @@ public class WebFetchTool implements ToolRegistry.Tool {
      * followed manually, up to {@link #MAX_REDIRECTS}, so each hop is
      * re-validated through {@link SsrfGuard#assertSafeScheme(URI)} and
      * re-resolved through the guarded DNS.
+     *
+     * <p>Only the final (non-redirect) response body is read, and it is read as
+     * raw bytes — never a decoded String — so binary documents survive intact
+     * for Tika. The SSRF scheme/redirect logic is unchanged.
      */
-    private String fetchUrl(String url) throws IOException {
+    private FetchResult fetchUrl(String url) throws IOException {
         var current = URI.create(url);
         SsrfGuard.assertSafeScheme(current);
 
@@ -161,82 +203,202 @@ public class WebFetchTool implements ToolRegistry.Tool {
                     throw new IOException("HTTP %d fetching %s".formatted(code, current));
                 }
 
-                return response.body().string();
+                var bytes = response.body().bytes();
+                var contentType = response.header("Content-Type", "");
+                return new FetchResult(bytes, contentType, current.toString());
             }
         }
         throw new IOException("Too many redirects (>%d) fetching %s"
                 .formatted(MAX_REDIRECTS, url));
     }
 
-    private String processResponse(String body, String mode, String url, Agent agent) {
+    private String processResponse(FetchResult fetched, String mode, String url, Agent agent) {
+        var contentType = fetched.contentType();
+        var body = fetched.body();
+
         if ("html".equals(mode)) {
             // Raw HTML mode — for large pages, auto-save to workspace to avoid
-            // flooding the LLM context with hundreds of KB of HTML
-            if (body.length() > MAX_TEXT_LENGTH && agent != null) {
+            // flooding the LLM context with hundreds of KB of HTML.
+            var html = new String(body, charsetFor(contentType));
+            if (html.length() > MAX_TEXT_LENGTH && agent != null) {
                 var filename = URI.create(url).getHost().replaceAll("[^a-zA-Z0-9.-]", "_") + ".html";
-                AgentService.writeWorkspaceFile(agent.name, filename, body);
+                AgentService.writeWorkspaceFile(agent.name, filename, html);
                 return "HTML saved to workspace as '%s' (%d characters from %s)"
-                        .formatted(filename, body.length(), url);
+                        .formatted(filename, html.length(), url);
             }
-            if (body.length() > MAX_HTML_LENGTH) {
-                return body.substring(0, MAX_HTML_LENGTH)
+            if (html.length() > MAX_HTML_LENGTH) {
+                return html.substring(0, MAX_HTML_LENGTH)
                         + "\n\n[Truncated: HTML exceeds %d characters]".formatted(MAX_HTML_LENGTH);
             }
-            return body;
+            return html;
         }
 
-        // Text mode — extract readable content
-        var contentType = body.strip().startsWith("<") ? "html" : "text";
-        if ("html".equals(contentType)) {
-            return extractText(body, url);
+        // Text mode — route by content type.
+        // 1. HTML → Readability main-content pass → Markdown.
+        if (isHtml(contentType, body)) {
+            return extractText(new String(body, charsetFor(contentType)), fetched.finalUrl());
         }
 
-        // Already plain text (JSON, XML, etc.)
-        if (body.length() > MAX_TEXT_LENGTH) {
-            return body.substring(0, MAX_TEXT_LENGTH)
-                    + "\n\n[Truncated: content exceeds %d characters]".formatted(MAX_TEXT_LENGTH);
+        // 2. Textual (JSON / XML / CSV / plain text) → pass through unchanged.
+        if (isTextual(contentType) || (contentType.isBlank() && !looksBinary(body))) {
+            return truncate(new String(body, charsetFor(contentType)), "content");
         }
-        return body;
+
+        // 3. Binary document (PDF / Office / …) → Tika text extraction.
+        return extractWithTika(body, contentType, url);
     }
 
     /**
-     * Extract readable text from HTML using Jsoup.
-     * Strips scripts, styles, nav, and other non-content elements.
-     * Preserves document structure with headers, paragraphs, and lists.
+     * Extract readable content from HTML and render it as Markdown.
+     *
+     * <p>A Readability main-content pass runs first; if it finds no substantial
+     * article (or throws on malformed input) the original Jsoup boilerplate
+     * strip runs as a fallback, so this never returns empty for a page that has
+     * body content. The chosen content HTML is converted to Markdown, prefixed
+     * with the page title as an H1 when present.
      */
     private String extractText(String html, String url) {
-        var doc = Jsoup.parse(html, url);
+        String contentHtml = null;
+        String title = null;
 
-        // Remove non-content elements
-        doc.select("script, style, noscript, iframe, svg, canvas, nav, footer, " +
-                   "header, aside, form, button, input, select, textarea, " +
-                   "[role=navigation], [role=banner], [role=complementary], " +
-                   "[aria-hidden=true], .hidden, .sr-only, .visually-hidden").remove();
-
-        // Extract title
-        var title = doc.title();
-
-        // Get text with whitespace structure preserved
-        doc.outputSettings().prettyPrint(false);
-        var text = doc.body().wholeText();
-
-        // Clean up excessive whitespace while preserving paragraph breaks
-        text = text.replaceAll("[ \\t]+", " ")           // Collapse horizontal whitespace
-                   .replaceAll("\\n[ \\t]+", "\n")        // Trim leading whitespace on lines
-                   .replaceAll("[ \\t]+\\n", "\n")        // Trim trailing whitespace on lines
-                   .replaceAll("\\n{3,}", "\n\n")         // Max two consecutive newlines
-                   .strip();
-
-        var result = new StringBuilder();
-        if (!title.isBlank()) {
-            result.append("# ").append(title).append("\n\n");
+        // 1. Readability main-content pass.
+        try {
+            var article = new Readability4J(url, html).parse();
+            var articleText = article.getTextContent();
+            if (articleText != null && articleText.strip().length() >= MIN_READABILITY_CHARS) {
+                contentHtml = article.getContent();
+                title = article.getTitle();
+            }
+        } catch (Exception _) {
+            // fall through to the Jsoup boilerplate-strip fallback
         }
-        result.append(text);
+
+        // 2. Fallback: strip non-content elements and keep the body HTML.
+        if (contentHtml == null || contentHtml.isBlank()) {
+            var doc = Jsoup.parse(html, url);
+            doc.select("script, style, noscript, iframe, svg, canvas, nav, footer, " +
+                       "header, aside, form, button, input, select, textarea, " +
+                       "[role=navigation], [role=banner], [role=complementary], " +
+                       "[aria-hidden=true], .hidden, .sr-only, .visually-hidden").remove();
+            title = doc.title();
+            contentHtml = doc.body() != null ? doc.body().html() : doc.html();
+        }
+
+        // 3. HTML → Markdown.
+        var markdown = HTML_TO_MARKDOWN.convert(contentHtml).strip();
+
+        // 4. Assemble with an optional title heading.
+        var result = new StringBuilder();
+        if (title != null && !title.isBlank()) {
+            result.append("# ").append(title.strip()).append("\n\n");
+        }
+        result.append(markdown);
 
         if (result.length() > MAX_TEXT_LENGTH) {
             return result.substring(0, MAX_TEXT_LENGTH)
                     + "\n\n[Truncated: extracted text exceeds %d characters]".formatted(MAX_TEXT_LENGTH);
         }
         return result.toString();
+    }
+
+    /** Extract text from a non-HTML document (PDF, Office, EPUB, …) with Tika. */
+    private String extractWithTika(byte[] body, String contentType, String url) {
+        try {
+            var metadata = new Metadata();
+            if (!contentType.isBlank()) {
+                metadata.set(HttpHeaders.CONTENT_TYPE, contentType);
+            }
+            // Resource-name hint lets Tika fall back to extension-based detection.
+            metadata.set(TikaCoreProperties.RESOURCE_NAME_KEY, url);
+            var text = TIKA.parseToString(new ByteArrayInputStream(body), metadata);
+            return truncate(text.strip(), "content");
+        } catch (Exception e) {
+            return "Error: could not extract text from %s: %s".formatted(url, e.getMessage());
+        }
+    }
+
+    /** True when the response is HTML: an explicit html content type, or — when
+     *  the content type is absent — a body whose first non-whitespace char opens
+     *  a tag that isn't an XML declaration. */
+    private static boolean isHtml(String contentType, byte[] body) {
+        if (contentType.toLowerCase().contains("html")) {
+            return true;
+        }
+        if (contentType.isBlank()) {
+            var head = new String(body, 0, Math.min(body.length, 256), StandardCharsets.UTF_8).stripLeading();
+            return head.startsWith("<") && !head.regionMatches(true, 0, "<?xml", 0, 5);
+        }
+        return false;
+    }
+
+    /** True for content types that are already human-readable and must pass
+     *  through untouched (JSON, XML, CSV, plain text, source). */
+    private static boolean isTextual(String contentType) {
+        if (contentType.isBlank()) {
+            return false;
+        }
+        var ct = contentType.toLowerCase();
+        return ct.startsWith("text/")
+                || ct.contains("json")
+                || ct.contains("xml")
+                || ct.contains("csv")
+                || ct.contains("javascript")
+                || ct.contains("yaml");
+    }
+
+    /** Heuristic used only when the content type is absent: magic numbers for
+     *  common binary documents, or a NUL byte early in the stream. */
+    private static boolean looksBinary(byte[] body) {
+        if (body.length == 0) {
+            return false;
+        }
+        if (startsWith(body, "%PDF")) {                                   // PDF
+            return true;
+        }
+        if (body.length >= 4 && body[0] == 'P' && body[1] == 'K'
+                && body[2] == 3 && body[3] == 4) {                        // ZIP (docx/xlsx/pptx/odf)
+            return true;
+        }
+        if (body.length >= 2 && (body[0] & 0xFF) == 0xD0 && (body[1] & 0xFF) == 0xCF) {
+            return true;                                                  // OLE2 (legacy .doc/.xls/.ppt)
+        }
+        int n = Math.min(body.length, 512);
+        for (int i = 0; i < n; i++) {
+            if (body[i] == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean startsWith(byte[] body, String ascii) {
+        if (body.length < ascii.length()) {
+            return false;
+        }
+        for (int i = 0; i < ascii.length(); i++) {
+            if (body[i] != ascii.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Parse the charset from a Content-Type header, defaulting to UTF-8 — the
+     *  same rule OkHttp's {@code ResponseBody.string()} applied before the
+     *  switch to raw bytes. */
+    private static Charset charsetFor(String contentType) {
+        if (contentType.isBlank()) {
+            return StandardCharsets.UTF_8;
+        }
+        var mediaType = MediaType.parse(contentType);
+        return mediaType != null ? mediaType.charset(StandardCharsets.UTF_8) : StandardCharsets.UTF_8;
+    }
+
+    private static String truncate(String text, String label) {
+        if (text.length() > MAX_TEXT_LENGTH) {
+            return text.substring(0, MAX_TEXT_LENGTH)
+                    + "\n\n[Truncated: %s exceeds %d characters]".formatted(label, MAX_TEXT_LENGTH);
+        }
+        return text;
     }
 }
