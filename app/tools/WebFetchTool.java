@@ -287,7 +287,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
                        "[role=navigation], [role=banner], [role=complementary], " +
                        "[aria-hidden=true], .hidden, .sr-only, .visually-hidden").remove();
             title = doc.title();
-            contentHtml = doc.body() != null ? doc.body().html() : doc.html();
+            // jsoup always yields a <body> (creating an empty one if absent), so no null guard is needed.
+            contentHtml = doc.body().html();
         }
 
         // 3. HTML → Markdown.

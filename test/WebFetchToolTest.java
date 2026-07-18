@@ -406,7 +406,7 @@ class WebFetchToolTest extends UnitTest {
         var tool = new WebFetchTool();
         var result = tool.execute("{\"url\":\"http://example.test/data.json\"}", null);
 
-        assertTrue(json.equals(result),
+        assertEquals(json, result,
                 "JSON must pass through unchanged (no Markdown/Tika): " + result);
     }
 
