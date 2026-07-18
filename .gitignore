@@ -8,6 +8,13 @@
 # model weights). Never committed; the production captioner lives in app/services/caption.
 /spike/
 
+# VulnHunter security-audit output (the /vulnhunt skill writes to
+# <basename>_VULNHUNT_RESULTS_<timestamp>/). NEVER commit — these trees hold
+# working exploit PoCs + step-by-step reproduction for findings that are not yet
+# fixed; publishing them is an attacker roadmap. Actionable content is tracked in
+# JIRA (e.g. epic JCLAW-776); keep the raw artifacts local only.
+*_VULNHUNT_RESULTS_*/
+
 # Per-clone runtime security material — application secret (PLAY_SECRET)
 # and TLS cert+key. Lives under certs/ (write paths: `./jclaw.sh secret`,
 # `./jclaw.sh cert`, `play secret`, `play enable-https`, the Docker
