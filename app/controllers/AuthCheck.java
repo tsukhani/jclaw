@@ -71,6 +71,16 @@ public class AuthCheck extends Controller {
             response.status = 401;
             renderJSON("{\"error\":\"Authentication required\",\"code\":\"password_unset\"}");
         }
+
+        // JCLAW-764 / AD-1: after authentication, demote an app-originated request
+        // (Referer under /apps/<slug>/ + Sec-Fetch-Site: same-origin) to that app's
+        // own invoke route only — any other endpoint is forbidden. The bearer path
+        // returned early above (loopback unaffected); SPA calls carry no /apps/
+        // Referer, so they are not app-originated and keep full authority.
+        if (AppOriginGate.isBlocked()) {
+            response.status = 403;
+            renderJSON("{\"error\":\"App may only invoke its own agent\",\"code\":\"app_scope\"}");
+        }
     }
 
     /** Pull the bearer token out of the Authorization header, if any.

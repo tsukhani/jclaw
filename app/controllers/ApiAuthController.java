@@ -189,6 +189,11 @@ public class ApiAuthController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogoutResponse.class)))
     public static void logout() {
+        // JCLAW-764 / AD-1: same rationale as resetPassword — an app-originated
+        // caller must not be able to log the operator out via the ambient cookie.
+        if (AppOriginGate.isBlocked()) {
+            ApiResponses.error(403, "app_scope", "App-originated request may not log the operator out");
+        }
         session.clear();
         EventLogger.info("auth", "Admin logged out");
         renderJSON(gson.toJson(new LogoutResponse("ok")));
@@ -208,6 +213,14 @@ public class ApiAuthController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ResetPasswordResponse.class)))
     public static void resetPassword() {
+        // JCLAW-764 / AD-1: this endpoint is session-sensitive but not behind
+        // @With(AuthCheck.class) (setup/login must stay unauthenticated), so the
+        // AuthCheck provenance gate never runs here. A same-origin app rides the
+        // operator cookie — block an app-originated call before it can wipe the
+        // admin credential.
+        if (AppOriginGate.isBlocked()) {
+            ApiResponses.error(403, "app_scope", "App-originated request may not reset the password");
+        }
         var authed = session.get("authenticated");
         if (!"true".equals(authed)) {
             ApiResponses.error(401, "authentication_required", "Authentication required");
