@@ -2,7 +2,7 @@
 import type { Agent, Message } from '~/types/api'
 // UsersRound matches the Subagents nav icon (the "spawned children" glyph) so
 // the empty-state landing reads as the same surface.
-import { UsersRound } from 'lucide-vue-next'
+import { UsersRound } from '@lucide/vue'
 
 /**
  * JCLAW-271: SubagentRuns admin page. Lists every subagent run with filters

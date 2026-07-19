@@ -30,7 +30,7 @@ import {
   PuzzlePieceIcon,
   Squares2X2Icon,
 } from '@heroicons/vue/24/outline'
-import { BotMessageSquare, UsersRound } from 'lucide-vue-next'
+import { BotMessageSquare, UsersRound } from '@lucide/vue'
 import type { Component } from 'vue'
 
 // Vite's `?raw` query returns the file's contents as a string at build

@@ -30,7 +30,7 @@ import {
   VideoCameraIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import { Save } from 'lucide-vue-next'
+import { Save } from '@lucide/vue'
 import { renderMarkdown } from '~/utils/chat-markdown'
 import type {
   Agent,

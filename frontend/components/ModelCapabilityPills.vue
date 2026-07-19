@@ -27,7 +27,7 @@
  * such fallback today, so the pill is even more strictly informational.
  */
 import type { ProviderModel } from '~/composables/useProviders'
-import { Lightbulb, Eye, Volume2, Video } from 'lucide-vue-next'
+import { Lightbulb, Eye, Volume2, Video } from '@lucide/vue'
 
 export type Capability = 'thinking'
 

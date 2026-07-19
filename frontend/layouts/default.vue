@@ -29,7 +29,7 @@ import {
 // UsersRound covers the "spawned children" feel of the SubagentRuns admin page
 // (JCLAW-271); Heroicons' UserGroup is too tilted toward a "team" gloss to
 // read as the parent/child fan-out we want.
-import { BotMessageSquare, PanelLeftClose, PanelLeftOpen, UsersRound } from 'lucide-vue-next'
+import { BotMessageSquare, PanelLeftClose, PanelLeftOpen, UsersRound } from '@lucide/vue'
 import { loadTourStatus } from '~/composables/useGuidedTour'
 import TourIntroDialog from '~/components/TourIntroDialog.vue'
 

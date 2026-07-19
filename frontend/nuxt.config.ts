@@ -85,7 +85,7 @@ export default defineNuxtConfig({
     optimizeDeps: {
       include: [
         'reka-ui',
-        'lucide-vue-next',
+        '@lucide/vue',
         '@vueuse/core',
         'clsx',
         'tailwind-merge',

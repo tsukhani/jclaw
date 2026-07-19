@@ -8,7 +8,7 @@
  * `update:modelKey` string of the form `<provider>::<modelId>` so the parent
  * can route through the existing onModelChange handler unchanged.
  */
-import { ChevronDown, Search } from 'lucide-vue-next'
+import { ChevronDown, Search } from '@lucide/vue'
 import type { Provider } from '~/composables/useProviders'
 import {
   Popover, PopoverContent, PopoverTrigger,
