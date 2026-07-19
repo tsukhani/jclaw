@@ -39,6 +39,19 @@ describe('Chat — app-creator hand-off prefill', () => {
     expect(el.value).toContain('App name: X')
   })
 
+  it('grows the composer to fit the prefill (programmatic set → autoResize)', async () => {
+    routeQuery.value = { compose: 'Use the app-creator skill to build a hosted app.\n\nApp name: X\nWhat it should do: Y' }
+    setupChatApi()
+    const c = await mountSuspended(Chat)
+    await flushPromises()
+
+    // A programmatic v-model write never fires @input, so autoResize must be
+    // invoked explicitly. It writes el.style.height; before the fix it stayed
+    // '' (never called), leaving the box at its rows="1" natural height.
+    const el = c.find('#chat-message-input').element as HTMLTextAreaElement
+    expect(el.style.height).not.toBe('')
+  })
+
   it('leaves the composer empty without ?compose=', async () => {
     routeQuery.value = {}
     setupChatApi()

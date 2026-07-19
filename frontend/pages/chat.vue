@@ -263,11 +263,16 @@ const deepLinkConvoId = route.query.conversation ? Number(route.query.conversati
 // Hand-off from the Apps "Create app" affordance: ?compose=<request> prefills
 // the composer with the app-creator request so the operator can review + send.
 // Strip the query afterward so an in-page nav / refresh doesn't re-prefill.
-onMounted(() => {
+onMounted(async () => {
   const compose = route.query.compose
   if (typeof compose === 'string' && compose.trim()) {
     input.value = compose
     router.replace({ query: { ...route.query, compose: undefined } })
+    // Programmatic v-model writes don't fire the textarea's @input handler, so
+    // grow the composer to fit the prefilled request ourselves (after nextTick
+    // flushes the new value into the DOM, so scrollHeight reflects it).
+    await nextTick()
+    autoResize()
     focusInput()
   }
 })
