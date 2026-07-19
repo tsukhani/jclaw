@@ -1,5 +1,6 @@
 package controllers;
 
+import agents.AgentRunner;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -7,28 +8,31 @@ import play.Play;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.ConversationService;
 import services.Tx;
 import utils.ApiResponses;
 import utils.GsonHolder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
+import java.util.HashMap;
 import java.util.regex.Pattern;
 
 /**
  * JCLAW-764 / AD-2: the single-purpose App → Agent invoke endpoint. A hosted app
  * POSTs to {@code POST /api/apps/<slug>/invoke} and its one operator-designated
- * agent — resolved fail-closed from {@code app.json.agent} (AD-3) — runs. There is
- * <em>no</em> target-agent / endpoint / verb parameter: the agent is resolved solely
- * from {@code <slug>}, never from the request body. {@link AppOriginGate} (in
- * {@link AuthCheck}) guarantees an app-originated caller can reach only this route
- * for its own slug.
+ * agent — resolved fail-closed from {@code app.json.agent} (AD-3) — runs on the
+ * text input, returning the agent's response. There is <em>no</em> target-agent /
+ * endpoint / verb parameter: the agent is resolved solely from {@code <slug>},
+ * never from the request body. {@link AppOriginGate} (in {@link AuthCheck})
+ * guarantees an app-originated caller can reach only this route for its own slug.
  *
- * <p><b>Slice A (this commit):</b> the provenance gate + AD-3 fail-closed resolution,
- * returning a stub. Execution — a fresh app-owned {@code Conversation}
- * ({@code channelType="app"}) delegating to the agent-run pipeline — is the next
- * commit.
+ * <p>Each invoke runs in a fresh app-owned {@code Conversation}
+ * ({@code channelType="app"}, {@code peerId=slug}), so it is viewable and
+ * filterable in the operator's Conversations page under the {@code app} channel
+ * (AD-4). Being a non-{@code web} origin, an app turn is untrusted, so a dangerous
+ * tool such as {@code exec} fails closed for it (see {@code utils.ChannelOriginTrust}
+ * / JCLAW-777) — apps may feed the agent untrusted content (e.g. an uploaded RFP).
  */
 @With(AuthCheck.class)
 public class ApiAppInvokeController extends Controller {
@@ -37,11 +41,38 @@ public class ApiAppInvokeController extends Controller {
     private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
     private static final String APP_JSON = "app.json";
 
+    /** Channel type stamped on every app-owned conversation, so they group under one
+     *  "app" channel in the operator's Conversations page. */
+    private static final String APP_CHANNEL = "app";
+
     public static void invoke(String slug) {
-        var agent = resolveDesignatedAgent(slug); // AD-3 — throws 4xx (fail-closed) on any miss
-        // Slice A: no agent run yet — this proves the gate + resolution end-to-end.
-        renderJSON(GsonHolder.INSTANCE.toJson(
-                Map.of("stub", true, "agentId", agent.id, "agentName", agent.name)));
+        var agent = resolveDesignatedAgent(slug); // AD-3 — fail-closed 4xx on any miss
+        var input = readInput();                   // AD-2 — text from the body; agent comes from the slug, never the body
+        // AD-4: a fresh app-owned conversation. create() (not findOrCreate) so each
+        // invoke is its own row; channelType/peerId make it viewable under the app channel.
+        var conversation = ConversationService.create(agent, APP_CHANNEL, slug);
+        // AD-6: reuse the existing agent-run pipeline — no parallel execution stack.
+        var result = AgentRunner.run(agent, conversation, input);
+        var resp = new HashMap<String, Object>();
+        resp.put("conversationId", conversation.id);
+        resp.put("response", result.response());
+        renderJSON(GsonHolder.INSTANCE.toJson(resp));
+    }
+
+    /**
+     * AD-2: the app's text input, read from the request body's {@code message}
+     * field. No target-agent / endpoint / verb parameter is honored — any
+     * {@code agent} / {@code verb} field in the body is ignored, since the agent is
+     * resolved solely from {@code <slug>} (AD-3).
+     */
+    private static String readInput() {
+        var body = JsonBodyReader.readJsonBody();
+        var msg = (body != null && body.has("message") && !body.get("message").isJsonNull())
+                ? body.get("message").getAsString() : null;
+        if (msg == null || msg.isBlank()) {
+            ApiResponses.error(400, "no_input", "invoke requires a non-empty 'message'");
+        }
+        return msg;
     }
 
     /**
