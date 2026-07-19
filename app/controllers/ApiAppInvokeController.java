@@ -10,6 +10,7 @@ import play.data.Upload;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.AppInvokeLimits;
 import services.AttachmentService;
 import services.ConversationService;
 import services.Tx;
@@ -62,6 +63,14 @@ public class ApiAppInvokeController extends Controller {
         var hasFiles = files != null && files.length > 0;
         if ((message == null || message.isBlank()) && !hasFiles) {
             ApiResponses.error(400, "no_input", "invoke requires a 'message' and/or file uploads");
+        }
+        // AD-5 / JCLAW-766: server-side per-app rate limit, checked here — after input
+        // validation but before any real work (staging, the agent run) — so a runaway app
+        // can't drain cost. The effective cap is the app.json override tightened into the
+        // authoritative ceiling; over-limit calls are rejected until the window rolls.
+        if (!AppInvokeLimits.tryAcquire(slug, AppInvokeLimits.effectiveLimit(readLimitOverride(slug)))) {
+            ApiResponses.error(429, "rate_limited",
+                    "This app has reached its invoke limit; try again shortly");
         }
         var attachments = hasFiles ? UploadStaging.stage(agent, files) : List.<AttachmentService.Input>of();
         // AD-4: a fresh app-owned conversation (channelType="app", peerId=slug), viewable
@@ -167,12 +176,8 @@ public class ApiAppInvokeController extends Controller {
      * ({@code 4xx}) — never a default agent.
      */
     private static Agent resolveDesignatedAgent(String slug) {
-        if (slug == null || !SLUG.matcher(slug).matches()) {
-            ApiResponses.error(404, "no_such_app", "No such app");
-        }
-        var appsDir = Play.getFile("public/apps").toPath().toAbsolutePath().normalize();
-        var manifest = appsDir.resolve(slug).resolve(APP_JSON).normalize();
-        if (!manifest.startsWith(appsDir) || !Files.isRegularFile(manifest)) {
+        var manifest = manifestPath(slug);
+        if (manifest == null || !Files.isRegularFile(manifest)) {
             ApiResponses.error(404, "no_such_app", "No such app: " + slug);
         }
         var agentIdStr = readAgentId(manifest, slug); // throws 4xx if manifest unreadable / no agent
@@ -183,6 +188,43 @@ public class ApiAppInvokeController extends Controller {
                     "App '" + slug + "' designates an agent that no longer exists");
         }
         return agent;
+    }
+
+    /**
+     * The validated {@code app.json} path for a slug, or {@code null} when the slug is
+     * malformed or the resolved path would escape the apps directory. Does not require
+     * the file to exist. Single source of the traversal-safe path shared by
+     * {@link #resolveDesignatedAgent} and {@link #readLimitOverride}.
+     */
+    private static Path manifestPath(String slug) {
+        if (slug == null || !SLUG.matcher(slug).matches()) {
+            return null;
+        }
+        var appsDir = Play.getFile("public/apps").toPath().toAbsolutePath().normalize();
+        var manifest = appsDir.resolve(slug).resolve(APP_JSON).normalize();
+        return manifest.startsWith(appsDir) ? manifest : null;
+    }
+
+    /**
+     * AD-5 / JCLAW-766: the optional per-app invoke-limit override from
+     * {@code app.json.limit}, or {@code null} when absent, unreadable, or non-numeric —
+     * {@link AppInvokeLimits} then applies the global default. The value only ever
+     * tightens the effective limit; it can never raise it above the ceiling.
+     */
+    private static Integer readLimitOverride(String slug) {
+        var manifest = manifestPath(slug);
+        if (manifest == null || !Files.isRegularFile(manifest)) {
+            return null;
+        }
+        try {
+            var m = JsonParser.parseString(Files.readString(manifest)).getAsJsonObject();
+            if (m.has("limit") && !m.get("limit").isJsonNull()) {
+                return m.get("limit").getAsInt();
+            }
+        } catch (RuntimeException | java.io.IOException _) {
+            return null; // malformed manifest / non-numeric limit → fall back to the default
+        }
+        return null;
     }
 
     /** The raw {@code agent} field of the manifest, or fail-closed 4xx when absent. */

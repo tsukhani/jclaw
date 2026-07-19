@@ -262,6 +262,21 @@ class ApiAppInvokeControllerTest extends FunctionalTest {
         assertStatus(403, fileFromAppOrigin("someotherapp", appSlug, uuid));
     }
 
+    // ── AD-5 / JCLAW-766: server-side per-app invoke limit ────────────────
+
+    @Test
+    void invokeRejectedWhenOverPerAppLimit() throws IOException {
+        // An app.json "limit" tightens the per-window cap. With limit=1 the first invoke
+        // runs; a second within the same window is rejected with 429. The %test window is
+        // widened (application.conf) so both invokes land in one window deterministically.
+        var slug = makeApp("{\"name\":\"Capped\",\"version\":\"1.0.0\",\"agent\":\""
+                + agentId + "\",\"limit\":1}");
+        assertStatus(200, invoke(slug, slug, MSG, NO_FILES));
+        var second = invoke(slug, slug, MSG, NO_FILES);
+        assertStatus(429, second);
+        assertTrue(getContent(second).contains("rate_limited"), "got: " + getContent(second));
+    }
+
     // ── request helpers ───────────────────────────────────────────────
 
     /** A multipart invoke POST carrying app-origin headers (Referer under /apps/<refererSlug>/).
