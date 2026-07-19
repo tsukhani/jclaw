@@ -19,21 +19,14 @@ import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
-import services.MimeExtensions;
 import services.Tx;
-import services.UploadLimits;
+import services.UploadStaging;
 import tools.SubagentSpawnTool;
 import utils.ApiResponses;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
-import utils.WorkspacePathGuard;
 
-import java.io.File;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -41,12 +34,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static utils.GsonHolder.INSTANCE;
-import static utils.TikaHolder.TIKA;
 
 /**
  * Chat dispatch endpoints: sync send, SSE streaming, and file upload.
@@ -249,169 +240,23 @@ public class ApiChatController extends Controller {
         Agent agent = AgentService.findById(agentId);
         if (agent == null) notFound();
 
-        validateUploads(files);
-        Path stagingDir = acquireStagingDir(agent);
-
+        // JCLAW-765: chat and the App->Agent invoke endpoint share ONE staging path
+        // (utils/services.UploadStaging) so the same size/type limits + containment
+        // apply to both — no second upload surface to drift into a bypass.
         var results = new ArrayList<Map<String, Object>>();
-        try {
-            Files.createDirectories(stagingDir);
-            for (var upload : files) {
-                results.add(stageOneUpload(stagingDir, upload));
-            }
-        } catch (IOException e) {
-            EventLogger.error("chat", "Chat upload failed for agent %s: %s"
-                    .formatted(agent.name, e.getMessage()));
-            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Upload failed: " + e.getMessage());
+        for (var in : UploadStaging.stage(agent, files)) {
+            var entry = new HashMap<String, Object>();
+            entry.put(KEY_ATTACHMENT_ID, in.attachmentId());
+            entry.put(KEY_ORIGINAL_FILENAME, in.originalFilename());
+            entry.put(KEY_MIME_TYPE, in.mimeType());
+            entry.put(KEY_SIZE_BYTES, in.sizeBytes());
+            entry.put("kind", in.kind());
+            results.add(entry);
         }
 
         var resp = new HashMap<String, Object>();
         resp.put("files", results);
         renderJSON(gson.toJson(resp));
-    }
-
-    @SuppressWarnings("java:S2259")
-    private static void validateUploads(Upload[] files) {
-        if (files == null || files.length == 0) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "No files uploaded");
-        }
-        int maxFiles = UploadLimits.maxFiles();
-        if (files.length > maxFiles) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Too many files (max " + maxFiles + ")");
-        }
-        for (var u : files) {
-            if (u == null || u.asFile() == null || !u.asFile().exists()) {
-                ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid file upload");
-            }
-        }
-    }
-
-    @SuppressWarnings("java:S2259")
-    private static Path acquireStagingDir(Agent agent) {
-        try {
-            return AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
-        } catch (SecurityException _) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid upload target");
-            return null; // unreachable — ApiResponses.error() throws
-        }
-    }
-
-    @SuppressWarnings("java:S2259")
-    private static Map<String, Object> stageOneUpload(Path stagingDir, Upload upload)
-            throws IOException {
-        var f = upload.asFile();
-        var safeName = sanitizeFilename(upload.getFileName() != null ? upload.getFileName() : f.getName());
-        if (safeName.isEmpty()) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid filename: " + upload.getFileName());
-        }
-        var sniffedMime = sniffMime(f, upload.getContentType());
-        var kind = MessageAttachment.kindForMime(sniffedMime);
-        enforceUploadCap(f, kind, upload.getFileName());
-
-        var uuid = UUID.randomUUID().toString();
-        var ext = extensionFromFilename(safeName);
-        if (ext.isEmpty()) ext = canonicalExtensionForMime(sniffedMime);
-        var onDiskName = uuid + (ext.isEmpty() ? "" : "." + ext);
-
-        var target = acquireContainedOr400(stagingDir, onDiskName, upload.getFileName());
-        Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
-
-        var entry = new HashMap<String, Object>();
-        entry.put(KEY_ATTACHMENT_ID, uuid);
-        entry.put(KEY_ORIGINAL_FILENAME, safeName);
-        entry.put(KEY_MIME_TYPE, sniffedMime);
-        entry.put(KEY_SIZE_BYTES, Files.size(target));
-        entry.put("kind", kind);
-        return entry;
-    }
-
-    /**
-     * Tika reads file magic bytes — authoritative over browser-declared
-     * Content-Type for spoofing-resistance. ONE narrow exception: Tika
-     * sniffs every WebM/Matroska container as video/* regardless of
-     * whether it has video tracks. {@link services.MatroskaTracks}
-     * resolves that ambiguity — an audio/* browser hint wins (voice
-     * notes from MediaRecorder({audio:true}), the JCLAW-165 follow-up),
-     * otherwise the container's track codecs decide (file-picker
-     * uploads of audio-only .webm, JCLAW-560). Other ambiguities still
-     * fall to Tika.
-     */
-    private static String sniffMime(File f, String browserMime) throws IOException {
-        var sniffedMime = TIKA.detect(f);
-        return services.MatroskaTracks.disambiguate(sniffedMime, browserMime, f.toPath());
-    }
-
-    @SuppressWarnings("java:S2259")
-    private static void enforceUploadCap(File f, String kind, String originalName) {
-        var cap = UploadLimits.forKind(kind);
-        if (f.length() > cap) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "%s too large: %s (max %d MB for %s)"
-                    .formatted(UploadLimits.displayName(kind),
-                            originalName, cap / (1024 * 1024),
-                            UploadLimits.displayName(kind)));
-        }
-    }
-
-    /**
-     * Resolve {@code leaf} against {@code stagingDir} via path containment.
-     * Translates {@link SecurityException} (escape attempt) into a 400 so the
-     * caller can stay on the IO happy-path without nesting try blocks.
-     * {@code error()} throws — this method does not return on the failure path.
-     */
-    private static Path acquireContainedOr400(
-            Path stagingDir, String leaf, String originalName) {
-        try {
-            return WorkspacePathGuard.acquireContained(stagingDir, leaf);
-        } catch (SecurityException _) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid filename: " + originalName);
-            return null; // unreachable — ApiResponses.error() throws
-        }
-    }
-
-    private static String extensionFromFilename(String safeName) {
-        var dot = safeName.lastIndexOf('.');
-        if (dot < 0 || dot == safeName.length() - 1) return "";
-        return safeName.substring(dot + 1).toLowerCase();
-    }
-
-    /**
-     * Candidate extensions probed against {@link play.libs.MimeTypes} to
-     * find one whose forward lookup matches a sniffed MIME. The data lives
-     * in Play's bundled {@code mime-types.properties} plus the
-     * {@code mimetype.*} overrides declared in {@code conf/application.conf}
-     * — adding a new format there makes it resolvable here without touching
-     * Java. Only hit when the uploader's original filename carried no
-     * extension at all, which is rare.
-     */
-    private static final String[] EXTENSION_CANDIDATES = {
-            "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg",
-            "avif", "heic", "heif",
-            "mp3", "m4a", "aac", "wav", "ogg", "oga", "flac", "opus", "weba",
-            "pdf", "txt", "md", "csv", "json", "html", "xml",
-            "zip", "tar", "gz",
-            "doc", "docx", "xls", "xlsx", "ppt", "pptx"
-    };
-
-    /**
-     * Reverse lookup delegated to {@link services.MimeExtensions} (which in
-     * turn calls {@link play.libs.MimeTypes}). Data lives in Play's bundled
-     * properties plus {@code mimetype.*} overrides in
-     * {@code conf/application.conf}; extending coverage for a new format is
-     * a one-line config change.
-     */
-    private static String canonicalExtensionForMime(String mime) {
-        return MimeExtensions.forMime(mime, EXTENSION_CANDIDATES);
-    }
-
-    private static String sanitizeFilename(String name) {
-        if (name == null) return "";
-        var base = name.replace('\\', '/');
-        int slash = base.lastIndexOf('/');
-        if (slash >= 0) base = base.substring(slash + 1);
-        base = base.strip();
-        while (base.startsWith(".")) base = base.substring(1);
-        var cleaned = base.replaceAll("[^A-Za-z0-9._\\- ]", "_");
-        if (cleaned.length() > 120) cleaned = cleaned.substring(0, 120);
-        return cleaned;
     }
 
     /**

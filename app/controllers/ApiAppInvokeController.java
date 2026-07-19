@@ -5,17 +5,21 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import play.Play;
+import play.data.Upload;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.AttachmentService;
 import services.ConversationService;
 import services.Tx;
+import services.UploadStaging;
 import utils.ApiResponses;
 import utils.GsonHolder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -45,34 +49,27 @@ public class ApiAppInvokeController extends Controller {
      *  "app" channel in the operator's Conversations page. */
     private static final String APP_CHANNEL = "app";
 
-    public static void invoke(String slug) {
+    public static void invoke(String slug, Upload[] files) {
         var agent = resolveDesignatedAgent(slug); // AD-3 — fail-closed 4xx on any miss
-        var input = readInput();                   // AD-2 — text from the body; agent comes from the slug, never the body
-        // AD-4: a fresh app-owned conversation. create() (not findOrCreate) so each
-        // invoke is its own row; channelType/peerId make it viewable under the app channel.
+        // AD-2: input is the multipart "message" field plus optional file uploads of
+        // any type. No target-agent / verb parameter is honored — the agent is resolved
+        // solely from the slug. Uploads go through the SHARED UploadStaging path, so an
+        // app upload is bound by the same size/type limits as chat (no new bypass).
+        var message = params.get("message");
+        var hasFiles = files != null && files.length > 0;
+        if ((message == null || message.isBlank()) && !hasFiles) {
+            ApiResponses.error(400, "no_input", "invoke requires a 'message' and/or file uploads");
+        }
+        var attachments = hasFiles ? UploadStaging.stage(agent, files) : List.<AttachmentService.Input>of();
+        // AD-4: a fresh app-owned conversation (channelType="app", peerId=slug), viewable
+        // under the app channel. create() (not findOrCreate) so each invoke is its own row.
         var conversation = ConversationService.create(agent, APP_CHANNEL, slug);
         // AD-6: reuse the existing agent-run pipeline — no parallel execution stack.
-        var result = AgentRunner.run(agent, conversation, input);
+        var result = AgentRunner.run(agent, conversation, message == null ? "" : message, attachments);
         var resp = new HashMap<String, Object>();
         resp.put("conversationId", conversation.id);
         resp.put("response", result.response());
         renderJSON(GsonHolder.INSTANCE.toJson(resp));
-    }
-
-    /**
-     * AD-2: the app's text input, read from the request body's {@code message}
-     * field. No target-agent / endpoint / verb parameter is honored — any
-     * {@code agent} / {@code verb} field in the body is ignored, since the agent is
-     * resolved solely from {@code <slug>} (AD-3).
-     */
-    private static String readInput() {
-        var body = JsonBodyReader.readJsonBody();
-        var msg = (body != null && body.has("message") && !body.get("message").isJsonNull())
-                ? body.get("message").getAsString() : null;
-        if (msg == null || msg.isBlank()) {
-            ApiResponses.error(400, "no_input", "invoke requires a non-empty 'message'");
-        }
-        return msg;
     }
 
     /**
