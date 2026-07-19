@@ -4,6 +4,7 @@ import agents.AgentRunner;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.MessageAttachment;
 import play.Play;
 import play.data.Upload;
 import play.mvc.Controller;
@@ -18,8 +19,10 @@ import utils.GsonHolder;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -69,7 +72,92 @@ public class ApiAppInvokeController extends Controller {
         var resp = new HashMap<String, Object>();
         resp.put("conversationId", conversation.id);
         resp.put("response", result.response());
+        // AD-5 / JCLAW-765: any file the run produced (e.g. a documents-tool PDF) comes
+        // back as a slug-scoped download URL the app is permitted to fetch (see file()).
+        resp.put("files", producedFiles(slug, conversation.id));
         renderJSON(GsonHolder.INSTANCE.toJson(resp));
+    }
+
+    /**
+     * JCLAW-765 / AD-5: serve ONE agent-produced file for THIS app. Two independent
+     * scopes guard it: {@link AppOriginGate} lets an app-originated caller reach only
+     * its own {@code /api/apps/<slug>/files/...} route, and this method additionally
+     * requires the attachment's conversation to be this app's own ({@code channelType="app"},
+     * {@code peerId=slug}) — so one app can never fetch another app's (or a chat's)
+     * attachment by guessing a uuid. Only finalized, {@code generated}, non-deleted rows
+     * are served.
+     */
+    public static void file(String slug, String uuid) {
+        if (slug == null || !SLUG.matcher(slug).matches()) {
+            notFound();
+        }
+        var att = MessageAttachment.findByUuid(uuid);
+        if (att == null || att.deleted || !att.generated) {
+            notFound();
+        }
+        var conv = att.message.conversation;
+        if (!APP_CHANNEL.equals(conv.channelType) || !slug.equals(conv.peerId)) {
+            notFound(); // not this app's file — indistinguishable from a missing one
+        }
+
+        // storagePath is workspace-relative "<agentName>/attachments/<convId>/<uuid>.<ext>";
+        // strip the agent-name prefix so acquireWorkspacePath does its lexical + canonical
+        // containment check inside the workspace root (mirrors ApiAttachmentsController.download).
+        var agentName = conv.agent.name;
+        var prefix = agentName + "/";
+        if (!att.storagePath.startsWith(prefix)) {
+            notFound();
+        }
+        var relPath = att.storagePath.substring(prefix.length());
+        Path path;
+        try {
+            path = AgentService.acquireWorkspacePath(agentName, relPath);
+        } catch (SecurityException _) {
+            forbidden();
+            return; // javac definite-assignment: path is unassigned on this catch path
+        }
+        var f = path.toFile();
+        if (!f.exists() || !f.isFile()) {
+            notFound();
+        }
+        response.setHeader("Content-Type", att.mimeType);
+        response.setHeader("Content-Disposition",
+                "attachment; filename=\"" + safeHeaderFilename(att.originalFilename) + "\"");
+        response.setHeader("Cache-Control", "private, max-age=300");
+        renderBinary(f);
+    }
+
+    /**
+     * AD-5 / JCLAW-765: the agent-produced downloadable files for this invoke's
+     * conversation, each as {@code {filename, mimeType, sizeBytes, url}}. The {@code url}
+     * is the slug-scoped {@code GET /api/apps/<slug>/files/<uuid>} the app may fetch; the
+     * bytes were persisted as {@code generated} attachments by the run pipeline (e.g.
+     * {@code DocumentsTool.executeRich}). Empty when the run produced nothing.
+     */
+    private static List<Map<String, Object>> producedFiles(String slug, long conversationId) {
+        List<MessageAttachment> rows = MessageAttachment.find(
+                "message.conversation.id = ?1 and generated = true and deleted = false ORDER BY id ASC",
+                conversationId).fetch();
+        var files = new ArrayList<Map<String, Object>>(rows.size());
+        for (var att : rows) {
+            var f = new HashMap<String, Object>();
+            f.put("filename", att.originalFilename);
+            f.put("mimeType", att.mimeType);
+            f.put("sizeBytes", att.sizeBytes);
+            f.put("url", "/api/apps/" + slug + "/files/" + att.uuid);
+            files.add(f);
+        }
+        return files;
+    }
+
+    /** Strip characters that could break the {@code Content-Disposition} header (quotes,
+     *  backslash, CR/LF). Generated filenames are already sanitized upstream; this is
+     *  defense in depth at the header boundary. */
+    private static String safeHeaderFilename(String name) {
+        if (name == null || name.isBlank()) {
+            return "download";
+        }
+        return name.replaceAll("[\"\\\\\\r\\n]", "_");
     }
 
     /**

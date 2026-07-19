@@ -16,10 +16,11 @@ import java.util.regex.Pattern;
  * <p>A request is app-originated when it carries {@code Sec-Fetch-Site: same-origin}
  * — a browser-set forbidden header an app's {@code fetch} cannot forge or remove —
  * AND a {@code Referer} whose path is under {@code /apps/<slug>/}. Such a request is
- * permitted only against {@code POST /api/apps/<slug>/invoke} for the matching slug;
- * anything else the caller rejects with 403. Authentication is unchanged — only
- * app-origin authority is narrowed. The loopback {@code jclaw_api} bearer and normal
- * SPA calls (no {@code /apps/} Referer) are never app-originated.
+ * permitted only against that app's own two routes for the matching slug —
+ * {@code POST /api/apps/<slug>/invoke} and {@code GET /api/apps/<slug>/files/<uuid>}
+ * (JCLAW-765) — and the caller rejects anything else with 403. Authentication is
+ * unchanged — only app-origin authority is narrowed. The loopback {@code jclaw_api}
+ * bearer and normal SPA calls (no {@code /apps/} Referer) are never app-originated.
  *
  * <p>The Referer signal is strippable by a <em>deliberately hostile</em> in-app
  * script ({@code fetch(..., {referrerPolicy:'no-referrer'})}), so this closes
@@ -70,10 +71,10 @@ public final class AppOriginGate {
     }
 
     /**
-     * True when the current request is app-originated AND is not a {@code POST} to
-     * that app's own invoke route — i.e. the caller must reject it with 403 (AD-1).
-     * False for every non-app-originated request (SPA, loopback bearer, server-side),
-     * which pass through with full authority.
+     * True when the current request is app-originated AND is not one of that app's
+     * own routes ({@code POST .../invoke} or {@code GET .../files/<uuid>}) — i.e. the
+     * caller must reject it with 403 (AD-1). False for every non-app-originated request
+     * (SPA, loopback bearer, server-side), which pass through with full authority.
      */
     public static boolean isBlocked() {
         var req = Http.Request.current();
@@ -84,7 +85,17 @@ public final class AppOriginGate {
         if (slug == null) {
             return false;
         }
-        return !("POST".equalsIgnoreCase(req.method) && ("/api/apps/" + slug + "/invoke").equals(req.path));
+        var base = "/api/apps/" + slug + "/";
+        // The two routes an app may reach for its own slug: POST .../invoke (run its
+        // designated agent) and GET .../files/<uuid> (fetch a file that run produced —
+        // JCLAW-765). The download endpoint re-scopes by conversation ownership, so a
+        // uuid guessed from another app or a chat still 404s there. Everything else → 403.
+        var ownInvoke = "POST".equalsIgnoreCase(req.method) && (base + "invoke").equals(req.path);
+        var filesPrefix = base + "files/";
+        var ownFile = "GET".equalsIgnoreCase(req.method)
+                && req.path.startsWith(filesPrefix)
+                && req.path.length() > filesPrefix.length();
+        return !(ownInvoke || ownFile);
     }
 
     private static String header(Http.Request req, String name) {

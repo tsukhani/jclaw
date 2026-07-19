@@ -1,6 +1,7 @@
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
+import models.Message;
 import models.MessageAttachment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -194,6 +195,73 @@ class ApiAppInvokeControllerTest extends FunctionalTest {
                 "the uploaded file should be a persisted attachment on the app conversation");
     }
 
+    // ── AD-5 / JCLAW-765: produced-file output + scoped download ──────────
+
+    @Test
+    void invokeResponseIncludesFilesArray() {
+        // The response always carries a files array — empty here, since the no-provider
+        // agent runs no tools and produces nothing. Proves the output wiring is present.
+        var r = invoke(appSlug, appSlug, MSG, NO_FILES);
+        assertStatus(200, r);
+        var obj = JsonParser.parseString(getContent(r)).getAsJsonObject();
+        assertTrue(obj.has("files") && obj.get("files").isJsonArray(), "response must include a files array");
+        assertEquals(0, obj.getAsJsonArray("files").size(), "a no-provider run produces no files");
+    }
+
+    @Test
+    void fileServesThisAppsGeneratedAttachment() {
+        var pdf = "%PDF-1.4 generated report".getBytes(StandardCharsets.ISO_8859_1);
+        var uuid = seedGeneratedAttachment("app", appSlug, "report.pdf", "application/pdf", pdf);
+        var r = GET("/api/apps/" + appSlug + "/files/" + uuid);
+        // renderBinary streams via Play's sendfile pipeline, which FunctionalTest doesn't
+        // capture into the body buffer — so assert the serve contract via headers.
+        assertIsOk(r);
+        var disposition = r.headers.get("Content-Disposition");
+        assertNotNull(disposition, "Content-Disposition header should be set");
+        assertTrue(disposition.value().startsWith("attachment"),
+                "produced doc disposition should be attachment: " + disposition.value());
+        assertTrue(disposition.value().contains("report.pdf"),
+                "disposition should carry the produced filename: " + disposition.value());
+        assertNotNull(r.contentType, "Content-Type must be set on the served file");
+    }
+
+    @Test
+    void fileRejectsAnotherAppsAttachment() throws IOException {
+        // Scoping by conversation ownership: a valid uuid from ANOTHER app's conversation
+        // is a 404 under this app's route (peerId mismatch), not a leak.
+        var other = makeApp("{\"name\":\"Other\",\"version\":\"1.0.0\",\"agent\":\"" + agentId + "\"}");
+        var uuid = seedGeneratedAttachment("app", other, "secret.pdf", "application/pdf",
+                "%PDF secret".getBytes(StandardCharsets.ISO_8859_1));
+        assertStatus(404, GET("/api/apps/" + appSlug + "/files/" + uuid));
+    }
+
+    @Test
+    void fileRejectsNonAppConversationAttachment() {
+        // A chat attachment (channelType != "app") is never reachable via an app's files
+        // route, even when its peerId happens to equal the slug.
+        var uuid = seedGeneratedAttachment("web", appSlug, "chat.pdf", "application/pdf",
+                "%PDF chat".getBytes(StandardCharsets.ISO_8859_1));
+        assertStatus(404, GET("/api/apps/" + appSlug + "/files/" + uuid));
+    }
+
+    @Test
+    void appOriginAllowedToOwnFilesRoute() {
+        // AD-1 whitelist: an app-originated GET to its OWN files route reaches the endpoint
+        // (200), not a 403 — the second route the gate now permits for the matching slug.
+        var uuid = seedGeneratedAttachment("app", appSlug, "own.pdf", "application/pdf",
+                "%PDF own".getBytes(StandardCharsets.ISO_8859_1));
+        assertIsOk(fileFromAppOrigin(appSlug, appSlug, uuid));
+    }
+
+    @Test
+    void appOriginBlockedFromAnotherAppsFilesRoute() {
+        // The files whitelist stays slug-scoped: app <appSlug> (Referer) cannot use another
+        // slug's files route — the gate 403s before the endpoint (URL slug != Referer slug).
+        var uuid = seedGeneratedAttachment("app", appSlug, "own.pdf", "application/pdf",
+                "%PDF own".getBytes(StandardCharsets.ISO_8859_1));
+        assertStatus(403, fileFromAppOrigin("someotherapp", appSlug, uuid));
+    }
+
     // ── request helpers ───────────────────────────────────────────────
 
     /** A multipart invoke POST carrying app-origin headers (Referer under /apps/<refererSlug>/).
@@ -232,6 +300,12 @@ class ApiAppInvokeControllerTest extends FunctionalTest {
         return send(method, url, referer, "same-origin");
     }
 
+    /** An app-origin GET to a files route (Referer under /apps/<refererSlug>/, same-origin). */
+    private Http.Response fileFromAppOrigin(String urlSlug, String refererSlug, String uuid) {
+        return send("GET", "/api/apps/" + urlSlug + "/files/" + uuid,
+                "http://localhost/apps/" + refererSlug + "/", "same-origin");
+    }
+
     private Http.Response send(String method, String url, String referer, String secFetch) {
         var req = newRequest();
         req.method = method;
@@ -265,6 +339,21 @@ class ApiAppInvokeControllerTest extends FunctionalTest {
 
     private static Conversation latestAppConversation(String slug) {
         return Conversation.find("channelType = ?1 and peerId = ?2 order by id desc", "app", slug).first();
+    }
+
+    /** Seed a {@code generated} attachment on a fresh conversation of the given channel/peer,
+     *  writing real bytes to the agent workspace, and return its uuid — the row the download
+     *  endpoint resolves. Runs in its own committed tx so the in-process handler sees it. */
+    private String seedGeneratedAttachment(String channelType, String peerId,
+                                           String filename, String mime, byte[] bytes) {
+        return commitFreshTx(() -> {
+            Agent agent = Agent.findById(agentId);
+            Conversation conv = services.ConversationService.create(agent, channelType, peerId);
+            Message msg = services.ConversationService.appendAssistantMessage(conv, "here is your file", null);
+            MessageAttachment att = services.AttachmentService.persistGeneratedAttachment(
+                    agent, msg, bytes, mime, null, filename);
+            return att.uuid;
+        });
     }
 
     private String makeApp(String manifest) throws IOException {

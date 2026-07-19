@@ -430,6 +430,39 @@ class DocumentsToolTest extends UnitTest {
         assertEquals("%PDF", magic, "written file must be a real PDF");
     }
 
+    // ----- JCLAW-765: executeRich carries the produced document -----------------
+
+    @Test
+    void executeRich_writeDocumentCarriesProducedFileAsAttachment() {
+        // A written PDF comes back on the rich result as a GeneratedAttachment (real
+        // bytes, honest .pdf name + mime) so the run pipeline persists it as a
+        // downloadable MessageAttachment — the seam an app uses to fetch a rendered doc.
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-rich-attach");
+        var rich = tool.executeRich(
+                "{\"action\":\"writeDocument\",\"path\":\"proposal.pdf\",\"content\":\"# Proposal\\n\\nBody.\"}",
+                agent);
+
+        assertFalse(rich.text().startsWith("Error"), "write failed: " + rich.text());
+        assertEquals(1, rich.attachments().size(), "one produced document expected");
+        var att = rich.attachments().get(0);
+        assertEquals("proposal.pdf", att.filename());
+        assertEquals("application/pdf", att.mimeType());
+        assertTrue(att.bytes().length > 0, "attachment must carry the produced bytes");
+        var magic = new String(att.bytes(), 0, 4, java.nio.charset.StandardCharsets.ISO_8859_1);
+        assertEquals("%PDF", magic, "produced attachment must be a real PDF");
+    }
+
+    @Test
+    void executeRich_readDocumentCarriesNoAttachment() {
+        // A non-producing action stays text-only — no spurious attachment on the result.
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-rich-read");
+        var rich = tool.executeRich(
+                "{\"action\":\"readDocument\",\"path\":\"nope.txt\"}", agent);
+        assertTrue(rich.attachments().isEmpty(), "read must not produce an attachment");
+    }
+
     private models.Agent freshAgent(String name) {
         play.test.Fixtures.deleteDatabase();
         // Reset the on-disk workspace too so files (drafts, rendered outputs,

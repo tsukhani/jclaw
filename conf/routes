@@ -258,6 +258,9 @@ DELETE  /api/apps/{slug}                        ApiAppsController.delete
 # JCLAW-764: scoped App -> Agent invoke. The agent is resolved from app.json.agent
 # (never a body param); AuthCheck's AD-1 gate restricts app-origin callers to this route.
 POST    /api/apps/{slug}/invoke                 ApiAppInvokeController.invoke
+# JCLAW-765: fetch a file the invoke's agent produced. Scoped to this app's own
+# channelType="app" conversations (peerId=slug); the AD-1 gate also whitelists it.
+GET     /api/apps/{slug}/files/{uuid}           ApiAppInvokeController.file
 
 # Unknown /api/* paths -> clean 404 JSON (JCLAW-336). Must be after all real /api
 # routes and before the SPA + {controller}/{action} catch-alls, so scanners hitting

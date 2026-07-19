@@ -1,5 +1,6 @@
 package tools;
 
+import agents.GeneratedAttachment;
 import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
@@ -121,6 +122,14 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
     @Override
     public String execute(String argsJson, Agent agent) {
+        // execute() is the text-only fallback; the dispatcher uses executeRich(), which
+        // additionally carries a written PDF/DOCX/HTML back as a downloadable attachment
+        // (JCLAW-765). Delegating keeps one dispatch path — see GenerateImageTool.
+        return executeRich(argsJson, agent).text();
+    }
+
+    @Override
+    public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         var action = args.get(ARG_ACTION).getAsString();
         var relativePath = args.get("path").getAsString();
@@ -129,67 +138,109 @@ public class DocumentsTool implements ToolRegistry.Tool {
         try {
             target = AgentService.acquireWorkspacePath(agent.name, relativePath);
         } catch (SecurityException _) {
-            return "Error: Path '%s' escapes the workspace directory.".formatted(relativePath);
+            return ToolRegistry.ToolResult.text(
+                    "Error: Path '%s' escapes the workspace directory.".formatted(relativePath));
         }
 
         return switch (action) {
-            case ACTION_READ -> readDocument(target);
+            case ACTION_READ -> ToolRegistry.ToolResult.text(readDocument(target));
             case ACTION_APPEND, "appendFile" -> {
                 var content = args.has(ARG_CONTENT) && !args.get(ARG_CONTENT).isJsonNull()
                         ? args.get(ARG_CONTENT).getAsString() : "";
-                yield appendDocument(target, relativePath, content);
+                yield ToolRegistry.ToolResult.text(appendDocument(target, relativePath, content));
             }
             case ACTION_WRITE -> {
                 var content = args.has(ARG_CONTENT) && !args.get(ARG_CONTENT).isJsonNull()
                         ? args.get(ARG_CONTENT).getAsString() : "";
                 var format = args.has(ARG_FORMAT) && !args.get(ARG_FORMAT).isJsonNull()
                         ? args.get(ARG_FORMAT).getAsString() : null;
-                yield writeDocument(target, relativePath, content, format);
+                yield richResult(writeDocument(target, relativePath, content, format));
             }
             case ACTION_RENDER -> {
                 if (!args.has(ARG_SOURCE_PATH) || args.get(ARG_SOURCE_PATH).isJsonNull()) {
-                    yield "Error: renderDocument requires 'sourcePath' (workspace-relative markdown file to render).";
+                    yield ToolRegistry.ToolResult.text(
+                            "Error: renderDocument requires 'sourcePath' (workspace-relative markdown file to render).");
                 }
                 var sourceRelative = args.get(ARG_SOURCE_PATH).getAsString();
                 Path source;
                 try {
                     source = AgentService.acquireWorkspacePath(agent.name, sourceRelative);
                 } catch (SecurityException _) {
-                    yield "Error: sourcePath '%s' escapes the workspace directory.".formatted(sourceRelative);
+                    yield ToolRegistry.ToolResult.text(
+                            "Error: sourcePath '%s' escapes the workspace directory.".formatted(sourceRelative));
                 }
                 if (!Files.exists(source)) {
-                    yield "Error: sourcePath not found: %s".formatted(sourceRelative);
+                    yield ToolRegistry.ToolResult.text("Error: sourcePath not found: %s".formatted(sourceRelative));
                 }
                 String content;
                 try {
                     content = Files.readString(source);
                 } catch (IOException e) {
-                    yield "Error reading sourcePath: %s".formatted(e.getMessage());
+                    yield ToolRegistry.ToolResult.text("Error reading sourcePath: %s".formatted(e.getMessage()));
                 }
                 var format = args.has(ARG_FORMAT) && !args.get(ARG_FORMAT).isJsonNull()
                         ? args.get(ARG_FORMAT).getAsString() : null;
-                yield writeDocument(target, relativePath, content, format);
+                yield richResult(writeDocument(target, relativePath, content, format));
             }
-            default -> "Error: Unknown action '%s'".formatted(action);
+            default -> ToolRegistry.ToolResult.text("Error: Unknown action '%s'".formatted(action));
         };
     }
 
-    private String writeDocument(Path target, String relativePath, String content, String format) {
+    /** Outcome of a write/render: the text response, plus (on success) the produced
+     *  file and its resolved format so {@link #richResult} can carry the bytes as a
+     *  downloadable attachment. On any error path, {@code file} is null. */
+    private record Written(String text, Path file, String format) {
+        static Written error(String text) { return new Written(text, null, null); }
+    }
+
+    /**
+     * Wrap a write/render outcome. On success the produced document is carried as a
+     * {@link GeneratedAttachment} so the run pipeline persists it as a downloadable
+     * {@code MessageAttachment} (JCLAW-765) — the same structured path
+     * {@code generate_image} uses for images, and what lets an app fetch a rendered
+     * PDF back via {@code GET /api/apps/<slug>/files/<uuid>}. On error, or if the
+     * just-written file can't be re-read, it degrades to text (the file is still on
+     * disk and linked from the text response).
+     */
+    private static ToolRegistry.ToolResult richResult(Written w) {
+        if (w.file() == null) {
+            return ToolRegistry.ToolResult.text(w.text());
+        }
+        try {
+            var bytes = Files.readAllBytes(w.file());
+            var att = new GeneratedAttachment(
+                    bytes, mimeForFormat(w.format()), null, w.file().getFileName().toString());
+            return ToolRegistry.ToolResult.withAttachments(w.text(), null, List.of(att));
+        } catch (IOException _) {
+            return ToolRegistry.ToolResult.text(w.text());
+        }
+    }
+
+    private static String mimeForFormat(String format) {
+        return switch (format) {
+            case "pdf" -> "application/pdf";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            default -> "text/html";
+        };
+    }
+
+    private Written writeDocument(Path target, String relativePath, String content, String format) {
         if (content == null || content.isEmpty()) {
-            return "Error: writeDocument requires 'content' (markdown).";
+            return Written.error("Error: writeDocument requires 'content' (markdown).");
         }
         if (content.length() > MAX_WRITE_MARKDOWN_CHARS) {
-            return "Error: Markdown content exceeds write limit (%d chars). Content length: %d chars."
-                    .formatted(MAX_WRITE_MARKDOWN_CHARS, content.length());
+            return Written.error("Error: Markdown content exceeds write limit (%d chars). Content length: %d chars."
+                    .formatted(MAX_WRITE_MARKDOWN_CHARS, content.length()));
         }
 
         var resolved = resolveFormat(format, relativePath);
         if (resolved == null) {
-            return "Error: Could not determine output format. Provide 'format' (html, pdf, or docx) or use a matching path extension.";
+            return Written.error(
+                    "Error: Could not determine output format. Provide 'format' (html, pdf, or docx) or use a matching path extension.");
         }
         if (!WRITE_FORMATS.contains(resolved)) {
-            return "Error: Unsupported format '%s'. Supported: %s."
-                    .formatted(resolved, String.join(", ", WRITE_FORMATS));
+            return Written.error("Error: Unsupported format '%s'. Supported: %s."
+                    .formatted(resolved, String.join(", ", WRITE_FORMATS)));
         }
 
         // The resolved format is authoritative for the file's bytes, so the
@@ -226,13 +277,14 @@ public class DocumentsTool implements ToolRegistry.Tool {
             }
             long size = Files.size(target);
             var fileName = target.getFileName().toString();
-            return ("Document written: %s (%s, %d bytes). "
+            var text = ("Document written: %s (%s, %d bytes). "
                     + "IMPORTANT: in your reply to the user, include this exact markdown link so they can download the file: [%s](%s)")
                     .formatted(relativePath, resolved, size, fileName, relativePath);
+            return new Written(text, target, resolved);
         } catch (IOException e) {
-            return "Error writing document: %s".formatted(e.getMessage());
+            return Written.error("Error writing document: %s".formatted(e.getMessage()));
         } catch (RuntimeException e) {
-            return "Error rendering document: %s".formatted(e.getMessage());
+            return Written.error("Error rendering document: %s".formatted(e.getMessage()));
         }
     }
 

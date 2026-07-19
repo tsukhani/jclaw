@@ -243,6 +243,11 @@ public final class AttachmentService {
             case "image/jpeg" -> "jpg";
             case "image/webp" -> "webp";
             case "image/gif" -> "gif";
+            // JCLAW-765: the documents tool can now produce a downloadable attachment,
+            // so a generated file's on-disk leaf must carry an honest extension.
+            case "application/pdf" -> "pdf";
+            case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> "docx";
+            case "text/html" -> "html";
             default -> "png";
         };
     }
