@@ -3,3 +3,8 @@ allowBuilds:
   esbuild: true
   unrs-resolver: true
   vue-demi: true
+# Frontend deps are gated on whether they compile and pass tests, not on
+# release age. Disable pnpm's release-age cooldown (default in pnpm 11) so
+# new upgrades are never held back or auto-excluded per-version. Do not
+# reintroduce minimumReleaseAge / minimumReleaseAgeExclude here.
+minimumReleaseAge: 0
