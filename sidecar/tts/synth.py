@@ -87,6 +87,16 @@ def _load_mlx(model_id):
     return m
 
 
+def _voice_seed(voice):
+    """Map the `voice` field to a deterministic mlx RNG seed: a numeric voice
+    picks a specific Qwen3-TTS speaker; anything else keeps one stable default."""
+    if voice:
+        v = voice.strip()
+        if v.lstrip("-").isdigit():
+            return int(v)
+    return 42
+
+
 def _synthesize(text, model_id, voice, ref_audio, ref_text, speed, fmt):
     """Synthesize `text` to audio bytes; returns (base64_str, sample_rate)."""
     import numpy as np
@@ -104,7 +114,9 @@ def _synthesize(text, model_id, voice, ref_audio, ref_text, speed, fmt):
 
     model = _load_mlx(model_id)
     kw = {"verbose": False}
-    if voice:
+    # Kokoro has named voices; Qwen3-TTS-Base does not — for it, `voice` selects a
+    # speaker via the RNG seed below.
+    if voice and "kokoro" in model_id.lower():
         kw["voice"] = voice
     if speed:
         kw["speed"] = float(speed)
@@ -112,6 +124,13 @@ def _synthesize(text, model_id, voice, ref_audio, ref_text, speed, fmt):
         kw["ref_audio"] = ref_audio
     if ref_text:
         kw["ref_text"] = ref_text
+
+    # Pin the speaker so the voice stays consistent across sentence chunks and
+    # turns: Qwen3-TTS-Base samples a fresh voice per call otherwise. Seed mlx's
+    # RNG deterministically (a numeric `voice` picks a specific speaker; blank
+    # keeps one stable default). Harmless for the already-deterministic Kokoro.
+    import mlx.core as mx
+    mx.random.seed(_voice_seed(voice))
 
     segments = list(model.generate(text=text, **kw))
     if not segments:
