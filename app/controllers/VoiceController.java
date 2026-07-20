@@ -21,6 +21,9 @@ import services.transcription.AsrSidecarClient;
 import services.tts.TtsException;
 import services.tts.TtsRouter;
 import services.tts.TtsText;
+import services.voice.TurnEndpointer;
+import services.voice.VoiceSession;
+import services.voice.VoiceVad;
 
 import java.io.IOException;
 import java.net.URI;
@@ -38,23 +41,25 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
- * Real-time voice mode WebSocket (JCLAW-791). The browser segments a spoken
- * utterance (client-side VAD) and streams it as a WAV {@code BinaryFrame}. How
- * the server turns that into a user turn depends on the agent's active model: an
+ * Real-time voice mode WebSocket (JCLAW-791; server-side endpointing JCLAW-799).
+ * The browser streams the mic as continuous PCM16 {@code BinaryFrame}s; the
+ * server runs the Silero VAD + adaptive-silence endpointer ({@link VoiceSession},
+ * JCLAW-797) to detect where each utterance begins and ends. How the finalized
+ * utterance becomes a user turn depends on the agent's active model: an
  * audio-capable model receives the raw speech as a native {@code input_audio}
  * attachment (the JCLAW-165 chat pipeline, so tone and non-lexical cues survive),
  * while a text-only model gets a local-ASR transcript. Either way the reply
  * streams back as sentence-chunked TTS audio frames (reusing JCLAW-790), which
  * the client plays gaplessly.
  *
- * <p><b>Barge-in (Phase B):</b> each utterance runs its turn on a virtual thread
- * so the inbound loop stays responsive; a new utterance (or an explicit {@code
- * cancel} frame) supersedes any in-flight turn by tripping its cancel flag. The
- * cancelled turn stops emitting between chunks. Every frame carries a monotonic
- * {@code turn} id so the client discards straggler audio from a superseded turn.
- * (Agent <i>generation</i> cancellation — stopping {@code AgentRunner.run}
- * itself — is a Phase C refinement; today a barged turn stops streaming audio
- * but its reply still completes server-side.)
+ * <p><b>Barge-in:</b> each turn runs on a virtual thread so the inbound loop
+ * keeps running the VAD; when the endpointer detects the user speaking over an
+ * in-flight turn, the server trips that turn's cancel flag and sends a {@code
+ * flush} so the client drops its queued playback immediately. Generation is
+ * cancelled too — {@code AgentRunner.runStreaming} takes the same flag — so a
+ * barged turn stops producing tokens, not just audio. Every frame carries a
+ * monotonic {@code turn} id so the client discards straggler audio from a
+ * superseded turn.
  *
  * <p>The cascade keeps the Java agent (tools, memory, orchestration) in the
  * loop. When the model can't hear audio, voice STT deliberately uses the LOCAL
@@ -64,14 +69,16 @@ import java.util.stream.Collectors;
  *
  * <p>Protocol — client→server:
  * <ul>
- *   <li>{@code TextFrame  {"type":"init","agentId":N}} — bind the agent (once)</li>
- *   <li>{@code BinaryFrame <wav bytes>} — one complete utterance (supersedes any in-flight turn)</li>
- *   <li>{@code TextFrame  {"type":"cancel"}} — barge-in: stop the in-flight turn</li>
+ *   <li>{@code TextFrame  {"type":"init","agentId":N}} — bind the agent + start the pipeline (once)</li>
+ *   <li>{@code BinaryFrame <pcm16 bytes>} — a chunk of the continuous 16&nbsp;kHz mono mic stream</li>
+ *   <li>{@code TextFrame  {"type":"cancel"}} — client-initiated stop of the in-flight turn</li>
  *   <li>{@code TextFrame  {"type":"bye"}} — graceful close</li>
  * </ul>
- * server→client (JSON frames, each with a {@code turn} id after {@code ready}):
- * {@code {"type":"ready"}}, {@code {"type":"transcript","turn":t,"text":..}},
- * {@code {"type":"reply","turn":t,"text":..}}, {@code {"type":"audio","turn":t,"index":i,"audio":<base64 wav>}},
+ * server→client (JSON frames):
+ * {@code {"type":"ready"}}, {@code {"type":"state","value":"capturing|thinking"}},
+ * {@code {"type":"flush"}} (drop queued playback on barge-in),
+ * {@code {"type":"transcript","turn":t,"text":..}}, {@code {"type":"reply","turn":t,"text":..}},
+ * {@code {"type":"audio","turn":t,"index":i,"audio":<base64 wav>}},
  * {@code {"type":"turn_complete","turn":t}}, {@code {"type":"error","message":..}}.
  */
 public class VoiceController extends WebSocketController {
@@ -82,6 +89,10 @@ public class VoiceController extends WebSocketController {
     /** Overlay "You:" placeholder for the native-audio path — the raw speech went
      *  straight to the model, so there is no Whisper transcript to echo. */
     private static final String VOICE_ATTACHMENT_LABEL = "(voice message)";
+
+    /** Pre-roll windows kept before speech-start so the onset isn't clipped
+     *  (~320&nbsp;ms at the 32&nbsp;ms Silero window). */
+    private static final int PREROLL_WINDOWS = 10;
 
     public static void socket() {
         // CSWSH defense — a WebSocket handshake is NOT bound by the Same-Origin
@@ -104,52 +115,104 @@ public class VoiceController extends WebSocketController {
         var writeLock = new Object();               // serialize frame writes across turn threads
         var current = new AtomicReference<AtomicBoolean>();  // in-flight turn's cancel flag
         var turnSeq = new AtomicInteger();
-        Agent agent = null;
+        var sessionRef = new AtomicReference<VoiceSession>(); // per-connection streaming pipeline
 
-        for (Http.WebSocketEvent event : inbound) {
-            try {
-                switch (event) {
-                    case Http.TextFrame(var text) -> {
-                        var msg = JsonParser.parseString(text).getAsJsonObject();
-                        var type = msg.has("type") ? msg.get("type").getAsString() : "";
-                        switch (type) {
-                            case "init" -> {
-                                agent = resolveAgent(msg);
-                                send(out, writeLock, agent == null
-                                        ? Map.of("type", "error", "message", "unknown or missing agentId")
-                                        : Map.of("type", "ready", "agentId", agent.id));
+        try {
+            for (Http.WebSocketEvent event : inbound) {
+                try {
+                    switch (event) {
+                        case Http.TextFrame(var text) -> {
+                            var msg = JsonParser.parseString(text).getAsJsonObject();
+                            var type = msg.has("type") ? msg.get("type").getAsString() : "";
+                            switch (type) {
+                                case "init" -> initSession(msg, username, asr, out, writeLock,
+                                        current, turnSeq, sessionRef);
+                                case "cancel" -> cancelCurrent(current);  // client-initiated stop
+                                case "bye" -> {
+                                    cancelCurrent(current);
+                                    return;
+                                }
+                                default -> { /* ignore unknown control frames */ }
                             }
-                            case "cancel" -> cancelCurrent(current);  // barge-in
-                            case "bye" -> {
-                                cancelCurrent(current);
-                                return;
-                            }
-                            default -> { /* ignore unknown control frames */ }
                         }
-                    }
-                    case Http.BinaryFrame(var bytes) -> {
-                        if (agent == null) {
-                            send(out, writeLock, Map.of("type", "error", "message", "send an init frame first"));
-                        } else {
-                            // A new utterance supersedes any in-flight turn (barge-in),
-                            // and its turn runs off the loop so cancels stay responsive.
+                        case Http.BinaryFrame(var bytes) -> {
+                            // Continuous PCM16 mic frames; the session runs VAD +
+                            // endpointing inline and calls back on turn boundaries.
+                            var s = sessionRef.get();
+                            if (s == null) {
+                                send(out, writeLock, Map.of("type", "error", "message", "send an init frame first"));
+                            } else {
+                                s.onPcm(bytes, bytes.length);
+                            }
+                        }
+                        case Http.WebSocketClose ignored -> {
                             cancelCurrent(current);
-                            var cancel = new AtomicBoolean(false);
-                            current.set(cancel);
-                            int turnId = turnSeq.incrementAndGet();
-                            var boundAgent = agent;
-                            Thread.ofVirtual().name("voice-turn-" + turnId).start(() ->
-                                    runTurn(boundAgent, username, asr, bytes, cancel, turnId, out, writeLock));
+                            return;
                         }
                     }
-                    case Http.WebSocketClose ignored -> {
-                        cancelCurrent(current);
-                        return;
-                    }
+                } catch (RuntimeException e) {  // a bad frame must not drop the socket
+                    Logger.warn("voice: frame handling failed: %s", e.getMessage());
                 }
-            } catch (RuntimeException e) {  // a bad frame must not drop the socket
-                Logger.warn("voice: frame handling failed: %s", e.getMessage());
             }
+        } finally {
+            cancelCurrent(current);
+            var s = sessionRef.getAndSet(null);
+            if (s != null) s.close();  // release the native VAD
+        }
+    }
+
+    /** Bind the agent and stand up the streaming pipeline (Silero VAD + adaptive
+     *  endpointing, JCLAW-797) for this connection. Utterances detected server-side
+     *  flow one at a time to {@link #runTurn}; the mic stays open so a new utterance
+     *  during an in-flight turn is a server-driven barge-in. */
+    @SuppressWarnings("java:S107") // per-connection wiring — all captured by the session listener
+    private static void initSession(JsonObject msg, String username, AsrSidecarClient asr,
+                                    Http.Outbound out, Object writeLock,
+                                    AtomicReference<AtomicBoolean> current, AtomicInteger turnSeq,
+                                    AtomicReference<VoiceSession> sessionRef) {
+        var agent = resolveAgent(msg);
+        if (agent == null) {
+            send(out, writeLock, Map.of("type", "error", "message", "unknown or missing agentId"));
+            return;
+        }
+        try {
+            var vad = new VoiceVad(); // provisions the Silero model on first use
+            var endpointer = new TurnEndpointer(
+                    ConfigService.getInt("voice.endpoint.speechStartMs", 180),
+                    ConfigService.getInt("voice.endpoint.baseSilenceMs", 500),
+                    ConfigService.getInt("voice.endpoint.maxSilenceMs", 1500),
+                    ConfigService.getInt("voice.endpoint.minUtteranceMs", 200),
+                    TurnEndpointer.ALWAYS_COMPLETE); // Smart Turn v3 plugs into this seam later
+            var boundAgent = agent;
+            var voice = new VoiceSession(vad, endpointer, PREROLL_WINDOWS, new VoiceSession.Listener() {
+                @Override
+                public void onSpeechStart() {
+                    // Server-side barge-in: abandon any in-flight turn and flush the
+                    // client's playback the instant the user starts talking.
+                    if (current.get() != null) {
+                        cancelCurrent(current);
+                        send(out, writeLock, Map.of("type", "flush"));
+                    }
+                    send(out, writeLock, Map.of("type", "state", "value", "capturing"));
+                }
+
+                @Override
+                public void onUtterance(byte[] wav) {
+                    cancelCurrent(current);
+                    var cancel = new AtomicBoolean(false);
+                    current.set(cancel);
+                    int turnId = turnSeq.incrementAndGet();
+                    send(out, writeLock, Map.of("type", "state", "value", "thinking"));
+                    Thread.ofVirtual().name("voice-turn-" + turnId).start(() ->
+                            runTurn(boundAgent, username, asr, wav, cancel, turnId, out, writeLock));
+                }
+            });
+            sessionRef.set(voice);
+            send(out, writeLock, Map.of("type", "ready", "agentId", agent.id));
+        } catch (RuntimeException e) {
+            Logger.warn("voice: failed to start session: %s", e.getMessage());
+            send(out, writeLock, Map.of("type", "error",
+                    "message", "voice engine unavailable: " + e.getMessage()));
         }
     }
 
