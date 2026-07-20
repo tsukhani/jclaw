@@ -1,7 +1,8 @@
-// Real-time voice mode client (JCLAW-791). Opens a WebSocket to /api/voice,
-// captures the mic, segments utterances with a simple energy VAD, encodes each
-// as a WAV and sends it; plays the streamed TTS reply gaplessly on one
-// AudioContext. One voice session app-wide (SPA singleton).
+// Real-time voice mode client (JCLAW-791; capture/playback JCLAW-796). Opens a
+// WebSocket to /api/voice, captures the mic via an AudioWorklet, segments
+// utterances with a simple energy VAD, encodes each as a WAV and sends it; plays
+// the streamed TTS reply through an AudioWorklet ring buffer that can hard-stop
+// within one render quantum. One voice session app-wide (SPA singleton).
 //
 // Phase B — barge-in: the mic stays live while the agent is thinking/speaking,
 // so the user can interrupt. A stricter frame count while the agent holds the
@@ -9,6 +10,13 @@
 // cut playback, send {type:"cancel"}, and start the new utterance; every server
 // frame carries a monotonic `turn` id so we drop straggler audio from the
 // superseded turn.
+//
+// JCLAW-796: capture moved off the deprecated ScriptProcessorNode to a
+// dedicated-thread AudioWorklet, and playback moved off timeline-scheduled
+// AudioBufferSourceNodes to a ring-buffer worklet — barge-in now flushes the
+// buffer in one message instead of stopping N scheduled nodes, so playback dies
+// within a single render quantum. Both worklet modules are served statically
+// from /worklets (public/).
 //
 // Dev note: the WS is same-origin (/api/voice); works in prod (one JVM). In
 // `--dev` the Nitro proxy may not forward the WS upgrade to :9000, and the
@@ -26,7 +34,7 @@ let ws: WebSocket | null = null
 let mediaStream: MediaStream | null = null
 let micCtx: AudioContext | null = null
 let sourceNode: MediaStreamAudioSourceNode | null = null
-let processor: ScriptProcessorNode | null = null
+let captureNode: AudioWorkletNode | null = null
 let captureRate = 16000
 
 // --- VAD / utterance state ---
@@ -35,16 +43,22 @@ let speechFrames = 0
 let silenceFrames = 0
 let captured: Float32Array[] = [] // doubles as a pre-roll ring while not capturing
 
-// --- gapless playback ---
+// --- ring-buffer playback ---
 let playCtx: AudioContext | null = null
-let nextStartTime = 0
-const playSources: AudioBufferSourceNode[] = []
-let audioPending = 0
+let playNode: AudioWorkletNode | null = null
+let bufferEmpty = true // mirrors the worklet ring buffer (drained = true)
 let turnComplete = false
 let currentTurn = -1 // the turn whose audio we currently accept (-1 = none)
 let watchdog: ReturnType<typeof setTimeout> | null = null
 
-// VAD tuning (Phase A/B defaults; Phase C tunes these).
+// Worklet modules (served from public/). Loaded once per AudioContext.
+const CAPTURE_WORKLET = '/worklets/voice-capture.js'
+const PLAYBACK_WORKLET = '/worklets/voice-playback.js'
+// Samples per posted capture frame — kept at the pre-worklet buffer size so the
+// energy-VAD frame counts below keep their timing (~85 ms at 48 kHz).
+const CAPTURE_FRAME = 4096
+
+// VAD tuning (Phase A/B defaults; Phase C / JCLAW-797 move endpointing server-side).
 const RMS_THRESHOLD = 0.015 // frame energy above this counts as speech
 const SPEECH_START_FRAMES = 3 // consecutive speech frames to open an utterance
 const BARGE_IN_FRAMES = 8 // stricter while the agent talks — resists speaker echo
@@ -59,10 +73,10 @@ const SPEAKING_STALL_MS = 15_000
 
 function teardown() {
   clearWatchdog()
-  if (processor) {
-    processor.onaudioprocess = null
-    processor.disconnect()
-    processor = null
+  if (captureNode) {
+    captureNode.port.onmessage = null
+    captureNode.disconnect()
+    captureNode = null
   }
   if (sourceNode) {
     sourceNode.disconnect()
@@ -77,6 +91,11 @@ function teardown() {
     mediaStream = null
   }
   stopPlayback()
+  if (playNode) {
+    playNode.port.onmessage = null
+    playNode.disconnect()
+    playNode = null
+  }
   if (playCtx) {
     playCtx.close().catch(() => {})
     playCtx = null
@@ -96,7 +115,8 @@ function teardown() {
   speechFrames = 0
   silenceFrames = 0
   captured = []
-  nextStartTime = 0
+  bufferEmpty = true
+  turnComplete = false
   currentTurn = -1
 }
 
@@ -137,6 +157,7 @@ async function start(agentId: number) {
       if (state.value !== 'error') stop()
     }
     await startMic()
+    await startPlayback()
   }
   catch (e) {
     fail((e as Error)?.message || 'could not start voice mode (mic permission?)')
@@ -149,22 +170,40 @@ async function startMic() {
   })
   micCtx = new AudioContext()
   captureRate = micCtx.sampleRate
+  await micCtx.audioWorklet.addModule(CAPTURE_WORKLET)
   sourceNode = micCtx.createMediaStreamSource(mediaStream)
-  // ScriptProcessorNode is deprecated but universally supported and needs no
-  // separate worklet module; AudioWorklet is the Phase-C upgrade.
-  processor = micCtx.createScriptProcessor(4096, 1, 1)
-  processor.onaudioprocess = onAudioFrame
-  sourceNode.connect(processor)
-  processor.connect(micCtx.destination) // some browsers only fire onaudioprocess when connected
+  captureNode = new AudioWorkletNode(micCtx, 'voice-capture-processor', {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    processorOptions: { frame: CAPTURE_FRAME },
+  })
+  captureNode.port.onmessage = e => onAudioFrame(e.data as Float32Array)
+  sourceNode.connect(captureNode)
+  // The node emits silence; connecting to the destination only keeps the graph
+  // pulling so process() fires (the mic is never routed to the speakers).
+  captureNode.connect(micCtx.destination)
 }
 
-function onAudioFrame(e: AudioProcessingEvent) {
+async function startPlayback() {
+  playCtx = new AudioContext()
+  await playCtx.audioWorklet.addModule(PLAYBACK_WORKLET)
+  playNode = new AudioWorkletNode(playCtx, 'voice-playback-processor', {
+    numberOfInputs: 0,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+  })
+  playNode.port.onmessage = (e) => {
+    if ((e.data as { type?: string })?.type === 'drained') onDrained()
+  }
+  playNode.connect(playCtx.destination)
+}
+
+function onAudioFrame(input: Float32Array) {
   // Barge-in: stay live while the agent holds the floor so the user can cut in;
   // ignore only while connecting/idle/error.
   const holdingFloor = state.value === 'thinking' || state.value === 'speaking'
   if (state.value !== 'listening' && state.value !== 'capturing' && !holdingFloor) return
 
-  const input = e.inputBuffer.getChannelData(0)
   let sum = 0
   for (let i = 0; i < input.length; i++) {
     const v = input[i]!
@@ -174,7 +213,7 @@ function onAudioFrame(e: AudioProcessingEvent) {
 
   // Always buffer the frame; while not yet capturing, keep only a short pre-roll
   // ring so the utterance onset (the detection frames) survives.
-  captured.push(new Float32Array(input))
+  captured.push(input)
   if (!capturing && captured.length > PREROLL_FRAMES) captured.shift()
 
   if (rms > RMS_THRESHOLD) {
@@ -278,7 +317,7 @@ async function onMessage(ev: MessageEvent) {
       if (msg.turn != null) currentTurn = msg.turn
       reply.value = msg.text || ''
       if (state.value === 'thinking') state.value = 'speaking'
-      ensurePlayCtx()
+      turnComplete = false // a fresh turn's audio is about to stream
       break
     case 'audio':
       if (msg.turn !== currentTurn) break // straggler from a superseded turn
@@ -298,34 +337,19 @@ async function onMessage(ev: MessageEvent) {
   armWatchdog()
 }
 
-function ensurePlayCtx() {
-  if (!playCtx) {
-    playCtx = new AudioContext()
-    nextStartTime = playCtx.currentTime
-  }
-  turnComplete = false
-  audioPending = 0
-}
-
 async function playChunk(b64: string) {
-  if (!playCtx || !b64) return
+  if (!playCtx || !playNode || !b64) return
   try {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
-    const buf = await playCtx.decodeAudioData(bytes.buffer)
-    if (!playCtx) return
-    const src = playCtx.createBufferSource()
-    src.buffer = buf
-    src.connect(playCtx.destination)
-    const at = Math.max(playCtx.currentTime, nextStartTime)
-    src.start(at)
-    nextStartTime = at + buf.duration
-    audioPending++
-    playSources.push(src)
-    src.onended = () => {
-      audioPending--
-      maybeEndTurn()
-      armWatchdog() // a chunk finishing is progress during a long reply
-    }
+    const audio = await playCtx.decodeAudioData(bytes.buffer)
+    if (!playCtx || !playNode) return
+    if (playCtx.state === 'suspended') await playCtx.resume()
+    // decodeAudioData resamples to the context rate, so the samples already
+    // match the worklet's output rate. Copy channel 0 to transfer ownership.
+    const mono = new Float32Array(audio.getChannelData(0))
+    bufferEmpty = false
+    playNode.port.postMessage({ type: 'push', data: mono }, [mono.buffer])
+    armWatchdog()
   }
   catch (e) {
     console.error('voice: failed to decode/play audio chunk', e)
@@ -333,25 +357,21 @@ async function playChunk(b64: string) {
 }
 
 function stopPlayback() {
-  for (const s of playSources) {
-    try {
-      s.onended = null
-      s.stop()
-    }
-    catch {
-      // already stopped
-    }
-  }
-  playSources.length = 0
-  audioPending = 0
+  if (playNode) playNode.port.postMessage({ type: 'flush' })
+  bufferEmpty = true
   turnComplete = false
-  if (playCtx) nextStartTime = playCtx.currentTime
+}
+
+function onDrained() {
+  bufferEmpty = true
+  maybeEndTurn()
+  armWatchdog() // a chunk finishing is progress during a long reply
 }
 
 function maybeEndTurn() {
-  // The turn ends once the server signalled completion AND every scheduled audio
-  // chunk has finished — then we hand the floor back to the mic.
-  if (turnComplete && audioPending <= 0 && state.value === 'speaking') {
+  // The turn ends once the server signalled completion AND the ring buffer has
+  // played out — then we hand the floor back to the mic.
+  if (turnComplete && bufferEmpty && state.value === 'speaking') {
     state.value = 'listening'
     clearWatchdog()
   }
