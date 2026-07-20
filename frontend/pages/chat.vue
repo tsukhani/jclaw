@@ -8,7 +8,6 @@ import {
   PaperAirplaneIcon,
   PaperClipIcon,
   PencilSquareIcon,
-  PhoneIcon,
   SpeakerWaveIcon,
   UsersIcon,
   XMarkIcon,
@@ -1020,10 +1019,7 @@ function exportConversation() {
                   aria-label="Start voice mode"
                   @click="voiceModeActive = true"
                 >
-                  <PhoneIcon
-                    class="w-4 h-4"
-                    aria-hidden="true"
-                  />
+                  <IconVoiceWaveform class="w-4 h-4" />
                 </button>
               </div>
               <!--
