@@ -37,6 +37,9 @@ POST    /api/tts/synthesize                     ApiTtsController.synthesize
 POST    /api/tts/stream                          ApiTtsController.stream
 POST    /api/tts/models/{id}/download           ApiTtsController.download
 
+# Real-time voice mode WebSocket (JCLAW-791) — cascade: mic → local STT → agent → streaming TTS.
+WS      /api/voice                              VoiceController.socket
+
 # Local image generation API (JCLAW-226)
 GET     /api/imagegen/local/state               ApiImagegenController.state
 POST    /api/imagegen/local/pull                ApiImagegenController.pull

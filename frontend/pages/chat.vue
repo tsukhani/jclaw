@@ -8,6 +8,7 @@ import {
   PaperAirplaneIcon,
   PaperClipIcon,
   PencilSquareIcon,
+  PhoneIcon,
   SpeakerWaveIcon,
   UsersIcon,
   XMarkIcon,
@@ -58,6 +59,11 @@ const { data: configData } = await useFetch<ConfigResponse>('/api/config')
 const selectedAgentId = ref<number | null>(
   agents.value?.find(a => a.isMain)?.id ?? agents.value?.[0]?.id ?? null,
 )
+
+// JCLAW-791: real-time voice mode overlay — a live spoken conversation with the
+// current agent. Distinct from the composer's "Record voice" button (which just
+// attaches an audio clip).
+const voiceModeActive = ref(false)
 
 // Extract configured providers and their models from config
 const configDataRef = computed(() => configData.value ?? null)
@@ -1002,6 +1008,23 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                 </button>
+                <!--
+                  Voice mode (JCLAW-791): a live spoken conversation with the
+                  agent — separate from "Record voice" above, which attaches an
+                  audio clip. Opens the voice overlay for the current agent.
+                -->
+                <button
+                  type="button"
+                  class="inline-flex items-center justify-center w-8 h-8 rounded-full border border-border text-fg-muted hover:text-fg-strong hover:bg-muted transition-colors"
+                  title="Voice mode — talk with the agent"
+                  aria-label="Start voice mode"
+                  @click="voiceModeActive = true"
+                >
+                  <PhoneIcon
+                    class="w-4 h-4"
+                    aria-hidden="true"
+                  />
+                </button>
               </div>
               <!--
                 Model-capability toggles. Unsloth-style rounded-full pills:
@@ -1223,6 +1246,11 @@ function exportConversation() {
         />
       </div> <!-- end body wrapper -->
     </div>
+    <ChatVoiceOverlay
+      v-if="voiceModeActive && selectedAgentId != null"
+      :agent-id="selectedAgentId!"
+      @close="voiceModeActive = false"
+    />
   </div>
 </template>
 
