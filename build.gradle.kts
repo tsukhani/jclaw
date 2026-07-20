@@ -427,7 +427,7 @@ dependencies {
     // models reject WebP ("Failed to load image"). This TwelveMonkeys ImageIO plugin auto-registers a
     // WebP ImageReader so CaptionImageNormalizer can transcode WebP → PNG before sending. Pure-Java,
     // no natives; read-only (we only decode WebP, then write PNG via core ImageIO).
-    implementation("com.twelvemonkeys.imageio:imageio-webp:3.13.1")
+    implementation("com.twelvemonkeys.imageio:imageio-webp:3.14.0")
 
     // JCLAW-21: db-scheduler — persistent task scheduling backed by a single
     // DB table (scheduled_tasks). Replaces what would otherwise be a custom
