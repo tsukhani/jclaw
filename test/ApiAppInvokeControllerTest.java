@@ -6,6 +6,8 @@ import models.MessageAttachment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import play.Play;
 import play.mvc.Http;
 import play.test.FunctionalTest;
@@ -124,28 +126,24 @@ class ApiAppInvokeControllerTest extends FunctionalTest {
         assertStatus(404, invoke(slug, slug, MSG, NO_FILES));
     }
 
-    @Test
-    void invokeNoDesignatedAgentFailsClosed() throws IOException {
-        var slug = makeApp("{\"name\":\"NoAgent\",\"version\":\"1.0.0\"}");
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("failClosedManifests")
+    void invokeFailsClosed(String expectedCode, String manifest) throws IOException {
+        // AD-3: each missing/malformed agent designation fails closed with its own 400 code.
+        var slug = makeApp(manifest);
         var r = invoke(slug, slug, MSG, NO_FILES);
         assertStatus(400, r);
-        assertTrue(getContent(r).contains("no_agent"));
+        assertTrue(getContent(r).contains(expectedCode));
     }
 
-    @Test
-    void invokeUnknownAgentFailsClosed() throws IOException {
-        var slug = makeApp("{\"name\":\"Ghost\",\"version\":\"1.0.0\",\"agent\":\"999999999\"}");
-        var r = invoke(slug, slug, MSG, NO_FILES);
-        assertStatus(400, r);
-        assertTrue(getContent(r).contains("unknown_agent"));
-    }
-
-    @Test
-    void invokeNonNumericAgentFailsClosed() throws IOException {
-        var slug = makeApp("{\"name\":\"Bad\",\"version\":\"1.0.0\",\"agent\":\"not-a-number\"}");
-        var r = invoke(slug, slug, MSG, NO_FILES);
-        assertStatus(400, r);
-        assertTrue(getContent(r).contains("bad_agent"));
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> failClosedManifests() {
+        return java.util.stream.Stream.of(
+                org.junit.jupiter.params.provider.Arguments.of("no_agent",
+                        "{\"name\":\"NoAgent\",\"version\":\"1.0.0\"}"),
+                org.junit.jupiter.params.provider.Arguments.of("unknown_agent",
+                        "{\"name\":\"Ghost\",\"version\":\"1.0.0\",\"agent\":\"999999999\"}"),
+                org.junit.jupiter.params.provider.Arguments.of("bad_agent",
+                        "{\"name\":\"Bad\",\"version\":\"1.0.0\",\"agent\":\"not-a-number\"}"));
     }
 
     // ── AD-2 / AD-4 / AD-6 execution wiring ───────────────────────────

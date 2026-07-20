@@ -53,6 +53,13 @@ public class ApiAppInvokeController extends Controller {
      *  "app" channel in the operator's Conversations page. */
     private static final String APP_CHANNEL = "app";
 
+    /** {@code app.json} manifest field names (JCLAW: SonarQube java:S1192). */
+    private static final String AGENT_FIELD = "agent";
+    private static final String LIMIT_FIELD = "limit";
+
+    /** Shared prefix for the fail-closed messages that name the offending app. */
+    private static final String APP_PREFIX = "App '";
+
     public static void invoke(String slug, Upload[] files) {
         var agent = resolveDesignatedAgent(slug); // AD-3 — fail-closed 4xx on any miss
         // AD-2: input is the multipart "message" field plus optional file uploads of
@@ -185,7 +192,7 @@ public class ApiAppInvokeController extends Controller {
         var agent = Tx.run(() -> AgentService.findById(agentId));
         if (agent == null) {
             ApiResponses.error(400, "unknown_agent",
-                    "App '" + slug + "' designates an agent that no longer exists");
+                    APP_PREFIX + slug + "' designates an agent that no longer exists");
         }
         return agent;
     }
@@ -218,8 +225,8 @@ public class ApiAppInvokeController extends Controller {
         }
         try {
             var m = JsonParser.parseString(Files.readString(manifest)).getAsJsonObject();
-            if (m.has("limit") && !m.get("limit").isJsonNull()) {
-                return m.get("limit").getAsInt();
+            if (m.has(LIMIT_FIELD) && !m.get(LIMIT_FIELD).isJsonNull()) {
+                return m.get(LIMIT_FIELD).getAsInt();
             }
         } catch (RuntimeException | java.io.IOException _) {
             return null; // malformed manifest / non-numeric limit → fall back to the default
@@ -232,13 +239,13 @@ public class ApiAppInvokeController extends Controller {
         JsonObject m;
         try {
             m = JsonParser.parseString(Files.readString(manifest)).getAsJsonObject();
-        } catch (Exception e) {
+        } catch (Exception _) {
             ApiResponses.error(404, "no_such_app", "App manifest unreadable: " + slug);
             return null; // unreachable — error() threw
         }
-        var v = (m.has("agent") && !m.get("agent").isJsonNull()) ? m.get("agent").getAsString() : null;
+        var v = (m.has(AGENT_FIELD) && !m.get(AGENT_FIELD).isJsonNull()) ? m.get(AGENT_FIELD).getAsString() : null;
         if (v == null || v.isBlank()) {
-            ApiResponses.error(400, "no_agent", "App '" + slug + "' has no designated agent");
+            ApiResponses.error(400, "no_agent", APP_PREFIX + slug + "' has no designated agent");
         }
         return v;
     }
@@ -246,8 +253,8 @@ public class ApiAppInvokeController extends Controller {
     private static long parseAgentId(String agentIdStr, String slug) {
         try {
             return Long.parseLong(agentIdStr.trim());
-        } catch (NumberFormatException e) {
-            ApiResponses.error(400, "bad_agent", "App '" + slug + "' has an invalid agent designation");
+        } catch (NumberFormatException _) {
+            ApiResponses.error(400, "bad_agent", APP_PREFIX + slug + "' has an invalid agent designation");
             return -1; // unreachable — error() threw
         }
     }

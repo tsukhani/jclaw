@@ -51,7 +51,7 @@ public final class AppOriginGate {
         String path;
         try {
             path = URI.create(referer.trim()).getPath();
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             return null;
         }
         if (path == null) {

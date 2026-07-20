@@ -49,6 +49,10 @@ public class ApiAuthController extends Controller {
     private static final int DEFAULT_LOGIN_MAX_FAILURES = 10;
     private static final long DEFAULT_LOGIN_WINDOW_SECONDS = 300L;
 
+    // JCLAW-764 / AD-1: one spelling of the app-origin refusal code, shared by the
+    // three credential/session routes that gate on AppOriginGate (JCLAW: java:S1192).
+    private static final String APP_SCOPE_CODE = "app_scope";
+
     public record AuthStatusResponse(boolean passwordSet) {}
 
     public record SetupRequest(String password) {}
@@ -87,7 +91,7 @@ public class ApiAuthController extends Controller {
         // safety no longer depends on that precondition surviving a future refactor. An
         // app-originated caller must never reach the credential-bootstrap path.
         if (AppOriginGate.isBlocked()) {
-            ApiResponses.error(403, "app_scope", "App-originated request may not set up the password");
+            ApiResponses.error(403, APP_SCOPE_CODE, "App-originated request may not set up the password");
         }
         var existing = ConfigService.get(PASSWORD_HASH_KEY);
         if (existing != null && !existing.isBlank()) {
@@ -201,7 +205,7 @@ public class ApiAuthController extends Controller {
         // JCLAW-764 / AD-1: same rationale as resetPassword — an app-originated
         // caller must not be able to log the operator out via the ambient cookie.
         if (AppOriginGate.isBlocked()) {
-            ApiResponses.error(403, "app_scope", "App-originated request may not log the operator out");
+            ApiResponses.error(403, APP_SCOPE_CODE, "App-originated request may not log the operator out");
         }
         session.clear();
         EventLogger.info("auth", "Admin logged out");
@@ -228,7 +232,7 @@ public class ApiAuthController extends Controller {
         // operator cookie — block an app-originated call before it can wipe the
         // admin credential.
         if (AppOriginGate.isBlocked()) {
-            ApiResponses.error(403, "app_scope", "App-originated request may not reset the password");
+            ApiResponses.error(403, APP_SCOPE_CODE, "App-originated request may not reset the password");
         }
         var authed = session.get("authenticated");
         if (!"true".equals(authed)) {
