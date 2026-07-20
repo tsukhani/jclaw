@@ -1,13 +1,19 @@
 package controllers;
 
 import agents.AgentRunner;
+import agents.ModelResolver;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.LlmTypes.ModelInfo;
+import llm.ProviderRegistry;
 import models.Agent;
+import models.Conversation;
+import models.MessageAttachment;
 import play.Logger;
 import play.mvc.Http;
 import play.mvc.WebSocketController;
 import services.AgentService;
+import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.Tx;
@@ -23,6 +29,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,10 +39,13 @@ import java.util.stream.Collectors;
 
 /**
  * Real-time voice mode WebSocket (JCLAW-791). The browser segments a spoken
- * utterance (client-side VAD) and streams it as a WAV {@code BinaryFrame}; the
- * server transcribes it on the local ASR, runs the agent turn, and streams the
- * reply back as sentence-chunked TTS audio frames (reusing JCLAW-790), which the
- * client plays gaplessly.
+ * utterance (client-side VAD) and streams it as a WAV {@code BinaryFrame}. How
+ * the server turns that into a user turn depends on the agent's active model: an
+ * audio-capable model receives the raw speech as a native {@code input_audio}
+ * attachment (the JCLAW-165 chat pipeline, so tone and non-lexical cues survive),
+ * while a text-only model gets a local-ASR transcript. Either way the reply
+ * streams back as sentence-chunked TTS audio frames (reusing JCLAW-790), which
+ * the client plays gaplessly.
  *
  * <p><b>Barge-in (Phase B):</b> each utterance runs its turn on a virtual thread
  * so the inbound loop stays responsive; a new utterance (or an explicit {@code
@@ -47,9 +57,10 @@ import java.util.stream.Collectors;
  * but its reply still completes server-side.)
  *
  * <p>The cascade keeps the Java agent (tools, memory, orchestration) in the
- * loop. Voice STT deliberately uses the LOCAL ASR for latency — cloud
- * transcription would blow the voice-to-voice budget — so the operator must
- * provision a local Whisper model in Settings&nbsp;&gt;&nbsp;Transcription.
+ * loop. When the model can't hear audio, voice STT deliberately uses the LOCAL
+ * ASR for latency — cloud transcription would blow the voice-to-voice budget —
+ * so a text-only model needs a local Whisper model provisioned in
+ * Settings&nbsp;&gt;&nbsp;Transcription.
  *
  * <p>Protocol — client→server:
  * <ul>
@@ -67,6 +78,10 @@ public class VoiceController extends WebSocketController {
 
     /** Queue sentinel marking the end of a turn's streamed sentence sequence. */
     private static final String END_OF_TURN = "";
+
+    /** Overlay "You:" placeholder for the native-audio path — the raw speech went
+     *  straight to the model, so there is no Whisper transcript to echo. */
+    private static final String VOICE_ATTACHMENT_LABEL = "(voice message)";
 
     public static void socket() {
         // CSWSH defense — a WebSocket handshake is NOT bound by the Same-Origin
@@ -158,12 +173,36 @@ public class VoiceController extends WebSocketController {
     private static void runTurn(Agent agent, String username, AsrSidecarClient asr, byte[] wav,
                                 AtomicBoolean cancel, int turnId, Http.Outbound out, Object lock) {
         try {
-            var transcript = transcribe(asr, wav);
+            // One transaction resolves the shared web conversation AND whether the
+            // active model hears audio natively (both walk agent/conversation).
+            var plan = Tx.run(() -> {
+                var conv = ConversationService.findOrCreate(agent, "web", username);
+                return new TurnPlan(conv.id, modelHearsAudio(agent, conv));
+            });
             if (cancel.get()) return;
-            send(out, lock, Map.of("type", "transcript", "turn", turnId, "text", transcript));
-            if (transcript.isBlank()) {
-                send(out, lock, Map.of("type", "turn_complete", "turn", turnId));
-                return;
+
+            // Input leg. An audio-capable model receives the raw speech as a native
+            // audio attachment (the chat pipeline transcodes it to input_audio, and
+            // auto-falls back to a Whisper transcript only if the provider rejects
+            // the format), so tone and non-lexical cues reach the model. A text-only
+            // model gets a local-ASR transcript. Either way the reply is text and is
+            // spoken via TTS below.
+            String userMessage;
+            List<AttachmentService.Input> attachments;
+            if (plan.nativeAudio()) {
+                attachments = List.of(stageVoiceAudio(agent, wav));
+                userMessage = "";
+                send(out, lock, Map.of("type", "transcript", "turn", turnId, "text", VOICE_ATTACHMENT_LABEL));
+            } else {
+                var transcript = transcribe(asr, wav);
+                if (cancel.get()) return;
+                send(out, lock, Map.of("type", "transcript", "turn", turnId, "text", transcript));
+                if (transcript.isBlank()) {
+                    send(out, lock, Map.of("type", "turn_complete", "turn", turnId));
+                    return;
+                }
+                attachments = List.of();
+                userMessage = transcript;
             }
 
             // Agent turn on the shared web conversation, so voice + text share
@@ -173,7 +212,6 @@ public class VoiceController extends WebSocketController {
             // and queues each complete sentence, while the consumer below
             // synthesizes them — so audio starts on the first sentence instead of
             // after the whole reply.
-            var conversation = Tx.run(() -> ConversationService.findOrCreate(agent, "web", username));
             var sentences = new LinkedBlockingQueue<String>();
             var pending = new StringBuilder();
             var cb = new AgentRunner.StreamingCallbacks(
@@ -195,8 +233,8 @@ public class VoiceController extends WebSocketController {
                     },
                     err -> sentences.offer(END_OF_TURN),
                     () -> sentences.offer(END_OF_TURN));
-            AgentRunner.runStreaming(agent, conversation.id, "web", username, transcript,
-                    cancel, cb, System.nanoTime(), List.of());
+            AgentRunner.runStreaming(agent, plan.conversationId(), "web", username, userMessage,
+                    cancel, cb, System.nanoTime(), attachments);
 
             // Consumer: synthesize + stream each sentence as it arrives; grow the
             // displayed reply with the spoken (plain) text as we go.
@@ -305,6 +343,38 @@ public class VoiceController extends WebSocketController {
         if (!msg.has("agentId") || msg.get("agentId").isJsonNull()) return null;
         var agentId = msg.get("agentId").getAsLong();
         return Tx.run(() -> AgentService.findById(agentId));
+    }
+
+    /** Per-turn plan: the shared web conversation id + whether the active model
+     *  accepts audio natively (drives native-audio vs Whisper input). */
+    private record TurnPlan(Long conversationId, boolean nativeAudio) {}
+
+    /** Whether the agent's active model accepts audio input natively — the same
+     *  {@code supportsAudio} gate the chat path uses (JCLAW-165). Caller must hold
+     *  a JPA tx: resolves the provider + model info off the agent/conversation. */
+    private static boolean modelHearsAudio(Agent agent, Conversation conv) {
+        var provider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conv));
+        if (provider == null) provider = ProviderRegistry.getPrimary();
+        if (provider == null) return false;
+        return ModelResolver.resolveModelInfo(agent, conv, provider)
+                .map(ModelInfo::supportsAudio).orElse(false);
+    }
+
+    /** Stage the utterance WAV as an audio attachment the streaming runner can
+     *  finalize and ship as a native {@code input_audio} part. The staging layout
+     *  ({@code attachments/staging/<uuid>.wav}) mirrors {@code ApiChatController}
+     *  uploads; MIME and kind are re-sniffed on finalize, so these are only hints. */
+    private static AttachmentService.Input stageVoiceAudio(Agent agent, byte[] wav) {
+        try {
+            var uuid = UUID.randomUUID().toString();
+            var stagingDir = AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
+            Files.createDirectories(stagingDir);
+            Files.write(stagingDir.resolve(uuid + ".wav"), wav);
+            return new AttachmentService.Input(uuid, "voice.wav", "audio/wav", wav.length,
+                    MessageAttachment.KIND_AUDIO);
+        } catch (IOException e) {
+            throw new TtsException("failed to stage voice audio: " + e.getMessage(), e);
+        }
     }
 
     /** Buffer the utterance to a temp WAV and transcribe on the local ASR. */
