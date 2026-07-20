@@ -258,6 +258,7 @@ public class VoiceController extends WebSocketController {
     private static void runTurn(Agent agent, String username, AsrSidecarClient asr, byte[] wav,
                                 AtomicBoolean cancel, int turnId, Http.Outbound out, Object lock) {
         try {
+            long t0 = System.nanoTime(); // ≈ endpoint: the utterance is now in hand
             // One transaction resolves the shared web conversation AND whether the
             // active model hears audio natively (both walk agent/conversation).
             var plan = Tx.run(() -> {
@@ -289,6 +290,8 @@ public class VoiceController extends WebSocketController {
                 attachments = List.of();
                 userMessage = transcript;
             }
+
+            long inputMs = (System.nanoTime() - t0) / 1_000_000L; // STT / attachment staging
 
             // Agent turn on the shared web conversation, so voice + text share
             // context. Run through the STREAMING runner with the barge-in cancel
@@ -344,8 +347,16 @@ public class VoiceController extends WebSocketController {
                 send(out, lock, Map.of("type", "reply", "turn", turnId, "text", spoken.toString()));
                 send(out, lock, Map.of("type", "audio", "turn", turnId, "index", i++,
                         "audio", enc.encodeToString(audio)));
+                if (i == 1) { // first audio out — the voice-to-voice metric that matters most
+                    Logger.info("voice: turn %d — stt %dms, first audio %dms after endpoint",
+                            turnId, inputMs, (System.nanoTime() - t0) / 1_000_000L);
+                }
             }
-            if (!cancel.get()) send(out, lock, Map.of("type", "turn_complete", "turn", turnId));
+            if (!cancel.get()) {
+                send(out, lock, Map.of("type", "turn_complete", "turn", turnId));
+                Logger.info("voice: turn %d complete — %dms end-to-end, %d chunk(s)",
+                        turnId, (System.nanoTime() - t0) / 1_000_000L, i);
+            }
         } catch (RuntimeException e) {
             Logger.warn("voice: turn %d failed: %s", turnId, e.getMessage());
             if (!cancel.get()) {
