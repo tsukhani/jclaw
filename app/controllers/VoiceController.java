@@ -15,6 +15,7 @@ import services.transcription.AsrSidecarClient;
 import services.tts.TtsException;
 import services.tts.TtsRouter;
 import services.tts.TtsSentenceChunker;
+import services.tts.TtsText;
 
 import java.io.IOException;
 import java.net.URI;
@@ -187,10 +188,13 @@ public class VoiceController extends WebSocketController {
             var reply = replyRef.get();
             send(out, lock, Map.of("type", "reply", "turn", turnId, "text", reply));
 
-            if (!reply.isBlank()) {
+            // Speak plain text, not raw markdown — a table would otherwise be
+            // synthesized as pipes and dashes and stall the turn.
+            var speakable = TtsText.toSpeakable(reply);
+            if (!speakable.isBlank()) {
                 var enc = Base64.getEncoder();
                 int i = 0;
-                for (var chunk : TtsSentenceChunker.chunk(reply)) {
+                for (var chunk : TtsSentenceChunker.chunk(speakable)) {
                     if (cancel.get() || !out.isOpen()) return;
                     var audio = TtsRouter.synthesize(chunk);
                     if (cancel.get()) return;

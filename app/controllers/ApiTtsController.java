@@ -18,6 +18,7 @@ import services.tts.TtsModel;
 import services.tts.TtsRouter;
 import services.tts.TtsSentenceChunker;
 import services.tts.TtsSidecarManager;
+import services.tts.TtsText;
 import utils.ApiResponses;
 
 import java.io.ByteArrayInputStream;
@@ -120,9 +121,13 @@ public class ApiTtsController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "text too long for read-aloud (%d > %d chars)".formatted(text.length(), maxChars));
         }
+        var speakable = TtsText.toSpeakable(text);
+        if (speakable.isBlank()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "no speakable text after stripping markup");
+        }
         byte[] audio;
         try {
-            audio = TtsRouter.synthesize(text);
+            audio = TtsRouter.synthesize(speakable);
         } catch (TtsException e) {
             EventLogger.warn("tts", "read-aloud failed: " + e.getMessage());
             ApiResponses.error(503, "tts_unavailable", e.getMessage());
@@ -149,7 +154,7 @@ public class ApiTtsController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "text too long for read-aloud (%d > %d chars)".formatted(text.length(), maxChars));
         }
-        var chunks = TtsSentenceChunker.chunk(text);
+        var chunks = TtsSentenceChunker.chunk(TtsText.toSpeakable(text));
         SseStream sse = openSSE().heartbeat(Duration.ofSeconds(15)).timeout(Duration.ofMinutes(10));
         var cancelled = new AtomicBoolean(false);
         sse.onClose(() -> cancelled.set(true));
