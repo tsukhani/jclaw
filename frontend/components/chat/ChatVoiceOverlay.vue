@@ -4,7 +4,7 @@
 // utterances → local STT → agent → streaming TTS playback. Distinct from the
 // composer's "Record voice" button (which attaches an audio clip). Shares the
 // current conversation, so turns land in the chat history too.
-import { MicrophoneIcon, SpeakerWaveIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { XMarkIcon } from '@heroicons/vue/24/outline'
 
 const props = defineProps<{ agentId: number }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -52,7 +52,9 @@ const indicatorClass = computed(() => {
   }
 })
 
-const pulse = computed(() => state.value === 'listening' || state.value === 'capturing')
+// The waveform pulses whenever audio is actually flowing (mic open or agent
+// speaking); it stays still while connecting/thinking/error.
+const animating = computed(() => ['listening', 'capturing', 'speaking'].includes(state.value))
 </script>
 
 <template>
@@ -90,17 +92,11 @@ const pulse = computed(() => state.value === 'listening' || state.value === 'cap
       <div class="flex flex-col items-center gap-3 py-7">
         <div
           class="w-20 h-20 rounded-full flex items-center justify-center transition-colors"
-          :class="[indicatorClass, { 'animate-pulse': pulse }]"
+          :class="indicatorClass"
         >
-          <SpeakerWaveIcon
-            v-if="state === 'speaking'"
-            class="w-9 h-9"
-            aria-hidden="true"
-          />
-          <MicrophoneIcon
-            v-else
-            class="w-9 h-9"
-            aria-hidden="true"
+          <IconVoiceWaveform
+            :animated="animating"
+            class="w-10 h-10"
           />
         </div>
         <span
