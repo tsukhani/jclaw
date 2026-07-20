@@ -103,6 +103,15 @@ class ApiAppInvokeControllerTest extends FunctionalTest {
     }
 
     @Test
+    void setupBlockedFromAppOrigin() {
+        // DiD (VulnHunter follow-up): setup() is unauthenticated and gate-less by nature;
+        // an app-originated call must still be refused (403) before the credential-bootstrap
+        // path — and the gate fires ahead of the "already set" 409, so a password being
+        // seeded in the fixture doesn't mask it.
+        assertStatus(403, appOrigin("POST", "/api/auth/setup", appSlug));
+    }
+
+    @Test
     void unauthenticatedInvokeReturns401() {
         assertStatus(401, invokeNoAuth(appSlug));
     }

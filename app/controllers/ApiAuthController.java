@@ -80,6 +80,15 @@ public class ApiAuthController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SetupRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SetupOkResponse.class)))
     public static void setup() {
+        // JCLAW-764 / AD-1 (defense-in-depth, VulnHunter follow-up): setup() is
+        // unauthenticated and not behind @With(AuthCheck.class), so the provenance gate
+        // never runs here. It is currently safe only because it 409s once a password
+        // exists (below); gate it too — consistently with resetPassword/logout — so its
+        // safety no longer depends on that precondition surviving a future refactor. An
+        // app-originated caller must never reach the credential-bootstrap path.
+        if (AppOriginGate.isBlocked()) {
+            ApiResponses.error(403, "app_scope", "App-originated request may not set up the password");
+        }
         var existing = ConfigService.get(PASSWORD_HASH_KEY);
         if (existing != null && !existing.isBlank()) {
             ApiResponses.error(409, "already_set", "Password is already set");
