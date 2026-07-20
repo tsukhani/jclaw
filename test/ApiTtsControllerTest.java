@@ -60,6 +60,26 @@ class ApiTtsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void streamRequiresAuth() {
+        var resp = POST("/api/tts/stream", "application/json", "{\"text\":\"hello\"}");
+        assertEquals(401, resp.status.intValue());
+    }
+
+    @Test
+    void streamRejectsMissingText() {
+        // Validation returns before the SSE stream opens, so no engine is touched.
+        login();
+        assertEquals(400, POST("/api/tts/stream", "application/json", "{}").status.intValue());
+    }
+
+    @Test
+    void streamRejectsBlankText() {
+        login();
+        assertEquals(400,
+                POST("/api/tts/stream", "application/json", "{\"text\":\"   \"}").status.intValue());
+    }
+
+    @Test
     void downloadRejectsUnknownModel() {
         login();
         assertEquals(400,

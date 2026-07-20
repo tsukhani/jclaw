@@ -34,6 +34,7 @@ POST    /api/transcription/diarization/download ApiTranscriptionController.diari
 # (Sidecar vs JVM-native sherpa-onnx) in Settings > Speech; switchable at will.
 GET     /api/tts/state                          ApiTtsController.state
 POST    /api/tts/synthesize                     ApiTtsController.synthesize
+POST    /api/tts/stream                          ApiTtsController.stream
 POST    /api/tts/models/{id}/download           ApiTtsController.download
 
 # Local image generation API (JCLAW-226)
