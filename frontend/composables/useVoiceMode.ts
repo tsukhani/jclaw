@@ -121,6 +121,12 @@ async function start(agentId: number) {
   reply.value = ''
   errorMsg.value = ''
   try {
+    // Transport is negotiated by the browser + server, not chosen here: over an
+    // HTTPS/h2 (or h3) origin the browser establishes this socket via Extended
+    // CONNECT — RFC 8441 / 9220, which the play1 fork advertises
+    // (connectProtocolEnabled) since 1.13.46 — multiplexed on the existing
+    // connection; otherwise it falls back to a separate HTTP/1.1 connection.
+    // Same new WebSocket(url) either way; there is no client-side transport knob.
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
     ws = new WebSocket(`${scheme}//${location.host}/api/voice`)
     ws.binaryType = 'arraybuffer'
