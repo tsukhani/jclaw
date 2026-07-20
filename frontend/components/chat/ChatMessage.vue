@@ -7,6 +7,8 @@ import {
   ExclamationTriangleIcon,
   PencilIcon,
   PhotoIcon,
+  SpeakerWaveIcon,
+  SpeakerXMarkIcon,
   TrashIcon,
   UsersIcon,
 } from '@heroicons/vue/24/outline'
@@ -84,6 +86,10 @@ function formatModelLabel(msg: Message): string {
   if (!u) return '?'
   return u.modelProvider ? `${u.modelProvider}/${u.modelId ?? '?'}` : (u.modelId ?? '?')
 }
+
+// Read-aloud (TTS) playback, shared across messages so only one plays at a time
+// (JCLAW-789/793). The engine is the operator's Settings > Speech selection.
+const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey, toggle: toggleReadAloud } = useReadAloud()
 </script>
 
 <template>
@@ -428,6 +434,30 @@ function formatModelLabel(msg: Message): string {
             <CheckIcon
               v-else
               class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            :disabled="readAloudLoadingKey === String(msg.id ?? msg._key)"
+            class="p-1 text-fg-muted hover:text-fg-primary disabled:cursor-not-allowed transition-colors"
+            :title="readAloudPlayingKey === String(msg.id ?? msg._key) ? 'Stop reading' : 'Read aloud'"
+            :aria-label="readAloudPlayingKey === String(msg.id ?? msg._key) ? 'Stop reading aloud' : 'Read message aloud'"
+            @click="toggleReadAloud(String(msg.id ?? msg._key), msg.content)"
+          >
+            <ArrowPathIcon
+              v-if="readAloudLoadingKey === String(msg.id ?? msg._key)"
+              class="w-4 h-4 animate-spin"
+              aria-hidden="true"
+            />
+            <SpeakerXMarkIcon
+              v-else-if="readAloudPlayingKey === String(msg.id ?? msg._key)"
+              class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+              aria-hidden="true"
+            />
+            <SpeakerWaveIcon
+              v-else
+              class="w-4 h-4"
               aria-hidden="true"
             />
           </button>

@@ -33,6 +33,7 @@ import {
   PhotoIcon,
   PuzzlePieceIcon,
   ShieldCheckIcon,
+  SpeakerWaveIcon,
   UserGroupIcon,
 } from '@heroicons/vue/24/outline'
 
@@ -49,6 +50,7 @@ import SettingsProvidersPanel from './SettingsProvidersPanel.vue'
 import SettingsSearchPanel from './SettingsSearchPanel.vue'
 import SettingsShellPanel from './SettingsShellPanel.vue'
 import SettingsSkillsPanel from './SettingsSkillsPanel.vue'
+import SettingsSpeechPanel from './SettingsSpeechPanel.vue'
 import SettingsSubagentsPanel from './SettingsSubagentsPanel.vue'
 import SettingsTasksPanel from './SettingsTasksPanel.vue'
 import SettingsTranscriptionPanel from './SettingsTranscriptionPanel.vue'
@@ -99,6 +101,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
     sections: [
       { id: 'ocr', title: 'OCR Backends', icon: DocumentMagnifyingGlassIcon, component: SettingsOcrPanel },
       { id: 'transcription', title: 'Transcription', icon: MicrophoneIcon, component: SettingsTranscriptionPanel },
+      { id: 'speech', title: 'Speech', icon: SpeakerWaveIcon, component: SettingsSpeechPanel },
       { id: 'image-caption', title: 'Image Captioning', icon: ChatBubbleBottomCenterTextIcon, component: SettingsImageCaptionPanel },
       { id: 'image-generation', title: 'Image Generation', icon: PhotoIcon, component: SettingsImageGenPanel },
       { id: 'video-interpretation', title: 'Video Interpretation', icon: EyeIcon, component: SettingsVideoInterpPanel },

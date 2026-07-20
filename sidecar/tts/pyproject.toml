@@ -1,0 +1,11 @@
+[project]
+name = "jclaw-tts-sidecar"
+version = "0.1.0"
+description = "TTS synthesis sidecar for jclaw (JCLAW-789) — Qwen3-TTS / Kokoro via mlx-audio (Apple silicon); NVIDIA/vLLM backend deferred (JCLAW-788)"
+requires-python = ">=3.11"
+# The daemon (serve.py) is a stdlib-only HTTP supervisor: it holds no ML
+# dependencies and shells every request to the TTS worker (synth.py), which
+# carries mlx-audio + friends in its own PEP 723 inline script env. Mirrors
+# the ASR sidecar (sidecar/asr) exactly, but the data direction is inverted:
+# text in, audio bytes out. So this project env has an empty runtime dep set.
+dependencies = []

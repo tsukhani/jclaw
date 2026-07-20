@@ -17,6 +17,8 @@ import services.UvProbe;
 import services.scanners.ScannerRegistry;
 import services.transcription.AsrModel;
 import services.transcription.FfmpegProbe;
+import services.tts.TtsEngine;
+import services.tts.TtsModel;
 import tools.ShellExecTool;
 import tools.SubagentSpawnTool;
 import utils.HttpFactories;
@@ -92,6 +94,18 @@ public class DefaultConfigJob extends Job<Void> {
                 && AsrModel.byId(storedLocalModel).isEmpty()) {
             ConfigService.set(localModelKey, AsrModel.DEFAULT.id());
         }
+
+        // TTS / read-aloud (JCLAW-789/793). The operator picks the engine in
+        // Settings > Speech and can switch at will; TtsRouter reads these keys
+        // per request. Sidecar (Qwen3-TTS/Kokoro) is the quality-first default;
+        // JVM-native (sherpa-onnx) is the no-sidecar alternative. The sidecar
+        // port is seeded EXPLICITLY so the client and the spawned daemon agree —
+        // ASR omits its port seed and only works because both sides share the
+        // LocalSidecarDaemon default, a latent gap we don't repeat here.
+        seedIfAbsent("tts.engine", TtsEngine.DEFAULT.id());
+        seedIfAbsent("tts.local.port", "9531");
+        seedIfAbsent("tts.sidecar.model", TtsModel.defaultFor(TtsEngine.SIDECAR).id());
+        seedIfAbsent("tts.jvm.model", TtsModel.defaultFor(TtsEngine.JVM).id());
         // JCLAW-563: per-turn acoustic emotion labels on diarized
         // transcripts. On by default (best-effort — failures never break a
         // transcript); set false to skip the ~95 MB model download and the

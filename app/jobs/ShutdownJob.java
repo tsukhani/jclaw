@@ -13,6 +13,8 @@ import services.imagegen.LocalImageSidecarManager;
 import services.search.LuceneIndexer;
 import services.transcription.AsrSidecarManager;
 import services.transcription.DiarizeSidecarManager;
+import services.tts.TtsJvmEngine;
+import services.tts.TtsSidecarManager;
 import services.videogen.LocalVideoSidecarManager;
 import tools.PlaywrightBrowserTool;
 
@@ -69,6 +71,8 @@ public class ShutdownJob extends Job<Void> {
                 new Component("telegram-streaming-sink", TelegramStreamingSink::shutdown),
                 new Component("asr-sidecar", AsrSidecarManager::stop),
                 new Component("diarize-sidecar", DiarizeSidecarManager::stop),
+                new Component("tts-sidecar", TtsSidecarManager::stop),
+                new Component("tts-jvm-engine", TtsJvmEngine::release),
                 new Component("imagegen-sidecar", LocalImageSidecarManager::stop),
                 new Component("videogen-sidecar", LocalVideoSidecarManager::stop),
                 new Component("mcp-connections", McpConnectionManager::shutdown),

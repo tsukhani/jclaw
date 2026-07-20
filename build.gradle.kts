@@ -211,6 +211,19 @@ sonar {
 
 repositories {
     mavenCentral()
+
+    // JCLAW-793: sherpa-onnx (the JVM-native TTS engine) isn't published to
+    // Maven Central — resolve its classes jar + per-platform native-lib jar
+    // straight from the project's GitHub releases via an Ivy pattern (the same
+    // shape the pre-JCLAW-630 sherpa integration used). Scoped to the sherpa
+    // group with content{} so no other dependency is ever looked up here, and
+    // metadataSources{artifact()} because the releases carry no POM/ivy.xml.
+    ivy {
+        url = uri("https://github.com/k2-fsa/sherpa-onnx/releases/download")
+        patternLayout { artifact("v[revision]/[artifact]-v[revision].[ext]") }
+        metadataSources { artifact() }
+        content { includeGroup("com.k2fsa.sherpa.onnx") }
+    }
 }
 
 dependencies {
@@ -417,6 +430,28 @@ dependencies {
     // JCLAW-630: WeSpeaker embeddings moved into the diarize sidecar
     // (batched /embed, sherpa-onnx Python — same ONNX + feature pipeline).
     // The JVM-side sherpa-onnx JNI stack and its ivy repo are gone.
+
+    // JCLAW-793: sherpa-onnx returns to the JVM — deliberately — as the
+    // operator-selectable "JVM-native" TTS engine (Settings > Speech), an
+    // alternative to the Python sidecar. Apache-2.0. The classes jar is
+    // platform-neutral; the native-lib jar carries libsherpa-onnx-jni with ONNX
+    // Runtime STATICALLY LINKED inside it, so this adds ONE native lib and does
+    // NOT pull com.microsoft.onnxruntime. Selected for the build host below; CPU
+    // inference (RTF ~0.03 for Piper, validated in the JCLAW-793 spike) — the
+    // GPU path stays on the sidecar (Qwen3-TTS/vLLM). Resolved via the Ivy repo.
+    val sherpaVersion = "1.13.4"
+    val sherpaNativeClassifier = run {
+        val os = System.getProperty("os.name").lowercase()
+        val arch = System.getProperty("os.arch").lowercase()
+        val a = if (arch.contains("aarch64") || arch.contains("arm64")) "aarch64" else "x64"
+        when {
+            os.contains("mac") || os.contains("darwin") -> "osx-$a"
+            os.contains("win") -> "win-x64"
+            else -> "linux-$a"
+        }
+    }
+    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx:$sherpaVersion")
+    runtimeOnly("com.k2fsa.sherpa.onnx:sherpa-onnx-native-lib-$sherpaNativeClassifier:$sherpaVersion")
 
     // JCLAW-563/654: in-process wav2vec2 speech-emotion recognition (ONNX
     // Runtime Java API) retired — per-turn emotion is now judged by the LLM

@@ -30,6 +30,12 @@ POST    /api/transcription/models/{id}/download ApiTranscriptionController.downl
 GET     /api/transcription/diarization/models   ApiTranscriptionController.diarizationModels
 POST    /api/transcription/diarization/download ApiTranscriptionController.diarizationDownload
 
+# Text-to-speech / read-aloud API (JCLAW-789/793) — operator picks the engine
+# (Sidecar vs JVM-native sherpa-onnx) in Settings > Speech; switchable at will.
+GET     /api/tts/state                          ApiTtsController.state
+POST    /api/tts/synthesize                     ApiTtsController.synthesize
+POST    /api/tts/models/{id}/download           ApiTtsController.download
+
 # Local image generation API (JCLAW-226)
 GET     /api/imagegen/local/state               ApiImagegenController.state
 POST    /api/imagegen/local/pull                ApiImagegenController.pull
