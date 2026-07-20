@@ -186,11 +186,12 @@ public class VoiceController extends WebSocketController {
             }
             if (cancel.get()) return;
             var reply = replyRef.get();
-            send(out, lock, Map.of("type", "reply", "turn", turnId, "text", reply));
-
-            // Speak plain text, not raw markdown — a table would otherwise be
-            // synthesized as pipes and dashes and stall the turn.
+            // Show AND speak the same plain text — raw markdown (a table) is neither
+            // readable in the compact overlay nor speakable. The full reply is kept
+            // in the chat history by the agent runner.
             var speakable = TtsText.toSpeakable(reply);
+            send(out, lock, Map.of("type", "reply", "turn", turnId,
+                    "text", speakable.isBlank() ? reply : speakable));
             if (!speakable.isBlank()) {
                 var enc = Base64.getEncoder();
                 int i = 0;

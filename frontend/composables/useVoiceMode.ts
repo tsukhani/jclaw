@@ -42,6 +42,7 @@ const playSources: AudioBufferSourceNode[] = []
 let audioPending = 0
 let turnComplete = false
 let currentTurn = -1 // the turn whose audio we currently accept (-1 = none)
+let watchdog: ReturnType<typeof setTimeout> | null = null
 
 // VAD tuning (Phase A/B defaults; Phase C tunes these).
 const RMS_THRESHOLD = 0.015 // frame energy above this counts as speech
@@ -50,7 +51,14 @@ const BARGE_IN_FRAMES = 8 // stricter while the agent talks — resists speaker 
 const SILENCE_END_FRAMES = 12 // consecutive silence frames (hangover) to close it
 const PREROLL_FRAMES = 8 // frames of pre-roll kept so the onset isn't clipped
 
+// Stall watchdog: recover instead of hanging if a turn makes no progress — a
+// generous ceiling while the agent is thinking (tool use), shorter once audio
+// should be flowing (a synth hang or a suspended AudioContext).
+const THINKING_STALL_MS = 60_000
+const SPEAKING_STALL_MS = 15_000
+
 function teardown() {
+  clearWatchdog()
   if (processor) {
     processor.onaudioprocess = null
     processor.disconnect()
@@ -203,6 +211,7 @@ function endUtterance() {
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(wav)
     state.value = 'thinking'
+    armWatchdog()
   }
   else {
     state.value = 'listening'
@@ -278,6 +287,9 @@ async function onMessage(ev: MessageEvent) {
       fail(msg.message || 'voice error')
       break
   }
+  // Any frame is progress — re-arm the stall watchdog (or clear it, if this
+  // frame took us out of thinking/speaking).
+  armWatchdog()
 }
 
 function ensurePlayCtx() {
@@ -306,6 +318,7 @@ async function playChunk(b64: string) {
     src.onended = () => {
       audioPending--
       maybeEndTurn()
+      armWatchdog() // a chunk finishing is progress during a long reply
     }
   }
   catch (e) {
@@ -334,7 +347,36 @@ function maybeEndTurn() {
   // chunk has finished — then we hand the floor back to the mic.
   if (turnComplete && audioPending <= 0 && state.value === 'speaking') {
     state.value = 'listening'
+    clearWatchdog()
   }
+}
+
+function clearWatchdog() {
+  if (watchdog != null) {
+    clearTimeout(watchdog)
+    watchdog = null
+  }
+}
+
+// (Re)arm the stall watchdog for the current agent-holding state; a no-op while
+// listening/capturing/idle. Called on every progress signal (a frame arrived, an
+// audio chunk finished, a turn started) so a healthy turn never trips it.
+function armWatchdog() {
+  clearWatchdog()
+  const ms = state.value === 'speaking'
+    ? SPEAKING_STALL_MS
+    : state.value === 'thinking' ? THINKING_STALL_MS : 0
+  if (ms > 0) watchdog = setTimeout(onWatchdogStall, ms)
+}
+
+function onWatchdogStall() {
+  // No progress for too long (server hang, a lost frame, or audio that never
+  // played) — abandon the turn and hand the floor back to the mic instead of
+  // hanging at Thinking/Speaking.
+  clearWatchdog()
+  console.warn('voice: turn stalled — recovering to listening')
+  bargeIn() // stop playback, cancel the stuck turn server-side, reject its frames
+  state.value = 'listening'
 }
 
 export function useVoiceMode() {
