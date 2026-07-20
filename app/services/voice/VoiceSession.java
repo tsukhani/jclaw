@@ -34,22 +34,39 @@ public final class VoiceSession implements AutoCloseable {
         void onUtterance(byte[] wav);
     }
 
+    /** Interim (pre-endpoint) transcription hook (JCLAW-798): a growing-utterance
+     *  WAV to transcribe for a live partial transcript. {@code null} disables it. */
+    @FunctionalInterface
+    public interface Partial {
+        void onInterim(byte[] wav);
+    }
+
     private final VoiceVad vad;
     private final TurnEndpointer endpointer;
     private final PcmWindower windower;
     private final Listener listener;
+    private final Partial partial;         // nullable — interim transcript hook
+    private final long partialIntervalMs;  // min gap between interim emits
     private final int prerollWindows;
     private final ArrayDeque<float[]> preroll = new ArrayDeque<>();
     private final ByteArrayOutputStream utterance = new ByteArrayOutputStream();
     private long frameIndex;
+    private long lastPartialMs;
     private boolean buffering;
 
     public VoiceSession(VoiceVad vad, TurnEndpointer endpointer, int prerollWindows, Listener listener) {
+        this(vad, endpointer, prerollWindows, listener, null, 0);
+    }
+
+    public VoiceSession(VoiceVad vad, TurnEndpointer endpointer, int prerollWindows, Listener listener,
+                        Partial partial, long partialIntervalMs) {
         this.vad = vad;
         this.endpointer = endpointer;
         this.windower = new PcmWindower(VoiceVad.WINDOW);
         this.prerollWindows = Math.max(0, prerollWindows);
         this.listener = listener;
+        this.partial = partial;
+        this.partialIntervalMs = partialIntervalMs;
     }
 
     /** Feed a raw binary frame of little-endian PCM16 from the browser. */
@@ -67,6 +84,7 @@ public final class VoiceSession implements AutoCloseable {
                 for (var p : preroll) appendWindow(p); // seed with the onset we already consumed
                 preroll.clear();
                 appendWindow(w);
+                lastPartialMs = tsMs; // first interim comes one interval into speech
                 listener.onSpeechStart();
             }
             case ENDPOINT -> {
@@ -79,6 +97,7 @@ public final class VoiceSession implements AutoCloseable {
             case NONE -> {
                 if (buffering) {
                     appendWindow(w);
+                    maybeEmitPartial(tsMs);
                 }
                 else {
                     preroll.addLast(w);
@@ -86,6 +105,16 @@ public final class VoiceSession implements AutoCloseable {
                 }
             }
         }
+    }
+
+    /** Emit the growing utterance for an interim transcript, throttled to at most
+     *  once per {@code partialIntervalMs}. Fire-and-forget: the sink transcribes
+     *  off-thread and single-flights, so this never blocks the inbound loop. */
+    private void maybeEmitPartial(long tsMs) {
+        if (partial == null || utterance.size() == 0) return;
+        if (tsMs - lastPartialMs < partialIntervalMs) return;
+        lastPartialMs = tsMs;
+        partial.onInterim(wrapWav(utterance.toByteArray()));
     }
 
     private void appendWindow(float[] w) {

@@ -184,6 +184,28 @@ public class VoiceController extends WebSocketController {
                     ConfigService.getInt("voice.endpoint.minUtteranceMs", 200),
                     TurnEndpointer.ALWAYS_COMPLETE); // Smart Turn v3 plugs into this seam later
             var boundAgent = agent;
+            // Interim transcripts (JCLAW-798): show partial text as the user
+            // speaks. Skipped for audio-capable models (they receive the raw audio,
+            // not a transcript) and disableable via config. Single-flight + the
+            // session's throttle keep interims from starving the final transcribe.
+            boolean partialsOn = !"false".equalsIgnoreCase(String.valueOf(ConfigService.get("voice.partials.enabled")))
+                    && !modelHearsAudioAtInit(boundAgent, username);
+            var interimBusy = new AtomicBoolean(false);
+            VoiceSession.Partial partialSink = !partialsOn ? null : wav -> {
+                if (!interimBusy.compareAndSet(false, true)) return; // one interim at a time
+                Thread.ofVirtual().name("voice-partial").start(() -> {
+                    try {
+                        var text = transcribe(asr, wav);
+                        if (!text.isBlank()) {
+                            send(out, writeLock, Map.of("type", "transcript", "text", text, "partial", true));
+                        }
+                    } catch (RuntimeException e) {
+                        Logger.debug("voice: interim transcript failed: %s", e.getMessage());
+                    } finally {
+                        interimBusy.set(false);
+                    }
+                });
+            };
             var voice = new VoiceSession(vad, endpointer, PREROLL_WINDOWS, new VoiceSession.Listener() {
                 @Override
                 public void onSpeechStart() {
@@ -206,7 +228,7 @@ public class VoiceController extends WebSocketController {
                     Thread.ofVirtual().name("voice-turn-" + turnId).start(() ->
                             runTurn(boundAgent, username, asr, wav, cancel, turnId, out, writeLock));
                 }
-            });
+            }, partialSink, ConfigService.getInt("voice.partials.intervalMs", 1200));
             sessionRef.set(voice);
             send(out, writeLock, Map.of("type", "ready", "agentId", agent.id));
         } catch (RuntimeException e) {
@@ -421,6 +443,12 @@ public class VoiceController extends WebSocketController {
         if (provider == null) return false;
         return ModelResolver.resolveModelInfo(agent, conv, provider)
                 .map(ModelInfo::supportsAudio).orElse(false);
+    }
+
+    /** Resolve audio-capability once at session start (creates the shared web
+     *  conversation, which the first turn reuses) — gates interim transcripts. */
+    private static boolean modelHearsAudioAtInit(Agent agent, String username) {
+        return Tx.run(() -> modelHearsAudio(agent, ConversationService.findOrCreate(agent, "web", username)));
     }
 
     /** Stage the utterance WAV as an audio attachment the streaming runner can
