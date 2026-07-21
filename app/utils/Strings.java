@@ -39,6 +39,20 @@ public final class Strings {
         return s.length() <= maxLen ? s : s.substring(0, maxLen) + "…";
     }
 
+    /**
+     * Redact {@code secret} from {@code body} (every occurrence becomes
+     * {@code "<redacted>"}) and truncate the result to
+     * {@link #ERROR_SNIPPET_MAX_CHARS}. Returns {@code ""} for a null/empty body
+     * and skips redaction when {@code secret} is null/empty. Shared by the LLM
+     * error-body sanitizers (JCLAW-811) so both redact identically before an
+     * error snippet reaches event logs or the UI.
+     */
+    public static @NonNull String redactAndTruncate(@Nullable String body, @Nullable String secret) {
+        if (body == null || body.isEmpty()) return "";
+        var scrubbed = (secret == null || secret.isEmpty()) ? body : body.replace(secret, "<redacted>");
+        return truncate(scrubbed, ERROR_SNIPPET_MAX_CHARS);
+    }
+
     /** First value that is non-null and not blank, or null if none qualify. */
     public static @Nullable String firstNonBlank(@Nullable String... values) {
         for (var v : values) {

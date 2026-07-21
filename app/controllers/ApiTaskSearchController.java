@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import models.Agent;
 import models.TaskRunMessage;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -48,7 +49,7 @@ public class ApiTaskSearchController extends Controller {
                     task != null ? task.id : null,
                     task != null ? task.name : null,
                     agent != null ? agent.id : null,
-                    agent != null ? agent.name : null);
+                    Agent.nameOf(agent));
         }
     }
 

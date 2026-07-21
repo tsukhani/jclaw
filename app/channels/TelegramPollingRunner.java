@@ -592,7 +592,7 @@ public final class TelegramPollingRunner {
                                 merged.messageId(), merged.messageThreadId()),
                         inputs, sendChatType);
             } catch (Exception e) {
-                EventLogger.error(LOG_CATEGORY, sendAgent != null ? sendAgent.name : null,
+                EventLogger.error(LOG_CATEGORY, Agent.nameOf(sendAgent),
                         LOG_SOURCE, "Polling dispatch error: %s".formatted(e.getMessage()));
             }
         });

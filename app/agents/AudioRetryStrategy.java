@@ -128,6 +128,6 @@ public final class AudioRetryStrategy {
                 providerName, modelId, outcome, transcriptAwaited,
                 errorTag != null ? " error_tag=" + errorTag : "");
         EventLogger.info("AUDIO_PASSTHROUGH_OUTCOME",
-                agent != null ? agent.name : null, channel, detail);
+                Agent.nameOf(agent), channel, detail);
     }
 }

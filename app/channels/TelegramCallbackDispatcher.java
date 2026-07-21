@@ -178,7 +178,7 @@ public final class TelegramCallbackDispatcher {
         var header = new StringBuilder();
         header.append("⚙️ <b>Model Configuration</b>\n\n");
         if (modelCount == 0) {
-            header.append("Provider: <b>").append(escape(providerLabel)).append("</b>\n");
+            header.append("Provider: <b>").append(TelegramMarkdownFormatter.escapeHtml(providerLabel)).append("</b>\n");
             header.append("<i>No models configured for this provider.</i>");
         } else {
             int totalPages = Math.max(1,
@@ -187,7 +187,7 @@ public final class TelegramCallbackDispatcher {
             int clampedPage = Math.clamp(payload.page(), 0, totalPages - 1);
             int start = clampedPage * TelegramModelKeyboard.MODELS_PER_PAGE + 1;
             int end = Math.min(start + TelegramModelKeyboard.MODELS_PER_PAGE - 1, modelCount);
-            header.append("Provider: <b>").append(escape(providerLabel))
+            header.append("Provider: <b>").append(TelegramMarkdownFormatter.escapeHtml(providerLabel))
                     .append("</b> (").append(start).append('–').append(end)
                     .append(" of ").append(modelCount).append(")\n");
             header.append("Select a model:");
@@ -259,7 +259,7 @@ public final class TelegramCallbackDispatcher {
      */
     private static String toHtmlSafe(String plain) {
         if (plain == null) return "";
-        var escaped = escape(plain);
+        var escaped = TelegramMarkdownFormatter.escapeHtml(plain);
         // Convert `backtick` spans to <code>spans</code>.
         var result = new StringBuilder(escaped.length());
         boolean inCode = false;
@@ -274,12 +274,5 @@ public final class TelegramCallbackDispatcher {
         }
         if (inCode) result.append("</code>");
         return result.toString();
-    }
-
-    private static String escape(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;");
     }
 }

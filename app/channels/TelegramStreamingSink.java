@@ -1231,6 +1231,6 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     }
 
     private String agentName() {
-        return agent != null ? agent.name : null;
+        return Agent.nameOf(agent);
     }
 }

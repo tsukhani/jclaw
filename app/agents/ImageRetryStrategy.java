@@ -60,6 +60,6 @@ public final class ImageRetryStrategy {
         var channel = conversation != null ? conversation.channelType : null;
         var detail = "provider=%s model=%s outcome=%s%s".formatted(
                 providerName, modelId, outcome, errorTag != null ? " error_tag=" + errorTag : "");
-        EventLogger.info("IMAGE_PASSTHROUGH_OUTCOME", agent != null ? agent.name : null, channel, detail);
+        EventLogger.info("IMAGE_PASSTHROUGH_OUTCOME", Agent.nameOf(agent), channel, detail);
     }
 }

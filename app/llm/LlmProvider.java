@@ -731,9 +731,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * logs or leaking the credential downstream.
      */
     private static String sanitizeErrorBody(String body, String secret) {
-        if (body == null || body.isEmpty()) return "";
-        var scrubbed = (secret == null || secret.isEmpty()) ? body : body.replace(secret, "<redacted>");
-        return Strings.truncate(scrubbed, Strings.ERROR_SNIPPET_MAX_CHARS);
+        return Strings.redactAndTruncate(body, secret);
     }
 
     private void backoffBeforeRetry(int attempt) {

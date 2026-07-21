@@ -80,7 +80,7 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
     }
 
     private String agentName() {
-        return agent != null ? agent.name : null;
+        return Agent.nameOf(agent);
     }
 
     private String channelName() {

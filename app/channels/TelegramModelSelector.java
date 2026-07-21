@@ -96,8 +96,8 @@ public final class TelegramModelSelector {
         var providerLabel = TelegramModelKeyboard.providerLabel(provider);
         var sb = new StringBuilder();
         sb.append("⚙️ <b>Model Configuration</b>\n\n");
-        sb.append("Current model: <code>").append(escape(modelId)).append("</code>\n");
-        sb.append("Provider: ").append(escape(providerLabel));
+        sb.append("Current model: <code>").append(TelegramMarkdownFormatter.escapeHtml(modelId)).append("</code>\n");
+        sb.append("Provider: ").append(TelegramMarkdownFormatter.escapeHtml(providerLabel));
         if (overrideActive) {
             sb.append("  <i>(conversation override)</i>");
         }
@@ -115,11 +115,6 @@ public final class TelegramModelSelector {
      */
     public static String currentProviderName(Agent agent, Conversation conversation) {
         return ModelOverrideResolver.provider(conversation, agent);
-    }
-
-    private static String escape(String s) {
-        if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     // ── Binding / routing helpers ──────────────────────────────────────
@@ -211,6 +206,6 @@ public final class TelegramModelSelector {
     /** Info logger convenience for the callback dispatcher. */
     public static void logEvent(Agent agent, String message) {
         EventLogger.info("SLASH_COMMAND",
-                agent != null ? agent.name : null, "telegram", message);
+                Agent.nameOf(agent), "telegram", message);
     }
 }

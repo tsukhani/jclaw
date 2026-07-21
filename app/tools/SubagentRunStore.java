@@ -92,7 +92,7 @@ final class SubagentRunStore {
         if (id == null) return null;
         return Tx.run(() -> {
             var a = (Agent) Agent.findById(id);
-            return a != null ? a.name : null;
+            return Agent.nameOf(a);
         });
     }
 

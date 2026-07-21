@@ -189,7 +189,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             var outcome = doSearch(entry.provider(), entry.apiKey(), query, numResults, agent);
             if (outcome.ok()) return outcome;
             lastError = outcome;
-            EventLogger.warn(ACTION_SEARCH, agent != null ? agent.name : null, null,
+            EventLogger.warn(ACTION_SEARCH, Agent.nameOf(agent), null,
                     "%s failed, trying next provider. Error: %s".formatted(
                             entry.provider().displayName(), outcome.text()));
         }
@@ -220,7 +220,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
     private SearchOutcome doSearch(SearchProvider provider, String apiKey, String query, int numResults, Agent agent) {
         try {
-            EventLogger.info(ACTION_SEARCH, agent != null ? agent.name : null, null,
+            EventLogger.info(ACTION_SEARCH, Agent.nameOf(agent), null,
                     "Searching via %s: \"%s\" (numResults=%d)".formatted(provider.displayName(), query, numResults));
 
             var request = provider.buildRequest(apiKey, query, numResults);
@@ -235,7 +235,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             }
 
             if (statusCode != 200) {
-                EventLogger.error(ACTION_SEARCH, agent != null ? agent.name : null, null,
+                EventLogger.error(ACTION_SEARCH, Agent.nameOf(agent), null,
                         "%s API returned HTTP %d: %s".formatted(provider.displayName(), statusCode,
                                 responseBody.substring(0, Math.min(responseBody.length(), ERROR_BODY_SNIPPET_CHARS))));
                 return SearchOutcome.error("Error: %s API returned HTTP %d: %s".formatted(
@@ -245,12 +245,12 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
             var results = provider.parseResults(responseBody);
             var markdown = provider.formatResults(responseBody, results);
-            EventLogger.info(ACTION_SEARCH, agent != null ? agent.name : null, null,
+            EventLogger.info(ACTION_SEARCH, Agent.nameOf(agent), null,
                     "%s returned %d chars for \"%s\"".formatted(provider.displayName(), markdown.length(), query));
 
             return new SearchOutcome(markdown, results, provider.displayName(), true);
         } catch (Exception e) {
-            EventLogger.error(ACTION_SEARCH, agent != null ? agent.name : null, null,
+            EventLogger.error(ACTION_SEARCH, Agent.nameOf(agent), null,
                     "%s search failed: %s".formatted(provider.displayName(), e.getMessage()));
             return SearchOutcome.error("Error: searching with %s: %s".formatted(provider.displayName(), e.getMessage()));
         }

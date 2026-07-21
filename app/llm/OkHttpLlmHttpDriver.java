@@ -147,12 +147,11 @@ final class OkHttpLlmHttpDriver {
      * key, and an oversized body would flood the logs.
      */
     private static String sanitizeErrorBody(String body, String authHeader) {
-        if (body == null || body.isEmpty()) return "";
-        var scrubbed = body;
+        String key = null;
         if (authHeader != null && authHeader.startsWith(HttpKeys.BEARER_PREFIX)) {
-            var key = authHeader.substring(HttpKeys.BEARER_PREFIX.length());
-            if (!key.isEmpty()) scrubbed = scrubbed.replace(key, "<redacted>");
+            var extracted = authHeader.substring(HttpKeys.BEARER_PREFIX.length());
+            if (!extracted.isEmpty()) key = extracted;
         }
-        return Strings.truncate(scrubbed, Strings.ERROR_SNIPPET_MAX_CHARS);
+        return Strings.redactAndTruncate(body, key);
     }
 }

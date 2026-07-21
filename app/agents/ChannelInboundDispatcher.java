@@ -261,7 +261,7 @@ final class ChannelInboundDispatcher {
                     ChannelRegistry.forChannel(channelType, agent, peerId));
             if (channel == null) {
                 if (ChannelType.TELEGRAM == ChannelType.fromValue(channelType)) {
-                    EventLogger.warn("channel", agent != null ? agent.name : null, "telegram",
+                    EventLogger.warn("channel", Agent.nameOf(agent), "telegram",
                             "No enabled binding for (agent=%s, userId=%s); dropping queued response"
                                     .formatted(agent != null ? agent.name : "?", peerId));
                 }

@@ -174,6 +174,15 @@ public class Agent extends Model {
         updatedAt = Instant.now();
     }
 
+    /**
+     * Null-safe agent name for audit logs and channel routing: the agent's
+     * {@code name}, or {@code null} when {@code agent} itself is null.
+     * Centralizes the {@code agent != null ? agent.name : null} idiom (JCLAW-811).
+     */
+    public static String nameOf(Agent agent) {
+        return agent != null ? agent.name : null;
+    }
+
     public static Agent findByName(String name) {
         return Agent.find("name", name).first();
     }

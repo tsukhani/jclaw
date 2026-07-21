@@ -156,7 +156,7 @@ final class TelegramMessageSender {
                     "sendTurn called with null argument");
             return false;
         }
-        var segments = TelegramOutboundPlanner.plan(text, agent != null ? agent.name : null);
+        var segments = TelegramOutboundPlanner.plan(text, Agent.nameOf(agent));
         if (segments.isEmpty()) return true; // nothing to send
 
         // JCLAW-369: track "first chunk of the turn" across all segments so the

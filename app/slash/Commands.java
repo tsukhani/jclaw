@@ -291,7 +291,7 @@ public final class Commands {
             ConversationService.appendAssistantMessage(conv, NEW_TEXT, null);
             return conv;
         });
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/new → new conversation %d for peer=%s".formatted(newConv.id, peerId));
         return new Result(newConv, NEW_TEXT, Command.NEW);
     }
@@ -335,7 +335,7 @@ public final class Commands {
             ConversationService.appendAssistantMessage(conv, welcome, null);
             return conv;
         });
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/start → welcome + new conversation %d for peer=%s".formatted(newConv.id, peerId));
         return new Result(newConv, welcome, null);
     }
@@ -371,7 +371,7 @@ public final class Commands {
             // Nothing to reset. Treat as help-like: tell the user we can't
             // reset because there's no current conversation.
             var fallback = "No active conversation to reset.";
-            EventLogger.warn(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+            EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/reset with no current conversation");
             return new Result(null, fallback, Command.RESET);
         }
@@ -391,7 +391,7 @@ public final class Commands {
             conv.save();
             return conv;
         });
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/reset for conversation %d".formatted(convId));
         return new Result(updated != null ? updated : current, RESET_TEXT, Command.RESET);
     }
@@ -425,17 +425,17 @@ public final class Commands {
      */
     private static Result executeStop(Agent agent, String channelType, Conversation current) {
         if (current == null) {
-            EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+            EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/stop with no current conversation");
             return new Result(null, "No active conversation. Nothing to stop.", Command.STOP);
         }
         if (!ConversationQueue.isBusy(current.id)) {
-            EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+            EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/stop for conversation %d — nothing in flight".formatted(current.id));
             return new Result(current, "Nothing to stop.", Command.STOP);
         }
         ConversationQueue.cancellationFlag(current.id).set(true);
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/stop signalled cancellation for conversation %d".formatted(current.id));
         return new Result(current, "Stopped.", Command.STOP);
     }
@@ -463,7 +463,7 @@ public final class Commands {
     private static Result executeCompact(Agent agent, String channelType, Conversation current, String args) {
         if (current == null) {
             var fallback = "No active conversation to compact.";
-            EventLogger.warn(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+            EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/compact with no current conversation");
             return new Result(null, fallback, Command.COMPACT);
         }
@@ -543,7 +543,7 @@ public final class Commands {
                 ConversationService.appendAssistantMessage(conv, responseFinal, null);
             }
         });
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/compact for conversation %d: %s".formatted(convId, outcome));
     }
 
@@ -558,7 +558,7 @@ public final class Commands {
                 }
             });
         }
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/help" + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
         return new Result(current, helpText, Command.HELP);
     }
@@ -654,7 +654,7 @@ public final class Commands {
             persistCannedResponseInTx(current, text);
             return text;
         });
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 logPrefix + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
         return new Result(current, responseText, Command.MODEL);
     }
@@ -680,7 +680,7 @@ public final class Commands {
             persistCannedResponseInTx(current, text);
             return text;
         });
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/usage" + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
         return new Result(current, responseText, Command.USAGE);
     }
@@ -1032,7 +1032,7 @@ public final class Commands {
             persistCannedResponseInTx(current, text);
             return text;
         });
-        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/subagent " + (sub.kind() != null ? sub.kind() : "(no-args)")
                         + (sub.id() != null ? " " + sub.id() : "")
                         + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));

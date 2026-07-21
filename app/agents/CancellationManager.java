@@ -110,7 +110,7 @@ public final class CancellationManager {
         if (priorContent != null && !priorContent.isBlank()) {
             return priorContent;
         }
-        EventLogger.warn("llm", agent != null ? agent.name : null, null,
+        EventLogger.warn("llm", Agent.nameOf(agent), null,
                 "Cancelled in round %d before any synthesis content — emitting labeled fallback"
                         .formatted(round + 1));
         var images = collectedImages != null ? collectedImages : List.<String>of();
