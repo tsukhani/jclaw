@@ -254,6 +254,30 @@ class SubagentYieldToolTest extends UnitTest {
     }
 
     @Test
+    void defaultYieldTimeoutConfigIsHonouredAndZeroDisablesWatchdog() {
+        // JCLAW-812: the operator-configurable global default (Settings →
+        // Subagents) is the fallback when a yield omits timeoutSeconds. setup()
+        // wiped the config, so unset returns the hard-coded default.
+        assertEquals(SubagentYieldTool.DEFAULT_TIMEOUT_SECONDS,
+                SubagentYieldTool.defaultYieldTimeoutSeconds());
+        // A configured value is honoured.
+        ConfigService.set(SubagentYieldTool.DEFAULT_YIELD_TIMEOUT_KEY, "600");
+        assertEquals(600, SubagentYieldTool.defaultYieldTimeoutSeconds());
+        // 0 is preserved — it disables the yield watchdog, the exact JCLAW-812
+        // pain point ("timeoutSeconds: 0 on every yield").
+        ConfigService.set(SubagentYieldTool.DEFAULT_YIELD_TIMEOUT_KEY, "0");
+        assertEquals(0, SubagentYieldTool.defaultYieldTimeoutSeconds());
+        // A negative (nonsensical) value coerces to the hard-coded default.
+        ConfigService.set(SubagentYieldTool.DEFAULT_YIELD_TIMEOUT_KEY, "-5");
+        assertEquals(SubagentYieldTool.DEFAULT_TIMEOUT_SECONDS,
+                SubagentYieldTool.defaultYieldTimeoutSeconds());
+        // An oversized value clamps to MAX.
+        ConfigService.set(SubagentYieldTool.DEFAULT_YIELD_TIMEOUT_KEY, "999999");
+        assertEquals(SubagentYieldTool.MAX_TIMEOUT_SECONDS,
+                SubagentYieldTool.defaultYieldTimeoutSeconds());
+    }
+
+    @Test
     void yieldTimeoutSecondsPersistsToRowAndClampsToMax() throws Exception {
         // JCLAW-326: timeoutSeconds is persisted on SubagentRun for the
         // watchdog to read. Values above MAX_TIMEOUT_SECONDS clamp silently;

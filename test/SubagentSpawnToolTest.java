@@ -484,6 +484,26 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void defaultRunTimeoutConfigIsHonouredAndNonPositiveCoercesToDefault() {
+        // JCLAW-812: the operator-configurable global default (Settings →
+        // Subagents) is the fallback when a spawn omits runTimeoutSeconds.
+        // setup() wiped the config, so unset returns the hard-coded default.
+        assertEquals(SubagentSpawnTool.DEFAULT_TIMEOUT_SECONDS,
+                SubagentSpawnTool.defaultRunTimeoutSeconds());
+        // A configured value is honoured — e.g. long-running fan-out.
+        ConfigService.set(SubagentSpawnTool.DEFAULT_RUN_TIMEOUT_KEY, "1200");
+        assertEquals(1200, SubagentSpawnTool.defaultRunTimeoutSeconds());
+        // A run always needs a positive idle budget, so 0 / negative coerce to
+        // the hard-coded default (unlike the yield default, where 0 is valid).
+        ConfigService.set(SubagentSpawnTool.DEFAULT_RUN_TIMEOUT_KEY, "0");
+        assertEquals(SubagentSpawnTool.DEFAULT_TIMEOUT_SECONDS,
+                SubagentSpawnTool.defaultRunTimeoutSeconds());
+        ConfigService.set(SubagentSpawnTool.DEFAULT_RUN_TIMEOUT_KEY, "-10");
+        assertEquals(SubagentSpawnTool.DEFAULT_TIMEOUT_SECONDS,
+                SubagentSpawnTool.defaultRunTimeoutSeconds());
+    }
+
+    @Test
     void idleRunTimesOutWhenSilent() {
         // No touches, no completion → the idle budget fires.
         Long runId = 90003L;

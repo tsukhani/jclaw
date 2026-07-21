@@ -48,6 +48,20 @@ const subagentMaxChildrenPerParent = computed(() => {
   return entries.find(e => e.key === 'subagent.maxChildrenPerParent')?.value ?? '5'
 })
 
+// JCLAW-812: global defaults for the per-call subagent_spawn runTimeoutSeconds
+// and subagent_yield timeoutSeconds args, so operators aren't stuck repeating
+// them on every call. Call-site values still override. Fallbacks mirror the
+// Java-side defaults (300s each).
+const subagentDefaultRunTimeout = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find(e => e.key === 'subagent.defaultRunTimeoutSeconds')?.value ?? '300'
+})
+
+const subagentDefaultYieldTimeout = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find(e => e.key === 'subagent.defaultYieldTimeoutSeconds')?.value ?? '300'
+})
+
 // JCLAW-499: external-harness (ACP) runtime command. Empty = disabled
 // (runtime="acp" spawns are refused until set). Operator-set only.
 const subagentAcpCommand = computed(() => {
@@ -218,7 +232,10 @@ async function saveSubagentModel(value: string) {
       concurrent <span class="font-mono">RUNNING</span> children a single parent
       may have in flight. On violation the tool emits
       <span class="font-mono">SUBAGENT_LIMIT_EXCEEDED</span> and returns a
-      plain-text refusal to the model. Changes apply live; no restart needed.
+      plain-text refusal to the model. The two
+      <span class="font-mono">default…TimeoutSeconds</span> rows set the fallback
+      timeouts a spawn / yield uses when its own arg is omitted — a call-site
+      value still overrides. Changes apply live; no restart needed.
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
@@ -328,6 +345,124 @@ async function saveSubagentModel(value: string) {
               class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
               title="Edit"
               @click="editingSubagentField = 'maxChildrenPerParent'; subagentFieldEdit = subagentMaxChildrenPerParent"
+            >
+              <PencilIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+        </div>
+        <!-- JCLAW-812: global default for subagent_spawn runTimeoutSeconds.
+             A call-site value overrides; must be positive. -->
+        <div class="px-4 py-2.5 flex items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+            defaultRunTimeoutSeconds
+            <span class="relative group/tip">
+              <InformationCircleIcon
+                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                aria-hidden="true"
+              />
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                Default idle budget (seconds of inactivity) for subagent_spawn when the call omits runTimeoutSeconds. A call-site value overrides. Must be positive.
+              </span>
+            </span>
+          </span>
+          <template v-if="editingSubagentField === 'defaultRunTimeout'">
+            <input
+              v-model="subagentFieldEdit"
+              type="number"
+              min="1"
+              max="86400"
+              aria-label="Default run timeout seconds"
+              class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            >
+            <button
+              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+              title="Save"
+              @click="saveSubagentField('subagent.defaultRunTimeoutSeconds', subagentFieldEdit)"
+            >
+              <CheckIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Cancel"
+              @click="editingSubagentField = null"
+            >
+              <XMarkIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+          <template v-else>
+            <span class="flex-1 text-sm text-fg-primary font-mono">{{ subagentDefaultRunTimeout }}</span>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Edit"
+              @click="editingSubagentField = 'defaultRunTimeout'; subagentFieldEdit = subagentDefaultRunTimeout"
+            >
+              <PencilIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+        </div>
+        <!-- JCLAW-812: global default for subagent_yield timeoutSeconds.
+             A call-site value overrides; 0 disables the yield watchdog. -->
+        <div class="px-4 py-2.5 flex items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+            defaultYieldTimeoutSeconds
+            <span class="relative group/tip">
+              <InformationCircleIcon
+                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                aria-hidden="true"
+              />
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                Default resume budget (seconds) for subagent_yield when the call omits timeoutSeconds. A call-site value overrides. Set 0 to disable the yield watchdog — the parent waits until the child ends via its own runTimeoutSeconds.
+              </span>
+            </span>
+          </span>
+          <template v-if="editingSubagentField === 'defaultYieldTimeout'">
+            <input
+              v-model="subagentFieldEdit"
+              type="number"
+              min="0"
+              max="3600"
+              aria-label="Default yield timeout seconds"
+              class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            >
+            <button
+              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+              title="Save"
+              @click="saveSubagentField('subagent.defaultYieldTimeoutSeconds', subagentFieldEdit)"
+            >
+              <CheckIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Cancel"
+              @click="editingSubagentField = null"
+            >
+              <XMarkIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+          <template v-else>
+            <span class="flex-1 text-sm text-fg-primary font-mono">{{ subagentDefaultYieldTimeout }}</span>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Edit"
+              @click="editingSubagentField = 'defaultYieldTimeout'; subagentFieldEdit = subagentDefaultYieldTimeout"
             >
               <PencilIcon
                 class="w-3.5 h-3.5"

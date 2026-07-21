@@ -30,9 +30,9 @@ record SubagentSpawnArgs(
         var requestedAgentId = optLong(args, SubagentSpawnTool.ARG_AGENT_ID);
         var modelProviderOverride = optString(args, "modelProvider");
         var modelIdOverride = optString(args, "modelId");
-        var timeoutSeconds = optInt(args, SubagentSpawnTool.ARG_RUN_TIMEOUT_SECONDS,
-                SubagentSpawnTool.DEFAULT_TIMEOUT_SECONDS);
-        if (timeoutSeconds <= 0) timeoutSeconds = SubagentSpawnTool.DEFAULT_TIMEOUT_SECONDS;
+        var runDefault = SubagentSpawnTool.defaultRunTimeoutSeconds();
+        var timeoutSeconds = optInt(args, SubagentSpawnTool.ARG_RUN_TIMEOUT_SECONDS, runDefault);
+        if (timeoutSeconds <= 0) timeoutSeconds = runDefault;
         // JCLAW-267: mode parameter — "session" (default) materializes a fresh
         // child Conversation; "inline" runs the child in the parent's
         // Conversation with messages tagged so the chat UI folds them.

@@ -134,7 +134,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * round / tool call); active work resets the clock. The absolute total
      * runtime is bounded separately by {@link #MAX_WALLCLOCK_KEY}.
      */
-    static final int DEFAULT_TIMEOUT_SECONDS = 300;
+    public static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
     /**
      * JCLAW-424: operator-controlled absolute wall-clock ceiling on a single
@@ -186,6 +186,21 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  verbatim. */
     public static final String DEPTH_LIMIT_KEY = "subagent.maxDepth";
     public static final String BREADTH_LIMIT_KEY = "subagent.maxChildrenPerParent";
+
+    /** JCLAW-812: operator-configurable global default for the per-spawn
+     *  {@code runTimeoutSeconds} arg (Settings → Subagents). A spawn that omits
+     *  the arg falls back to this; a call-site value still overrides. DB-backed,
+     *  so it applies without a restart. */
+    public static final String DEFAULT_RUN_TIMEOUT_KEY = "subagent.defaultRunTimeoutSeconds";
+
+    /** Effective default idle budget for a spawn that omits {@code runTimeoutSeconds}:
+     *  the configured {@link #DEFAULT_RUN_TIMEOUT_KEY}, coerced to
+     *  {@link #DEFAULT_TIMEOUT_SECONDS} when unset or non-positive (a run always
+     *  needs a positive idle budget; total runtime is capped by {@link #MAX_WALLCLOCK_KEY}). */
+    public static int defaultRunTimeoutSeconds() {
+        int n = ConfigService.getInt(DEFAULT_RUN_TIMEOUT_KEY, DEFAULT_TIMEOUT_SECONDS);
+        return n > 0 ? n : DEFAULT_TIMEOUT_SECONDS;
+    }
 
     public static final String CFG_SUBAGENT_PROVIDER = "subagent.modelProvider";
     public static final String CFG_SUBAGENT_MODEL = "subagent.modelId";
@@ -315,7 +330,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         props.put(ARG_RUN_TIMEOUT_SECONDS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
                 "Idle budget: seconds of inactivity (no LLM round/tool call) before the run times out; "
-                        + "active work resets it, so it need not cover total runtime (default 300)"));
+                        + "active work resets it, so it need not cover total runtime (default "
+                        + defaultRunTimeoutSeconds() + ")"));
         props.put("async", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                 SchemaKeys.DESCRIPTION,
                 "When true (default false), return the child's run id immediately so you can "
@@ -525,8 +541,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (!ALLOWED_CONTEXTS.contains(context)) {
             return "Error: 'context' must be one of " + ALLOWED_CONTEXTS + ".";
         }
-        var timeoutSeconds = SubagentSpawnArgs.optInt(args, ARG_RUN_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
-        if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+        var runDefault = defaultRunTimeoutSeconds();
+        var timeoutSeconds = SubagentSpawnArgs.optInt(args, ARG_RUN_TIMEOUT_SECONDS, runDefault);
+        if (timeoutSeconds <= 0) timeoutSeconds = runDefault;
         // JCLAW-499: runtime validation (native | acp) + resolved harness command,
         // applied to every child of the fan-out.
         var acpError = SubagentAcpRunner.acpRuntimeError(args, parentAgent);

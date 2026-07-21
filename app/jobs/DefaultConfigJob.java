@@ -21,6 +21,7 @@ import services.tts.TtsEngine;
 import services.tts.TtsModel;
 import tools.ShellExecTool;
 import tools.SubagentSpawnTool;
+import tools.SubagentYieldTool;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -368,6 +369,15 @@ public class DefaultConfigJob extends Job<Void> {
         // tools.SubagentSpawnTool#awaitFuture.
         seedIfAbsent(SubagentSpawnTool.MAX_WALLCLOCK_KEY,
                 String.valueOf(SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS));
+        // JCLAW-812: global defaults for the per-call runTimeoutSeconds (spawn) and
+        // timeoutSeconds (yield) args, so operators aren't stuck repeating them on
+        // every call. Call-site values still override. Editable from the Settings
+        // page's Subagents section. Read paths: SubagentSpawnTool#defaultRunTimeoutSeconds
+        // and SubagentYieldTool#defaultYieldTimeoutSeconds.
+        seedIfAbsent(SubagentSpawnTool.DEFAULT_RUN_TIMEOUT_KEY,
+                String.valueOf(SubagentSpawnTool.DEFAULT_TIMEOUT_SECONDS));
+        seedIfAbsent(SubagentYieldTool.DEFAULT_YIELD_TIMEOUT_KEY,
+                String.valueOf(SubagentYieldTool.DEFAULT_TIMEOUT_SECONDS));
     }
 
     private void seedDefaultAgent() {

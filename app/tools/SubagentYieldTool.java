@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.SubagentRun;
+import services.ConfigService;
 import services.SubagentRegistry;
 import services.Tx;
 import utils.GsonHolder;
@@ -92,6 +93,23 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
      *  so a stray million-second value can't pin a watchdog VT indefinitely. */
     public static final int MAX_TIMEOUT_SECONDS = 3600;
 
+    /** JCLAW-812: operator-configurable global default for the {@code timeoutSeconds}
+     *  arg (Settings → Subagents). A yield that omits the arg falls back to this;
+     *  a call-site value still overrides. DB-backed, applies without a restart. */
+    public static final String DEFAULT_YIELD_TIMEOUT_KEY = "subagent.defaultYieldTimeoutSeconds";
+
+    /** Effective default resume budget for a yield that omits {@code timeoutSeconds}:
+     *  the configured {@link #DEFAULT_YIELD_TIMEOUT_KEY}, clamped to
+     *  {@link #MAX_TIMEOUT_SECONDS}. Unlike the spawn budget, {@code 0} is a valid
+     *  configured default — it disables the yield watchdog so the parent parks until
+     *  the child ends via its own spawn-time {@code runTimeoutSeconds}. Only a
+     *  negative (nonsensical) value coerces to {@link #DEFAULT_TIMEOUT_SECONDS}. */
+    public static int defaultYieldTimeoutSeconds() {
+        int n = ConfigService.getInt(DEFAULT_YIELD_TIMEOUT_KEY, DEFAULT_TIMEOUT_SECONDS);
+        if (n < 0) return DEFAULT_TIMEOUT_SECONDS;
+        return Math.min(n, MAX_TIMEOUT_SECONDS);
+    }
+
     /** Marker that {@link agents.AgentRunner} scans for on tool-result text
      *  to recognise a successful yield call and break out of its tool-call
      *  loop without persisting a final assistant reply. */
@@ -169,7 +187,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         props.put(PARAM_TIMEOUT_SECONDS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
                 "Caller-tightened resume budget in seconds (0-" + MAX_TIMEOUT_SECONDS
-                        + ", default " + DEFAULT_TIMEOUT_SECONDS
+                        + ", default " + defaultYieldTimeoutSeconds()
                         + "). If the child hasn't terminated by then a synthetic TIMEOUT "
                         + "announce resumes your turn. Pass 0 to disable the yield timeout — "
                         + "the parent waits until the child terminates via its own spawn-time "
@@ -310,14 +328,15 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 return ParsedArgs.fail("Error: 'conversationId' must be numeric (got '" + convIdStr + "').");
             }
         }
-        var timeout = JsonArgs.optInt(args, PARAM_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
+        var yieldDefault = defaultYieldTimeoutSeconds();
+        var timeout = JsonArgs.optInt(args, PARAM_TIMEOUT_SECONDS, yieldDefault);
         // 0 is a load-bearing sentinel: explicitly disables the yield watchdog
         // so the parent parks until the child terminates naturally via its own
-        // runTimeoutSeconds. Negative values are nonsense — coerce to DEFAULT.
+        // runTimeoutSeconds. Negative values are nonsense — coerce to the default.
         // SubagentRegistry.scheduleYieldTimeout already no-ops for non-positive
         // inputs, so storing 0 on the row + handing it to the scheduler is the
         // entire "no timeout" implementation.
-        if (timeout < 0) timeout = DEFAULT_TIMEOUT_SECONDS;
+        if (timeout < 0) timeout = yieldDefault;
         if (timeout > MAX_TIMEOUT_SECONDS) timeout = MAX_TIMEOUT_SECONDS;
         return ParsedArgs.ok(runId, convId, timeout);
     }
