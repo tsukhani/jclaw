@@ -4,7 +4,6 @@ import com.google.gson.JsonObject;
 import utils.JsonArgs;
 
 import java.util.Locale;
-import java.util.Set;
 
 /**
  * JCLAW-677: request parsing and schema-level validation of a single subagent
@@ -17,9 +16,6 @@ record SubagentSpawnArgs(
         String task, String label, Long requestedAgentId,
         String modelProvider, String modelId,
         String mode, String context, int timeoutSeconds, boolean asyncRequested) {
-
-    private static final Set<String> ALLOWED_MODES =
-            Set.of(SubagentSpawnTool.MODE_SESSION, SubagentSpawnTool.MODE_INLINE);
 
     static SubagentSpawnArgs fail(String msg) {
         return new SubagentSpawnArgs(msg, null, null, null, null, null, null, null, 0, false);
@@ -44,9 +40,12 @@ record SubagentSpawnArgs(
         var mode = requestedMode == null || requestedMode.isBlank()
                 ? SubagentSpawnTool.DEFAULT_MODE
                 : requestedMode.toLowerCase(Locale.ROOT);
-        if (!ALLOWED_MODES.contains(mode)) {
-            return fail("Error: 'mode' must be one of " + ALLOWED_MODES
-                    + SubagentSpawnTool.GOT_LITERAL + requestedMode + "').");
+        // JCLAW-809: single source of truth — SubagentSpawnTool.modeRejection is
+        // the same check the batch path (SubagentSpawnTool.executeBatch) applies,
+        // so the two paths can no longer diverge on an unknown mode.
+        var modeRejection = SubagentSpawnTool.modeRejection(requestedMode, mode);
+        if (modeRejection != null) {
+            return fail(modeRejection);
         }
         // JCLAW-268: context parameter — "fresh" (default) is the JCLAW-265
         // behavior; "inherit" summarizes the parent's recent turns and unions

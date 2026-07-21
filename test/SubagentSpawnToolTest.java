@@ -235,6 +235,40 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void batchEnforcesAllowedModesLikeSingleSpawn() {
+        // JCLAW-809: the batch path (tasks[]) used to skip the ALLOWED_MODES check
+        // the single-spawn parse() path applies, so a mode typo was silently
+        // accepted on batch but rejected on single. Both paths now reject an
+        // unknown mode identically. Synchronous: the rejection precedes any spawn,
+        // so no LLM mock is needed.
+        var parent = createAgent("p-batch-mode", "test-provider", "test-model");
+        var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+
+        // The SAME typo mode down both paths must yield the SAME rejection.
+        var singleErr = agents.ToolContext.withScope(null, 6001L, () ->
+                spawnTool.execute("{\"task\":\"x\",\"mode\":\"sesion\"}", parent));
+        var batchErr = agents.ToolContext.withScope(null, 6002L, () ->
+                spawnTool.execute("{\"tasks\":[\"x\"],\"mode\":\"sesion\"}", parent));
+        assertTrue(singleErr.startsWith("Error: 'mode' must be one of")
+                        && singleErr.contains("(got 'sesion')"),
+                "single-spawn must reject an unknown mode: " + singleErr);
+        assertTrue(batchErr.startsWith("Error: 'mode' must be one of")
+                        && batchErr.contains("(got 'sesion')"),
+                "batch must reject an unknown mode the same way single-spawn does (JCLAW-809): " + batchErr);
+        assertEquals(singleErr, batchErr,
+                "batch and single-spawn must produce the identical mode-rejection message (JCLAW-809)");
+
+        // Control: a valid mode is accepted past the mode gate — an oversized
+        // session fan-out reaches the breadth cap rather than a mode rejection.
+        var validMode = agents.ToolContext.withScope(null, 6003L, () ->
+                spawnTool.execute("{\"tasks\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"],\"mode\":\"session\"}", parent));
+        assertFalse(validMode.contains("'mode' must be one of"),
+                "a valid mode must not trip the ALLOWED_MODES check: " + validMode);
+        assertTrue(validMode.startsWith("Subagent spawn refused") && validMode.contains("breadth"),
+                "valid-mode batch must proceed to the breadth cap, proving the mode was accepted: " + validMode);
+    }
+
+    @Test
     void acpRuntimeRunsExternalHarnessAndCapturesStdout() throws Exception {
         // JCLAW-499: runtime=acp runs the operator-configured external harness with
         // the task on stdin and captures stdout as the reply. `cat` is the stub

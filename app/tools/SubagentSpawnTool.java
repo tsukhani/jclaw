@@ -94,6 +94,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     private static final String SLUG_FALLBACK = "session";
     static final String MODE_SESSION = "session";
     static final String MODE_INLINE = "inline";
+    /** JCLAW-809: canonical set of accepted spawn modes — the single source of
+     *  truth for {@link #modeRejection} so the single-spawn ({@code SubagentSpawnArgs.parse})
+     *  and batch ({@link #executeBatch}) paths validate identically. Mirrors the
+     *  {@link #ALLOWED_CONTEXTS} home so both allowed-value sets live on the facade. */
+    static final Set<String> ALLOWED_MODES = Set.of(MODE_SESSION, MODE_INLINE);
     static final String DEFAULT_CONTEXT = "fresh";
     static final String CONTEXT_FRESH = "fresh";
     static final String CONTEXT_INHERIT = "inherit";
@@ -508,6 +513,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // Batch is inherently async + session-scoped; inline has no batch semantics.
         var rawMode = SubagentSpawnArgs.optString(args, "mode");
         var mode = (rawMode == null || rawMode.isBlank()) ? DEFAULT_MODE : rawMode.toLowerCase(Locale.ROOT);
+        // JCLAW-809: enforce the same ALLOWED_MODES check the single-spawn path
+        // applies, so a mode typo is rejected here instead of silently accepted.
+        var rejection = modeRejection(rawMode, mode);
+        if (rejection != null) return rejection;
         if (MODE_INLINE.equals(mode)) {
             return "Error: batch 'tasks' is only compatible with mode=\"session\" (inline embeds a single child into the parent transcript).";
         }
@@ -596,6 +605,22 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** JCLAW-498: one entry of a batch fan-out. */
     private record BatchTaskSpec(String task, String label, Long agentId) {}
+
+    /**
+     * JCLAW-809: reject a spawn mode that is not in {@link #ALLOWED_MODES},
+     * returning the rejection message (identical in format to the single-spawn
+     * {@code SubagentSpawnArgs.parse} path) or {@code null} when the normalized
+     * mode is allowed. {@code requestedMode} is the raw arg, used only for the
+     * {@code (got '…')} suffix. Extracted so the single-spawn and batch paths
+     * cannot diverge on which modes they accept.
+     */
+    static String modeRejection(String requestedMode, String normalizedMode) {
+        if (!ALLOWED_MODES.contains(normalizedMode)) {
+            return "Error: 'mode' must be one of " + ALLOWED_MODES
+                    + GOT_LITERAL + requestedMode + "').";
+        }
+        return null;
+    }
 
     /** Result of the synchronous child run + idle await. Public for
      *  {@code SubagentSpawnToolTest} (default package), which inspects the
