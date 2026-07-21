@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Provider-facing token measurement backed by JTokkit.
@@ -30,7 +30,7 @@ import static utils.GsonHolder.INSTANCE;
  */
 public final class TokenUsageEstimator {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
     private static final EncodingRegistry REGISTRY = Encodings.newLazyEncodingRegistry();
 
     /**

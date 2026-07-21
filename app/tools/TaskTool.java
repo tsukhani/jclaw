@@ -650,6 +650,18 @@ public class TaskTool implements ToolRegistry.Tool {
             task.description = v != null ? v : "";
             anyChange = true;
         }
+        // JCLAW-828: route the delivery patch through the same resolver as
+        // creation. A bare channel name ("telegram") stored verbatim passes
+        // DeliverySpec.validate() but DeliveryDispatcher rejects it at every
+        // fire; resolveDeliverySpec backfills the target from the calling
+        // conversation. Inference runs ONLY for the bare-channel shape — an
+        // explicit null-clear (optStr → null) or a "none"/full-spec value stays
+        // verbatim, preserving updateTask's clear semantics.
+        if (args.has(KEY_DELIVERY)) {
+            var explicit = optStr(args, KEY_DELIVERY);
+            task.delivery = explicit == null ? null : resolveDeliverySpec(explicit, task.agent);
+            anyChange = true;
+        }
         anyChange |= applyStringPatches(args, task);
         anyChange |= applyFlagPatches(args, task);
 
@@ -660,7 +672,6 @@ public class TaskTool implements ToolRegistry.Tool {
     /** Patch the optional-string fields. Returns true iff any were touched. */
     private static boolean applyStringPatches(JsonObject args, Task task) {
         boolean anyChange = false;
-        if (args.has(KEY_DELIVERY))           { task.delivery          = optStr(args, KEY_DELIVERY);           anyChange = true; }
         if (args.has(KEY_PAYLOAD_TYPE))       { task.payloadType       = optStr(args, KEY_PAYLOAD_TYPE);       anyChange = true; }
         if (args.has(KEY_MODEL_PROVIDER))     { task.modelProvider     = optStr(args, KEY_MODEL_PROVIDER);     anyChange = true; }
         if (args.has(KEY_MODEL_ID))           { task.modelId           = optStr(args, KEY_MODEL_ID);           anyChange = true; }

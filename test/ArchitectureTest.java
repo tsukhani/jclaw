@@ -31,7 +31,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * <p>Rules 1 and 2 currently hold clean. Rule 3 carries an explicit, visible list
  * of the three pre-existing {@code new Gson()} offenders the wave-5 audit found;
  * the rule guards every <em>other</em> class from regressing, and each excluded
- * entry should be deleted as that class migrates to {@code GsonHolder.INSTANCE}.
+ * entry should be deleted as that class migrates to {@code GsonHolder.GSON}.
  * When a baseline like this grows past a handful of sites, switch the rule to
  * {@link com.tngtech.archunit.library.freeze.FreezingArchRule#freeze} instead,
  * which manages the baseline in a committed violation store.
@@ -110,7 +110,7 @@ class ArchitectureTest extends UnitTest {
     }
 
     /**
-     * A default-configured {@code new Gson()} silently bypasses {@code GsonHolder.INSTANCE}'s
+     * A default-configured {@code new Gson()} silently bypasses {@code GsonHolder.GSON}'s
      * wire-format contract — {@code serializeNulls()}, the ISO-8601 {@code Instant} adapter,
      * and the deliberate HTML-escape setting (JCLAW-686/730). Purpose-built {@code GsonBuilder}
      * instances (e.g. the pretty-printer, the compact serializer) are legitimate and not
@@ -118,14 +118,14 @@ class ArchitectureTest extends UnitTest {
      *
      * <p>This rule is fully strict — the wave-5 remediation migrated the last three
      * offenders ({@code DiarizeAudioTool}, {@code AcpHarnessProbe}, {@code VideoInterpretationClient})
-     * to {@code GsonHolder.INSTANCE}, so any bare {@code new Gson()} anywhere but the holder now fails.
+     * to {@code GsonHolder.GSON}, so any bare {@code new Gson()} anywhere but the holder now fails.
      */
     @Test
     void defaultGsonConstructionGoesThroughGsonHolder() {
         ArchRule rule = noClasses()
                 .that().doNotHaveFullyQualifiedName("utils.GsonHolder")
                 .should().callConstructorWhere(constructorCall("com.google.gson.Gson", true))
-                .because("a bare `new Gson()` bypasses GsonHolder.INSTANCE's serializeNulls / "
+                .because("a bare `new Gson()` bypasses GsonHolder.GSON's serializeNulls / "
                         + "Instant-adapter / HTML-escape contract (JCLAW-686/730)");
         rule.check(APP_CLASSES);
     }

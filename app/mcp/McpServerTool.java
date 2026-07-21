@@ -37,7 +37,7 @@ import java.util.Map;
  */
 public final class McpServerTool implements ToolRegistry.Tool {
 
-    private static final Gson GSON = GsonHolder.INSTANCE;
+    private static final Gson GSON = GsonHolder.GSON;
 
     private static final String FIELD_DESCRIPTION = "description";
 

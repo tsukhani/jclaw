@@ -12,7 +12,7 @@ import services.OcrHealthProbe;
 
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Reports OCR backend availability and configured-enabled state for the
@@ -29,7 +29,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiOcrController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     public record OcrProvider(String name, String displayName, boolean available,
                               String version, String reason, boolean enabled,

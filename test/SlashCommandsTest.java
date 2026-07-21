@@ -1,6 +1,5 @@
 import models.Agent;
 import models.Message;
-import models.MessageRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1366,41 +1365,6 @@ class SlashCommandsTest extends UnitTest {
         assertFalse(Commands.isStart("hello"));
         assertFalse(Commands.isStart(null));
         assertFalse(Commands.isStart(""));
-    }
-
-    @Test
-    void welcomeTextUsesDescriptionAndPointsToHelp() {
-        agent.description = "Helps you ship JClaw features.";
-        var text = Commands.welcomeText(agent);
-        assertTrue(text.contains("Helps you ship JClaw features."), text);
-        assertTrue(text.contains("/help"), text);
-        assertTrue(text.contains(agent.name), text);   // blockquote header carries the agent name
-    }
-
-    @Test
-    void welcomeTextFallsBackWhenDescriptionBlank() {
-        agent.description = "   ";
-        var text = Commands.welcomeText(agent);
-        assertTrue(text.contains(agent.name), text);
-        assertTrue(text.contains("/help"), text);
-    }
-
-    @Test
-    void executeStartWelcomeOpensConversationAndPersistsWelcome() {
-        agent.description = "Your friendly ops bot.";
-        var result = Commands.executeStartWelcome(agent, "telegram", "peer-1");
-
-        assertNotNull(result.conversation(), "a fresh conversation must be opened");
-        assertNull(result.command(), "/start-welcome is not a registered Command");
-        var welcome = result.responseText();
-        assertTrue(welcome.contains("Your friendly ops bot."), welcome);
-        assertTrue(welcome.contains("/help"), welcome);
-
-        // The welcome is persisted as the conversation's first assistant message.
-        assertEquals(1L, Message.count("conversation.id = ?1", result.conversation().id));
-        var msg = Message.find("conversation.id = ?1", result.conversation().id).<Message>first();
-        assertEquals(MessageRole.ASSISTANT.value, msg.role);
-        assertEquals(welcome, msg.content);
     }
 
     @Test

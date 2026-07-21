@@ -237,7 +237,7 @@ final class SubagentResponses {
         msg.role = yielded ? MessageRole.USER.value : MessageRole.SYSTEM.value;
         msg.content = fallback;
         msg.messageKind = SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE;
-        msg.metadata = GsonHolder.INSTANCE.toJson(payload, Map.class);
+        msg.metadata = GsonHolder.GSON.toJson(payload, Map.class);
         // JCLAW-291: also stamp the column on the announce row itself so
         // queries that count truncated messages see it without parsing JSON.
         msg.truncated = modelOutputTruncated;

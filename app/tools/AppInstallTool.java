@@ -187,7 +187,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
             payload.put("url", "/apps/" + slug + "/");
             payload.put("files", files);
             payload.put("source", workspaceRelative(agent, src));   // where the app was found
-            return GsonHolder.INSTANCE.toJson(payload, Map.class);
+            return GsonHolder.GSON.toJson(payload, Map.class);
         } catch (IOException e) {
             return err("install failed: " + e.getMessage());
         }
@@ -371,7 +371,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("valid", valid);
         payload.put("issues", issues);
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     private static String jsonStaged(String slug, JsonObject args, boolean alreadyPresent) {
@@ -382,7 +382,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
         payload.put("slug", slug);
         payload.put("workspacePath", dest);
         payload.put("alreadyPresent", alreadyPresent);
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     private static String err(String msg) {

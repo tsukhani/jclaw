@@ -82,7 +82,7 @@ public final class AcpEventMapper {
             m.put("title", tc.title());
             m.put("kind", tc.kind() == null ? null : tc.kind().toString());
         }
-        return GsonHolder.INSTANCE.toJson(m);
+        return GsonHolder.GSON.toJson(m);
     }
 
     /**

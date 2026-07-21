@@ -22,7 +22,7 @@ import static controllers.BindingKeys.KEY_ENABLED;
 import static controllers.BindingKeys.KEY_REPLY_TO_MODE;
 import static controllers.BindingKeys.KEY_TRANSPORT;
 import static controllers.BindingKeys.KEY_WEBHOOK_BASE_URL;
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * CRUD API for per-agent Slack bindings (JCLAW-441). Mirrors
@@ -40,7 +40,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiSlackBindingsController extends ApiBindingController {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private static final String KEY_BOT_TOKEN = "botToken";
     private static final String KEY_SIGNING_SECRET = "signingSecret";

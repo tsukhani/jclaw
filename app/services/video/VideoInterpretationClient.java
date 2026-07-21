@@ -241,7 +241,7 @@ public class VideoInterpretationClient {
     private static String buildMultiImageRequestJson(String model, List<Map<String, Object>> contentParts) {
         var message = new JsonObject();
         message.addProperty("role", "user");
-        message.add(CONTENT, GsonHolder.INSTANCE.toJsonTree(contentParts));
+        message.add(CONTENT, GsonHolder.GSON.toJsonTree(contentParts));
         var messages = new JsonArray();
         messages.add(message);
 

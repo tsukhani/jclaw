@@ -7,7 +7,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.BindingService;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Read-only QR-pairing status endpoint for WhatsApp-Web (Cobalt) bindings
@@ -48,6 +48,6 @@ public class WhatsAppQrController extends Controller {
                 (binding.transport != null ? binding.transport : WhatsAppTransport.CLOUD_API).name(),
                 paired,
                 qr);
-        renderJSON(INSTANCE.toJson(status));
+        renderJSON(GSON.toJson(status));
     }
 }

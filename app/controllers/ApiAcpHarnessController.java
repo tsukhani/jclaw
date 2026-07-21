@@ -12,7 +12,7 @@ import services.AcpHarnessProbe;
 
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * ACP coding-harness detection: probes the host PATH for the CLIs the ACP
@@ -25,7 +25,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiAcpHarnessController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
     private static final String COMMAND_FIELD = "command";
 
     /** One probed harness: adapter {@code id}, a display {@code name}, the

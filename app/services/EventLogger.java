@@ -267,6 +267,6 @@ public class EventLogger {
         payload.put("context", context);    // "fresh" | "inherit"
         payload.put("outcome", outcome);
         payload.put("reason", reason);
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 }

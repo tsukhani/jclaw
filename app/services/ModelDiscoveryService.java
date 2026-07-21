@@ -104,6 +104,51 @@ public class ModelDiscoveryService {
         record Error(int statusCode, String message) implements DiscoveryResult {}
     }
 
+    /**
+     * The single normalized model shape emitted by all three discovery parsers
+     * ({@link #parseModels}, {@link #parseLmStudioNativeResponse},
+     * {@link #parseOllamaShow}). Centralizing the field set — and the
+     * {@code key -> value} projection in {@link #toMap()} — keeps the three
+     * paths from drifting: every parser emits the full key set (including the
+     * {@code supportsVideo} / {@code videoDetectedFromProvider} pair that the
+     * LM Studio and Ollama parsers previously omitted) by construction.
+     */
+    record ModelInfo(
+            String id, String name, int contextWindow, int maxTokens,
+            boolean supportsThinking, boolean thinkingFromProvider,
+            boolean alwaysThinks, boolean alwaysThinksFromProvider,
+            boolean supportsVision, boolean visionFromProvider,
+            boolean supportsAudio, boolean audioFromProvider,
+            boolean supportsVideo, boolean videoFromProvider,
+            double promptPrice, double completionPrice,
+            double cachedReadPrice, double cacheWritePrice,
+            boolean isFree) {
+
+        Map<String, Object> toMap() {
+            var m = new LinkedHashMap<String, Object>();
+            m.put(KEY_ID, id);
+            m.put(KEY_NAME, name);
+            m.put(KEY_CONTEXT_WINDOW, contextWindow);
+            m.put(KEY_MAX_TOKENS, maxTokens);
+            m.put(KEY_SUPPORTS_THINKING, supportsThinking);
+            m.put(KEY_THINKING_DETECTED_FROM_PROVIDER, thinkingFromProvider);
+            m.put(KEY_ALWAYS_THINKS, alwaysThinks);
+            m.put(KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER, alwaysThinksFromProvider);
+            m.put(KEY_SUPPORTS_VISION, supportsVision);
+            m.put(KEY_VISION_DETECTED_FROM_PROVIDER, visionFromProvider);
+            m.put(KEY_SUPPORTS_AUDIO, supportsAudio);
+            m.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, audioFromProvider);
+            m.put(KEY_SUPPORTS_VIDEO, supportsVideo);
+            m.put(KEY_VIDEO_DETECTED_FROM_PROVIDER, videoFromProvider);
+            m.put(KEY_PROMPT_PRICE, promptPrice);
+            m.put(KEY_COMPLETION_PRICE, completionPrice);
+            m.put(KEY_CACHED_READ_PRICE, cachedReadPrice);
+            m.put(KEY_CACHE_WRITE_PRICE, cacheWritePrice);
+            m.put(KEY_IS_FREE, isFree);
+            return m;
+        }
+    }
+
     // Provider model catalogs change on the order of days, so the read-heavy
     // page-load paths (e.g. the Settings video-model dropdown, ~1.3s/call) cache
     // discovery for 10 minutes rather than hitting the provider on every load.
@@ -284,35 +329,30 @@ public class ModelDiscoveryService {
             if (!el.isJsonObject()) continue;
             var obj = el.getAsJsonObject();
 
-            var model = new LinkedHashMap<String, Object>();
-            model.put(KEY_ID, getString(obj, KEY_ID, ""));
-            model.put(KEY_NAME, inferName(obj));
-            model.put(KEY_CONTEXT_WINDOW, inferContextWindow(obj));
-            model.put(KEY_MAX_TOKENS, inferMaxTokens(obj));
             var thinking = detectThinkingSupport(obj);
-            model.put(KEY_SUPPORTS_THINKING, thinking.confirmed());
-            model.put(KEY_THINKING_DETECTED_FROM_PROVIDER, thinking.fromProvider());
             var alwaysThinks = detectAlwaysThinks(obj);
-            model.put(KEY_ALWAYS_THINKS, alwaysThinks.confirmed());
-            model.put(KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER, alwaysThinks.fromProvider());
             var vision = detectVisionSupport(obj);
-            model.put(KEY_SUPPORTS_VISION, vision.confirmed());
-            model.put(KEY_VISION_DETECTED_FROM_PROVIDER, vision.fromProvider());
             var audio = detectAudioSupport(obj);
-            model.put(KEY_SUPPORTS_AUDIO, audio.confirmed());
-            model.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, audio.fromProvider());
             var video = detectVideoSupport(obj);
-            model.put(KEY_SUPPORTS_VIDEO, video.confirmed());
-            model.put(KEY_VIDEO_DETECTED_FROM_PROVIDER, video.fromProvider());
-            model.put(KEY_PROMPT_PRICE, inferPrice(obj, FIELD_PROMPT));
-            model.put(KEY_COMPLETION_PRICE, inferPrice(obj, FIELD_COMPLETION));
-            model.put(KEY_CACHED_READ_PRICE, inferPrice(obj, TYPE_INPUT_CACHE_READ));
-            model.put(KEY_CACHE_WRITE_PRICE, inferPrice(obj, "input_cache_write"));
-            model.put(KEY_IS_FREE, inferIsFree(obj));
+            var info = new ModelInfo(
+                    getString(obj, KEY_ID, ""),
+                    inferName(obj),
+                    inferContextWindow(obj),
+                    inferMaxTokens(obj),
+                    thinking.confirmed(), thinking.fromProvider(),
+                    alwaysThinks.confirmed(), alwaysThinks.fromProvider(),
+                    vision.confirmed(), vision.fromProvider(),
+                    audio.confirmed(), audio.fromProvider(),
+                    video.confirmed(), video.fromProvider(),
+                    inferPrice(obj, FIELD_PROMPT),
+                    inferPrice(obj, FIELD_COMPLETION),
+                    inferPrice(obj, TYPE_INPUT_CACHE_READ),
+                    inferPrice(obj, "input_cache_write"),
+                    inferIsFree(obj));
 
-            if (model.get(KEY_ID).toString().isBlank()) continue;
+            if (info.id().isBlank()) continue;
 
-            result.add(model);
+            result.add(info.toMap());
         }
 
         return result;
@@ -889,41 +929,36 @@ public class ModelDiscoveryService {
                     ? entry.get(FIELD_MAX_CONTEXT_LENGTH).getAsInt()
                     : 0;
 
-            var model = new LinkedHashMap<String, Object>();
-            model.put(KEY_ID, id);
-            model.put(KEY_NAME, id.contains("/") ? id.substring(id.lastIndexOf('/') + 1) : id);
-            model.put(KEY_CONTEXT_WINDOW, ctxWin);
-            model.put(KEY_MAX_TOKENS, 0);
-
             // Vision is authoritative from the type field.
             boolean isVlm = "vlm".equals(type);
-            model.put(KEY_SUPPORTS_VISION, isVlm);
-            model.put(KEY_VISION_DETECTED_FROM_PROVIDER, true);
 
-            // Thinking and audio aren't enumerated in the native API.
-            // Leave fromProvider=false so the existing id-based heuristic
-            // picks up known thinking models (deepseek-r1, qwq, etc.)
-            // without overriding a confirmed answer here.
-            model.put(KEY_SUPPORTS_THINKING, false);
-            model.put(KEY_THINKING_DETECTED_FROM_PROVIDER, false);
             // alwaysThinks runs the id-pattern detector regardless: locally
             // run R1 / QwQ models are still pure reasoners.
             var lmIdOnly = new JsonObject();
             lmIdOnly.addProperty(KEY_ID, id);
             var lmAlwaysThinks = detectAlwaysThinks(lmIdOnly);
-            model.put(KEY_ALWAYS_THINKS, lmAlwaysThinks.confirmed());
-            model.put(KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER, lmAlwaysThinks.fromProvider());
-            model.put(KEY_SUPPORTS_AUDIO, false);
-            model.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, false);
 
-            // Local models — no pricing data.
-            model.put(KEY_PROMPT_PRICE, -1.0);
-            model.put(KEY_COMPLETION_PRICE, -1.0);
-            model.put(KEY_CACHED_READ_PRICE, -1.0);
-            model.put(KEY_CACHE_WRITE_PRICE, -1.0);
-            model.put(KEY_IS_FREE, false);
+            var info = new ModelInfo(
+                    id,
+                    id.contains("/") ? id.substring(id.lastIndexOf('/') + 1) : id,
+                    ctxWin,
+                    0,
+                    // Thinking and audio aren't enumerated in the native API.
+                    // Leave fromProvider=false so the existing id-based heuristic
+                    // picks up known thinking models (deepseek-r1, qwq, etc.)
+                    // downstream without overriding a confirmed answer here.
+                    false, false,
+                    lmAlwaysThinks.confirmed(), lmAlwaysThinks.fromProvider(),
+                    isVlm, true,
+                    false, false,
+                    // Video: the LM Studio native path is image-only (JCLAW-208),
+                    // so no model discovered here is video-native.
+                    false, false,
+                    // Local models — no pricing data.
+                    -1.0, -1.0, -1.0, -1.0,
+                    false);
 
-            results.add(model);
+            results.add(info.toMap());
         }
 
         return results;
@@ -1134,39 +1169,32 @@ public class ModelDiscoveryService {
         // fall back to id-based heuristics.
         if (!ollamaCapabilitiesAllowChat(show)) return null;
 
-        var model = new LinkedHashMap<String, Object>();
-        model.put(KEY_ID, id);
-        model.put(KEY_NAME, id);
-        model.put(KEY_CONTEXT_WINDOW, extractOllamaContextLength(show));
-        model.put(KEY_MAX_TOKENS, 0);
-
         var forDetect = new JsonObject();
         forDetect.addProperty(KEY_ID, id);
         if (show.has(FIELD_CAPABILITIES) && show.get(FIELD_CAPABILITIES).isJsonArray()) {
             forDetect.add(FIELD_CAPABILITIES, show.getAsJsonArray(FIELD_CAPABILITIES));
         }
         var thinking = detectThinkingSupport(forDetect);
-        model.put(KEY_SUPPORTS_THINKING, thinking.confirmed());
-        model.put(KEY_THINKING_DETECTED_FROM_PROVIDER, thinking.fromProvider());
         var alwaysThinks = detectAlwaysThinks(forDetect);
-        model.put(KEY_ALWAYS_THINKS, alwaysThinks.confirmed());
-        model.put(KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER, alwaysThinks.fromProvider());
         var vision = detectVisionSupport(forDetect);
-        model.put(KEY_SUPPORTS_VISION, vision.confirmed());
-        model.put(KEY_VISION_DETECTED_FROM_PROVIDER, vision.fromProvider());
         var audio = detectAudioSupport(forDetect);
-        model.put(KEY_SUPPORTS_AUDIO, audio.confirmed());
-        model.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, audio.fromProvider());
 
-        // Ollama doesn't publish pricing via the API. -1 means "unset" —
-        // the frontend skips these fields when saving.
-        model.put(KEY_PROMPT_PRICE, -1.0);
-        model.put(KEY_COMPLETION_PRICE, -1.0);
-        model.put(KEY_CACHED_READ_PRICE, -1.0);
-        model.put(KEY_CACHE_WRITE_PRICE, -1.0);
-        model.put(KEY_IS_FREE, false);
-
-        return model;
+        return new ModelInfo(
+                id, id,
+                extractOllamaContextLength(show),
+                0,
+                thinking.confirmed(), thinking.fromProvider(),
+                alwaysThinks.confirmed(), alwaysThinks.fromProvider(),
+                vision.confirmed(), vision.fromProvider(),
+                audio.confirmed(), audio.fromProvider(),
+                // Video: the Ollama native path is image-only (JCLAW-208); a
+                // Qwen-VL model served here stays supportsVideo=false, matching
+                // the pre-existing behavior where the video keys were absent.
+                false, false,
+                // Ollama doesn't publish pricing via the API. -1 means "unset" —
+                // the frontend skips these fields when saving.
+                -1.0, -1.0, -1.0, -1.0,
+                false).toMap();
     }
 
     /**

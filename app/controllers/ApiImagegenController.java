@@ -17,7 +17,7 @@ import services.imagegen.ReplicateImageModelCatalog;
 
 import java.util.LinkedHashMap;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Local image-generation Settings UI backend (JCLAW-226), the producing analogue
@@ -41,7 +41,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiImagegenController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     public record ImagegenLocalStateResponse(String provider, String model,
                                              boolean uvAvailable, String uvReason,

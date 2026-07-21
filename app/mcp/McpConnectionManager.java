@@ -316,7 +316,13 @@ public final class McpConnectionManager {
     }
 
     private static void launchConnect(Entry entry, McpServer server, int attempt) {
-        if (!connections.containsKey(server.name)) return;  // stopped while waiting
+        // Identity, not just presence: if the entry was replaced (admin toggle/
+        // config edit re-runs connectInternal, which stop()s then re-adds a
+        // fresh entry under the same name) while this attempt waited on the
+        // backoff timer, this orphan must not launch — a containsKey check would
+        // see the live replacement's entry and wrongly proceed. Mirror the
+        // success-path identity guard in doConnect.
+        if (connections.get(server.name) != entry) return;  // stopped or replaced while waiting
         Thread.ofVirtual().name("mcp-connect-" + server.name).start(() -> doConnect(entry, server, attempt));
     }
 
@@ -424,11 +430,24 @@ public final class McpConnectionManager {
             entry.lastError = client.lastError();
             persistStatus(server.id, McpServer.Status.DISCONNECTED, client.lastError());
             persistTimestamp(server.id, TIMESTAMP_LAST_DISCONNECTED);
+            // Re-verify identity after the teardown above: an admin toggle/delete
+            // could have replaced this entry between the initial guard and here.
+            // Rescheduling an orphan would race the live replacement's own
+            // backoff loop against the same server name.
+            if (connections.get(server.name) != entry) return;  // stopped or replaced during teardown
             scheduleConnect(entry, server, entry.attempts + 1);
         });
     }
 
     private static void handleFailure(Entry entry, McpServer server, int attempt, String error) {
+        // If the entry was replaced or removed (admin toggle/delete or a
+        // concurrent connect) while this attempt was in flight, this orphaned
+        // failure path must not touch shared state: unpublishing the live
+        // replacement's tools, clobbering its DB row, or deleting its allowlist
+        // rows. Guard before any mutation — this is the doConnect catch-path
+        // counterpart to the success-path identity check. The caller has
+        // already closed its own local client, so no leak escapes here.
+        if (connections.get(server.name) != entry) return;
         var hadConnection = entry.client != null;
         if (entry.client != null) {
             try { entry.client.close(); } catch (RuntimeException _) {}

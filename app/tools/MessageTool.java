@@ -262,10 +262,14 @@ public class MessageTool implements ToolRegistry.Tool {
                 "Channel-specific peer id (Telegram chat id, Slack channel id, "
                         + "WhatsApp e.164 phone). Defaults to the active conversation's "
                         + "peer id."));
+        // Only `action` is unconditionally required. `message` is required for
+        // send / reply / edit but not for react / delete / pin / unpin / poll, so
+        // it can't sit in the top-level REQUIRED list without contradicting the
+        // prose description and the per-action runtime validation in execute().
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,
-                SchemaKeys.REQUIRED, List.of(PARAM_ACTION, PARAM_MESSAGE)
+                SchemaKeys.REQUIRED, List.of(PARAM_ACTION)
         );
     }
 
@@ -432,7 +436,7 @@ public class MessageTool implements ToolRegistry.Tool {
             payload.put(PARAM_ACTION, "sent");
             payload.put(PARAM_CHANNEL, channel);
             payload.put(PARAM_TARGET, target);
-            return GsonHolder.INSTANCE.toJson(payload, Map.class);
+            return GsonHolder.GSON.toJson(payload, Map.class);
         }
         return "Error: " + result.reason();
     }
@@ -638,7 +642,7 @@ public class MessageTool implements ToolRegistry.Tool {
         payload.put(PARAM_ACTION, action);
         payload.put("status", status);
         if (reason != null) payload.put("reason", reason);
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     /**

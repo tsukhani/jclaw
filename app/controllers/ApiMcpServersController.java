@@ -18,7 +18,7 @@ import utils.ApiResponses;
 import java.util.List;
 import java.util.Map;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Admin CRUD over the {@code mcp_server} table (JCLAW-33).
@@ -46,7 +46,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiMcpServersController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     public record McpServerRequest(String name, Boolean enabled, Boolean requiresApproval,
                                    String transport, String command, List<String> args,

@@ -2,18 +2,16 @@ package services.transcription;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
-import utils.HttpFactories;
+import services.sidecar.SidecarHttpClient;
 
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -25,7 +23,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * both processes share the host. A JVM-wide fair lock serializes calls so
  * concurrent conversations queue instead of thrashing the model.
  */
-public class DiarizeSidecarClient {
+public class DiarizeSidecarClient extends SidecarHttpClient {
 
     /** One speaker turn: {@code [startMs, endMs)} attributed to {@code speaker},
      *  optionally with a per-turn emotion (null unless emotions were requested
@@ -41,8 +39,6 @@ public class DiarizeSidecarClient {
     public record Emotion(String label, double confidence,
                           Double valence, Double arousal, Double dominance) {}
 
-    private static final MediaType JSON = MediaType.get("application/json");
-
     /** The sidecar is one-inference-at-a-time by design (HTTP 409 when busy).
      *  Serialize all sidecar calls JVM-wide with a FAIR lock so concurrent
      *  conversations queue instead of surfacing a retryable busy condition as
@@ -50,26 +46,18 @@ public class DiarizeSidecarClient {
     private static final ReentrantLock SIDECAR_LOCK =
             new ReentrantLock(true);
 
-    private final String baseUrlOverride;
-    private final OkHttpClient client;
-
     public DiarizeSidecarClient() {
-        // Derived from the shared general client (reuses its pool/dispatcher)
-        // but with the per-read socket timeout lifted: the first /diarize
-        // lazily loads the pyannote pipeline (gated download + torch import +
-        // ~20s model load) and legitimately sends nothing for minutes. With
-        // readTimeout=0 a genuinely hung socket is bounded ONLY by the per-call
-        // callTimeout set on every request below — do not "fix" the zero
-        // without replacing that bound.
-        this(null, HttpFactories.general().newBuilder()
-                .readTimeout(Duration.ZERO)
-                .build());
+        this(null, defaultClient());
     }
 
     /** Test seam: fixed base URL (no sidecar spawn) + injected client. */
     public DiarizeSidecarClient(String baseUrlOverride, OkHttpClient client) {
-        this.baseUrlOverride = baseUrlOverride;
-        this.client = client;
+        super(baseUrlOverride, client);
+    }
+
+    @Override
+    protected ReentrantLock sidecarLock() {
+        return SIDECAR_LOCK;
     }
 
     /**
@@ -80,12 +68,7 @@ public class DiarizeSidecarClient {
      * SER model (null/blank = the sidecar default, MERaLiON-SER-v1).
      */
     public List<Turn> diarize(Path audioFile, Integer numSpeakers, boolean emotions, String emotionModel) {
-        SIDECAR_LOCK.lock();
-        try {
-            return diarizeLocked(audioFile, numSpeakers, emotions, emotionModel);
-        } finally {
-            SIDECAR_LOCK.unlock();
-        }
+        return withSidecarLock(() -> diarizeLocked(audioFile, numSpeakers, emotions, emotionModel));
     }
 
     private List<Turn> diarizeLocked(Path audioFile, Integer numSpeakers, boolean emotions,
@@ -184,11 +167,5 @@ public class DiarizeSidecarClient {
                 e.has("valence") ? e.get("valence").getAsDouble() : null,
                 e.has("arousal") ? e.get("arousal").getAsDouble() : null,
                 e.has("dominance") ? e.get("dominance").getAsDouble() : null);
-    }
-
-    private static String truncate(String s) {
-        if (s == null) return "";
-        var oneLine = s.replaceAll("\\s+", " ").strip();
-        return oneLine.length() > 300 ? oneLine.substring(0, 300) + "…" : oneLine;
     }
 }

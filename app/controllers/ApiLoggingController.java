@@ -14,7 +14,7 @@ import utils.ApiResponses;
 
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Per-logger log-level overrides. Backs the Logging Levels section of Settings.
@@ -28,7 +28,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiLoggingController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     public record LevelEntry(String logger, String level) {}
 

@@ -8,6 +8,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Durable per-bot last-consumed {@code update_id} store (JCLAW-361).
@@ -49,6 +51,22 @@ public final class TelegramOffsetStore {
      */
     public static final String OFFSET_PATH_PROPERTY = "jclaw.telegram.offsetPath";
 
+    /**
+     * In-memory high-water mark per offset file, seeded once from disk on first
+     * touch (JCLAW-826). Keeping the authoritative value in memory takes the hot
+     * {@link #persist} path off a class-wide monitor guarding three file ops per
+     * update (read-to-compare + mkdirs + write): the compare is now a lock-free
+     * {@code getAndAccumulate(Math::max)} and the file is written through only
+     * when the offset actually advances. Single-writer-per-bot (the SDK's
+     * single-thread update executor) keeps the write-through ordered; a JVM
+     * restart drops the map, which re-seeds from disk. Keyed by the resolved
+     * offset {@link Path} — identical to keying by bot id in production (the
+     * directory is fixed), while the {@link #OFFSET_PATH_PROPERTY} test seam
+     * points different runs at different temp dirs, keeping their entries
+     * naturally isolated.
+     */
+    private static final ConcurrentHashMap<Path, AtomicInteger> HIGH_WATER = new ConcurrentHashMap<>();
+
     private TelegramOffsetStore() {}
 
     /**
@@ -87,18 +105,7 @@ public final class TelegramOffsetStore {
     public static int load(String token) {
         String botId = botId(token);
         if (botId == null) return 0;
-        Path file = offsetFile(botId);
-        if (!Files.isRegularFile(file)) return 0;
-        try {
-            String raw = Files.readString(file, StandardCharsets.UTF_8).trim();
-            if (raw.isEmpty()) return 0;
-            return Integer.parseInt(raw);
-        } catch (IOException | NumberFormatException e) {
-            EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
-                    "Unreadable Telegram offset for bot %s, starting from 0: %s".formatted(
-                            botId, e.getMessage()));
-            return 0;
-        }
+        return highWater(botId).get();
     }
 
     /**
@@ -108,10 +115,38 @@ public final class TelegramOffsetStore {
      * are logged, not thrown: a missed write costs at most a re-process of the
      * affected updates on the next restart, which is the pre-JCLAW-361 behaviour.
      */
-    public static synchronized void persist(String token, int updateId) {
+    public static void persist(String token, int updateId) {
         String botId = botId(token);
         if (botId == null) return;
-        if (updateId <= load(token)) return;
+        // Atomic monotonic bump of the in-memory high-water mark; getAndAccumulate
+        // returns the prior value so we write through only when the offset advanced.
+        int prev = highWater(botId).getAndAccumulate(updateId, Math::max);
+        if (updateId <= prev) return;
+        writeThrough(botId, updateId);
+    }
+
+    /** High-water holder for {@code botId}, seeded once from disk on first touch. */
+    private static AtomicInteger highWater(String botId) {
+        return HIGH_WATER.computeIfAbsent(offsetFile(botId), file -> readFromDisk(botId, file));
+    }
+
+    /** Read the persisted offset from {@code file}, or 0 when absent/empty/unreadable. */
+    private static AtomicInteger readFromDisk(String botId, Path file) {
+        if (!Files.isRegularFile(file)) return new AtomicInteger(0);
+        try {
+            String raw = Files.readString(file, StandardCharsets.UTF_8).trim();
+            if (raw.isEmpty()) return new AtomicInteger(0);
+            return new AtomicInteger(Integer.parseInt(raw));
+        } catch (IOException | NumberFormatException e) {
+            EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
+                    "Unreadable Telegram offset for bot %s, starting from 0: %s".formatted(
+                            botId, e.getMessage()));
+            return new AtomicInteger(0);
+        }
+    }
+
+    /** Write {@code updateId} through to {@code botId}'s offset file; failures are logged, not thrown. */
+    private static void writeThrough(String botId, int updateId) {
         try {
             Path dir = offsetDir();
             Files.createDirectories(dir);

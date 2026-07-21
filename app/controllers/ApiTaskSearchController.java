@@ -13,7 +13,7 @@ import play.mvc.With;
 import services.search.MessageSearch;
 import utils.ApiResponses;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Task transcript full-text search API. Split out of {@code ApiTasksController}
@@ -25,7 +25,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiTaskSearchController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     /**
      * One hit from the transcript search: the matched

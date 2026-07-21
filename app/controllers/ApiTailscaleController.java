@@ -7,7 +7,7 @@ import services.ConfigService;
 import services.EventLogger;
 import services.TailscaleFunnel;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Tailscale Funnel admin API (JCLAW-84): a single app-level toggle that exposes
@@ -20,7 +20,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiTailscaleController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
     private static final String CATEGORY = "tailscale";
     private static final String FIELD_ENABLED = "enabled";
 

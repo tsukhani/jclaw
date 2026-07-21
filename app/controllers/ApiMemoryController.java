@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Admin API for agent memories (JCLAW-40). A cross-agent view: lists every
@@ -42,7 +42,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiMemoryController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private static final String KEY_IMPORTANCE = "importance";
     private static final String KEY_CATEGORY = "category";

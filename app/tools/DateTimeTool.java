@@ -126,12 +126,16 @@ public class DateTimeTool implements ToolRegistry.Tool {
                 ? args.get(ARG_ACTION).getAsString()
                 : ACTION_NOW;
 
-        return switch (action) {
-            case ACTION_NOW -> now(args);
-            case ACTION_CONVERT -> convert(args);
-            case ACTION_CALCULATE -> calculate(args);
-            default -> "Error: Unknown action '%s'. Use: now, convert, calculate".formatted(action);
-        };
+        try {
+            return switch (action) {
+                case ACTION_NOW -> now(args);
+                case ACTION_CONVERT -> convert(args);
+                case ACTION_CALCULATE -> calculate(args);
+                default -> "Error: Unknown action '%s'. Use: now, convert, calculate".formatted(action);
+            };
+        } catch (UnknownTimezoneException e) {
+            return e.getMessage();
+        }
     }
 
     private String now(JsonObject args) {
@@ -228,11 +232,24 @@ public class DateTimeTool implements ToolRegistry.Tool {
                 try {
                     return ZoneId.of(tz);
                 } catch (Exception _) {
-                    // Fall through to default
+                    // A present-but-invalid timezone is a caller mistake, not a
+                    // reason to silently substitute the server default (which
+                    // would return a plausible-looking wrong answer). Surface it.
+                    throw new UnknownTimezoneException(tz);
                 }
             }
         }
+        // Absent (or blank) timezone → the server default is the documented behavior.
         return ZoneId.systemDefault();
+    }
+
+    /** Signals a present-but-invalid timezone argument; caught in {@link #execute}
+     *  and rendered as an "Error: Unknown timezone …" tool result. */
+    private static final class UnknownTimezoneException extends RuntimeException {
+        UnknownTimezoneException(String tz) {
+            super("Error: Unknown timezone '%s'. Use an IANA name like 'Asia/Kuala_Lumpur' or 'America/New_York'."
+                    .formatted(tz));
+        }
     }
 
     private String formatResult(ZonedDateTime zdt) {

@@ -94,7 +94,7 @@ public final class AcpHarnessProbe {
             var list = new ArrayList<>(customCommands());
             if (!list.contains(trimmed)) {
                 list.add(trimmed);
-                ConfigService.set(CUSTOM_COMMANDS_KEY, GsonHolder.INSTANCE.toJson(list));
+                ConfigService.set(CUSTOM_COMMANDS_KEY, GsonHolder.GSON.toJson(list));
             }
         }
         return probe;
@@ -105,7 +105,7 @@ public final class AcpHarnessProbe {
         var trimmed = command == null ? "" : command.strip();
         var list = new ArrayList<>(customCommands());
         if (list.remove(trimmed)) {
-            ConfigService.set(CUSTOM_COMMANDS_KEY, GsonHolder.INSTANCE.toJson(list));
+            ConfigService.set(CUSTOM_COMMANDS_KEY, GsonHolder.GSON.toJson(list));
         }
     }
 

@@ -8,7 +8,7 @@ import models.Agent;
 import models.Conversation;
 import services.EventLogger;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Token-counting, reasoning-duration, and pricing-JSON assembly for one
@@ -34,7 +34,7 @@ import static utils.GsonHolder.INSTANCE;
  */
 public final class UsageMetricsBuilder {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private UsageMetricsBuilder() {}
 

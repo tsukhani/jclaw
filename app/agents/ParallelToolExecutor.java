@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Three-tier scheduler for a batch of tool calls. Extracted from
@@ -57,7 +57,7 @@ import static utils.GsonHolder.INSTANCE;
  */
 public final class ParallelToolExecutor {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private ParallelToolExecutor() {}
 

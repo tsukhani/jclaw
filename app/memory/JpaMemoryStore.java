@@ -234,9 +234,15 @@ public class JpaMemoryStore implements MemoryStore {
         // raw agent deletes; this explicit pass remains the service-path cleanup.
         Long pk = pkOrNull(agentId);
         if (pk == null) return 0;
-        return JPA.em().createQuery("DELETE FROM Memory m WHERE m.agent.id = :agentId")
+        int deleted = JPA.em().createQuery("DELETE FROM Memory m WHERE m.agent.id = :agentId")
                 .setParameter("agentId", pk)
                 .executeUpdate();
+        // JCLAW-820: the bulk JPQL DELETE bypasses @PostRemove, so the agent's
+        // MEMORY-scope FTS + HNSW vector docs would orphan. Evict them in one
+        // race-free delete by the agent-field term (mirrors the JCLAW-673 evict
+        // pattern the other scopes use for their bulk deletes).
+        LuceneIndexer.removeByAgent(LuceneIndexer.Scope.MEMORY, String.valueOf(pk));
+        return deleted;
     }
 
     // --- Search strategies ---

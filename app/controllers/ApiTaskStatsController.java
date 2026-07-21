@@ -16,7 +16,7 @@ import services.TimezoneResolver;
 
 import java.time.LocalDate;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Task dashboard-stats API — the run-derived KPI aggregates and the stats-reset
@@ -30,7 +30,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiTaskStatsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     /**
      * Operator dashboard KPIs for the Tasks surface (JCLAW-22 slice K):

@@ -37,7 +37,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Chat dispatch endpoints: sync send, SSE streaming, and file upload.
@@ -47,7 +47,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiChatController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     // JSON body keys (request input + per-attachment metadata) and SSE/response payload keys.
     private static final String KEY_AGENT_ID = "agentId";

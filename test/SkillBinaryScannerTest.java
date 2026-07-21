@@ -244,6 +244,14 @@ class SkillBinaryScannerTest extends UnitTest {
         var mdScanner = new MetaDefenderCloudScanner();
         var vtScanner = new VirusTotalScanner();
 
+        // Scanners ship OFF by default (JCLAW-828: scanner.<id>.enabled defaults
+        // to false), so opt each one in explicitly. isEnabled() still returns
+        // false for a blank key, so the per-key independence assertions below
+        // are driven purely by which authKey/apiKey is set.
+        ConfigService.set("scanner.malwarebazaar.enabled", "true");
+        ConfigService.set("scanner.metadefender.enabled", "true");
+        ConfigService.set("scanner.virustotal.enabled", "true");
+
         // State: all blank → all disabled
         ConfigService.set("scanner.malwarebazaar.authKey", "");
         ConfigService.set("scanner.metadefender.apiKey", "");
@@ -290,8 +298,12 @@ class SkillBinaryScannerTest extends UnitTest {
         assertTrue(mdScanner.isEnabled(), "MetaDefender must be enabled alongside MalwareBazaar");
         assertTrue(vtScanner.isEnabled(), "VirusTotal must be enabled alongside the others");
 
-        // Restore real keys from env (or clear) so subsequent tests behave
-        // according to what they explicitly expect.
+        // Restore real keys from env (or clear) and reset the enabled flags to
+        // their OFF default so subsequent tests behave according to what they
+        // explicitly expect.
+        ConfigService.set("scanner.malwarebazaar.enabled", "false");
+        ConfigService.set("scanner.metadefender.enabled", "false");
+        ConfigService.set("scanner.virustotal.enabled", "false");
         var mbKey = System.getenv("MALWAREBAZAAR_AUTH_KEY");
         ConfigService.set("scanner.malwarebazaar.authKey",
                 mbKey != null && !mbKey.isBlank() ? mbKey : "");

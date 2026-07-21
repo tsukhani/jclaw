@@ -60,7 +60,10 @@ public final class JsonBodyReader {
     // below is non-null — the analyzer can't see the throw.
     @SuppressWarnings("java:S2259")
     public static String requiredOr400(JsonObject body, String key) {
-        if (!body.has(key) || body.get(key).isJsonNull()) {
+        // isJsonPrimitive() rejects objects/arrays too: {"name":{}} would otherwise
+        // reach getAsString() and throw UnsupportedOperationException — a 500 with a
+        // stack trace instead of the documented 400.
+        if (!body.has(key) || body.get(key).isJsonNull() || !body.get(key).isJsonPrimitive()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field '%s' is required".formatted(key));
         }
         var s = body.get(key).getAsString();

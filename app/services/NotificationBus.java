@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Simple in-memory pub/sub notification bus for pushing real-time events
@@ -41,7 +41,7 @@ public class NotificationBus {
      *  reached a terminal state, so a live monitor can stop tailing. */
     public static final String BUS_CODINGRUN_DONE = "codingrun.done";
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
     private static final CopyOnWriteArrayList<Consumer<String>> listeners = new CopyOnWriteArrayList<>();
 
     /** Per-listener dispatch timeout. SSE writes hanging longer indicate a dead client. */

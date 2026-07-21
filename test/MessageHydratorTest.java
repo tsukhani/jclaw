@@ -59,7 +59,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     private static String toolCallJson(String id, String name, String args) {
-        return GsonHolder.INSTANCE.toJson(toolCall(id, name, args));
+        return GsonHolder.GSON.toJson(toolCall(id, name, args));
     }
 
     // ─── buildMessages: empty / system-only inputs ──────────────────────

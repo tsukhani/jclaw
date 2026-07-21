@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Message;
 import models.MessageRole;
+import play.db.jpa.JPA;
 import play.jobs.Every;
 import play.jobs.Job;
 import services.ConfigService;
@@ -79,20 +80,27 @@ public class TokenizerCalibrationJob extends Job<Void> {
     @Override
     public void doJob() {
         var since = Instant.now().minus(LOOKBACK_DAYS, ChronoUnit.DAYS);
-        List<Message> recent = Message.find(
-                        "role = ?1 AND usageJson IS NOT NULL AND createdAt > ?2 ORDER BY createdAt DESC",
-                        MessageRole.ASSISTANT.value, since)
-                .fetch(MAX_SAMPLES_PER_RUN);
+        // Scalar projection: this scan only reads the usageJson column, so
+        // select it directly instead of hydrating up to MAX_SAMPLES_PER_RUN
+        // full Message entities every cycle just to discard every other field.
+        List<String> usageJsons = JPA.em().createQuery(
+                        "SELECT m.usageJson FROM Message m "
+                                + "WHERE m.role = ?1 AND m.usageJson IS NOT NULL AND m.createdAt > ?2 "
+                                + "ORDER BY m.createdAt DESC", String.class)
+                .setParameter(1, MessageRole.ASSISTANT.value)
+                .setParameter(2, since)
+                .setMaxResults(MAX_SAMPLES_PER_RUN)
+                .getResultList();
 
-        if (recent.isEmpty()) return;
+        if (usageJsons.isEmpty()) return;
 
-        var ratiosByKey = collectRatios(recent);
+        var ratiosByKey = collectRatios(usageJsons);
         int updated = applyCalibrations(ratiosByKey);
 
         if (updated > 0) {
             EventLogger.info("tokenizer-calibration", null, null,
                     "Calibration cycle complete: scanned %d messages across %d (provider,model) groups, updated %d"
-                            .formatted(recent.size(), ratiosByKey.size(), updated));
+                            .formatted(usageJsons.size(), ratiosByKey.size(), updated));
         }
     }
 
@@ -102,10 +110,10 @@ public class TokenizerCalibrationJob extends Job<Void> {
      * that pair after the parseSample filter drops modelMatched=true rows
      * and malformed entries.
      */
-    public static Map<String, List<Double>> collectRatios(List<Message> recent) {
+    public static Map<String, List<Double>> collectRatios(List<String> usageJsons) {
         var ratiosByKey = new HashMap<String, List<Double>>();
-        for (var msg : recent) {
-            var sample = parseSample(msg.usageJson);
+        for (var usageJson : usageJsons) {
+            var sample = parseSample(usageJson);
             if (sample != null) {
                 ratiosByKey.computeIfAbsent(sample.key(), k -> new ArrayList<>()).add(sample.ratio());
             }

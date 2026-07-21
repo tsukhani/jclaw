@@ -16,7 +16,7 @@ import utils.ApiResponses;
 
 import java.util.Arrays;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * CRUD + import/export over the {@code prompt} table — the Prompts Library
@@ -31,7 +31,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiPromptsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private static final String KEY_TITLE = "title";
     private static final String KEY_CONTENT = "content";

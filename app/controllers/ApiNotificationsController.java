@@ -11,7 +11,7 @@ import services.NotificationService;
 import java.time.Instant;
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Notifications API — surface for the global {@code NotificationBar}
@@ -32,7 +32,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiNotificationsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     /** Wire DTO returned by {@link #list}. Keeps the column set stable
      *  even if we add internal columns to {@link Notification} later. */

@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -69,7 +70,7 @@ public final class TtsJvmEngine {
 
     /** Model ids with an in-flight background prefetch — single-flights the
      *  Settings Download button and drives the {@code /api/tts/state} flag. */
-    private static final java.util.Set<String> DOWNLOADING = ConcurrentHashMap.newKeySet();
+    private static final Set<String> DOWNLOADING = ConcurrentHashMap.newKeySet();
 
     /** {@code OfflineTts.generate} is CPU-bound and not documented thread-safe;
      *  serialize JVM-wide with a fair lock (mirrors the sidecar client). */

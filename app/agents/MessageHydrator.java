@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * History → {@link ChatMessage} list hydration: walks the persisted
@@ -53,7 +53,7 @@ import static utils.GsonHolder.INSTANCE;
  */
 public final class MessageHydrator {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private MessageHydrator() {}
 

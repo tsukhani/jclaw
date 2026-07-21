@@ -5,6 +5,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.reflect.TypeToken;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
+import play.Play;
 import services.ConfigService;
 import services.Tx;
 import utils.GsonHolder;
@@ -45,7 +46,7 @@ public final class ProviderRegistry {
      *  The {@code services.imagegen} clients read their {@code provider.bfl.*} keys directly. */
     private static final Set<String> IMAGE_ONLY_PROVIDERS = Set.of("bfl", "replicate");
 
-    private static final Gson gson = GsonHolder.INSTANCE;
+    private static final Gson gson = GsonHolder.GSON;
     private static volatile Map<String, LlmProvider> cache = Map.of();
     private static volatile long lastRefresh;
     private static final long REFRESH_INTERVAL_MS = 60_000;
@@ -119,13 +120,25 @@ public final class ProviderRegistry {
         var configMap = new HashMap<String, String>();
         for (var c : allConfigs) configMap.put(c.key, c.value);
 
-        var providerNames = configMap.keySet().stream()
+        // Sort provider names so ordering is stable regardless of the source
+        // HashMap's bucket layout: getPrimary()/getSecondary() must not shift when
+        // an unrelated config key resizes the map and reshuffles key iteration.
+        var providerNames = new ArrayList<>(configMap.keySet().stream()
                 .filter(k -> k.startsWith(CONFIG_KEY_PREFIX) && k.endsWith(".baseUrl"))
                 .map(k -> k.substring(CONFIG_KEY_PREFIX.length(), k.lastIndexOf(".")))
                 .distinct()
-                .toList();
+                .toList());
+        Collections.sort(providerNames);
 
-        // LinkedHashMap preserves insertion order so getPrimary()/getSecondary() are deterministic.
+        // Optional operator pin: llm.primaryProvider forces a named provider to the
+        // front of the deterministic order when it matches a configured provider.
+        var primary = Play.configuration != null
+                ? Play.configuration.getProperty("llm.primaryProvider") : null;
+        if (primary != null && !primary.isBlank() && providerNames.remove(primary.trim())) {
+            providerNames.addFirst(primary.trim());
+        }
+
+        // LinkedHashMap preserves the order established above so getPrimary()/getSecondary() are deterministic.
         var newCache = new LinkedHashMap<String, LlmProvider>();
         for (var name : providerNames) {
             if (IMAGE_ONLY_PROVIDERS.contains(name)) continue; // image-gen only — not a chat provider

@@ -237,7 +237,7 @@ public final class TaskLifecycleEvents {
      * Build the JSON {@code details} payload from key/value pairs, mirroring
      * {@link services.EventLogger}'s {@code subagentDetails}: a
      * {@link LinkedHashMap} (so field order in the rendered JSON matches the
-     * argument order) serialized via the shared {@link GsonHolder#INSTANCE}.
+     * argument order) serialized via the shared {@link GsonHolder#GSON}.
      * Gson's {@code serializeNulls()} emits {@code null} values as JSON
      * {@code null} rather than skipping them, keeping the schema consistent.
      */
@@ -250,6 +250,6 @@ public final class TaskLifecycleEvents {
         for (int i = 0; i < kvPairs.length; i += 2) {
             payload.put(kvPairs[i].toString(), kvPairs[i + 1]);
         }
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 }

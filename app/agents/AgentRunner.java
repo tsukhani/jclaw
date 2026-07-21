@@ -476,12 +476,14 @@ public class AgentRunner {
         var trace = LatencyTrace.forTurn(conversation.channelType, null);
         trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
 
-        // JCLAW-291: cooperative-cancel checkpoint at the conversation-forward
-        // boundary. If a /subagent kill landed between queue acquire and now,
-        // bail before we burn any LLM budget or persist any state.
-        checkSubagentCancel(conversation);
-
         try {
+            // JCLAW-291: cooperative-cancel checkpoint at the conversation-forward
+            // boundary. If a /subagent kill landed between queue acquire and now,
+            // bail before we burn any LLM budget or persist any state. Inside the
+            // try so a RunCancelledException still runs the finally that releases
+            // queue ownership (trace end/flush/processQueueDrain).
+            checkSubagentCancel(conversation);
+
             // Short setup transaction: persist user message, assemble prompt, resolve provider.
             // Re-fetch the conversation by ID so it is managed in this persistence context.
             // Callers on virtual threads (TaskExecutionHandler, webhooks) pass entities that were

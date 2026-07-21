@@ -265,19 +265,7 @@ public final class SsrfGuard {
         if (host == null || isLikelyIpLiteral(host)) {
             return url; // already an approved literal IP — nothing to pin
         }
-        InetAddress pinned;
-        try {
-            // assertUrlSafe already walked EVERY resolved address and rejected
-            // the host if any was unsafe; pin to the first.
-            pinned = InetAddress.getAllByName(host)[0];
-        } catch (UnknownHostException e) {
-            throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
-        }
-        if (isUnsafe(pinned)) { // defence in depth: never emit an unsafe pin
-            throw new SecurityException(
-                    BLOCKED_ADDRESS_MSG
-                            .formatted(host, pinned.getHostAddress()));
-        }
+        var pinned = resolveSafePin(host);
         var literal = pinned.getHostAddress();
         var pinnedHost = pinned instanceof Inet6Address ? "[" + literal + "]" : literal;
         var rebuilt = new StringBuilder()
@@ -315,10 +303,25 @@ public final class SsrfGuard {
         if (host == null || isLikelyIpLiteral(host)) {
             return Optional.empty(); // already a validated literal IP — nothing to pin
         }
+        var pinned = resolveSafePin(host);
+        return Optional.of("MAP %s %s".formatted(host, pinned.getHostAddress()));
+    }
+
+    /**
+     * Resolve {@code host} and return the first address, re-verified safe — the
+     * security-critical resolve-and-validate DNS pin shared by
+     * {@link #pinnedUrl(String)} and {@link #hostResolverRule(String)} (so a
+     * future hardening edit touches one place). {@link #assertUrlSafe} has
+     * already walked every resolved address and rejected the host if any was
+     * unsafe; this repins to the first and re-checks it as defence in depth so
+     * an unsafe pin can never be emitted.
+     *
+     * @throws SecurityException if the host cannot resolve, or the pinned
+     *         address is in a blocked range.
+     */
+    private static InetAddress resolveSafePin(@NonNull String host) {
         InetAddress pinned;
         try {
-            // assertUrlSafe already walked EVERY resolved address and rejected
-            // the host if any was unsafe; pin to the first.
             pinned = InetAddress.getAllByName(host)[0];
         } catch (UnknownHostException e) {
             throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
@@ -328,7 +331,7 @@ public final class SsrfGuard {
                     BLOCKED_ADDRESS_MSG
                             .formatted(host, pinned.getHostAddress()));
         }
-        return Optional.of("MAP %s %s".formatted(host, pinned.getHostAddress()));
+        return pinned;
     }
 
     /**

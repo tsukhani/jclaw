@@ -13,7 +13,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Scheduling-metadata API — the IANA timezone list for the task create/edit
@@ -28,7 +28,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiSchedulingMetaController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     /**
      * JCLAW-261: returns the sorted IANA timezone list for the task

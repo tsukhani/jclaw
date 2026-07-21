@@ -248,7 +248,7 @@ public class ConversationListTool implements ToolRegistry.Tool {
         payload.put("count", runsJson.size());
         payload.put("has_more", hasMore);
         payload.put("runs", runsJson);
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     /** Truncate {@link SubagentRun#outcome} to {@link #OUTCOME_PREVIEW_MAX_CHARS}

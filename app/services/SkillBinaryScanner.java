@@ -140,7 +140,16 @@ public class SkillBinaryScanner {
 
     private static String sha256Of(Path file) throws IOException, NoSuchAlgorithmException {
         var digest = MessageDigest.getInstance("SHA-256");
-        digest.update(Files.readAllBytes(file));
+        // Stream the digest through a fixed buffer instead of reading the whole
+        // file into heap: memory stays O(8KB) regardless of file size, so a
+        // large skill binary can't OOME its way past the fail-open guard.
+        try (var in = Files.newInputStream(file)) {
+            var buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+        }
         return HexFormat.of().formatHex(digest.digest());
     }
 }

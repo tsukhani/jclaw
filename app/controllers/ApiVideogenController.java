@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Video-generation job status for the chat UI (JCLAW-234). The chat polls
@@ -30,7 +30,7 @@ public class ApiVideogenController extends Controller {
 
     private static final String FIELD_STATE = "state";
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     /** Per-request id cap — the chat only ever polls a handful of visible placeholders; this just bounds
      *  the work a single request can ask for (defense-in-depth), not an authorization control. */

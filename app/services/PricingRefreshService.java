@@ -202,7 +202,7 @@ public final class PricingRefreshService {
         }
 
         if (modelsUpdated > 0) {
-            ConfigService.set(configKey, GsonHolder.INSTANCE.toJson(models));
+            ConfigService.set(configKey, GsonHolder.GSON.toJson(models));
         }
         return modelsUpdated;
     }

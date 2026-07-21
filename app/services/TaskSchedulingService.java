@@ -396,13 +396,21 @@ public final class TaskSchedulingService {
         if (client == null) return;
         try {
             client.cancel(TaskInstanceId.of(TaskExecutionHandler.TASK_NAME, taskId.toString()));
-        } catch (RuntimeException e) {
-            // cancel() throws when no row exists; that's a no-op outcome for
-            // us, not an error. Log at debug-level via info-with-quiet-text
-            // so operators don't see noise.
+        } catch (TaskInstanceNotFoundException _) {
+            // No row exists — a no-op outcome for us, not an error. Log at
+            // debug-level via info-with-quiet-text so operators don't see noise.
             EventLogger.info("task", null, null,
-                    "TaskSchedulingService.cancel: no scheduled row for Task id %d (%s)"
-                            .formatted(taskId, e.getMessage()));
+                    "TaskSchedulingService.cancel: no scheduled row for Task id %d"
+                            .formatted(taskId));
+        } catch (TaskInstanceCurrentlyExecutingException _) {
+            // The row is locked mid-fire (db-scheduler holds it for the fire's
+            // duration); cancel() can't remove it while the executor owns it.
+            // Mirror runNow's typed handling and surface this distinctly rather
+            // than relabelling it "no scheduled row" — the schedule survives
+            // because a fire is in flight, not because it was missing.
+            EventLogger.warn("task", null, null,
+                    "TaskSchedulingService.cancel: Task id %d is currently executing; scheduled row not removed"
+                            .formatted(taskId));
         }
     }
 

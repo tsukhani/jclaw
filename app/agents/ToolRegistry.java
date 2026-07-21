@@ -479,18 +479,6 @@ public class ToolRegistry {
                 .toList();
     }
 
-    /** Get tool definitions filtered by a pre-loaded set of disabled tool names.
-     *  Used by hot paths that already have the disabled set in scope. Does NOT
-     *  apply the lazy MCP discovery gate — only call from contexts where every
-     *  MCP tool should ship (e.g., catalog metadata for the admin UI). */
-    public static List<ToolDef> getToolDefsForAgent(Set<String> disabledTools) {
-        if (disabledTools.isEmpty()) return getToolDefs();
-        return tools.values().stream()
-                .filter(t -> !disabledTools.contains(t.name()))
-                .map(t -> ToolDef.of(t.name(), t.description(), t.parameters()))
-                .toList();
-    }
-
     /**
      * Per-agent cache of disabled-tool names. The write path for AgentToolConfig is
      * a single endpoint ({@link controllers.ApiToolsController}) which calls

@@ -66,12 +66,12 @@ class BasicTest extends UnitTest {
 
     @Test
     void gsonHolderInstanceIsNotNull() {
-        assertNotNull(GsonHolder.INSTANCE);
+        assertNotNull(GsonHolder.GSON);
     }
 
     @Test
     void gsonHolderCanSerialize() {
-        var json = GsonHolder.INSTANCE.toJson(java.util.Map.of("key", "value"));
+        var json = GsonHolder.GSON.toJson(java.util.Map.of("key", "value"));
         assertTrue(json.contains("key"));
         assertTrue(json.contains("value"));
     }

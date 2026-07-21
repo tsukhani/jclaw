@@ -49,7 +49,7 @@ public final class ApiResponses {
     /** 404 — the addressed resource does not exist. */
     public static final String NOT_FOUND = "not_found";
 
-    private static final Gson GSON = GsonHolder.INSTANCE;
+    private static final Gson GSON = GsonHolder.GSON;
     private static final String LOG_CATEGORY = "api";
 
     private ApiResponses() {}

@@ -5,7 +5,10 @@ import java.util.function.Function;
 
 public final class ScannerRegistry {
 
-    private static final String DISABLED_DEFAULT = "false";
+    // Single source of truth: the seeded `enabled` value tracks the runtime
+    // fallback in ConfiguredHashScanner so the two never diverge (JCLAW-828).
+    private static final String DISABLED_DEFAULT =
+            String.valueOf(ConfiguredHashScanner.ENABLED_BY_DEFAULT);
 
     public record ConfigDefault(String key, String value) {}
 

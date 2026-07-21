@@ -14,6 +14,17 @@ import java.util.function.BiFunction;
 
 abstract class ConfiguredHashScanner implements Scanner {
 
+    /**
+     * Default {@code enabled} state when the operator hasn't set
+     * {@code scanner.<id>.enabled}. Single source of truth for the hash
+     * scanners: {@link #isEnabled()} uses it as the config fallback and
+     * {@link ScannerRegistry} seeds the same value, so the seeded and
+     * unseeded paths agree (JCLAW-828). Scanners ship OFF — they need an
+     * operator-supplied API key and {@link #isEnabled()} already returns false
+     * for a blank key regardless of this flag.
+     */
+    static final boolean ENABLED_BY_DEFAULT = false;
+
     @FunctionalInterface
     protected interface JsonVerdictParser {
         Verdict parse(JsonObject json);
@@ -44,7 +55,7 @@ abstract class ConfiguredHashScanner implements Scanner {
 
     @Override
     public boolean isEnabled() {
-        if (!"true".equalsIgnoreCase(config().get(enabledKey, "true"))) return false;
+        if (!"true".equalsIgnoreCase(config().get(enabledKey, String.valueOf(ENABLED_BY_DEFAULT)))) return false;
         var key = config().get(apiKeyKey);
         if (key == null || key.isBlank()) {
             if (missingKeyWarning.shouldWarn()) warn(missingKeyMessage);
