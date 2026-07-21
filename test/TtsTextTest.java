@@ -54,6 +54,26 @@ class TtsTextTest extends UnitTest {
     }
 
     @Test
+    void stripsEmojiSoTheyAreNotPronounced() {
+        // JCLAW-791 follow-up: emoji reached the engine and got pronounced
+        // ("lotus", "waving hand"). They must be removed, leaving only words.
+        assertEquals("Yes, I can hear you loud and clear lah. What can I help with?",
+                TtsText.toSpeakable("Yes, I can hear you loud and clear lah. 🦩 What can I help with?"));
+        assertEquals("Hey Tarun! How are you?",
+                TtsText.toSpeakable("Hey Tarun! 👋 How are you?"));
+        // checkmark, star, heart-with-variation-selector, flag, ZWJ family sequence
+        assertEquals("done star heart flag family",
+                TtsText.toSpeakable("done ✅ star ⭐ heart ❤️ flag 🇺🇸 family 👨‍👩‍👧"));
+    }
+
+    @Test
+    void keepsNonEmojiPunctuationAndSymbols() {
+        // The emoji strip must not eat prose, currency, math, or accents.
+        assertEquals("Plain prose, 100% fine keep $5 and 3+4=7 café résumé",
+                TtsText.toSpeakable("Plain prose, 100% fine keep $5 and 3+4=7 café résumé"));
+    }
+
+    @Test
     void dropsListBullets() {
         var out = TtsText.toSpeakable("- first\n- second\n* third");
         assertFalse(out.contains("- "), out);
