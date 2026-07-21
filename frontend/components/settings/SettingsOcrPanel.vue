@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// OCR Backends settings panel (JCLAW-680). Backends that extract text from
+// OCR settings panel (JCLAW-680). Backends that extract text from
 // images and scanned PDFs via the documents tool. The toggle is bound to a
 // Config DB row but the render gates on the runtime probe — a host without the
 // binary cannot flip the toggle on. Moved verbatim from pages/settings.vue;
@@ -40,7 +40,7 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
 </script>
 
 <template>
-  <!-- OCR Backends -->
+  <!-- OCR -->
   <div
     class="mb-6 space-y-4"
     data-tour="ocr-backends"
