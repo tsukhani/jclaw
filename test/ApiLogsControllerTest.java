@@ -103,4 +103,15 @@ class ApiLogsControllerTest extends FunctionalTest {
         assertTrue(getContent(resp).contains("\"offset\":0"),
                 "negative offset must default to 0: " + getContent(resp));
     }
+
+    @Test
+    void listRejectsUnparseableSinceWith400() {
+        login();
+        // JCLAW-808: an unparseable ISO-8601 bound is a 400, not a 500 from a
+        // bubbled DateTimeParseException.
+        var resp = GET("/api/logs?since=not-a-date");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).contains("since"),
+                "error should name the offending param: " + getContent(resp));
+    }
 }

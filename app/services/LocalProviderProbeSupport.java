@@ -56,6 +56,18 @@ public final class LocalProviderProbeSupport {
             return new Result(false, 0,
                     "%s probe failed: %s".formatted(baseUrl, e.getMessage()),
                     false);
+        } catch (RuntimeException e) {
+            // JCLAW-808: 200 with a body that isn't the expected {"data":[...]}
+            // shape — malformed JSON (JsonSyntaxException), a non-object root
+            // (IllegalStateException), or a wrong-typed "data" member
+            // (ClassCastException from getAsJsonArray). OkHttp got a response, so
+            // the port is reachable (connectionRefused stays false), but the
+            // payload is unusable. Catch RuntimeException broadly so no unchecked
+            // parse surprise escapes this synchronous @OnApplicationStart probe to
+            // rethrow as UnexpectedException and fail the boot pass.
+            return new Result(false, 0,
+                    "%s/models returned an unusable body: %s".formatted(baseUrl, e.getMessage()),
+                    false);
         }
     }
 }

@@ -137,6 +137,20 @@ class SkillLoaderTest extends UnitTest {
         assertFalse(SkillLoader.isTextFile("dir/unknownfile"), "unknown extensionless → binary");
     }
 
+    @Test
+    void isTextFileFoldsUppercaseViaLocaleRoot() {
+        // JCLAW-808: classification uses toLowerCase(Locale.ROOT), so the
+        // I-bearing names that a Turkish/Azeri default locale would fold to
+        // dotless-'ı' (and thus misclassify as binary) stay text on every JVM.
+        // We assert the contract on the exact bug-target names rather than
+        // flipping Locale.getDefault() — that process-global static is read by
+        // concurrently-running tests in play1's TestEngine, so mutating it here
+        // would race them (see project-play1-testengine-concurrent-tests).
+        assertTrue(SkillLoader.isTextFile("LICENSE"), "uppercase LICENSE is text");
+        assertTrue(SkillLoader.isTextFile("DOCKERFILE"), "uppercase DOCKERFILE is text");
+        assertTrue(SkillLoader.isTextFile("config.INI"), "uppercase .INI extension is text");
+    }
+
     // ─── formatSkillsXml ─────────────────────────────────────────────────────
 
     @Test

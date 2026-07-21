@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -523,7 +524,10 @@ public class SkillLoader {
      * content editing) and binaries (eligible for malware scanning).
      */
     public static boolean isTextFile(String name) {
-        var lower = name.toLowerCase();
+        // Locale.ROOT, not the default locale: a Turkish/Azeri JVM lowercases
+        // 'I' to dotless 'ı', turning LICENSE/Dockerfile/*.INI into non-matches
+        // and misclassifying them as binary.
+        var lower = name.toLowerCase(Locale.ROOT);
         for (var ext : TEXT_EXTENSIONS) {
             if (lower.endsWith(ext)) return true;
         }
