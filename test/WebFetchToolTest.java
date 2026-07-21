@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 import tools.WebFetchTool;
 import models.Agent;
@@ -45,13 +46,19 @@ class WebFetchToolTest extends UnitTest {
         }
     }
 
+    private static final String CFG_MAX_BODY_BYTES = "web_fetch.max-body-bytes";
+
     private QueueInterceptor queue;
     private OkHttpClient originalClient;
+    private String originalMaxBodyBytes;
 
     @BeforeEach
     void setup() throws Exception {
         queue = new QueueInterceptor();
         originalClient = (OkHttpClient) CLIENT_FIELD.get(null);
+        // Snapshot the body cap so a test that lowers it can't leak into the
+        // default-cap tests (methods run sequentially; restored in teardown).
+        originalMaxBodyBytes = Play.configuration.getProperty(CFG_MAX_BODY_BYTES);
         CLIENT_FIELD.set(null, new OkHttpClient.Builder()
                 .addInterceptor(queue)
                 .followRedirects(false)
@@ -63,6 +70,30 @@ class WebFetchToolTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         CLIENT_FIELD.set(null, originalClient);
+        if (originalMaxBodyBytes == null) {
+            Play.configuration.remove(CFG_MAX_BODY_BYTES);
+        } else {
+            Play.configuration.setProperty(CFG_MAX_BODY_BYTES, originalMaxBodyBytes);
+        }
+    }
+
+    /** Lower the per-fetch body cap so the bounding logic is provable without
+     *  materialising a multi-MB body. Restored to its prior value in teardown. */
+    private static void setMaxBodyBytes(long bytes) {
+        Play.configuration.setProperty(CFG_MAX_BODY_BYTES, Long.toString(bytes));
+    }
+
+    /** A response body with an unknown ({@code -1}) declared length, so the
+     *  bounded-read backstop — not the {@code Content-Length} pre-check — is what
+     *  must cap it. Mirrors a chunked / length-omitting server. */
+    private static ResponseBody unknownLengthBody(String body, String contentType) {
+        var buf = new okio.Buffer().write(
+                body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return new ResponseBody() {
+            @Override public MediaType contentType() { return MediaType.parse(contentType); }
+            @Override public long contentLength() { return -1L; }
+            @Override public okio.BufferedSource source() { return buf; }
+        };
     }
 
     /** Interceptor that pops one queued response per call. Throws if an
@@ -423,6 +454,40 @@ class WebFetchToolTest extends UnitTest {
                 "id attributes must not leak as {#id} annotations: " + text);
         assertTrue(text.contains("A Heading"), "heading text preserved: " + text);
         assertTrue(text.contains("Some readable paragraph text"), "body preserved: " + text);
+    }
+
+    // =====================
+    // 8. JCLAW-805: response body bounded before buffering (OOM guard)
+    // =====================
+
+    @Test
+    void oversizedDeclaredContentLengthRejectedBeforeBuffering() {
+        // A server that honestly declares a body over the cap is rejected before
+        // a single byte is buffered — the Content-Length pre-check.
+        setMaxBodyBytes(100);
+        queue.enqueue(ok("x".repeat(500), "text/plain")); // Content-Length = 500 > 100
+        var result = new WebFetchTool().execute("{\"url\":\"http://example.test/\"}", null);
+        assertTrue(result.contains("too large"),
+                "oversized declared Content-Length must be rejected; got: " + result);
+        assertTrue(result.contains("limit 100"),
+                "error should name the cap; got: " + result);
+    }
+
+    @Test
+    void unknownLengthBodyIsBoundedToCap() {
+        // Content-Length omitted (or lied about) → the read itself must stop at
+        // the cap, so at most MAX_BODY_BYTES ever reaches the heap. A 250-byte
+        // body under a 100-byte cap must come back as exactly the 100-byte prefix.
+        setMaxBodyBytes(100);
+        var full = "A".repeat(50) + "B".repeat(200); // 250 bytes, unknown length
+        queue.enqueue(new Response.Builder()
+                .code(200).message("OK")
+                .addHeader("Content-Type", "text/plain")
+                .body(unknownLengthBody(full, "text/plain")));
+        var result = new WebFetchTool().execute("{\"url\":\"http://example.test/\"}", null);
+        assertEquals("A".repeat(50) + "B".repeat(50), result,
+                "body must be bounded to the cap before buffering; got length "
+                        + result.length());
     }
 
     /** Build a one-page PDF containing {@code text}, using the PDFBox 3.x that

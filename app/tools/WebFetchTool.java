@@ -10,12 +10,14 @@ import net.dankito.readability4j.Readability4J;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.ResponseBody;
 import org.apache.tika.Tika;
 import org.apache.tika.metadata.HttpHeaders;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.jsoup.Jsoup;
 import services.AgentService;
+import utils.PlayConfig;
 import utils.SsrfGuard;
 
 import javax.net.ssl.SSLException;
@@ -55,6 +57,16 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int TIMEOUT_SECONDS = 30;
     private static final int MAX_REDIRECTS = 5;
+
+    /** Cap on the raw response bytes buffered into the heap per fetch. The body
+     *  comes from an untrusted, LLM-supplied URL and the {@link SsrfGuard} client
+     *  sets no read/body limit, so a large or slow response — multiplied across
+     *  the parallel virtual-thread fetches — could OOM the shared JVM. 10 MiB by
+     *  default: comfortably above {@link #MAX_HTML_LENGTH} and a typical article
+     *  PDF, yet small enough that many concurrent fetches can't exhaust the heap.
+     *  Operators can override via {@code web_fetch.max-body-bytes}. */
+    private static final long DEFAULT_MAX_BODY_BYTES = 10L * 1024 * 1024;
+    private static final String CFG_MAX_BODY_BYTES = "web_fetch.max-body-bytes";
 
     /** Below this many extracted characters the Readability pass is treated as a
      *  miss and the Jsoup boilerplate-strip fallback runs instead — small pages
@@ -177,7 +189,9 @@ public class WebFetchTool implements ToolRegistry.Tool {
      *
      * <p>Only the final (non-redirect) response body is read, and it is read as
      * raw bytes — never a decoded String — so binary documents survive intact
-     * for Tika. The SSRF scheme/redirect logic is unchanged.
+     * for Tika. The read is size-bounded through {@link #readBounded} so an
+     * oversized or unbounded body can't OOM the shared JVM. The SSRF
+     * scheme/redirect logic is unchanged.
      */
     private FetchResult fetchUrl(String url) throws IOException {
         var current = URI.create(url);
@@ -209,13 +223,51 @@ public class WebFetchTool implements ToolRegistry.Tool {
                     throw new IOException("HTTP %d fetching %s".formatted(code, current));
                 }
 
-                var bytes = response.body().bytes();
+                var bytes = readBounded(response.body(), current);
                 var contentType = response.header("Content-Type", "");
                 return new FetchResult(bytes, contentType, current.toString());
             }
         }
         throw new IOException("Too many redirects (>%d) fetching %s"
                 .formatted(MAX_REDIRECTS, url));
+    }
+
+    /**
+     * Buffer at most {@link #maxBodyBytes()} of an untrusted response body into
+     * the heap, so a large or slow LLM-supplied URL can't OOM the shared JVM.
+     * Two layered guards:
+     * <ol>
+     *   <li>a declared {@code Content-Length} over the cap is rejected before a
+     *       single body byte is read;</li>
+     *   <li>the read itself is bounded — okio buffers only {@code cap + 1} bytes
+     *       (rounded up to its segment size), so a server that omits or lies
+     *       about {@code Content-Length} still can't push more than ~cap onto
+     *       the heap. The kept prefix flows into the existing text/HTML
+     *       character-truncation, which fires here because the byte cap sits far
+     *       above {@link #MAX_TEXT_LENGTH} / {@link #MAX_HTML_LENGTH}.</li>
+     * </ol>
+     */
+    private static byte[] readBounded(ResponseBody body, URI url) throws IOException {
+        long cap = maxBodyBytes();
+        long declared = body.contentLength();
+        if (declared > cap) {
+            throw new IOException(
+                    "Response body too large (%d bytes, limit %d) fetching %s"
+                            .formatted(declared, cap, url));
+        }
+        var source = body.source();
+        // request(cap + 1) reads segment by segment only until the buffer holds
+        // cap + 1 bytes (or the source is exhausted) — never the whole stream.
+        if (source.request(cap + 1)) {
+            return source.readByteArray(cap); // more than the cap available → keep the capped prefix
+        }
+        return source.readByteArray(); // whole body fit under the cap
+    }
+
+    /** Per-fetch heap cap for the raw response body ({@link #CFG_MAX_BODY_BYTES},
+     *  default {@link #DEFAULT_MAX_BODY_BYTES}). */
+    private static long maxBodyBytes() {
+        return PlayConfig.longOr(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
     }
 
     private String processResponse(FetchResult fetched, String mode, String url, Agent agent) {
