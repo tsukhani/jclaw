@@ -119,6 +119,17 @@ PUT     /api/mcp-servers/{id}                   ApiMcpServersController.update
 DELETE  /api/mcp-servers/{id}                   ApiMcpServersController.delete
 POST    /api/mcp-servers/{id}/test              ApiMcpServersController.test
 
+# Prompts Library API (JCLAW-813)
+# Static segments (categories/export/import) declared before the {id} patterns
+# so they resolve first, per the convention noted for /api/skills below.
+GET     /api/prompts/categories                 ApiPromptsController.categories
+GET     /api/prompts/export                     ApiPromptsController.export
+POST    /api/prompts/import                     ApiPromptsController.importPrompts
+GET     /api/prompts                            ApiPromptsController.list
+POST    /api/prompts                            ApiPromptsController.create
+PUT     /api/prompts/{id}                       ApiPromptsController.update
+DELETE  /api/prompts/{id}                       ApiPromptsController.delete
+
 # Tools API
 GET     /api/tools                              ApiToolsController.list
 GET     /api/tools/meta                         ApiToolsController.meta

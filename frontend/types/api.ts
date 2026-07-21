@@ -795,6 +795,25 @@ export interface McpServer {
   updatedAt: string | null
 }
 
+/** JCLAW-813: a saved prompt in the Prompts Library. The category glyph is a
+ *  frontend concern (value → Heroicon), so no icon field travels on the wire. */
+export interface Prompt {
+  id: number
+  title: string
+  content: string
+  tags: string | null
+  category: string
+  categoryLabel: string
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+/** JCLAW-813: one entry in the fixed prompt-category list. */
+export interface PromptCategory {
+  value: string
+  label: string
+}
+
 /** One advertised tool on an MCP server. */
 export interface McpToolInfo {
   name: string

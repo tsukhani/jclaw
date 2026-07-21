@@ -20,6 +20,7 @@ import {
   MegaphoneIcon,
   MoonIcon,
   PuzzlePieceIcon,
+  RectangleStackIcon,
   Squares2X2Icon,
   SunIcon,
   WrenchScrewdriverIcon,
@@ -203,6 +204,9 @@ const navGroups: NavGroup[] = [
       { label: 'Chat', to: '/chat', icon: ChatBubbleOvalLeftEllipsisIcon },
       { label: 'Channels', to: '/channels', icon: LinkIcon },
       { label: 'Conversations', to: '/conversations', icon: ChatBubbleLeftRightIcon },
+      // Prompts Library (JCLAW-813): saved reusable prompts you Run into the
+      // composer — a chat-composition aid, so it sits with the chat surfaces.
+      { label: 'Prompts', to: '/prompts', icon: RectangleStackIcon },
     ],
   },
   {
