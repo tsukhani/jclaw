@@ -76,8 +76,12 @@ export interface SettingsSectionGroup {
 }
 
 // Sections are organised into functional domains so the 20-item rail stays
-// scannable. Within Media, OCR precedes Transcription to preserve the operator's
-// requested slot order (Providers → Search → OCR → Transcription, 2026-07-03).
+// scannable. The media features split by direction (2026-07-21): Understanding
+// turns media into text the model can read (OCR, Transcription, Image Captioning,
+// Video Interpretation); Generation produces media from the model (Speech, Image
+// Generation, Video Generation). Within Understanding, OCR precedes Transcription
+// to preserve the operator's requested slot order (Providers → Search → OCR →
+// Transcription, 2026-07-03).
 export const sectionGroups: SettingsSectionGroup[] = [
   {
     label: 'System',
@@ -97,14 +101,19 @@ export const sectionGroups: SettingsSectionGroup[] = [
     ],
   },
   {
-    label: 'Media',
+    label: 'Understanding',
     sections: [
       { id: 'ocr', title: 'OCR', icon: DocumentMagnifyingGlassIcon, component: SettingsOcrPanel },
       { id: 'transcription', title: 'Transcription', icon: MicrophoneIcon, component: SettingsTranscriptionPanel },
-      { id: 'speech', title: 'Speech', icon: SpeakerWaveIcon, component: SettingsSpeechPanel },
       { id: 'image-caption', title: 'Image Captioning', icon: ChatBubbleBottomCenterTextIcon, component: SettingsImageCaptionPanel },
-      { id: 'image-generation', title: 'Image Generation', icon: PhotoIcon, component: SettingsImageGenPanel },
       { id: 'video-interpretation', title: 'Video Interpretation', icon: EyeIcon, component: SettingsVideoInterpPanel },
+    ],
+  },
+  {
+    label: 'Generation',
+    sections: [
+      { id: 'speech', title: 'Speech', icon: SpeakerWaveIcon, component: SettingsSpeechPanel },
+      { id: 'image-generation', title: 'Image Generation', icon: PhotoIcon, component: SettingsImageGenPanel },
       { id: 'video-generation', title: 'Video Generation', icon: FilmIcon, component: SettingsVideoGenPanel },
     ],
   },
