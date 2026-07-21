@@ -99,7 +99,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
   {
     label: 'Media',
     sections: [
-      { id: 'ocr', title: 'OCR Backends', icon: DocumentMagnifyingGlassIcon, component: SettingsOcrPanel },
+      { id: 'ocr', title: 'OCR', icon: DocumentMagnifyingGlassIcon, component: SettingsOcrPanel },
       { id: 'transcription', title: 'Transcription', icon: MicrophoneIcon, component: SettingsTranscriptionPanel },
       { id: 'speech', title: 'Speech', icon: SpeakerWaveIcon, component: SettingsSpeechPanel },
       { id: 'image-caption', title: 'Image Captioning', icon: ChatBubbleBottomCenterTextIcon, component: SettingsImageCaptionPanel },
