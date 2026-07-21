@@ -3,7 +3,6 @@ package tools;
 import agents.ToolAction;
 import agents.ToolContext;
 import agents.ToolRegistry;
-import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -23,6 +22,7 @@ import services.transcription.DiarizationFusion;
 import services.transcription.DiarizeSidecarClient;
 import services.transcription.LlmAudio;
 import services.transcription.WhisperTranscriber;
+import utils.GsonHolder;
 import utils.HttpFactories;
 import utils.JsonArgs;
 
@@ -30,13 +30,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -111,9 +111,6 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     /** Chars of an upstream/ffmpeg error kept when surfacing a failure. */
     private static final int ERROR_BODY_SNIPPET_CHARS = 300;
     private static final int FFMPEG_ERROR_TAIL_CHARS = 200;
-
-
-    private static final Gson GSON = new Gson();
 
     /** S1192 constants — config-key prefix and OpenAI wire-format literals. */
     private static final String PROVIDER_PREFIX = "provider.";
@@ -413,7 +410,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         var messages = new JsonArray();
         var user = new JsonObject();
         user.addProperty("role", "user");
-        user.add("content", GSON.toJsonTree(content));
+        user.add("content", GsonHolder.INSTANCE.toJsonTree(content));
         messages.add(user);
         body.add("messages", messages);
 
@@ -424,10 +421,11 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         if (!apiKey.isBlank()) request.header("Authorization", "Bearer " + apiKey);
 
         // Audio inference over a multi-minute recording routinely exceeds
-        // the default single-shot timeout; give it room.
-        var client = HttpFactories.llmSingleShot().newBuilder()
-                .callTimeout(Duration.ofSeconds(AUDIO_CALL_TIMEOUT_SECONDS)).build();
-        try (var response = client.newCall(request.build()).execute()) {
+        // the default single-shot timeout; give it room via a per-call
+        // deadline on the shared client (no per-call client allocation).
+        var call = HttpFactories.llmSingleShot().newCall(request.build());
+        call.timeout().timeout(AUDIO_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        try (var response = call.execute()) {
             // OkHttp 5 guarantees a non-null body on a synchronously executed
             // call (may be empty, never null) — same contract note as
             // OpenAiCompatibleTranscriptionClient.

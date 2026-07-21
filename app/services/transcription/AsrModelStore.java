@@ -1,13 +1,12 @@
 package services.transcription;
 
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import play.Logger;
 import services.EventLogger;
 
+import java.util.Arrays;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Settings-facing status/provisioning for ASR models (JCLAW-650), backed by
@@ -17,44 +16,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * CUDA/CPU hosts. Keeps {@code WhisperModelManager}'s status contract
  * (state/bytes/error) so the Settings frontend is unchanged.
  */
-public final class AsrModelStore {
-
-    public enum State {
-        NOT_DOWNLOADED, DOWNLOADING, DOWNLOADED, ERROR, UNAVAILABLE;
-
-        /**
-         * Wire status string the Settings frontend consumes — the vocabulary
-         * shared with the imagegen panel (ABSENT / DOWNLOADING / AVAILABLE /
-         * ERROR / UNAVAILABLE). JCLAW-650 renamed this internal enum
-         * (ABSENT→NOT_DOWNLOADED, AVAILABLE→DOWNLOADED) without updating the
-         * frontend contract, so the Download button and Ready badge silently
-         * stopped rendering; this projection restores it. Keep in lockstep with
-         * the {@code TranscriptionModelStatus} union in SettingsTranscriptionPanel.vue.
-         */
-        public String wireName() {
-            return switch (this) {
-                case NOT_DOWNLOADED -> "ABSENT";
-                case DOWNLOADED -> "AVAILABLE";
-                case DOWNLOADING -> "DOWNLOADING";
-                case ERROR -> "ERROR";
-                case UNAVAILABLE -> "UNAVAILABLE";
-            };
-        }
-    }
+public final class AsrModelStore extends ModelPrefetchStore<AsrModelStore.Status> {
 
     public record Status(State state, long bytesDownloaded, long totalBytes,
                          String engine, String error) {}
 
-    /** In-flight prefetches by model id; completed entries are pruned on read. */
-    private static final Map<String, CompletableFuture<Void>> PREFETCHES = new ConcurrentHashMap<>();
-    private static final Map<String, String> PREFETCH_ERRORS = new ConcurrentHashMap<>();
+    private static final AsrModelStore INSTANCE = new AsrModelStore();
 
     private AsrModelStore() {}
 
     /** Test-only: clear prefetch state so tests don't bleed. */
     public static void resetForTest() {
-        PREFETCHES.clear();
-        PREFETCH_ERRORS.clear();
+        INSTANCE.resetPrefetchState();
     }
 
     /**
@@ -72,18 +45,14 @@ public final class AsrModelStore {
             }
             return out;
         }
-        var ids = new StringBuilder();
-        for (var m : AsrModel.values()) {
-            if (!ids.isEmpty()) ids.append(',');
-            ids.append(m.id());
-        }
+        var ids = Arrays.stream(AsrModel.values()).map(AsrModel::id).collect(Collectors.joining(","));
         try {
-            var body = new AsrSidecarClient().asrModels(ids.toString());
+            var body = new AsrSidecarClient().asrModels(ids);
             var status = JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("status");
             for (var m : AsrModel.values()) {
                 var s = status.getAsJsonObject(m.id());
                 if (s == null) continue;
-                out.put(m.id(), rowFor(m, s));
+                out.put(m.id(), INSTANCE.rowFor(m.id(), s));
             }
         } catch (RuntimeException e) {
             for (var m : AsrModel.values()) {
@@ -94,51 +63,23 @@ public final class AsrModelStore {
         return out;
     }
 
-    /** A string field on a JSON object, or null when absent/JSON-null. */
-    private static String strOrNull(JsonObject o, String field) {
-        return o.has(field) && !o.get(field).isJsonNull() ? o.get(field).getAsString() : null;
-    }
-
-    /** One Settings row from the sidecar's per-model status object, folding
-     *  in the in-JVM prefetch/error state (S3776: lifted out of statusAll). */
-    private static Status rowFor(AsrModel m, JsonObject s) {
-        boolean cached = s.get("cached").getAsBoolean();
-        boolean downloading = s.has("downloading") && s.get("downloading").getAsBoolean();
-        long onDisk = s.get("bytesOnDisk").getAsLong();
-        var engine = strOrNull(s, "engine");
-        // The sidecar now owns download state (it runs the pull as a detached
-        // subprocess and reports progress off the cache dir); PREFETCH_ERRORS
-        // only carries a failure to even reach the sidecar to kick it off.
-        var sidecarError = strOrNull(s, "error");
-        String error = sidecarError != null ? sidecarError : PREFETCH_ERRORS.get(m.id());
-        State state;
-        if (downloading) {
-            state = State.DOWNLOADING;
-        } else if (error != null && !cached) {
-            state = State.ERROR;
-        } else {
-            state = cached ? State.DOWNLOADED : State.NOT_DOWNLOADED;
-        }
-        return new Status(state, onDisk, (long) m.approxSizeMb() * 1024 * 1024, engine, error);
+    /** Folds in the ASR size denominator: {@code approxSizeMb} from the model
+     *  the id maps to, as the Settings progress total until the live X-Linked-Size
+     *  from HF replaces it once a download begins. */
+    @Override
+    protected Status buildStatus(String key, State state, long bytesDownloaded,
+                                 String engine, String error) {
+        long totalBytes = (long) AsrModel.byId(key).orElseThrow().approxSizeMb() * 1024 * 1024;
+        return new Status(state, bytesDownloaded, totalBytes, engine, error);
     }
 
     /** Kick a background prefetch of the HOST engine's weights; single-flight
      *  per model id, mirroring WhisperModelManager.ensureAvailable. */
     public static void prefetch(AsrModel model) {
-        PREFETCH_ERRORS.remove(model.id());
-        PREFETCHES.compute(model.id(), (id, existing) -> {
-            if (existing != null && !existing.isDone()) return existing;
-            return CompletableFuture.runAsync(() -> {
-                try {
-                    new AsrSidecarClient().asrPrefetch(id);
-                    EventLogger.info("transcription",
-                            "ASR model %s prefetched for the host engine".formatted(id));
-                } catch (RuntimeException e) {
-                    PREFETCH_ERRORS.put(id, e.getMessage());
-                    Logger.warn("AsrModelStore: prefetch of %s failed: %s", id, e.getMessage());
-                    throw e;
-                }
-            });
+        INSTANCE.startPrefetch(model.id(), id -> {
+            new AsrSidecarClient().asrPrefetch(id);
+            EventLogger.info("transcription",
+                    "ASR model %s prefetched for the host engine".formatted(id));
         });
     }
 }

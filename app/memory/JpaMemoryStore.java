@@ -10,6 +10,7 @@ import play.cache.Caches;
 import play.db.DB;
 import play.db.jpa.JPA;
 import services.EventLogger;
+import services.Tx;
 import services.search.DirectLuceneMessageSearchRepository;
 import services.search.LuceneIndexer;
 import services.search.MessageSearchRepository.ScoredId;
@@ -138,27 +139,48 @@ public class JpaMemoryStore implements MemoryStore {
 
     @Override
     public String store(String agentId, String text, String category, double importance) {
+        var memory = persistRow(agentId, text, category, importance);
+        if (vectorEnabled) {
+            embedMemory(memory);
+        }
+        return memory.id.toString();
+    }
+
+    /**
+     * JCLAW-807-follow-up: persist the row only, deferring the (blocking) vector
+     * embedding to {@link #embedStored}. The memory-auto-capture apply phase uses
+     * this so its write transaction never spans the embedding HTTP call — the row
+     * commits, then the embedding is generated and written outside that tx. The
+     * non-vector path is identical to {@link #store} (there is nothing to defer).
+     */
+    @Override
+    public String storeDeferred(String agentId, String text, String category, double importance) {
+        return persistRow(agentId, text, category, importance).id.toString();
+    }
+
+    private Memory persistRow(String agentId, String text, String category, double importance) {
         var memory = new Memory();
         memory.agent = resolveAgent(agentId);   // JCLAW-537: real FK — the agent must exist
         memory.text = text;
         memory.category = category;
         memory.importance = importance;
         memory.save();
+        return memory;
+    }
 
-        if (vectorEnabled) {
-            // JCLAW-555: dialect-split embedding storage. Postgres writes the
-            // pgvector column; every other dialect re-upserts the row's Lucene
-            // MEMORY doc with a KNN vector field. No pgvector SQL is ever
-            // attempted on H2 (the pre-555 gap: the raw ::vector UPDATE ran on
-            // any dialect whenever the flag was on, failing on every store).
-            if (isPostgres) {
-                generateAndStoreEmbedding(memory);
-            } else {
-                generateAndIndexEmbedding(memory);
-            }
+    /**
+     * JCLAW-555: dialect-split embedding storage for a freshly-persisted, still-
+     * attached row. Postgres writes the pgvector column; every other dialect
+     * re-upserts the row's Lucene MEMORY doc with a KNN vector field. No pgvector
+     * SQL is ever attempted on H2 (the pre-555 gap: the raw ::vector UPDATE ran on
+     * any dialect whenever the flag was on, failing on every store).
+     */
+    private void embedMemory(Memory memory) {
+        if (isPostgres) {
+            generateAndStoreEmbedding(memory);
+        } else {
+            generateAndIndexEmbedding(memory);
         }
-
-        return memory.id.toString();
     }
 
     @Override
@@ -464,22 +486,60 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     private void generateAndStoreEmbedding(Memory memory) {
+        var embedding = generateEmbedding(memory.text);
+        if (embedding != null) {
+            storeEmbeddingSql((Long) memory.id, embedding);
+        }
+    }
+
+    /** Persist a pre-computed embedding onto the pgvector column via raw SQL (JPA
+     *  has no native pgvector binding). Runs inside the caller's transaction. */
+    private void storeEmbeddingSql(Long id, float[] embedding) {
         try {
-            var embedding = generateEmbedding(memory.text);
-            if (embedding != null) {
-                // Store embedding as raw SQL since JPA doesn't natively handle pgvector
-                var sql = "UPDATE memory SET embedding = ?::text::vector WHERE id = ?";
-                var conn = JPA.em().unwrap(Connection.class);
-                try (var stmt = conn.prepareStatement(sql)) {
-                    stmt.setString(1, toVectorLiteral(embedding));
-                    stmt.setLong(2, (Long) memory.id);
-                    stmt.executeUpdate();
-                }
+            var sql = "UPDATE memory SET embedding = ?::text::vector WHERE id = ?";
+            var conn = JPA.em().unwrap(Connection.class);
+            try (var stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, toVectorLiteral(embedding));
+                stmt.setLong(2, id);
+                stmt.executeUpdate();
             }
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "Failed to generate embedding: %s".formatted(e.getMessage()));
         }
     }
+
+    /**
+     * JCLAW-807-follow-up: generate and persist the embedding for a row already
+     * written by {@link #storeDeferred}, with the embedding HTTP call held OUTSIDE
+     * any DB transaction — the invariant the memory-auto-capture pipeline is built
+     * around (no connection pinned during a slow network call). A short read tx
+     * snapshots the row's text + agent id, the slow embedding call then runs with
+     * no connection held, and the write lands in a fresh short tx: a pgvector
+     * UPDATE on Postgres, a Lucene HNSW upsert (no DB) elsewhere. No-op when vector
+     * memory is disabled or the id is unknown.
+     */
+    @Override
+    public void embedStored(String id) {
+        if (!vectorEnabled) return;
+        long pk = Long.parseLong(id);
+        var target = Tx.run(() -> {
+            Memory m = Memory.findById(pk);
+            return m == null ? null : new EmbedTarget(m.id, m.text, String.valueOf(m.agent.id));
+        });
+        if (target == null) return;
+        var embedding = generateEmbedding(target.text());   // blocking HTTP — no tx held
+        if (embedding == null) return;
+        if (isPostgres) {
+            Tx.run(() -> storeEmbeddingSql(target.id(), embedding));
+        } else {
+            LuceneIndexer.upsert(LuceneIndexer.Scope.MEMORY, target.id(),
+                    target.text(), target.agentId(), embedding);
+        }
+    }
+
+    /** Fields carried out of the snapshot tx so {@link #embedStored} can embed a
+     *  row without holding a connection across the embedding HTTP call. */
+    private record EmbedTarget(Long id, String text, String agentId) {}
 
     /**
      * Cache for {@link #generateEmbedding} results (JCLAW-206). Embeddings are

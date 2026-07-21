@@ -30,6 +30,26 @@ class ConfigServiceTest extends UnitTest {
         assertNull(ConfigService.get("nonexistent"));
     }
 
+    // --- getLong: parses / defaults with the same semantics as getInt ---
+
+    @Test
+    void getLongParsesStoredValue() {
+        // A value beyond int range proves it's a genuine long parse, not getInt.
+        ConfigService.set("some.long", "5000000000");
+        assertEquals(5_000_000_000L, ConfigService.getLong("some.long", -1L));
+    }
+
+    @Test
+    void getLongReturnsDefaultForMissing() {
+        assertEquals(3_600_000L, ConfigService.getLong("no.such.long", 3_600_000L));
+    }
+
+    @Test
+    void getLongReturnsDefaultForNonNumeric() {
+        ConfigService.set("bad.long", "not-a-number");
+        assertEquals(7L, ConfigService.getLong("bad.long", 7L));
+    }
+
     @Test
     void setOverwrites() {
         ConfigService.set("key", "v1");

@@ -240,6 +240,16 @@ dependencies {
     // WorkspacePathGuard). Broadening to the rest of app/ is the next increment.
     implementation("org.jspecify:jspecify:1.0.0")
 
+    // ArchUnit — architecture rules as unit tests (test/ArchitectureTest). Guards
+    // the canonical seams the audit waves keep having to re-consolidate: outbound
+    // HTTP goes through HttpFactories, no JDK java.net.http creeps back in, and a
+    // bare `new Gson()` can't bypass GsonHolder's wire-format contract. Declared as
+    // `implementation` (not testImplementation) because the play1 test runner builds
+    // its classpath from the main dependency set + framework/lib; only transitive
+    // dep is slf4j-api, already on the classpath. Never loaded at runtime (only the
+    // test class references it), so its presence in the dist is inert.
+    implementation("com.tngtech.archunit:archunit:1.4.2")
+
     // jsoup 1.22.2 is one patch ahead of the 1.22.1 that Tika 3.3.0's
     // parent POM pins for its parser modules; keeps resolved/declared in sync.
     implementation("org.jsoup:jsoup:1.22.2")

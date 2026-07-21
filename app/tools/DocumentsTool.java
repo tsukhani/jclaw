@@ -18,6 +18,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.DocumentWriter;
 import services.OcrHealthProbe;
+import utils.JsonArgs;
 import utils.TikaHolder;
 
 import java.io.IOException;
@@ -145,15 +146,12 @@ public class DocumentsTool implements ToolRegistry.Tool {
         return switch (action) {
             case ACTION_READ -> ToolRegistry.ToolResult.text(readDocument(target));
             case ACTION_APPEND, "appendFile" -> {
-                var content = args.has(ARG_CONTENT) && !args.get(ARG_CONTENT).isJsonNull()
-                        ? args.get(ARG_CONTENT).getAsString() : "";
+                var content = JsonArgs.optString(args, ARG_CONTENT, "");
                 yield ToolRegistry.ToolResult.text(appendDocument(target, relativePath, content));
             }
             case ACTION_WRITE -> {
-                var content = args.has(ARG_CONTENT) && !args.get(ARG_CONTENT).isJsonNull()
-                        ? args.get(ARG_CONTENT).getAsString() : "";
-                var format = args.has(ARG_FORMAT) && !args.get(ARG_FORMAT).isJsonNull()
-                        ? args.get(ARG_FORMAT).getAsString() : null;
+                var content = JsonArgs.optString(args, ARG_CONTENT, "");
+                var format = JsonArgs.optString(args, ARG_FORMAT);
                 yield richResult(writeDocument(target, relativePath, content, format));
             }
             case ACTION_RENDER -> {
@@ -178,8 +176,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 } catch (IOException e) {
                     yield ToolRegistry.ToolResult.text("Error reading sourcePath: %s".formatted(e.getMessage()));
                 }
-                var format = args.has(ARG_FORMAT) && !args.get(ARG_FORMAT).isJsonNull()
-                        ? args.get(ARG_FORMAT).getAsString() : null;
+                var format = JsonArgs.optString(args, ARG_FORMAT);
                 yield richResult(writeDocument(target, relativePath, content, format));
             }
             default -> ToolRegistry.ToolResult.text("Error: Unknown action '%s'".formatted(action));

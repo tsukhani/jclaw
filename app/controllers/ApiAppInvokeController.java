@@ -7,6 +7,7 @@ import models.Agent;
 import models.MessageAttachment;
 import play.Play;
 import play.data.Upload;
+import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
@@ -60,8 +61,20 @@ public class ApiAppInvokeController extends Controller {
     /** Shared prefix for the fail-closed messages that name the offending app. */
     private static final String APP_PREFIX = "App '";
 
+    /**
+     * JCLAW-199 pattern (mirrors {@code ApiChatController.streamChat}): {@code @NoTransaction}
+     * opts this endpoint out of Play 1.x's per-request JPA transaction. Without it the
+     * multi-second {@link AgentRunner#run} runs inside the request tx, so its internal
+     * {@link Tx#run} blocks short-circuit — {@code JPA.isInsideTransaction()} is true, they
+     * join the open request tx — and the pooled HikariCP connection is pinned for the whole
+     * agent run, the same connection-starvation the streaming chat endpoint fixed. Every DB
+     * touch this method owns is therefore wrapped in its own short {@link Tx#run} (agent
+     * lookup in {@link #resolveDesignatedAgent}, conversation creation, produced-files query);
+     * none runs outside one.
+     */
+    @NoTransaction
     public static void invoke(String slug, Upload[] files) {
-        var agent = resolveDesignatedAgent(slug); // AD-3 — fail-closed 4xx on any miss
+        var agent = resolveDesignatedAgent(slug); // AD-3 — fail-closed 4xx on any miss (own Tx.run inside)
         // AD-2: input is the multipart "message" field plus optional file uploads of
         // any type. No target-agent / verb parameter is honored — the agent is resolved
         // solely from the slug. Uploads go through the SHARED UploadStaging path, so an
@@ -82,7 +95,8 @@ public class ApiAppInvokeController extends Controller {
         var attachments = hasFiles ? UploadStaging.stage(agent, files) : List.<AttachmentService.Input>of();
         // AD-4: a fresh app-owned conversation (channelType="app", peerId=slug), viewable
         // under the app channel. create() (not findOrCreate) so each invoke is its own row.
-        var conversation = ConversationService.create(agent, APP_CHANNEL, slug);
+        // Short Tx.run so the insert commits and releases the connection before the agent run.
+        var conversation = Tx.run(() -> ConversationService.create(agent, APP_CHANNEL, slug));
         // AD-6: reuse the existing agent-run pipeline — no parallel execution stack.
         var result = AgentRunner.run(agent, conversation, message == null ? "" : message, attachments);
         var resp = new HashMap<String, Object>();
@@ -90,7 +104,7 @@ public class ApiAppInvokeController extends Controller {
         resp.put("response", result.response());
         // AD-5 / JCLAW-765: any file the run produced (e.g. a documents-tool PDF) comes
         // back as a slug-scoped download URL the app is permitted to fetch (see file()).
-        resp.put("files", producedFiles(slug, conversation.id));
+        resp.put("files", Tx.run(() -> producedFiles(slug, conversation.id)));
         renderJSON(GsonHolder.INSTANCE.toJson(resp));
     }
 

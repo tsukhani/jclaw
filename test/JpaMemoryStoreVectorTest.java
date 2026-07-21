@@ -217,4 +217,38 @@ class JpaMemoryStoreVectorTest extends UnitTest {
         assertTrue(results.stream().noneMatch(e -> e.id().equals("999999")),
                 "the dangling index id must not hydrate into a result");
     }
+
+    // ─── deferred embedding (JCLAW-807-follow-up) ─────────────────────────────
+
+    @Test
+    void storeDeferredPersistsRowButWritesNoEmbedding() {
+        // The memory-auto-capture apply phase persists rows inside its write tx but
+        // defers the (blocking) embedding to a post-commit pass. storeDeferred is the
+        // row-only leg: the Memory row is durable immediately, but no vector is written.
+        var agent = agentId("vec-defer");
+        var id = store.storeDeferred(agent, BERLIN, "fact", 0.6);
+
+        assertNotNull(id);
+        assertEquals(1, store.list(agent).size(), "the row must be persisted immediately");
+        // NONSENSE_QUERY has zero lexical overlap with BERLIN — only a KNN hit could
+        // recall it, and storeDeferred wrote no vector, so the KNN leg stays empty.
+        assertTrue(store.search(agent, NONSENSE_QUERY, 5).isEmpty(),
+                "a deferred store leaves the row out of the KNN index until embedStored runs");
+    }
+
+    @Test
+    void embedStoredWritesTheVectorForADeferredRow() {
+        var agent = agentId("vec-embed");
+        var id = store.storeDeferred(agent, BERLIN, "fact", 0.6);
+        assertTrue(store.search(agent, NONSENSE_QUERY, 5).isEmpty(), "precondition: no vector yet");
+
+        store.embedStored(id);
+
+        // Same end state as the inline store() path (see knnRecallsSemanticMatch…):
+        // the vector is now written, so the KNN leg recalls despite zero lexical overlap.
+        var results = store.search(agent, NONSENSE_QUERY, 5);
+        assertFalse(results.isEmpty(),
+                "embedStored must write the vector so the deferred row becomes KNN-recallable");
+        assertEquals(BERLIN, results.getFirst().text());
+    }
 }

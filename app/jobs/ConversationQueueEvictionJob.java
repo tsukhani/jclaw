@@ -18,13 +18,7 @@ public class ConversationQueueEvictionJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        var raw = ConfigService.get("conversation.queue.idleEvictionMs");
-        long idleMs;
-        try {
-            idleMs = raw != null ? Long.parseLong(raw) : DEFAULT_IDLE_MS;
-        } catch (NumberFormatException _) {
-            idleMs = DEFAULT_IDLE_MS;
-        }
+        var idleMs = ConfigService.getLong("conversation.queue.idleEvictionMs", DEFAULT_IDLE_MS);
         var evicted = ConversationQueue.evictIdle(idleMs);
         if (evicted > 0) {
             EventLogger.info("queue", "Evicted %d idle conversation queue state(s)".formatted(evicted));

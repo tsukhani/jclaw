@@ -30,8 +30,8 @@ import java.util.Set;
  * — no explicit "save" call from the agent. The pipeline mirrors
  * {@link SessionCompactor}: functional {@link Extractor}/{@link Consolidator}
  * seams keep the LLM calls testable, and the phases are ordered so no DB
- * transaction is held during a slow LLM call (gate → extract (no Tx) → parse →
- * plan (Tx) → consolidation judge (no Tx) → persist + supersede (Tx)).
+ * transaction is held during a slow LLM call or embedding round-trip (gate → extract (no Tx) → parse →
+ * plan (Tx) → consolidation judge (no Tx) → persist + supersede (Tx) → embed (no Tx)).
  *
  * <p>Design notes, grounded in 2025–26 agent-memory best practice:
  * <ul>
@@ -291,8 +291,15 @@ public final class MemoryAutoCapture {
         // call" invariant the pipeline is built around.
         var plan = Tx.run(() -> plan(agentKey, candidates, maxPerTurn, dupThreshold, dedupScan));
         var supersessions = judgeSupersessions(agentName, plan, consolidator, breaker);
-        int stored = Tx.run(() -> applyPlan(agentKey, agentName, plan, supersessions));
-        return logged(agentName, new CaptureResult(stored, candidates.size() - stored, null));
+        // Persist the survivor rows inside the apply Tx (capturing their ids), then
+        // generate + write their embeddings AFTER it commits — the embedding HTTP
+        // round-trip must never run inside the write tx (same "slow call OUTSIDE the
+        // Tx" ordering as extract/judge above; the vector leg otherwise pinned one
+        // pooled connection across up to maxPerTurn sequential embedding calls).
+        var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, supersessions));
+        embedStored(storedIds);
+        return logged(agentName, new CaptureResult(storedIds.size(),
+                candidates.size() - storedIds.size(), null));
     }
 
     /**
@@ -372,20 +379,23 @@ public final class MemoryAutoCapture {
 
     /**
      * Apply phase (in Tx): store the survivors, then mark judged rows
-     * superseded. The judge only nominates same-subject pairs; the direction is
-     * enforced here deterministically — a row is superseded only when its id
-     * (serial) is strictly lower than the new row's, i.e. the newer write
-     * always wins and the LLM can never flip recency (JCLAW-525 AC). Each
-     * supersession is event-logged.
+     * superseded. Survivor rows are persisted via {@link MemoryStore#storeDeferred}
+     * — their vector embeddings are written by a separate post-commit pass
+     * ({@link #embedStored}), never inside this write tx — and the method returns
+     * the new row ids in survivor order for that pass. The judge only nominates
+     * same-subject pairs; the direction is enforced here deterministically — a row
+     * is superseded only when its id (serial) is strictly lower than the new row's,
+     * i.e. the newer write always wins and the LLM can never flip recency
+     * (JCLAW-525 AC). Each supersession is event-logged.
      */
-    private static int applyPlan(String agentKey, String agentName, ConsolidationPlan plan,
-                                 Map<Integer, List<Integer>> supersessions) {
+    private static List<String> applyPlan(String agentKey, String agentName, ConsolidationPlan plan,
+                                          Map<Integer, List<Integer>> supersessions) {
         var store = MemoryStoreFactory.get();
-        int stored = 0;
+        var storedIds = new ArrayList<String>(plan.survivors().size());
         for (int i = 0; i < plan.survivors().size(); i++) {
             var c = plan.survivors().get(i);
-            var newIdStr = store.store(agentKey, c.text(), c.category(), c.importance());
-            stored++;
+            var newIdStr = store.storeDeferred(agentKey, c.text(), c.category(), c.importance());
+            storedIds.add(newIdStr);
             var olds = supersessions.get(i);
             if (olds == null || olds.isEmpty()) continue;
             long newId = Long.parseLong(newIdStr);
@@ -400,7 +410,22 @@ public final class MemoryAutoCapture {
                                 .formatted(ex.id(), newId, snippet(ex.text()), snippet(c.text())));
             }
         }
-        return stored;
+        return storedIds;
+    }
+
+    /**
+     * Post-commit embedding pass (JCLAW-807-follow-up): runs after {@link #applyPlan}'s
+     * write tx has committed, so the (up to {@code maxPerTurn}) blocking embedding
+     * calls never pin that tx's pooled connection. Each row's embedding is generated
+     * and written by the store outside the write tx (a fresh short tx for the pgvector
+     * UPDATE, or a no-DB Lucene upsert); a no-op when vector memory is disabled.
+     */
+    private static void embedStored(List<String> storedIds) {
+        if (storedIds.isEmpty()) return;
+        var store = MemoryStoreFactory.get();
+        for (var id : storedIds) {
+            store.embedStored(id);
+        }
     }
 
     private static String snippet(String text) {

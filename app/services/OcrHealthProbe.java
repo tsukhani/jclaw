@@ -1,7 +1,5 @@
 package services;
 
-import java.io.IOException;
-
 /**
  * One-shot health check for the {@code tesseract} binary that Apache Tika
  * shells out to for OCR. Apache Tika's TesseractOCRParser fires opportunistically
@@ -24,34 +22,21 @@ public class OcrHealthProbe {
     /**
      * Execute {@code tesseract --version} and cache the outcome. Safe to call
      * repeatedly (e.g. from tests) — each call replaces the cached result.
-     * IOException from {@link ProcessBuilder#start()} is the canonical signal
-     * that the binary is not on PATH; we translate it into a non-cryptic
-     * {@link ProbeResult} rather than letting the raw exception escape.
+     * Delegates the bounded child-process exec to
+     * {@link ExecutableProbeSupport#probeCapturing} so a tesseract binary that
+     * accepts the invocation but never exits can't stall the synchronous boot
+     * probe ({@link jobs.TesseractProbeJob}) forever — the shared helper caps
+     * the wait and {@code destroyForcibly()}'s a hung child, yielding an
+     * unavailable result instead of hanging. On success the printed version's
+     * first line is surfaced as before.
      */
     public static ProbeResult probe() {
-        var pb = new ProcessBuilder("tesseract", "--version");
-        pb.redirectErrorStream(true);
-        try {
-            var proc = pb.start();
-            String output;
-            try (var in = proc.getInputStream()) {
-                output = new String(in.readAllBytes());
-            }
-            int exit = proc.waitFor();
-            if (exit == 0) {
-                var firstLine = output.lines().findFirst().orElse("(no version output)").trim();
-                return CACHE.set(new ProbeResult(true, firstLine, null));
-            }
-            return CACHE.set(new ProbeResult(false, null,
-                    "tesseract --version exited %d: %s".formatted(exit, output.strip())));
-        } catch (IOException e) {
-            return CACHE.set(new ProbeResult(false, null,
-                    "tesseract binary not found on PATH (%s)".formatted(e.getMessage())));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return CACHE.set(new ProbeResult(false, null,
-                    "tesseract --version interrupted: " + e.getMessage()));
+        var r = ExecutableProbeSupport.probeCapturing("tesseract", "--version", "");
+        if (r.available()) {
+            var firstLine = r.output().lines().findFirst().orElse("(no version output)").trim();
+            return CACHE.set(new ProbeResult(true, firstLine, null));
         }
+        return CACHE.set(new ProbeResult(false, null, r.reason()));
     }
 
     public static ProbeResult lastResult() {

@@ -17,6 +17,16 @@ class ContentHashTest extends UnitTest {
     }
 
     @Test
+    void sha256HexMatchesKnownVectorLowercase() {
+        // Locks the byte-for-byte lowercase encoding after the HexFormat.of()
+        // migration: the well-known SHA-256("hello"). The digest carries high-bit
+        // bytes (0x82, 0xba, ...) and a leading-zero byte, so this also guards the
+        // sign-extension / zero-padding the hand-rolled loop handled.
+        assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                ContentHash.sha256Hex("hello"));
+    }
+
+    @Test
     void handleIsTheLeading16HexOfTheFullHash() {
         var content = "the quick brown fox jumps over the lazy dog";
         var handle = ContentHash.handle(content);

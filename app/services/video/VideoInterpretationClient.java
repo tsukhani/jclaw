@@ -1,6 +1,5 @@
 package services.video;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -11,6 +10,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.AttachmentService;
 import services.ConfigService;
+import utils.GsonHolder;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.Strings;
@@ -63,8 +63,6 @@ public class VideoInterpretationClient {
             + "visual or audio cues. Be objective and specific; do not speculate beyond what is shown.";
     /** Video understanding warrants a fuller reply than a one-line caption. */
     private static final int MAX_TOKENS = 800;
-
-    private static final Gson GSON = new Gson();
 
     /**
      * How the clip reaches the dedicated model. {@link #NATIVE_VIDEO} sends the whole clip as a
@@ -243,7 +241,7 @@ public class VideoInterpretationClient {
     private static String buildMultiImageRequestJson(String model, List<Map<String, Object>> contentParts) {
         var message = new JsonObject();
         message.addProperty("role", "user");
-        message.add(CONTENT, GSON.toJsonTree(contentParts));
+        message.add(CONTENT, GsonHolder.INSTANCE.toJsonTree(contentParts));
         var messages = new JsonArray();
         messages.add(message);
 

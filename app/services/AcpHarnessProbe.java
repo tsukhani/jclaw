@@ -1,7 +1,7 @@
 package services;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonParser;
+import utils.GsonHolder;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,8 +16,6 @@ import java.util.List;
  * per binary); only queried when the Subagents panel opens.
  */
 public final class AcpHarnessProbe {
-
-    private static final Gson GSON = new Gson();
 
     /** Config key holding operator-added custom harness commands as a JSON array
      *  of strings (e.g. {@code ["aider --message", "amp -x"]}). Each is probed
@@ -96,7 +94,7 @@ public final class AcpHarnessProbe {
             var list = new ArrayList<>(customCommands());
             if (!list.contains(trimmed)) {
                 list.add(trimmed);
-                ConfigService.set(CUSTOM_COMMANDS_KEY, GSON.toJson(list));
+                ConfigService.set(CUSTOM_COMMANDS_KEY, GsonHolder.INSTANCE.toJson(list));
             }
         }
         return probe;
@@ -107,7 +105,7 @@ public final class AcpHarnessProbe {
         var trimmed = command == null ? "" : command.strip();
         var list = new ArrayList<>(customCommands());
         if (list.remove(trimmed)) {
-            ConfigService.set(CUSTOM_COMMANDS_KEY, GSON.toJson(list));
+            ConfigService.set(CUSTOM_COMMANDS_KEY, GsonHolder.INSTANCE.toJson(list));
         }
     }
 

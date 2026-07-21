@@ -1,6 +1,6 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.transcription.AsrModelStore.State;
+import services.transcription.ModelPrefetchStore.State;
 
 /**
  * Guards the internal-state → wire-status projection the Settings frontend

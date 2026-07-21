@@ -2,6 +2,8 @@ package tools;
 
 import agents.AgentRunner;
 import agents.ToolContext;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
@@ -12,6 +14,7 @@ import services.Tx;
 import tools.SubagentSpawnTool.SyncRunOutcome;
 import utils.GsonHolder;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,9 +40,25 @@ final class SubagentAsyncRunner {
      *  from a spawn (single async-in-task or a batch fan-out) to the inline
      *  block-await in subagent_yield. These children have no persistent
      *  conversation to resume into, so the chat announce/resume path doesn't
-     *  apply; the parent collects results via a blocking yield. */
-    private static final ConcurrentHashMap<Long, CompletableFuture<SyncRunOutcome>>
-            ASYNC_OUTCOMES = new ConcurrentHashMap<>();
+     *  apply; the parent collects results via a blocking yield.
+     *
+     *  <p>Bounded so an uncollected outcome can't pin its future — and the full
+     *  reply string it holds — for the JVM lifetime. subagent_yield removes an
+     *  entry on collect, but a batch fan-out with no matching yield (or a partial
+     *  collect) would otherwise leak the future forever. {@code expireAfterWrite}
+     *  comfortably dominates the max child wall-clock ceiling
+     *  ({@code subagent.maxWallClockSeconds}, default 1800s) plus generous
+     *  collection headroom, so a legitimately-running-then-collected child is
+     *  never evicted before its yield; {@code maximumSize} is the hard leak cap.
+     *  Collect semantics are preserved: {@link Cache#asMap() asMap().remove}
+     *  still retrieves any live outcome, and an expired/evicted one reads back as
+     *  an already-collected miss instead of hanging. Mirrors the Caffeine memo in
+     *  {@link llm.TokenUsageEstimator}. */
+    private static final Cache<Long, CompletableFuture<SyncRunOutcome>> ASYNC_OUTCOMES =
+            Caffeine.newBuilder()
+                    .expireAfterWrite(Duration.ofHours(2))
+                    .maximumSize(4_096)
+                    .build();
 
     /** JCLAW-498: outstanding async-child runIds grouped by the spawning parent's
      *  scope ({@code task:<id>} or {@code conv:<id>}), so subagent_yield all=true
@@ -84,7 +103,13 @@ final class SubagentAsyncRunner {
     }
 
     private static void forgetOutstanding(Long runId) {
-        for (var set : OUTSTANDING_BY_SCOPE.values()) set.remove(runId);
+        // Remove the runId from every scope, and drop any scope whose set is now
+        // empty. Without the prune, each distinct conv:/task: scope would leave a
+        // permanent empty Set entry once its fan-out was collected (JCLAW-498 leak).
+        OUTSTANDING_BY_SCOPE.values().removeIf(set -> {
+            set.remove(runId);
+            return set.isEmpty();
+        });
     }
 
     /**
@@ -175,7 +200,7 @@ final class SubagentAsyncRunner {
      * single runId) and return it as the same JSON a synchronous spawn returns.
      */
     static String awaitAsyncOutcome(Long runId) {
-        var f = ASYNC_OUTCOMES.remove(runId);
+        var f = ASYNC_OUTCOMES.asMap().remove(runId);
         forgetOutstanding(runId);
         if (f == null) {
             return "Error: no pending async subagent for runId " + runId
@@ -201,7 +226,7 @@ final class SubagentAsyncRunner {
     static String awaitAsyncOutcomes(List<Long> runIds) {
         var results = new ArrayList<Object>();
         for (var runId : runIds) {
-            var f = ASYNC_OUTCOMES.remove(runId);
+            var f = ASYNC_OUTCOMES.asMap().remove(runId);
             forgetOutstanding(runId);
             if (f == null) {
                 var miss = new LinkedHashMap<String, Object>();

@@ -345,38 +345,57 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static BrowserSession launchSession(String key, Set<String> pinnedRules) {
         EventLogger.info("tool", key, null, "Launching headless browser");
         ensureBrowserInstalled();
-        var playwright = Playwright.create(new Playwright.CreateOptions()
-                .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
-        // JCLAW-172: headless is hardcoded — there is no UX where running a
-        // visible browser on the host serves an LLM-driven agent. The
-        // previous {@code playwright.headless} config key is gone.
-        var launchOptions = new BrowserType.LaunchOptions().setHeadless(true);
-        // JCLAW-731: pin DNS for every validated host in this session so Chromium
-        // resolves each to exactly the IP the SSRF guard approved.
-        if (!pinnedRules.isEmpty()) {
-            launchOptions.setArgs(List.of("--host-resolver-rules=" + String.join(",", pinnedRules)));
-        }
-        var browser = playwright.chromium().launch(launchOptions);
-        var page = browser.newPage();
-        // JCLAW-116: abort any request (main frame, subresource, or
-        // redirect target) whose URL fails the SSRF guard. Catches
-        // three cases the entry-URL check in navigate() can't:
-        //   (a) subresources embedded in the loaded page that target
-        //       private networks (tracking pixels pointing at
-        //       169.254.169.254, script-loaders reaching loopback, etc.),
-        //   (b) HTTP redirects to unsafe hosts (Chromium follows them
-        //       automatically without re-invoking our one-shot check),
-        //   (c) any future navigation that bypasses navigate() (e.g.
-        //       a click handler that triggers page.navigate internally).
-        page.route("**/*", route -> {
-            if (SsrfGuard.isUrlSafe(route.request().url())) {
-                route.resume();
-            } else {
-                route.abort();
+        // Build the driver -> browser -> page -> route chain under a guard: a
+        // failure partway through must best-effort close whatever OS processes
+        // were already spawned before rethrowing. launchSession runs inside
+        // getOrCreateSession's compute(...), so a throw propagates with NO map
+        // entry — nothing downstream would ever tear these down, so an unguarded
+        // partial construction leaks the Playwright driver + Chromium processes
+        // for the JVM lifetime. Mirrors destroySession's independent-close teardown.
+        Playwright playwright = null;
+        Browser browser = null;
+        Page page = null;
+        try {
+            playwright = Playwright.create(new Playwright.CreateOptions()
+                    .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+            // JCLAW-172: headless is hardcoded — there is no UX where running a
+            // visible browser on the host serves an LLM-driven agent. The
+            // previous {@code playwright.headless} config key is gone.
+            var launchOptions = new BrowserType.LaunchOptions().setHeadless(true);
+            // JCLAW-731: pin DNS for every validated host in this session so Chromium
+            // resolves each to exactly the IP the SSRF guard approved.
+            if (!pinnedRules.isEmpty()) {
+                launchOptions.setArgs(List.of("--host-resolver-rules=" + String.join(",", pinnedRules)));
             }
-        });
-        return new BrowserSession(playwright, browser, page,
-                new ReentrantLock(), Set.copyOf(pinnedRules), System.currentTimeMillis());
+            browser = playwright.chromium().launch(launchOptions);
+            page = browser.newPage();
+            // JCLAW-116: abort any request (main frame, subresource, or
+            // redirect target) whose URL fails the SSRF guard. Catches
+            // three cases the entry-URL check in navigate() can't:
+            //   (a) subresources embedded in the loaded page that target
+            //       private networks (tracking pixels pointing at
+            //       169.254.169.254, script-loaders reaching loopback, etc.),
+            //   (b) HTTP redirects to unsafe hosts (Chromium follows them
+            //       automatically without re-invoking our one-shot check),
+            //   (c) any future navigation that bypasses navigate() (e.g.
+            //       a click handler that triggers page.navigate internally).
+            page.route("**/*", route -> {
+                if (SsrfGuard.isUrlSafe(route.request().url())) {
+                    route.resume();
+                } else {
+                    route.abort();
+                }
+            });
+            return new BrowserSession(playwright, browser, page,
+                    new ReentrantLock(), Set.copyOf(pinnedRules), System.currentTimeMillis());
+        } catch (RuntimeException e) {
+            // Best-effort teardown of whatever was constructed, newest first,
+            // each guarded independently (mirrors destroySession).
+            if (page != null) { try { page.close(); } catch (Exception _) { /* best-effort */ } }
+            if (browser != null) { try { browser.close(); } catch (Exception _) { /* best-effort */ } }
+            if (playwright != null) { try { playwright.close(); } catch (Exception _) { /* best-effort */ } }
+            throw e;
+        }
     }
 
     public static void closeSession(String agentName) {

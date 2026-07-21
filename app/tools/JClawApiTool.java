@@ -17,6 +17,7 @@ import play.mvc.ActionInvoker;
 import play.mvc.Router;
 import services.InternalApiTokenService;
 import utils.HttpFactories;
+import utils.JsonArgs;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
@@ -273,12 +274,13 @@ public class JClawApiTool implements ToolRegistry.Tool {
     }
 
     private static String stringField(JsonObject obj, String key) {
-        if (!obj.has(key)) return null;
+        // Keep the non-primitive guard before delegating: optNonBlankString would
+        // throw on an object/array value (getAsString). Gating on isJsonPrimitive
+        // first (a JsonNull is also non-primitive) leaves only the null/blank
+        // collapse for the shared reader — same result as the inline dance.
         JsonElement el = obj.get(key);
-        if (el == null || el.isJsonNull()) return null;
-        if (!el.isJsonPrimitive()) return null;
-        var s = el.getAsString();
-        return s.isBlank() ? null : s;
+        if (el == null || !el.isJsonPrimitive()) return null;
+        return JsonArgs.optNonBlankString(obj, key);
     }
 
     // ---------------------------------------------------------------- discover

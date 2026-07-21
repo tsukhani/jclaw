@@ -3,6 +3,7 @@ package services.catalog;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import services.SkillCategoryClassifier;
+import utils.JsonArgs;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,7 +41,7 @@ public final class MastraDumpParser implements DumpParser {
     }
 
     private static String str(JsonObject o, String key) {
-        return o != null && o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
+        return o == null ? null : JsonArgs.optString(o, key);
     }
 
     private static long asLong(JsonObject o, String key) {

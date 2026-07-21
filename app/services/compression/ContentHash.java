@@ -3,6 +3,7 @@ package services.compression;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 /**
  * SHA-256 content hashing for the CCR (Compress-Cache-Retrieve) mechanism
@@ -15,18 +16,12 @@ public final class ContentHash {
 
     private ContentHash() {}
 
-    private static final char[] HEX = "0123456789abcdef".toCharArray();
-
     /** Lowercase 64-char hex SHA-256 of {@code content} (UTF-8). */
     public static String sha256Hex(String content) {
         try {
             var digest = MessageDigest.getInstance("SHA-256")
                     .digest(content.getBytes(StandardCharsets.UTF_8));
-            var sb = new StringBuilder(digest.length * 2);
-            for (var b : digest) {
-                sb.append(HEX[(b >> 4) & 0xF]).append(HEX[b & 0xF]);
-            }
-            return sb.toString();
+            return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
             // SHA-256 is mandated on every conformant JRE — unreachable.
             throw new IllegalStateException("SHA-256 unavailable", e);

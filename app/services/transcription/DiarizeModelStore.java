@@ -1,8 +1,6 @@
 package services.transcription;
 
-import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import play.Logger;
 import services.ConfigService;
 import services.EventLogger;
 
@@ -10,8 +8,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Settings-facing status/provisioning for the on-device diarization weights:
@@ -20,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * sidecar downloads by repo), backed by the sidecar's detached-download
  * mechanism so a multi-GB pull never stalls status polling.
  */
-public final class DiarizeModelStore {
+public final class DiarizeModelStore extends ModelPrefetchStore<DiarizeModelStore.Status> {
 
     /** The fixed pyannote diarizer repo — matches diarize.py's MODEL constant. */
     public static final String PYANNOTE_REPO = "pyannote/speaker-diarization-community-1";
@@ -45,34 +41,17 @@ public final class DiarizeModelStore {
         return SER_MODELS.stream().anyMatch(m -> m.repo().equals(repo));
     }
 
-    public enum State {
-        NOT_DOWNLOADED, DOWNLOADING, DOWNLOADED, ERROR, UNAVAILABLE;
-
-        /** Wire status string shared with the imagegen/ASR panels. */
-        public String wireName() {
-            return switch (this) {
-                case NOT_DOWNLOADED -> "ABSENT";
-                case DOWNLOADED -> "AVAILABLE";
-                case DOWNLOADING -> "DOWNLOADING";
-                case ERROR -> "ERROR";
-                case UNAVAILABLE -> "UNAVAILABLE";
-            };
-        }
-    }
-
     /** No {@code totalBytes}: diarization repos are free-text/unknown-size, so
      *  the UI shows a live downloaded-MB counter rather than a percentage. */
     public record Status(State state, long bytesDownloaded, String engine, String error) {}
 
-    private static final Map<String, CompletableFuture<Void>> PREFETCHES = new ConcurrentHashMap<>();
-    private static final Map<String, String> PREFETCH_ERRORS = new ConcurrentHashMap<>();
+    private static final DiarizeModelStore INSTANCE = new DiarizeModelStore();
 
     private DiarizeModelStore() {}
 
     /** Test-only: clear prefetch state so tests don't bleed. */
     public static void resetForTest() {
-        PREFETCHES.clear();
-        PREFETCH_ERRORS.clear();
+        INSTANCE.resetPrefetchState();
     }
 
     /** The SER repo the operator has configured, coerced to the default when
@@ -102,7 +81,7 @@ public final class DiarizeModelStore {
             var status = JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("status");
             for (var r : repos) {
                 var s = status.getAsJsonObject(r);
-                if (s != null) out.put(r, rowFor(r, s));
+                if (s != null) out.put(r, INSTANCE.rowFor(r, s));
             }
         } catch (RuntimeException e) {
             for (var r : repos) out.putIfAbsent(r, new Status(State.UNAVAILABLE, 0, null,
@@ -111,48 +90,20 @@ public final class DiarizeModelStore {
         return out;
     }
 
-    /** A string field on a JSON object, or null when absent/JSON-null. */
-    private static String strOrNull(JsonObject o, String field) {
-        return o.has(field) && !o.get(field).isJsonNull() ? o.get(field).getAsString() : null;
-    }
-
-    /** One Settings row from the sidecar's per-repo status object. The sidecar
-     *  owns download state (detached subprocess + cache-dir progress); the JVM
-     *  PREFETCH_ERRORS map only carries a failure to even reach the sidecar. */
-    private static Status rowFor(String repo, JsonObject s) {
-        boolean cached = s.get("cached").getAsBoolean();
-        boolean downloading = s.has("downloading") && s.get("downloading").getAsBoolean();
-        long onDisk = s.get("bytesOnDisk").getAsLong();
-        var engine = strOrNull(s, "engine");
-        var sidecarError = strOrNull(s, "error");
-        String error = sidecarError != null ? sidecarError : PREFETCH_ERRORS.get(repo);
-        State state;
-        if (downloading) {
-            state = State.DOWNLOADING;
-        } else if (error != null && !cached) {
-            state = State.ERROR;
-        } else {
-            state = cached ? State.DOWNLOADED : State.NOT_DOWNLOADED;
-        }
-        return new Status(state, onDisk, engine, error);
+    /** Diarization repos are unknown-size, so there is no size denominator to
+     *  fold in — the row is built straight from the shared fields. */
+    @Override
+    protected Status buildStatus(String key, State state, long bytesDownloaded,
+                                 String engine, String error) {
+        return new Status(state, bytesDownloaded, engine, error);
     }
 
     /** Kick a background prefetch of an HF repo; single-flight per repo. */
     public static void prefetch(String repo) {
-        PREFETCH_ERRORS.remove(repo);
-        PREFETCHES.compute(repo, (r, existing) -> {
-            if (existing != null && !existing.isDone()) return existing;
-            return CompletableFuture.runAsync(() -> {
-                try {
-                    new DiarizeSidecarClient().prefetch(r);
-                    EventLogger.info("transcription",
-                            "diarization weight %s prefetch requested".formatted(r));
-                } catch (RuntimeException e) {
-                    PREFETCH_ERRORS.put(r, e.getMessage());
-                    Logger.warn("DiarizeModelStore: prefetch of %s failed: %s", r, e.getMessage());
-                    throw e;
-                }
-            });
+        INSTANCE.startPrefetch(repo, r -> {
+            new DiarizeSidecarClient().prefetch(r);
+            EventLogger.info("transcription",
+                    "diarization weight %s prefetch requested".formatted(r));
         });
     }
 }

@@ -9,6 +9,7 @@ import play.Play;
 import services.EventLogger;
 import services.SkillCategoryClassifier;
 import utils.HttpFactories;
+import utils.JsonArgs;
 import utils.Strings;
 
 import java.io.IOException;
@@ -232,7 +233,7 @@ public final class ClawhubCatalog implements Catalog {
     }
 
     private static String str(JsonObject o, String key) {
-        return o != null && o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
+        return o == null ? null : JsonArgs.optString(o, key);
     }
 
     private static long asLong(JsonObject o, String key, long dflt) {

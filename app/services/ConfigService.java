@@ -55,6 +55,16 @@ public class ConfigService {
         }
     }
 
+    public static long getLong(String key, long defaultValue) {
+        var raw = get(key);
+        if (raw == null) return defaultValue;
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException _) {
+            return defaultValue;
+        }
+    }
+
     public static boolean getBoolean(String key, boolean defaultValue) {
         var raw = get(key);
         if (raw == null) return defaultValue;

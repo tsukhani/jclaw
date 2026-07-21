@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
@@ -132,9 +133,7 @@ public final class BreachedPasswordChecker {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-1")
                     .digest(s.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(digest.length * 2);
-            for (byte b : digest) sb.append("%02X".formatted(b));
-            return sb.toString();
+            return HexFormat.of().withUpperCase().formatHex(digest);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-1 unavailable — JDK install broken?", e);
         }

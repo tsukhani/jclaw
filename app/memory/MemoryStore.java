@@ -58,6 +58,28 @@ public interface MemoryStore {
         return store(agentId, text, category, MemoryCategory.defaultImportanceFor(category));
     }
 
+    /**
+     * JCLAW-807-follow-up: persist a memory row WITHOUT generating its (vector)
+     * embedding, returning the new id. Callers pair this with {@link #embedStored}
+     * to move the blocking embedding round-trip out of the persistence
+     * transaction, so a pooled DB connection is never held across the embedding
+     * HTTP call. Backends with no separate embedding leg default to {@link #store}
+     * — there is nothing to defer.
+     */
+    default String storeDeferred(String agentId, String text, String category, double importance) {
+        return store(agentId, text, category, importance);
+    }
+
+    /**
+     * JCLAW-807-follow-up: generate and persist the embedding for a row previously
+     * written by {@link #storeDeferred}, with the embedding HTTP call held outside
+     * any DB transaction. No-op for backends without a vector leg, when vector
+     * memory is disabled, or when the id is unknown.
+     */
+    default void embedStored(String id) {
+        // no-op: backends without a deferred embedding leg embed inline in store()
+    }
+
     List<MemoryEntry> search(String agentId, String query, int limit);
 
     void delete(String id);
