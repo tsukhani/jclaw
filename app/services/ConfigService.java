@@ -1,11 +1,15 @@
 package services;
 
+import jakarta.transaction.Status;
+import jakarta.transaction.Synchronization;
 import jobs.ToolRegistrationJob;
 import models.Agent;
 import models.Config;
+import org.hibernate.Session;
 import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
+import play.db.jpa.JPA;
 import utils.HttpFactories;
 
 import java.time.Duration;
@@ -83,7 +87,43 @@ public class ConfigService {
 
     public static void set(String key, String value) {
         Tx.run(() -> Config.upsert(key, value));
+        // Read-your-writes: seed the cache immediately so a later reader on a
+        // different connection sees the value before the surrounding transaction
+        // commits — the FunctionalTest suite and real request flows depend on this.
         cache.put(key, Optional.ofNullable(value));
+        // JCLAW-832: when set() joined an ambient (outer) transaction the upsert is
+        // not durable yet. If that transaction rolls back, drop the eagerly-cached
+        // entry so it can't serve a value the DB never kept for the 60s TTL. On the
+        // owned-transaction path Tx.run already committed, so the entry stands.
+        if (JPA.isInsideTransaction()) {
+            scheduleRollbackEviction(JPA.em().unwrap(Session.class), key);
+        }
+    }
+
+    /**
+     * Register an {@code afterCompletion} synchronization on {@code session}'s
+     * transaction that evicts {@code key} from the cache iff the transaction rolls
+     * back; on commit the eagerly-cached value stands. One synchronization per
+     * {@code set()}-in-a-transaction — config writes are rarely batched, so this is
+     * simpler and more robust than deduping through thread-local state (which would
+     * be fragile under the concurrent test runner). Visible (public) for
+     * {@code ConfigServiceTest} in the default package, which exercises it against a
+     * fresh EntityManager without disturbing the UnitTest harness's ambient JPA context.
+     */
+    public static void scheduleRollbackEviction(Session session, String key) {
+        session.getTransaction().registerSynchronization(new Synchronization() {
+            @Override
+            public void beforeCompletion() {
+                // no-op: the evict/keep decision is made after completion
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status == Status.STATUS_ROLLEDBACK) {
+                    cache.invalidate(key);
+                }
+            }
+        });
     }
 
     /**

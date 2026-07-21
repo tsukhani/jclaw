@@ -5,6 +5,9 @@ import play.test.UnitTest;
 import models.Agent;
 import services.AgentService;
 import services.ConfigService;
+import play.db.jpa.JPA;
+import jakarta.persistence.EntityManager;
+import org.hibernate.Session;
 
 class ConfigServiceTest extends UnitTest {
 
@@ -280,5 +283,75 @@ class ConfigServiceTest extends UnitTest {
         var error = ConfigService.setWithSideEffects(
                 "dispatcher.llm.maxRequests", "200");
         assertNull(error);
+    }
+
+    // --- JCLAW-832: set() caches eagerly for read-your-writes; if it joined an
+    // ambient transaction that ROLLS BACK the entry must be evicted, but on COMMIT
+    // it must stand. The eviction is driven by an afterCompletion synchronization
+    // (registered by scheduleRollbackEviction). We exercise that against a FRESH,
+    // thread-unbound EntityManager so the test never disturbs the harness's ambient
+    // JPA context — driving startTx/withTransaction from a UnitTest body would. ---
+
+    /** Cache a value the DB does NOT hold — the phantom state set() leaves when its
+     *  surrounding transaction rolls back. Seeded via committed fresh-EM operations
+     *  (NOT ConfigService.set): the UnitTest body runs inside an ambient tx, so set()
+     *  would leave the row uncommitted (invisible to the fresh-EM delete) and register
+     *  an extra synchronization on the harness transaction. */
+    private void seedCacheOnlyPhantom(String key) {
+        EntityManager ins = JPA.newEntityManager("default"); // durable insert (own connection commits)
+        try {
+            ins.getTransaction().begin();
+            var row = new models.Config();
+            row.key = key;
+            row.value = "phantom-value"; // @PrePersist stamps updatedAt
+            ins.persist(row);
+            ins.getTransaction().commit();
+        } finally {
+            if (ins.isOpen()) ins.close();
+        }
+        assertEquals("phantom-value", ConfigService.get(key)); // warm the service cache from the row
+        EntityManager del = JPA.newEntityManager("default"); // durable delete — cache still serves the value
+        try {
+            del.getTransaction().begin();
+            del.createQuery("delete from Config c where c.key = :k")
+                    .setParameter("k", key).executeUpdate();
+            del.getTransaction().commit();
+        } finally {
+            if (del.isOpen()) del.close();
+        }
+        assertEquals("phantom-value", ConfigService.get(key),
+                "precondition: the cache still serves the phantom (DB row gone)");
+    }
+
+    @Test
+    void rollbackEvictsPhantomFromCache() {
+        var key = "jclaw832.phantom.rollback";
+        seedCacheOnlyPhantom(key);
+        EntityManager em = JPA.newEntityManager("default");
+        try {
+            em.getTransaction().begin();
+            ConfigService.scheduleRollbackEviction(em.unwrap(Session.class), key);
+            em.getTransaction().rollback(); // fires afterCompletion(ROLLEDBACK) -> evict
+        } finally {
+            if (em.isOpen()) em.close();
+        }
+        assertNull(ConfigService.get(key),
+                "rolled-back config write must be evicted from the cache, not linger");
+    }
+
+    @Test
+    void commitKeepsPhantomInCache() {
+        var key = "jclaw832.phantom.commit";
+        seedCacheOnlyPhantom(key);
+        EntityManager em = JPA.newEntityManager("default");
+        try {
+            em.getTransaction().begin();
+            ConfigService.scheduleRollbackEviction(em.unwrap(Session.class), key);
+            em.getTransaction().commit(); // fires afterCompletion(COMMITTED) -> keep
+        } finally {
+            if (em.isOpen()) em.close();
+        }
+        assertEquals("phantom-value", ConfigService.get(key),
+                "a committed transaction must NOT evict the eagerly-cached value");
     }
 }
