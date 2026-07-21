@@ -26,6 +26,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * JPA-backed memory store. Text search runs on the direct Lucene index for H2
@@ -529,23 +530,49 @@ public class JpaMemoryStore implements MemoryStore {
         if (override != null) {
             return override.apply(text);
         }
-        return embeddingCache.get(new EmbeddingKey(vectorModel, hashText(text)), k -> {
+        return cachedEmbedding(new EmbeddingKey(vectorModel, hashText(text)), () -> {
             try {
                 var provider = ProviderRegistry.getPrimary();
                 if (provider == null) return null;
-                // Embeddings are computed lazily inside a Caffeine cache load —
-                // the chat-channel context that triggered the lookup isn't
+                // Embeddings are computed lazily on a cache miss — the
+                // chat-channel context that triggered the lookup isn't
                 // available here, so the call records under "unknown" channel
                 // for dispatcher_wait. Acceptable: embeddings hit a different
                 // provider endpoint than chat and are typically cheap.
-                // The key carries only a hash of the text, so the raw text is
-                // captured from the enclosing scope rather than read off the key.
-                return provider.embeddings(k.model(), text, null);
+                return provider.embeddings(vectorModel, text, null);
             } catch (Exception e) {
                 EventLogger.warn(EVENT_CATEGORY_MEMORY, "Embedding generation failed: %s".formatted(e.getMessage()));
                 return null;
             }
         });
+    }
+
+    /**
+     * Cache-through for {@link #embeddingCache} that never holds a monitor
+     * across the blocking embeddings round-trip (JCLAW-807). A synchronous
+     * {@code Cache.get(key, loader)} computes the loader under Caffeine's
+     * per-bin {@code ConcurrentHashMap} monitor — a synchronized block wrapped
+     * around the blocking OkHttp call — pinning the virtual thread's carrier
+     * for the whole request. The fork is virtual-thread-only, so this fires on
+     * every recall cache miss (recall text is usually novel), shrinking the
+     * ForkJoinPool carrier pool under concurrent recall. Instead: read via
+     * {@link Cache#getIfPresent}, compute outside any cache lock on a miss,
+     * then {@link Cache#put} — no monitor is held across the I/O. A rare
+     * duplicate compute under a race is correct because embeddings are
+     * deterministic (the same {@code (model, text)} always yields the same
+     * vector); a {@code null} compute (no provider, failure) is not cached,
+     * matching the loader's old null-skip.
+     */
+    private static float[] cachedEmbedding(EmbeddingKey key, Supplier<float[]> compute) {
+        var cached = embeddingCache.getIfPresent(key);
+        if (cached != null) {
+            return cached;
+        }
+        var embedding = compute.get();
+        if (embedding != null) {
+            embeddingCache.put(key, embedding);
+        }
+        return embedding;
     }
 
     private String toVectorLiteral(float[] embedding) {

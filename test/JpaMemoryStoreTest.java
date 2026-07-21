@@ -6,6 +6,9 @@ import play.test.UnitTest;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 /**
  * JCLAW-407: the embedding cache key is now a content hash of the memory text,
@@ -132,5 +135,59 @@ class JpaMemoryStoreTest extends UnitTest {
         var rendered = k.toString();
         assertFalse(rendered.contains(longText));
         assertTrue(rendered.contains(hash(longText)));
+    }
+
+    // --- JCLAW-807: the cache-through that computes outside any cache lock ---
+
+    private static float[] cached(Object key, Supplier<float[]> compute) throws Exception {
+        var m = JpaMemoryStore.class.getDeclaredMethod("cachedEmbedding",
+                Class.forName("memory.JpaMemoryStore$EmbeddingKey"), Supplier.class);
+        m.setAccessible(true);
+        return (float[]) m.invoke(null, key, compute);
+    }
+
+    /** A globally-unique cache key so this test never collides with a real-model
+     *  entry or a concurrent test lane on the JVM-global embedding cache. */
+    private static Object uniqueKey() throws Exception {
+        return key("test-model-" + UUID.randomUUID(), "cache-flow-" + UUID.randomUUID());
+    }
+
+    @Test
+    void embeddingComputedOnceThenServedFromCache() throws Exception {
+        // The cache-through runs the blocking compute exactly once on a miss,
+        // then serves every later call from the cache without recomputing — the
+        // dedup the old get-with-loader had, now without pinning the carrier
+        // across the embeddings round-trip.
+        var k = uniqueKey();
+        var vector = new float[] {0.1f, 0.2f, 0.3f};
+        var computes = new AtomicInteger();
+        Supplier<float[]> compute = () -> {
+            computes.incrementAndGet();
+            return vector;
+        };
+
+        var first = cached(k, compute);
+        assertSame(vector, first, "a miss returns the freshly computed vector");
+        assertEquals(1, computes.get(), "the blocking compute runs once on a miss");
+
+        var second = cached(k, compute);
+        assertSame(vector, second, "a hit returns the cached vector");
+        assertEquals(1, computes.get(), "a cache hit must not recompute the embedding");
+    }
+
+    @Test
+    void nullEmbeddingIsNotCached() throws Exception {
+        // A null compute (no provider / failure) must not populate the cache, so
+        // a later successful compute for the same key still runs — matching the
+        // loader's old null-skip.
+        var k = uniqueKey();
+        var computes = new AtomicInteger();
+
+        assertNull(cached(k, () -> { computes.incrementAndGet(); return null; }),
+                "a null compute returns null");
+        var vector = new float[] {1f};
+        assertSame(vector, cached(k, () -> { computes.incrementAndGet(); return vector; }),
+                "the same key recomputes because null was never cached");
+        assertEquals(2, computes.get(), "null must not be stored as a cache hit");
     }
 }
