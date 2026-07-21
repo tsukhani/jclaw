@@ -102,11 +102,16 @@ public class ApiSubagentRunsController extends Controller {
         SubagentRun.Status statusEnum = parseStatusFilter(status);
         if (statusEnum == null && status != null && !status.isBlank()) return;
 
+        // JCLAW-806: qualify every filter path with the root alias `r.`. The
+        // JOIN FETCH below pulls the four associated entities into query scope,
+        // so an unqualified attribute (e.g. `status`, `parentAgent.id`) is now
+        // ambiguous under Hibernate 7 strict HQL. `r.` is valid for both the
+        // fetch query and the fetch-less COUNT.
         var filter = new JpqlFilter()
-                .eq("parentAgent.id", parentAgentId)
-                .eq("parentConversation.id", parentConversationId)
-                .eq(STATUS, statusEnum)
-                .gte("startedAt", sinceInstant);
+                .eq("r.parentAgent.id", parentAgentId)
+                .eq("r.parentConversation.id", parentConversationId)
+                .eq("r." + STATUS, statusEnum)
+                .gte("r.startedAt", sinceInstant);
 
         // JCLAW-304: q resolves against TWO Lucene scopes and unions the
         // resulting run-id sets — SUBAGENT_RUN directly (label + outcome
@@ -124,7 +129,7 @@ public class ApiSubagentRunsController extends Controller {
                 response.setHeader("Access-Control-Expose-Headers", HDR_TOTAL_COUNT);
                 renderJSON("[]");
             }
-            where = where.isEmpty() ? "id IN (:fts)" : where + " AND id IN (:fts)";
+            where = where.isEmpty() ? "r.id IN (:fts)" : where + " AND r.id IN (:fts)";
         }
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, PagedJpqlQuery.MAX_LIMIT) : 100;
@@ -135,6 +140,14 @@ public class ApiSubagentRunsController extends Controller {
         // values through the same single binding path, so the COUNT and the SELECT
         // can never diverge.
         var page = PagedJpqlQuery.of(SubagentRun.class, "SubagentRun r", "r")
+                // JCLAW-806: eagerly join the four optional=false to-one FKs that
+                // toView dereferences per row (parent/child agent + conversation).
+                // Without this each row fires ~4 EAGER SELECTs (~2000 on a 500-row
+                // page). All four are to-ONE, so the fetch join is pagination-safe
+                // (no in-memory pagination); the COUNT drops it (see PagedJpqlQuery).
+                // Mirrors ApiConversationsController.listConversations' JOIN FETCH c.agent.
+                .joinFetch("JOIN FETCH r.parentAgent JOIN FETCH r.childAgent "
+                        + "JOIN FETCH r.parentConversation JOIN FETCH r.childConversation")
                 .where(where)
                 .positionalParams(filter.paramList())
                 .namedParam("fts", ftsRunIds)

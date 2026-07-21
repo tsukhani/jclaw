@@ -78,6 +78,39 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void listJoinFetchesToOneFksAndPreservesViewShape() {
+        // JCLAW-806: the list query now JOIN FETCHes the four optional=false
+        // to-one FKs that toView dereferences (parent/child agent + parent/child
+        // conversation). Verify the eager join didn't drop the row or scramble
+        // the emitted view fields — every id/name toView reads must round-trip.
+        login();
+        var ids = commitInFreshTx(() -> {
+            var p = AgentService.create("api-jf-parent", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-jf-child", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            var runId = persistRun(p, c, pc, cc, SubagentRun.Status.COMPLETED);
+            return new long[]{runId, p.id, c.id, pc.id, cc.id};
+        });
+
+        var resp = GET("/api/subagent-runs");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"id\":" + ids[0]), "run row present: " + body);
+        assertTrue(body.contains("\"parentAgentId\":" + ids[1]), "parentAgentId present: " + body);
+        assertTrue(body.contains("\"parentAgentName\":\"api-jf-parent\""),
+                "parent agent name present: " + body);
+        assertTrue(body.contains("\"childAgentId\":" + ids[2]), "childAgentId present: " + body);
+        assertTrue(body.contains("\"childAgentName\":\"api-jf-child\""),
+                "child agent name present: " + body);
+        assertTrue(body.contains("\"parentConversationId\":" + ids[3]),
+                "parentConversationId present: " + body);
+        assertTrue(body.contains("\"childConversationId\":" + ids[4]),
+                "childConversationId present: " + body);
+        assertTrue(body.contains("\"status\":\"COMPLETED\""), "status present: " + body);
+    }
+
+    @Test
     void listFilteredByParentAgentExcludesOtherAgents() {
         login();
         var data = commitInFreshTx(() -> {

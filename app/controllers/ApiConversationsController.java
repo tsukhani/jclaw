@@ -308,12 +308,44 @@ public class ApiConversationsController extends Controller {
 
         setPaginationHeaders(total);
 
-        var result = messages.stream().map(ApiConversationsController::messageToMap).toList();
+        // JCLAW-806: bulk-fetch this page's attachments in one IN-clause query and
+        // group by message id, instead of touching m.attachments lazily per row
+        // (a PersistentBag init per message = N+1, up to 500/page). A LEFT JOIN
+        // FETCH on the to-many collection can't be combined with from()/fetch()
+        // pagination (Hibernate HHH000104 in-memory pagination), so the separate
+        // bulk-fetch-then-group is the safe shape. Mirrors the compactionCounts
+        // bulk-group in listConversations.
+        var attachmentsByMessage = attachmentsForMessages(messages);
+        var result = messages.stream()
+                .map(m -> messageToMap(m, attachmentsByMessage.getOrDefault(m.id, List.of())))
+                .toList();
 
         renderJSON(gson.toJson(result));
     }
 
-    private static HashMap<String, Object> messageToMap(Message m) {
+    /**
+     * JCLAW-806: one IN-clause query for every {@link MessageAttachment} on the
+     * given page of messages, grouped into {@code messageId -> attachments}
+     * (id-ascending, matching the entity's {@code @OrderBy}). Messages with no
+     * attachments are simply absent from the map. Returns an empty map for an
+     * empty page.
+     */
+    private static Map<Long, List<MessageAttachment>> attachmentsForMessages(List<Message> messages) {
+        var msgIds = messages.stream().map(m -> m.id).filter(Objects::nonNull).toList();
+        if (msgIds.isEmpty()) return Map.of();
+        List<MessageAttachment> rows = JPA.em().createQuery(
+                "SELECT a FROM MessageAttachment a WHERE a.message.id IN :ids ORDER BY a.id ASC",
+                MessageAttachment.class)
+                .setParameter("ids", msgIds)
+                .getResultList();
+        var grouped = new HashMap<Long, List<MessageAttachment>>();
+        for (var a : rows) {
+            grouped.computeIfAbsent(a.message.id, _ -> new ArrayList<>()).add(a);
+        }
+        return grouped;
+    }
+
+    private static HashMap<String, Object> messageToMap(Message m, List<MessageAttachment> attachments) {
         var map = new HashMap<String, Object>();
         map.put("id", m.id);
         map.put("role", m.role);
@@ -363,10 +395,11 @@ public class ApiConversationsController extends Controller {
             map.put("truncated", Boolean.TRUE);
         }
         // JCLAW-279: surface attachment metadata so the chat UI can render
-        // download chips on conversation reload. Empty list rather than
-        // absent so the frontend can rely on the field always being present.
-        if (m.attachments != null && !m.attachments.isEmpty()) {
-            map.put("attachments", attachmentsToList(m.attachments));
+        // download chips on conversation reload. JCLAW-806: sourced from the
+        // page-level bulk fetch (see attachmentsForMessages) rather than the
+        // lazy m.attachments bag, so this stays N+1-free.
+        if (!attachments.isEmpty()) {
+            map.put("attachments", attachmentsToList(attachments));
         }
         return map;
     }

@@ -8,6 +8,7 @@ import play.test.FunctionalTest;
 import models.Agent;
 import models.Conversation;
 import models.Message;
+import models.MessageAttachment;
 import models.MessageRole;
 import models.SessionCompaction;
 import services.ConversationService;
@@ -52,6 +53,20 @@ class ApiConversationsControllerTest extends FunctionalTest {
     private String extractId(String json) {
         var matcher = java.util.regex.Pattern.compile("\"id\":(\\d+)").matcher(json);
         return matcher.find() ? matcher.group(1) : null;
+    }
+
+    /** Seed one attachment row on {@code m} (all NOT NULL columns populated). */
+    private static void seedAttachment(Message m, String uuid, String filename,
+                                       String mime, String kind) {
+        var att = new MessageAttachment();
+        att.message = m;
+        att.uuid = uuid;
+        att.originalFilename = filename;
+        att.storagePath = "attach-bulk-test/attachments/" + m.conversation.id + "/" + uuid;
+        att.mimeType = mime;
+        att.sizeBytes = 3;
+        att.kind = kind;
+        att.save();
     }
 
     // --- Tests ---
@@ -385,6 +400,55 @@ class ApiConversationsControllerTest extends FunctionalTest {
                 "structured payload must land as object, got: " + body);
         assertTrue(body.contains("\"faviconUrl\":\"https://icons.duckduckgo.com"),
                 "favicon URL must roundtrip, got: " + body);
+    }
+
+    /**
+     * JCLAW-806: /messages bulk-fetches attachments in one IN-clause query and
+     * groups them by message id (replacing the per-row lazy m.attachments init
+     * that was N+1 on history load). Seed two messages each carrying a distinct
+     * attachment plus one message without any, then assert every attachment
+     * surfaces under its own message on reload — proving the bulk fetch + group
+     * preserves the same wire shape as the prior lazy path.
+     */
+    @Test
+    void getMessagesBulkFetchesAttachmentsPerMessage() {
+        login();
+        var cid = commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "attach-bulk-test";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var conv = ConversationService.create(agent, "web", "tester");
+
+            var m1 = new Message();
+            m1.conversation = conv;
+            m1.role = "user";
+            m1.content = "first with file";
+            m1.save();
+            seedAttachment(m1, "uuid-aaa", "alpha.png", "image/png", MessageAttachment.KIND_IMAGE);
+
+            var m2 = new Message();
+            m2.conversation = conv;
+            m2.role = "user";
+            m2.content = "second with file";
+            m2.save();
+            seedAttachment(m2, "uuid-bbb", "beta.pdf", "application/pdf", MessageAttachment.KIND_FILE);
+
+            // Third message with NO attachment — must not gain a spurious one.
+            ConversationService.appendUserMessage(conv, "third no file");
+            return conv.id;
+        });
+
+        var response = GET("/api/conversations/" + cid + "/messages");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"uuid\":\"uuid-aaa\"")
+                        && body.contains("\"originalFilename\":\"alpha.png\""),
+                "first message's attachment must surface: " + body);
+        assertTrue(body.contains("\"uuid\":\"uuid-bbb\"")
+                        && body.contains("\"originalFilename\":\"beta.pdf\""),
+                "second message's attachment must surface: " + body);
     }
 
     /**
