@@ -244,7 +244,7 @@ final class StreamingAgentRunner {
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
-        var prepared = AgentPromptPreparer.buildStreamingPrologue(agent, conversation, userMessage);
+        var prepared = AgentPromptPreparer.buildStreamingPrologue(agent, conversation, channelType, userMessage);
 
         var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();

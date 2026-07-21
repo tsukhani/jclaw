@@ -28,8 +28,8 @@ import java.util.Set;
  *       prefix/suffix sizes consistent with that placement.</li>
  *   <li>Skills XML — emitted when the agent has at least one skill on disk,
  *       absent otherwise.</li>
- *   <li>Channel guidance — Telegram and Web sections render their distinctive
- *       bodies; Slack/WhatsApp/null/unknown skip the section entirely.</li>
+ *   <li>Channel guidance — Web, Telegram, and Voice sections render their
+ *       distinctive bodies; Slack/WhatsApp/null/unknown skip the section entirely.</li>
  *   <li>Blank file handling — a blank workspace markdown file silently drops
  *       from the output instead of injecting an empty section.</li>
  * </ul>
@@ -307,6 +307,25 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "web must produce a Channel Guidance header");
         assertTrue(prompt.contains("admin chat UI") || prompt.contains("download chips"),
                 "guidance body should include web-specific hints");
+    }
+
+    @Test
+    void voiceChannelInjectsSpokenGuidanceNotWebGuidance() {
+        // JCLAW-797: a voice turn is tagged "voice" (its history still lives on
+        // the shared "web" conversation). The prompt must tell the model it's in
+        // a spoken exchange — not hand it the web-UI markdown guidance, which is
+        // what made the model claim it "can't hear" the user.
+        var agent = newAgent("spa-channel-voice");
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "voice").systemPrompt();
+        assertTrue(prompt.contains("Channel Guidance (voice)"),
+                "voice must produce a Channel Guidance header");
+        assertTrue(prompt.contains("live voice conversation")
+                        && prompt.contains("text-to-speech"),
+                "guidance body should describe the spoken STT/TTS surface");
+        assertTrue(prompt.contains("never tell them you lack audio"),
+                "guidance must forbid the 'I can't hear you' failure mode");
+        assertFalse(prompt.contains("admin chat UI"),
+                "voice must NOT get the web-UI markdown guidance");
     }
 
     @Test

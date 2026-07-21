@@ -186,13 +186,21 @@ final class AgentPromptPreparer {
      * the system prompt + compaction summary + parent-context, hydrate messages and
      * tool definitions. Fold everything into ONE transaction so nested Tx.run calls
      * inside helpers don't open additional connections.
+     *
+     * <p>{@code channelType} is the inbound surface of <em>this</em> turn, which
+     * drives the assembler's channel guidance. It is normally identical to the
+     * conversation's stored {@code channelType}; voice mode is the exception —
+     * the turn is tagged {@code "voice"} while its history lives on the shared
+     * {@code "web"} conversation, so the model gets spoken-conversation guidance.
+     * Falls back to the stored channel when null.
      */
     static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
-                                                   String userMessage) {
+                                                   String channelType, String userMessage) {
         return Tx.run(() -> {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
             var convo = ConversationService.findById(conversation.id);
-            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, convo.channelType);
+            var promptChannel = channelType != null ? channelType : convo.channelType;
+            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, promptChannel);
             // JCLAW-38: re-inject latest compaction summary (if any)
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.

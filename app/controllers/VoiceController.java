@@ -94,6 +94,14 @@ public class VoiceController extends WebSocketController {
      *  (~320&nbsp;ms at the 32&nbsp;ms Silero window). */
     private static final int PREROLL_WINDOWS = 10;
 
+    /** Per-turn channel identity handed to the streaming runner. The conversation
+     *  itself stays {@code "web"} (voice and typed chat share history), but tagging
+     *  the turn {@code "voice"} makes {@link agents.SystemPromptAssembler} inject
+     *  spoken-conversation guidance instead of the web-UI markdown guidance —
+     *  otherwise the model reads the transcript as a text chat and denies it can
+     *  hear the user. */
+    private static final String VOICE_CHANNEL = "voice";
+
     public static void socket() {
         // CSWSH defense — a WebSocket handshake is NOT bound by the Same-Origin
         // Policy, so the browser attaches the session cookie even on a cross-site
@@ -188,8 +196,14 @@ public class VoiceController extends WebSocketController {
             // speaks. Skipped for audio-capable models (they receive the raw audio,
             // not a transcript) and disableable via config. Single-flight + the
             // session's throttle keep interims from starving the final transcribe.
+            // The active model's audio capability decides the input leg (native
+            // audio vs local ASR) and whether interim transcripts run — resolve it
+            // once. When the model is text-only, warm the local ASR now so the
+            // first utterance doesn't eat the worker+model cold start (JCLAW-800).
+            boolean modelHearsAudio = modelHearsAudioAtInit(boundAgent, username);
+            if (!modelHearsAudio) prewarmAsr(asr);
             boolean partialsOn = !"false".equalsIgnoreCase(String.valueOf(ConfigService.get("voice.partials.enabled")))
-                    && !modelHearsAudioAtInit(boundAgent, username);
+                    && !modelHearsAudio;
             var interimBusy = new AtomicBoolean(false);
             VoiceSession.Partial partialSink = !partialsOn ? null : wav -> {
                 if (!interimBusy.compareAndSet(false, true)) return; // one interim at a time
@@ -321,7 +335,7 @@ public class VoiceController extends WebSocketController {
                     },
                     err -> sentences.offer(END_OF_TURN),
                     () -> sentences.offer(END_OF_TURN));
-            AgentRunner.runStreaming(agent, plan.conversationId(), "web", username, userMessage,
+            AgentRunner.runStreaming(agent, plan.conversationId(), VOICE_CHANNEL, username, userMessage,
                     cancel, cb, System.nanoTime(), attachments);
 
             // Consumer: synthesize + stream each sentence as it arrives; grow the
@@ -477,6 +491,23 @@ public class VoiceController extends WebSocketController {
         } catch (IOException e) {
             throw new TtsException("failed to stage voice audio: " + e.getMessage(), e);
         }
+    }
+
+    /** Best-effort warm of the local ASR worker at session start: the first
+     *  transcribe spawns a Python worker and loads the Whisper model (~5s), and
+     *  we'd rather pay that while the user is speaking their first sentence than
+     *  on turn 1's critical path. Runs off-thread on a short silent clip;
+     *  failures are swallowed — a cold first turn is the prior behavior, not a
+     *  regression. Only called for the text-only (ASR) path; audio-native models
+     *  never touch the sidecar. */
+    private static void prewarmAsr(AsrSidecarClient asr) {
+        Thread.ofVirtual().name("voice-asr-prewarm").start(() -> {
+            try {
+                transcribe(asr, VoiceSession.wrapWav(new byte[16000])); // 0.5s of silence @ 16 kHz
+            } catch (RuntimeException e) {
+                Logger.debug("voice: ASR prewarm failed (first turn will cold-start): %s", e.getMessage());
+            }
+        });
     }
 
     /** Buffer the utterance to a temp WAV and transcribe on the local ASR. */

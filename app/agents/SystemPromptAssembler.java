@@ -417,14 +417,18 @@ public class SystemPromptAssembler {
     /**
      * Resolve a per-channel guidance body, or {@link Optional#empty()} when the
      * channel has no registered section (Slack, WhatsApp, unknown types).
-     * Telegram and Web are the two cases that ship today — Slack and WhatsApp
-     * can be added here once we decide what prompt-level tuning they need.
+     * Web, Telegram, and Voice are the cases that ship today — Slack and WhatsApp
+     * can be added here once we decide what prompt-level tuning they need. Note
+     * that {@code "voice"} is a per-turn surface tag, not a {@link models.ChannelType}
+     * enum value: voice turns live on the shared {@code "web"} conversation but are
+     * assembled with this guidance so the model knows it's in a spoken exchange.
      */
     private static Optional<String> channelGuidanceFor(String channelType) {
         if (channelType == null) return Optional.empty();
         return switch (channelType.toLowerCase()) {
             case "web" -> Optional.of(WEB_CHANNEL_GUIDANCE);
             case "telegram" -> Optional.of(TELEGRAM_CHANNEL_GUIDANCE);
+            case "voice" -> Optional.of(VOICE_CHANNEL_GUIDANCE);
             default -> Optional.empty();
         };
     }
@@ -492,6 +496,25 @@ public class SystemPromptAssembler {
             everything else as downloadable document attachments with the original
             filename preserved. Do NOT inline file contents when you're asked for a
             file; emit the link and let the bot deliver the real thing.
+            """;
+
+    private static final String VOICE_CHANNEL_GUIDANCE = """
+            You are in a live voice conversation. The person is SPEAKING to you: their
+            words were captured by a microphone and turned into text by speech-to-text,
+            so the message you receive is what they said out loud. It may contain minor
+            transcription errors (wrong homophones, dropped words) — infer their intent
+            rather than fixating on an odd word. You are not reading a silent chat, and
+            you are certainly NOT unable to hear them: their spoken turn is right here as
+            text, so never tell them you lack audio, hearing, or voice capabilities.
+
+            Your reply is read back aloud by text-to-speech, so write for the ear, not the
+            eye. Keep it short and conversational — a sentence or two is usually right;
+            give a longer answer only when they actually ask for detail. Use plain spoken
+            prose: no markdown headings, tables, bullet or numbered lists, code blocks, or
+            file-download links, and avoid emoji and symbols that sound wrong when spoken.
+            Say things the way you'd say them out loud. If something is inherently visual
+            or structured (code, a long list, a file), offer to put it in the web chat
+            instead of dictating it.
             """;
 
     private static void appendExecutionBiasSection(StringBuilder sb) {

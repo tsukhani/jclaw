@@ -125,8 +125,9 @@ public final class VoiceSession implements AutoCloseable {
         }
     }
 
-    /** Wrap PCM16 mono samples in a 16 kHz WAV container. */
-    static byte[] wrapWav(byte[] pcm) {
+    /** Wrap PCM16 mono samples in a 16 kHz WAV container. Public so callers
+     *  outside this package (e.g. the ASR prewarm) can mint a silent WAV. */
+    public static byte[] wrapWav(byte[] pcm) {
         int rate = VoiceVad.SAMPLE_RATE;
         var buf = ByteBuffer.allocate(44 + pcm.length).order(ByteOrder.LITTLE_ENDIAN);
         buf.put("RIFF".getBytes(StandardCharsets.US_ASCII));
