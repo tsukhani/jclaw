@@ -36,6 +36,17 @@ public final class TaskRunRegistry {
      *  currently executing on this JVM. */
     private static final Map<Long, AtomicBoolean> ACTIVE = new ConcurrentHashMap<>();
 
+    /**
+     * JCLAW-803: Task ids with a fire live on this JVM. Distinct from
+     * {@link #ACTIVE} (which is keyed by {@code taskRunId} for cancellation) —
+     * this is keyed by {@code taskId} so a revived duplicate fire of the same
+     * Task can be detected and dropped by {@link #tryClaimTask} before it opens
+     * a second RUNNING TaskRun. Process-local by design: a {@code RUNNING} row
+     * orphaned by a crashed prior JVM is absent here, so it is correctly re-fired
+     * on recovery — only a fire still live in <em>this</em> process is blocked.
+     */
+    private static final Set<Long> ACTIVE_TASKS = ConcurrentHashMap.newKeySet();
+
     /** Register {@code taskRunId} as in-flight with a fresh (un-flipped) cancel
      *  flag. Called by {@link services.TaskExecutor} right after the RUNNING
      *  TaskRun row is opened, so {@link #isCancelled} works the instant the
@@ -50,6 +61,34 @@ public final class TaskRunRegistry {
     public static void unregister(Long taskRunId) {
         if (taskRunId == null) return;
         ACTIVE.remove(taskRunId);
+    }
+
+    /**
+     * JCLAW-803: atomically claim {@code taskId} as firing on this JVM. Returns
+     * {@code true} when the claim is taken (no other live fire for this Task
+     * here) and {@code false} when a fire is already in flight for it — in which
+     * case the caller ({@link services.TaskExecutionHandler}) must drop the
+     * duplicate revive rather than start a second concurrent fire. The claim
+     * MUST be released via {@link #releaseTask} in a {@code finally} once the
+     * fire terminates. A null id never blocks (returns {@code true}; the caller
+     * handles undecodable instance ids on its own skip path).
+     */
+    public static boolean tryClaimTask(Long taskId) {
+        if (taskId == null) return true;
+        return ACTIVE_TASKS.add(taskId);
+    }
+
+    /** Release a claim taken by {@link #tryClaimTask}. No-op on a null id or an
+     *  id that was never claimed. */
+    public static void releaseTask(Long taskId) {
+        if (taskId == null) return;
+        ACTIVE_TASKS.remove(taskId);
+    }
+
+    /** True iff a fire for {@code taskId} is currently claimed on this JVM. For
+     *  tests + introspection. */
+    public static boolean isTaskActive(Long taskId) {
+        return taskId != null && ACTIVE_TASKS.contains(taskId);
     }
 
     /**
@@ -90,5 +129,6 @@ public final class TaskRunRegistry {
      *  this — concurrent cancels would race. */
     public static void clear() {
         ACTIVE.clear();
+        ACTIVE_TASKS.clear();
     }
 }

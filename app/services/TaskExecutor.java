@@ -107,6 +107,11 @@ public final class TaskExecutor {
         // The finally below clears the slot on every terminal outcome —
         // normal completion, failure (rethrown), or cancel.
         TaskRunRegistry.register(run.id);
+        // JCLAW-803: bound this fire's wall-clock so a wedged agent loop can't
+        // run forever (db-scheduler can't see a hung-but-heartbeating fire).
+        // On deadline the watchdog flips the same cooperative-cancel flag the
+        // operator-cancel path uses; disarmed in the finally on any exit.
+        final var deadline = TaskFireDeadline.arm(run.id);
         try {
             // JCLAW-21: lifecycle audit — TASK_STARTED bookmark. Operator
             // monitoring (JCLAW-22) reads these to render "running" pills
@@ -138,6 +143,7 @@ public final class TaskExecutor {
 
             return finalizeRun(task, run);
         } finally {
+            TaskFireDeadline.disarm(deadline, run.id);
             TaskRunRegistry.unregister(run.id);
         }
     }
@@ -339,21 +345,24 @@ public final class TaskExecutor {
             sink.onComplete(outcome.content());
             return true;
         } catch (RunCancelledException _) {
-            // JCLAW-414: operator cancelled this fire mid-run. The cancel
-            // endpoint already flipped the flag and stamps the run CANCELLED
-            // for instant UI; close here too (idempotent — onCancelled only
-            // acts on a still-RUNNING row) so the run is terminal even if the
-            // endpoint's write lagged. Do NOT rethrow — a clean operator
-            // action, not a failure for JClawFailureHandler to classify, and
-            // not a reschedule trigger.
-            sink.onCancelled("Cancelled by operator");
+            // JCLAW-414: this fire's cooperative-cancel flag was flipped mid-run.
+            // Two flippers share this path: an operator (POST /task-runs/{id}/cancel)
+            // and JCLAW-803's TaskFireDeadline watchdog (fire blew its max
+            // duration). Both stamp the run CANCELLED here (idempotent —
+            // onCancelled only acts on a still-RUNNING row) so the run is terminal
+            // even if the endpoint's write lagged. Do NOT rethrow — a clean
+            // cancellation, not a failure for JClawFailureHandler to classify.
+            boolean timedOut = TaskFireDeadline.wasTimedOut(sink.taskRunId());
+            sink.onCancelled(timedOut ? "Cancelled: exceeded max run duration" : "Cancelled by operator");
             // The fire ended without completing; return the task from RUNNING to
             // its alive state (ACTIVE for recurring, PENDING for one-shot) so it
             // isn't stranded showing RUNNING. Only this fire was cancelled — the
             // recurring schedule / next-run time are untouched. Guarded.
             leaveRunning(task.id, Task.initialStatusFor(task.type));
             EventLogger.info("task", null, null,
-                    "TaskExecutor.runTask: task run %d cancelled by operator".formatted(sink.taskRunId()));
+                    "TaskExecutor.runTask: task run %d %s".formatted(sink.taskRunId(),
+                            timedOut ? "cancelled after exceeding its max run duration"
+                                    : "cancelled by operator"));
             return false;
         } catch (RuntimeException e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();

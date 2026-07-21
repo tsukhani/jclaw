@@ -137,13 +137,34 @@ public final class TaskExecutionHandler {
                 return scheduleNextIfRecurring(jclawTask);
             }
 
-            // Drive the fire. Any RuntimeException propagates to
-            // JClawFailureHandler (wired in via .onFailure above)
-            // which decides retry-with-backoff vs permanent fail
-            // based on TransientErrorClassifier.
-            TaskExecutor.runTask(jclawTask);
+            // JCLAW-803: dedup guard. db-scheduler revives a fire it believes
+            // dead (heartbeat stalled after a restart) and re-fires the row
+            // while the original may still be running on this JVM. Without this
+            // gate every revive opens a fresh concurrent fire, piling up zombie
+            // agent loops and tripping the "removed 0" stop() error when a stale
+            // fire finally completes. Claim the Task id atomically; if a live
+            // fire already holds it here, drop this redundant revive via
+            // defaultCompletion (remove this row only) — the in-flight fire owns
+            // the reschedule. A RUNNING row orphaned by a crashed prior JVM is
+            // not claimed here, so it is still re-fired normally on recovery.
+            if (!TaskRunRegistry.tryClaimTask(jclawTaskId)) {
+                EventLogger.warn("task",
+                        jclawTask.agent != null ? jclawTask.agent.name : null, null,
+                        "TaskExecutionHandler: Task id %d already has a live fire on this node; dropping duplicate revive"
+                                .formatted(jclawTaskId));
+                return defaultCompletion();
+            }
+            try {
+                // Drive the fire. Any RuntimeException propagates to
+                // JClawFailureHandler (wired in via .onFailure above)
+                // which decides retry-with-backoff vs permanent fail
+                // based on TransientErrorClassifier.
+                TaskExecutor.runTask(jclawTask);
 
-            return scheduleNextIfRecurring(jclawTask);
+                return scheduleNextIfRecurring(jclawTask);
+            } finally {
+                TaskRunRegistry.releaseTask(jclawTaskId);
+            }
         });
     }
 

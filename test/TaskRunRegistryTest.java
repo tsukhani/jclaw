@@ -26,6 +26,12 @@ class TaskRunRegistryTest extends UnitTest {
     private static final Long ID = 990_414L;
     private static final Long OTHER = 990_415L;
 
+    // JCLAW-803: sentinel *task* ids for the dedup-claim contract, kept in a
+    // distinct high range so they never collide with a concurrently-firing
+    // real Task's id (the suite runs tests concurrently against one registry).
+    private static final Long TASK = 990_803L;
+    private static final Long OTHER_TASK = 990_804L;
+
     @Test
     void registerThenFlagThenUnregister() {
         try {
@@ -76,5 +82,50 @@ class TaskRunRegistryTest extends UnitTest {
         } finally {
             TaskRunRegistry.unregister(ID);
         }
+    }
+
+    // === JCLAW-803: task-level dedup claim ===
+
+    @Test
+    void claimIsExclusiveUntilReleased() {
+        try {
+            assertFalse(TaskRunRegistry.isTaskActive(TASK), "unclaimed task is not active");
+            assertTrue(TaskRunRegistry.tryClaimTask(TASK), "first claim on a free task succeeds");
+            assertTrue(TaskRunRegistry.isTaskActive(TASK), "claimed task reads active");
+
+            // A second claim while the first is live is refused — this is what
+            // makes the handler drop a revived duplicate fire.
+            assertFalse(TaskRunRegistry.tryClaimTask(TASK), "a second concurrent claim is refused");
+
+            TaskRunRegistry.releaseTask(TASK);
+            assertFalse(TaskRunRegistry.isTaskActive(TASK), "released task is no longer active");
+            // Released → a fresh fire may claim it again.
+            assertTrue(TaskRunRegistry.tryClaimTask(TASK), "claim succeeds again after release");
+        } finally {
+            TaskRunRegistry.releaseTask(TASK);
+        }
+    }
+
+    @Test
+    void claimsAreIndependentAcrossTaskIds() {
+        try {
+            assertTrue(TaskRunRegistry.tryClaimTask(TASK));
+            // A different task id is unaffected by TASK's claim.
+            assertTrue(TaskRunRegistry.tryClaimTask(OTHER_TASK),
+                    "claiming one task must not block a different task");
+            assertTrue(TaskRunRegistry.isTaskActive(OTHER_TASK));
+        } finally {
+            TaskRunRegistry.releaseTask(TASK);
+            TaskRunRegistry.releaseTask(OTHER_TASK);
+        }
+    }
+
+    @Test
+    void nullTaskIdNeverBlocksAndReleaseIsSafe() {
+        // An undecodable instance id yields a null task id; it must never block
+        // (the handler has its own skip path), and release/isActive stay no-ops.
+        assertTrue(TaskRunRegistry.tryClaimTask(null), "null task id never blocks a fire");
+        assertFalse(TaskRunRegistry.isTaskActive(null));
+        assertDoesNotThrow(() -> TaskRunRegistry.releaseTask(null));
     }
 }
