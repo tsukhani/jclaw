@@ -1,4 +1,6 @@
 import com.github.kagkarlsson.scheduler.SchedulerClient;
+import com.github.kagkarlsson.scheduler.exceptions.TaskInstanceCurrentlyExecutingException;
+import com.github.kagkarlsson.scheduler.exceptions.TaskInstanceNotFoundException;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Agent;
@@ -120,8 +122,15 @@ class TaskSchedulingServiceTest extends UnitTest {
 
     @Test
     void cancelIsIdempotentWhenNoRowExists() {
-        stub.throwOnCancel = true;
+        stub.throwNotFoundOnCancel = true;
         TaskSchedulingService.cancel(99L);  // must not throw
+        assertEquals(1, stub.cancels.size());
+    }
+
+    @Test
+    void cancelSwallowsCurrentlyExecutingRow() {
+        stub.throwCurrentlyExecutingOnCancel = true;
+        TaskSchedulingService.cancel(77L);  // must not throw — row locked mid-fire
         assertEquals(1, stub.cancels.size());
     }
 
@@ -231,7 +240,8 @@ class TaskSchedulingServiceTest extends UnitTest {
         final List<ScheduleCall> schedules = new ArrayList<>();
         final List<TaskInstanceId> cancels = new ArrayList<>();
         final List<RescheduleCall> reschedules = new ArrayList<>();
-        boolean throwOnCancel = false;
+        boolean throwNotFoundOnCancel = false;
+        boolean throwCurrentlyExecutingOnCancel = false;
         boolean rescheduleReturns = true;
 
         SchedulerClient proxy() {
@@ -252,8 +262,11 @@ class TaskSchedulingServiceTest extends UnitTest {
             if ("cancel".equals(name) && args != null && args.length == 1
                     && args[0] instanceof TaskInstanceId id) {
                 cancels.add(id);
-                if (throwOnCancel) {
-                    throw new RuntimeException("Stub: no row to cancel");
+                if (throwNotFoundOnCancel) {
+                    throw new TaskInstanceNotFoundException(id.getTaskName(), id.getId());
+                }
+                if (throwCurrentlyExecutingOnCancel) {
+                    throw new TaskInstanceCurrentlyExecutingException(id.getTaskName(), id.getId());
                 }
                 return null;
             }

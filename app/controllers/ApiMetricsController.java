@@ -28,7 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.TreeSet;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Runtime observability endpoints. In-memory only — histograms reset
@@ -129,7 +129,7 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Reset latency segment histograms")
     public static void resetLatency() {
         LatencyStats.reset();
-        renderJSON(INSTANCE.toJson(new StatusResponse(STATUS_RESET)));
+        renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
     }
 
     /**
@@ -157,22 +157,34 @@ public class ApiMetricsController extends Controller {
         // One query: window + agent filter (NOT channel). Derive the channel list from
         // all fetched rows so the dropdown populates; aggregate only the channel-matching
         // subset so percentiles are recomputed from raw samples rather than merged.
-        List<LatencyMetric> rows = agentId == null
-                ? LatencyMetric.<LatencyMetric>find("createdAt >= ?1", since).fetch()
-                : LatencyMetric.<LatencyMetric>find("createdAt >= ?1 and agentId = ?2", since, agentId).fetch();
+        //
+        // Scalar projection (mirrors cost() below): this is the highest-volume table
+        // over a 30-day default window, and only three columns are read per row, so
+        // select (channel, segment, latencyMs) directly instead of hydrating full
+        // LatencyMetric entities.
+        var jpql = new StringBuilder(
+                "SELECT m.channel, m.segment, m.latencyMs FROM LatencyMetric m WHERE m.createdAt >= ?1");
+        if (agentId != null) jpql.append(" AND m.agentId = ?2");
+        var query = JPA.em().createQuery(jpql.toString(), Object[].class);
+        query.setParameter(1, since);
+        if (agentId != null) query.setParameter(2, agentId);
+        var rows = query.getResultList();
 
         var channels = new TreeSet<String>();
         var bySegment = new LinkedHashMap<String, List<Long>>();
         for (var r : rows) {
-            if (r.channel != null) channels.add(r.channel);
-            if (channel == null || channel.equals(r.channel)) {
-                bySegment.computeIfAbsent(r.segment, _ -> new ArrayList<>()).add(r.latencyMs);
+            var rowChannel = (String) r[0];
+            var segment = (String) r[1];
+            var latencyMs = (Long) r[2];
+            if (rowChannel != null) channels.add(rowChannel);
+            if (channel == null || channel.equals(rowChannel)) {
+                bySegment.computeIfAbsent(segment, _ -> new ArrayList<>()).add(latencyMs);
             }
         }
 
         var resp = new JsonObject();
         resp.addProperty(KEY_SINCE, since.toString());
-        resp.add("channels", INSTANCE.toJsonTree(channels));
+        resp.add("channels", GSON.toJsonTree(channels));
         resp.add("segments", LatencyStats.aggregate(bySegment));
         renderJSON(resp.toString());
     }
@@ -182,7 +194,7 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Clear persisted latency metric rows")
     public static void clearLatencyRows() {
         LatencyMetric.deleteAll();
-        renderJSON(INSTANCE.toJson(new StatusResponse(STATUS_RESET)));
+        renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
     }
 
     /**
@@ -203,7 +215,7 @@ public class ApiMetricsController extends Controller {
                     m.createdAt.toString(), m.agentId, m.channel, m.contentType, m.algorithm,
                     m.tokensBefore, m.tokensAfter, m.kind.name(), m.ccrHit));
         }
-        renderJSON(INSTANCE.toJson(new CompressionResponse(since.toString(), rows)));
+        renderJSON(GSON.toJson(new CompressionResponse(since.toString(), rows)));
     }
 
     /** DELETE /api/metrics/compression — clear all recorded compression metrics. */
@@ -211,7 +223,7 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Reset (delete) all compression metrics")
     public static void resetCompression() {
         CompressionMetrics.reset();
-        renderJSON(INSTANCE.toJson(new StatusResponse(STATUS_RESET)));
+        renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
     }
 
     /**
@@ -301,7 +313,7 @@ public class ApiMetricsController extends Controller {
                     (String) r[4]));
         }
 
-        renderJSON(INSTANCE.toJson(new CostResponse(since.toString(), rows)));
+        renderJSON(GSON.toJson(new CostResponse(since.toString(), rows)));
     }
 
     /** Parsed loadtest request — collapses the body-parsing branch tower into one record carrier. */
@@ -385,7 +397,7 @@ public class ApiMetricsController extends Controller {
                 LoadTestRunner.disable();
             }
 
-            renderJSON(INSTANCE.toJson(buildLoadtestResponse(result, input)));
+            renderJSON(GSON.toJson(buildLoadtestResponse(result, input)));
         } catch (Result r) {
             throw r;
         } catch (Exception e) {
@@ -541,13 +553,13 @@ public class ApiMetricsController extends Controller {
         // null otherwise). Renders as an array of {turn, count, ttftMeanMs,
         // ttftP50Ms, ...} objects, ordered by turn position.
         if (result.turnBuckets() != null) {
-            out.add("turnBuckets", INSTANCE.toJsonTree(result.turnBuckets()));
+            out.add("turnBuckets", GSON.toJsonTree(result.turnBuckets()));
         }
         // Server-side segment breakdown for this run only — see
         // LoadTestRunner.SegmentBreakdown. Always present (single-turn
         // runs still benefit from the segment view).
         if (result.serverSegments() != null && !result.serverSegments().isEmpty()) {
-            out.add("serverSegments", INSTANCE.toJsonTree(result.serverSegments()));
+            out.add("serverSegments", GSON.toJsonTree(result.serverSegments()));
         }
         return out;
     }
@@ -556,7 +568,7 @@ public class ApiMetricsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void stopLoadtest() {
         LoadTestHarness.stop();
-        renderJSON(INSTANCE.toJson(new StatusResponse("stopped")));
+        renderJSON(GSON.toJson(new StatusResponse("stopped")));
     }
 
     /** DELETE /api/metrics/loadtest/data — delete loadtest conversations, messages, and events. */
@@ -564,7 +576,7 @@ public class ApiMetricsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void cleanLoadtest() {
         LoadTestRunner.cleanupConversations();
-        renderJSON(INSTANCE.toJson(new StatusResponse("cleaned")));
+        renderJSON(GSON.toJson(new StatusResponse("cleaned")));
     }
 
     @SuppressWarnings("java:S2259")

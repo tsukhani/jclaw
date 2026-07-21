@@ -19,12 +19,12 @@ import services.EventLogger;
 import java.util.List;
 import java.util.Set;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
 public class ApiChannelsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private record ChannelView(Long id, String channelType, JsonElement config,
                                boolean enabled, String createdAt, String updatedAt) {

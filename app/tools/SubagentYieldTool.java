@@ -270,7 +270,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("action", "yielded");
         payload.put(PARAM_RUN_ID, String.valueOf(runId));
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     /** JCLAW-498: resolve a batch-collect request — {@code all:true} collects every
@@ -405,6 +405,6 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         if (run.childConversation != null) {
             alreadyDone.put("conversation_id", String.valueOf(run.childConversation.id));
         }
-        return GsonHolder.INSTANCE.toJson(alreadyDone, Map.class);
+        return GsonHolder.GSON.toJson(alreadyDone, Map.class);
     }
 }

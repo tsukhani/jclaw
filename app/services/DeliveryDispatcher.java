@@ -348,7 +348,7 @@ public final class DeliveryDispatcher {
         var msg = ConversationService.appendMessage(conv, MessageRole.USER, text,
                 null, null, null);
         msg.messageKind = "subagent_send";
-        msg.metadata = GsonHolder.INSTANCE.toJson(metadata, Map.class);
+        msg.metadata = GsonHolder.GSON.toJson(metadata, Map.class);
         msg.save();
         return DispatchResult.delivered();
     }

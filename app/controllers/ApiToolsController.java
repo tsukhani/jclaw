@@ -20,12 +20,12 @@ import utils.ApiResponses;
 import java.util.HashMap;
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
 public class ApiToolsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private static final String KEY_ENABLED = "enabled";
 

@@ -2,16 +2,14 @@ package services.transcription;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
-import utils.HttpFactories;
+import services.sidecar.SidecarHttpClient;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -24,10 +22,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * processes share the host. A JVM-wide fair lock serializes calls so
  * concurrent conversations queue instead of thrashing the GPU.
  */
-public class AsrSidecarClient {
-
-
-    private static final MediaType JSON = MediaType.get("application/json");
+public class AsrSidecarClient extends SidecarHttpClient {
 
     /** JCLAW-620: the sidecar is one-inference-at-a-time by design (HTTP
      *  409 when busy). Serialize all sidecar calls JVM-wide with a FAIR
@@ -36,32 +31,19 @@ public class AsrSidecarClient {
     private static final ReentrantLock SIDECAR_LOCK =
             new ReentrantLock(true);
 
-    private final String baseUrlOverride;
-    private final OkHttpClient client;
-
     public AsrSidecarClient() {
-        // Derived from the shared general client (reuses its pool/dispatcher)
-        // but with the per-read socket timeout lifted: the sidecar's first
-        // /diarize lazily loads the pipeline (gated download + torch import)
-        // and legitimately sends nothing for minutes. The JCLAW-565 UAT
-        // caught general()'s 30s read timeout firing mid-load while the
-        // sidecar went on to succeed. DELIBERATE TRADEOFF (JCLAW-626): with
-        // readTimeout=0, a genuinely hung socket is bounded ONLY by the
-        // 1800s per-call callTimeout set on every request below — do not
-        // "fix" the zero without replacing that bound.
-        this(null, HttpFactories.general().newBuilder()
-                .readTimeout(Duration.ZERO)
-                .build());
+        this(null, defaultClient());
     }
 
     /** Test seam: fixed base URL (no sidecar spawn) + injected client. */
     public AsrSidecarClient(String baseUrlOverride, OkHttpClient client) {
-        this.baseUrlOverride = baseUrlOverride;
-        this.client = client;
+        super(baseUrlOverride, client);
     }
 
-
-
+    @Override
+    protected ReentrantLock sidecarLock() {
+        return SIDECAR_LOCK;
+    }
 
 
 
@@ -78,12 +60,7 @@ public class AsrSidecarClient {
      */
     public List<WhisperTranscriber.Segment> transcribe(Path audioFile, String model,
                                                           String language) {
-        SIDECAR_LOCK.lock();
-        try {
-            return transcribeLocked(audioFile, model, language);
-        } finally {
-            SIDECAR_LOCK.unlock();
-        }
+        return withSidecarLock(() -> transcribeLocked(audioFile, model, language));
     }
 
     private List<WhisperTranscriber.Segment> transcribeLocked(Path audioFile, String model,
@@ -165,11 +142,5 @@ public class AsrSidecarClient {
         } catch (IOException e) {
             throw new TranscriptionException("ASR sidecar unreachable: " + e.getMessage(), e);
         }
-    }
-
-    private static String truncate(String s) {
-        if (s == null) return "";
-        var oneLine = s.replaceAll("\\s+", " ").strip();
-        return oneLine.length() > 300 ? oneLine.substring(0, 300) + "…" : oneLine;
     }
 }

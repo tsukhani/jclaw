@@ -34,12 +34,12 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
 public class ApiAgentsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     // JCLAW-682: canonical error codes for the ApiResponses envelope.
 

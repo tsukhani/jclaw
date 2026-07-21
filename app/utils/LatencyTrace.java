@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -37,7 +38,7 @@ public final class LatencyTrace {
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
     private final AtomicLong toolExecMs = new AtomicLong();
     private final AtomicInteger toolRoundCount = new AtomicInteger();
-    private volatile boolean ended;
+    private final AtomicBoolean ended = new AtomicBoolean();
 
     public LatencyTrace() {
         this(null, 0L);
@@ -119,8 +120,11 @@ public final class LatencyTrace {
      * provider-missing errors.
      */
     public void end() {
-        if (ended) return;
-        ended = true;
+        // CAS single-shot: the terminal callbacks can race across the worker,
+        // streaming, and IO threads, so a non-atomic check-then-set could let
+        // two callers both pass the guard and double-emit. Mirrors the
+        // QueueDrainOrchestrator double-terminal CAS.
+        if (!ended.compareAndSet(false, true)) return;
         long endNs = System.nanoTime();
 
         Long prologueDone = marks.get(PROLOGUE_DONE);

@@ -27,7 +27,7 @@ import static controllers.BindingKeys.KEY_ENABLED;
 import static controllers.BindingKeys.KEY_REPLY_TO_MODE;
 import static controllers.BindingKeys.KEY_TRANSPORT;
 import static controllers.BindingKeys.KEY_WEBHOOK_BASE_URL;
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * CRUD API for per-user Telegram bindings (JCLAW-89). Each binding maps one bot
@@ -38,7 +38,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiTelegramBindingsController extends ApiBindingController {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     // Sonar java:S2119 — a single shared SecureRandom for webhook-secret
     // generation. SecureRandom is thread-safe and meant to be reused; a fresh

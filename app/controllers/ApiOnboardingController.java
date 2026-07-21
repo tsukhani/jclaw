@@ -11,7 +11,7 @@ import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * First-login guided-tour flag. Stores a high-water "farthest step reached"
@@ -30,7 +30,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiOnboardingController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     public static final String CONFIG_KEY = "onboarding.tourMaxStep";
     private static final int TOTAL_STEPS = 6;

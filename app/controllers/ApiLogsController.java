@@ -13,12 +13,12 @@ import utils.JpqlFilter;
 import java.time.Instant;
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
 public class ApiLogsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     public record LogEntry(Long id, String timestamp, String level, String category,
                            String agentId, String channel, String message, String details) {}

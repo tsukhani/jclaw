@@ -470,6 +470,31 @@ class TaskToolTest extends UnitTest {
     }
 
     @Test
+    void updateTaskCompletesBareChannelDeliveryFromConversation() {
+        // JCLAW-828: a bare channel name ("web") patched onto an existing task
+        // via updateTask must route through the SAME inference createTask uses,
+        // backfilling the target from the calling conversation. Before the fix
+        // the bare value was stored verbatim — DeliverySpec.validate() accepted
+        // it but DeliveryDispatcher rejected "web" (no target) at every fire.
+        var conv = Tx.run(() -> {
+            var c = new models.Conversation();
+            c.agent = agent;
+            c.channelType = "web";
+            c.save();
+            return c;
+        });
+        tool.execute("""
+                {"action":"createTask","name":"u-bare","schedule":"now","delivery":"telegram:999"}""", agent);
+        var taskId = findTaskByName("u-bare").id;
+
+        tool.execute("""
+                {"action":"updateTask","name":"u-bare","delivery":"web"}""", agent);
+        var fresh = (Task) Tx.run(() -> Task.findById(taskId));
+        assertEquals("web:" + conv.id, fresh.delivery,
+                "bare channel on updateTask must be completed with the calling conversation id");
+    }
+
+    @Test
     void updateTaskPayloadType() {
         tool.execute("""
                 {"action":"createTask","name":"u-pt","schedule":"now"}""", agent);

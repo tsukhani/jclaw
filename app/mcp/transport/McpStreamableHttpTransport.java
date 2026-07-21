@@ -2,6 +2,7 @@ package mcp.transport;
 
 import mcp.jsonrpc.JsonRpc;
 import okhttp3.Call;
+import okhttp3.Callback;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -40,10 +41,11 @@ import java.util.function.Consumer;
  * streaming sub-mode of HTTP, chosen by the server per request via Content-Type.
  *
  * <p><b>Threading.</b> {@link #send} returns as soon as the POST request is
- * dispatched; the response is read on a fresh virtual thread and delivered
- * via {@code onMessage}. Concurrent {@code send}s are independent HTTP calls,
- * pooled and dispatched by OkHttp's virtual-thread executor (per
- * {@link HttpFactories#llmStreaming}).
+ * enqueued; the response is read on OkHttp's dispatcher executor (a virtual
+ * thread per {@link HttpFactories#llmStreaming}) and delivered via
+ * {@code onMessage}. Concurrent {@code send}s are independent HTTP calls,
+ * pooled and dispatched by that executor, so the dispatcher's per-host
+ * request caps apply and provide backpressure.
  *
  * <p><b>Out of scope.</b> The optional GET-SSE channel for receiving
  * server-initiated events between requests is not implemented; for the
@@ -107,16 +109,33 @@ public final class McpStreamableHttpTransport implements McpTransport {
         var call = HttpFactories.llmStreaming().newCall(builder.build());
         var token = callSeq.incrementAndGet();
         inFlight.put(token, call);
-        Thread.ofVirtual().name("mcp-http-" + name + "-" + token).start(() -> {
-            try (var resp = call.execute()) {
-                handleResponse(resp);
-            } catch (IOException | RuntimeException e) {
-                // RuntimeException too: an unexpected parse/dereference failure
-                // on this reader VT would otherwise vanish silently — route it
-                // to onError so the connection manager can react.
-                if (!closed) onError.accept(e);
-            } finally {
-                inFlight.remove(token);
+        // Enqueue through OkHttp's Dispatcher rather than firing a per-send
+        // virtual thread + call.execute(): the dispatcher owns the virtual-thread
+        // executor (per HttpFactories#llmStreaming) and enforces the operator's
+        // per-host request caps, giving sends real backpressure instead of an
+        // unbounded fan-out of concurrent connections.
+        call.enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                try {
+                    if (!closed) onError.accept(e);
+                } finally {
+                    inFlight.remove(token);
+                }
+            }
+
+            @Override
+            public void onResponse(Call call, Response resp) {
+                try (resp) {
+                    handleResponse(resp);
+                } catch (IOException | RuntimeException e) {
+                    // RuntimeException too: an unexpected parse/dereference failure
+                    // while reading the response would otherwise vanish silently —
+                    // route it to onError so the connection manager can react.
+                    if (!closed) onError.accept(e);
+                } finally {
+                    inFlight.remove(token);
+                }
             }
         });
     }

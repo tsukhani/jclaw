@@ -511,7 +511,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // off — useful when the parent decides whether to re-summarize or
         // to surface the truncation to the user.
         if (runOutcome.replyTruncated()) payload.put(FIELD_TRUNCATED, Boolean.TRUE);
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     /**
@@ -594,12 +594,19 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var summary = SubagentChildBootstrap.buildInheritSummary(parentAgent, parentConvIdFinal, fContext);
 
         var runIds = new ArrayList<String>();
+        var failures = new LinkedHashMap<String, String>();
         for (var spec : specs) {
             var perArgs = new SubagentSpawnArgs(null, spec.task(), spec.label(), spec.agentId(),
                     null, null, fMode, fContext, fTimeout, true);
             var bootstrap = SubagentChildBootstrap.bootstrapChildInTx(parentAgent, parentConv, perArgs, summary);
             if (bootstrap.error() != null) {
-                continue; // skip a child that failed to bootstrap; the rest still run
+                // JCLAW-823: don't silently drop a child whose bootstrap failed.
+                // Record the reason against its task so the parent LLM sees which
+                // spawns were skipped and why, and emit an auditable event per skip
+                // (no child/run id yet — bootstrap never got that far).
+                failures.put(spec.task(), bootstrap.error());
+                EventLogger.recordSubagentError(parentAgent.name, null, null, fMode, fContext, bootstrap.error());
+                continue; // the rest of the fan-out still runs
             }
             var runId = SubagentRunStore.insertSubagentRun(parentAgentId, bootstrap.childAgentId(),
                     parentConvIdFinal, bootstrap.childConvId(), spec.label());
@@ -616,8 +623,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         payload.put("run_ids", runIds);
         payload.put("count", runIds.size());
         payload.put(FIELD_STATUS, SubagentRun.Status.RUNNING.name());
+        // JCLAW-823: surface bootstrap-skipped children (task -> reason) so the
+        // parent LLM can retry or report them instead of assuming all N launched.
+        if (!failures.isEmpty()) {
+            payload.put("skipped", failures);
+            payload.put("skipped_count", failures.size());
+        }
         payload.put("hint", "children run in parallel; collect them all with one subagent_yield using runIds (or all=true)");
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     /** JCLAW-498: one entry of a batch fan-out. */

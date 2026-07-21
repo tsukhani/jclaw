@@ -145,7 +145,7 @@ class BindingCredentialRedactionTest extends UnitTest {
         var t = new TelegramBinding();
         t.botToken = "SECRET-bot-token-value";
         t.webhookSecret = "SECRET-webhook-value";
-        var json = utils.GsonHolder.INSTANCE.toJson(t);
+        var json = utils.GsonHolder.GSON.toJson(t);
         assertFalse(json.contains("SECRET-bot-token-value"),
                 "Gson must not serialize botToken in the clear");
         assertFalse(json.contains("SECRET-webhook-value"),

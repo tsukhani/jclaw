@@ -36,7 +36,7 @@ import java.util.Map;
  */
 public class WhatsAppChannel implements Channel {
 
-    private static final Gson gson = GsonHolder.INSTANCE;
+    private static final Gson gson = GsonHolder.GSON;
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get(HttpKeys.APPLICATION_JSON);
 

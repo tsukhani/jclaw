@@ -525,17 +525,16 @@ class PlaywrightToolTest extends UnitTest {
 
     @Test
     void cleanupIdleSessionsRemovesEntriesPastTimeout() throws Exception {
-        // Inject a synthetic BrowserSession with lastUsed = 0L (epoch — far
-        // older than the 5-minute IDLE_TIMEOUT_MS) and null Playwright /
-        // Browser / Page handles. destroySession's three try/catch blocks
-        // swallow the resulting NPEs, so the cleanup path runs end-to-end
-        // and removes the entry without ever touching a live driver.
+        // Inject a synthetic SessionHolder with lastUsed = 0L (epoch — far
+        // older than the 5-minute IDLE_TIMEOUT_MS) and no live session (null).
+        // With no browser handles to close, retire() skips destroySession and
+        // simply drops the entry, so the cleanup path runs end-to-end and
+        // removes the holder without ever touching a live driver.
         //
-        // This exercises the forEach + computeIfPresent + tryLock + destroy
-        // sequence, including the "return null" branch that triggers entry
-        // removal from the ConcurrentHashMap.
+        // This exercises the forEach + tryLock + retire sequence, including the
+        // value-checked remove that evicts the holder from the ConcurrentHashMap.
         var sessions = sessionsMap();
-        var staleSession = newBrowserSession(0L);
+        var staleSession = newSessionHolder(0L);
         var key = "stale-cleanup-" + System.nanoTime();
         sessions.put(key, staleSession);
         assertTrue(sessions.containsKey(key), "precondition: stale entry seeded");
@@ -557,7 +556,7 @@ class PlaywrightToolTest extends UnitTest {
         // must survive a cleanup tick. This pins the timeout boundary so a
         // refactor that flips the comparison sign (>/<=) breaks loudly.
         var sessions = sessionsMap();
-        var freshSession = newBrowserSession(System.currentTimeMillis());
+        var freshSession = newSessionHolder(System.currentTimeMillis());
         var key = "fresh-cleanup-" + System.nanoTime();
         sessions.put(key, freshSession);
         try {
@@ -579,25 +578,22 @@ class PlaywrightToolTest extends UnitTest {
     }
 
     /**
-     * Construct a {@code BrowserSession} record with null Playwright/Browser/Page
-     * handles, a fresh lock, and the supplied {@code lastUsed} timestamp. Looks
-     * up the canonical constructor by parameter types rather than by array
-     * index — {@code getDeclaredConstructors()} order is JVM-implementation
-     * defined, and on CI it surfaced a synthetic 0-arg constructor at index 0
-     * that broke the previous {@code [0]} variant.
+     * Construct a {@code SessionHolder} with no live {@code session} (null) and
+     * the supplied {@code lastUsed} timestamp — the per-agent slot the
+     * {@code sessions} map holds since JCLAW-821 moved the browser launch out of
+     * the ConcurrentHashMap bin lock. The no-arg constructor initialises the
+     * final lock and defaults {@code session}/{@code removed}; only
+     * {@code lastUsed} is overridden reflectively to drive the idle-timeout math.
      */
-    private static Object newBrowserSession(long lastUsed) throws Exception {
-        var sessionClass = Class.forName("tools.PlaywrightBrowserTool$BrowserSession");
-        var ctor = sessionClass.getDeclaredConstructor(
-                com.microsoft.playwright.Playwright.class,
-                com.microsoft.playwright.Browser.class,
-                com.microsoft.playwright.Page.class,
-                java.util.concurrent.locks.ReentrantLock.class,
-                java.util.Set.class,
-                long.class);
+    private static Object newSessionHolder(long lastUsed) throws Exception {
+        var holderClass = Class.forName("tools.PlaywrightBrowserTool$SessionHolder");
+        var ctor = holderClass.getDeclaredConstructor();
         ctor.setAccessible(true);
-        return ctor.newInstance(null, null, null,
-                new java.util.concurrent.locks.ReentrantLock(), java.util.Set.of(), lastUsed);
+        var holder = ctor.newInstance();
+        var lastUsedField = holderClass.getDeclaredField("lastUsed");
+        lastUsedField.setAccessible(true);
+        lastUsedField.setLong(holder, lastUsed);
+        return holder;
     }
 
     /**

@@ -715,7 +715,7 @@ final class SubagentAcpRunner {
                 msg.role = MessageRole.ASSISTANT.value;
                 msg.messageKind = SubagentSpawnTool.MESSAGE_KIND_CODINGRUN_STEP;
                 msg.content = ev.text();
-                msg.metadata = GsonHolder.INSTANCE.toJson(
+                msg.metadata = GsonHolder.GSON.toJson(
                         Map.of("seq", seq, "kind", ev.kind()), Map.class);
                 msg.save();
             });

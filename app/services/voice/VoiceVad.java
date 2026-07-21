@@ -9,6 +9,7 @@ import play.Play;
 import services.ConfigService;
 import utils.HttpFactories;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -94,7 +95,7 @@ public final class VoiceVad implements AutoCloseable {
 
     /** Absolute path of the Silero weights, downloading them on first use. */
     static Path ensureModel() {
-        var dir = new java.io.File(Play.applicationPath, "data/voice-models").toPath();
+        var dir = new File(Play.applicationPath, "data/voice-models").toPath();
         var model = dir.resolve(MODEL_FILE);
         if (Files.isRegularFile(model)) return model;
         var url = ConfigService.get("voice.vad.modelUrl");

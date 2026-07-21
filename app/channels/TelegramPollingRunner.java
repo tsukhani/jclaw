@@ -337,17 +337,30 @@ public final class TelegramPollingRunner {
                         ("Polling binding %d disabled: Telegram rejected its bot token (getMe "
                                 + "401/403/404). The token is invalid or revoked — fix it and "
                                 + "re-enable the binding.").formatted(target.id()));
-                disableBindingForInvalidToken(target.id());
-                var app = APP.get();
-                if (app != null && ACTIVE.containsKey(target.id())) {
-                    unregisterInternal(app, target.id(), target.token());
-                }
+                disableAndUnregisterRejected(target);
             } catch (Exception e) {
                 // One bad binding must not abort the rest of the sweep.
                 EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
                         "Token health probe error for binding %d: %s".formatted(
                                 target.id(), e.getMessage()));
             }
+        }
+    }
+
+    /**
+     * Persist {@code enabled = false} and tear down the live session for a
+     * binding whose token Telegram rejected. Runs under the class monitor —
+     * the same one {@link #reconcile()} and {@link #stop()} serialize on — so a
+     * concurrent admin save can't race a half-applied disable: it either sees
+     * the pre-disable registry and reconciles the row away afterward, or waits
+     * for this to complete. Without the monitor the {@link #ACTIVE}/
+     * {@link #SESSIONS} mutation here could interleave with a reconcile mid-flight.
+     */
+    private static synchronized void disableAndUnregisterRejected(TokenTarget target) {
+        disableBindingForInvalidToken(target.id());
+        var app = APP.get();
+        if (app != null && ACTIVE.containsKey(target.id())) {
+            unregisterInternal(app, target.id(), target.token());
         }
     }
 

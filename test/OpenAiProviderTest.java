@@ -122,4 +122,33 @@ class OpenAiProviderTest extends UnitTest {
         assertEquals(0, usage.reasoningTokens(),
                 "non-reasoning fields under completion_tokens_details must not bleed in");
     }
+
+    // =====================
+    // parseUsage — JSON-null token fields (JCLAW-823)
+    // =====================
+
+    @Test
+    void parseUsageTreatsJsonNullTokenFieldsAsZero() {
+        var p = provider();
+        // A provider that emits "prompt_tokens": null (etc.) used to crash the
+        // whole 200-response parse via getAsInt() on JsonNull. parseUsage now
+        // routes through readUsageInt, which treats null like missing → 0.
+        var usage = p.parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": null, "completion_tokens": null, "total_tokens": null}
+                """).getAsJsonObject());
+        assertEquals(0, usage.promptTokens());
+        assertEquals(0, usage.completionTokens());
+        assertEquals(0, usage.totalTokens());
+    }
+
+    @Test
+    void parseUsageStillReadsPresentTokenFields() {
+        var p = provider();
+        var usage = p.parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+                """).getAsJsonObject());
+        assertEquals(11, usage.promptTokens());
+        assertEquals(7, usage.completionTokens());
+        assertEquals(18, usage.totalTokens());
+    }
 }

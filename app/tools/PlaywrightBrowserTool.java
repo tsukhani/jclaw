@@ -32,7 +32,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     private static final int MAX_TEXT_LENGTH = 50_000;
     private static final long IDLE_TIMEOUT_MS = 5L * 60 * 1000; // 5 minutes
-    private static final ConcurrentHashMap<String, BrowserSession> sessions = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, SessionHolder> sessions = new ConcurrentHashMap<>();
 
     // Action names dispatched in execute()
     private static final String ACTION_NAVIGATE = "navigate";
@@ -48,14 +48,8 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static final String ARG_SELECTOR = "selector";
 
     /**
-     * Playwright's {@link Page} API is not thread-safe — concurrent navigate /
-     * screenshot calls on the same Page corrupt its internal request map and
-     * surface as {@code "Object doesn't exist: request@<hash>"}. When the LLM
-     * emits multiple browser tool calls in a single streaming round,
-     * {@link agents.AgentRunner#executeToolsParallel} dispatches them on
-     * separate virtual threads, so the tool must serialize Page access itself.
-     * The {@code lock} is held for the full duration of each {@code execute()}
-     * call on this agent's session.
+     * The live browser resources for one agent session. Immutable; a relaunch
+     * (JCLAW-731 DNS re-pin) builds a fresh instance rather than mutating this one.
      *
      * <p>{@code pinnedRules} records the {@code --host-resolver-rules} MAP
      * clauses this browser was launched with (JCLAW-731). Because that flag is
@@ -65,11 +59,38 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * just the entry host.
      */
     private record BrowserSession(Playwright playwright, Browser browser, Page page,
-                                  ReentrantLock lock, Set<String> pinnedRules, long lastUsed) {
-        BrowserSession withLastUsed() {
-            return new BrowserSession(playwright, browser, page, lock, pinnedRules,
-                    System.currentTimeMillis());
-        }
+                                  Set<String> pinnedRules) {
+    }
+
+    /**
+     * Per-agent session slot held in the {@link #sessions} map. The map only
+     * ever stores holders, and installing one is an O(1), non-blocking
+     * {@code computeIfAbsent} — the blocking work (browser launch in seconds,
+     * Chromium install in minutes) runs under {@link #lock}, never inside a
+     * ConcurrentHashMap bin-node monitor where a synchronized-around-blocking-IO
+     * stall would pin the virtual-thread carrier (JCLAW-821).
+     *
+     * <p>{@link #lock} is stable for the agent's lifetime and is held for the
+     * full duration of each {@code execute()} call, so parallel browser tool
+     * calls in one streaming round (dispatched on separate virtual threads by
+     * {@link agents.AgentRunner#executeToolsParallel}) serialize against the
+     * same {@link Page} — Playwright's Page is not thread-safe — and a launch or
+     * teardown can never overlap a live Page op. Concurrent navigate / screenshot
+     * calls on the same Page otherwise corrupt its internal request map and
+     * surface as {@code "Object doesn't exist: request@<hash>"}.
+     *
+     * <p>{@link #session} is the live browser, lazily launched and {@code null}
+     * before first use and after teardown; {@link #lastUsed} drives idle cleanup;
+     * {@link #removed} fences a holder retired from the map so a thread that
+     * captured it just before removal retries instead of launching into an orphan.
+     * All three are guarded by {@link #lock} ({@code lastUsed} is also read racily
+     * by {@link #cleanupIdleSessions}'s idle fast-path, hence volatile).
+     */
+    private static final class SessionHolder {
+        final ReentrantLock lock = new ReentrantLock();
+        BrowserSession session;
+        volatile long lastUsed = System.currentTimeMillis();
+        boolean removed;
     }
 
     @Override
@@ -143,7 +164,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         // validated IP via --host-resolver-rules, so Chromium connects only
         // where we checked (SNI-safe — the hostname stays in the URL, so the
         // Host header and TLS SNI are preserved). --host-resolver-rules is a
-        // launch arg, so getOrCreateSession relaunches the browser (carrying the
+        // launch arg, so ensureSession relaunches the browser (carrying the
         // union of all prior pins) whenever a navigation targets a host not
         // already pinned — every navigated host, not just the entry host, ends
         // up connect-time pinned. The route interceptor keeps re-validating
@@ -158,12 +179,15 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             }
         }
 
-        // Acquire the per-agent lock so parallel tool calls in the same round
-        // (e.g. navigate + screenshot dispatched by executeToolsParallel) run
-        // serially against the same Page. Playwright's Page is not thread-safe.
-        var session = getOrCreateSession(agent.name, pinRule);
-        session.lock().lock();
+        // Acquire the per-agent lock BEFORE touching the browser so parallel
+        // tool calls in the same round (e.g. navigate + screenshot dispatched by
+        // executeToolsParallel) run serially against the same Page (Playwright's
+        // Page is not thread-safe), AND so the blocking browser launch/relaunch
+        // runs under this lock rather than inside a ConcurrentHashMap bin monitor
+        // (JCLAW-821). Installing the holder is O(1); ensureSession does the launch.
+        var holder = acquireHolder(agent.name);
         try {
+            var session = ensureSession(holder, agent.name, pinRule);
             var page = session.page();
             return switch (action) {
                 case ACTION_NAVIGATE -> navigate(page, args.get("url").getAsString());
@@ -181,7 +205,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         } catch (Exception e) {
             return "Error: %s".formatted(e.getMessage());
         } finally {
-            session.lock().unlock();
+            holder.lock.unlock();
         }
     }
 
@@ -286,33 +310,63 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     // --- Session management ---
 
-    private BrowserSession getOrCreateSession(String agentName, Optional<String> hostResolverRule) {
-        // Use compute() for atomic get-or-create — prevents race between
-        // concurrent getOrCreateSession and closeSession on the same key.
-        return sessions.compute(agentName, (key, existing) -> {
-            if (existing != null && existing.page().isClosed()) {
-                destroySession(existing, key);
-                existing = null;
+    /**
+     * Return this agent's holder with its lock held (the caller must unlock).
+     * Installing the holder is an O(1), non-blocking {@code computeIfAbsent}; the
+     * actual browser launch is deferred to {@link #ensureSession} under the
+     * returned lock (JCLAW-821). Retries if the holder is retired from the map
+     * between the {@code computeIfAbsent} and the {@code lock()} — otherwise a
+     * launch into that orphaned holder would leak (its browser would be tracked
+     * by no map entry).
+     */
+    private static SessionHolder acquireHolder(String agentName) {
+        while (true) {
+            var holder = sessions.computeIfAbsent(agentName, k -> new SessionHolder());
+            holder.lock.lock();
+            if (!holder.removed) {
+                return holder;
             }
-            if (existing != null) {
-                // The DNS pin is a launch-time arg, so a navigation to a host
-                // not already pinned can't be added to the running Chromium.
-                var relaunchPins = pinsForNavigation(existing.pinnedRules(), hostResolverRule);
-                if (relaunchPins.isEmpty()) {
-                    // Rule empty or already pinned — reuse the live session as-is.
-                    return existing.withLastUsed();
-                }
-                // Relaunch with the union of prior pins + the new host so every
-                // previously-visited host stays connect-time pinned. This discards
-                // the current page state, but a cross-host navigation loads a fresh
-                // page anyway, so nothing useful is lost.
-                destroySession(existing, key);
-                return launchSession(key, relaunchPins.get());
+            // Retired by a concurrent close / idle-cleanup between the map lookup
+            // and the lock; drop it and re-resolve the current holder.
+            holder.lock.unlock();
+        }
+    }
+
+    /**
+     * Launch, reuse, or relaunch this agent's browser as needed, returning the
+     * live session. Runs under {@code holder.lock} (held by the caller), so the
+     * blocking launch never executes inside a ConcurrentHashMap callback
+     * (JCLAW-821). Refreshes {@code lastUsed} so idle cleanup sees the activity.
+     */
+    private static BrowserSession ensureSession(SessionHolder holder, String agentName,
+                                                Optional<String> hostResolverRule) {
+        holder.lastUsed = System.currentTimeMillis();
+        var existing = holder.session;
+        if (existing != null && existing.page().isClosed()) {
+            destroySession(existing, agentName);
+            holder.session = null;
+            existing = null;
+        }
+        if (existing != null) {
+            // The DNS pin is a launch-time arg, so a navigation to a host not
+            // already pinned can't be added to the running Chromium.
+            var relaunchPins = pinsForNavigation(existing.pinnedRules(), hostResolverRule);
+            if (relaunchPins.isEmpty()) {
+                // Rule empty or already pinned — reuse the live session as-is.
+                return existing;
             }
-            var initialPins = new LinkedHashSet<String>();
-            hostResolverRule.ifPresent(initialPins::add);
-            return launchSession(key, initialPins);
-        });
+            // Relaunch with the union of prior pins + the new host so every
+            // previously-visited host stays connect-time pinned. This discards
+            // the current page state, but a cross-host navigation loads a fresh
+            // page anyway, so nothing useful is lost. Null the reference before
+            // launching so a launch failure leaves no dangling torn-down session.
+            destroySession(existing, agentName);
+            holder.session = null;
+            return holder.session = launchSession(agentName, relaunchPins.get());
+        }
+        var initialPins = new LinkedHashSet<String>();
+        hostResolverRule.ifPresent(initialPins::add);
+        return holder.session = launchSession(agentName, initialPins);
     }
 
     /**
@@ -347,11 +401,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         ensureBrowserInstalled();
         // Build the driver -> browser -> page -> route chain under a guard: a
         // failure partway through must best-effort close whatever OS processes
-        // were already spawned before rethrowing. launchSession runs inside
-        // getOrCreateSession's compute(...), so a throw propagates with NO map
-        // entry — nothing downstream would ever tear these down, so an unguarded
-        // partial construction leaks the Playwright driver + Chromium processes
-        // for the JVM lifetime. Mirrors destroySession's independent-close teardown.
+        // were already spawned before rethrowing. launchSession runs under the
+        // holder lock before holder.session is assigned, so a throw leaves NO
+        // reference to the partial browser — nothing downstream would ever tear
+        // these down, so an unguarded partial construction leaks the Playwright
+        // driver + Chromium processes for the JVM lifetime. Mirrors
+        // destroySession's independent-close teardown.
         Playwright playwright = null;
         Browser browser = null;
         Page page = null;
@@ -386,8 +441,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                     route.abort();
                 }
             });
-            return new BrowserSession(playwright, browser, page,
-                    new ReentrantLock(), Set.copyOf(pinnedRules), System.currentTimeMillis());
+            return new BrowserSession(playwright, browser, page, Set.copyOf(pinnedRules));
         } catch (RuntimeException e) {
             // Best-effort teardown of whatever was constructed, newest first,
             // each guarded independently (mirrors destroySession).
@@ -399,19 +453,33 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     }
 
     public static void closeSession(String agentName) {
-        // Atomic remove — ConcurrentHashMap guarantees no race with compute().
-        // Acquire the session lock before tearing down so an in-flight Page op
+        // Acquire the holder lock before tearing down so an in-flight Page op
         // from another thread finishes cleanly (Playwright close() during a
         // live request would surface as "Object doesn't exist").
-        var session = sessions.remove(agentName);
-        if (session != null) {
-            session.lock().lock();
-            try {
-                destroySession(session, agentName);
-            } finally {
-                session.lock().unlock();
-            }
+        var holder = sessions.get(agentName);
+        if (holder == null) return;
+        holder.lock.lock();
+        try {
+            retire(holder, agentName);
+        } finally {
+            holder.lock.unlock();
         }
+    }
+
+    /**
+     * Tear down a holder's live browser and retire the holder from the map.
+     * Caller must hold {@code holder.lock}. The {@code removed} flag makes any
+     * thread that captured this holder just before removal retry in
+     * {@link #acquireHolder} rather than launch into an orphan; the value-checked
+     * {@code remove} leaves a freshly re-installed holder for the same key alone.
+     */
+    private static void retire(SessionHolder holder, String agentName) {
+        if (holder.session != null) {
+            destroySession(holder.session, agentName);
+            holder.session = null;
+        }
+        holder.removed = true;
+        sessions.remove(agentName, holder);
     }
 
     /** Tear down a session's resources. Safe to call from any thread. */
@@ -427,24 +495,21 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     /** Called periodically to clean up idle sessions. */
     public static void cleanupIdleSessions() {
         var now = System.currentTimeMillis();
-        // Use removeIf-style iteration — avoids ConcurrentModificationException
-        // and makes remove+destroy atomic per key.
-        sessions.forEach((name, session) -> {
-            if (now - session.lastUsed() > IDLE_TIMEOUT_MS) {
-                sessions.computeIfPresent(name, (k, s) -> {
-                    if (System.currentTimeMillis() - s.lastUsed() <= IDLE_TIMEOUT_MS) {
-                        return s; // refreshed between check and compute — keep
-                    }
-                    // tryLock: if an op is in flight the session isn't really
-                    // idle, so skip this round and revisit on the next tick.
-                    if (!s.lock().tryLock()) return s;
-                    try {
-                        destroySession(s, k);
-                        return null; // removes the entry
-                    } finally {
-                        s.lock().unlock();
-                    }
-                });
+        // forEach is weakly consistent and holds no bin lock, so the blocking
+        // teardown below runs outside any ConcurrentHashMap monitor.
+        sessions.forEach((name, holder) -> {
+            if (now - holder.lastUsed <= IDLE_TIMEOUT_MS) return;
+            // tryLock: if an op is in flight the session isn't really idle, so
+            // skip this round and revisit on the next tick.
+            if (!holder.lock.tryLock()) return;
+            try {
+                if (holder.removed) return; // already retired by a concurrent close
+                if (System.currentTimeMillis() - holder.lastUsed <= IDLE_TIMEOUT_MS) {
+                    return; // refreshed between the idle check and the lock — keep
+                }
+                retire(holder, name);
+            } finally {
+                holder.lock.unlock();
             }
         });
     }

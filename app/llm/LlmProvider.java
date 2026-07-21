@@ -60,6 +60,11 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     private static final int MAX_RETRIES = 3;
     private static final long[] BACKOFF_MS = {1000, 2000, 4000};
+    // Upper bound on a server-supplied Retry-After. The header is
+    // externally controlled, so a hostile or misconfigured upstream can park
+    // the calling (virtual) thread for an unbounded interval — cap it so a
+    // rogue value can't wedge a request for minutes.
+    private static final long RETRY_AFTER_MAX_SECONDS = 60;
 
     // OpenAI-compatible JSON field names used across request/response (de)serialization
     // and chunk-usage augmentation. Centralised so a typo can't drift one call site
@@ -359,7 +364,18 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
         var json = serializeRequest(request);
         var responseBody = executeWithRetry("/chat/completions", json, timeoutSeconds, channel);
-        return deserializeResponse(responseBody);
+        // A provider can return a 200 whose body is garbage (truncated JSON, an
+        // HTML error page, a missing "choices" array). deserializeResponse then
+        // throws a raw JsonSyntaxException / IllegalStateException — which
+        // chatWithFailover doesn't catch, so the failover never fires. Wrap it as
+        // an LlmException so provider-side garbage-with-200 is a failover trigger.
+        try {
+            return deserializeResponse(responseBody);
+        } catch (LlmException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new LlmException("Malformed 200 response from " + config.name(), e);
+        }
     }
 
     // ─── Streaming chat ──────────────────────────────────────────────────
@@ -512,8 +528,15 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         var request = new EmbeddingRequest(model, input);
         var json = gson.toJson(request);
         var responseBody = executeWithRetry("/embeddings", json, null, channel);
-        var response = gson.fromJson(responseBody, EmbeddingResponse.class);
-        if (response.data() == null || response.data().isEmpty()) {
+        EmbeddingResponse response;
+        try {
+            response = gson.fromJson(responseBody, EmbeddingResponse.class);
+        } catch (RuntimeException e) {
+            // Same garbage-with-200 concern as chat(): a malformed body must
+            // surface as an LlmException, not a raw JsonSyntaxException.
+            throw new LlmException("Malformed embeddings response from " + config.name(), e);
+        }
+        if (response == null || response.data() == null || response.data().isEmpty()) {
             throw new LlmException("Empty embedding response");
         }
         return response.data().getFirst().embedding();
@@ -670,10 +693,12 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         Exception lastException = null;
 
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            boolean alreadyBackedOff = false;
             try {
                 var outcome = attemptRequest(uri, auth, json, timeout, channel, attempt);
                 if (outcome.body() != null) return outcome.body();
                 if (outcome.error() != null) lastException = outcome.error();
+                alreadyBackedOff = outcome.alreadyBackedOff();
             } catch (LlmException e) {
                 throw e;
             } catch (InterruptedException ie) {
@@ -683,7 +708,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                 lastException = e;
             }
 
-            if (attempt < MAX_RETRIES) {
+            // The 429 path already parked for the (clamped) Retry-After, so
+            // don't stack the standard backoff on top of it.
+            if (attempt < MAX_RETRIES && !alreadyBackedOff) {
                 backoffBeforeRetry(attempt);
             }
         }
@@ -691,26 +718,40 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         throw new LlmException("All retries exhausted for " + config.name(), lastException);
     }
 
-    /** Outcome of a single attempt: either {@code body} is a success body, or {@code error} carries a retryable error. */
-    private record AttemptOutcome(String body, Exception error) {}
+    /**
+     * Outcome of a single attempt: either {@code body} is a success body, or {@code error}
+     * carries a retryable error. {@code alreadyBackedOff} is true when the attempt already
+     * waited (the 429 path parks for Retry-After itself), so {@code executeWithRetry} must
+     * not stack the standard backoff on top.
+     */
+    private record AttemptOutcome(String body, Exception error, boolean alreadyBackedOff) {}
 
     /**
-     * Execute one request attempt. Returns a body on 200, parks for retry-after on 429
-     * (and returns an empty outcome so the caller advances), throws on 4xx, or returns
-     * an error outcome on 5xx for the caller to retry.
+     * Execute one request attempt. Returns a body on 200; on 429 parks for the
+     * (clamped) Retry-After and returns an error outcome flagged already-backed-off so the
+     * caller records a 429 {@link LlmException} without double-waiting; throws on 4xx; or
+     * returns an error outcome on 5xx for the caller to retry.
      */
     private AttemptOutcome attemptRequest(URI uri, String auth, String json, Duration timeout,
                                           String channel, int attempt) throws InterruptedException, IOException {
         var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout, channel);
 
-        if (reply.statusCode() == 200) return new AttemptOutcome(reply.body(), null);
+        if (reply.statusCode() == 200) return new AttemptOutcome(reply.body(), null, false);
 
         if (reply.statusCode() == 429) {
             var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
-            var retryAfter = reply.retryAfterSeconds().orElse(defaultBackoff);
+            var requested = reply.retryAfterSeconds().orElse(defaultBackoff);
+            var retryAfter = Math.min(requested, RETRY_AFTER_MAX_SECONDS);
+            if (retryAfter < requested) {
+                EventLogger.warn("llm", "Retry-After from %s clamped %ds → %ds".formatted(
+                        config.name(), requested, retryAfter));
+            }
             EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(config.name(), retryAfter));
             parkForMillis(retryAfter * 1000);
-            return new AttemptOutcome(null, null);
+            return new AttemptOutcome(null,
+                    new LlmException("HTTP 429 from %s: rate limited (retry-after %ds)".formatted(
+                            config.name(), retryAfter)),
+                    true);
         }
 
         if (reply.statusCode() >= 400 && reply.statusCode() < 500) {
@@ -719,7 +760,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
 
         return new AttemptOutcome(null, new LlmException("HTTP %d from %s: %s".formatted(
-                reply.statusCode(), config.name(), sanitizeErrorBody(reply.body(), config.apiKey()))));
+                reply.statusCode(), config.name(), sanitizeErrorBody(reply.body(), config.apiKey()))), false);
     }
 
     /**
@@ -768,9 +809,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      */
     public Usage parseUsage(JsonObject usageObj) {
         return new Usage(
-                usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
-                usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
-                usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
+                readUsageInt(usageObj, "prompt_tokens"),
+                readUsageInt(usageObj, "completion_tokens"),
+                readUsageInt(usageObj, "total_tokens"),
                 extractReasoningTokens(usageObj),
                 extractCachedTokens(usageObj),
                 extractCacheCreationTokens(usageObj));

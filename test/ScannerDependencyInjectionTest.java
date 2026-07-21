@@ -11,6 +11,7 @@ import services.scanners.MetaDefenderCloudScanner;
 import services.scanners.ScannerConfig;
 import services.scanners.ScannerDependencies;
 import services.scanners.ScannerHttpClient;
+import services.scanners.ScannerRegistry;
 import services.scanners.VirusTotalScanner;
 
 import java.io.IOException;
@@ -288,6 +289,33 @@ class ScannerDependencyInjectionTest extends UnitTest {
 
         assertEquals(0, deps.requests.size(),
                 "isEnabled() must NEVER fire an HTTP request, no matter how often it's called");
+    }
+
+    @Test
+    void unsetEnabledFallbackAgreesWithRegistrySeed() {
+        // JCLAW-828: ScannerRegistry seeds scanner.*.enabled=false while the
+        // runtime fallback in ConfiguredHashScanner previously defaulted to
+        // "true" — the effective default diverged depending on whether seeding
+        // had run. Both now derive from one owner. A scanner with an API key
+        // present but NO enabled config must stay disabled (the seeded default),
+        // not flip on because of a stale "true" fallback.
+        var deps = new FakeDeps();
+        deps.config.put("scanner.virustotal.apiKey", "key"); // key set, enabled UNSET
+        assertFalse(new VirusTotalScanner(deps.build()).isEnabled(),
+                "unset enabled must fall back to the seeded default (disabled), not enabled");
+
+        // The registry seeds exactly that value, so the two paths agree.
+        var seededEnabled = ScannerRegistry.defaultConfig().stream()
+                .filter(c -> c.key().equals("scanner.virustotal.enabled"))
+                .map(ScannerRegistry.ConfigDefault::value)
+                .findFirst().orElseThrow();
+        assertEquals("false", seededEnabled,
+                "registry must seed enabled=false to match the runtime fallback");
+
+        // Feeding the seeded value back in yields the same disabled outcome.
+        deps.config.put("scanner.virustotal.enabled", seededEnabled);
+        assertFalse(new VirusTotalScanner(deps.build()).isEnabled(),
+                "seeded enabled value must produce the same disabled result as the unset fallback");
     }
 
     // =====================================================================

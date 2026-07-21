@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
  */
 public class WebSearchTool implements ToolRegistry.Tool {
 
-    private static final Gson gson = GsonHolder.INSTANCE;
+    private static final Gson gson = GsonHolder.GSON;
     private static final int TIMEOUT_SECONDS = 30;
     private static final int DEFAULT_NUM_RESULTS = 5;
     private static final int MAX_NUM_RESULTS = 10;

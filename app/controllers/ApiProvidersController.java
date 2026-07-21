@@ -30,7 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Provider management endpoints — model discovery from provider APIs.
@@ -38,7 +38,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiProvidersController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
     private static final String PROVIDER_CONFIG_PREFIX = "provider.";
     private static final String BASE_URL_SUFFIX = ".baseUrl";
     private static final String SUPPORTS_VISION = "supportsVision";

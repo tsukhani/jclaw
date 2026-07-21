@@ -7,7 +7,6 @@ import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
 import play.db.jpa.JPA;
-import services.search.LuceneIndexer;
 import services.transcription.PendingTranscripts;
 import services.transcription.TranscriptionRouter;
 import utils.JpqlFilter;
@@ -538,88 +537,18 @@ public class ConversationService {
     }
 
     /**
-     * Bulk-delete conversations (and their messages) by ID using JPQL.
-     * Both single and bulk delete routes use this to ensure consistent behavior.
+     * Bulk-delete conversations (and their messages) by ID. Both single and
+     * bulk delete routes use this to ensure consistent behavior. The
+     * cross-subsystem cascade (subagent-child subtree, on-disk attachments,
+     * cross-linked SubagentRun audit rows, external Lucene docs) lives in
+     * {@link ConversationDeletionCascade}, mirroring {@link AgentDeletionCascade}.
      *
      * @param ids conversation ids to delete (children, SubagentRuns, and
      *            attached messages cascade automatically)
      * @return the number of conversations deleted
      */
     public static int deleteByIds(List<Long> ids) {
-        if (ids == null || ids.isEmpty()) return 0;
-        var em = JPA.em();
-        // Subagent-tree cascade: a Conversation can be the parent of one or
-        // more child Conversations (subagent runs), and SubagentRun audit
-        // rows hold FKs to both ends. Pre-fix, bulk-delete-by-filter
-        // happened to include the children in the same SQL statement so
-        // the FKs were satisfied at statement-end. Now that the listing
-        // filter excludes children (so /conversations doesn't double-show
-        // them), explicit cascade-cleanup keeps deleteByIds working when
-        // a parent has subagent children.
-        // 1. Recursive deleteByIds for child conversations (depth-first —
-        //    handles grandchildren / SubagentRuns / Messages / etc).
-        List<Long> childIds = em.createQuery(
-                "SELECT c.id FROM Conversation c WHERE c.parentConversation.id IN :ids",
-                Long.class).setParameter("ids", ids).getResultList();
-        if (!childIds.isEmpty()) {
-            deleteByIds(childIds);
-        }
-        // 2. SubagentRun rows referencing any of these conversations on
-        //    either side. Done after the child cascade so a recursive call
-        //    doesn't try to double-delete a SubagentRun the parent's
-        //    cleanup would have removed. JCLAW-673: collect the ids first so
-        //    their SUBAGENT_RUN full-text docs can be evicted after the bulk
-        //    JPQL DELETE, which never fires SubagentRun.@PostRemove.
-        List<Long> subagentRunIds = em.createQuery(
-                "SELECT sr.id FROM SubagentRun sr "
-                        + "WHERE sr.parentConversation.id IN :ids "
-                        + "   OR sr.childConversation.id IN :ids", Long.class)
-                .setParameter("ids", ids).getResultList();
-        em.createQuery(
-                "DELETE FROM SubagentRun sr "
-                        + "WHERE sr.parentConversation.id IN :ids "
-                        + "   OR sr.childConversation.id IN :ids")
-                .setParameter("ids", ids).executeUpdate();
-        // 3a. JCLAW-209: free the on-disk attachment bytes before dropping the rows that
-        // point at them. All of a conversation's attachments live under one directory
-        // (workspace/{agent}/attachments/{conversationId}/), so a per-conversation sweep
-        // reclaims them; without this the files would be orphaned on disk forever once the
-        // rows are cascade-deleted below. Child conversations are handled by the recursive
-        // call above. Done while the conversation→agent join is still intact.
-        @SuppressWarnings("unchecked")
-        List<Object[]> agentDirs = em.createQuery(
-                "SELECT c.id, c.agent.name FROM Conversation c WHERE c.id IN :ids")
-                .setParameter("ids", ids).getResultList();
-        for (var row : agentDirs) {
-            AttachmentService.deleteConversationAttachments((String) row[1], (Long) row[0]);
-        }
-        // 3b. JCLAW-135: collect the message ids so their CONVERSATION_MESSAGE
-        // Lucene docs can be evicted after the delete. The DB cascades
-        // chat_message_attachment / message / session_compaction off the
-        // Conversation delete below (ON DELETE CASCADE, JCLAW-542), so the old
-        // hand-ordered JPQL sweep of those three tables is gone — but a bulk /
-        // cascade delete never fires Message.@PostRemove, so the full-text docs
-        // would orphan without this explicit cleanup. (Child-conversation
-        // messages are handled by the recursive call in step 1.)
-        List<Long> messageIds = em.createQuery(
-                "SELECT m.id FROM Message m WHERE m.conversation.id IN :ids", Long.class)
-                .setParameter("ids", ids).getResultList();
-        int deleted = em.createQuery("DELETE FROM Conversation c WHERE c.id IN :ids")
-                .setParameter("ids", ids).executeUpdate();
-        for (Long messageId : messageIds) {
-            LuceneIndexer.remove(LuceneIndexer.Scope.CONVERSATION_MESSAGE, messageId);
-        }
-        if (!messageIds.isEmpty()) {
-            LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
-        }
-        // JCLAW-673: evict the SUBAGENT_RUN docs for the rows swept in step 2.
-        for (Long subagentRunId : subagentRunIds) {
-            LuceneIndexer.remove(LuceneIndexer.Scope.SUBAGENT_RUN, subagentRunId);
-        }
-        if (!subagentRunIds.isEmpty()) {
-            LuceneIndexer.commit(LuceneIndexer.Scope.SUBAGENT_RUN);
-        }
-        return deleted;
+        return ConversationDeletionCascade.deleteByIds(ids);
     }
 
     /**

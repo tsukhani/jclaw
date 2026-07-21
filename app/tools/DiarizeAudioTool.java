@@ -410,7 +410,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
         var messages = new JsonArray();
         var user = new JsonObject();
         user.addProperty("role", "user");
-        user.add("content", GsonHolder.INSTANCE.toJsonTree(content));
+        user.add("content", GsonHolder.GSON.toJsonTree(content));
         messages.add(user);
         body.add("messages", messages);
 

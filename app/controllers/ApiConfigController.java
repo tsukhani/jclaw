@@ -17,12 +17,12 @@ import utils.ApiResponses;
 
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
 public class ApiConfigController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     /** Config key prefix reserved for the load-test harness. Users cannot save or delete these. */
     private static final String RESERVED_KEY_PREFIX =

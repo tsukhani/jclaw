@@ -17,12 +17,12 @@ import utils.ApiResponses;
 
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
 public class ApiBindingsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     // JSON body keys for AgentBinding fields.
     private static final String KEY_AGENT_ID = "agentId";

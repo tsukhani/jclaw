@@ -13,7 +13,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * API controller for the Nuxt 3 frontend.
@@ -54,7 +54,7 @@ public class ApiController extends Controller {
                 Play.configuration.getProperty("application.version", "0.0.0"),
                 Play.version,
                 readExpectedFrameworkVersion());
-        renderJSON(INSTANCE.toJson(resp));
+        renderJSON(GSON.toJson(resp));
     }
 
     /**
@@ -91,7 +91,7 @@ public class ApiController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = WorkspaceStatsResponse.class)))
     @Operation(summary = "Total on-disk size of the agent workspace root, for the dashboard's runaway-growth line")
     public static void workspaceStats() {
-        renderJSON(INSTANCE.toJson(
+        renderJSON(GSON.toJson(
                 new WorkspaceStatsResponse(directorySizeBytes(AgentService.workspaceRoot()))));
     }
 

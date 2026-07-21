@@ -22,7 +22,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * TaskRun API — the run-history read surface (per-task runs, per-run message
@@ -37,7 +37,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiTaskRunsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     /**
      * Operator-facing view of one TaskRun row. Returns the audit fields

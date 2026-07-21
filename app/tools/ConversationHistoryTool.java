@@ -248,6 +248,6 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
         payload.put("count", messages.size());
         payload.put("has_more", hasMore);
         payload.put("messages", messages);
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 }

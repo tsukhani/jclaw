@@ -93,13 +93,27 @@ class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    void nowWithInvalidTimezoneFallsBackToDefault() {
+    void nowWithInvalidTimezoneReturnsError() {
+        // JCLAW-823: a present-but-invalid timezone is a caller mistake, not a
+        // cue to silently substitute the server default (which returned a
+        // plausible-looking WRONG time). It must surface as an error string.
         var result = tool.execute("""
                 {"action": "now", "timezone": "Invalid/Zone"}
                 """, agent);
-        // Should not error — falls through to system default
-        assertTrue(result.contains("timezone:"));
-        assertTrue(result.contains("iso:"));
+        assertTrue(result.startsWith("Error: Unknown timezone"),
+                "invalid tz must return an Unknown timezone error, got: " + result);
+        assertTrue(result.contains("Invalid/Zone"), "error should name the bad timezone");
+    }
+
+    @Test
+    void convertWithInvalidTimezoneReturnsError() {
+        // Covers the convert path's resolveZone (fromTimezone/toTimezone).
+        var result = tool.execute("""
+                {"action": "convert", "timestamp": "2026-04-13T09:00:00",
+                 "fromTimezone": "Not/AZone", "toTimezone": "UTC"}
+                """, agent);
+        assertTrue(result.startsWith("Error: Unknown timezone"),
+                "invalid convert tz must return an Unknown timezone error, got: " + result);
     }
 
     @Test

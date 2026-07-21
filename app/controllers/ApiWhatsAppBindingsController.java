@@ -22,7 +22,7 @@ import static controllers.BindingKeys.EVENT_CATEGORY_CHANNEL;
 import static controllers.BindingKeys.KEY_AGENT_ID;
 import static controllers.BindingKeys.KEY_ENABLED;
 import static controllers.BindingKeys.KEY_TRANSPORT;
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * CRUD API for per-agent WhatsApp bindings (JCLAW-444). Mirrors
@@ -43,7 +43,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiWhatsAppBindingsController extends ApiBindingController {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private static final String KEY_PHONE_NUMBER_ID = "phoneNumberId";
     private static final String KEY_ACCESS_TOKEN = "accessToken";

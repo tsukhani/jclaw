@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -127,15 +128,15 @@ public final class LuceneIndexer {
     /** EventLogger category for all messages emitted from this indexer. */
     private static final String CATEGORY = "search";
 
-    // Writer and SearcherManager maps are written once at open() under the
-    // class monitor and read by every subsequent indexer/search call.
-    // EnumMap keyed by Scope so per-scope lookups are O(1) array accesses
-    // without boxing or hash work. Reads are always after a synchronized
-    // open() write, so the JMM happens-before from the synchronized region
-    // is sufficient — no separate volatile needed on the map references
-    // themselves since the EnumMap is mutated only inside open()/close().
-    private static final Map<Scope, IndexWriter> WRITERS = new EnumMap<>(Scope.class);
-    private static final Map<Scope, SearcherManager> SEARCHERS = new EnumMap<>(Scope.class);
+    // Writer and SearcherManager snapshots. open() builds a fresh EnumMap
+    // locally, populates it under the class monitor, then publishes an
+    // immutable view through these volatile references LAST — so any thread
+    // (search/indexer call, on any carrier) that reads a non-empty map sees,
+    // by the volatile write→read happens-before, every entry it holds.
+    // close()/closeQuietly() republish an empty map. EnumMap keyed by Scope
+    // keeps per-scope lookups O(1) array accesses without boxing or hash work.
+    private static volatile Map<Scope, IndexWriter> writers = Map.of();
+    private static volatile Map<Scope, SearcherManager> searchers = Map.of();
 
     /**
      * Seconds between periodic background commits. Search visibility comes
@@ -170,18 +171,31 @@ public final class LuceneIndexer {
         // flip the shared index open underneath it (the un-serialized lazy-open
         // path). Only consulted in test mode; production never sets the flag.
         if (heldClosedForTest && Play.runningInTestMode()) return;
-        if (!WRITERS.isEmpty()) return;
+        if (!writers.isEmpty()) return;
+        var newWriters = new EnumMap<Scope, IndexWriter>(Scope.class);
+        var newSearchers = new EnumMap<Scope, SearcherManager>(Scope.class);
         try {
             for (var scope : Scope.values()) {
-                openScope(scope);
+                openScope(scope, newWriters, newSearchers);
             }
+            // Publish the fully-populated maps LAST so a reader never sees a
+            // half-built snapshot (see the field declaration for the fence).
+            writers = Collections.unmodifiableMap(newWriters);
+            searchers = Collections.unmodifiableMap(newSearchers);
             startCommitScheduler();
         } catch (IOException | RuntimeException e) {
             // Partial-open rollback: any scope opened before the failure
             // is closed so the next retry starts clean. Without this, a
             // mid-loop failure leaves writers holding FS locks and the
-            // next open() can't grab them.
-            closeQuietly();
+            // next open() can't grab them. Closes the local maps directly —
+            // they may or may not have been published above.
+            if (commitScheduler != null) {
+                commitScheduler.shutdownNow();
+                commitScheduler = null;
+            }
+            closeMaps(newSearchers, newWriters);
+            writers = Map.of();
+            searchers = Map.of();
             throw e;
         }
     }
@@ -215,7 +229,7 @@ public final class LuceneIndexer {
      * doesn't starve the others' cadence.
      */
     private static void commitAll() {
-        for (var entry : WRITERS.entrySet()) {
+        for (var entry : writers.entrySet()) {
             try {
                 entry.getValue().commit();
             } catch (IOException | RuntimeException e) {
@@ -226,7 +240,8 @@ public final class LuceneIndexer {
         }
     }
 
-    private static void openScope(Scope scope) throws IOException {
+    private static void openScope(Scope scope, Map<Scope, IndexWriter> writerMap,
+                                  Map<Scope, SearcherManager> searcherMap) throws IOException {
         var indexDir = indexPath(scope);
         Files.createDirectories(indexDir);
         // Pre-v1 codec note: if the directory contains segments from an
@@ -250,8 +265,8 @@ public final class LuceneIndexer {
             try { dir.close(); } catch (IOException _) { /* surface original */ }
             throw e;
         }
-        WRITERS.put(scope, writer);
-        SEARCHERS.put(scope, new SearcherManager(writer, new SearcherFactory()));
+        writerMap.put(scope, writer);
+        searcherMap.put(scope, new SearcherManager(writer, new SearcherFactory()));
         EventLogger.info(CATEGORY, null, null,
                 "Lucene index opened: scope=%s at %s (%d existing docs)"
                         .formatted(scope.name(), indexDir, writer.getDocStats().numDocs));
@@ -271,7 +286,21 @@ public final class LuceneIndexer {
             commitScheduler.shutdownNow();
             commitScheduler = null;
         }
-        for (var entry : SEARCHERS.entrySet()) {
+        closeMaps(searchers, writers);
+        // Republish empty snapshots so isOpen()/lookups observe the closed state.
+        searchers = Map.of();
+        writers = Map.of();
+    }
+
+    /**
+     * Close every searcher then every writer in the given maps. Shared by the
+     * {@link #closeQuietly()} shutdown path (operating on the published fields)
+     * and the {@link #open()} partial-open rollback (operating on the local,
+     * possibly-unpublished maps). Per-scope failures are logged, never thrown.
+     */
+    private static void closeMaps(Map<Scope, SearcherManager> searcherMap,
+                                  Map<Scope, IndexWriter> writerMap) {
+        for (var entry : searcherMap.entrySet()) {
             try {
                 entry.getValue().close();
             } catch (IOException e) {
@@ -280,8 +309,7 @@ public final class LuceneIndexer {
                                 .formatted(entry.getKey().name(), e.getMessage()));
             }
         }
-        SEARCHERS.clear();
-        for (var entry : WRITERS.entrySet()) {
+        for (var entry : writerMap.entrySet()) {
             try {
                 entry.getValue().close();
                 EventLogger.info(CATEGORY, null, null,
@@ -292,7 +320,6 @@ public final class LuceneIndexer {
                                 .formatted(entry.getKey().name(), e.getMessage()));
             }
         }
-        WRITERS.clear();
     }
 
     /**
@@ -338,7 +365,7 @@ public final class LuceneIndexer {
      * abort the caller.
      */
     public static void upsert(Scope scope, long id, String content, String agentKey, float[] vector) {
-        var writer = WRITERS.get(scope);
+        var writer = writers.get(scope);
         if (writer == null) return;
         try {
             var doc = new Document();
@@ -377,7 +404,7 @@ public final class LuceneIndexer {
      * as {@link #upsert}.
      */
     public static void remove(Scope scope, long id) {
-        var writer = WRITERS.get(scope);
+        var writer = writers.get(scope);
         if (writer == null) return;
         try {
             writer.deleteDocuments(new Term(ID_FIELD, String.valueOf(id)));
@@ -397,9 +424,35 @@ public final class LuceneIndexer {
         remove(Scope.TASK_RUN_MESSAGE, id);
     }
 
+    /**
+     * JCLAW-820: evict every document owned by {@code agentKey} in one
+     * {@link IndexWriter#deleteDocuments(Term...)} against the exact-match
+     * {@link #AGENT_FIELD} — a single race-free delete, not a per-id loop
+     * (the JCLAW-673 evict pattern applied to a whole owner at once). Used by
+     * {@code JpaMemoryStore.deleteAll} whose bulk JPQL DELETE bypasses the
+     * {@code @PostRemove} hook, so the agent's {@link Scope#MEMORY} docs would
+     * otherwise orphan. Commits so the eviction is durable and immediately
+     * reflected (a rare service-path bulk op, not the per-write hot path).
+     * No-op for a null key or a closed scope; failures are logged, never
+     * propagated — same no-throw contract as {@link #remove}.
+     */
+    public static void removeByAgent(Scope scope, String agentKey) {
+        if (agentKey == null) return;
+        var writer = writers.get(scope);
+        if (writer == null) return;
+        try {
+            writer.deleteDocuments(new Term(AGENT_FIELD, agentKey));
+            writer.commit();
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, null, null,
+                    "Lucene removeByAgent failed: scope=%s agent=%s: %s"
+                            .formatted(scope.name(), agentKey, e.getMessage()));
+        }
+    }
+
     /** Internal accessor for a scope's SearcherManager. */
     static SearcherManager searcherManager(Scope scope) {
-        return SEARCHERS.get(scope);
+        return searchers.get(scope);
     }
 
     /**
@@ -410,7 +463,7 @@ public final class LuceneIndexer {
      * contract as {@link #upsert}.
      */
     public static void commit(Scope scope) {
-        var writer = WRITERS.get(scope);
+        var writer = writers.get(scope);
         if (writer == null) return;
         try {
             writer.commit();
@@ -432,7 +485,7 @@ public final class LuceneIndexer {
      * contract as {@link #upsert}).
      */
     public static void clear(Scope scope) {
-        var writer = WRITERS.get(scope);
+        var writer = writers.get(scope);
         if (writer == null) return;
         try {
             writer.deleteAll();
@@ -445,22 +498,15 @@ public final class LuceneIndexer {
 
     /** Whether the indexes have been opened. */
     public static boolean isOpen() {
-        return !WRITERS.isEmpty();
+        return !writers.isEmpty();
     }
 
     /** Number of indexed documents in the given scope. Test/admin
      *  introspection. */
     public static int docCount(Scope scope) {
-        var writer = WRITERS.get(scope);
+        var writer = writers.get(scope);
         if (writer == null) return 0;
         return writer.getDocStats().numDocs;
-    }
-
-    /** Backwards-compatible doc count for the TASK_RUN_MESSAGE scope —
-     *  preserved so legacy callers and tests don't need refactoring on
-     *  the JCLAW-304 cut. New code should call {@link #docCount(Scope)}. */
-    public static int docCount() {
-        return docCount(Scope.TASK_RUN_MESSAGE);
     }
 
     /** System-property override for {@link #indexPath(Scope)}. Tests set
@@ -524,12 +570,12 @@ public final class LuceneIndexer {
     /**
      * Test-only: clear every open scope's index in place (deleteAll + commit)
      * and refresh the searchers, leaving the writers open at the current path.
-     * Replaces ad-hoc reflection into {@link #WRITERS} from test setup
+     * Replaces ad-hoc reflection into {@link #writers} from test setup
      * (JCLAW-428). Callers serialize via {@code LuceneTestSync} so a wipe never
      * races a concurrent search test on a shared scope. No-op when closed.
      */
     public static synchronized void wipeForTest() {
-        for (var writer : WRITERS.values()) {
+        for (var writer : writers.values()) {
             try {
                 writer.deleteAll();
                 writer.commit();
@@ -537,7 +583,7 @@ public final class LuceneIndexer {
                 throw new UncheckedIOException("Lucene wipeForTest failed", e);
             }
         }
-        for (var searcher : SEARCHERS.values()) {
+        for (var searcher : searchers.values()) {
             try {
                 searcher.maybeRefresh();
             } catch (IOException e) {

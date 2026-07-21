@@ -105,7 +105,7 @@ public class ApiAppInvokeController extends Controller {
         // AD-5 / JCLAW-765: any file the run produced (e.g. a documents-tool PDF) comes
         // back as a slug-scoped download URL the app is permitted to fetch (see file()).
         resp.put("files", Tx.run(() -> producedFiles(slug, conversation.id)));
-        renderJSON(GsonHolder.INSTANCE.toJson(resp));
+        renderJSON(GsonHolder.GSON.toJson(resp));
     }
 
     /**

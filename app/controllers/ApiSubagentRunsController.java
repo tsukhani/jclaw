@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * JCLAW-271: REST surface for the SubagentRuns admin page. Lists
@@ -54,7 +54,7 @@ import static utils.GsonHolder.INSTANCE;
 public class ApiSubagentRunsController extends Controller {
 
     private static final String MISSING_RUN_ID = "Missing run id.";
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     private static final String KEY_REASON = "reason";
     private static final String KEY_RUN_ID = "run_id";
@@ -325,9 +325,9 @@ public class ApiSubagentRunsController extends Controller {
             return;
         }
 
-        List<SubagentRun> targets;
+        int deleted;
         if (body.has("ids")) {
-            targets = targetsFromIds(body);
+            deleted = deleteTerminalRuns(targetsFromIds(body));
         } else if (body.has("filter")) {
             var f = body.getAsJsonObject("filter");
             String statusRaw = stringField(f, STATUS);
@@ -336,16 +336,17 @@ public class ApiSubagentRunsController extends Controller {
             String sinceRaw = stringField(f, "since");
             Instant sinceInstant = parseSinceFilter(sinceRaw);
             if (sinceInstant == null && sinceRaw != null && !sinceRaw.isBlank()) return;
-            targets = findMatchingRuns(
+            var matchingIds = findMatchingRunIds(
                     longField(f, "parentAgentId"),
                     longField(f, "parentConversationId"),
                     statusEnum, sinceInstant, stringField(f, "q"));
+            deleted = deleteRunsByIdChunked(matchingIds);
         } else {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provide 'ids' or 'filter'.");
             return;
         }
 
-        renderJSON(gson.toJson(new DeletedCountResponse(deleteTerminalRuns(targets))));
+        renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
     }
 
     /**
@@ -387,33 +388,65 @@ public class ApiSubagentRunsController extends Controller {
     }
 
     /**
-     * Resolve every run matching the list-view filter, unpaginated, for bulk
-     * delete. Mirrors the WHERE-clause + FTS construction in {@link #list} so
-     * "delete all matching" targets exactly the rows the operator sees.
+     * Resolve the ids of every run matching the list-view filter, unpaginated,
+     * for bulk delete. Mirrors the WHERE-clause + FTS construction in
+     * {@link #list} so "delete all matching" targets exactly the rows the
+     * operator sees. Projects {@code r.id} only — the row entities are hydrated
+     * a bounded chunk at a time in {@link #deleteRunsByIdChunked}, so a
+     * "delete all" over a large match set never loads the whole result into
+     * memory. The {@code r.} qualification matches {@link #list}'s JCLAW-806
+     * aliasing.
      */
-    private static List<SubagentRun> findMatchingRuns(Long parentAgentId, Long parentConversationId,
-                                                      SubagentRun.Status status, Instant since, String q) {
+    private static List<Long> findMatchingRunIds(Long parentAgentId, Long parentConversationId,
+                                                 SubagentRun.Status status, Instant since, String q) {
         var filter = new JpqlFilter()
-                .eq("parentAgent.id", parentAgentId)
-                .eq("parentConversation.id", parentConversationId)
-                .eq(STATUS, status)
-                .gte("startedAt", since);
+                .eq("r.parentAgent.id", parentAgentId)
+                .eq("r.parentConversation.id", parentConversationId)
+                .eq("r." + STATUS, status)
+                .gte("r.startedAt", since);
         var ftsRunIds = ftsSubagentRunIds(q);
         var where = filter.toWhereClause();
         if (ftsRunIds != null) {
             if (ftsRunIds.isEmpty()) return List.of();
-            where = where.isEmpty() ? "id IN (:fts)" : where + " AND id IN (:fts)";
+            where = where.isEmpty() ? "r.id IN (:fts)" : where + " AND r.id IN (:fts)";
         }
         var jpql = where.isEmpty()
-                ? "SELECT r FROM SubagentRun r"
-                : "SELECT r FROM SubagentRun r WHERE " + where;
-        var jpaQ = JPA.em().createQuery(jpql, SubagentRun.class);
+                ? "SELECT r.id FROM SubagentRun r"
+                : "SELECT r.id FROM SubagentRun r WHERE " + where;
+        var jpaQ = JPA.em().createQuery(jpql, Long.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
             jpaQ.setParameter(i + 1, params.get(i));
         }
         if (ftsRunIds != null) jpaQ.setParameter("fts", ftsRunIds);
         return jpaQ.getResultList();
+    }
+
+    /** Bounded page size for the chunked bulk-delete hydrate → cascade loop. */
+    private static final int DELETE_CHUNK = 100;
+
+    /**
+     * Cascade-delete the matching runs in bounded chunks. Each chunk re-fetches
+     * its full {@link SubagentRun} rows with the same JOIN FETCH {@link #list}
+     * uses (JCLAW-806) — eagerly loading the child agent that
+     * {@link #deleteTerminalRuns} dereferences, so the delete path doesn't
+     * re-introduce the per-row N+1. Only one chunk of entities is resident at a
+     * time; RUNNING rows are still skipped by {@link #deleteTerminalRuns}.
+     */
+    private static int deleteRunsByIdChunked(List<Long> ids) {
+        int deleted = 0;
+        for (int i = 0; i < ids.size(); i += DELETE_CHUNK) {
+            var chunk = ids.subList(i, Math.min(i + DELETE_CHUNK, ids.size()));
+            var runs = JPA.em()
+                    .createQuery("SELECT r FROM SubagentRun r "
+                            + "JOIN FETCH r.parentAgent JOIN FETCH r.childAgent "
+                            + "JOIN FETCH r.parentConversation JOIN FETCH r.childConversation "
+                            + "WHERE r.id IN :ids", SubagentRun.class)
+                    .setParameter("ids", chunk)
+                    .getResultList();
+            deleted += deleteTerminalRuns(runs);
+        }
+        return deleted;
     }
 
     /**

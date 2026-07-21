@@ -34,7 +34,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Objects;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Tasks API.
@@ -50,7 +50,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiTasksController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     // JSON body keys read by the controller's write-path validation guards.
     // (The mapping keys travel with the field mapping in TaskWriteService.)
@@ -423,7 +423,13 @@ public class ApiTasksController extends Controller {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) return false;
         final ScheduleShorthandParser.ScheduleSpec spec;
         try {
-            spec = ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString());
+            // JCLAW-818: resolve a bare local date-time in the task's zone, not
+            // the server default. Prefer a timezone supplied in the same PATCH
+            // body (applyOptionalFieldUpdates hasn't run yet, so task.timezone
+            // still holds the stored value) over the task's stored zone.
+            var tzRaw = TaskWriteService.readOptionalString(body, KEY_TIMEZONE);
+            var zone = TimezoneResolver.resolve(tzRaw != null ? tzRaw : task.timezone);
+            spec = ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid schedule: " + e.getMessage());
             return false; // unreachable — error() throws

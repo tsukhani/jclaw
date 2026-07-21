@@ -150,6 +150,6 @@ public final class JsonRpc {
 
     private static JsonElement paramsJson(Object params) {
         if (params instanceof JsonElement el) return el;
-        return GsonHolder.INSTANCE.toJsonTree(params);
+        return GsonHolder.GSON.toJsonTree(params);
     }
 }

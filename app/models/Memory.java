@@ -15,6 +15,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
+import play.db.jpa.JPA;
 import play.db.jpa.Model;
 import services.EventLogger;
 import services.search.LuceneIndexer;
@@ -194,7 +195,7 @@ public class Memory extends Model {
      */
     public static void touchAccessed(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
-        play.db.jpa.JPA.em()
+        JPA.em()
                 .createQuery("UPDATE Memory m SET m.lastAccessedAt = :now WHERE m.id IN (:ids)")
                 .setParameter("now", Instant.now())
                 .setParameter("ids", ids)

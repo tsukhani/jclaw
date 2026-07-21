@@ -19,7 +19,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Apps registry (SPEC-apps): enumerates operator-hosted mini-apps under
@@ -31,7 +31,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiAppsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     /** A hosted-app slug is a single path segment of lowercase alphanumerics and
      *  hyphens — no dots or slashes, so it can never traverse out of public/apps/. */

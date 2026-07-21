@@ -81,7 +81,7 @@ final class SubagentAsyncRunner {
         asyncPayload.put(SubagentSpawnTool.FIELD_RUN_ID, runIdStr);
         asyncPayload.put(SubagentSpawnTool.FIELD_CONVERSATION_ID, String.valueOf(childConvId));
         asyncPayload.put(SubagentSpawnTool.FIELD_STATUS, SubagentRun.Status.RUNNING.name());
-        return GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
+        return GsonHolder.GSON.toJson(asyncPayload, Map.class);
     }
 
     /** JCLAW-498: the current tool-dispatch scope key — {@code task:<id>} in a task
@@ -141,7 +141,7 @@ final class SubagentAsyncRunner {
         payload.put(SubagentSpawnTool.FIELD_RUN_ID, runIdStr);
         payload.put(SubagentSpawnTool.FIELD_CONVERSATION_ID, String.valueOf(childConvId));
         payload.put(SubagentSpawnTool.FIELD_STATUS, SubagentRun.Status.RUNNING.name());
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     /**
@@ -207,7 +207,7 @@ final class SubagentAsyncRunner {
                     + " (already collected, or not an async spawn).";
         }
         try {
-            return GsonHolder.INSTANCE.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
+            return GsonHolder.GSON.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return "Error: interrupted while awaiting async subagent " + runId + ".";
@@ -256,7 +256,7 @@ final class SubagentAsyncRunner {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("results", results);
         payload.put("count", results.size());
-        return GsonHolder.INSTANCE.toJson(payload, Map.class);
+        return GsonHolder.GSON.toJson(payload, Map.class);
     }
 
     /**

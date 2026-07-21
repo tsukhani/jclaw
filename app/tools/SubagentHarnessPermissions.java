@@ -128,7 +128,7 @@ final class SubagentHarnessPermissions {
         if (perm.id() != null) resp.put("id", perm.id());
         resp.put("decision", approved ? "allow" : "deny");
         resp.put("approved", approved);
-        var line = GsonHolder.INSTANCE.toJson(resp, Map.class) + "\n";
+        var line = GsonHolder.GSON.toJson(resp, Map.class) + "\n";
         try {
             synchronized (STDIN_WRITE_LOCKS.computeIfAbsent(runId, _ -> new Object())) {
                 stdin.write(line.getBytes(StandardCharsets.UTF_8));

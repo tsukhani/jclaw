@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * CRUD and query endpoints for conversations. Extracted from ApiChatController
@@ -45,7 +45,7 @@ import static utils.GsonHolder.INSTANCE;
 @With(AuthCheck.class)
 public class ApiConversationsController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
 
     // OpenAI-shaped tool-call element key (the wrapping "function" object).
     private static final String KEY_FUNCTION = "function";
@@ -88,6 +88,8 @@ public class ApiConversationsController extends Controller {
      *                             ({@code subagent_announce},
      *                             {@code subagent_send}, …)
      * @param metadata             kind-specific metadata object
+     * @param truncated            {@code true} when the model output was
+     *                             truncated; emitted only when true (JCLAW-291)
      * @param attachments          file attachments on the row
      */
     public record MessageView(Long id, String role, String content,
@@ -98,6 +100,7 @@ public class ApiConversationsController extends Controller {
                               Long subagentRunId,
                               String messageKind,
                               JsonElement metadata,
+                              Boolean truncated,
                               List<MessageAttachmentView> attachments) {}
 
     /**
@@ -111,9 +114,21 @@ public class ApiConversationsController extends Controller {
      * @param sizeBytes        attachment size in bytes
      * @param kind             discriminator for special-rendered kinds
      *                         ({@code image}, {@code audio}, generic file)
+     * @param generated        {@code true} when the attachment was produced by a
+     *                         tool (e.g. image-gen) rather than user-uploaded;
+     *                         the chat UI badges these (JCLAW-227)
+     * @param deleted          {@code true} once removed from the workspace; the
+     *                         chip shows a "deleted" marker (JCLAW-209)
+     * @param generationMetadata optional generation parameters JSON, present only
+     *                         for tool-generated attachments
+     * @param generationJobId  optional id of the generation job the chat polls for
+     *                         status; present only while a generation is in flight
+     *                         (JCLAW-234)
      */
     public record MessageAttachmentView(String uuid, String originalFilename,
-                                        String mimeType, long sizeBytes, String kind) {}
+                                        String mimeType, long sizeBytes, String kind,
+                                        boolean generated, boolean deleted,
+                                        String generationMetadata, Long generationJobId) {}
 
     public record QueueStatusResponse(boolean busy, int queueSize) {}
 

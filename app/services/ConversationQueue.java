@@ -76,6 +76,11 @@ public class ConversationQueue {
 
         // All mode-read + processing-flag + queue decisions must be atomic to prevent
         // TOCTOU races where two threads both believe they acquired the conversation.
+        // We only DECIDE under the lock; the EventLogger emits (synchronous file-append
+        // + a batched DB flush) happen AFTER releasing it, mirroring the "Message queued"
+        // log below — never hold the ingress lock across that I/O.
+        boolean interrupted;
+        boolean droppedOverflow = false;
         synchronized (state) {
             state.mode = mode;
             state.lastActivityMs = System.currentTimeMillis();
@@ -86,25 +91,33 @@ public class ConversationQueue {
             }
 
             // Agent is busy -- handle based on mode
-            if ("interrupt".equals(mode)) {
+            interrupted = "interrupt".equals(mode);
+            if (interrupted) {
                 // Signal the in-flight processor to cancel, then queue this message
                 // so drain() will pick it up after the current run finishes.
                 state.cancelled.set(true);
                 state.pending.clear();
                 state.pending.addLast(message);
-                EventLogger.info(QUEUE, message.agent().name, message.channelType(),
-                        "Interrupt mode: signalled cancellation for conversation %d, queued new message"
-                                .formatted(conversationId));
-                return false;
+            } else {
+                // Queue the message (queue and collect modes)
+                if (state.pending.size() >= MAX_QUEUE_SIZE) {
+                    state.pending.pollFirst(); // Drop oldest
+                    droppedOverflow = true;
+                }
+                state.pending.addLast(message);
             }
+        }
 
-            // Queue the message (queue and collect modes)
-            if (state.pending.size() >= MAX_QUEUE_SIZE) {
-                state.pending.pollFirst(); // Drop oldest
-                EventLogger.warn(QUEUE, message.agent().name, message.channelType(),
-                        "Queue overflow for conversation %d, dropped oldest message".formatted(conversationId));
-            }
-            state.pending.addLast(message);
+        if (interrupted) {
+            EventLogger.info(QUEUE, message.agent().name, message.channelType(),
+                    "Interrupt mode: signalled cancellation for conversation %d, queued new message"
+                            .formatted(conversationId));
+            return false;
+        }
+
+        if (droppedOverflow) {
+            EventLogger.warn(QUEUE, message.agent().name, message.channelType(),
+                    "Queue overflow for conversation %d, dropped oldest message".formatted(conversationId));
         }
 
         EventLogger.info(QUEUE, message.agent().name, message.channelType(),

@@ -17,7 +17,7 @@ import utils.PlayConfig;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
-import static utils.GsonHolder.INSTANCE;
+import static utils.GsonHolder.GSON;
 
 /**
  * Admin authentication.
@@ -33,7 +33,7 @@ import static utils.GsonHolder.INSTANCE;
  */
 public class ApiAuthController extends Controller {
 
-    private static final Gson gson = INSTANCE;
+    private static final Gson gson = GSON;
     public static final String PASSWORD_HASH_KEY = "auth.admin.passwordHash";
 
     // JCLAW-741: password policy (length over complexity, NIST 800-63B) — a
