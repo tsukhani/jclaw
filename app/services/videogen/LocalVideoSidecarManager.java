@@ -28,7 +28,11 @@ public final class LocalVideoSidecarManager {
                     + "pre-warm it from Settings",
             VideoGenerationException::new));
 
-    private static String runningModel; // the engine the live sidecar is serving
+    // The engine the live sidecar is serving. A best-effort hint that lets the
+    // fast path detect an engine-switch without a health round-trip; the true
+    // source of truth is DAEMON.isHealthy(), which reconciles a stale value (see
+    // ensureRunning). Volatile for cross-thread visibility (JCLAW-830).
+    private static volatile String runningModel;
 
     private LocalVideoSidecarManager() {}
 
@@ -37,10 +41,12 @@ public final class LocalVideoSidecarManager {
     }
 
     /** Ensure the sidecar is up serving {@code model} and return its base URL; restarts if it's serving
-     *  a different engine. Idempotent + single-flight on the daemon lock. */
+     *  a different engine. Idempotent + single-flight (JCLAW-830): the stop/spawn/health-await runs under
+     *  the daemon's {@code startLock} — separate from the lock {@code stop()} uses — so a shutdown stop
+     *  never stalls behind an engine-switch startup poll. */
     public static String ensureRunning(String model) {
         if (model.equals(runningModel) && DAEMON.isHealthy()) return DAEMON.baseUrl();
-        synchronized (DAEMON.lock()) {
+        return DAEMON.singleFlight(() -> {
             if (model.equals(runningModel) && DAEMON.isHealthy()) return DAEMON.baseUrl();
             if (!UvProbe.isAvailable()) { // shared uv-on-PATH probe
                 throw new VideoGenerationException(
@@ -54,14 +60,15 @@ public final class LocalVideoSidecarManager {
             DAEMON.awaitHealthy();
             runningModel = model;
             return DAEMON.baseUrl();
-        }
+        });
     }
 
-    /** Stop the sidecar if running (releases its GPU memory). Wired into {@code jobs.ShutdownJob}. */
+    /** Stop the sidecar if running (releases its GPU memory). Wired into {@code jobs.ShutdownJob}.
+     *  Clears the engine hint; if this races an in-flight engine-switch the daemon's stop-generation
+     *  hand-off keeps it orphan-free and the next {@code ensureRunning} reconciles the hint via the
+     *  health check (JCLAW-830). */
     public static void stop() {
-        synchronized (DAEMON.lock()) {
-            DAEMON.stop();
-            runningModel = null;
-        }
+        DAEMON.stop();
+        runningModel = null;
     }
 }

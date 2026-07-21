@@ -478,9 +478,11 @@ final class StreamingAgentRunner {
         // the final synthesis happens in round N.
         var turnImages = new ArrayList<String>();
         if (!accumulator.toolCalls().isEmpty()) {
-            content = ToolCallLoopRunner.handleToolCallsStreaming(agent, conversation, conversation.id, messages, tools,
-                    accumulator.toolCalls(), content, primary, cb, thinkingMode, 0,
+            var ctx = new ToolCallLoopRunner.StreamingTurnContext(
+                    agent, conversation, conversation.id, tools, primary, cb, thinkingMode,
                     isCancelled, trace, turnUsage, turnImages, channelType, sink);
+            content = ToolCallLoopRunner.handleToolCallsStreaming(
+                    ctx, messages, accumulator.toolCalls(), content, 0);
         }
         return new StreamingPostAccumulator(content, replyTruncated);
     }

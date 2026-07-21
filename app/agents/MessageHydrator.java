@@ -26,9 +26,9 @@ import static utils.GsonHolder.GSON;
  *
  * <h2>What this class owns</h2>
  * <ul>
- *   <li>{@link #buildMessages} — the central history walker (with an
- *   {@code audioBearersOut} side-map for JCLAW-165 audio-rewrite, and
- *   a convenience overload that discards it).</li>
+ *   <li>{@link #buildMessages} — the central history walker; returns a
+ *   {@link Hydration} carrying the message list plus the audio / image /
+ *   video attachment-bearer side-maps (JCLAW-165 / JCLAW-224).</li>
  *   <li>{@link #sanitizeToolCallId} — the JCLAW-119 ID normaliser used
  *   on both sides of an assistant-tool_calls / tool-result pair.</li>
  *   <li>{@link #parseToolCalls} — single-call JSON unpack with
@@ -58,49 +58,33 @@ public final class MessageHydrator {
     private MessageHydrator() {}
 
     /**
-     * JCLAW-165: backward-compat overload for callers that don't need
-     * the audio-bearer side-map (compaction path, tests). Drops the
-     * captured refs on the floor.
+     * Result of {@link #buildMessages}: the hydrated {@link ChatMessage} list
+     * plus the three attachment-bearer side-maps (audio / image / video) that
+     * the post-Tx capability rewrites re-target. Replaces the JCLAW-165 /
+     * JCLAW-224 out-parameter overloads — one call now returns everything the
+     * caller previously hand-assembled from mutable out-lists.
      */
-    public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
-        return buildMessages(systemPrompt, conversation, new ArrayList<>());
-    }
+    public record Hydration(
+            List<ChatMessage> messages,
+            List<VisionAudioAssembler.AudioBearer> audioBearers,
+            List<VisionAudioAssembler.ImageBearer> imageBearers,
+            List<VisionAudioAssembler.VideoBearer> videoBearers) {}
 
     /**
-     * JCLAW-165 overload for callers that need only the audio-bearer side-map
-     * (e.g. tests). Drops the image-bearer refs on the floor.
-     */
-    public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
-                                            List<VisionAudioAssembler.AudioBearer> audioBearersOut) {
-        return buildMessages(systemPrompt, conversation, audioBearersOut, new ArrayList<>());
-    }
-
-    /**
-     * Build the LLM message list and capture the audio- and image-bearer
-     * side-maps concurrently. Caller passes in {@code audioBearersOut} and
-     * {@code imageBearersOut} (typically fresh ArrayLists); the method appends
-     * one entry per user message that has audio / image attachments so the
-     * post-Tx capability rewrites ({@link VisionAudioAssembler#applyTranscriptsForCapability}
-     * and {@link VisionAudioAssembler#applyCaptionsForCapability}) can re-target
-     * the exact slots. Inside-Tx use only — reads conversation history via
+     * Build the LLM message list and capture the audio-, image-, and
+     * video-bearer side-maps in one pass. Appends one bearer entry per user
+     * message that has audio / image / video attachments so the post-Tx
+     * capability rewrites ({@link VisionAudioAssembler#applyTranscriptsForCapability},
+     * {@link VisionAudioAssembler#applyCaptionsForCapability},
+     * {@link VisionAudioAssembler#applyVideoForCapability}) can re-target the
+     * exact slots. Inside-Tx use only — reads conversation history via
      * {@link ConversationService#loadRecentMessages} which touches lazy collections.
      */
-    public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
-                                            List<VisionAudioAssembler.AudioBearer> audioBearersOut,
-                                            List<VisionAudioAssembler.ImageBearer> imageBearersOut) {
-        return buildMessages(systemPrompt, conversation, audioBearersOut, imageBearersOut, new ArrayList<>());
-    }
-
-    /**
-     * JCLAW-224 overload threading {@code videoBearersOut} — the side-map of user turns carrying
-     * video attachments — so {@link VisionAudioAssembler#applyVideoForCapability} can splice the
-     * chosen interpretation strategy's content parts into the exact slots after assembly.
-     */
-    public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
-                                            List<VisionAudioAssembler.AudioBearer> audioBearersOut,
-                                            List<VisionAudioAssembler.ImageBearer> imageBearersOut,
-                                            List<VisionAudioAssembler.VideoBearer> videoBearersOut) {
+    public static Hydration buildMessages(String systemPrompt, Conversation conversation) {
         var messages = new ArrayList<ChatMessage>();
+        var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
+        var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
+        var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
         messages.add(ChatMessage.system(systemPrompt));
 
         // JCLAW-193: tool-row history doesn't store the function name, but
@@ -115,7 +99,7 @@ public final class MessageHydrator {
         for (var msg : history) {
             var role = MessageRole.fromValue(msg.role);
             messages.add(switch (role != null ? role : MessageRole.USER) {
-                case USER -> hydrateUserMessage(msg, messages.size(), audioBearersOut, imageBearersOut, videoBearersOut);
+                case USER -> hydrateUserMessage(msg, messages.size(), audioBearers, imageBearers, videoBearers);
                 case ASSISTANT -> hydrateAssistantMessage(msg, toolNamesById);
                 // JCLAW-119: sanitize the tool_call_id on the TOOL-role row so
                 // it matches the normalized id on the assistant-row tool_calls.
@@ -130,7 +114,7 @@ public final class MessageHydrator {
             });
         }
 
-        return messages;
+        return new Hydration(messages, audioBearers, imageBearers, videoBearers);
     }
 
     /**

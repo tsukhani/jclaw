@@ -225,7 +225,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         fwdMsg.setForwardDate(1700000000);
         var fwdUpdate = new org.telegram.telegrambots.meta.api.objects.Update();
         fwdUpdate.setMessage(fwdMsg);
-        assertTrue(channels.TelegramPollingRunner.isForward(fwdUpdate),
+        assertTrue(channels.TelegramReactionNotifier.isForward(fwdUpdate),
                 "a forwarded webhook message must be detected as a forward");
 
         var normalMsg = new org.telegram.telegrambots.meta.api.objects.message.Message();
@@ -233,7 +233,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         normalMsg.setText("typed");
         var normalUpdate = new org.telegram.telegrambots.meta.api.objects.Update();
         normalUpdate.setMessage(normalMsg);
-        assertFalse(channels.TelegramPollingRunner.isForward(normalUpdate),
+        assertFalse(channels.TelegramReactionNotifier.isForward(normalUpdate),
                 "a normal typed webhook message must NOT be detected as a forward");
     }
 

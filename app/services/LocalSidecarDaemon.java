@@ -14,7 +14,9 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 /**
  * Shared lifecycle mechanism for jclaw's local Python sidecars — the imagegen
@@ -27,11 +29,32 @@ import java.util.function.BiFunction;
  * start/drain/graceful-close discipline is {@code mcp.transport.McpStdioTransport}.
  *
  * <p>One instance per managed daemon, held as a static field by the per-domain
- * manager facade. {@link #lock()} is the single-flight monitor the facade
- * synchronizes {@code ensureRunning} on; {@link #spawn(String)} and
- * {@link #awaitHealthy()} assume that lock is held, while {@link #stop()}
- * acquires it (the JVM monitor is reentrant, so a facade may call {@code stop()}
- * from inside the lock — as the videogen engine-switch path does).
+ * manager facade. Concurrency (JCLAW-830) splits the two jobs the old coarse
+ * monitor conflated:
+ * <ul>
+ *   <li><b>Single-flight</b> — {@link #singleFlight(Supplier)} runs a
+ *       spawn + {@link #awaitHealthy()} sequence under {@code startLock} so at
+ *       most one thread spawns on the fixed port at a time. A second concurrent
+ *       starter blocks there, then its own health re-check short-circuits it to a
+ *       no-op (a double-spawn on the fixed port would poison the
+ *       {@link #spawnFailedUntil} cooldown for the healthy sidecar).</li>
+ *   <li><b>Safe publication</b> — {@link #process} and the drain threads are
+ *       {@code volatile} and every compound read/write is guarded by the
+ *       short-held {@code procLock}, never across the blocking startup poll. So
+ *       {@link #stop()} can observe and terminate a process another thread is
+ *       still spawning without stalling behind the multi-second (minutes on first
+ *       launch) health-await.</li>
+ * </ul>
+ *
+ * <p>{@link #stop()} deliberately does <em>not</em> take {@code startLock}: an
+ * idle-respawn, shutdown, or engine-switch stop never waits on an in-flight
+ * spawn. A stop that races a spawn is made orphan-free by the {@code stopGeneration}
+ * hand-off (see {@code spawnNow} and {@link #stop()}).
+ *
+ * <p>{@link #lock()} is retained only for the diarization facade
+ * ({@code services.transcription.DiarizeSidecarManager}), which still serializes
+ * its own {@code ensureRunning} on that monitor; it is orthogonal to {@code startLock}
+ * and is not the lock {@code stop()} uses.
  */
 public final class LocalSidecarDaemon {
 
@@ -55,17 +78,58 @@ public final class LocalSidecarDaemon {
     private final Config cfg;
     private final Object lock = new Object();
 
-    private Process process;
-    private Thread outDrain;
-    private Thread errDrain;
+    /** JCLAW-830 single-flight: only one thread spawns on the fixed port at a
+     *  time. Held across spawn + {@link #awaitHealthy()} so a second concurrent
+     *  starter waits for the in-flight spawn then re-checks health and no-ops,
+     *  rather than double-spawning. Deliberately NOT the lock {@link #stop()}
+     *  uses, so a stop never stalls behind the startup poll. */
+    private final ReentrantLock startLock = new ReentrantLock();
+
+    /** JCLAW-830 short-held publication guard for {@link #process} and the drain
+     *  threads: held only around field access, never across the spawn or the
+     *  health poll, so {@link #stop()} can observe/terminate a spawning process
+     *  without blocking on startup. */
+    private final Object procLock = new Object();
+
+    /** JCLAW-830: bumped by {@link #stop()} under {@link #procLock}. A spawn whose
+     *  generation changed between launching its child and publishing it aborts
+     *  (kills the just-launched orphan) — closing the stop-before-publish race.
+     *  Volatile so the {@link #awaitHealthy()} poll can read it lock-free. */
+    private volatile long stopGeneration;
+
+    private volatile Process process;
+    private volatile Thread outDrain;
+    private volatile Thread errDrain;
 
     public LocalSidecarDaemon(Config cfg) {
         this.cfg = cfg;
     }
 
-    /** Single-flight monitor; the facade synchronizes {@code ensureRunning} on it. */
+    /** Retained for the diarization facade
+     *  ({@code services.transcription.DiarizeSidecarManager}), which still
+     *  serializes its own {@code ensureRunning} on this monitor. The four other
+     *  facades use {@link #singleFlight(Supplier)} instead (JCLAW-830). This
+     *  monitor is orthogonal to {@code startLock} and is not the lock
+     *  {@link #stop()} uses. */
     public Object lock() {
         return lock;
+    }
+
+    /**
+     * Run {@code action} — a health re-check + spawn + {@link #awaitHealthy()}
+     * sequence — under the single-flight {@code startLock} (JCLAW-830). At most
+     * one thread spawns on the fixed port at a time; a second concurrent caller
+     * blocks here until the in-flight spawn finishes, then {@code action}'s own
+     * health re-check short-circuits it to a no-op. {@link #stop()} does not take
+     * {@code startLock}, so it never stalls behind the startup poll.
+     */
+    public <T> T singleFlight(Supplier<T> action) {
+        startLock.lock();
+        try {
+            return action.get();
+        } finally {
+            startLock.unlock();
+        }
     }
 
     public int port() {
@@ -76,11 +140,10 @@ public final class LocalSidecarDaemon {
         return "http://127.0.0.1:" + port();
     }
 
-    /** Whether a process handle exists (alive or not) — drives the engine-switch restart. */
+    /** Whether a process handle exists (alive or not) — drives the engine-switch
+     *  restart. Volatile read; safe without a lock (JCLAW-830). */
     public boolean hasProcess() {
-        synchronized (lock) {
-            return process != null;
-        }
+        return process != null;
     }
 
     /** JCLAW-626: after a spawn failure, fail fast for a cooldown instead
@@ -101,7 +164,9 @@ public final class LocalSidecarDaemon {
      * Spawn the sidecar serving {@code model}, passing {@code hfToken} (when
      * non-blank) to the child as {@code HF_TOKEN}. The token parameter exists
      * so a facade can pass an explicit value (or null to force no token —
-     * the ASR sidecar's weights are ungated and need none). The caller must hold {@link #lock()}.
+     * the ASR sidecar's weights are ungated and need none). Invoke inside
+     * {@link #singleFlight(Supplier)} (or, for the diarization facade, while
+     * holding {@link #lock()}) so only one spawn runs on the fixed port at a time.
      */
     public void spawn(String model, String hfToken) {
         if (System.currentTimeMillis() < spawnFailedUntil) {
@@ -113,10 +178,24 @@ public final class LocalSidecarDaemon {
             spawnNow(model, hfToken);
             spawnFailedUntil = 0;
             spawnFailureMessage = null;
+        } catch (StartCancelledException e) {
+            // JCLAW-830: a concurrent stop() cancelled this launch — that is a
+            // deliberate cancellation, not a startup failure, so do NOT poison the
+            // cooldown. Surface it as the domain exception for the caller.
+            throw cfg.fail().apply(e.getMessage(), null);
         } catch (RuntimeException e) {
             spawnFailedUntil = System.currentTimeMillis() + SPAWN_FAILURE_COOLDOWN_MS;
             spawnFailureMessage = e.getMessage();
             throw e;
+        }
+    }
+
+    /** JCLAW-830: internal marker that {@code spawnNow} raced a {@link #stop()}
+     *  and abandoned its just-launched child. Distinct from a real launch failure
+     *  so {@link #spawn(String, String)} skips the {@code spawnFailedUntil} cooldown. */
+    private static final class StartCancelledException extends RuntimeException {
+        StartCancelledException(String message) {
+            super(message);
         }
     }
 
@@ -135,6 +214,12 @@ public final class LocalSidecarDaemon {
                 "--model", model,
                 "--cache-dir", cacheDir,
                 "--idle-timeout-min", String.valueOf(idleMin));
+        // JCLAW-830: snapshot the stop generation before launching. If stop()
+        // bumps it while the child is starting, the publish below aborts and
+        // kills the orphan so stop()'s "no running process" intent holds.
+        long genAtLaunch = stopGeneration;
+
+        Process proc;
         try {
             var pb = new ProcessBuilder(cmd).directory(sidecarDir);
             // JCLAW-641: the sidecar's subprocess ceilings derive from the
@@ -150,30 +235,54 @@ public final class LocalSidecarDaemon {
             if (hfToken != null && !hfToken.isBlank()) {
                 pb.environment().put("HF_TOKEN", hfToken);
             }
-            process = pb.start();
+            proc = pb.start();
+        } catch (IOException e) {
+            throw cfg.fail().apply("failed to launch %s: %s".formatted(cfg.displayName(), e.getMessage()), e);
+        }
+
+        // Publish the child (and start its drains) atomically w.r.t. stop(). If a
+        // stop() slipped in between the snapshot and here, abandon and kill the
+        // just-launched process instead of publishing it — otherwise stop() would
+        // have returned seeing no process while this leaves one running.
+        synchronized (procLock) {
+            if (stopGeneration != genAtLaunch) {
+                proc.destroyForcibly();
+                throw new StartCancelledException(
+                        "%s start was cancelled by a concurrent stop".formatted(cfg.displayName()));
+            }
+            process = proc;
             // The sidecar writes operational lines (listening, request logs, idle-exit)
             // to stderr; stdout carries nothing (payloads go over the HTTP socket). Drain
             // both on VTs so a full pipe never blocks the child.
             outDrain = Thread.ofVirtual().name(cfg.threadPrefix() + "-stdout")
-                    .start(() -> drain(process.getInputStream(), false));
+                    .start(() -> drain(proc.getInputStream(), false));
             errDrain = Thread.ofVirtual().name(cfg.threadPrefix() + "-stderr")
-                    .start(() -> drain(process.getErrorStream(), true));
-            EventLogger.info(cfg.logChannel(),
-                    "%s starting (model=%s port=%d)".formatted(cfg.displayName(), model, port()));
-        } catch (IOException e) {
-            throw cfg.fail().apply("failed to launch %s: %s".formatted(cfg.displayName(), e.getMessage()), e);
+                    .start(() -> drain(proc.getErrorStream(), true));
         }
+        EventLogger.info(cfg.logChannel(),
+                "%s starting (model=%s port=%d)".formatted(cfg.displayName(), model, port()));
     }
 
-    /** Block until {@code /health} responds or the startup deadline elapses. Caller holds {@link #lock()}. */
+    /** Block until {@code /health} responds or the startup deadline elapses. Runs
+     *  without holding any monitor {@link #stop()} needs; invoke from inside the
+     *  single-flight section that launched the process ({@link #singleFlight(Supplier)},
+     *  or {@link #lock()} for the diarization facade). */
     public void awaitHealthy() {
         int timeoutS = ConfigService.getInt(cfg.configPrefix() + ".startupTimeoutSeconds", cfg.defaultStartupTimeoutS());
+        // JCLAW-830: if stop() intervenes while we poll, abort promptly instead of
+        // burning the full timeout on a process it already terminated.
+        long genAtStart = stopGeneration;
         long deadline = System.nanoTime() + timeoutS * 1_000_000_000L;
         while (System.nanoTime() < deadline) {
-            if (process != null && !process.isAlive()) {
+            if (stopGeneration != genAtStart) {
+                throw cfg.fail().apply(
+                        "%s startup was cancelled by a concurrent stop".formatted(cfg.displayName()), null);
+            }
+            Process p = process; // volatile snapshot — stop() may null it under us
+            if (p != null && !p.isAlive()) {
                 throw cfg.fail().apply(
                         "%s exited during startup (exit %d) — check the logs"
-                                .formatted(cfg.displayName(), process.exitValue()), null);
+                                .formatted(cfg.displayName(), p.exitValue()), null);
             }
             if (isHealthy()) return;
             try {
@@ -270,23 +379,42 @@ public final class LocalSidecarDaemon {
 
     /**
      * Stop the sidecar if running. {@code destroy()} for a clean exit,
-     * {@code destroyForcibly()} if it doesn't go within 2s. Acquires {@link #lock()}.
+     * {@code destroyForcibly()} if it doesn't go within 2s.
+     *
+     * <p>JCLAW-830: takes only the short {@link #procLock} to bump
+     * {@code stopGeneration} and unpublish the process fields, then does the
+     * (up-to-2s) terminate <em>outside</em> the lock. It never touches
+     * {@code startLock}, so it never stalls behind an in-flight spawn's health
+     * poll. The generation bump makes a spawn racing this stop orphan-free: a
+     * spawn that has not yet published sees the changed generation and kills its
+     * own child; one that has published is the process we terminate here.
      */
     public void stop() {
-        synchronized (lock) {
-            if (process == null) return;
-            process.destroy();
-            try {
-                if (!process.waitFor(2, TimeUnit.SECONDS)) {
-                    process.destroyForcibly();
-                }
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                process.destroyForcibly();
-            }
-            if (outDrain != null) outDrain.interrupt();
-            if (errDrain != null) errDrain.interrupt();
+        Process p;
+        Thread out;
+        Thread err;
+        synchronized (procLock) {
+            stopGeneration++;
+            p = process;
+            out = outDrain;
+            err = errDrain;
             process = null;
+            outDrain = null;
+            errDrain = null;
         }
+        // p == null: nothing published. Either nothing was running, or a spawn is
+        // mid-launch — the generation bump above makes it abort and kill its child.
+        if (p == null) return;
+        p.destroy();
+        try {
+            if (!p.waitFor(2, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+            }
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            p.destroyForcibly();
+        }
+        if (out != null) out.interrupt();
+        if (err != null) err.interrupt();
     }
 }

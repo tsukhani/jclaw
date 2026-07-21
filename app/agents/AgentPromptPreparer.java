@@ -13,7 +13,6 @@ import services.SessionCompactor;
 import services.Tx;
 import utils.LatencyTrace;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -106,10 +105,7 @@ final class AgentPromptPreparer {
             // for inherit-mode subagents. No-op for fresh-mode and non-subagent
             // conversations (parentContext is null).
             sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
-            var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
-            var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
-            var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
-            var messages = MessageHydrator.buildMessages(sysPrompt, conv, audioBearers, imageBearers, videoBearers);
+            var hydration = MessageHydrator.buildMessages(sysPrompt, conv);
 
             // JCLAW-108: resolve the provider from the effective provider name
             // (conversation override when set, agent default otherwise), not
@@ -133,7 +129,8 @@ final class AgentPromptPreparer {
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
 
-            return Optional.of(new PreparedData(messages, primary, secondary, tools, audioBearers, imageBearers, videoBearers));
+            return Optional.of(new PreparedData(hydration.messages(), primary, secondary, tools,
+                    hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers()));
         });
     }
 
@@ -205,15 +202,13 @@ final class AgentPromptPreparer {
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
-            var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
-            var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
-            var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
-            var msgs = MessageHydrator.buildMessages(sysPrompt, convo, audioBearers, imageBearers, videoBearers);
+            var hydration = MessageHydrator.buildMessages(sysPrompt, convo);
             // Conversation-aware overload: applies the loadtest-agent
             // short-circuit AND the lazy MCP discovery gate (only ship
             // schemas for servers the model has called list_mcp_tools on).
             var toolDefs = ToolRegistry.getToolDefsForAgent(agent, convo);
-            return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools, audioBearers, imageBearers, videoBearers);
+            return new PreparedPrologue(assembled0, hydration.messages(), toolDefs, disabledTools,
+                    hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
         });
     }
 

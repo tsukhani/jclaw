@@ -70,7 +70,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SYSTEM PROMPT", fresh);
+        var messages = MessageHydrator.buildMessages("SYSTEM PROMPT", fresh).messages();
         assertEquals(1, messages.size(),
                 "empty history must produce a one-element list (system prompt only)");
         assertEquals(MessageRole.SYSTEM.value, messages.getFirst().role());
@@ -85,7 +85,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         assertEquals(MessageRole.SYSTEM.value, messages.getFirst().role());
         assertEquals("SP", messages.getFirst().content());
     }
@@ -99,7 +99,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         assertEquals(2, messages.size());
         var user = messages.get(1);
         assertEquals(MessageRole.USER.value, user.role());
@@ -118,7 +118,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         assertEquals(3, messages.size());
         var asst = messages.get(2);
         assertEquals(MessageRole.ASSISTANT.value, asst.role());
@@ -136,7 +136,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         // SYSTEM + USER + ASSISTANT(with tool_calls)
         assertEquals(3, messages.size());
         var asst = messages.get(2);
@@ -162,7 +162,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         // SYSTEM + USER + ASSISTANT + TOOL
         assertEquals(4, messages.size());
         var tool = messages.get(3);
@@ -191,7 +191,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         var asst = messages.get(2);
         var tool = messages.get(3);
         var expectedId = "functions_web_search_7";
@@ -214,7 +214,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         var asst = messages.get(2);
         assertEquals(MessageRole.ASSISTANT.value, asst.role());
         assertNull(asst.toolCalls(),
@@ -235,7 +235,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         var asst = messages.get(2);
         assertEquals("I'll run that for you.", asst.content());
         assertNotNull(asst.toolCalls());
@@ -251,7 +251,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         // SYSTEM prompt + persisted SYSTEM row.
         assertEquals(2, messages.size());
         var sys = messages.get(1);
@@ -273,7 +273,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         assertEquals(5, messages.size());
         assertEquals(MessageRole.SYSTEM.value, messages.get(0).role());
         assertEquals(MessageRole.USER.value, messages.get(1).role());
@@ -298,7 +298,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = MessageHydrator.buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
         // SYSTEM prompt + the bogus row, hydrated through the USER branch.
         assertEquals(2, messages.size());
         assertEquals(MessageRole.USER.value, messages.get(1).role(),

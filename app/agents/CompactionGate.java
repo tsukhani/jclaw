@@ -125,7 +125,7 @@ public final class CompactionGate {
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
-            return MessageHydrator.buildMessages(sysPrompt, conv);
+            return MessageHydrator.buildMessages(sysPrompt, conv).messages();
         });
     }
 }

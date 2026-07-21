@@ -51,13 +51,16 @@ public final class LocalImageSidecarManager {
 
     /**
      * Ensure the sidecar is up and return its base URL. Idempotent and
-     * single-flight: concurrent callers serialize on the daemon lock so only one
-     * daemon is ever spawned. Throws {@link ImageGenerationException} when uv is
-     * absent, the script is missing, or the daemon doesn't become healthy in time.
+     * single-flight (JCLAW-830): the spawn + health-await run under the daemon's
+     * {@code startLock} — a separate lock from the one {@code stop()} uses — so a
+     * concurrent starter waits for the in-flight spawn and then no-ops on the
+     * re-check, while {@code stop()}/idle-respawn never stall behind the startup
+     * poll. Throws {@link ImageGenerationException} when uv is absent, the script
+     * is missing, or the daemon doesn't become healthy in time.
      */
     public static String ensureRunning() {
         if (DAEMON.isHealthy()) return DAEMON.baseUrl();
-        synchronized (DAEMON.lock()) {
+        return DAEMON.singleFlight(() -> {
             if (DAEMON.isHealthy()) return DAEMON.baseUrl();
             if (!UvProbe.isAvailable()) {
                 throw new ImageGenerationException(
@@ -67,7 +70,7 @@ public final class LocalImageSidecarManager {
             DAEMON.spawn(ConfigService.get("imagegen.local.model", DEFAULT_MODEL));
             DAEMON.awaitHealthy();
             return DAEMON.baseUrl();
-        }
+        });
     }
 
     /**

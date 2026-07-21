@@ -659,14 +659,16 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                                                           String channelType,
                                                           AgentExecutionSink sink) throws Exception {
 
+        // JCLAW-831: the stable per-turn state now rides in a StreamingTurnContext
+        // record; only messages / toolCalls / priorContent / round stay positional.
+        var ctx = new ToolCallLoopRunner.StreamingTurnContext(
+                agent, conversation, conversationId, tools, provider, cb, thinkingMode,
+                isCancelled, trace, turnUsage, collectedImages, channelType, sink);
+
         Method m = ToolCallLoopRunner.class.getDeclaredMethod(
                 "handleToolCallsStreaming",
-                Agent.class, Conversation.class, Long.class,
-                List.class, List.class, List.class, String.class,
-                LlmProvider.class, AgentRunner.StreamingCallbacks.class, String.class,
-                int.class, AtomicBoolean.class, LatencyTrace.class,
-                LlmProvider.TurnUsage.class, List.class, String.class,
-                AgentExecutionSink.class);
+                ToolCallLoopRunner.StreamingTurnContext.class,
+                List.class, List.class, String.class, int.class);
         m.setAccessible(true);
 
         var resultRef = new AtomicReference<String>();
@@ -674,9 +676,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
         var t = Thread.ofVirtual().start(() -> {
             try {
                 resultRef.set((String) m.invoke(null,
-                        agent, conversation, conversationId, messages, tools, toolCalls,
-                        priorContent, provider, cb, thinkingMode, round, isCancelled,
-                        trace, turnUsage, collectedImages, channelType, sink));
+                        ctx, messages, toolCalls, priorContent, round));
             } catch (Exception e) {
                 errorRef.set(e);
             }

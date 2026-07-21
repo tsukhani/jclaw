@@ -10,7 +10,7 @@ import channels.TelegramChannel;
 import channels.TelegramForwardCoalesceBuffer;
 import channels.TelegramInboundTextBuffer;
 import channels.TelegramMediaGroupBuffer;
-import channels.TelegramPollingRunner;
+import channels.TelegramReactionNotifier;
 import channels.TelegramStreamingSink;
 import channels.TelegramWebhookRateLimiter;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -249,9 +249,9 @@ public class WebhookTelegramController extends Controller {
         // NOTE: Telegram only DELIVERS message_reaction to the webhook when the
         // registrar (TelegramWebhookRegistrar — outside this story's file set)
         // names it in allowed_updates; this handler is ready for that follow-up.
-        var reaction = TelegramPollingRunner.parseReaction(sdkUpdate);
+        var reaction = TelegramReactionNotifier.parseReaction(sdkUpdate);
         if (reaction != null) {
-            TelegramPollingRunner.handleReaction(
+            TelegramReactionNotifier.handleReaction(
                     ctx.agent(), ctx.botToken(), ctx.telegramUserId(), reaction);
             return;
         }
@@ -266,7 +266,7 @@ public class WebhookTelegramController extends Controller {
         // InboundMessage drops the forward fields) so handleInboundMessage can
         // route a forward burst through the coalesce lane.
         handleInboundMessage(ctx, message, bindingId,
-                TelegramPollingRunner.isForward(sdkUpdate));
+                TelegramReactionNotifier.isForward(sdkUpdate));
     }
 
     private static void handleCallback(BindingCtx ctx, InboundCallback callback, Long bindingId) {

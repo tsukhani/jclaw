@@ -426,26 +426,36 @@ public final class ToolCallLoopRunner {
         return false;
     }
 
-    @SuppressWarnings("java:S107") // Tool-call streaming dispatcher — every parameter is required orchestration state
-    static String handleToolCallsStreaming(Agent agent, Conversation conversation, Long conversationId,
-                                            List<ChatMessage> messages, List<ToolDef> tools,
-                                            List<ToolCall> toolCalls, String priorContent,
-                                            LlmProvider provider,
-                                            AgentRunner.StreamingCallbacks cb,
-                                            String thinkingMode,
-                                            int round, AtomicBoolean isCancelled,
-                                            LatencyTrace trace,
-                                            LlmProvider.TurnUsage turnUsage,
-                                            List<String> collectedImages,
-                                            String channelType,
-                                            AgentExecutionSink sink) {
+    /**
+     * Stable per-turn state for the streaming tool-call recursion
+     * ({@link #handleToolCallsStreaming} and its {@link #retryEmptyContinuation}
+     * helper). Every field is invariant across the recursion; only the
+     * genuinely-varying {@code messages}, {@code toolCalls}, {@code priorContent},
+     * and {@code round} stay as method parameters. Mirrors the
+     * {@code ParallelToolExecutor.DispatchContext} record pattern, collapsing what
+     * was a 17-positional-parameter recursion.
+     *
+     * <p>{@code collectedImages} is the JCLAW-104 turn-scope image accumulator —
+     * the SAME list threads through every recursion level so images captured in an
+     * early round still reach the final {@code buildImagePrefix} call.
+     */
+    // Visible (public) for ToolCallLoopRunnerStreamingTest in the default package
+    public record StreamingTurnContext(Agent agent, Conversation conversation, Long conversationId,
+                                       List<ToolDef> tools, LlmProvider provider,
+                                       AgentRunner.StreamingCallbacks cb, String thinkingMode,
+                                       AtomicBoolean isCancelled, LatencyTrace trace,
+                                       LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
+                                       String channelType, AgentExecutionSink sink) {}
+
+    static String handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
+                                           List<ToolCall> toolCalls, String priorContent, int round) {
         if (round >= AgentRunner.maxToolRounds()) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
-        if (isCancelled.get()) {
-            return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+        if (ctx.isCancelled().get()) {
+            return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
         }
-        EventLogger.info("tool", agent.name, null,
+        EventLogger.info("tool", ctx.agent().name, null,
                 "Streaming round %d: executing %d tool call(s)".formatted(round + 1, toolCalls.size()));
 
         var currentMessages = new ArrayList<>(messages);
@@ -453,17 +463,17 @@ public final class ToolCallLoopRunner {
 
         int streamingToolResultsAnchor = currentMessages.size();
         var toolRoundStartNs = System.nanoTime();
-        ParallelToolExecutor.executeToolsParallel(toolCalls, agent, conversationId, currentMessages,
-                cb.onStatus(), cb.onToolCall(), collectedImages, isCancelled, sink);
-        trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
+        ParallelToolExecutor.executeToolsParallel(toolCalls, ctx.agent(), ctx.conversationId(), currentMessages,
+                ctx.cb().onStatus(), ctx.cb().onToolCall(), ctx.collectedImages(), ctx.isCancelled(), ctx.sink());
+        ctx.trace().addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
-        if (isCancelled.get()) return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+        if (ctx.isCancelled().get()) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
 
         // JCLAW-291: cooperative-cancel checkpoint between the tool round
         // and the LLM continuation. Subagent-driven streaming runs aren't
         // the common case but the checkpoint is cheap and keeps the two
         // round-loops symmetric.
-        AgentRunner.checkSubagentCancel(conversation);
+        AgentRunner.checkSubagentCancel(ctx.conversation());
 
         // JCLAW-273: subagent_yield detected in this round — exit the
         // streaming loop without continuing to the next LLM round and
@@ -472,50 +482,50 @@ public final class ToolCallLoopRunner {
         // persistence + terminal-callback path; the parent's logical turn
         // resumes later from tools.SubagentSpawnTool#runAsyncAndAnnounce.
         if (yieldRequestedInLastRound(currentMessages, streamingToolResultsAnchor)) {
-            EventLogger.info("tool", agent.name, null,
+            EventLogger.info("tool", ctx.agent().name, null,
                     "Streaming round %d: subagent_yield invoked — suspending parent turn"
                             .formatted(round + 1));
             return AgentRunner.YIELDED_RESPONSE;
         }
 
-        cb.onStatus().accept("Processing results (round %d)...".formatted(round + 1));
-        EventLogger.info("llm", agent.name, null,
+        ctx.cb().onStatus().accept("Processing results (round %d)...".formatted(round + 1));
+        EventLogger.info("llm", ctx.agent().name, null,
                 "Streaming round %d: continuing LLM call after tool results".formatted(round + 1));
 
         // Continue with streaming after tool results. JCLAW-108: effective
         // model id honors conversation override, same as the round-1 call.
-        var effectiveModelIdForCall = ModelResolver.effectiveModelId(agent, conversation);
+        var effectiveModelIdForCall = ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation());
         // JCLAW-465: compress tool outputs (incl. this turn's) before the
         // continuation call. Ephemeral — currentMessages keeps the originals.
-        var sendMessages = CompressionPipeline.compress(currentMessages, agent, conversation);
+        var sendMessages = CompressionPipeline.compress(currentMessages, ctx.agent(), ctx.conversation());
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
-        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, sendMessages, tools);
-        var accumulator = provider.chatStreamAccumulate(
-                effectiveModelIdForCall, sendMessages, tools, cb.onToken(), cb.onReasoning(),
-                maxTokens, thinkingMode, channelType);
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());
+        var accumulator = ctx.provider().chatStreamAccumulate(
+                effectiveModelIdForCall, sendMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
+                maxTokens, ctx.thinkingMode(), ctx.channelType());
 
         try {
-            if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null, cb))
-                return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+            if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, ctx.isCancelled(), ctx.agent(), null, ctx.cb()))
+                return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+            return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
         }
 
-        if (isCancelled.get()) return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+        if (ctx.isCancelled().get()) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
 
         // Fold this round's usage into the turn-level cumulative (JCLAW-76).
         // Runs regardless of whether the round resolves to more tool calls,
         // truncation, synthesis, or empty-retry — every round contributes.
-        turnUsage.addRound(accumulator);
+        ctx.turnUsage().addRound(accumulator);
 
         // Truncation guard: if the model hit max_tokens mid-tool-call, the tool arguments
         // will be an incomplete JSON fragment. Passing that to ToolRegistry.execute causes
         // a Gson EOFException and the user sees a cryptic "End of input" error. Instead,
         // surface a clear message so the LLM can retry with a more concise approach.
         if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason()) && !accumulator.toolCalls().isEmpty()) {
-            return handleTruncatedToolCallAccumulator(accumulator, agent, cb, round);
+            return handleTruncatedToolCallAccumulator(accumulator, ctx.agent(), ctx.cb(), round);
         }
 
         // Recursively handle if more tool calls. JCLAW-104: pass the SAME
@@ -523,9 +533,7 @@ public final class ToolCallLoopRunner {
         // the deeper round's final buildImagePrefix call. channelType threads
         // through too so buildDownloadSuffix can stay channel-aware.
         if (!accumulator.toolCalls().isEmpty()) {
-            return handleToolCallsStreaming(agent, conversation, conversationId, currentMessages, tools,
-                    accumulator.toolCalls(), accumulator.content(), provider, cb, thinkingMode,
-                    round + 1, isCancelled, trace, turnUsage, collectedImages, channelType, sink);
+            return handleToolCallsStreaming(ctx, currentMessages, accumulator.toolCalls(), accumulator.content(), round + 1);
         }
 
         // Some models (especially smaller/distilled ones) occasionally return zero tokens
@@ -533,14 +541,12 @@ public final class ToolCallLoopRunner {
         // even when the user clearly wants synthesis. Retry once with an explicit synthesis
         // nudge before giving up and emitting a diagnostic fallback.
         if (accumulator.content() == null || accumulator.content().isBlank()) {
-            return retryEmptyContinuation(agent, conversation, provider, cb, thinkingMode, round, isCancelled,
-                    turnUsage, collectedImages, channelType, currentMessages, tools,
-                    effectiveModelIdForCall, priorContent);
+            return retryEmptyContinuation(ctx, round, currentMessages, effectiveModelIdForCall, priorContent);
         }
 
-        return MessageDeduplicator.buildImagePrefix(collectedImages, accumulator.content())
+        return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), accumulator.content())
                 + accumulator.content()
-                + MessageDeduplicator.buildDownloadSuffix(collectedImages, accumulator.content(), channelType);
+                + MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), accumulator.content(), ctx.channelType());
     }
 
     /**
@@ -571,56 +577,51 @@ public final class ToolCallLoopRunner {
      * continuation. If the retry also returns empty, emit a labeled
      * diagnostic fallback so the user knows why the chat went silent.
      */
-    @SuppressWarnings("java:S107") // mirrors the orchestration state of handleToolCallsStreaming
-    private static String retryEmptyContinuation(Agent agent, Conversation conversation, LlmProvider provider,
-                                                  AgentRunner.StreamingCallbacks cb, String thinkingMode,
-                                                  int round, AtomicBoolean isCancelled,
-                                                  LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
-                                                  String channelType, ArrayList<ChatMessage> currentMessages,
-                                                  List<ToolDef> tools, String effectiveModelIdForCall,
-                                                  String priorContent) {
-        EventLogger.warn("llm", agent.name, null,
+    private static String retryEmptyContinuation(StreamingTurnContext ctx, int round,
+                                                 ArrayList<ChatMessage> currentMessages,
+                                                 String effectiveModelIdForCall, String priorContent) {
+        EventLogger.warn("llm", ctx.agent().name, null,
                 "Empty continuation after tool calls in round %d — retrying with synthesis nudge"
                         .formatted(round + 1));
-        cb.onStatus().accept("Synthesizing response (retry)...");
+        ctx.cb().onStatus().accept("Synthesizing response (retry)...");
 
         var retryMessages = new ArrayList<>(currentMessages);
         retryMessages.add(ChatMessage.user(
                 "Synthesize the final response for me now using the tool results above. "
                         + "Do not call any more tools. Write the full answer as markdown."));
 
-        var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, retryMessages, tools);
-        var retry = provider.chatStreamAccumulate(
-                effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(),
-                retryMaxTokens, thinkingMode, channelType);
+        var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, ctx.tools());
+        var retry = ctx.provider().chatStreamAccumulate(
+                effectiveModelIdForCall, retryMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
+                retryMaxTokens, ctx.thinkingMode(), ctx.channelType());
         try {
-            if (!CancellationManager.awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb))
-                return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+            if (!CancellationManager.awaitAccumulatorOrCancel(retry, ctx.isCancelled(), ctx.agent(), null, ctx.cb()))
+                return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+            return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
         }
 
         // Retry round is a real LLM call — its usage counts too (JCLAW-76).
-        turnUsage.addRound(retry);
+        ctx.turnUsage().addRound(retry);
 
         if (retry.content() != null && !retry.content().isBlank()) {
-            return MessageDeduplicator.buildImagePrefix(collectedImages, retry.content())
+            return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), retry.content())
                     + retry.content()
-                    + MessageDeduplicator.buildDownloadSuffix(collectedImages, retry.content(), channelType);
+                    + MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), retry.content(), ctx.channelType());
         }
 
         // Retry also empty — emit a labeled diagnostic so the user knows why.
-        EventLogger.warn("llm", agent.name, null,
+        EventLogger.warn("llm", ctx.agent().name, null,
                 "Retry also returned empty content — emitting diagnostic fallback");
         // No LLM content to dedupe against — prepend every collected image unchanged.
-        var fallbackPrefix = collectedImages.isEmpty() ? ""
-                : String.join("\n\n", collectedImages) + "\n\n";
-        var fallbackSuffix = MessageDeduplicator.buildDownloadSuffix(collectedImages, "", channelType);
+        var fallbackPrefix = ctx.collectedImages().isEmpty() ? ""
+                : String.join("\n\n", ctx.collectedImages()) + "\n\n";
+        var fallbackSuffix = MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), "", ctx.channelType());
         var fallback = fallbackPrefix
                 + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*"
                 + fallbackSuffix;
-        cb.onToken().accept(fallback);
+        ctx.cb().onToken().accept(fallback);
         return fallback;
     }
 }

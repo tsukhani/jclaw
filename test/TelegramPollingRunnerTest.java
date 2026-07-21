@@ -2,6 +2,7 @@ import channels.ChannelTransport;
 import channels.TelegramOffsetStore;
 import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
+import channels.TelegramReactionNotifier;
 import models.Agent;
 import models.EventLog;
 import models.TelegramBinding;
@@ -424,7 +425,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     @Test
     void parseReactionExtractsAddedEmojiAndReactor() {
         var update = updateFromJson(reactionUpdateJson("private", 100, 42, 5, "ada", "👍"));
-        var delta = TelegramPollingRunner.parseReaction(update);
+        var delta = TelegramReactionNotifier.parseReaction(update);
         assertNotNull(delta, "a message_reaction update must parse into a delta");
         assertEquals("100", delta.chatId());
         assertEquals("private", delta.chatType());
@@ -439,7 +440,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         // A plain text-message update carries no message_reaction → null.
         var update = updateFromJson("{\"update_id\":1,\"message\":{\"message_id\":1,"
                 + "\"date\":1,\"chat\":{\"id\":1,\"type\":\"private\"},\"text\":\"hi\"}}");
-        assertNull(TelegramPollingRunner.parseReaction(update),
+        assertNull(TelegramReactionNotifier.parseReaction(update),
                 "a non-reaction update must not parse into a reaction delta");
     }
 
@@ -450,35 +451,35 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 + "\"chat\":{\"id\":1,\"type\":\"private\"},\"message_id\":9,\"date\":1,"
                 + "\"old_reaction\":[{\"type\":\"emoji\",\"emoji\":\"👍\"}],"
                 + "\"new_reaction\":[{\"type\":\"emoji\",\"emoji\":\"👍\"}]}}");
-        assertNull(TelegramPollingRunner.parseReaction(update),
+        assertNull(TelegramReactionNotifier.parseReaction(update),
                 "a reaction update with no net change must produce no delta");
     }
 
     @Test
     void reactionEventTextRendersAddAndRemove() {
-        var added = new TelegramPollingRunner.ReactionDelta("1", "private", 7, "5", "@ada",
+        var added = new TelegramReactionNotifier.ReactionDelta("1", "private", 7, "5", "@ada",
                 java.util.List.of("👍"), java.util.List.of());
-        assertTrue(TelegramPollingRunner.reactionEventText(added).startsWith("[system] @ada reacted"),
+        assertTrue(TelegramReactionNotifier.reactionEventText(added).startsWith("[system] @ada reacted"),
                 "added-only delta must read as a 'reacted' event");
-        assertTrue(TelegramPollingRunner.reactionEventText(added).contains("message 7"));
+        assertTrue(TelegramReactionNotifier.reactionEventText(added).contains("message 7"));
 
-        var removed = new TelegramPollingRunner.ReactionDelta("1", "private", 7, "5", "@ada",
+        var removed = new TelegramReactionNotifier.ReactionDelta("1", "private", 7, "5", "@ada",
                 java.util.List.of(), java.util.List.of("👍"));
-        assertTrue(TelegramPollingRunner.reactionEventText(removed).contains("removed reaction"),
+        assertTrue(TelegramReactionNotifier.reactionEventText(removed).contains("removed reaction"),
                 "removed-only delta must read as a 'removed reaction' event");
     }
 
     @Test
     void reactionNotifyModeDefaultsToOwnAndNormalizesUnknown() {
         play.Play.configuration.remove("telegram.reactions.notify"); // → default
-        assertEquals("own", TelegramPollingRunner.reactionNotifyMode(),
+        assertEquals("own", TelegramReactionNotifier.reactionNotifyMode(),
                 "missing config must default to 'own'");
         try {
             play.Play.configuration.setProperty("telegram.reactions.notify", "garbage");
-            assertEquals("own", TelegramPollingRunner.reactionNotifyMode(),
+            assertEquals("own", TelegramReactionNotifier.reactionNotifyMode(),
                     "an unknown value must normalize to 'own'");
             play.Play.configuration.setProperty("telegram.reactions.notify", "ALL");
-            assertEquals("all", TelegramPollingRunner.reactionNotifyMode(),
+            assertEquals("all", TelegramReactionNotifier.reactionNotifyMode(),
                     "case-insensitive parse of 'all'");
         } finally {
             play.Play.configuration.remove("telegram.reactions.notify");
@@ -490,20 +491,20 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         // AC1: default 'own' = reactions on messages the bot sent. We approximate
         // that as DM-only (a DM's only non-owner messages are the bot's); a group
         // reaction's target author is unattributable from the update, so suppress.
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "private"),
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("own", "private"),
                 "own must notify on a DM reaction");
-        assertFalse(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup"),
+        assertFalse(TelegramReactionNotifier.shouldNotifyReaction("own", "supergroup"),
                 "own must suppress a group reaction (author unattributable)");
     }
 
     @Test
     void reactionGateOffSuppressesEverythingAndAllPassesEverything() {
         // AC1: off suppresses entirely; all passes any chat type.
-        assertFalse(TelegramPollingRunner.shouldNotifyReaction("off", "private"),
+        assertFalse(TelegramReactionNotifier.shouldNotifyReaction("off", "private"),
                 "off must suppress even a DM reaction");
-        assertFalse(TelegramPollingRunner.shouldNotifyReaction("off", "supergroup"));
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "private"));
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "supergroup"),
+        assertFalse(TelegramReactionNotifier.shouldNotifyReaction("off", "supergroup"));
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("all", "private"));
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("all", "supergroup"),
                 "all must notify on a group reaction too");
     }
 
@@ -513,11 +514,11 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     void reactionGateOwnGroup_notifiesOnlyOnBotSentMessage() {
         // The 3-arg gate: under own, a group reaction notifies ONLY when the
         // reacted message was bot-sent; a non-bot message stays suppressed.
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup", true),
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("own", "supergroup", true),
                 "own must notify on a group reaction on a bot-sent message");
-        assertFalse(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup", false),
+        assertFalse(TelegramReactionNotifier.shouldNotifyReaction("own", "supergroup", false),
                 "own must suppress a group reaction on a non-bot message");
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "group", true),
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("own", "group", true),
                 "own must notify on a plain-group reaction on a bot-sent message");
     }
 
@@ -525,19 +526,19 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     void reactionGateOwnDm_unchangedRegardlessOfBotSentFlag() {
         // DM behavior is unchanged: own always notifies in a DM (its only
         // non-owner messages are the bot's), with or without the cache hint.
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "private", false),
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("own", "private", false),
                 "own must still notify on a DM reaction even without a cache hit");
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "private", true),
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("own", "private", true),
                 "own must notify on a DM reaction with a cache hit too");
     }
 
     @Test
     void reactionGateAllAndOff_unchangedByBotSentFlag() {
         // all/off ignore the bot-sent flag entirely — unchanged from JCLAW-375.
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "supergroup", false));
-        assertTrue(TelegramPollingRunner.shouldNotifyReaction("all", "supergroup", true));
-        assertFalse(TelegramPollingRunner.shouldNotifyReaction("off", "supergroup", true));
-        assertFalse(TelegramPollingRunner.shouldNotifyReaction("off", "private", true));
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("all", "supergroup", false));
+        assertTrue(TelegramReactionNotifier.shouldNotifyReaction("all", "supergroup", true));
+        assertFalse(TelegramReactionNotifier.shouldNotifyReaction("off", "supergroup", true));
+        assertFalse(TelegramReactionNotifier.shouldNotifyReaction("off", "private", true));
     }
 
     @Test
@@ -554,9 +555,9 @@ class TelegramPollingRunnerTest extends FunctionalTest {
 
             boolean botSentHit = channels.TelegramChannel.wasSentByBot(token, "100", 4242);
             boolean botSentMiss = channels.TelegramChannel.wasSentByBot(token, "100", 9999);
-            assertTrue(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup", botSentHit),
+            assertTrue(TelegramReactionNotifier.shouldNotifyReaction("own", "supergroup", botSentHit),
                     "a group reaction on the cached bot-sent id must notify under own");
-            assertFalse(TelegramPollingRunner.shouldNotifyReaction("own", "supergroup", botSentMiss),
+            assertFalse(TelegramReactionNotifier.shouldNotifyReaction("own", "supergroup", botSentMiss),
                     "a group reaction on an uncached id must stay suppressed under own");
         } finally {
             channels.TelegramChannel.clearForTest(token);
@@ -667,7 +668,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         msg.setForwardDate(1_700_000_000);
         var update = new Update();
         update.setMessage(msg);
-        assertTrue(TelegramPollingRunner.isForward(update),
+        assertTrue(TelegramReactionNotifier.isForward(update),
                 "a message carrying forward_date must be detected as a forward");
     }
 
@@ -686,7 +687,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         msg.setForwardOrigin(origin);
         var update = new Update();
         update.setMessage(msg);
-        assertTrue(TelegramPollingRunner.isForward(update),
+        assertTrue(TelegramReactionNotifier.isForward(update),
                 "a message carrying forward_origin must be detected as a forward");
     }
 
@@ -697,15 +698,15 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         msg.setText("just a normal typed message");
         var update = new Update();
         update.setMessage(msg);
-        assertFalse(TelegramPollingRunner.isForward(update),
+        assertFalse(TelegramReactionNotifier.isForward(update),
                 "a normal (non-forwarded) message must NOT be detected as a forward");
     }
 
     @Test
     void isForwardFalseForNullUpdateOrMessage() {
-        assertFalse(TelegramPollingRunner.isForward(null),
+        assertFalse(TelegramReactionNotifier.isForward(null),
                 "null update is not a forward");
-        assertFalse(TelegramPollingRunner.isForward(new Update()),
+        assertFalse(TelegramReactionNotifier.isForward(new Update()),
                 "an update with no message (e.g. callback/reaction) is not a forward");
     }
 
@@ -718,8 +719,8 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                     "boom",
                     org.telegram.telegrambots.meta.api.objects.ApiResponse.builder()
                             .ok(false).errorCode(code).errorDescription("denied").build());
-            assertEquals(TelegramPollingRunner.ERR_NON_RECOVERABLE,
-                    TelegramPollingRunner.classifyPollingError(ex),
+            assertEquals(TelegramReactionNotifier.ERR_NON_RECOVERABLE,
+                    TelegramReactionNotifier.classifyPollingError(ex),
                     "HTTP " + code + " is an operator-action (non-recoverable) failure");
         }
     }
@@ -732,19 +733,19 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                     "boom",
                     org.telegram.telegrambots.meta.api.objects.ApiResponse.builder()
                             .ok(false).errorCode(code).errorDescription("transient").build());
-            assertEquals(TelegramPollingRunner.ERR_RECOVERABLE,
-                    TelegramPollingRunner.classifyPollingError(ex),
+            assertEquals(TelegramReactionNotifier.ERR_RECOVERABLE,
+                    TelegramReactionNotifier.classifyPollingError(ex),
                     "HTTP " + code + " recovers on the SDK/cooldown curve (recoverable)");
         }
     }
 
     @Test
     void classifyPollingErrorPlainExceptionAndNullAreRecoverable() {
-        assertEquals(TelegramPollingRunner.ERR_RECOVERABLE,
-                TelegramPollingRunner.classifyPollingError(new java.net.SocketTimeoutException("read timed out")),
+        assertEquals(TelegramReactionNotifier.ERR_RECOVERABLE,
+                TelegramReactionNotifier.classifyPollingError(new java.net.SocketTimeoutException("read timed out")),
                 "a network timeout (no Telegram code) is conservatively recoverable");
-        assertEquals(TelegramPollingRunner.ERR_RECOVERABLE,
-                TelegramPollingRunner.classifyPollingError(null),
+        assertEquals(TelegramReactionNotifier.ERR_RECOVERABLE,
+                TelegramReactionNotifier.classifyPollingError(null),
                 "a null error is conservatively recoverable");
     }
 
@@ -754,9 +755,9 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "boom",
                 org.telegram.telegrambots.meta.api.objects.ApiResponse.builder()
                         .ok(false).errorCode(401).errorDescription("unauthorized").build());
-        assertTrue(TelegramPollingRunner.describePollingErrorCurve(auth).contains("non-recoverable"),
+        assertTrue(TelegramReactionNotifier.describePollingErrorCurve(auth).contains("non-recoverable"),
                 "an auth failure's curve description names it non-recoverable");
-        assertTrue(TelegramPollingRunner.describePollingErrorCurve(
+        assertTrue(TelegramReactionNotifier.describePollingErrorCurve(
                         new java.net.ConnectException("refused")).contains("recoverable"),
                 "a network failure's curve description names it recoverable");
     }

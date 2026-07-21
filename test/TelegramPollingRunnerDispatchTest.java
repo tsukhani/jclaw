@@ -4,6 +4,7 @@ import channels.TelegramChannel;
 import channels.TelegramOffsetStore;
 import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
+import channels.TelegramReactionNotifier;
 import models.Agent;
 import models.EventLog;
 import models.TelegramBinding;
@@ -524,7 +525,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                 + "\"old_reaction\":[{\"type\":\"custom_emoji\",\"custom_emoji_id\":\"555\"}],"
                 + "\"new_reaction\":[{\"type\":\"emoji\",\"emoji\":\"🔥\"},"
                 + "{\"type\":\"custom_emoji\",\"custom_emoji_id\":\"555\"}]}}");
-        var delta = TelegramPollingRunner.parseReaction(update);
+        var delta = TelegramReactionNotifier.parseReaction(update);
         assertNotNull(delta, "an emoji delta must parse even alongside custom-emoji noise");
         assertEquals(java.util.List.of("🔥"), delta.added(),
                 "only the plain emoji contributes to added");
@@ -541,7 +542,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         // The further id-string fallback (neither username nor first name) is
         // unreachable with SDK 9.5: User.firstName is lombok @NonNull on a
         // @Jacksonized builder, so no wire payload can produce a null one.
-        var byFirstName = TelegramPollingRunner.parseReaction(updateFromJson(
+        var byFirstName = TelegramReactionNotifier.parseReaction(updateFromJson(
                 "{\"update_id\":41,\"message_reaction\":{"
                         + "\"chat\":{\"id\":1,\"type\":\"private\"},\"message_id\":9,\"date\":1,"
                         + "\"user\":{\"id\":77,\"is_bot\":false,\"first_name\":\"React\"},"
@@ -555,16 +556,16 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
 
     @Test
     void reactionEventTextCombinesAddWithRemoveAndDefaultsAnonymousToSomeone() {
-        var swap = new TelegramPollingRunner.ReactionDelta("1", "private", 7, "5", "@ada",
+        var swap = new TelegramReactionNotifier.ReactionDelta("1", "private", 7, "5", "@ada",
                 java.util.List.of("👍"), java.util.List.of("👎"));
-        String text = TelegramPollingRunner.reactionEventText(swap);
+        String text = TelegramReactionNotifier.reactionEventText(swap);
         assertTrue(text.contains("reacted 👍"), "the added emoji leads the event: " + text);
         assertTrue(text.contains("(and removed 👎)"),
                 "a simultaneous removal is appended parenthetically: " + text);
 
-        var anonymous = new TelegramPollingRunner.ReactionDelta("1", "private", 7, null, null,
+        var anonymous = new TelegramReactionNotifier.ReactionDelta("1", "private", 7, null, null,
                 java.util.List.of("👍"), java.util.List.of());
-        assertTrue(TelegramPollingRunner.reactionEventText(anonymous).startsWith("[system] Someone "),
+        assertTrue(TelegramReactionNotifier.reactionEventText(anonymous).startsWith("[system] Someone "),
                 "a null reactor renders as 'Someone'");
     }
 
@@ -573,19 +574,19 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         play.Play.configuration.remove("telegram.reactions.notify"); // default: own
         var agent = new Agent();
         agent.name = "reaction-noop-agent";
-        var groupDelta = new TelegramPollingRunner.ReactionDelta("100", "supergroup", 42,
+        var groupDelta = new TelegramReactionNotifier.ReactionDelta("100", "supergroup", 42,
                 "5", "@ada", java.util.List.of("👍"), java.util.List.of());
-        var nullChatDelta = new TelegramPollingRunner.ReactionDelta(null, "private", 42,
+        var nullChatDelta = new TelegramReactionNotifier.ReactionDelta(null, "private", 42,
                 "5", "@ada", java.util.List.of("👍"), java.util.List.of());
 
         EventLogger.clear();
         // Guards: none of these may throw or notify.
-        TelegramPollingRunner.handleReaction(null, "711:tokNull", "1", groupDelta);
-        TelegramPollingRunner.handleReaction(agent, "711:tokNull", "1", null);
-        TelegramPollingRunner.handleReaction(agent, "711:tokNull", "1", nullChatDelta);
+        TelegramReactionNotifier.handleReaction(null, "711:tokNull", "1", groupDelta);
+        TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", null);
+        TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", nullChatDelta);
         // Gate: mode=own + group reaction + no bot-sent cache entry → suppressed
         // BEFORE any agent dispatch (the never-seen token has no cache).
-        TelegramPollingRunner.handleReaction(agent, "711:tokNull", "1", groupDelta);
+        TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", groupDelta);
         EventLogger.flush();
 
         assertEquals(0L, channelEvents("%Reaction notification%"),
@@ -603,8 +604,8 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                 return this;
             }
         };
-        assertEquals(TelegramPollingRunner.ERR_RECOVERABLE,
-                TelegramPollingRunner.classifyPollingError(selfCaused),
+        assertEquals(TelegramReactionNotifier.ERR_RECOVERABLE,
+                TelegramReactionNotifier.classifyPollingError(selfCaused),
                 "a self-referential cause chain terminates and classifies recoverable");
     }
 }

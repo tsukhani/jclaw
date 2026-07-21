@@ -20,7 +20,6 @@ import services.video.VideoUnderstandingDispatcher.Strategy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -177,14 +176,11 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
         var agent = agent("vis"); // multi-image
         var att = videoAttachmentWithFile(agent, channel, 40);
 
-        var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
-        var imageBearers = new ArrayList<VisionAudioAssembler.ImageBearer>();
-        var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
-        var messages = MessageHydrator.buildMessages("sys", att.message.conversation,
-                audioBearers, imageBearers, videoBearers);
+        var hydration = MessageHydrator.buildMessages("sys", att.message.conversation);
+        var videoBearers = hydration.videoBearers();
         assertEquals(1, videoBearers.size(), "video bearer collected for the " + channel + " turn");
 
-        var spliced = VisionAudioAssembler.applyVideoForCapability(messages, videoBearers, agent, false, true);
+        var spliced = VisionAudioAssembler.applyVideoForCapability(hydration.messages(), videoBearers, agent, false, true);
         var userMsg = spliced.get(videoBearers.get(0).chatMessageIndex());
         assertInstanceOf(List.class, userMsg.content(), "content is a parts array");
         @SuppressWarnings("unchecked")
@@ -214,11 +210,10 @@ class VideoUnderstandingDispatcherTest extends UnitTest {
 
             var agent = agent("txt"); // text-only chat model → dedicated video model path
             var att = videoAttachmentWithFile(agent, "web", 40);
-            var videoBearers = new ArrayList<VisionAudioAssembler.VideoBearer>();
-            var messages = MessageHydrator.buildMessages("sys", att.message.conversation,
-                    new ArrayList<>(), new ArrayList<>(), videoBearers);
+            var hydration = MessageHydrator.buildMessages("sys", att.message.conversation);
+            var videoBearers = hydration.videoBearers();
 
-            var spliced = VisionAudioAssembler.applyVideoForCapability(messages, videoBearers, agent, false, false);
+            var spliced = VisionAudioAssembler.applyVideoForCapability(hydration.messages(), videoBearers, agent, false, false);
             var userMsg = spliced.get(videoBearers.get(0).chatMessageIndex());
             assertInstanceOf(String.class, userMsg.content(),
                     "a pure-text interpretation must splice as a plain string, not a parts array");
