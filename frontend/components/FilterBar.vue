@@ -51,6 +51,11 @@ function parseQuery(query: string): Filter[] {
   // token is an optional `key:` prefix plus a quoted span or a bare run; the
   // surrounding quotes are stripped from the stored value.
   const tokens = query.trim().match(/(?:[^\s:"]+:)?(?:"[^"]*"|[^\s"]+)/g) ?? []
+  // A bare token (no `key:` prefix) binds to the page's primary filter — the
+  // first declared key, conventionally `q` (free-text search) — so typing plain
+  // text searches, rather than silently binding an unsupported `name:` filter.
+  // Falls back to `name` only when a page declares no keys at all.
+  const defaultKey = props.filterKeys[0] ?? 'name'
   return tokens.map((token) => {
     const colonIdx = token.indexOf(':')
     const quoteIdx = token.indexOf('"')
@@ -59,7 +64,7 @@ function parseQuery(query: string): Filter[] {
     if (colonIdx > 0 && (quoteIdx === -1 || colonIdx < quoteIdx)) {
       return { key: token.slice(0, colonIdx), value: stripQuotes(token.slice(colonIdx + 1)) }
     }
-    return { key: 'name', value: stripQuotes(token) }
+    return { key: defaultKey, value: stripQuotes(token) }
   }).filter(f => f.value)
 }
 

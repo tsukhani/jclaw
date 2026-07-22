@@ -61,7 +61,7 @@ describe('FilterBar', () => {
     expect(emitted![0]![0]).toEqual([{ key: 'agent', value: 'main' }])
   })
 
-  it('treats bare words as name filter', async () => {
+  it('falls back to a name filter for a bare word when no keys are declared', async () => {
     const component = await mountSuspended(FilterBar, {
       props: { storageKey: 'test-bare' },
     })
@@ -70,6 +70,17 @@ describe('FilterBar', () => {
     await input.trigger('keydown', { key: 'Enter' })
     const emitted = component.emitted('update:filters')
     expect(emitted![0]![0]).toEqual([{ key: 'name', value: 'hello' }])
+  })
+
+  it('defaults a bare word to the first declared filter key (q), not name', async () => {
+    const component = await mountSuspended(FilterBar, {
+      props: { storageKey: 'test-bare-q', filterKeys: ['q', 'agent', 'category'] },
+    })
+    const input = component.find('input[type="text"]')
+    await input.setValue('Marissa')
+    await input.trigger('keydown', { key: 'Enter' })
+    const emitted = component.emitted('update:filters')
+    expect(emitted![0]![0]).toEqual([{ key: 'q', value: 'Marissa' }])
   })
 
   it('keeps a quoted multi-word value as one filter (spaces preserved, quotes stripped)', async () => {
@@ -108,7 +119,7 @@ describe('FilterBar', () => {
     expect(emitted![0]![0]).toEqual([{ key: 'transcript', value: 'invoice AND refund' }])
   })
 
-  it('treats a bare quoted phrase as a name filter', async () => {
+  it('falls back to a name filter for a bare quoted phrase when no keys are declared', async () => {
     const component = await mountSuspended(FilterBar, {
       props: { storageKey: 'test-bare-quoted' },
     })
