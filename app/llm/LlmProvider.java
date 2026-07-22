@@ -23,6 +23,7 @@ import llm.LlmTypes.Usage;
 import llm.ToolCallChunkMerger.ToolCallBuilder;
 import services.EventLogger;
 import utils.HttpKeys;
+import utils.PlayConfig;
 import utils.Strings;
 
 import java.io.IOException;
@@ -739,7 +740,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         if (reply.statusCode() == 200) return new AttemptOutcome(reply.body(), null, false);
 
         if (reply.statusCode() == 429) {
-            var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
+            var defaultBackoff = backoffMsFor(attempt) / 1000;
             var requested = reply.retryAfterSeconds().orElse(defaultBackoff);
             var retryAfter = Math.min(requested, RETRY_AFTER_MAX_SECONDS);
             if (retryAfter < requested) {
@@ -775,9 +776,19 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         return Strings.redactAndTruncate(body, secret);
     }
 
+    /** Retry backoff for {@code attempt} in ms — the {@link #BACKOFF_MS} schedule
+     *  scaled by {@code llm.retry.backoff-percent} (default 100 = the full 1s/2s/4s
+     *  waits). {@code %test} sets it to 0 so functional tests that hit an unreachable
+     *  provider don't sleep through the backoff: the retry COUNT is unchanged
+     *  ({@link #MAX_RETRIES}), only the delay collapses. */
+    private static long backoffMsFor(int attempt) {
+        var base = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
+        return base * PlayConfig.intOr("llm.retry.backoff-percent", 100) / 100;
+    }
+
     private void backoffBeforeRetry(int attempt) {
         try {
-            var backoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
+            var backoff = backoffMsFor(attempt);
             EventLogger.warn("llm", "Retry %d/%d for %s after %dms"
                     .formatted(attempt + 1, MAX_RETRIES, config.name(), backoff));
             parkForMillis(backoff);
