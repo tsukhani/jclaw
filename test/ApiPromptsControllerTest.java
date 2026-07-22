@@ -44,6 +44,29 @@ class ApiPromptsControllerTest extends FunctionalTest {
         assertTrue(content.contains("\"label\":\"Coding\""), content);
     }
 
+    // ==================== generate ====================
+
+    @Test
+    void generateRequiresAuth() {
+        var resp = POST("/api/prompts/generate", "application/json", "{\"description\":\"x\"}");
+        assertEquals(401, resp.status.intValue());
+    }
+
+    @Test
+    void generateRejectsBlankDescription() {
+        login();
+        assertEquals(400, POST("/api/prompts/generate", "application/json", "{}").status.intValue());
+    }
+
+    @Test
+    void generateReturns503WhenNoLlmConfigured() {
+        // setUp() wiped the DB, so there is no 'main' agent / provider to resolve —
+        // generation is unavailable and must surface a clean error, not a 500.
+        login();
+        var resp = POST("/api/prompts/generate", "application/json", "{\"description\":\"a code review checklist\"}");
+        assertEquals(503, resp.status.intValue());
+    }
+
     // ==================== list ====================
 
     @Test

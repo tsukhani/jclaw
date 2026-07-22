@@ -41,6 +41,10 @@ describe('Prompts Library page', () => {
   afterEach(() => {
     const { _state, _resolve } = useConfirm()
     if (_state.open) _resolve(false)
+    // Tear down any teleported dialog + reka-ui's modal body lock so a dialog
+    // left open by one test can't inert the page for the next.
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
+    document.body.style.pointerEvents = ''
   })
 
   it('renders a card per prompt with title, category badge, and tag chips', async () => {
@@ -96,6 +100,25 @@ describe('Prompts Library page', () => {
     const arg = navigateToMock.mock.calls[0]![0] as { path: string, query: { compose: string } }
     expect(arg.path).toBe('/chat')
     expect(arg.query.compose).toBe('Review this code')
+  })
+
+  it('New prompt opens the describe-it step, not the raw form', async () => {
+    const c = await mountSuspended(Prompts)
+    await flushPromises()
+
+    await c.find('[data-testid="new-prompt-button"]').trigger('click')
+    await flushPromises()
+
+    // Create starts on the describe step: a single description box + Generate,
+    // and NOT the title/content form (that only appears after generation).
+    expect(document.body.querySelector('[data-testid="prompt-description"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="prompt-generate"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="prompt-title"]')).toBeFalsy()
+
+    // Close so the modal body-lock doesn't leak into the next test.
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(b => b.textContent?.trim() === 'Cancel')?.click()
+    await flushPromises()
   })
 
   it('delete goes through the confirm dialog and fires DELETE only when confirmed', async () => {

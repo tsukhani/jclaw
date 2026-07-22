@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Prompt;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.PromptGenerationService;
 import services.PromptImportExportService;
 import utils.ApiResponses;
 
@@ -67,9 +68,24 @@ public class ApiPromptsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = CategoryView.class))))
-    @Operation(summary = "List the fixed prompt categories (value, label, emoji)")
+    @Operation(summary = "List the fixed prompt categories (value, label)")
     public static void categories() {
         renderJSON(gson.toJson(Arrays.stream(Prompt.Category.values()).map(CategoryView::of).toList()));
+    }
+
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptGenerationService.Generated.class)))
+    @Operation(summary = "Generate a prompt (title, category, content, tags) from a description; does not save")
+    public static void generate() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) badRequest();
+        var description = JsonBodyReader.requiredOr400(body, "description");
+        var generated = PromptGenerationService.generate(description);
+        if (generated == null) {
+            ApiResponses.error(503, "unavailable",
+                    "Prompt generation is unavailable — configure an LLM provider for the main agent first.");
+        }
+        renderJSON(gson.toJson(generated));
     }
 
     @SuppressWarnings("java:S2259")

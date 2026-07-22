@@ -123,6 +123,7 @@ POST    /api/mcp-servers/{id}/test              ApiMcpServersController.test
 # Static segments (categories/export/import) declared before the {id} patterns
 # so they resolve first, per the convention noted for /api/skills below.
 GET     /api/prompts/categories                 ApiPromptsController.categories
+POST    /api/prompts/generate                   ApiPromptsController.generate
 GET     /api/prompts/export                     ApiPromptsController.export
 POST    /api/prompts/import                     ApiPromptsController.importPrompts
 GET     /api/prompts                            ApiPromptsController.list
