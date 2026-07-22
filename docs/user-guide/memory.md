@@ -1,6 +1,6 @@
 # Memories
 
-Agents remember. After each conversation turn, JClaw quietly extracts durable, reusable facts — preferences you've stated, decisions made, lessons learned — and stores them per agent. Those memories flow back into later sessions: the most important are loaded at session start, the rest are recalled when relevant to what you're asking. The [Memories](/memory) page (sidebar → **Admin**) is where you inspect and curate everything your agents have captured.
+Agents remember. After each conversation turn, JClaw quietly extracts durable, reusable facts — preferences you've stated, decisions made, lessons learned — and stores them per agent. Those memories flow back into later sessions: the most important are loaded at session start, the rest are recalled when relevant to what you're asking. The [Memories](/memories) page (sidebar → **Admin**) is where you inspect and curate everything your agents have captured.
 
 ## How capture works
 
@@ -47,7 +47,7 @@ By default relevance is keyword-based. Enabling **vector search** adds semantic 
 
 ## The Memories page
 
-The [Memories](/memory) page is a cross-agent table: owning agent, memory text, category badge, importance, and created date. The filter bar composes free text with per-field predicates, e.g.:
+The [Memories](/memories) page is a cross-agent table: owning agent, memory text, category badge, importance, and created date. The filter bar composes free text with per-field predicates, e.g.:
 
 ```
 q:invoice category:core importance:>0.8 agent:main

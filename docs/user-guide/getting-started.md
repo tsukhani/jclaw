@@ -40,7 +40,7 @@ The left sidebar is grouped by intent:
 | _(top)_ | [Dashboard](/) — the home overview, sits above the groups. |
 | **Chat** | [Chat](/chat) (live conversations), [Channels](/channels) (external chat surfaces like Slack), [Conversations](/conversations) (every prior thread). |
 | **Ops** | [Agents](/agents), [Subagents](/subagents), [Tasks](/tasks), [Reminders](/reminders) (your scheduled nudges), [Skills](/skills), [Tools](/tools), [MCP Servers](/mcp-servers). |
-| **Admin** | [Settings](/settings), [Memories](/memory) (captured agent memories), [Logs](/logs). |
+| **Admin** | [Settings](/settings), [Memories](/memories) (captured agent memories), [Logs](/logs). |
 | **Help** | Feedback, Guided Tour, this **User Guide**. |
 
 At the bottom, two diagnostic rows: your JClaw version (with a green/red pip for API status) and the Play framework version (with a green/amber pip showing whether it matches the pinned `.play-version`). Red on the first dot means the backend is unreachable — most pages will fail until it recovers.
