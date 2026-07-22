@@ -244,7 +244,7 @@ const navGroups: NavGroup[] = [
       // Memories: the operator's window into what each agent has captured
       // (JCLAW-40) — text, category, importance, and source per memory, with
       // manual importance adjustment and delete.
-      { label: 'Memories', to: '/memory', icon: CircleStackIcon },
+      { label: 'Memories', to: '/memories', icon: CircleStackIcon },
       { label: 'Logs', to: '/logs', icon: Bars3Icon },
     ],
   },

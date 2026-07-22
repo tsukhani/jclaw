@@ -3,7 +3,7 @@ import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import { useConfirm } from '~/composables/useConfirm'
-import Memory from '~/pages/memory.vue'
+import Memory from '~/pages/memories.vue'
 
 // JCLAW-40: cross-agent memory admin page — filter bar, agent column, inline
 // importance edit, delete.
