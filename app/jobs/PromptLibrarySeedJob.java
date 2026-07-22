@@ -72,7 +72,7 @@ public class PromptLibrarySeedJob extends Job<Void> {
         seed("Summarize & Extract Action Items", Prompt.Category.ANALYSIS, "summary, meetings",
                 """
                 Summarize the text below in 5 bullet points, then list every action item as \
-                \"[owner] - [task] - [due]\" (use TBD when unknown). Flag any open questions \
+                "[owner] - [task] - [due]" (use TBD when unknown). Flag any open questions \
                 separately.
 
                 <paste notes/transcript here>""");
