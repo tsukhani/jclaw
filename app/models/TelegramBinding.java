@@ -188,22 +188,11 @@ public class TelegramBinding extends AgentBoundBinding {
      * Never returns null for a persisted binding (the default agent is
      * non-null by schema).
      *
-     * <p>DORMANT (JCLAW-372): no dispatch site calls this yet. The wiring is a
-     * documented follow-up — both inbound dispatch sites currently pass the
-     * binding's default agent ({@code sendAgent}) straight to
-     * {@link agents.AgentRunner#processInboundForAgentStreaming}. To activate,
-     * replace that agent with {@code binding.resolveAgentForTopic(chatId,
-     * threadId)} at:
-     * <ul>
-     *   <li>{@link channels.TelegramPollingRunner} — where {@code sendAgent}
-     *       feeds {@code processInboundForAgentStreaming} alongside
-     *       {@code merged.messageThreadId()}; and</li>
-     *   <li>{@link controllers.WebhookTelegramController} — the parallel call
-     *       using {@code message.messageThreadId()}.</li>
-     * </ul>
-     * Both sites already have the chat id and thread id in scope; the
-     * {@code TelegramStreamingSink} and conversation peer key are unaffected
-     * (the override only changes which agent runs the turn).
+     * <p>Consulted per inbound message (JCLAW-377) by both Telegram dispatch
+     * paths — {@link channels.TelegramPollingRunner} and
+     * {@link controllers.WebhookTelegramController}: the resolved agent runs the
+     * turn, while the {@code TelegramStreamingSink} keeps the binding's default
+     * identity (the override only changes which agent runs the turn).
      */
     public Agent resolveAgentForTopic(String chatId, Integer threadId) {
         var override = TelegramTopicBinding.findByBindingAndTopic(this, chatId, threadId);

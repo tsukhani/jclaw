@@ -26,10 +26,8 @@ import java.util.List;
  * default" convention. The composite unique index makes a given topic resolve
  * to at most one override.
  *
- * <p>DORMANT: nothing dispatches through this yet. Resolution is exposed via
- * {@link TelegramBinding#resolveAgentForTopic(String, Integer)}; wiring the
- * dispatch sites to consult it is a documented follow-up (see that method's
- * Javadoc).
+ * <p>Consulted on the Telegram inbound path via
+ * {@link TelegramBinding#resolveAgentForTopic(String, Integer)} (JCLAW-377).
  */
 @Entity
 @Table(name = "telegram_topic_binding", indexes = {
