@@ -5,14 +5,16 @@ import models.Message;
 import models.SubagentRun;
 import models.Task;
 import models.TaskRunMessage;
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.queryparser.classic.ParseException;
-import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnFloatVectorQuery;
+import org.apache.lucene.search.MultiTermQuery;
+import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.search.TermQuery;
@@ -184,7 +186,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         if (query == null || query.isBlank() || agentId == null) return List.of();
         var sm = LuceneIndexer.searcherManager(LuceneIndexer.Scope.MEMORY);
         if (sm == null) return List.of();
-        return normalizeByTop(collectScored(sm, query, agentId, limit));
+        return normalizeByTop(collectScored(sm, query, agentId, limit, false));
     }
 
     /**
@@ -230,7 +232,59 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     }
 
     private static List<Long> collectMatchingIds(SearcherManager sm, String query, int limit) throws IOException {
-        return collectScored(sm, query, null, limit).stream().map(ScoredId::id).toList();
+        return collectScored(sm, query, null, limit, true).stream().map(ScoredId::id).toList();
+    }
+
+    /** Shared query-time analyzer (StandardAnalyzer is stateless + thread-safe):
+     *  the same tokenization used at index time, so query tokens line up with the
+     *  indexed terms (lowercased, stopwords dropped). */
+    private static final Analyzer CONTENT_ANALYZER = new StandardAnalyzer();
+
+    /** Max index terms a single prefix token expands to (scored). Bounds the work
+     *  on a large corpus while keeping BM25 scoring for the recall relevance floor. */
+    private static final int MAX_PREFIX_EXPANSIONS = 50;
+
+    /** Below this length a token matches exactly — a 1-char prefix would match
+     *  almost everything and carry no signal. */
+    private static final int MIN_PREFIX_LEN = 2;
+
+    /**
+     * Build the content-field query from free text: tokenize with the index-time
+     * analyzer, then match each token as a bounded, scored {@link PrefixQuery} so a
+     * partial/base term surfaces its longer forms — "marissa" finds "marissa's",
+     * "phone" finds "phones". (StandardAnalyzer keeps the possessive as one token,
+     * so plain term matching treated "marissa" and "marissa's" as unrelated.) Tokens
+     * shorter than {@link #MIN_PREFIX_LEN} match exactly. {@code requireAll} ANDs the
+     * tokens (admin filter — all must appear), else ORs them (agent recall — any
+     * token, then relevance-ranked + floored). Returns {@code null} when the query
+     * yields no usable tokens (e.g. all stopwords).
+     */
+    private static Query buildContentQuery(String query, boolean requireAll) throws IOException {
+        var terms = analyzeToTerms(query);
+        if (terms.isEmpty()) return null;
+        var occur = requireAll ? BooleanClause.Occur.MUST : BooleanClause.Occur.SHOULD;
+        var b = new BooleanQuery.Builder();
+        for (var t : terms) {
+            Query tq = t.length() >= MIN_PREFIX_LEN
+                    ? new PrefixQuery(new Term(LuceneIndexer.CONTENT_FIELD, t),
+                            new MultiTermQuery.TopTermsScoringBooleanQueryRewrite(MAX_PREFIX_EXPANSIONS))
+                    : new TermQuery(new Term(LuceneIndexer.CONTENT_FIELD, t));
+            b.add(tq, occur);
+        }
+        return b.build();
+    }
+
+    /** Run {@link #CONTENT_ANALYZER} over {@code text} and collect the emitted
+     *  tokens (lowercased, stopwords dropped). */
+    private static List<String> analyzeToTerms(String text) throws IOException {
+        var terms = new ArrayList<String>();
+        try (var ts = CONTENT_ANALYZER.tokenStream(LuceneIndexer.CONTENT_FIELD, text)) {
+            var attr = ts.addAttribute(CharTermAttribute.class);
+            ts.reset();
+            while (ts.incrementToken()) terms.add(attr.toString());
+            ts.end();
+        }
+        return terms;
     }
 
     /**
@@ -241,20 +295,17 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * {@code agentKey} searches unfiltered.
      */
     private static List<ScoredId> collectScored(SearcherManager sm, String query,
-                                                String agentKey, int limit) throws IOException {
-        // QueryParser.parse throws on malformed input. Treat parse
-        // failure as an empty result rather than propagating —
-        // operators typing free-form text shouldn't 500 the UI.
-        var parser = new QueryParser(LuceneIndexer.CONTENT_FIELD, new StandardAnalyzer());
-        Query q;
-        try {
-            q = parser.parse(query);
-        } catch (ParseException _) {
-            return List.of();
-        }
+                                                String agentKey, int limit, boolean requireAll) throws IOException {
+        // Prefix-match each query token (see buildContentQuery) rather than the
+        // free-form QueryParser: operators typing free text get partial-word +
+        // possessive matching ("marissa" → "marissa's"), and stray Lucene operator
+        // characters can't ParseException the query out from under the UI.
+        Query content = buildContentQuery(query, requireAll);
+        if (content == null) return List.of(); // no usable tokens (e.g. all stopwords)
+        Query q = content;
         if (agentKey != null) {
             q = new BooleanQuery.Builder()
-                    .add(q, BooleanClause.Occur.MUST)
+                    .add(content, BooleanClause.Occur.MUST)
                     .add(new TermQuery(new Term(LuceneIndexer.AGENT_FIELD, agentKey)),
                             BooleanClause.Occur.MUST)
                     .build();

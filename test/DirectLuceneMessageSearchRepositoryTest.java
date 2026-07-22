@@ -157,6 +157,33 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
     }
 
     @Test
+    void prefixMatchesPossessiveAndPartialTerms() throws Exception {
+        // Query tokens match as PREFIXES, so a base/partial term surfaces its
+        // longer forms — "marissa" finds "marissa's" (StandardAnalyzer keeps the
+        // possessive as one token, so the old token-exact match missed it).
+        repo.init();
+
+        // Agent-recall path (searchMemoryIds).
+        var agentId = makeAgent("prefixAgent");
+        var memId = seedMemory(agentId, "Marissa's phone number is +60 12-345 6789");
+        var recallMarissa = repo.searchMemoryIds(String.valueOf(agentId), "marissa", 10)
+                .stream().map(s -> s.id()).toList();
+        assertTrue(recallMarissa.contains(memId),
+                "recall: base term 'marissa' must find the possessive 'Marissa's' memory");
+        var recallPho = repo.searchMemoryIds(String.valueOf(agentId), "pho", 10)
+                .stream().map(s -> s.id()).toList();
+        assertTrue(recallPho.contains(memId), "recall: partial 'pho' must prefix-match 'phone'");
+
+        // Admin path (searchIds over a scope) prefix-matches the same way, and ANDs
+        // multiple terms (all must appear).
+        var convId = seedConversationMessage("Marissa's delivery preference");
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "marissa", 10).contains(convId),
+                "admin: base term 'marissa' must find the possessive conversation");
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "marissa nomatchxyz", 10).isEmpty(),
+                "admin: an unmatched second term (AND) excludes the row");
+    }
+
+    @Test
     void initIsIdempotent() throws Exception {
         repo.init();
         repo.init();  // second call must not throw
@@ -207,9 +234,11 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
     void malformedQuerySyntaxReturnsEmptyNotThrowing() throws Exception {
         repo.init();
         seedMessage("something to index");
-        // Unbalanced parens — QueryParser.ParseException — must NOT propagate.
+        // Operator characters (unbalanced parens) are dropped by the analyzer
+        // rather than parsed — the query becomes the token "unbalanced" (a prefix),
+        // which matches nothing here. No QueryParser, so nothing to ParseException.
         var hits = repo.search("((unbalanced", 10);
-        assertTrue(hits.isEmpty(), "malformed syntax must yield empty list, not throw");
+        assertTrue(hits.isEmpty(), "operator chars must yield empty list, not throw");
     }
 
     @Test
@@ -427,14 +456,11 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
     @Test
     void stemmingMatchesSingularAndPluralForms() throws Exception {
-        // StandardAnalyzer doesn't actually stem (it lowercases and
-        // tokenizes only). The AC's "stemming" wording is closer to
-        // case-fold-and-tokenize than to Porter-stem. Pin the behavior
-        // that's actually shipping: a plural query matches the indexed
-        // singular when they share the tokenized form (e.g. exact
-        // word-boundary substring), but NOT when they're separate
-        // surface tokens like "quota" vs "quotas". This locks today's
-        // contract so a future analyzer change becomes visible.
+        // StandardAnalyzer doesn't stem (it lowercases + tokenizes only);
+        // singular/plural bridging now comes from PREFIX matching instead —
+        // a query token matches any indexed term it prefixes, so "quota" finds
+        // "quota" (and would find "quotas"). Pin the shipping contract: the exact
+        // token still matches, case-folded, so a future analyzer change stays visible.
         repo.init();
         seedSubagentRunRow("radarr-monitor",
                 "IMPORT_FAILED: disk quota exceeded on volume1");
