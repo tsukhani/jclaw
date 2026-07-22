@@ -133,7 +133,7 @@ public final class VoiceVad implements AutoCloseable {
         if (v == null || v.isBlank()) return dflt;
         try {
             return Float.parseFloat(v.trim());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return dflt;
         }
     }

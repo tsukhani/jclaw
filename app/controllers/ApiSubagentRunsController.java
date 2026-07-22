@@ -61,6 +61,7 @@ public class ApiSubagentRunsController extends Controller {
     private static final String HDR_TOTAL_COUNT = "X-Total-Count";
     // Run "status" reused as a filter path, request-body field, and sort-whitelist key.
     private static final String STATUS = "status";
+    private static final String COL_STARTED_AT = "r.startedAt";
 
     @SuppressWarnings("java:S107") // each query param is its own filter axis; bundling into a DTO would hide them from OpenAPI generation
     public record SubagentRunView(Long id, Long parentAgentId, String parentAgentName,
@@ -111,7 +112,7 @@ public class ApiSubagentRunsController extends Controller {
                 .eq("r.parentAgent.id", parentAgentId)
                 .eq("r.parentConversation.id", parentConversationId)
                 .eq("r." + STATUS, statusEnum)
-                .gte("r.startedAt", sinceInstant);
+                .gte(COL_STARTED_AT, sinceInstant);
 
         // JCLAW-304: q resolves against TWO Lucene scopes and unions the
         // resulting run-id sets — SUBAGENT_RUN directly (label + outcome
@@ -403,7 +404,7 @@ public class ApiSubagentRunsController extends Controller {
                 .eq("r.parentAgent.id", parentAgentId)
                 .eq("r.parentConversation.id", parentConversationId)
                 .eq("r." + STATUS, status)
-                .gte("r.startedAt", since);
+                .gte(COL_STARTED_AT, since);
         var ftsRunIds = ftsSubagentRunIds(q);
         var where = filter.toWhereClause();
         if (ftsRunIds != null) {
@@ -462,7 +463,7 @@ public class ApiSubagentRunsController extends Controller {
             case "parent" -> "r.parentAgent.name";
             case "child" -> "r.childAgent.name";
             case STATUS -> "r.status";
-            case "started" -> "r.startedAt";
+            case "started" -> COL_STARTED_AT;
             default -> null;
         };
         if (col == null) return "ORDER BY r.startedAt DESC";

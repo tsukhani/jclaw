@@ -46,11 +46,11 @@ public final class TtsSentenceChunker {
                 if (s.length() > MAX_CHARS) {
                     flush(out, buf);
                     out.addAll(hardWrap(s));
-                    continue;
+                } else {
+                    if (!buf.isEmpty()) buf.append(' ');
+                    buf.append(s);
+                    if (buf.length() >= MIN_CHARS) flush(out, buf);
                 }
-                if (buf.length() > 0) buf.append(' ');
-                buf.append(s);
-                if (buf.length() >= MIN_CHARS) flush(out, buf);
             }
             // A paragraph break is a natural pause — flush whatever's buffered.
             flush(out, buf);
@@ -65,19 +65,19 @@ public final class TtsSentenceChunker {
         var pieces = new ArrayList<String>();
         var buf = new StringBuilder();
         for (var word : s.split("\\s+")) {
-            if (buf.length() > 0 && buf.length() + 1 + word.length() > MAX_CHARS) {
+            if (!buf.isEmpty() && buf.length() + 1 + word.length() > MAX_CHARS) {
                 pieces.add(buf.toString());
                 buf.setLength(0);
             }
-            if (buf.length() > 0) buf.append(' ');
+            if (!buf.isEmpty()) buf.append(' ');
             buf.append(word);
         }
-        if (buf.length() > 0) pieces.add(buf.toString());
+        if (!buf.isEmpty()) pieces.add(buf.toString());
         return pieces;
     }
 
     private static void flush(List<String> out, StringBuilder buf) {
-        if (buf.length() > 0) {
+        if (!buf.isEmpty()) {
             out.add(buf.toString());
             buf.setLength(0);
         }

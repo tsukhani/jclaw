@@ -106,7 +106,7 @@ public final class PromptGenerationService {
                 var cat = Prompt.Category.fromValue(str(o, "category"));
                 if (cat != null) category = cat;
             }
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             // Non-JSON / malformed — leave content blank so the fallback below
             // hands the operator the raw text to edit instead of nothing.
             content = "";

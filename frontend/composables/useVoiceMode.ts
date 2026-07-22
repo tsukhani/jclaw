@@ -183,7 +183,7 @@ async function startPlayback() {
 // (including through the agent's reply, for barge-in); the server's VAD decides
 // what is speech, so there is no client-side gating.
 function sendFrame(input: Float32Array) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  if (ws?.readyState !== WebSocket.OPEN) return
   const pcm = new Int16Array(input.length)
   for (let i = 0; i < input.length; i++) {
     const s = Math.max(-1, Math.min(1, input[i]!))
@@ -251,7 +251,7 @@ async function onMessage(ev: MessageEvent) {
 async function playChunk(b64: string) {
   if (!playCtx || !playNode || !b64) return
   try {
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+    const bytes = Uint8Array.from(atob(b64), c => c.codePointAt(0)!)
     const audio = await playCtx.decodeAudioData(bytes.buffer)
     if (!playCtx || !playNode) return
     if (playCtx.state === 'suspended') await playCtx.resume()
@@ -300,9 +300,9 @@ function clearWatchdog() {
 // never trips it.
 function armWatchdog() {
   clearWatchdog()
-  const ms = state.value === 'speaking'
-    ? SPEAKING_STALL_MS
-    : state.value === 'thinking' ? THINKING_STALL_MS : 0
+  let ms = 0
+  if (state.value === 'speaking') ms = SPEAKING_STALL_MS
+  else if (state.value === 'thinking') ms = THINKING_STALL_MS
   if (ms > 0) watchdog = setTimeout(onWatchdogStall, ms)
 }
 

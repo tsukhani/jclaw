@@ -31,8 +31,8 @@ import java.util.stream.Collectors;
  */
 class ApiConversationsControllerSchemaDriftTest extends UnitTest {
 
-    private static Set<String> componentNames(Class<?> record) {
-        return Arrays.stream(record.getRecordComponents())
+    private static Set<String> componentNames(Class<?> recordClass) {
+        return Arrays.stream(recordClass.getRecordComponents())
                 .map(RecordComponent::getName)
                 .collect(Collectors.toSet());
     }

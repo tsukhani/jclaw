@@ -18,6 +18,7 @@ import services.ConfigService;
 import services.ConversationService;
 import services.Tx;
 import services.transcription.AsrSidecarClient;
+import services.transcription.WhisperTranscriber;
 import services.tts.TtsException;
 import services.tts.TtsRouter;
 import services.tts.TtsText;
@@ -102,6 +103,13 @@ public class VoiceController extends WebSocketController {
      *  hear the user. */
     private static final String VOICE_CHANNEL = "voice";
 
+    /** Server→client frame tokens, de-duplicated per S1192 — the {@code type}
+     *  discriminators and the field keys reused across frames. */
+    private static final String TYPE_ERROR = "error";
+    private static final String TYPE_TRANSCRIPT = "transcript";
+    private static final String KEY_MESSAGE = "message";
+    private static final String KEY_AGENT_ID = "agentId";
+
     public static void socket() {
         // CSWSH defense — a WebSocket handshake is NOT bound by the Same-Origin
         // Policy, so the browser attaches the session cookie even on a cross-site
@@ -113,7 +121,7 @@ public class VoiceController extends WebSocketController {
             return;
         }
         if (!authenticated()) {
-            outbound.sendJson(Map.of("type", "error", "message", "authentication required"));
+            outbound.sendJson(Map.of("type", TYPE_ERROR, KEY_MESSAGE, "authentication required"));
             disconnect();
             return;
         }
@@ -148,12 +156,12 @@ public class VoiceController extends WebSocketController {
                             // endpointing inline and calls back on turn boundaries.
                             var s = sessionRef.get();
                             if (s == null) {
-                                send(out, writeLock, Map.of("type", "error", "message", "send an init frame first"));
+                                send(out, writeLock, Map.of("type", TYPE_ERROR, KEY_MESSAGE, "send an init frame first"));
                             } else {
                                 s.onPcm(bytes, bytes.length);
                             }
                         }
-                        case Http.WebSocketClose ignored -> {
+                        case Http.WebSocketClose _ -> {
                             cancelCurrent(current);
                             return;
                         }
@@ -180,11 +188,13 @@ public class VoiceController extends WebSocketController {
                                     AtomicReference<VoiceSession> sessionRef) {
         var agent = resolveAgent(msg);
         if (agent == null) {
-            send(out, writeLock, Map.of("type", "error", "message", "unknown or missing agentId"));
+            send(out, writeLock, Map.of("type", TYPE_ERROR, KEY_MESSAGE, "unknown or missing agentId"));
             return;
         }
+        VoiceVad vad = null;
+        boolean handedOff = false; // set once the VoiceSession takes ownership of the VAD
         try {
-            var vad = new VoiceVad(); // provisions the Silero model on first use
+            vad = new VoiceVad(); // provisions the Silero model on first use
             var endpointer = new TurnEndpointer(
                     ConfigService.getInt("voice.endpoint.speechStartMs", 180),
                     ConfigService.getInt("voice.endpoint.baseSilenceMs", 500),
@@ -211,7 +221,7 @@ public class VoiceController extends WebSocketController {
                     try {
                         var text = transcribe(asr, wav);
                         if (!text.isBlank()) {
-                            send(out, writeLock, Map.of("type", "transcript", "text", text, "partial", true));
+                            send(out, writeLock, Map.of("type", TYPE_TRANSCRIPT, "text", text, "partial", true));
                         }
                     } catch (RuntimeException e) {
                         Logger.debug("voice: interim transcript failed: %s", e.getMessage());
@@ -243,12 +253,18 @@ public class VoiceController extends WebSocketController {
                             runTurn(boundAgent, username, asr, wav, cancel, turnId, out, writeLock));
                 }
             }, partialSink, ConfigService.getInt("voice.partials.intervalMs", 1200));
+            handedOff = true; // the session now owns the VAD; socket()'s finally closes it
             sessionRef.set(voice);
-            send(out, writeLock, Map.of("type", "ready", "agentId", agent.id));
+            send(out, writeLock, Map.of("type", "ready", KEY_AGENT_ID, agent.id));
         } catch (RuntimeException e) {
             Logger.warn("voice: failed to start session: %s", e.getMessage());
-            send(out, writeLock, Map.of("type", "error",
-                    "message", "voice engine unavailable: " + e.getMessage()));
+            send(out, writeLock, Map.of("type", TYPE_ERROR,
+                    KEY_MESSAGE, "voice engine unavailable: " + e.getMessage()));
+        } finally {
+            // The VAD was provisioned but wiring threw before a live session took
+            // ownership → close the native Silero model so it can't leak. socket()'s
+            // finally only closes a session it can reach via sessionRef.
+            if (vad != null && !handedOff) vad.close();
         }
     }
 
@@ -292,11 +308,11 @@ public class VoiceController extends WebSocketController {
             if (plan.nativeAudio()) {
                 attachments = List.of(stageVoiceAudio(agent, wav));
                 userMessage = "";
-                send(out, lock, Map.of("type", "transcript", "turn", turnId, "text", VOICE_ATTACHMENT_LABEL));
+                send(out, lock, Map.of("type", TYPE_TRANSCRIPT, "turn", turnId, "text", VOICE_ATTACHMENT_LABEL));
             } else {
                 var transcript = transcribe(asr, wav);
                 if (cancel.get()) return;
-                send(out, lock, Map.of("type", "transcript", "turn", turnId, "text", transcript));
+                send(out, lock, Map.of("type", TYPE_TRANSCRIPT, "turn", turnId, "text", transcript));
                 if (transcript.isBlank()) {
                     send(out, lock, Map.of("type", "turn_complete", "turn", turnId));
                     return;
@@ -347,23 +363,24 @@ public class VoiceController extends WebSocketController {
                 String sentence;
                 try {
                     sentence = sentences.poll(10, TimeUnit.MINUTES);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                     return;
                 }
                 if (sentence == null || END_OF_TURN.equals(sentence)) break;
                 var speakable = TtsText.toSpeakable(sentence);
-                if (speakable.isBlank()) continue;
-                if (cancel.get() || !out.isOpen()) return;
-                var audio = TtsRouter.synthesize(speakable);
-                if (cancel.get()) return;
-                spoken.append(spoken.length() > 0 ? " " : "").append(speakable);
-                send(out, lock, Map.of("type", "reply", "turn", turnId, "text", spoken.toString()));
-                send(out, lock, Map.of("type", "audio", "turn", turnId, "index", i++,
-                        "audio", enc.encodeToString(audio)));
-                if (i == 1) { // first audio out — the voice-to-voice metric that matters most
-                    Logger.info("voice: turn %d — stt %dms, first audio %dms after endpoint",
-                            turnId, inputMs, (System.nanoTime() - t0) / 1_000_000L);
+                if (!speakable.isBlank()) { // skip whitespace-only chunks (e.g. stripped emoji)
+                    if (cancel.get() || !out.isOpen()) return;
+                    var audio = TtsRouter.synthesize(speakable);
+                    if (cancel.get()) return;
+                    spoken.append(!spoken.isEmpty() ? " " : "").append(speakable);
+                    send(out, lock, Map.of("type", "reply", "turn", turnId, "text", spoken.toString()));
+                    send(out, lock, Map.of("type", "audio", "turn", turnId, "index", i++,
+                            "audio", enc.encodeToString(audio)));
+                    if (i == 1) { // first audio out — the voice-to-voice metric that matters most
+                        Logger.info("voice: turn %d — stt %dms, first audio %dms after endpoint",
+                                turnId, inputMs, (System.nanoTime() - t0) / 1_000_000L);
+                    }
                 }
             }
             if (!cancel.get()) {
@@ -374,7 +391,7 @@ public class VoiceController extends WebSocketController {
         } catch (RuntimeException e) {
             Logger.warn("voice: turn %d failed: %s", turnId, e.getMessage());
             if (!cancel.get()) {
-                send(out, lock, Map.of("type", "error", "turn", turnId, "message", String.valueOf(e.getMessage())));
+                send(out, lock, Map.of("type", TYPE_ERROR, "turn", turnId, KEY_MESSAGE, String.valueOf(e.getMessage())));
             }
         }
     }
@@ -434,7 +451,7 @@ public class VoiceController extends WebSocketController {
         try {
             var authority = URI.create(origin.trim()).getAuthority();
             return authority != null && authority.equalsIgnoreCase(host);
-        } catch (RuntimeException e) {  // malformed Origin — treat as hostile
+        } catch (RuntimeException _) {  // malformed Origin — treat as hostile
             return false;
         }
     }
@@ -450,8 +467,8 @@ public class VoiceController extends WebSocketController {
     }
 
     private static Agent resolveAgent(JsonObject msg) {
-        if (!msg.has("agentId") || msg.get("agentId").isJsonNull()) return null;
-        var agentId = msg.get("agentId").getAsLong();
+        if (!msg.has(KEY_AGENT_ID) || msg.get(KEY_AGENT_ID).isJsonNull()) return null;
+        var agentId = msg.get(KEY_AGENT_ID).getAsLong();
         return Tx.run(() -> AgentService.findById(agentId));
     }
 
@@ -518,7 +535,7 @@ public class VoiceController extends WebSocketController {
                 Files.write(tmp, wav);
                 var model = ConfigService.get("transcription.localModel");
                 var segments = asr.transcribe(tmp, (model == null || model.isBlank()) ? "small" : model, null);
-                return segments.stream().map(s -> s.text()).collect(Collectors.joining(" ")).strip();
+                return segments.stream().map(WhisperTranscriber.Segment::text).collect(Collectors.joining(" ")).strip();
             } finally {
                 Files.deleteIfExists(tmp);
             }

@@ -61,20 +61,20 @@ function maybeFinish() {
  *  syntax, link URLs (keep the text), and stray markup symbols. */
 function stripMarkdown(md: string): string {
   return (md || '')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/[*_~>#]/g, '')
-    .replace(/\s+/g, ' ')
+    .replaceAll(/```[\s\S]*?```/g, ' ')
+    .replaceAll(/`([^`]+)`/g, '$1')
+    .replaceAll(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replaceAll(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replaceAll(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replaceAll(/[*_~>#]/g, '')
+    .replaceAll(/\s+/g, ' ')
     .trim()
 }
 
 async function decodeChunk(b64: string): Promise<AudioBuffer | null> {
   if (!audioCtx) return null
   try {
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+    const bytes = Uint8Array.from(atob(b64), c => c.codePointAt(0)!)
     return await audioCtx.decodeAudioData(bytes.buffer)
   }
   catch (e) {

@@ -22,7 +22,7 @@ public final class TtsText {
         s = s.replaceAll("```[\\s\\S]*?```", " ");                          // fenced code blocks
         s = s.replaceAll("!\\[[^\\]]*\\]\\([^)]*\\)", " ");                  // images
         s = s.replaceAll("\\[([^\\]]+)\\]\\([^)]*\\)", "$1");                // links -> link text
-        s = s.replaceAll("(?m)^[ \\t]*\\|?[ \\t:|+-]+\\|?[ \\t]*$", " ");    // table separator / empty rows / hr
+        s = s.replaceAll("(?m)^[ \\t|:+-]+$", " ");                          // table separator / empty rows / hr
         s = s.replaceAll("(?m)^[ \\t]{0,3}[-+*]\\s+", "");                   // list bullets
         s = s.replace("`", "");                                              // inline code ticks
         s = s.replace("|", ", ");                                           // table cell separators -> pauses

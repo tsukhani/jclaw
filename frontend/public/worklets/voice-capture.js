@@ -8,14 +8,14 @@
 class VoiceCaptureProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super()
-    const opt = (options && options.processorOptions) || {}
+    const opt = options?.processorOptions || {}
     this.frame = opt.frame > 0 ? opt.frame : 4096
     this.buf = new Float32Array(this.frame)
     this.n = 0
   }
 
   process(inputs) {
-    const channel = inputs[0] && inputs[0][0]
+    const channel = inputs[0]?.[0]
     if (channel) {
       for (let i = 0; i < channel.length; i++) {
         this.buf[this.n++] = channel[i]

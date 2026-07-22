@@ -119,7 +119,7 @@ public final class VoiceSession implements AutoCloseable {
 
     private void appendWindow(float[] w) {
         for (float f : w) {
-            int s = Math.round(Math.max(-1f, Math.min(1f, f)) * 32767f);
+            int s = Math.round(Math.clamp(f, -1f, 1f) * 32767f);
             utterance.write(s & 0xFF);
             utterance.write((s >> 8) & 0xFF);
         }

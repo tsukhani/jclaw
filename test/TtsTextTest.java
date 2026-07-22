@@ -2,10 +2,6 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.tts.TtsText;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * Markdown-to-speakable reduction for TTS (JCLAW-791): tables, code, links,
  * bullets, and emphasis markers must not reach the engine as literal syntax.

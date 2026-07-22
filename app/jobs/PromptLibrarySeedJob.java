@@ -30,34 +30,52 @@ public class PromptLibrarySeedJob extends Job<Void> {
 
     private void seedSamples() {
         seed("Code Review Checklist", Prompt.Category.CODING, "review, quality, checklist",
-                "Review the following code and report issues grouped by severity (blocker, "
-                        + "major, minor). For each: the file/line, what's wrong, why it matters, and a "
-                        + "concrete fix. Cover correctness, edge cases, security, performance, and "
-                        + "readability. End with the single highest-leverage change.\n\n<paste code here>");
+                """
+                Review the following code and report issues grouped by severity (blocker, \
+                major, minor). For each: the file/line, what's wrong, why it matters, and a \
+                concrete fix. Cover correctness, edge cases, security, performance, and \
+                readability. End with the single highest-leverage change.
+
+                <paste code here>""");
         seed("Explain This Code", Prompt.Category.CODING, "explain, learning",
-                "Explain what the following code does, step by step, for a competent engineer "
-                        + "new to this codebase. Call out any non-obvious control flow, side effects, or "
-                        + "assumptions. Then give a one-sentence summary of its purpose.\n\n<paste code here>");
+                """
+                Explain what the following code does, step by step, for a competent engineer \
+                new to this codebase. Call out any non-obvious control flow, side effects, or \
+                assumptions. Then give a one-sentence summary of its purpose.
+
+                <paste code here>""");
         seed("Write Unit Tests", Prompt.Category.CODING, "testing, tdd",
-                "Write thorough unit tests for the code below. Cover the happy path, boundary "
-                        + "values, and error/edge cases. Use the project's existing test framework and "
-                        + "conventions. Name each test after the behavior it pins.\n\n<paste code here>");
+                """
+                Write thorough unit tests for the code below. Cover the happy path, boundary \
+                values, and error/edge cases. Use the project's existing test framework and \
+                conventions. Name each test after the behavior it pins.
+
+                <paste code here>""");
         seed("Blog Post Outline", Prompt.Category.WRITING, "content, outline",
                 "Create a detailed outline for a blog post titled \"<title>\" aimed at "
                         + "<audience>. Include a hook, 4-6 section headings each with 2-3 bullet points, "
                         + "and a closing call to action. Keep the tone <tone>.");
         seed("Rewrite More Professionally", Prompt.Category.WRITING, "email, tone, editing",
-                "Rewrite the following text to be clear, concise, and professional while "
-                        + "preserving my intent and key details. Keep it warm, not stiff. Return only the "
-                        + "rewritten version.\n\n<paste text here>");
+                """
+                Rewrite the following text to be clear, concise, and professional while \
+                preserving my intent and key details. Keep it warm, not stiff. Return only the \
+                rewritten version.
+
+                <paste text here>""");
         seed("SWOT Analysis", Prompt.Category.ANALYSIS, "strategy, framework",
-                "Produce a SWOT analysis (Strengths, Weaknesses, Opportunities, Threats) for "
-                        + "the subject below. Give 3-5 specific, evidence-based points per quadrant, then a "
-                        + "short paragraph on the most important strategic implication.\n\n<subject>");
+                """
+                Produce a SWOT analysis (Strengths, Weaknesses, Opportunities, Threats) for \
+                the subject below. Give 3-5 specific, evidence-based points per quadrant, then a \
+                short paragraph on the most important strategic implication.
+
+                <subject>""");
         seed("Summarize & Extract Action Items", Prompt.Category.ANALYSIS, "summary, meetings",
-                "Summarize the text below in 5 bullet points, then list every action item as "
-                        + "\"[owner] - [task] - [due]\" (use TBD when unknown). Flag any open questions "
-                        + "separately.\n\n<paste notes/transcript here>");
+                """
+                Summarize the text below in 5 bullet points, then list every action item as \
+                \"[owner] - [task] - [due]\" (use TBD when unknown). Flag any open questions \
+                separately.
+
+                <paste notes/transcript here>""");
         seed("Brainstorm Ideas", Prompt.Category.CREATIVE, "ideation, divergent",
                 "Brainstorm 15 distinct, non-obvious ideas for <goal>. Range from safe to bold. "
                         + "For the 3 strongest, add a one-line reason they could work. Avoid repeating the "
@@ -71,8 +89,11 @@ public class PromptLibrarySeedJob extends Job<Void> {
                         + "the proposed solution, why now, success metrics, and the top 3 risks. Be "
                         + "specific and avoid buzzwords.");
         seed("Daily Standup Notes", Prompt.Category.CUSTOM, "standup, routine",
-                "Turn my rough notes into a clean standup update with three sections - "
-                        + "Yesterday, Today, Blockers - as short bullet points.\n\n<paste rough notes here>");
+                """
+                Turn my rough notes into a clean standup update with three sections - \
+                Yesterday, Today, Blockers - as short bullet points.
+
+                <paste rough notes here>""");
     }
 
     private void seed(String title, Prompt.Category category, String tags, String content) {

@@ -78,9 +78,14 @@ public class ApiTtsController extends Controller {
     private static TtsEngineEntry sidecarEntry() {
         boolean uv = UvProbe.isAvailable();
         boolean running = TtsSidecarManager.isRunning();
-        String status = running ? "running"
-                : uv ? "ready — starts on first use"
-                : "needs 'uv' on PATH: " + UvProbe.lastResult().reason();
+        String status;
+        if (running) {
+            status = "running";
+        } else if (uv) {
+            status = "ready — starts on first use";
+        } else {
+            status = "needs 'uv' on PATH: " + UvProbe.lastResult().reason();
+        }
         var models = new ArrayList<TtsModelEntry>();
         for (var m : TtsModel.forEngine(TtsEngine.SIDECAR)) {
             // Sidecar weights live in the sidecar's HF cache, pulled on first use —
@@ -94,9 +99,14 @@ public class ApiTtsController extends Controller {
     private static TtsEngineEntry jvmEntry() {
         String selected = TtsRouter.modelFor(TtsEngine.JVM);
         boolean ready = TtsJvmEngine.isModelPresent(selected);
-        String status = ready ? "ready"
-                : TtsJvmEngine.isDownloading(selected) ? "downloading model"
-                : "model downloads on first use";
+        String status;
+        if (ready) {
+            status = "ready";
+        } else if (TtsJvmEngine.isDownloading(selected)) {
+            status = "downloading model";
+        } else {
+            status = "model downloads on first use";
+        }
         var models = new ArrayList<TtsModelEntry>();
         for (var m : TtsModel.forEngine(TtsEngine.JVM)) {
             models.add(new TtsModelEntry(m.id(), m.displayName(), m.approxSizeMb(),

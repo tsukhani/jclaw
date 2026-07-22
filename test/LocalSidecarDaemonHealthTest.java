@@ -24,7 +24,7 @@ class LocalSidecarDaemonHealthTest extends UnitTest {
     private static void awaitUninterruptibly(CountDownLatch latch) {
         try {
             latch.await();
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }
@@ -64,7 +64,7 @@ class LocalSidecarDaemonHealthTest extends UnitTest {
                 spawns.incrementAndGet();             // the single real spawn
                 try {
                     Thread.sleep(50);                 // widen the overlap window
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
                 healthy.set(true);
@@ -103,7 +103,7 @@ class LocalSidecarDaemonHealthTest extends UnitTest {
                     maxConcurrent.accumulateAndGet(c, Math::max);
                     try {
                         Thread.sleep(5);
-                    } catch (InterruptedException e) {
+                    } catch (InterruptedException _) {
                         Thread.currentThread().interrupt();
                     }
                     inside.decrementAndGet();

@@ -494,7 +494,7 @@ public class JpaMemoryStore implements MemoryStore {
     private void generateAndStoreEmbedding(Memory memory) {
         var embedding = generateEmbedding(memory.text);
         if (embedding != null) {
-            storeEmbeddingSql((Long) memory.id, embedding);
+            storeEmbeddingSql(memory.id, embedding);
         }
     }
 

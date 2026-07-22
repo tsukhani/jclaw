@@ -50,8 +50,10 @@ watch(() => props.open, (isOpen) => {
 })
 
 const isEdit = computed(() => !!props.editing)
-const dialogTitle = computed(() =>
-  isEdit.value ? 'Edit prompt' : (step.value === 'describe' ? 'New prompt' : 'Review prompt'))
+const dialogTitle = computed(() => {
+  if (isEdit.value) return 'Edit prompt'
+  return step.value === 'describe' ? 'New prompt' : 'Review prompt'
+})
 const canSave = computed(() => !!title.value.trim() && !!content.value.trim() && !!category.value)
 
 async function generate() {

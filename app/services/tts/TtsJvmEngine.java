@@ -133,7 +133,7 @@ public final class TtsJvmEngine {
         if (voice == null || voice.isBlank()) return 0;
         try {
             return Math.max(0, Integer.parseInt(voice.trim()));
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return 0;
         }
     }
@@ -192,7 +192,7 @@ public final class TtsJvmEngine {
                     .sorted()
                     .map(n -> dir.resolve(n).toString())
                     .collect(Collectors.joining(","));
-        } catch (IOException e) {
+        } catch (IOException _) {
             return "";
         }
     }

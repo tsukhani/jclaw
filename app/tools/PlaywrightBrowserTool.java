@@ -362,11 +362,13 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             // launching so a launch failure leaves no dangling torn-down session.
             destroySession(existing, agentName);
             holder.session = null;
-            return holder.session = launchSession(agentName, relaunchPins.get());
+            holder.session = launchSession(agentName, relaunchPins.get());
+            return holder.session;
         }
         var initialPins = new LinkedHashSet<String>();
         hostResolverRule.ifPresent(initialPins::add);
-        return holder.session = launchSession(agentName, initialPins);
+        holder.session = launchSession(agentName, initialPins);
+        return holder.session;
     }
 
     /**

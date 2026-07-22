@@ -4,10 +4,6 @@ import services.tts.TtsSentenceChunker;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * Chunking behaviour for streaming TTS (JCLAW-790): blank input is empty, short
  * fragments merge, run-on sentences are hard-wrapped under the cap, paragraphs

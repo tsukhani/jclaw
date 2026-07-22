@@ -1,6 +1,7 @@
 package services;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import models.Prompt;
 
@@ -19,6 +20,7 @@ public final class PromptImportExportService {
 
     public static final String MODE_MERGE = "merge";
     public static final String MODE_REPLACE = "replace";
+    private static final String KEY_PROMPTS = "prompts";
     private static final int EXPORT_VERSION = 1;
 
     private PromptImportExportService() { /* static-only */ }
@@ -51,27 +53,36 @@ public final class PromptImportExportService {
         if (MODE_REPLACE.equals(mode)) {
             Prompt.deleteAll();
         }
-        if (body == null || !body.has("prompts") || !body.get("prompts").isJsonArray()) {
+        if (body == null || !body.has(KEY_PROMPTS) || !body.get(KEY_PROMPTS).isJsonArray()) {
             return 0;
         }
-        JsonArray arr = body.getAsJsonArray("prompts");
+        JsonArray arr = body.getAsJsonArray(KEY_PROMPTS);
         int count = 0;
         for (var el : arr) {
-            if (!el.isJsonObject()) continue;
-            var o = el.getAsJsonObject();
-            var title = str(o, "title");
-            var content = str(o, "content");
-            if (title == null || title.isBlank() || content == null || content.isBlank()) continue;
-            var row = new Prompt();
-            row.title = title.trim();
-            row.content = content;
-            row.tags = blankToNull(str(o, "tags"));
-            var cat = Prompt.Category.fromValue(str(o, "category"));
-            row.category = cat != null ? cat : Prompt.Category.CUSTOM;
-            row.save();
-            count++;
+            if (importRow(el)) count++;
         }
         return count;
+    }
+
+    /**
+     * Insert one export row, returning {@code true} when it was actually
+     * persisted. A non-object element, or one missing title/content, is skipped
+     * (returns {@code false}); an unknown/blank category coerces to CUSTOM.
+     */
+    private static boolean importRow(JsonElement el) {
+        if (!el.isJsonObject()) return false;
+        var o = el.getAsJsonObject();
+        var title = str(o, "title");
+        var content = str(o, "content");
+        if (title == null || title.isBlank() || content == null || content.isBlank()) return false;
+        var row = new Prompt();
+        row.title = title.trim();
+        row.content = content;
+        row.tags = blankToNull(str(o, "tags"));
+        var cat = Prompt.Category.fromValue(str(o, "category"));
+        row.category = cat != null ? cat : Prompt.Category.CUSTOM;
+        row.save();
+        return true;
     }
 
     private static String str(JsonObject o, String key) {

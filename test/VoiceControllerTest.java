@@ -2,9 +2,6 @@ import controllers.VoiceController;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * CSWSH guard for the voice-mode WebSocket (JCLAW-791): the handshake's
  * browser-set Origin must match our own host, else a cross-site page could open
