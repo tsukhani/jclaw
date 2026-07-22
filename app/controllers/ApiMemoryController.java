@@ -13,18 +13,13 @@ import models.Agent;
 import models.Memory;
 import play.mvc.Controller;
 import play.mvc.With;
-import services.EventLogger;
 import services.MemoryService;
-import services.search.LuceneIndexer;
-import services.search.MessageSearch;
 import utils.ApiResponses;
 import utils.JpqlFilter;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static utils.GsonHolder.GSON;
@@ -56,8 +51,8 @@ public class ApiMemoryController extends Controller {
 
     /**
      * GET /api/memories — list memories across all agents, newest first, narrowed
-     * by optional filters: {@code q} (free-text over memory text via the MEMORY
-     * Lucene scope, with a LIKE fallback when search isn't initialized),
+     * by optional filters: {@code q} (case-insensitive substring match over
+     * memory text — each whitespace-separated term must appear, AND-ed),
      * {@code agent} (exact agent name), {@code category} (exact), and
      * {@code importance} (a threshold like {@code >0.8}, {@code <=0.5}, or a bare
      * number treated as {@code >=}).
@@ -74,10 +69,9 @@ public class ApiMemoryController extends Controller {
         int effOffset = (offset != null && offset >= 0) ? offset : 0;
         var agentNames = agentNamesById();
 
-        // Resolve the filter (and any FTS hit set) ONCE, then run the count and
-        // the page off the same resolution — otherwise a q= search would hit
-        // Lucene twice per request. `total` drives the frontend pager via the
-        // X-Total-Count header, matching Conversations/Subagents.
+        // Resolve the filter ONCE, then run the count and the page off the same
+        // resolution. `total` drives the frontend pager via the X-Total-Count
+        // header, matching Conversations/Subagents.
         var resolved = resolveQuery(q, agent, category, importance);
         long total = 0;
         List<Memory> rows = List.of();
@@ -95,8 +89,8 @@ public class ApiMemoryController extends Controller {
 
     /**
      * The list()/bulkDelete(filter) query core: memories matching the filter
-     * set, newest first. Returns an empty list where list() used to
-     * short-circuit (unknown agent name, empty FTS hit set).
+     * set, newest first. Returns an empty list where list() short-circuits
+     * (unknown agent name).
      */
     private static List<Memory> selectMemories(String q, String agent, String category,
                                                String importance, String status,
@@ -108,27 +102,24 @@ public class ApiMemoryController extends Controller {
     }
 
     /**
-     * Filter + optional FTS hit set, resolved once. {@code empty} means the
-     * filter can't match anything — an unknown agent name, or an FTS search
-     * that ran but hit nothing — so callers short-circuit to zero rows/count
+     * Resolved filter. {@code empty} means the filter can't match anything —
+     * an unknown agent name — so callers short-circuit to zero rows/count
      * rather than issue a query that would return everything.
      */
-    private record ResolvedQuery(JpqlFilter filter, List<Long> ftsIds, boolean empty) {}
+    private record ResolvedQuery(JpqlFilter filter, boolean empty) {}
 
     private static ResolvedQuery resolveQuery(String q, String agent, String category, String importance) {
         Long agentIdFilter = null;
         if (agent != null && !agent.isBlank()) {
             agentIdFilter = agentIdForName(agent.strip());
-            if (agentIdFilter == null) return new ResolvedQuery(null, null, true);
+            if (agentIdFilter == null) return new ResolvedQuery(null, true);
         }
         var filter = new JpqlFilter()
                 .eq("m.agent.id", agentIdFilter)
                 .eq("m.category", normalizeCategory(category));
         applyImportance(filter, importance);
-
-        var ftsResult = resolveFtsIds(filter, q);
-        if (ftsResult.isPresent() && ftsResult.get().isEmpty()) return new ResolvedQuery(null, null, true);
-        return new ResolvedQuery(filter, ftsResult.orElse(null), false);
+        applyTextFilter(filter, q);
+        return new ResolvedQuery(filter, false);
     }
 
     /**
@@ -139,40 +130,30 @@ public class ApiMemoryController extends Controller {
      */
     private static PagedJpqlQuery<Memory> pagedQuery(ResolvedQuery r, String status, String sort, String dir) {
         return PagedJpqlQuery.of(Memory.class, "Memory m", "m")
-                .where(whereClause(r.filter(), r.ftsIds() != null, status))
+                .where(whereClause(r.filter(), status))
                 .positionalParams(r.filter().paramList())
-                .namedParam("fts", r.ftsIds())
                 .orderBy(orderByClause(sort, dir));
     }
 
     /**
-     * Free-text q resolution: adds a LIKE to {@code filter} in the no-search-
-     * backend path (Optional.empty() = no id constraint), or the Lucene hit ids
-     * (present-but-empty = ran-but-matched-nothing, so the caller returns empty).
+     * Free-text q → case-insensitive substring match: each whitespace-separated
+     * term must appear somewhere in the memory text (AND-ed). Substring rather
+     * than token-exact FTS so a partial term surfaces its containers — e.g.
+     * "Marissa" finds "Marissa's phone …". The admin list orders by created-date
+     * (not relevance), so this drops no ranking; and it keeps the list and
+     * "Delete all matching" (both routed through this filter) in lockstep.
      */
-    private static Optional<List<Long>> resolveFtsIds(JpqlFilter filter, String q) {
-        if (q == null || q.isBlank()) return Optional.empty();
-        if ("none".equals(MessageSearch.activeDialect())) {
-            filter.like("LOWER(m.text)", "%" + q.strip().toLowerCase() + "%");
-            return Optional.empty();
-        }
-        try {
-            return Optional.of(MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), 500));
-        } catch (IOException e) {
-            EventLogger.warn("search", null, null,
-                    "Memory FTS failed for q='%s': %s".formatted(q, e.getMessage()));
-            return Optional.empty();
+    private static void applyTextFilter(JpqlFilter filter, String q) {
+        if (q == null || q.isBlank()) return;
+        for (var term : q.strip().toLowerCase().split("\\s+")) {
+            filter.like("LOWER(m.text)", "%" + term + "%");
         }
     }
 
-    /** The shared WHERE body: the filter clause, the optional FTS id
-     *  constraint, and the status condition, AND-ed together. Empty string
-     *  when nothing narrows. */
-    private static String whereClause(JpqlFilter filter, boolean hasFts, String status) {
+    /** The shared WHERE body: the filter clause and the status condition,
+     *  AND-ed together. Empty string when nothing narrows. */
+    private static String whereClause(JpqlFilter filter, String status) {
         var where = filter.toWhereClause();
-        if (hasFts) {
-            where = where.isEmpty() ? "m.id IN (:fts)" : where + " AND m.id IN (:fts)";
-        }
         var statusCondition = statusCondition(status);
         if (statusCondition != null) {
             where = where.isEmpty() ? statusCondition : where + " AND " + statusCondition;
