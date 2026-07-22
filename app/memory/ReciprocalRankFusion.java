@@ -49,7 +49,7 @@ public final class ReciprocalRankFusion {
             int byScore = Double.compare(b.getValue(), a.getValue());
             return byScore != 0 ? byScore : Long.compare(a.getKey(), b.getKey());
         });
-        double top = fused.get(0).getValue();
+        double top = fused.getFirst().getValue();
         var out = new ArrayList<Ranked>(fused.size());
         for (var e : fused) {
             out.add(new Ranked(e.getKey(), e.getValue() / top));

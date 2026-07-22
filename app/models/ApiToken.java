@@ -114,6 +114,6 @@ public class ApiToken extends Model {
         query.setParameter("hash", hash);
         query.setHint("org.hibernate.cacheable", true);
         var results = query.getResultList();
-        return results.isEmpty() ? null : results.get(0);
+        return results.isEmpty() ? null : results.getFirst();
     }
 }
