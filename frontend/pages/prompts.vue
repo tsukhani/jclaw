@@ -15,18 +15,43 @@ const categories = computed(() => categoriesData.value ?? [])
 
 // Client-side search + category filter over the (small, personal-scale) list.
 const search = ref('')
-const activeCategory = ref<string | null>(null) // null = All
+const activeCategory = ref<string>('All') // 'All' or a category value
 
-const filtered = computed(() => {
+// Absolute per-category counts (whole library, not search-filtered) for the
+// filter-pill badges — matches the Tools page convention.
+const categoryCounts = computed<Record<string, number>>(() => {
+  const counts: Record<string, number> = { All: prompts.value.length }
+  for (const c of categories.value) {
+    counts[c.value] = prompts.value.filter(p => p.category === c.value).length
+  }
+  return counts
+})
+
+// Prompts matching the active category (or All) AND the search box.
+const searchFiltered = computed(() => {
   const q = search.value.trim().toLowerCase()
   return prompts.value.filter((p) => {
-    if (activeCategory.value && p.category !== activeCategory.value) return false
+    if (activeCategory.value !== 'All' && p.category !== activeCategory.value) return false
     if (!q) return true
     return p.title.toLowerCase().includes(q)
       || p.content.toLowerCase().includes(q)
       || (p.tags ?? '').toLowerCase().includes(q)
   })
 })
+
+// All view → one section per non-empty category (subheader + grid), mirroring
+// the Tools page. A single-category view is one unlabelled section.
+const displaySections = computed(() => {
+  if (activeCategory.value === 'All') {
+    return categories.value
+      .map(c => ({ value: c.value, label: c.label, prompts: searchFiltered.value.filter(p => p.category === c.value) }))
+      .filter(s => s.prompts.length > 0)
+  }
+  const c = categories.value.find(cc => cc.value === activeCategory.value)
+  return [{ value: activeCategory.value, label: c?.label ?? activeCategory.value, prompts: searchFiltered.value }]
+})
+
+const hasResults = computed(() => searchFiltered.value.length > 0)
 
 const { confirm } = useConfirm()
 
@@ -238,32 +263,28 @@ async function doImport(mode: 'merge' | 'replace') {
       <span class="text-xs text-fg-muted">Merge appends; Replace wipes your library first.</span>
     </div>
 
-    <!-- Category filter pills -->
-    <div class="flex flex-wrap gap-1.5 mb-5">
+    <!-- Category filter pills (Tools-page style: bordered, with absolute counts) -->
+    <div class="flex flex-wrap gap-1.5 mb-6">
       <button
         type="button"
         data-testid="category-filter-all"
-        :class="[
-          'px-2.5 py-1 text-xs rounded-full border transition-colors',
-          activeCategory === null
-            ? 'bg-emerald-600 text-white border-emerald-600'
-            : 'text-fg-muted border-border hover:border-emerald-500',
-        ]"
-        @click="activeCategory = null"
+        class="px-3 py-1 text-xs border transition-colors"
+        :class="activeCategory === 'All'
+          ? 'bg-emerald-500/10 border-emerald-600 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
+          : 'bg-surface-elevated border-border text-fg-muted hover:text-fg-primary hover:border-input'"
+        @click="activeCategory = 'All'"
       >
-        All
+        All <span class="tabular-nums opacity-60">({{ categoryCounts.All }})</span>
       </button>
       <button
         v-for="c in categories"
         :key="c.value"
         type="button"
         :data-testid="`category-filter-${c.value}`"
-        :class="[
-          'inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-full border transition-colors',
-          activeCategory === c.value
-            ? 'bg-emerald-600 text-white border-emerald-600'
-            : 'text-fg-muted border-border hover:border-emerald-500',
-        ]"
+        class="inline-flex items-center gap-1.5 px-3 py-1 text-xs border transition-colors"
+        :class="activeCategory === c.value
+          ? 'bg-emerald-500/10 border-emerald-600 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
+          : 'bg-surface-elevated border-border text-fg-muted hover:text-fg-primary hover:border-input'"
         @click="activeCategory = c.value"
       >
         <component
@@ -271,7 +292,7 @@ async function doImport(mode: 'merge' | 'replace') {
           class="w-3.5 h-3.5"
           aria-hidden="true"
         />
-        {{ c.label }}
+        {{ c.label }} <span class="tabular-nums opacity-60">({{ categoryCounts[c.value] ?? 0 }})</span>
       </button>
     </div>
 
@@ -303,25 +324,45 @@ async function doImport(mode: 'merge' | 'replace') {
       </button>
     </div>
     <div
-      v-else-if="!filtered.length"
+      v-else-if="!hasResults"
       class="text-sm text-fg-muted border border-dashed border-border rounded-lg px-4 py-8 text-center"
     >
       No prompts match your search or filter.
     </div>
 
-    <!-- Card grid -->
+    <!-- Category-grouped grids: subheaders in the All view (Tools-page style),
+         one unlabelled grid for a single-category view. -->
     <div
       v-else
-      class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+      class="space-y-8"
     >
-      <PromptCard
-        v-for="p in filtered"
-        :key="p.id"
-        :prompt="p"
-        @edit="openEdit(p)"
-        @delete="remove(p)"
-        @run="run(p)"
-      />
+      <section
+        v-for="section in displaySections"
+        :key="section.value"
+      >
+        <h2
+          v-if="activeCategory === 'All'"
+          class="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-fg-muted"
+        >
+          <component
+            :is="promptCategoryIcon(section.value)"
+            class="w-3.5 h-3.5"
+            aria-hidden="true"
+          />
+          {{ section.label }}
+          <span class="tabular-nums opacity-60">({{ section.prompts.length }})</span>
+        </h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <PromptCard
+            v-for="p in section.prompts"
+            :key="p.id"
+            :prompt="p"
+            @edit="openEdit(p)"
+            @delete="remove(p)"
+            @run="run(p)"
+          />
+        </div>
+      </section>
     </div>
 
     <PromptFormDialog
