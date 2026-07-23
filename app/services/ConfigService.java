@@ -1,5 +1,6 @@
 package services;
 
+import jakarta.persistence.PersistenceException;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import jobs.ToolRegistrationJob;
@@ -124,6 +125,41 @@ public class ConfigService {
                 }
             }
         });
+    }
+
+    /**
+     * Atomically create {@code key} with {@code value} iff no row exists yet.
+     * Returns {@code true} when this call inserted the row, {@code false} when a
+     * row was already present. Unlike {@link #set} (last-writer-wins via upsert),
+     * this closes a check-then-write race: a losing concurrent insert trips the
+     * {@code config_key} unique constraint and surfaces as {@code false}, not an
+     * overwrite. Used by the first-install credential bootstrap (JCLAW-782).
+     */
+    public static boolean setIfAbsent(String key, String value) {
+        boolean inserted = Tx.run(() -> {
+            if (Config.findByKey(key) != null) return false;
+            try {
+                var config = new Config();
+                config.key = key;
+                config.value = value;
+                config.save(); // flushes; the unique index rejects a concurrent insert
+                return true;
+            } catch (PersistenceException _) {
+                // A concurrent setIfAbsent inserted the same key first. The flush
+                // marks the transaction rollback-only, so Tx.run/withTransaction
+                // rolls it back cleanly — report the key as already present.
+                return false;
+            }
+        });
+        if (inserted) {
+            // Mirror set(): seed the cache for read-your-writes, evicting the entry
+            // if the surrounding (not-yet-committed) transaction rolls back (JCLAW-832).
+            cache.put(key, Optional.ofNullable(value));
+            if (JPA.isInsideTransaction()) {
+                scheduleRollbackEviction(JPA.em().unwrap(Session.class), key);
+            }
+        }
+        return inserted;
     }
 
     /**

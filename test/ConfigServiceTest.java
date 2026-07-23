@@ -60,6 +60,54 @@ class ConfigServiceTest extends UnitTest {
         assertEquals("v2", ConfigService.get("key"));
     }
 
+    // --- JCLAW-782: setIfAbsent is the atomic first-writer-wins primitive behind
+    // the unauthenticated /api/auth/setup bootstrap. Unlike set() (last-writer-wins
+    // via upsert), it inserts only when the key is absent so a check-then-write race
+    // can't land two credentials. ---
+
+    @Test
+    void setIfAbsentInsertsWhenAbsentThenReportsPresent() {
+        assertTrue(ConfigService.setIfAbsent("boot.key", "first"),
+                "first setIfAbsent on an absent key must insert and return true");
+        assertEquals("first", ConfigService.get("boot.key"));
+        // A second attempt must NOT overwrite (contrast with set()'s last-writer-wins).
+        assertFalse(ConfigService.setIfAbsent("boot.key", "second"),
+                "setIfAbsent on a present key must return false");
+        assertEquals("first", ConfigService.get("boot.key"),
+                "setIfAbsent must never overwrite an existing value");
+    }
+
+    @Test
+    void setIfAbsentIsAtomicUnderConcurrentInserts() throws InterruptedException {
+        // Two threads race to bootstrap the same key from fresh, each in its own
+        // committed transaction (the seedPassword cross-thread pattern). The
+        // config_key unique constraint must arbitrate so exactly one insert wins;
+        // the loser trips the constraint and returns false, never overwriting.
+        var key = "race.setifabsent";
+        var barrier = new java.util.concurrent.CyclicBarrier(2);
+        var results = new java.util.concurrent.ConcurrentLinkedQueue<Boolean>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+
+        Runnable attempt = () -> {
+            try {
+                barrier.await(); // align both threads on the starting line
+                results.add(ConfigService.setIfAbsent(key, "v-" + Thread.currentThread().threadId()));
+            } catch (Throwable ex) { err.set(ex); }
+        };
+        var t1 = Thread.ofVirtual().start(attempt);
+        var t2 = Thread.ofVirtual().start(attempt);
+        t1.join();
+        t2.join();
+
+        if (err.get() != null) throw new RuntimeException(err.get());
+        assertEquals(2, results.size(), "both attempts must complete");
+        long wins = results.stream().filter(Boolean::booleanValue).count();
+        assertEquals(1, wins, "exactly one concurrent setIfAbsent must win");
+        var stored = ConfigService.get(key);
+        assertNotNull(stored, "the winning insert must persist");
+        assertTrue(stored.startsWith("v-"), "the persisted value must be a winner's, not absent: " + stored);
+    }
+
     @Test
     void deleteRemovesEntry() {
         ConfigService.set("to-delete", "value");

@@ -96,6 +96,18 @@ class ApiAuthControllerTest extends FunctionalTest {
     }
 
     @Test
+    void setupReturns409ForWellFormedRetryOnAlreadySetInstall() {
+        // JCLAW-782: the setIfAbsent-backed write must preserve the 409 already_set
+        // shape even for a body that clears every validation gate (>=12 chars, not
+        // breached) — a well-formed second bootstrap must not overwrite the first.
+        seedPassword("changeme");
+        var resp = POST("/api/auth/setup", "application/json",
+                "{\"password\":\"validlongpass123\"}");
+        assertEquals(409, resp.status.intValue());
+        assertTrue(getContent(resp).contains("already_set"), getContent(resp));
+    }
+
+    @Test
     void setupReturns400OnMalformedBody() {
         var resp = POST("/api/auth/setup", "application/json", "not-a-json-body");
         assertEquals(400, resp.status.intValue());

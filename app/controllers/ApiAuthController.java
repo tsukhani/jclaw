@@ -121,7 +121,13 @@ public class ApiAuthController extends Controller {
             ApiResponses.error(400, "password_breached",
                     "This password appears in a known data breach. Choose a different one.");
         }
-        ConfigService.set(PASSWORD_HASH_KEY, PasswordHasher.hash(password));
+        // JCLAW-782: the check above is a fast, friendly reject; the write itself
+        // must be atomic so two setup() calls that both pass the check can't both
+        // land a hash (last-writer-wins). setIfAbsent inserts only if the key is
+        // still absent, so a losing concurrent bootstrap gets the same 409.
+        if (!ConfigService.setIfAbsent(PASSWORD_HASH_KEY, PasswordHasher.hash(password))) {
+            ApiResponses.error(409, "already_set", "Password is already set");
+        }
         EventLogger.info("auth", "Admin password set for the first time");
         renderJSON(gson.toJson(new SetupOkResponse("ok")));
     }
