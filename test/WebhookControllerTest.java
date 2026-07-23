@@ -42,28 +42,18 @@ class WebhookControllerTest extends FunctionalTest {
 
     @Test
     void telegramWebhookReturns404ForUnknownBinding() {
-        var response = POST("/api/webhooks/telegram/99999/any-secret",
+        // JCLAW-784: the route keys on {bindingId} only (secret dropped from URL).
+        var response = POST("/api/webhooks/telegram/99999",
                 "application/json", "{}");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    void telegramWebhookReturns401OnBadPathSecret() {
-        var bindingId = seedTelegramBinding("correct-secret", true);
-        var response = POST("/api/webhooks/telegram/" + bindingId + "/wrong-secret",
-                "application/json", "{}");
-        assertEquals(401, response.status.intValue());
-        assertSignatureFailureLogged("telegram");
-    }
-
-    @Test
     void telegramWebhookReturns401OnMissingHeader() {
-        // Path secret matches, but x-telegram-bot-api-secret-token header is
-        // absent. JCLAW-16 tightened this from "optional" to "required" —
-        // setWebhook registers the secret_token, so legit traffic always
-        // carries it.
+        // Binding + secret exist, but the x-telegram-bot-api-secret-token header —
+        // now the SOLE auth factor (JCLAW-784) — is absent. Reject with 401.
         var bindingId = seedTelegramBinding("correct-secret", true);
-        var response = POST("/api/webhooks/telegram/" + bindingId + "/correct-secret",
+        var response = POST("/api/webhooks/telegram/" + bindingId,
                 "application/json", "{}");
         assertEquals(401, response.status.intValue());
         assertSignatureFailureLogged("telegram");
@@ -76,7 +66,7 @@ class WebhookControllerTest extends FunctionalTest {
         // run" without mocking, so assert the response code + that no agent-
         // invocation event is logged.
         var bindingId = seedTelegramBinding("correct-secret", false);
-        var response = POST("/api/webhooks/telegram/" + bindingId + "/correct-secret",
+        var response = POST("/api/webhooks/telegram/" + bindingId,
                 "application/json", "{}");
         assertEquals(200, response.status.intValue());
     }

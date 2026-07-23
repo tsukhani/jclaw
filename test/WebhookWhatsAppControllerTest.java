@@ -1,3 +1,4 @@
+import controllers.WebhookIngressGate;
 import models.Agent;
 import models.EventLog;
 import models.WhatsAppBinding;
@@ -41,6 +42,10 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
     void setup() {
         Fixtures.deleteDatabase();
         EventLogger.clear();
+        // JCLAW-783: clear the shared ingress-gate counters between cases. Safe in
+        // @BeforeEach: the play1 runner serializes functional tests, and no unit
+        // test touches this gate's map.
+        WebhookIngressGate.resetForTest();
     }
 
     private static <T> T commitInFreshTx(Supplier<T> block) {
@@ -235,10 +240,105 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
     }
 
     private static String textPayload() {
+        // JCLAW-784: carry a fresh per-message timestamp so the replay-window guard
+        // (VULN-012) admits it — a real Cloud-API message always includes one.
+        return textPayload(String.valueOf(java.time.Instant.now().getEpochSecond()));
+    }
+
+    private static String textPayload(String timestamp) {
         return "{\"entry\":[{\"changes\":[{\"value\":{"
                 + "\"metadata\":{\"phone_number_id\":\"" + PHONE_NUMBER_ID + "\"},"
                 + "\"contacts\":[{\"profile\":{\"name\":\"Ada\"},\"wa_id\":\"15551234567\"}],"
                 + "\"messages\":[{\"from\":\"15551234567\",\"id\":\"wamid.x\","
+                + "\"timestamp\":\"" + timestamp + "\","
                 + "\"type\":\"text\",\"text\":{\"body\":\"hi\"}}]}}]}]}";
+    }
+
+    // ── JCLAW-783: pre-auth ingress gate (rate-limit + body cap before parse/DB) ──
+
+    /** Like {@link #postWithSig} but also sets an explicit Content-Length header so
+     *  the pre-auth Content-Length guard can be exercised. */
+    private static play.mvc.Http.Response postWithContentLength(String body, String signature,
+                                                                String contentLength) {
+        var req = newRequest();
+        req.method = "POST";
+        req.contentType = "application/json";
+        req.url = "/api/webhooks/whatsapp";
+        req.path = "/api/webhooks/whatsapp";
+        req.querystring = "";
+        req.body = new java.io.ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));
+        if (signature != null) {
+            req.headers.put("x-hub-signature-256",
+                    new play.mvc.Http.Header("x-hub-signature-256", signature));
+        }
+        req.headers.put("content-length", new play.mvc.Http.Header("content-length", contentLength));
+        return makeRequest(req);
+    }
+
+    @Test
+    void floodIsRateLimitedWith429BeforeParse() {
+        // JCLAW-783: a flood from one source starts returning 429 once the window
+        // count is exceeded. The requests are UNSIGNED — a 429 (not the 401 the
+        // first three get at the signature check) proves the rate-limit runs BEFORE
+        // readRawBody / JsonParser.parseString / findByPhoneNumberId.
+        play.Play.configuration.setProperty("whatsapp.webhook.rate-limit.max", "3");
+        play.Play.configuration.setProperty("whatsapp.webhook.rate-limit.window-seconds", "60");
+        try {
+            seedBinding(APP_SECRET);
+            var body = textPayload();
+            for (int i = 0; i < 3; i++) {
+                var r = postWithSig(body, null);
+                assertEquals(401, r.status.intValue(),
+                        "request " + (i + 1) + " is under the limit, so the missing signature yields 401");
+            }
+            var flooded = postWithSig(body, null);
+            assertEquals(429, flooded.status.intValue(),
+                    "exceeding the rate-limit window returns 429 before parse / DB");
+        } finally {
+            play.Play.configuration.remove("whatsapp.webhook.rate-limit.max");
+            play.Play.configuration.remove("whatsapp.webhook.rate-limit.window-seconds");
+        }
+    }
+
+    @Test
+    void oversizedContentLengthReturns413BeforeParse() {
+        // JCLAW-783: a Content-Length above the cap is rejected with 413 before the
+        // body is read or parsed (unsigned + oversized — the 413 pre-empts both).
+        play.Play.configuration.setProperty("whatsapp.webhook.max-body-bytes", "8");
+        try {
+            seedBinding(APP_SECRET);
+            var response = postWithContentLength(textPayload(), null, "100000");
+            assertEquals(413, response.status.intValue());
+        } finally {
+            play.Play.configuration.remove("whatsapp.webhook.max-body-bytes");
+        }
+    }
+
+    @Test
+    void oversizedBodyReadLengthReturns413() {
+        // JCLAW-783: with no Content-Length header the read-length backstop still
+        // rejects a body larger than the cap with 413 (before parse). textPayload is
+        // well over the 8-byte cap set here.
+        play.Play.configuration.setProperty("whatsapp.webhook.max-body-bytes", "8");
+        try {
+            seedBinding(APP_SECRET);
+            var response = postWithSig(textPayload(), null);
+            assertEquals(413, response.status.intValue());
+        } finally {
+            play.Play.configuration.remove("whatsapp.webhook.max-body-bytes");
+        }
+    }
+
+    // ── JCLAW-784 (VULN-012): replay window on the per-message timestamp ──
+
+    @Test
+    void postRejectsStaleTimestamp() {
+        // A correctly-signed body whose per-message timestamp is outside the replay
+        // window is rejected with 401, even though the HMAC (which covers only the
+        // body) verifies. This bounds indefinite replay of a captured signed body.
+        seedBinding(APP_SECRET);
+        var body = textPayload(String.valueOf(java.time.Instant.now().getEpochSecond() - 3600));
+        var response = postWithSig(body, sign(body));
+        assertEquals(401, response.status.intValue());
     }
 }

@@ -27,6 +27,8 @@ public class WebhookSlackController extends Controller {
     private static final String CHANNEL_SLACK = "slack";
     private static final String INVALID_SIGNATURE = "Invalid signature";
     private static final String CATEGORY_CHANNEL = "channel";
+    /** JCLAW-783: config prefix for this channel's ingress-gate limits (mirrors telegram.webhook.*). */
+    private static final String CFG_PREFIX = "slack.webhook";
 
     public static void webhook(Long bindingId) {
         var verified = resolveAndVerify(bindingId);
@@ -77,6 +79,14 @@ public class WebhookSlackController extends Controller {
      */
     @SuppressWarnings("java:S2259") // ApiResponses.error / unauthorized halt; binding is non-null past each guard
     private static Verified resolveAndVerify(Long bindingId) {
+        // JCLAW-783: pre-auth ingress gate, keyed on the URL binding id. Rate-limit +
+        // Content-Length cap run BEFORE the findSlackBindingById DB lookup and the
+        // unbounded readAllBytes below, so a flood or oversized POST is rejected
+        // cheaply (429 / 413) before it can spend either.
+        var clientIp = WebhookIngressGate.resolveClientIp(CFG_PREFIX);
+        var gateKey = String.valueOf(bindingId);
+        long maxBodyBytes = WebhookIngressGate.enforcePreAuth(CHANNEL_SLACK, gateKey, CFG_PREFIX, clientIp);
+
         SlackBinding binding = BindingService.findSlackBindingById(bindingId);
         if (binding == null) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
@@ -95,6 +105,9 @@ public class WebhookSlackController extends Controller {
         }
 
         var rawBody = readRawBodyOrHalt();
+        // JCLAW-783: read-length backstop for a chunked / lying Content-Length that
+        // slipped past the pre-auth Content-Length check above.
+        WebhookIngressGate.enforceReadLength(CHANNEL_SLACK, gateKey, clientIp, rawBody, maxBodyBytes);
 
         // Verify against THIS binding's secret before any payload parsing —
         // url_verification challenges are signed by Slack too, so they run through

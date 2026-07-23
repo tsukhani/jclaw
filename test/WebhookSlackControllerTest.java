@@ -1,6 +1,7 @@
 import channels.ChannelTransport;
 import channels.SlackApprovalService;
 import channels.SlackApprovalService.Outcome;
+import controllers.WebhookIngressGate;
 import models.Agent;
 import models.EventLog;
 import models.SlackBinding;
@@ -45,6 +46,10 @@ class WebhookSlackControllerTest extends FunctionalTest {
     void setup() {
         Fixtures.deleteDatabase();
         EventLogger.clear();
+        // JCLAW-783: clear the shared ingress-gate counters so a flood case doesn't
+        // bleed into unrelated cases. Safe in @BeforeEach: the play1 runner
+        // serializes functional tests, and no unit test touches this gate's map.
+        WebhookIngressGate.resetForTest();
     }
 
     private static <T> T commitInFreshTx(Supplier<T> block) {
@@ -413,5 +418,67 @@ class WebhookSlackControllerTest extends FunctionalTest {
         var deduped = EventLog.findRecent(20).stream().anyMatch(e ->
                 e.message != null && e.message.contains("Duplicate Slack event") && e.message.contains(msgTs));
         assertTrue(deduped, "the redelivered event must be logged as a duplicate drop");
+    }
+
+    // ── JCLAW-783: pre-auth ingress gate (rate-limit + body cap before DB/parse) ──
+
+    /** Like {@link #postWithSlackHeaders} but also sets an explicit Content-Length
+     *  header so the pre-auth Content-Length guard can be exercised. */
+    private static play.mvc.Http.Response postWithContentLength(Long bindingId, String body,
+            String timestamp, String signature, String contentLength) {
+        var url = "/api/webhooks/slack/" + bindingId;
+        var req = newRequest();
+        req.method = "POST";
+        req.contentType = "application/json";
+        req.url = url;
+        req.path = url;
+        req.querystring = "";
+        req.body = new java.io.ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));
+        req.headers.put("x-slack-request-timestamp",
+                new play.mvc.Http.Header("x-slack-request-timestamp", timestamp));
+        req.headers.put("x-slack-signature",
+                new play.mvc.Http.Header("x-slack-signature", signature));
+        req.headers.put("content-length", new play.mvc.Http.Header("content-length", contentLength));
+        return makeRequest(req);
+    }
+
+    @Test
+    void floodIsRateLimitedWith429BeforeBindingLookup() {
+        // A flood for one binding id starts returning 429 once the window count is
+        // exceeded. The requests carry a WRONG signature on purpose — a 429 (not the
+        // 401 the first three get) proves the rate-limit runs BEFORE findSlackBindingById
+        // and the signature verify.
+        play.Play.configuration.setProperty("slack.webhook.rate-limit.max", "3");
+        play.Play.configuration.setProperty("slack.webhook.rate-limit.window-seconds", "60");
+        try {
+            var id = seedBinding();
+            var ts = String.valueOf(Instant.now().getEpochSecond());
+            for (int i = 0; i < 3; i++) {
+                var r = postWithSlackHeaders(id, "{}", ts, "v0=bad");
+                assertEquals(401, r.status.intValue(),
+                        "request " + (i + 1) + " is under the limit, so the bad signature yields 401");
+            }
+            var flooded = postWithSlackHeaders(id, "{}", ts, "v0=bad");
+            assertEquals(429, flooded.status.intValue(),
+                    "exceeding the rate-limit window returns 429 before the binding lookup / signature check");
+        } finally {
+            play.Play.configuration.remove("slack.webhook.rate-limit.max");
+            play.Play.configuration.remove("slack.webhook.rate-limit.window-seconds");
+        }
+    }
+
+    @Test
+    void oversizedContentLengthReturns413BeforeBindingLookup() {
+        // A Content-Length above the cap is rejected with 413 before the body is
+        // read. Targeting an UNKNOWN binding id: a 413 (not the 404 an unknown id
+        // would otherwise get) proves the size guard runs BEFORE findSlackBindingById.
+        play.Play.configuration.setProperty("slack.webhook.max-body-bytes", "8");
+        try {
+            var ts = String.valueOf(Instant.now().getEpochSecond());
+            var response = postWithContentLength(99999L, "{}", ts, "v0=bad", "100000");
+            assertEquals(413, response.status.intValue());
+        } finally {
+            play.Play.configuration.remove("slack.webhook.max-body-bytes");
+        }
     }
 }

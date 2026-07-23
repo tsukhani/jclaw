@@ -447,6 +447,50 @@ public class WhatsAppChannel implements Channel {
 
     // --- HMAC-SHA256 signature verification ---
 
+    /** JCLAW-784 (VULN-012): replay acceptance window in seconds. A message whose
+     *  Cloud-API timestamp is further than this from now is treated as stale.
+     *  Mirrors Slack's 5-minute signed-timestamp window. */
+    public static final long REPLAY_WINDOW_SECONDS = 300;
+
+    /**
+     * VULN-012 freshness guard: true when {@code payload}'s first message carries a
+     * {@code timestamp} within {@link #REPLAY_WINDOW_SECONDS} of {@code now}. The
+     * Cloud-API HMAC covers only the body (no timestamp), so a captured signed body
+     * could otherwise be replayed forever; this bounds the window the way Slack's
+     * signed-timestamp check does. A missing / unparseable timestamp fails closed
+     * (not fresh) — a legitimate Cloud-API inbound message always carries one.
+     */
+    public static boolean isFreshTimestamp(JsonObject payload, Instant now) {
+        var ts = extractMessageTimestamp(payload);
+        if (ts == null) return false;
+        try {
+            long epochSeconds = Long.parseLong(ts.trim());
+            return Math.abs(now.getEpochSecond() - epochSeconds) <= REPLAY_WINDOW_SECONDS;
+        } catch (NumberFormatException _) {
+            return false;
+        }
+    }
+
+    /** {@code entry[0].changes[0].value.messages[0].timestamp}, or null when absent.
+     *  Defensive against any missing hop so a malformed payload yields null (stale)
+     *  rather than throwing. */
+    private static String extractMessageTimestamp(JsonObject payload) {
+        if (payload == null || !payload.has("entry")) return null;
+        var entries = payload.getAsJsonArray("entry");
+        if (entries.isEmpty()) return null;
+        var entry = entries.get(0).getAsJsonObject();
+        if (!entry.has("changes")) return null;
+        var changes = entry.getAsJsonArray("changes");
+        if (changes.isEmpty()) return null;
+        var value = changes.get(0).getAsJsonObject().getAsJsonObject("value");
+        if (value == null || !value.has("messages")) return null;
+        var messages = value.getAsJsonArray("messages");
+        if (messages.isEmpty()) return null;
+        var msg = messages.get(0).getAsJsonObject();
+        return msg.has("timestamp") && !msg.get("timestamp").isJsonNull()
+                ? msg.get("timestamp").getAsString() : null;
+    }
+
     public static boolean verifySignature(String appSecret, String rawBody, String signatureHeader) {
         if (appSecret == null || signatureHeader == null || !signatureHeader.startsWith("sha256=")) {
             return false;

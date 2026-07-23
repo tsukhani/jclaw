@@ -113,12 +113,14 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         });
     }
 
-    private static play.mvc.Http.Response postWithSecretHeader(Long bindingId, String pathSecret,
+    // JCLAW-784 (VULN-011): the secret is no longer in the route — the URL keys on
+    // {bindingId} only, and auth is solely the X-Telegram-Bot-Api-Secret-Token header.
+    private static play.mvc.Http.Response postWithSecretHeader(Long bindingId,
                                                                 String headerSecret, String body) {
         var req = newRequest();
         req.method = "POST";
         req.contentType = "application/json";
-        var url = "/api/webhooks/telegram/" + bindingId + "/" + pathSecret;
+        var url = "/api/webhooks/telegram/" + bindingId;
         req.url = url;
         req.path = url;
         req.querystring = "";
@@ -130,30 +132,31 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         return makeRequest(req);
     }
 
-    // ===== Path secret + header secret pairing =====
+    // ===== Header-secret authentication (JCLAW-784: secret no longer in the route) =====
 
     @Test
-    void acceptsValidPathAndHeaderSecretWithEmptyUpdate() {
-        // Both secrets match; the body parses as {} which produces a
-        // non-message update — controller calls ok() without dispatch.
+    void acceptsValidHeaderSecretWithEmptyUpdate() {
+        // JCLAW-784: with the secret gone from the URL, a valid
+        // X-Telegram-Bot-Api-Secret-Token header alone authenticates. The body
+        // parses as {} which produces a non-message update — ok() without dispatch.
         var bindingId = seedBinding(true);
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, "{}");
+        var response = postWithSecretHeader(bindingId, SECRET, "{}");
         assertEquals(200, response.status.intValue());
     }
 
     @Test
-    void rejectsWrongHeaderSecretEvenWithCorrectPath() {
-        // Path passes, header fails — must 401.
+    void rejectsWrongHeaderSecret() {
+        // A wrong header secret fails the constant-time compare — 401.
         var bindingId = seedBinding(true);
-        var response = postWithSecretHeader(bindingId, SECRET, "wrong-header", "{}");
+        var response = postWithSecretHeader(bindingId, "wrong-header", "{}");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    void rejectsCorrectHeaderWithWrongPath() {
-        // Path fails first, header never compared.
+    void rejectsMissingHeaderSecret() {
+        // No header at all — the sole auth factor is absent, so reject (fail closed).
         var bindingId = seedBinding(true);
-        var response = postWithSecretHeader(bindingId, "wrong-path", SECRET, "{}");
+        var response = postWithSecretHeader(bindingId, null, "{}");
         assertEquals(401, response.status.intValue());
     }
 
@@ -166,7 +169,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         // controller short-circuits to ok().
         var bindingId = seedBinding(true);
         var body = "{\"update_id\":1,\"edited_message\":{}}";
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        var response = postWithSecretHeader(bindingId, SECRET, body);
         assertEquals(200, response.status.intValue());
     }
 
@@ -186,7 +189,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
                 + "  \"text\":\"hello\""
                 + "}"
                 + "}";
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        var response = postWithSecretHeader(bindingId, SECRET, body);
         assertEquals(200, response.status.intValue());
     }
 
@@ -210,7 +213,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
                 + "  \"text\":\"a forwarded note\""
                 + "}"
                 + "}";
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        var response = postWithSecretHeader(bindingId, SECRET, body);
         assertEquals(200, response.status.intValue());
     }
 
@@ -254,7 +257,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
                 + "  \"text\":\"just chatting, not addressing the bot\""
                 + "}"
                 + "}";
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        var response = postWithSecretHeader(bindingId, SECRET, body);
         assertEquals(200, response.status.intValue());
     }
 
@@ -266,7 +269,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         var bindingId = seedBinding(false);
         // Wrong header on purpose: disabled-binding short-circuit must
         // win over signature gate. Controller returns 200.
-        var response = postWithSecretHeader(bindingId, SECRET, "anything", "{}");
+        var response = postWithSecretHeader(bindingId, "anything", "{}");
         assertEquals(200, response.status.intValue());
     }
 
@@ -276,7 +279,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         // ok() at the end — Telegram never sees a 500 even when the
         // payload is junk. Important to keep retry storms from forming.
         var bindingId = seedBinding(true);
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, "{not-json");
+        var response = postWithSecretHeader(bindingId, SECRET, "{not-json");
         assertEquals(200, response.status.intValue());
     }
 
@@ -284,7 +287,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
     void unknownBindingTakesPriorityOverHeaderCheck() {
         // Even with a valid-looking secret-token header, an unknown
         // bindingId returns 404 (the missing-row check runs first).
-        var response = postWithSecretHeader(99999999L, SECRET, SECRET, "{}");
+        var response = postWithSecretHeader(99999999L, SECRET, "{}");
         assertEquals(404, response.status.intValue());
     }
 
@@ -302,12 +305,12 @@ class WebhookTelegramControllerTest extends FunctionalTest {
             var bindingId = seedBinding(true);
             // First `max` (3) requests: wrong secret → 401 (rate limit not yet hit).
             for (int i = 0; i < 3; i++) {
-                var r = postWithSecretHeader(bindingId, SECRET, "wrong-header", "{}");
+                var r = postWithSecretHeader(bindingId, "wrong-header", "{}");
                 assertEquals(401, r.status.intValue(),
                         "request " + (i + 1) + " is under the limit, so the wrong secret yields 401");
             }
             // The 4th exceeds the window → 429, even though the secret is still wrong.
-            var flooded = postWithSecretHeader(bindingId, SECRET, "wrong-header", "{}");
+            var flooded = postWithSecretHeader(bindingId, "wrong-header", "{}");
             assertEquals(429, flooded.status.intValue(),
                     "exceeding the rate-limit window returns 429 before the secret check");
         } finally {
@@ -325,7 +328,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         try {
             var bindingId = seedBinding(true);
             var oversized = "{\"update_id\":1234567890}"; // > 8 bytes
-            var response = postWithSecretHeader(bindingId, SECRET, SECRET, oversized);
+            var response = postWithSecretHeader(bindingId, SECRET, oversized);
             assertEquals(413, response.status.intValue());
         } finally {
             play.Play.configuration.remove("telegram.webhook.max-body-bytes");
@@ -354,7 +357,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         try {
             var bindingId = seedBinding(true);
             var body = reactionBody("private", 100, 42, BOUND_USER_ID, "👍"); // 👍
-            var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+            var response = postWithSecretHeader(bindingId, SECRET, body);
             assertEquals(200, response.status.intValue());
         } finally {
             play.Play.configuration.remove("telegram.reactions.notify");
@@ -369,7 +372,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         play.Play.configuration.remove("telegram.reactions.notify"); // → default 'own'
         var bindingId = seedBinding(true);
         var body = reactionBody("supergroup", -100, 42, BOUND_USER_ID, "👍");
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        var response = postWithSecretHeader(bindingId, SECRET, body);
         assertEquals(200, response.status.intValue());
     }
 
@@ -405,7 +408,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
                 + "    \"chat\":{\"id\":100,\"type\":\"private\"},"
                 + "    \"from\":{\"id\":9999999,\"is_bot\":false,\"first_name\":\"Imposter\"}}"
                 + "}}";
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        var response = postWithSecretHeader(bindingId, SECRET, body);
         assertEquals(200, response.status.intValue());
     }
 
@@ -488,12 +491,12 @@ class WebhookTelegramControllerTest extends FunctionalTest {
     /** Like {@link #postWithSecretHeader} but injects arbitrary extra request headers
      *  (content-length, x-forwarded-for) so the ingress-hardening branches that read
      *  those headers can be exercised. */
-    private static play.mvc.Http.Response postWithExtraHeaders(Long bindingId, String pathSecret,
+    private static play.mvc.Http.Response postWithExtraHeaders(Long bindingId,
             String headerSecret, java.util.Map<String, String> extraHeaders, String body) {
         var req = newRequest();
         req.method = "POST";
         req.contentType = "application/json";
-        var url = "/api/webhooks/telegram/" + bindingId + "/" + pathSecret;
+        var url = "/api/webhooks/telegram/" + bindingId;
         req.url = url;
         req.path = url;
         req.querystring = "";
@@ -534,7 +537,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         // null-secret short-circuit rejects every request with 401 (fail closed),
         // even one carrying a plausible-looking secret token.
         var bindingId = seedBindingWithNullSecret();
-        var response = postWithSecretHeader(bindingId, SECRET, SECRET, "{}");
+        var response = postWithSecretHeader(bindingId, SECRET, "{}");
         assertEquals(401, response.status.intValue());
     }
 
@@ -551,7 +554,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
             var headers = new java.util.HashMap<String, String>();
             headers.put("content-length", "100000");        // far above the 8-byte cap
             headers.put("x-forwarded-for", "203.0.113.7, 10.0.0.1");
-            var response = postWithExtraHeaders(bindingId, SECRET, SECRET, headers, "{}");
+            var response = postWithExtraHeaders(bindingId, SECRET, headers, "{}");
             assertEquals(413, response.status.intValue());
 
             EventLogger.flush();
@@ -573,7 +576,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         var bindingId = seedBinding(true);
         var headers = new java.util.HashMap<String, String>();
         headers.put("content-length", "not-a-number");
-        var response = postWithExtraHeaders(bindingId, SECRET, SECRET, headers, "{not-json");
+        var response = postWithExtraHeaders(bindingId, SECRET, headers, "{not-json");
         assertEquals(200, response.status.intValue());
     }
 }

@@ -60,8 +60,9 @@ public class ApiTelegramBindingsController extends ApiBindingController {
      *  {@code webhookSecret} are elided — they're secrets. {@code webhookBaseUrl}
      *  is the operator-editable public host; {@code effectiveWebhookUrl} is the
      *  base + fixed path (binding id) surfaced so the Edit UI can show a preview.
-     *  JCLAW-730: the {@code /{secret}} tail Telegram actually receives is NEVER
-     *  included — the secret is a credential and must not enter a serialized body. */
+     *  JCLAW-784: the secret is sent to Telegram in the
+     *  {@code X-Telegram-Bot-Api-Secret-Token} header, never as a URL segment, so
+     *  it cannot enter this serialized body. */
     private record BindingView(Long id, Long agentId, String agentName,
                                 String telegramUserId, String transport,
                                 String webhookBaseUrl, boolean hasWebhookSecret,
@@ -86,11 +87,11 @@ public class ApiTelegramBindingsController extends ApiBindingController {
         }
 
         /** The webhook URL preview surfaced for the Edit UI (JCLAW-338/339):
-         *  {@code base + /api/webhooks/telegram/{id}}. JCLAW-730: the
-         *  {@code /{secret}} tail that {@link TelegramWebhookRegistrar#webhookUrl}
-         *  builds for actual registration is deliberately omitted here so the
-         *  secret never enters the returned body. Null unless this is a WEBHOOK
-         *  binding with both a public base and a secret (unchanged null-ness). */
+         *  {@code base + /api/webhooks/telegram/{id}} — identical to what
+         *  {@link TelegramWebhookRegistrar#webhookUrl} now registers (JCLAW-784
+         *  keys the route on the binding id and authenticates the secret via the
+         *  {@code X-Telegram-Bot-Api-Secret-Token} header). Null unless this is a
+         *  WEBHOOK binding with both a public base and a secret (unchanged). */
         private static String effectiveWebhookUrl(TelegramBinding b) {
             if (b.transport != ChannelTransport.WEBHOOK
                     || b.webhookBaseUrl == null || b.webhookBaseUrl.isBlank()

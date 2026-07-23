@@ -38,22 +38,24 @@ class TelegramWebhookRegistrarTest extends UnitTest {
     private static final String BASE = "https://host.taildcc9a6.ts.net";
 
     @Test
-    void webhookUrlEmbedsIdAndSecret() {
-        assertEquals("https://h.ts.net/api/webhooks/telegram/7/abc",
-                TelegramWebhookRegistrar.webhookUrl("https://h.ts.net", 7L, "abc"));
+    void webhookUrlEmbedsBindingIdOnly() {
+        // JCLAW-784: the secret moved to the X-Telegram-Bot-Api-Secret-Token header,
+        // so the URL keys on the binding id alone (no /{secret} tail to leak into logs).
+        assertEquals("https://h.ts.net/api/webhooks/telegram/7",
+                TelegramWebhookRegistrar.webhookUrl("https://h.ts.net", 7L));
     }
 
     @Test
     void webhookUrlStripsTrailingSlashFromBase() {
-        assertEquals("https://h.ts.net/api/webhooks/telegram/7/abc",
-                TelegramWebhookRegistrar.webhookUrl("https://h.ts.net/", 7L, "abc"));
+        assertEquals("https://h.ts.net/api/webhooks/telegram/7",
+                TelegramWebhookRegistrar.webhookUrl("https://h.ts.net/", 7L));
     }
 
     @Test
     void enabledWebhookWithSecretAndBaseRegisters() {
         var api = new FakeApi();
         TelegramWebhookRegistrar.apply(7L, "tok", "sek", BASE, ChannelTransport.WEBHOOK, true, api);
-        assertEquals(List.of("tok|" + BASE + "/api/webhooks/telegram/7/sek|sek"), api.set);
+        assertEquals(List.of("tok|" + BASE + "/api/webhooks/telegram/7|sek"), api.set);
         assertTrue(api.deleted.isEmpty(), "should not deregister an active webhook binding");
     }
 

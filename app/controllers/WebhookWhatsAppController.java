@@ -34,6 +34,8 @@ public class WebhookWhatsAppController extends Controller {
 
     private static final String CHANNEL_WHATSAPP = "whatsapp";
     private static final String CATEGORY_CHANNEL = "channel";
+    /** JCLAW-783: config prefix for this channel's ingress-gate limits (mirrors telegram.webhook.*). */
+    private static final String CFG_PREFIX = "whatsapp.webhook";
 
     /**
      * GET — Meta hub-verification challenge. Resolves the binding whose
@@ -66,6 +68,14 @@ public class WebhookWhatsAppController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     public static void webhook() {
+        // JCLAW-783: pre-auth ingress gate, keyed on the source IP (the routing id
+        // is only in the parsed body, so it can't key the limiter pre-parse).
+        // Rate-limit + Content-Length cap run BEFORE readRawBody /
+        // JsonParser.parseString / findByPhoneNumberId, so a flood or oversized POST
+        // is rejected (429 / 413) before spending any of that work.
+        var clientIp = WebhookIngressGate.resolveClientIp(CFG_PREFIX);
+        long maxBodyBytes = WebhookIngressGate.enforcePreAuth(CHANNEL_WHATSAPP, clientIp, CFG_PREFIX, clientIp);
+
         String rawBody;
         try {
             rawBody = WebhookUtil.readRawBody();
@@ -74,6 +84,8 @@ public class WebhookWhatsAppController extends Controller {
             error();
             return; // javac definite-assignment: rawBody is unassigned on this catch path
         }
+        // JCLAW-783: read-length backstop for a chunked / lying Content-Length.
+        WebhookIngressGate.enforceReadLength(CHANNEL_WHATSAPP, clientIp, clientIp, rawBody, maxBodyBytes);
 
         JsonObject payload;
         try {
@@ -115,6 +127,18 @@ public class WebhookWhatsAppController extends Controller {
             // Status update or unsupported type — nothing to dispatch.
             ok();
             return;
+        }
+
+        // JCLAW-784 (VULN-012): the Cloud-API HMAC covers only the body — no
+        // timestamp — so a captured signed body can be replayed indefinitely. Bound
+        // the replay window on the per-message timestamp (mirrors Slack's signed-
+        // timestamp check), enforced here in the authenticated path and independent
+        // of InboundEventDedup (which only drops exact-id repeats, not resigned or
+        // cache-evicted replays).
+        if (!WhatsAppChannel.isFreshTimestamp(payload, Instant.now())) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
+                    "Webhook rejected: stale/replayed timestamp for binding " + binding.id);
+            unauthorized("Stale request");
         }
 
         // JCLAW-447: record the 24h customer-service window on the request thread's

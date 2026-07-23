@@ -36,9 +36,12 @@ import java.security.MessageDigest;
 /**
  * Webhook receiver for per-user Telegram bindings (JCLAW-89). The route carries
  * the {@code bindingId} so the controller can look up the matching
- * {@link TelegramBinding} without a global "current telegram config" read; the
- * {@code secret} path segment is the per-binding {@code webhook_secret} for
- * signature verification. Unknown or disabled bindings get dropped at 404/403
+ * {@link TelegramBinding} without a global "current telegram config" read.
+ * Authentication is the per-binding {@code webhook_secret}, verified constant-time
+ * against the {@code X-Telegram-Bot-Api-Secret-Token} header registered with
+ * setWebhook. JCLAW-784 (VULN-011) dropped the secret from the URL path — a path
+ * segment leaks into proxy / access logs and browser history, and the header
+ * already proves possession. Unknown or disabled bindings get dropped at 404/403
  * rather than being silently accepted.
  */
 public class WebhookTelegramController extends Controller {
@@ -70,7 +73,7 @@ public class WebhookTelegramController extends Controller {
     private static final long DEFAULT_MAX_BODY_BYTES = 1_048_576L;
 
     @SuppressWarnings("java:S2259")
-    public static void webhook(Long bindingId, String secret) {
+    public static void webhook(Long bindingId) {
         BindingCtx ctx = loadBindingCtx(bindingId);
         if (ctx == null) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
@@ -105,7 +108,7 @@ public class WebhookTelegramController extends Controller {
             ApiResponses.error(413, "payload_too_large", "Payload Too Large");
         }
 
-        if (!verifySecret(ctx, secret, bindingId)) {
+        if (!verifySecret(ctx, bindingId)) {
             unauthorized("Invalid signature");
         }
 
@@ -201,27 +204,21 @@ public class WebhookTelegramController extends Controller {
     }
 
     /**
-     * JCLAW-16: Telegram's published auth mechanism is the secret_token
-     * registered with setWebhook and echoed back as
-     * X-Telegram-Bot-Api-Secret-Token. We also require the path segment
-     * to match — it's a local routing convention, but rejecting a wrong
-     * one costs nothing and fails fast before the header compare.
+     * JCLAW-16 / JCLAW-784: Telegram's published auth mechanism is the secret_token
+     * registered with setWebhook and echoed back as X-Telegram-Bot-Api-Secret-Token.
+     * We authenticate SOLELY on that header, constant-time. VULN-011 removed the
+     * secret from the URL path (it leaked into proxy / access logs and browser
+     * history and added nothing the header didn't already prove). A null stored
+     * secret, or a missing / blank header, is rejected — fail closed.
      */
-    private static boolean verifySecret(BindingCtx ctx, String secret, Long bindingId) {
+    private static boolean verifySecret(BindingCtx ctx, Long bindingId) {
         var agentName = ctx.agent() != null ? ctx.agent().name : null;
-        if (ctx.webhookSecret() == null
-                || !MessageDigest.isEqual(
-                        ctx.webhookSecret().getBytes(StandardCharsets.UTF_8),
-                        secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8))) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, agentName, CHANNEL_TELEGRAM,
-                    "Invalid webhook secret for binding %d".formatted(bindingId));
-            return false;
-        }
         var secretHeader = Http.Request.current().headers.get("x-telegram-bot-api-secret-token");
-        if (secretHeader == null
+        var headerValue = secretHeader != null ? secretHeader.value() : null;
+        if (ctx.webhookSecret() == null || headerValue == null || headerValue.isBlank()
                 || !MessageDigest.isEqual(
                         ctx.webhookSecret().getBytes(StandardCharsets.UTF_8),
-                        secretHeader.value().getBytes(StandardCharsets.UTF_8))) {
+                        headerValue.getBytes(StandardCharsets.UTF_8))) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, agentName, CHANNEL_TELEGRAM,
                     "Missing or invalid secret-token header for binding %d".formatted(bindingId));
             return false;

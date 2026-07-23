@@ -59,8 +59,9 @@ public class TelegramBinding extends AgentBoundBinding {
 
     /**
      * Shared secret for webhook transport; null for polling bindings. Auto-
-     * generated (JCLAW-339) — the operator never types it. Used both as the
-     * {@code /…/{secret}} path segment and Telegram's {@code secret_token}.
+     * generated (JCLAW-339) — the operator never types it. JCLAW-784: sent to
+     * Telegram only as the {@code secret_token} (verified via the
+     * {@code X-Telegram-Bot-Api-Secret-Token} header), no longer a URL segment.
      */
     @Column(name = "webhook_secret")
     @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedWebhookSecret()).
@@ -69,9 +70,9 @@ public class TelegramBinding extends AgentBoundBinding {
     /**
      * Public base URL (scheme + host, no path) Telegram should reach this
      * instance at, e.g. {@code https://host.tailnet.ts.net}. The fixed contract
-     * path {@code /api/webhooks/telegram/{id}/{secret}} is appended when building
-     * the full webhook URL for display and registration. Null for polling
-     * bindings.
+     * path {@code /api/webhooks/telegram/{id}} is appended when building the full
+     * webhook URL for display and registration (JCLAW-784: the secret is the
+     * {@code secret_token} header, not a URL segment). Null for polling bindings.
      */
     @Column(name = "webhook_base_url")
     public String webhookBaseUrl;

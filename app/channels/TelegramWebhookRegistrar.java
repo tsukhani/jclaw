@@ -141,13 +141,16 @@ public final class TelegramWebhookRegistrar {
                     "Webhook binding %d has no public base URL — not registered with Telegram".formatted(id));
             return false;
         }
-        return api.setWebhook(botToken, webhookUrl(baseUrl, id, webhookSecret), webhookSecret);
+        return api.setWebhook(botToken, webhookUrl(baseUrl, id), webhookSecret);
     }
 
-    /** The full webhook URL Telegram POSTs to: public base + the routed path. */
-    public static String webhookUrl(String baseUrl, Long id, String secret) {
+    /** The full webhook URL Telegram POSTs to: public base + the routed path.
+     *  JCLAW-784: the per-binding secret is authenticated via the
+     *  {@code X-Telegram-Bot-Api-Secret-Token} header (setWebhook's secret_token
+     *  arg), not embedded in the URL path, so it no longer leaks into access logs. */
+    public static String webhookUrl(String baseUrl, Long id) {
         var base = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        return base + "/api/webhooks/telegram/" + id + "/" + secret;
+        return base + "/api/webhooks/telegram/" + id;
     }
 
     // ── Health probe (JCLAW-362) ──
