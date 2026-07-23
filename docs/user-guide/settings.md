@@ -1,6 +1,6 @@
 # Settings
 
-The [Settings](/settings) page is the operator's control panel. Configuration is split into sections you reach from a grouped table-of-contents rail — **System**, **Providers**, **Understanding**, **Generation**, **Agents & Automation**, and **Security** — and selecting a section shows just that panel. Most knobs apply live — sections that need a JVM restart say so inline.
+The [Settings](/settings) page is the operator's control panel. Configuration is split into sections you reach from a grouped table-of-contents rail — **System**, **Providers**, **Audio**, **Image**, **Video**, **Agents & Automation**, and **Security** — and selecting a section shows just that panel. Most knobs apply live — sections that need a JVM restart say so inline.
 
 This page summarizes each section. The settings page itself is the source of truth for current defaults and available knobs; hover any field's info icon for an inline tooltip.
 
