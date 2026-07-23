@@ -12,7 +12,7 @@ import type { Agent, LatencyHistogram, LogEvent } from '~/types/api'
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
 // split) lives in ~/utils/latency-rows for unit-testability without
 // mounting the dashboard.
-import { buildLatencyRows, buildChartSeries } from '~/utils/latency-rows'
+import { buildLatencyRows, buildChartSeries, UNKNOWN_CHANNEL } from '~/utils/latency-rows'
 
 interface ActiveChannelsResponse {
   count: number
@@ -146,7 +146,11 @@ const { data: latency, refresh: refreshLatency } = useFetch<LatencyRowsResponse>
   { query: latencyQuery, default: () => ({ since: '', channels: [], segments: {} }), watch: [latencyQuery] },
 )
 
-const latencyChannels = computed(() => latency.value?.channels ?? [])
+// The UNKNOWN_CHANNEL bucket is system-internal LLM traffic (embedding recall,
+// slash compaction, skill promotion), not a chat channel — keep it out of the
+// selector. A stale 'unknown' selection self-clears via the watch below.
+const latencyChannels = computed(() =>
+  (latency.value?.channels ?? []).filter(c => c !== UNKNOWN_CHANNEL))
 const latencySegments = computed<Record<string, LatencyHistogram>>(() => latency.value?.segments ?? {})
 
 // Drop a channel filter that's no longer present after a window/agent reload.

@@ -64,6 +64,14 @@ const CHANNEL_LABELS: Record<string, string> = {
 /** Order channels render in the dropdown. Unknown channels append alphabetically. */
 const CHANNEL_ORDER = ['web', 'telegram', 'task', 'webhook'] as const
 
+/**
+ * The `LatencyStats.UNKNOWN_CHANNEL` fallback bucket the backend records for
+ * callers with no chat-channel context (embedding recall, slash compaction,
+ * skill promotion). These are system-internal LLM calls, not chats, so the
+ * value is suppressed from the Chat Performance channel selector.
+ */
+export const UNKNOWN_CHANNEL = 'unknown'
+
 function labelForChannel(channel: string): string {
   if (CHANNEL_LABELS[channel]) return CHANNEL_LABELS[channel]
   if (!channel) return 'Unknown'
@@ -261,14 +269,11 @@ export function listAvailableChannels<H extends { count: number } = LatencyHisto
       seen.add(channel)
     }
   }
-  // Any channel not in CHANNEL_ORDER, alphabetically. The 'unknown' bucket
-  // is the LatencyStats fallback for callers that pass null channel
-  // (embedding cache loads, slash compaction, skill promotion). Those are
-  // system-internal operations, not chats — surfacing them in the Chat
-  // Performance dropdown would muddy the per-channel chat view. Data still
-  // lives in LatencyStats for raw inspection if needed.
+  // Any channel not in CHANNEL_ORDER, alphabetically. The UNKNOWN_CHANNEL
+  // bucket is suppressed (see its doc) so the per-channel chat view stays
+  // clean; the data still lives in LatencyStats for raw inspection if needed.
   const remaining = Object.keys(payload)
-    .filter(c => !seen.has(c) && c !== 'unknown')
+    .filter(c => !seen.has(c) && c !== UNKNOWN_CHANNEL)
     .sort((a, b) => a.localeCompare(b))
   for (const channel of remaining) {
     if (hasAnySample(channel)) {
