@@ -9,12 +9,14 @@
 // the shared config store and writes go through /api/config.
 const { configValue, saveField, saving } = useSettingsConfig()
 
+type TtsVoiceEntry = { id: string, label: string }
 type TtsModelEntry = {
   id: string
   displayName: string
   approxSizeMb: number
   present: boolean
   downloading: boolean
+  voices: TtsVoiceEntry[]
 }
 type TtsEngineEntry = {
   id: string
@@ -43,13 +45,24 @@ const activeModelStatus = computed<TtsModelEntry | null>(() =>
   activeEntry.value?.models?.find(m => m.id === activeModelId.value) ?? null,
 )
 
+// Speaker voice for the active model (JCLAW-846). The list is per-model; the
+// selection persists in the per-engine key tts.<engine>.voice.
+const activeVoices = computed<TtsVoiceEntry[]>(() => activeModelStatus.value?.voices ?? [])
+const selectedVoice = computed(() => configValue(`tts.${selectedEngine.value}.voice`, ''))
+
 async function setEngine(value: string) {
   await saveField('tts.engine', value)
   refreshTtsState()
 }
 async function setModel(engine: string, value: string) {
   await saveField(`tts.${engine}.model`, value)
+  // Voices are per-model (a Kokoro name is meaningless for Qwen3), so reset the
+  // speaker to the model default whenever the model changes.
+  await saveField(`tts.${engine}.voice`, '')
   refreshTtsState()
+}
+async function setVoice(value: string) {
+  await saveField(`tts.${selectedEngine.value}.voice`, value)
 }
 async function downloadModel(id: string) {
   if (!id) return
@@ -181,10 +194,10 @@ onUnmounted(() => stopTtsPolling())
           v-else
           class="px-4 py-2.5 flex items-center gap-3"
         >
-          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Voice</span>
+          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model</span>
           <select
             :value="activeModelId"
-            aria-label="Text-to-speech voice model"
+            aria-label="Text-to-speech model"
             class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
             @change="setModel(selectedEngine, ($event.target as HTMLSelectElement).value)"
           >
@@ -220,6 +233,31 @@ onUnmounted(() => stopTtsPolling())
           <template v-else>
             <span class="text-[10px] px-1 border text-fg-muted border-input shrink-0">auto</span>
           </template>
+        </div>
+
+        <!-- Speaker voice for the selected model (JCLAW-846) — only when the model offers presets. -->
+        <div
+          v-if="!ttsStateLoading && activeVoices.length"
+          class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
+        >
+          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Voice</span>
+          <select
+            :value="selectedVoice"
+            aria-label="Text-to-speech speaker voice"
+            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            @change="setVoice(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">
+              Default
+            </option>
+            <option
+              v-for="v in activeVoices"
+              :key="v.id"
+              :value="v.id"
+            >
+              {{ v.label }}
+            </option>
+          </select>
         </div>
 
         <p

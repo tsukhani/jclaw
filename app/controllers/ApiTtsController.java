@@ -19,6 +19,7 @@ import services.tts.TtsRouter;
 import services.tts.TtsSentenceChunker;
 import services.tts.TtsSidecarManager;
 import services.tts.TtsText;
+import services.tts.TtsVoiceCatalog;
 import utils.ApiResponses;
 
 import java.io.ByteArrayInputStream;
@@ -56,7 +57,8 @@ public class ApiTtsController extends Controller {
     private static final Gson gson = GSON;
 
     public record TtsModelEntry(String id, String displayName, int approxSizeMb,
-                                boolean present, boolean downloading) {}
+                                boolean present, boolean downloading,
+                                List<TtsVoiceCatalog.Voice> voices) {}
 
     public record TtsEngineEntry(String id, String displayName, boolean available,
                                  String status, String model, List<TtsModelEntry> models) {}
@@ -90,7 +92,8 @@ public class ApiTtsController extends Controller {
         for (var m : TtsModel.forEngine(TtsEngine.SIDECAR)) {
             // Sidecar weights live in the sidecar's HF cache, pulled on first use —
             // not disk-tracked here, so "present" tracks whether the sidecar is up.
-            models.add(new TtsModelEntry(m.id(), m.displayName(), m.approxSizeMb(), running, false));
+            models.add(new TtsModelEntry(m.id(), m.displayName(), m.approxSizeMb(), running, false,
+                    TtsVoiceCatalog.voicesFor(m.id())));
         }
         return new TtsEngineEntry(TtsEngine.SIDECAR.id(), TtsEngine.SIDECAR.displayName(),
                 uv, status, TtsRouter.modelFor(TtsEngine.SIDECAR), models);
@@ -110,7 +113,8 @@ public class ApiTtsController extends Controller {
         var models = new ArrayList<TtsModelEntry>();
         for (var m : TtsModel.forEngine(TtsEngine.JVM)) {
             models.add(new TtsModelEntry(m.id(), m.displayName(), m.approxSizeMb(),
-                    TtsJvmEngine.isModelPresent(m.id()), TtsJvmEngine.isDownloading(m.id())));
+                    TtsJvmEngine.isModelPresent(m.id()), TtsJvmEngine.isDownloading(m.id()),
+                    TtsVoiceCatalog.voicesFor(m.id())));
         }
         // The JVM engine is always "available" — its native lib is bundled by the
         // build; only the weights need provisioning (present/downloading above).

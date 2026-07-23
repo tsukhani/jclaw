@@ -40,8 +40,8 @@ function ttsState(opts: Opts) {
         status: (opts.sidecarAvailable ?? true) ? 'ready — starts on first use' : 'needs \'uv\' on PATH',
         model: opts.sidecarModel ?? 'qwen3-0.6b',
         models: [
-          { id: 'qwen3-0.6b', displayName: 'Qwen3-TTS 0.6B', approxSizeMb: 2500, present: false, downloading: false },
-          { id: 'kokoro', displayName: 'Kokoro-82M', approxSizeMb: 330, present: false, downloading: false },
+          { id: 'qwen3-0.6b', displayName: 'Qwen3-TTS 0.6B', approxSizeMb: 2500, present: false, downloading: false, voices: [{ id: '1', label: 'Voice 1' }, { id: '2', label: 'Voice 2' }] },
+          { id: 'kokoro', displayName: 'Kokoro-82M', approxSizeMb: 330, present: false, downloading: false, voices: [{ id: 'af_bella', label: 'Bella (American, female)' }, { id: 'bm_george', label: 'George (British, male)' }] },
         ],
       },
       {
@@ -51,8 +51,8 @@ function ttsState(opts: Opts) {
         status: (opts.jvmModelPresent ?? false) ? 'ready' : 'model downloads on first use',
         model: opts.jvmModel ?? 'piper-en_US-amy-low',
         models: [
-          { id: 'piper-en_US-amy-low', displayName: 'Piper Amy (English, fast)', approxSizeMb: 65, present: opts.jvmModelPresent ?? false, downloading: false },
-          { id: 'kokoro-multi-lang-v1_0', displayName: 'Kokoro-82M (multilingual)', approxSizeMb: 720, present: false, downloading: false },
+          { id: 'piper-en_US-amy-low', displayName: 'Piper Amy (English, fast)', approxSizeMb: 65, present: opts.jvmModelPresent ?? false, downloading: false, voices: [] },
+          { id: 'kokoro-multi-lang-v1_0', displayName: 'Kokoro-82M (multilingual)', approxSizeMb: 720, present: false, downloading: false, voices: [] },
         ],
       },
     ],
@@ -129,5 +129,29 @@ describe('Settings page — Speech (JCLAW-789/793)', () => {
     setupApi({ engine: 'jvm', jvmModelPresent: true })
     const c = await mountSettingsSection('speech')
     expect(c.text()).toContain('Ready')
+  })
+
+  it('shows a Voice dropdown for a model with preset voices and POSTs tts.<engine>.voice (JCLAW-846)', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ engine: 'sidecar', sidecarModel: 'kokoro', capturePost: b => captured.push(b) })
+    const c = await mountSettingsSection('speech')
+
+    const voiceSelect = c.find<HTMLSelectElement>('select[aria-label="Text-to-speech speaker voice"]')
+    expect(voiceSelect.exists()).toBe(true)
+    expect(c.text()).toContain('George (British, male)')
+
+    voiceSelect.element.value = 'bm_george'
+    await voiceSelect.trigger('change')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'tts.sidecar.voice')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('bm_george')
+  })
+
+  it('hides the Voice dropdown for a single-voice model (JCLAW-846)', async () => {
+    setupApi({ engine: 'jvm', jvmModel: 'piper-en_US-amy-low' })
+    const c = await mountSettingsSection('speech')
+    expect(c.find('select[aria-label="Text-to-speech speaker voice"]').exists()).toBe(false)
   })
 })
