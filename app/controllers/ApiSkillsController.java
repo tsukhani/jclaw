@@ -538,10 +538,17 @@ public class ApiSkillsController extends Controller {
         if (agent == null) notFound();
 
         var agentName = agent.name;
-        var skillDir = AgentService.workspacePath(agentName).resolve(SKILLS_DIR).resolve(skillName);
+        // Route the body-supplied skillName through the same containment guard
+        // every sibling op uses: a ../ or absolute name is rejected (notFound)
+        // here, before any read or the background write. Both the read dir and
+        // the global write target below derive from the guard-validated folder
+        // name — never the raw body string, which the background job would
+        // otherwise resolve against globalSkillsPath() and escape on write.
+        var skillDir = resolveSkillName(AgentService.workspacePath(agentName).resolve(SKILLS_DIR), skillName);
         if (!Files.isDirectory(skillDir) || !Files.exists(skillDir.resolve(SKILL_MD))) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "Skill '%s' not found in agent workspace".formatted(skillName));
         }
+        var folderName = skillDir.getFileName().toString();
 
         // Return immediately — run sanitization in the background. Pass the
         // requesting agent's id so the service can gate promotion on the
@@ -550,14 +557,14 @@ public class ApiSkillsController extends Controller {
         Thread.ofVirtual().name("skill-promote").start(() -> {
             try {
                 Tx.run(() -> SkillPromotionService.promoteInBackground(
-                        skillDir, skillName, requestingAgentId));
+                        skillDir, folderName, requestingAgentId));
             } catch (Exception e) {
                 Logger.error("Background promotion failed for '%s': %s",
-                        skillName, e.getMessage());
+                        folderName, e.getMessage());
             }
         });
 
-        renderJSON(gson.toJson(new SkillPromoteResponse("promoting", skillName)));
+        renderJSON(gson.toJson(new SkillPromoteResponse("promoting", folderName)));
     }
 
     /** PUT /api/skills/{name}/rename — Rename a global skill folder. */

@@ -702,6 +702,63 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"skillName\":\"alpha\""));
     }
 
+    /**
+     * Security regression (JCLAW-781): a {@code ../}-prefixed skillName in the
+     * promote body must be rejected by the containment guard before the
+     * controller reads — or the background job writes — outside the skills
+     * root. We seed a SKILL.md one directory ABOVE the agent's {@code skills/}
+     * folder ({@code workspace/<agent>/evil}); pre-fix the controller resolved
+     * skillName raw, so {@code ../evil} escaped skills/, matched that file, and
+     * returned 200 "promoting" (the same escaping name then drove the
+     * {@code globalSkillsPath().resolve(skillName)} write). Post-fix the guard
+     * rejects it with 404 and never touches the escaping target.
+     */
+    @Test
+    void promoteRejectsTraversalSkillNameBeforeEscapingSkillsRoot() throws Exception {
+        login();
+        var idStr = createAgent("promote-traversal");
+
+        // A SKILL.md just outside skills/ that "../evil" would reach if the raw
+        // name were resolved against the skills root.
+        var escapeDir = AgentService.workspacePath("promote-traversal").resolve("evil");
+        Files.createDirectories(escapeDir);
+        Files.writeString(escapeDir.resolve("SKILL.md"),
+                "---\nname: evil\ndescription: outside skills root\nversion: 1.0.0\n---\n# evil\n");
+
+        var resp = POST("/api/skills/promote", "application/json",
+                "{\"agentId\": " + idStr + ", \"skillName\": \"../evil\"}");
+        assertEquals(404, resp.status.intValue());
+        assertFalse(getContent(resp).contains("\"status\":\"promoting\""),
+                "a traversal skillName must never be accepted for promotion");
+    }
+
+    /**
+     * Companion to the {@code ../} case: an absolute skillName must also be
+     * rejected by the guard before it is read or promoted. We back it with a
+     * real on-disk SKILL.md so the pre-fix raw-resolve
+     * ({@code skillsRoot.resolve(absolutePath)} yields the absolute path) would
+     * have found it and returned 200; post-fix the guard 404s first.
+     */
+    @Test
+    void promoteRejectsAbsoluteSkillNameBeforeEscapingSkillsRoot() throws Exception {
+        login();
+        var idStr = createAgent("promote-absolute");
+
+        var outsideDir = Files.createTempDirectory("promote-abs-outside-");
+        try {
+            Files.writeString(outsideDir.resolve("SKILL.md"),
+                    "---\nname: evil\ndescription: absolute escape\nversion: 1.0.0\n---\n# evil\n");
+
+            var resp = POST("/api/skills/promote", "application/json",
+                    "{\"agentId\": " + idStr + ", \"skillName\": \"" + outsideDir + "\"}");
+            assertEquals(404, resp.status.intValue());
+            assertFalse(getContent(resp).contains("\"status\":\"promoting\""),
+                    "an absolute skillName must never be accepted for promotion");
+        } finally {
+            SkillPromotionService.deleteRecursive(outsideDir);
+        }
+    }
+
     // ==================== PUT /api/skills/{name}/rename ====================
 
     @Test
