@@ -29,7 +29,7 @@ The frontend is a Nuxt 4 SPA (`ssr: false`) serving as the single-page control p
 
 ## File layout
 
-File-based routing (20 page files under `frontend/pages/`, including nested `conversations/` and `channels/`), a single layout, a shadcn-nuxt UI primitive library plus feature components, and a set of composables for cross-page state.
+File-based routing (23 page files under `frontend/pages/`, including nested `conversations/` and `channels/`), a single layout, a shadcn-nuxt UI primitive library plus feature components, and a set of composables for cross-page state.
 
 ```
 frontend/
@@ -56,6 +56,7 @@ Nuxt file-based. Pages (roles):
 |---|---|---|
 | `/` | `index.vue` | Dashboard (status widgets, latency/cost metrics, recent activity). |
 | `/chat` | `chat.vue` | Streaming chat with an agent. Largest functional page. |
+| `/prompts` | `prompts.vue` | Prompts Library — saved/reusable prompts, Run into the chat composer. |
 | `/conversations` | `conversations/index.vue` | History browser + bulk delete. |
 | `/conversations/:id` | `conversations/[id].vue` | Single conversation transcript. |
 | `/channels` | `channels/index.vue` | Channel overview. |
@@ -66,8 +67,10 @@ Nuxt file-based. Pages (roles):
 | `/reminders` | `reminders.vue` | Reminder list (web-channel notifications). |
 | `/skills` | `skills.vue` | Skill inventory, file tree, promotion, catalog import. |
 | `/tools` | `tools.vue` | Tool catalog + per-agent enable. |
+| `/apps` | `apps.vue` | Operator-hosted static mini-apps (home-screen grid; served from `public/apps/`). |
 | `/mcp-servers` | `mcp-servers.vue` | MCP server CRUD + connection test. |
 | `/settings` | `settings.vue` | Global Config keys. Largest page in the project. |
+| `/memories` | `memories.vue` | Agent-memory browser (inspect / edit / delete captured memories). |
 | `/logs` | `logs.vue` | Event-log viewer. |
 | `/guide` | `guide.vue` | In-app user guide (rendered from `docs/user-guide/*.md`). |
 | `/login` | `login.vue` | Exempt from `auth.global.ts`. |

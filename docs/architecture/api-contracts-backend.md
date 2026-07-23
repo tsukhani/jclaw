@@ -77,6 +77,18 @@ Task **execution is owned by db-scheduler** (atomic row-claim, retries, heartbea
 
 Backed by `JpaMemoryStore` — agent-scoped rows with hybrid keyword + vector recall (see [Backend Architecture](architecture-backend.md) → Memory).
 
+## Prompts
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET / POST | `/api/prompts` | List (newest-edited first) / create. |
+| PUT / DELETE | `/api/prompts/{id}` | Update (partial) / delete. |
+| GET | `/api/prompts/categories` | Fixed category taxonomy (value + label). |
+| POST | `/api/prompts/generate` | LLM-draft a prompt (title/category/content/tags) from a description; does not save (503 if no provider). |
+| GET / POST | `/api/prompts/export` · `/api/prompts/import` | Portable JSON export · import (mode: `merge` \| `replace`). |
+
+Prompts Library (JCLAW-813) — operator-level saved/reusable prompts (`ApiPromptsController` over the `prompt` table). "Run" hands `content` to the chat composer via `/chat?compose=`.
+
 ## Bindings, channels & webhooks
 
 | Method | Path | Purpose |

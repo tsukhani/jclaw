@@ -6,7 +6,7 @@
 
 JClaw is Abundent's **AI-powered automation platform**: a long-running Java service that hosts conversational LLM agents, schedules background tasks, executes tools (shell, filesystem, web, browser, documents, image/video generation), and exposes a unified Web/Slack/Telegram/WhatsApp chat surface. It draws feature designs from two predecessor projects (`OpenClaw` Node.js, `JavaClaw` Spring Boot) but shares no code — it's an original Java-first runtime on a customized Play 1.x fork + a Nuxt 4 SPA.
 
-Current version: see `application.version` in `conf/application.conf` (the source of truth; status: pre-v1 / alpha, work in progress per AGENTS.md).
+Current version: see `application.version` in `conf/application.conf` (the source of truth; status: pre-v1 / beta, work in progress per AGENTS.md).
 
 ## Repository type
 

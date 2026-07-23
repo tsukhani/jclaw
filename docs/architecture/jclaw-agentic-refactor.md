@@ -873,7 +873,7 @@ public class AuditLog {
 
 - **Skills:** Existing `app/skills/` become MCP Tool implementations
 - **Jobs:** Play Framework job scheduling powers deterministic cycles
-- **Frontend:** Nuxt 3 gets approval UI, agent monitoring views
+- **Frontend:** Nuxt 4 gets approval UI, agent monitoring views
 - **Models:** Current JPA entities extend with context graph
 
 ---

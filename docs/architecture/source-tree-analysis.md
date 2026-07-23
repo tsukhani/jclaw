@@ -88,7 +88,7 @@ jclaw/
 ├── frontend/                     # Nuxt 4 SPA.
 │   ├── app.vue                   # Root: <NuxtLayout>/<NuxtPage/> + global dialogs.
 │   ├── layouts/default.vue       # The only layout: sidebar + topbar + content slot.
-│   ├── pages/                    # File-routed pages (20, incl. conversations/ + channels/).
+│   ├── pages/                    # File-routed pages (23, incl. conversations/ + channels/).
 │   ├── components/
 │   │   ├── ui/                   # 74 shadcn-nuxt / Reka UI primitives.
 │   │   └── *.vue, guide/         # 17 feature components (DataTable, ChatContextMeter, GuideRenderer, …).
