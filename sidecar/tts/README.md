@@ -32,17 +32,21 @@ model, so its branch in `synth.py` bypasses the Apple-only gate.
   use — no Java-side download.
 - To use: `tts.engine=sidecar`, `tts.sidecar.model=chatterbox`.
 
-### Not yet validated on hardware
-The Java / config / frontend wiring is complete and Chatterbox appears in Settings
-automatically, but the `synth.py` torch branch has **not been run end-to-end** —
-it needs the model download + `torch`/`chatterbox-tts` installed + an MPS or CUDA
-device. First-run checklist:
-- `uv sync --script synth.py` resolves `chatterbox-tts` + torch under
-  `requires-python >=3.10,<3.13` (verify Chatterbox's own version pins fit that ceiling).
-- Confirm `model.generate` returns a tensor and `model.sr` is the true sample rate.
-- Note: declaring `chatterbox-tts` pulls torch (~2 GB) into the shared worker env,
-  so even the MLX-only path now installs it — split into a separate sidecar env if
-  that cost is unwanted.
+### Validated on Apple Silicon (2026-07-23, MPS)
+Chatterbox loads and synthesizes on MPS. Findings from the live bring-up:
+- **perth watermarker fix:** chatterbox-tts hardcodes `perth.PerthImplicitWatermarker()`
+  in its constructor, but perth's implicit watermarker imports as `None` in this env,
+  crashing model construction. `_load_chatterbox` substitutes a no-op watermarker (the
+  mark is optional and inaudible) so synthesis works; audio is otherwise unchanged.
+- **Deps resolve fine** — torch + chatterbox-tts install and the model downloads. Note the
+  ~2 GB torch pulled into the shared worker env (tradeoff below).
+- **Speed (MPS):** cold load+synth ~19 s; warm ~3–4.3 s per short sentence — about
+  3.5–5× slower than the in-JVM sherpa engine (~0.9 s first-chunk, JCLAW-800). So
+  Chatterbox is a voice-**quality** option (more natural voice + zero-shot cloning), not a
+  latency win: enabling it pushes voice-to-voice from ~5.3 s toward ~8 s.
+
+Still open: the torch-in-shared-env tradeoff (below); the CUDA path (`_pick_device`) is
+written but unverified on an NVIDIA box.
 
 ## Benchmark: Chatterbox vs sherpa (JCLAW-814)
 

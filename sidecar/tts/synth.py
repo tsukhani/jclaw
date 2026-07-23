@@ -120,6 +120,20 @@ def _load_chatterbox():
     from the public HF cache on first use."""
     m = _MODEL_CACHE.get("chatterbox")
     if m is None:
+        # chatterbox-tts hardcodes `perth.PerthImplicitWatermarker()` in its
+        # constructor, but perth's implicit watermarker fails to import in this env
+        # and is None, which crashes model construction. The watermark is an
+        # optional, inaudible provenance mark; for a self-hosted local engine we
+        # substitute a no-op so synthesis works (audio is otherwise unchanged).
+        import perth
+        if getattr(perth, "PerthImplicitWatermarker", None) is None:
+            class _NoopWatermarker:
+                def apply_watermark(self, wav, *args, **kwargs):
+                    return wav
+
+                def get_watermark(self, *args, **kwargs):
+                    return None
+            perth.PerthImplicitWatermarker = _NoopWatermarker
         from chatterbox.tts import ChatterboxTTS
         device = _pick_device()
         sys.stderr.write("[synth] loading chatterbox on %s\n" % device)
