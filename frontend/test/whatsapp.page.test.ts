@@ -229,6 +229,10 @@ describe('whatsapp WhatsApp-Web QR pairing (JCLAW-448)', () => {
       expect(img.exists()).toBe(true)
       expect(img.attributes('src')).toBe('data:image/png;base64,STUBQR')
     })
+    // An unpaired panel never clears its poll interval on its own. Unmount so
+    // onBeforeUnmount → stopPoll tears down the real 2s interval; otherwise it
+    // keeps polling into a torn-down component across later tests.
+    c.unmount()
   })
 
   it('shows a Connected state and stops once paired=true', async () => {
@@ -259,6 +263,7 @@ describe('whatsapp WhatsApp-Web QR pairing (JCLAW-448)', () => {
     }
     finally {
       vi.useRealTimers()
+      c.unmount()
     }
   })
 
@@ -270,5 +275,6 @@ describe('whatsapp WhatsApp-Web QR pairing (JCLAW-448)', () => {
     await c.findAll('button').find(b => b.text() === 'Cancel' || b.text() === 'Close')!.trigger('click')
     await nextTick()
     expect(c.find('[role="dialog"]').exists()).toBe(false)
+    c.unmount()
   })
 })
