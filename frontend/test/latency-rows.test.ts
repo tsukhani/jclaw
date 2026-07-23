@@ -132,6 +132,74 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
   })
 })
 
+describe('buildLatencyRows (JCLAW-800 voice group)', () => {
+  it('groups voice_* under a Voice parent immediately above Total', () => {
+    const rows = buildLatencyRows({
+      queue_wait: h(3, 5),
+      dispatcher_wait: h(3, 2),
+      ttft: h(3, 2000),
+      terminal_tail: h(3, 10),
+      voice_stt: h(3, 1400),
+      voice_tts_synth: h(3, 900),
+      voice_reply: h(3, 5300),
+      voice_turn: h(3, 7500),
+      total: h(3, 3000),
+    })
+    const keys = rows.map(r => r.key)
+    expect(keys[keys.length - 1]).toBe('total') // Total stays last
+    const voiceIdx = keys.indexOf('voice')
+    expect(keys.slice(voiceIdx, voiceIdx + 4)).toEqual([
+      'voice', 'voice_stt', 'voice_tts_synth', 'voice_reply',
+    ])
+    expect(keys.indexOf('total')).toBe(voiceIdx + 4) // group sits right above Total
+  })
+
+  it('makes Voice the parent (voice_turn) with the stages as labelled children', () => {
+    const rows = buildLatencyRows({
+      voice_stt: h(3, 1400),
+      voice_tts_synth: h(3, 900),
+      voice_reply: h(3, 5300),
+      voice_turn: h(3, 7500),
+      total: h(3, 3000),
+    })
+    const voice = rows.find(r => r.key === 'voice')!
+    expect(voice.isChild).toBe(false)
+    expect(voice.label).toBe('Voice')
+    expect(voice.h.p50).toBe(7500) // parent carries voice_turn's histogram
+    expect(rows.some(r => r.key === 'voice_turn')).toBe(false) // not repeated as its own row
+    for (const k of ['voice_stt', 'voice_tts_synth', 'voice_reply']) {
+      expect(rows.find(r => r.key === k)!.isChild).toBe(true)
+    }
+    expect(rows.find(r => r.key === 'voice_stt')!.label).toBe('STT')
+    expect(rows.find(r => r.key === 'voice_reply')!.label).toBe('First audio')
+  })
+
+  it('omits the Voice group when there is no completed turn (no voice_turn)', () => {
+    const rows = buildLatencyRows({
+      voice_stt: h(3, 1400), // partial: no voice_turn parent
+      total: h(3, 3000),
+    })
+    expect(rows.some(r => r.key === 'voice')).toBe(false)
+    // The stray key still surfaces (flat, via the unknown-key catch-all) so data never disappears.
+    expect(rows.find(r => r.key === 'voice_stt')!.isChild).toBe(false)
+  })
+
+  it('buildChartSeries keeps the voice segments (only prologue children drop)', () => {
+    const keys = buildChartSeries({
+      prologue: h(3, 20),
+      prologue_parse: h(3, 1),
+      voice_stt: h(3, 1400),
+      voice_reply: h(3, 5300),
+      voice_turn: h(3, 7500),
+      total: h(3, 3000),
+    }).map(s => s.key)
+    expect(keys.some(k => k.startsWith('prologue_'))).toBe(false)
+    expect(keys).toContain('voice') // parent (voice_turn)
+    expect(keys).toContain('voice_stt')
+    expect(keys).toContain('voice_reply')
+  })
+})
+
 describe('listAvailableChannels (JCLAW-102 dropdown options)', () => {
   it('orders channels web → telegram → task → webhook, then unknown ones alphabetical, suppressing the LatencyStats unknown bucket', () => {
     const channels = listAvailableChannels({

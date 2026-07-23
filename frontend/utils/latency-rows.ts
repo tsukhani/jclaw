@@ -127,6 +127,21 @@ function labelForChild(key: string): string {
   return PROLOGUE_CHILD_LABELS[key] ?? key.replace(/^prologue_/, '')
 }
 
+/**
+ * Voice-pipeline group (JCLAW-800). The `voice_*` segments render as a "Voice"
+ * parent carrying the full-turn total ({@link VOICE_PARENT_SEGMENT} = voice_turn)
+ * with the stage breakdown nested under it as children, mirroring the Prologue
+ * grouping. Emitted just above Total so Total stays the final summary row.
+ */
+const VOICE_PARENT_SEGMENT = 'voice_turn'
+export const VOICE_CHILDREN_ORDER = ['voice_stt', 'voice_tts_synth', 'voice_reply'] as const
+export const VOICE_LABELS: Record<string, string> = {
+  voice_turn: 'Voice',
+  voice_stt: 'STT',
+  voice_tts_synth: 'TTS synthesis',
+  voice_reply: 'First audio',
+}
+
 function hasSamples<H extends { count: number }>(h: H | undefined | null): h is H {
   return !!h && typeof h.count === 'number' && h.count > 0
 }
@@ -162,6 +177,31 @@ function appendPrologueChildren<H extends { count: number }>(
   }
 }
 
+/**
+ * Emit the voice-pipeline group (JCLAW-800): a "Voice" parent row carrying the
+ * full-turn total ({@link VOICE_PARENT_SEGMENT} = voice_turn), with the stage
+ * breakdown (voice_stt / voice_tts_synth / voice_reply) nested as children.
+ * Skipped when there is no completed-turn voice data — a partial run's stray
+ * voice_* keys then fall through to the unknown-key catch-all so nothing
+ * disappears. Mirrors {@link appendPrologueChildren}. Mutates {@code rows}/{@code seen}.
+ */
+function appendVoiceGroup<H extends { count: number }>(
+  metrics: Record<string, H | undefined>,
+  rows: LatencyRow<H>[],
+  seen: Set<string>,
+): void {
+  const parent = metrics[VOICE_PARENT_SEGMENT]
+  if (!hasSamples(parent)) return
+  rows.push({ key: 'voice', label: VOICE_LABELS[VOICE_PARENT_SEGMENT]!, h: parent, isChild: false })
+  seen.add(VOICE_PARENT_SEGMENT)
+  for (const child of VOICE_CHILDREN_ORDER) {
+    const ch = metrics[child]
+    if (!hasSamples(ch)) continue
+    rows.push({ key: child, label: VOICE_LABELS[child] ?? child, h: ch, isChild: true })
+    seen.add(child)
+  }
+}
+
 export function buildLatencyRows<H extends { count: number } = LatencyHistogram>(
   metrics: Record<string, H | undefined>,
 ): LatencyRow<H>[] {
@@ -169,6 +209,8 @@ export function buildLatencyRows<H extends { count: number } = LatencyHistogram>
   const seen = new Set<string>()
 
   for (const key of TOP_LEVEL_ORDER) {
+    // The voice-pipeline group renders just above Total so Total stays last (JCLAW-800).
+    if (key === 'total') appendVoiceGroup(metrics, rows, seen)
     const h = metrics[key]
     const parentEmitted = hasSamples(h)
     if (parentEmitted) {
@@ -239,14 +281,16 @@ export function listAvailableChannels<H extends { count: number } = LatencyHisto
 }
 
 /**
- * Build the series list the overlay chart consumes — top-level rows
- * only, for a single channel's segments. Suppresses `prologue_*`
- * children to avoid double-plotting the prologue sum.
+ * Build the series list the overlay chart consumes for a single channel's
+ * segments. Suppresses `prologue_*` children (their contribution is already
+ * the Prologue sum) but keeps the voice stage rows, which are distinct metrics.
  */
 export function buildChartSeries<H extends { count: number } = LatencyHistogram>(
   metrics: Record<string, H | undefined>,
 ): Array<{ key: string, label: string, histogram: H }> {
   return buildLatencyRows<H>(metrics)
-    .filter(r => !r.isChild)
+    // Drop only prologue_* children (their contribution is already the Prologue
+    // sum); keep the voice stage rows, which are distinct non-summed metrics.
+    .filter(r => !(r.isChild && isPrologueChildKey(r.key)))
     .map(r => ({ key: r.key, label: r.label, histogram: r.h }))
 }
