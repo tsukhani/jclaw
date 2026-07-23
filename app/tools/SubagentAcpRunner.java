@@ -21,6 +21,7 @@ import services.SubagentRegistry;
 import services.Tx;
 import utils.ChannelOriginTrust;
 import utils.GsonHolder;
+import utils.SubprocessEnv;
 
 import java.io.File;
 import java.io.IOException;
@@ -286,6 +287,7 @@ final class SubagentAcpRunner {
                     command, workdir, new GenericAdapter(), sandboxTrustedOrigin(runId));
             var pb = new ProcessBuilder(launched);
             if (workdir != null) pb.directory(workdir);
+            SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill (and the
             // idle/ceiling timeout via requestStop) can force-terminate it and its
@@ -347,6 +349,7 @@ final class SubagentAcpRunner {
             var pb = new ProcessBuilder(
                     HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
             if (workdir != null) pb.directory(workdir);
+            SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill and the
             // idle/ceiling timeout (via requestStop) can force-terminate it and
@@ -410,6 +413,7 @@ final class SubagentAcpRunner {
             var pb = new ProcessBuilder(
                     HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
             if (workdir != null) pb.directory(workdir);
+            SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
             proc = pb.start();
             // JCLAW-664: track the live process so the kill / idle-timeout paths can
             // force-terminate it and its descendants.
@@ -482,7 +486,20 @@ final class SubagentAcpRunner {
                 SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS);
         var requestTimeout = Duration.ofSeconds(ceilingSeconds > 0 ? ceilingSeconds : 21600L);
 
-        var client = AcpClient.sync(new StdioAcpClientTransport(params))
+        // JCLAW-779: the SDK's StdioAcpClientTransport spawns the harness with
+        // pb.environment().putAll(params.getEnv()) on top of the FULL inherited
+        // host env — putAll never removes, so host secrets would survive. Override
+        // getProcessBuilder to hand it a secret-filtered base; the SDK then layers
+        // params.getEnv() (config wins) on top of the filtered env.
+        var transport = new StdioAcpClientTransport(params) {
+            @Override
+            protected ProcessBuilder getProcessBuilder() {
+                var pb = super.getProcessBuilder();
+                SubprocessEnv.apply(pb);
+                return pb;
+            }
+        };
+        var client = AcpClient.sync(transport)
                 .requestTimeout(requestTimeout)                           // JClaw's idle/ceiling budget governs, not the SDK's 30s default
                 .clientCapabilities(new AcpSchema.ClientCapabilities())   // decline fs + terminal
                 .sessionUpdateConsumer(n -> {

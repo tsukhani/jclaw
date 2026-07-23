@@ -2,6 +2,7 @@ package mcp.transport;
 
 import mcp.jsonrpc.JsonRpc;
 import play.Logger;
+import utils.SubprocessEnv;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -60,7 +61,10 @@ public final class McpStdioTransport implements McpTransport {
         this.onMessage = onMessage;
         this.onError = onError;
         var pb = new ProcessBuilder(command);
-        pb.environment().putAll(env);
+        // JCLAW-779: strip inherited host secrets (PLAY_SECRET, AWS_/ANTHROPIC_/…
+        // keys) — the child gets the secret-filtered host env with the
+        // operator-supplied MCP config env layered on top (config wins).
+        SubprocessEnv.apply(pb, env);
         process = pb.start();
         stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
         stdout = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));

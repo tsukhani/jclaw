@@ -11,6 +11,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import utils.SubprocessEnv;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
@@ -21,9 +22,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -97,13 +96,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
         cachedAllowlist.set(new AllowlistCache(raw, newSet));
         return newSet;
     }
-
-    private static final Set<String> SENSITIVE_NAME_PATTERNS = Set.of(
-            "key", "secret", "token", "password", "credential"
-    );
-    private static final Set<String> SENSITIVE_PREFIXES = Set.of(
-            "AWS_", "ANTHROPIC_", "OPENAI_", "GOOGLE_", "AZURE_"
-    );
 
     @Override
     public String name() { return "exec"; }
@@ -376,14 +368,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     public Map<String, String> buildEnvironment(JsonObject args) {
-        var env = new LinkedHashMap<String, String>();
-
-        // Start with filtered host environment
-        for (var entry : System.getenv().entrySet()) {
-            if (!isSensitiveEnvVar(entry.getKey())) {
-                env.put(entry.getKey(), entry.getValue());
-            }
-        }
+        // Start with the shared secret-filtered host environment (JCLAW-779).
+        var env = SubprocessEnv.filteredHostEnv();
 
         // Merge custom env vars (blocking sensitive names)
         if (args.has("env") && args.get("env").isJsonObject()) {
@@ -399,15 +385,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     public static boolean isSensitiveEnvVar(String name) {
-        var upper = name.toUpperCase(Locale.ROOT);
-        for (var prefix : SENSITIVE_PREFIXES) {
-            if (upper.startsWith(prefix)) return true;
-        }
-        var lower = name.toLowerCase(Locale.ROOT);
-        for (var pattern : SENSITIVE_NAME_PATTERNS) {
-            if (lower.contains(pattern)) return true;
-        }
-        return false;
+        return SubprocessEnv.isSensitive(name);
     }
 
     private String executeCommand(String command, Path workdir, int timeoutSec,
