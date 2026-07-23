@@ -22,6 +22,7 @@ import services.transcription.WhisperTranscriber;
 import services.tts.TtsException;
 import services.tts.TtsRouter;
 import services.tts.TtsText;
+import services.voice.TextTurnConfirmer;
 import services.voice.TurnEndpointer;
 import services.voice.VoiceSession;
 import services.voice.VoiceTurnMetrics;
@@ -196,12 +197,23 @@ public class VoiceController extends WebSocketController {
         boolean handedOff = false; // set once the VoiceSession takes ownership of the VAD
         try {
             vad = new VoiceVad(); // provisions the Silero model on first use
+            // Adaptive semantic endpointing (JCLAW-845): a text-heuristic confirmer
+            // reads the latest interim transcript (JCLAW-798) and holds the turn open
+            // toward maxSilenceMs when the utterance ends mid-clause, so a natural
+            // mid-sentence pause isn't cut off. Falls back to fixed baseSilenceMs when
+            // there's no transcript (audio-native models) or when disabled via config.
+            var latestPartial = new AtomicReference<String>();
+            boolean semanticHold = !"false".equalsIgnoreCase(
+                    String.valueOf(ConfigService.get("voice.endpoint.semanticHold")));
+            TurnEndpointer.Confirmer confirmer = semanticHold
+                    ? new TextTurnConfirmer(latestPartial::get)
+                    : TurnEndpointer.ALWAYS_COMPLETE;
             var endpointer = new TurnEndpointer(
                     ConfigService.getInt("voice.endpoint.speechStartMs", 180),
                     ConfigService.getInt("voice.endpoint.baseSilenceMs", 500),
                     ConfigService.getInt("voice.endpoint.maxSilenceMs", 1500),
                     ConfigService.getInt("voice.endpoint.minUtteranceMs", 200),
-                    TurnEndpointer.ALWAYS_COMPLETE); // Smart Turn v3 plugs into this seam later
+                    confirmer);
             var boundAgent = agent;
             // Interim transcripts (JCLAW-798): show partial text as the user
             // speaks. Skipped for audio-capable models (they receive the raw audio,
@@ -222,6 +234,7 @@ public class VoiceController extends WebSocketController {
                     try {
                         var text = transcribe(asr, wav);
                         if (!text.isBlank()) {
+                            latestPartial.set(text); // feed the semantic-hold confirmer (JCLAW-845)
                             send(out, writeLock, Map.of("type", TYPE_TRANSCRIPT, "text", text, "partial", true));
                         }
                     } catch (RuntimeException e) {
@@ -234,6 +247,9 @@ public class VoiceController extends WebSocketController {
             var voice = new VoiceSession(vad, endpointer, PREROLL_WINDOWS, new VoiceSession.Listener() {
                 @Override
                 public void onSpeechStart() {
+                    // Fresh utterance: drop any stale partial so the confirmer decides
+                    // this turn's endpoint on this turn's transcript, not the last one's.
+                    latestPartial.set(null);
                     // Server-side barge-in: abandon any in-flight turn and flush the
                     // client's playback the instant the user starts talking.
                     if (current.get() != null) {
