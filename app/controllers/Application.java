@@ -69,6 +69,40 @@ public class Application extends Controller {
     }
 
     /**
+     * Serve a hosted-app file from {@code public/apps/<slug>/…} with a
+     * {@code no-cache} policy so an operator's edit surfaces on the next load.
+     *
+     * <p>Replaces a bare {@code staticDir:public/apps} route. As with
+     * {@link #nuxtAsset}, {@code staticDir} is resolved by the router before any
+     * controller runs, so it can only apply Play's single {@code http.cacheControl}
+     * (1 h) to every file — which pinned each app's stable-named {@code index.html}
+     * and scripts for an hour, so edits only appeared after a hard refresh. Unlike
+     * the content-hashed SPA chunks (immutable, see {@link #nuxtCacheControl}), these
+     * mini-apps keep stable filenames, so <em>every</em> file must revalidate — hence
+     * {@code no-cache} across the board. A directory request serves its
+     * {@code index.html}, matching the old {@code staticDir} behaviour.
+     */
+    @SuppressWarnings("java:S2259")
+    public static void appAsset(String path) {
+        File appsRoot = Play.getFile("public/apps");
+        try {
+            if (path != null && !path.contains("..")) {
+                File target = new File(appsRoot, path);
+                // A directory request (/apps/<slug>/ or /apps/<slug>) serves index.html.
+                if (target.isDirectory()) {
+                    target = new File(target, "index.html");
+                }
+                if (target.exists() && target.isFile()
+                        && target.getCanonicalPath().startsWith(appsRoot.getCanonicalPath() + File.separator)) {
+                    response.setHeader("Cache-Control", "no-cache");
+                    renderBinary(target);
+                }
+            }
+        } catch (IOException _) {}
+        notFound();
+    }
+
+    /**
      * SPA catch-all: serves static files from the Nuxt build if they exist,
      * otherwise falls back to index.html for client-side routing.
      * Production build lives in public/spa/ (output of: nuxi generate).

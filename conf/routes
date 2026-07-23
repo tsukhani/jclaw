@@ -295,10 +295,13 @@ GET     /api/apps/{slug}/files/{uuid}           ApiAppInvokeController.file
 GET     /_nuxt/{<.+>path}                       Application.nuxtAsset
 
 # Hosted apps (SPEC-apps): /apps/<slug>/... serves the static site under
-# public/apps/<slug>/. Must precede the SPA catch-all, and `apps/` is excluded
-# from it below, so /apps/<slug>/ serves files while /apps (no slash) stays the
-# SPA listing page.
-GET     /apps/                                  staticDir:public/apps
+# public/apps/<slug>/. Routed through Application.appAsset (not staticDir) so
+# each file gets Cache-Control: no-cache — these mini-apps keep stable filenames
+# (index.html, scripts), so an operator edit must surface on the next load rather
+# than being pinned for an hour by Play's http.cacheControl. Must precede the SPA
+# catch-all, and `apps/` is excluded from it below, so /apps/<slug>/ serves files
+# while /apps (no slash) stays the SPA listing page.
+GET     /apps/{<.+>path}                        Application.appAsset
 
 # SPA catch-all — serves index.html for all frontend routes (must be after API routes)
 GET     /{<(?!api/|public/|_nuxt/|apps/).+>path}      Application.spa
