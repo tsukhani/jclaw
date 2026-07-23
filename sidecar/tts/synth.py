@@ -5,6 +5,7 @@
 #   "soundfile>=0.12",
 #   "mlx-audio; sys_platform == 'darwin' and platform_machine == 'arm64'",
 #   "misaki[en]; sys_platform == 'darwin' and platform_machine == 'arm64'",
+#   "chatterbox-tts",
 # ]
 # ///
 """TTS synthesis worker (JCLAW-789). Text in, audio bytes out.
@@ -97,21 +98,52 @@ def _voice_seed(voice):
     return 42
 
 
-def _synthesize(text, model_id, voice, ref_audio, ref_text, speed, fmt):
-    """Synthesize `text` to audio bytes; returns (base64_str, sample_rate)."""
+def _pick_device():
+    """Best torch device for the Chatterbox path: cuda > mps > cpu, with a
+    TTS_DEVICE env override. Mirrors sidecar/diarize/diarize.py so a boxed GPU
+    (CUDA) or Apple GPU (MPS) is used automatically."""
+    override = os.environ.get("TTS_DEVICE", "").strip().lower()
+    if override in ("cuda", "mps", "cpu"):
+        return override
+    import torch
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _load_chatterbox():
+    """Load Chatterbox (PyTorch) once on the best device. Unlike the mlx-audio
+    models this is cross-platform torch (Apple MPS and NVIDIA CUDA), so it is
+    exempt from the Apple-silicon gate in _synthesize (JCLAW-814). Weights pull
+    from the public HF cache on first use."""
+    m = _MODEL_CACHE.get("chatterbox")
+    if m is None:
+        from chatterbox.tts import ChatterboxTTS
+        device = _pick_device()
+        sys.stderr.write("[synth] loading chatterbox on %s\n" % device)
+        m = ChatterboxTTS.from_pretrained(device=device)
+        _MODEL_CACHE["chatterbox"] = m
+    return m
+
+
+def _synthesize_chatterbox(text, ref_audio):
+    """Chatterbox synth -> (float32 mono audio, sample_rate). `ref_audio` (a path
+    to a short clean clip) does zero-shot voice cloning; Chatterbox has no named
+    voices, so the `voice` field is unused on this path."""
     import numpy as np
-    import soundfile as sf
+    model = _load_chatterbox()
+    kw = {"audio_prompt_path": ref_audio} if ref_audio else {}
+    wav = model.generate(text, **kw)  # torch tensor, shape (1, N) or (N,)
+    audio = np.asarray(wav.detach().to("cpu").numpy(), dtype="float32").reshape(-1)
+    sr = int(getattr(model, "sr", 24000) or 24000)
+    return audio, sr
 
-    model_id = model_id or DEFAULT_MODEL
-    if not is_apple_silicon():
-        # The Mac/MLX path is the supported one today. The NVIDIA/CPU backend
-        # (vLLM/transformers on Qwen/Qwen3-TTS-12Hz-* repos) is tracked by the
-        # deferred JCLAW-788 RTX 4090 validation — fail loud rather than silently.
-        raise RuntimeError(
-            "TTS on this platform is not yet supported — only Apple silicon / mlx-audio "
-            "is implemented (JCLAW-789). The NVIDIA/vLLM backend is pending the JCLAW-788 "
-            "RTX 4090 validation.")
 
+def _synthesize_mlx(text, model_id, voice, ref_audio, ref_text, speed):
+    """mlx-audio synth (Apple silicon) -> (float mono audio, sample_rate)."""
+    import numpy as np
     model = _load_mlx(model_id)
     kw = {"verbose": False}
     # Kokoro has named voices; Qwen3-TTS-Base does not — for it, `voice` selects a
@@ -137,6 +169,30 @@ def _synthesize(text, model_id, voice, ref_audio, ref_text, speed, fmt):
         raise RuntimeError("model produced no audio")
     audio = np.concatenate([np.array(getattr(s, "audio", s)).reshape(-1) for s in segments])
     sr = int(getattr(segments[0], "sample_rate", 24000) or 24000)
+    return audio, sr
+
+
+def _synthesize(text, model_id, voice, ref_audio, ref_text, speed, fmt):
+    """Synthesize `text` to audio bytes; returns (base64_str, sample_rate).
+    Routes by model id: Chatterbox takes the cross-platform torch path (MPS/CUDA);
+    every other id is mlx-audio, which is Apple-silicon only."""
+    import soundfile as sf
+
+    model_id = model_id or DEFAULT_MODEL
+
+    if model_id == "chatterbox":
+        audio, sr = _synthesize_chatterbox(text, ref_audio)
+    else:
+        if not is_apple_silicon():
+            # The mlx-audio (Qwen3/Kokoro) path is Apple-only today; the NVIDIA/CPU
+            # backend for those repos is tracked by the deferred JCLAW-788 RTX 4090
+            # validation. Chatterbox (model=chatterbox) is the cross-platform option.
+            raise RuntimeError(
+                "TTS on this platform is not yet supported for mlx-audio models — only "
+                "Apple silicon is implemented (JCLAW-789). Use model=chatterbox for the "
+                "cross-platform MPS/CUDA engine (JCLAW-814); the NVIDIA/vLLM Qwen backend "
+                "is pending the JCLAW-788 RTX 4090 validation.")
+        audio, sr = _synthesize_mlx(text, model_id, voice, ref_audio, ref_text, speed)
 
     # WAV is the guaranteed format (libsndfile always writes it). FLAC too if the
     # build supports it; anything else falls back to WAV for the batch cut.

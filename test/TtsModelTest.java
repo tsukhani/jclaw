@@ -43,4 +43,13 @@ class TtsModelTest extends UnitTest {
         assertTrue(TtsModel.byId("not-a-model").isEmpty());
         assertTrue(TtsModel.byId(null).isEmpty());
     }
+
+    @Test
+    void chatterboxIsASidecarModelButNotTheDefault() {
+        var cb = TtsModel.byId("chatterbox").orElseThrow();  // id is the /synthesize router token
+        assertSame(TtsEngine.SIDECAR, cb.engine());
+        assertTrue(TtsModel.forEngine(TtsEngine.SIDECAR).contains(cb));
+        // Added last, so it must not displace Qwen3-TTS as the sidecar default.
+        assertEquals("qwen3-0.6b", TtsModel.defaultFor(TtsEngine.SIDECAR).id());
+    }
 }

@@ -20,6 +20,10 @@ public enum TtsModel {
     QWEN3_06B(TtsEngine.SIDECAR, "qwen3-0.6b", "Qwen3-TTS 0.6B", 2500),
     QWEN3_06B_4BIT(TtsEngine.SIDECAR, "qwen3-0.6b-4bit", "Qwen3-TTS 0.6B (4-bit)", 400),
     KOKORO_MLX(TtsEngine.SIDECAR, "kokoro", "Kokoro-82M", 330),
+    // Chatterbox is a cross-platform PyTorch model (Apple MPS + NVIDIA CUDA), not
+    // mlx-audio, so the sidecar runs it via a torch loader that bypasses the
+    // Apple-only gate (JCLAW-814). Listed last so the SIDECAR default stays Qwen3-TTS.
+    CHATTERBOX(TtsEngine.SIDECAR, "chatterbox", "Chatterbox (PyTorch, MPS/CUDA)", 1000),
     // JVM (in-process sherpa-onnx OfflineTts) — Piper is tiny/fast, Kokoro adds languages.
     PIPER_AMY(TtsEngine.JVM, "piper-en_US-amy-low", "Piper Amy (English, fast)", 65),
     KOKORO_SHERPA(TtsEngine.JVM, "kokoro-multi-lang-v1_0", "Kokoro-82M (multilingual)", 720);
