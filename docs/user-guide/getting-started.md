@@ -38,7 +38,7 @@ The left sidebar is grouped by intent:
 | Group | What lives there |
 | --- | --- |
 | _(top)_ | [Dashboard](/) — the home overview, sits above the groups. |
-| **Chat** | [Chat](/chat) (live conversations), [Channels](/channels) (external chat surfaces like Slack), [Conversations](/conversations) (every prior thread). |
+| **Chat** | [Chats](/chat) (live conversations), [Prompts](/prompts) (saved, reusable prompts you run into the composer), [Channels](/channels) (external chat surfaces like Slack), [Conversations](/conversations) (every prior thread). |
 | **Ops** | [Agents](/agents), [Subagents](/subagents), [Tasks](/tasks), [Reminders](/reminders) (your scheduled nudges), [Skills](/skills), [Tools](/tools), [MCP Servers](/mcp-servers). |
 | **Admin** | [Settings](/settings), [Memories](/memories) (captured agent memories), [Logs](/logs). |
 | **Help** | Feedback, Guided Tour, this **User Guide**. |

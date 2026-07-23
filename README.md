@@ -443,14 +443,17 @@ Run the backend and frontend test suites together and print a consolidated pass/
 ./jclaw.sh test
 ```
 
-This runs `play autotest` (backend JUnit + functional tests) followed by `pnpm test` (frontend Vitest), streams each side's output live, and finishes with a two-line verdict like:
+This runs `play autotest` (backend JUnit + functional tests), `pnpm test` (frontend Vitest), and the three frontend quality gates — `stylelint`, `lint`, and `typecheck` — streaming each check's output live, and finishes with a five-line verdict like:
 
 ```
  backend  : PASSED  (47 classes, 26s)
  frontend : PASSED  Tests  199 passed (199) (5s)
+ stylelint: PASSED  (3s)
+ lint     : PASSED  (4s)
+ typecheck: PASSED  (8s)
 ```
 
-Full logs land in `logs/test-backend.log` and `logs/test-frontend.log` for post-mortem on failure. The command exits non-zero if either suite failed, so it's safe to wire into git hooks or CI.
+Each check writes its full output to `logs/test-<check>.log` (e.g. `logs/test-backend.log`, `logs/test-typecheck.log`) for post-mortem on failure. The command exits non-zero if any check failed, so it's safe to wire into git hooks or CI.
 
 #### Pre-push hook (optional)
 

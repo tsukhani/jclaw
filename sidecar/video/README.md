@@ -17,7 +17,7 @@ The `ltx` engine is **dual-runtime** (JCLAW-233):
 - **Apple Silicon** → MLX (`ltx_pipelines_mlx`, LTX-2.3 distilled). Faster than diffusers+MPS, higher
   quality, and it generates synchronized **audio**. Offered as a free-VRAM-tiered spectrum (the adaptive
   picker shows what fits, up to the largest the Mac's unified memory allows):
-  `ltx` int4 (~11 GB), `ltx-q8` int8 (~21 GB), `ltx-bf16` (~38 GB). Each pulls only the essential weights
+  `ltx` int4 (~11 GB), `ltx-q8` int8 (~21 GB), `ltx-bf16` (~40 GB). Each pulls only the essential weights
   (`ignore_patterns` skips the bundled dev/old transformers + LoRAs) plus a Gemma text encoder. No
   torch/diffusers on this platform.
 - **Linux / CUDA** → LTX-2.3 via the **official Lightricks `ltx_pipelines`** (the CUDA sibling of the MLX

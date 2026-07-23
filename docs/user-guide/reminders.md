@@ -137,7 +137,7 @@ Hitting the trash on a toast from a recurring reminder stops all future fires. I
 :::
 
 :::gotcha Telegram requires a binding
-Telegram delivery needs a configured Telegram binding for the owning agent (or an ancestor agent — agents inherit). Without one, the fire is recorded as a delivery failure on the underlying `TaskRun` and no message is sent. Configure the binding via **Settings → Channels → Telegram** before creating Telegram-routed reminders.
+Telegram delivery needs a configured Telegram binding for the owning agent (or an ancestor agent — agents inherit). Without one, the fire is recorded as a delivery failure on the underlying `TaskRun` and no message is sent. Configure the binding via the [Channels](/channels) page → Telegram card before creating Telegram-routed reminders.
 :::
 
 :::note LLM context isolation

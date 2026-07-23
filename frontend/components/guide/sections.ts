@@ -28,6 +28,7 @@ import {
   Cog6ToothIcon,
   LinkIcon,
   PuzzlePieceIcon,
+  RectangleStackIcon,
   Squares2X2Icon,
 } from '@heroicons/vue/24/outline'
 import { BotMessageSquare, UsersRound } from '@lucide/vue'
@@ -38,6 +39,7 @@ import type { Component } from 'vue'
 // hits no /api endpoints to render.
 import gettingStartedMd from '../../../docs/user-guide/getting-started.md?raw'
 import chatMd from '../../../docs/user-guide/chat.md?raw'
+import promptsMd from '../../../docs/user-guide/prompts.md?raw'
 import agentsMd from '../../../docs/user-guide/agents.md?raw'
 import conversationsChannelsMd from '../../../docs/user-guide/conversations-and-channels.md?raw'
 import subagentsMd from '../../../docs/user-guide/subagents.md?raw'
@@ -74,6 +76,12 @@ export const sections: GuideSection[] = [
     title: 'Chat',
     icon: ChatBubbleOvalLeftEllipsisIcon,
     content: chatMd,
+  },
+  {
+    id: 'prompts',
+    title: 'Prompts',
+    icon: RectangleStackIcon,
+    content: promptsMd,
   },
   {
     id: 'agents',
