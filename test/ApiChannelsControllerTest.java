@@ -86,6 +86,21 @@ class ApiChannelsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void listMasksSecretConfigValues() {
+        // JCLAW-780: the agent-reachable channels list must not leak secret
+        // config values. Secret-bearing keys (botToken) are masked; a benign
+        // field (chatId) round-trips unchanged.
+        login();
+        PUT("/api/channels/slack", "application/json",
+                "{\"config\":{\"botToken\":\"supersecrettoken\",\"chatId\":\"12345\"},\"enabled\":false}");
+        var body = getContent(GET("/api/channels"));
+        assertTrue(body.contains("\"botToken\""), "key must survive: " + body);
+        assertFalse(body.contains("supersecrettoken"), "raw secret must not leak: " + body);
+        assertTrue(body.contains("supe****"), "botToken value must be masked: " + body);
+        assertTrue(body.contains("\"chatId\":\"12345\""), "non-secret field must round-trip: " + body);
+    }
+
+    @Test
     void saveUpdatesExistingChannelConfig() {
         login();
         PUT("/api/channels/slack", "application/json",

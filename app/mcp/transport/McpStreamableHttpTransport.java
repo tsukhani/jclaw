@@ -11,6 +11,7 @@ import okio.BufferedSource;
 import play.Logger;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.SsrfGuard;
 
 import java.io.IOException;
 import java.net.URI;
@@ -93,6 +94,14 @@ public final class McpStreamableHttpTransport implements McpTransport {
     @Override
     public void send(JsonRpc.Message msg) throws IOException {
         if (closed) throw new IOException("transport closed");
+        // JCLAW-778: the endpoint is agent-settable config. Reject a metadata /
+        // link-local literal before opening the connection; hostname rebinding is
+        // screened at connect by PROVIDER_SAFE_DNS on the guarded client below.
+        try {
+            SsrfGuard.assertProviderUrlSafe(endpoint.toString());
+        } catch (SecurityException e) {
+            throw new IOException(e.getMessage(), e);
+        }
         var body = RequestBody.create(JsonRpc.encode(msg), JSON);
         var builder = new Request.Builder()
                 .url(endpoint.toString())
@@ -106,7 +115,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
         // form to match the spec example.
         var sid = sessionId.get();
         if (sid != null) builder.header(MCP_SESSION_ID, sid);
-        var call = HttpFactories.llmStreaming().newCall(builder.build());
+        var call = HttpFactories.llmStreamingGuarded().newCall(builder.build());
         var token = callSeq.incrementAndGet();
         inFlight.put(token, call);
         // Enqueue through OkHttp's Dispatcher rather than firing a per-send
@@ -160,10 +169,9 @@ public final class McpStreamableHttpTransport implements McpTransport {
             sessionId.compareAndSet(null, sidFromHeader);
         }
         if (!resp.isSuccessful()) {
-            String snippet = "";
-            try { snippet = resp.peekBody(512).string(); }
-            catch (IOException _) { /* body unreadable */ }
-            throw new IOException("MCP HTTP " + resp.code() + ": " + snippet);
+            // JCLAW-778: status only — the upstream body is attacker-influenced
+            // (agent-settable endpoint) and must not be reflected into lastError.
+            throw new IOException("MCP HTTP " + resp.code());
         }
         if (resp.code() == 202) return;  // notification accepted, no body
 

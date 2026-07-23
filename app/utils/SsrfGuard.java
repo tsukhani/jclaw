@@ -401,4 +401,103 @@ public final class SsrfGuard {
                 .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
                 .build();
     }
+
+    // ─── Provider / MCP relaxed guard (JCLAW-778) ────────────────────────
+    //
+    // Operator- and agent-settable LLM provider base URLs and MCP endpoint
+    // URLs are a different trust boundary from the LLM-emitted web_fetch URLs
+    // the strict {@link #isUnsafe} guard above screens: a prompt-injected agent
+    // can set them via the jclaw_api tool, so they need SSRF screening — but
+    // they legitimately point at loopback (Ollama 127.0.0.1:11434, LM Studio)
+    // and LAN hosts, which the strict guard blocks outright. This relaxed
+    // variant blocks only the ranges that are never a legitimate provider/MCP
+    // target yet are the real escalation surface: link-local (169.254.0.0/16 —
+    // the cloud-metadata endpoint 169.254.169.254 — plus fe80::/10), multicast,
+    // and the unspecified 0.0.0.0. Loopback and RFC-1918 / ULA private ranges
+    // are permitted.
+    //
+    // Tradeoff: permitting private ranges means an attacker who can set a
+    // provider/MCP URL could still reach other services on the operator's LAN.
+    // For a single-operator deployment where local self-hosted inference is a
+    // core use case, blocking loopback/LAN would break more than it protects,
+    // while the metadata endpoint — the one credential-theft primitive — stays
+    // blocked either way.
+
+    /**
+     * Relaxed provider/MCP unsafe check — see the section comment. Blocks
+     * link-local (incl. cloud metadata), multicast, and 0.0.0.0; permits
+     * loopback and private ranges. Visible for testing.
+     */
+    public static boolean isBlockedForProvider(@NonNull InetAddress addr) {
+        return addr.isAnyLocalAddress()        // 0.0.0.0, ::
+                || addr.isLinkLocalAddress()   // 169.254.0.0/16 (metadata), fe80::/10
+                || addr.isMulticastAddress();  // 224/4
+    }
+
+    /**
+     * {@link Dns} variant wired into the provider/MCP OkHttp clients (see
+     * {@link HttpFactories}). Rejects a hostname whose resolution includes any
+     * {@link #isBlockedForProvider} address, closing the DNS-rebinding window
+     * between a pre-flight {@link #assertProviderUrlSafe} check and OkHttp's own
+     * connect-time resolution.
+     */
+    public static final Dns PROVIDER_SAFE_DNS = hostname -> {
+        InetAddress[] addrs = InetAddress.getAllByName(hostname);
+        for (var addr : addrs) {
+            if (isBlockedForProvider(addr)) {
+                throw new UnknownHostException(
+                        BLOCKED_ADDRESS_MSG.formatted(hostname, addr.getHostAddress()));
+            }
+        }
+        return List.of(addrs);
+    };
+
+    /**
+     * Pre-connect screen for an agent-settable provider/MCP URL: validate the
+     * scheme and, if the host is a literal IP, that it is not in a
+     * {@link #isBlockedForProvider} range. Callers invoke this before opening
+     * the connection (model discovery, MCP validate, MCP transport send).
+     *
+     * <p>Mirrors the strict {@link #assertSafeScheme} split: literal-IP hosts
+     * are checked here because OkHttp's {@link #PROVIDER_SAFE_DNS} callback
+     * never fires for an already-resolved literal (so {@code
+     * http://169.254.169.254/} would otherwise slip through), while hostname
+     * resolution is screened at connect by {@link #PROVIDER_SAFE_DNS}. This
+     * method deliberately does <em>not</em> resolve hostnames — a not-yet-live
+     * provider host must still save/validate, and rebinding is covered at
+     * connect.
+     *
+     * @throws SecurityException if the scheme is not http/https, the URL has no
+     *         host, or the host is a blocked IP literal.
+     */
+    public static void assertProviderUrlSafe(@NonNull String url) {
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            throw new SecurityException("SSRF guard: unparseable URL: " + url, e);
+        }
+        var scheme = uri.getScheme();
+        if (scheme == null || !ALLOWED_SCHEMES.contains(scheme.toLowerCase())) {
+            throw new SecurityException(
+                    "SSRF guard: scheme not allowed: %s (only http/https)".formatted(scheme));
+        }
+        var host = uri.getHost();
+        if (host == null || host.isBlank()) {
+            throw new SecurityException("SSRF guard: URL has no host");
+        }
+        if (isLikelyIpLiteral(host)) {
+            try {
+                var addr = InetAddress.getByName(host);
+                if (isBlockedForProvider(addr)) {
+                    throw new SecurityException(
+                            "SSRF guard: host is a blocked IP literal: %s"
+                                    .formatted(addr.getHostAddress()));
+                }
+            } catch (UnknownHostException e) {
+                throw new SecurityException(
+                        "SSRF guard: cannot parse host as IP: " + host, e);
+            }
+        }
+    }
 }

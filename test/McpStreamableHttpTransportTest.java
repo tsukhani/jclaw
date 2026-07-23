@@ -171,6 +171,40 @@ class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @Test
+    void httpErrorDoesNotReflectUpstreamBody() throws Exception {
+        // JCLAW-778: the error surfaced to onError (and thence lastError) carries
+        // the status only — the attacker-influenced upstream body is not echoed.
+        server.enqueue(new MockResponse.Builder().code(500).body("SUPER_SECRET_UPSTREAM_BODY").build());
+
+        var latch = new CountDownLatch(1);
+        transport.start(received::add, t -> { error.set(t); latch.countDown(); });
+        transport.send(new JsonRpc.Request(1L, "ping", null));
+
+        assertTrue(latch.await(3, TimeUnit.SECONDS), "onError should fire on HTTP 500");
+        assertTrue(error.get().getMessage().contains("500"), "error must mention status: " + error.get());
+        assertFalse(error.get().getMessage().contains("SUPER_SECRET_UPSTREAM_BODY"),
+                "error must NOT reflect the upstream body: " + error.get());
+    }
+
+    @Test
+    void sendRejectsMetadataEndpointBeforeConnect() throws Exception {
+        // JCLAW-778: an agent-settable endpoint pointing at the cloud-metadata IP
+        // is rejected synchronously by the SSRF guard before the POST is enqueued.
+        var t = new McpStreamableHttpTransport("meta",
+                URI.create("http://169.254.169.254/mcp"), Map.of());
+        try {
+            t.start(received::add, error::set);
+            var ex = assertThrows(java.io.IOException.class,
+                    () -> t.send(new JsonRpc.Request(1L, "ping", null)));
+            assertTrue(ex.getMessage().contains("SSRF guard"),
+                    "rejection must come from the guard: " + ex.getMessage());
+            assertEquals(0, server.getRequestCount(), "no request may reach any server");
+        } finally {
+            t.close();
+        }
+    }
+
+    @Test
     void closeAfterStartIsClean() {
         transport.start(received::add, error::set);
         transport.close();

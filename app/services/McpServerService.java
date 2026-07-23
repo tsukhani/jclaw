@@ -11,6 +11,7 @@ import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
 import models.McpServer;
 import play.Play;
+import utils.SsrfGuard;
 
 import java.net.URI;
 import java.time.Duration;
@@ -81,6 +82,13 @@ public final class McpServerService {
 
         public static View of(McpServer row) {
             var cfg = explodeConfigJson(row.transport, row.configJson);
+            // JCLAW-780: mask secret values at this serialization seam — the
+            // View is an agent-reachable read. env values are token-like, masked
+            // key-driven via ConfigService.maskValue; header values (Authorization,
+            // …) are all secret-bearing and the key-driven check misses names like
+            // "Authorization", so every header value is masked unconditionally.
+            var maskedEnv = maskEnvValues(cfg.env);
+            var maskedHeaders = maskHeaderValues(cfg.headers);
             var liveTools = McpConnectionManager.tools(row.name);
             int tools = liveTools.size();
             // Expose name + description per advertised tool so the UI
@@ -107,8 +115,8 @@ public final class McpServerService {
             var effectiveLastError = liveLastError != null ? liveLastError : row.lastError;
             return new View(
                     row.id, row.name, row.enabled, row.requiresApproval, row.transport.name(),
-                    cfg.command, cfg.args, cfg.env,
-                    cfg.url, cfg.headers,
+                    cfg.command, cfg.args, maskedEnv,
+                    cfg.url, maskedHeaders,
                     liveStatus,
                     effectiveLastError,
                     row.lastConnectedAt != null ? row.lastConnectedAt.toString() : null,
@@ -343,11 +351,51 @@ public final class McpServerService {
                 catch (IllegalArgumentException _) {
                     throw new IllegalArgumentException("HTTP transport url is not a valid URI");
                 }
+                // JCLAW-778: the url is agent-settable. Reject a metadata /
+                // link-local literal at validate time; loopback/LAN stay allowed
+                // for local MCP servers, and hostname rebinding is screened at
+                // connect by PROVIDER_SAFE_DNS on the guarded transport client.
+                try { SsrfGuard.assertProviderUrlSafe(cfg.url()); }
+                catch (SecurityException e) {
+                    throw new IllegalArgumentException("HTTP transport url rejected: " + e.getMessage());
+                }
             }
         }
     }
 
     // ==================== internals ====================
+
+    /** JCLAW-780: mask env values key-driven — env keys (GITHUB_TOKEN, *_KEY, …)
+     *  drive {@link ConfigService#isSensitive}, so token-like vars mask while a
+     *  benign {@code NODE_ENV} passes through. */
+    private static Map<String, String> maskEnvValues(Map<String, String> env) {
+        return env.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        e -> ConfigService.maskValue(e.getKey(), e.getValue()),
+                        (a, b) -> a, LinkedHashMap::new));
+    }
+
+    /** JCLAW-780: mask every header value unconditionally — MCP config headers
+     *  (Authorization, X-Api-Key, …) are all secret-bearing and their names
+     *  don't reliably trip the key-driven {@link ConfigService#isSensitive}
+     *  check, so the local {@link #maskSecret} is used instead of maskValue. */
+    private static Map<String, String> maskHeaderValues(Map<String, String> headers) {
+        return headers.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        e -> maskSecret(e.getValue()),
+                        (a, b) -> a, LinkedHashMap::new));
+    }
+
+    /** Mask an all-secret value: first 4 chars + {@code "****"}, or {@code "****"}
+     *  when 4 chars or fewer, so an operator can still recognize which token is
+     *  set without the value leaking to an agent read. Mirrors the sensitive-case
+     *  shape of {@link ConfigService#maskValue}. */
+    private static String maskSecret(String value) {
+        if (value == null || value.isEmpty()) return value;
+        return value.length() > 4 ? value.substring(0, 4) + "****" : "****";
+    }
 
     private static McpTransport buildTransport(McpServer row) {
         var cfg = explodeConfigJson(row.transport, row.configJson);

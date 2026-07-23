@@ -3,6 +3,7 @@ package controllers;
 import channels.TelegramPollingRunner;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -14,6 +15,7 @@ import models.ChannelConfig;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ChannelStatusService;
+import services.ConfigService;
 import services.EventLogger;
 
 import java.util.List;
@@ -30,9 +32,32 @@ public class ApiChannelsController extends Controller {
                                boolean enabled, String createdAt, String updatedAt) {
         static ChannelView of(ChannelConfig c) {
             return new ChannelView(c.id, c.channelType,
-                    JsonParser.parseString(c.configJson),
+                    maskConfig(c.configJson),
                     c.enabled, c.createdAt.toString(), c.updatedAt.toString());
         }
+    }
+
+    /**
+     * JCLAW-780: parse the stored channel config and mask secret-bearing
+     * top-level fields (botToken, apiKey, signingSecret, …) before it reaches
+     * the agent-reachable {@link #list()} / {@link #get} responses. Sensitivity
+     * is key-driven via {@link ConfigService#maskValue}; non-string / nested
+     * values pass through unchanged (channel configs are flat string maps in
+     * practice).
+     */
+    private static JsonElement maskConfig(String configJson) {
+        var parsed = JsonParser.parseString(configJson);
+        if (!parsed.isJsonObject()) return parsed;
+        var out = new JsonObject();
+        for (var entry : parsed.getAsJsonObject().entrySet()) {
+            var v = entry.getValue();
+            if (v.isJsonPrimitive() && v.getAsJsonPrimitive().isString()) {
+                out.addProperty(entry.getKey(), ConfigService.maskValue(entry.getKey(), v.getAsString()));
+            } else {
+                out.add(entry.getKey(), v);
+            }
+        }
+        return out;
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ChannelView.class))))

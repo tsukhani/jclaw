@@ -13,6 +13,7 @@ import okhttp3.RequestBody;
 import play.Logger;
 import utils.HttpFactories;
 import utils.HttpKeys;
+import utils.SsrfGuard;
 import utils.Strings;
 
 import java.io.IOException;
@@ -203,6 +204,18 @@ public class ModelDiscoveryService {
      * </ul>
      */
     public static DiscoveryResult discover(String providerName, String baseUrl, String apiKey) {
+        // JCLAW-778: the base URL is agent-settable config. Reject a metadata /
+        // link-local target before any connect; loopback/LAN stay allowed for
+        // local inference. Hostname rebinding is screened at connect by the
+        // PROVIDER_SAFE_DNS-guarded client.
+        if (baseUrl != null) {
+            try {
+                SsrfGuard.assertProviderUrlSafe(baseUrl);
+            } catch (SecurityException e) {
+                Logger.warn("[discover/%s] rejected SSRF target: %s", providerName, e.getMessage());
+                return new DiscoveryResult.Error(400, "Provider base URL rejected by SSRF guard");
+            }
+        }
         var lower = providerName == null ? "" : providerName.toLowerCase();
         if (lower.contains("ollama")) {
             return discoverOllamaNative(providerName, baseUrl, apiKey);
@@ -227,7 +240,7 @@ public class ModelDiscoveryService {
                     .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
                     .build();
-            var call = HttpFactories.llmSingleShot().newCall(req);
+            var call = HttpFactories.llmSingleShotGuarded().newCall(req);
             call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;
@@ -240,8 +253,9 @@ public class ModelDiscoveryService {
             if (statusCode != 200) {
                 Logger.warn("[discover/%s] upstream returned HTTP %d: %s",
                         providerName, statusCode, Strings.truncate(responseBody, Strings.ERROR_SNIPPET_MAX_CHARS));
-                return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
-                        statusCode, Strings.truncate(responseBody, 200)));
+                // JCLAW-778: status only — the upstream body is attacker-influenced
+                // (agent-settable base URL) and must not be reflected to the caller.
+                return new DiscoveryResult.Error(502, "Provider returned HTTP %d".formatted(statusCode));
             }
 
             // Together returns a bare JSON array `[{id, ...}, ...]` here,
@@ -710,13 +724,23 @@ public class ModelDiscoveryService {
     static List<String> fetchLeaderboard(String leaderboardUrl) {
         if (leaderboardUrl == null || leaderboardUrl.isBlank()) return List.of();
 
+        // JCLAW-778: the leaderboard URL is config-set (provider.<name>.leaderboardUrl).
+        // Reject a metadata / link-local target before connecting; the leaderboard
+        // is optional, so a rejected URL degrades to "no rankings".
+        try {
+            SsrfGuard.assertProviderUrlSafe(leaderboardUrl);
+        } catch (SecurityException e) {
+            EventLogger.warn("provider", "Leaderboard URL rejected by SSRF guard: %s".formatted(e.getMessage()));
+            return List.of();
+        }
+
         try {
             var req = new Request.Builder()
                     .url(leaderboardUrl)
                     .header(HttpKeys.ACCEPT, "text/html,application/json")
                     .get()
                     .build();
-            var call = HttpFactories.general().newCall(req);
+            var call = HttpFactories.generalGuarded().newCall(req);
             call.timeout().timeout(LEADERBOARD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             String body;
@@ -876,7 +900,7 @@ public class ModelDiscoveryService {
                     .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
                     .build();
-            var call = HttpFactories.llmSingleShot().newCall(req);
+            var call = HttpFactories.llmSingleShotGuarded().newCall(req);
             call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;
@@ -1027,7 +1051,7 @@ public class ModelDiscoveryService {
                 .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                 .get()
                 .build();
-        var tagsCall = HttpFactories.llmSingleShot().newCall(tagsReq);
+        var tagsCall = HttpFactories.llmSingleShotGuarded().newCall(tagsReq);
         tagsCall.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
         int tagsStatus;
@@ -1037,9 +1061,10 @@ public class ModelDiscoveryService {
             tagsResponseBody = tagsResp.body().string();
         }
         if (tagsStatus != 200) {
+            // JCLAW-778: status only — do not reflect the attacker-influenced
+            // upstream body from an agent-settable base URL.
             return new TagsResult(new DiscoveryResult.Error(502,
-                    "Provider returned HTTP %d from /api/tags: %s".formatted(
-                            tagsStatus, Strings.truncate(tagsResponseBody, 200))),
+                    "Provider returned HTTP %d from /api/tags".formatted(tagsStatus)),
                     null);
         }
         var tagsBody = JsonParser.parseString(tagsResponseBody).getAsJsonObject();
@@ -1130,7 +1155,7 @@ public class ModelDiscoveryService {
                     .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .post(RequestBody.create(body, jsonMediaType))
                     .build();
-            var call = HttpFactories.llmSingleShot().newCall(req);
+            var call = HttpFactories.llmSingleShotGuarded().newCall(req);
             call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;

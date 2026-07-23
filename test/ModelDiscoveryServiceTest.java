@@ -905,6 +905,51 @@ class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
+    void discoverRejectsMetadataBaseUrlBeforeConnect() {
+        // JCLAW-778: an agent-settable base URL pointing at the cloud-metadata
+        // endpoint is rejected by the SSRF guard before any socket opens. No
+        // MockWebServer is needed — the rejection is synchronous.
+        var result = ModelDiscoveryService.discover(
+                "evil", "http://169.254.169.254/v1", "sk-test");
+        assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error,
+                "metadata base URL must be rejected: " + result);
+        var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+        assertEquals(400, err.statusCode());
+        assertTrue(err.message().contains("SSRF guard"),
+                "must identify the guard: " + err.message());
+    }
+
+    @Test
+    void discoverAllowsLoopbackBaseUrl() throws Exception {
+        // JCLAW-778: loopback stays allowed for local self-hosted inference —
+        // the guard must not break Ollama / LM Studio on 127.0.0.1.
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, "{\"data\":[{\"id\":\"gpt-4.1\"}]}"));
+            var result = ModelDiscoveryService.discover(
+                    "local", baseUrlOf(server), "sk-test");
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+                    "loopback base URL must be allowed: " + result);
+        }
+    }
+
+    @Test
+    void discoverErrorDoesNotReflectUpstreamBody() throws Exception {
+        // JCLAW-778: on non-2xx the returned error carries the status only, never
+        // the attacker-influenced upstream body.
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(403, "{\"leak\":\"SUPER_SECRET_UPSTREAM_BODY\"}"));
+            var result = ModelDiscoveryService.discover(
+                    "openai", baseUrlOf(server), "sk-bad");
+            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            assertTrue(err.message().contains("403"), "must carry status: " + err.message());
+            assertFalse(err.message().contains("SUPER_SECRET_UPSTREAM_BODY"),
+                    "must NOT reflect the upstream body: " + err.message());
+        }
+    }
+
+    @Test
     void discoverOpenAiCompatSurfacesMalformedJson() throws Exception {
         try (var server = new MockWebServer()) {
             server.start();

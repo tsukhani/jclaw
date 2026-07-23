@@ -57,11 +57,16 @@ import java.util.concurrent.TimeUnit;
  *       general request volume doesn't justify VT scheduling overhead).</li>
  * </ul>
  *
- * <p>No SSRF guard here — provider URLs and channel webhook URLs are
- * trusted operator config. The user-controlled URL path that
- * {@link tools.WebFetchTool} exposes wraps its own {@link OkHttpClient}
- * via {@link SsrfGuard#buildGuardedClient} with a per-request DNS
- * allow-list; that lives separately because its constraint differs.
+ * <p>Two guard postures. The plain {@link #llmStreaming()} /
+ * {@link #llmSingleShot()} / {@link #general()} clients apply no SSRF
+ * screening — channel webhook URLs and other fixed-vendor endpoints are
+ * trusted operator config. The {@code *Guarded()} variants (JCLAW-778) wire
+ * {@link SsrfGuard#PROVIDER_SAFE_DNS} for the now agent-settable LLM-provider
+ * base URLs and MCP endpoint URLs: they permit loopback/LAN (local inference)
+ * but block link-local + cloud metadata at resolve time. The stricter
+ * user-controlled {@link tools.WebFetchTool} path wraps its own
+ * {@link OkHttpClient} via {@link SsrfGuard#buildGuardedClient} with the full
+ * private-range block; that lives separately because its constraint differs.
  *
  * <p>This class replaces the prior {@code LlmOkHttpClient} +
  * {@code OkHttpClients} static-field holders, which exposed mutable
@@ -209,6 +214,18 @@ public final class HttpFactories {
             .eventListener(PROTOCOL_LOGGER)
             .build();
 
+    // JCLAW-778: SSRF-guarded variants for the agent-settable LLM-provider base
+    // URLs and MCP endpoint URLs. Derived via newBuilder() so they share each
+    // tier's connection pool + dispatcher + timeouts and only add
+    // SsrfGuard.PROVIDER_SAFE_DNS, which permits loopback/LAN (local inference)
+    // but rejects link-local + cloud-metadata addresses at resolve time.
+    private static final OkHttpClient LLM_STREAMING_GUARDED_CLIENT =
+            LLM_STREAMING_CLIENT.newBuilder().dns(SsrfGuard.PROVIDER_SAFE_DNS).build();
+    private static final OkHttpClient LLM_SINGLE_SHOT_GUARDED_CLIENT =
+            LLM_SINGLE_SHOT_CLIENT.newBuilder().dns(SsrfGuard.PROVIDER_SAFE_DNS).build();
+    private static final OkHttpClient GENERAL_GUARDED_CLIENT =
+            GENERAL_CLIENT.newBuilder().dns(SsrfGuard.PROVIDER_SAFE_DNS).build();
+
     private HttpFactories() { }
 
     /**
@@ -237,5 +254,35 @@ public final class HttpFactories {
      */
     public static @NonNull OkHttpClient general() {
         return GENERAL_CLIENT;
+    }
+
+    /**
+     * SSRF-guarded streaming LLM client (JCLAW-778) — same tuning as
+     * {@link #llmStreaming()} plus {@link SsrfGuard#PROVIDER_SAFE_DNS}. For the
+     * agent-settable MCP streamable-HTTP endpoint. Permits loopback/LAN, blocks
+     * link-local + cloud metadata at resolve time.
+     */
+    public static @NonNull OkHttpClient llmStreamingGuarded() {
+        return LLM_STREAMING_GUARDED_CLIENT;
+    }
+
+    /**
+     * SSRF-guarded single-shot LLM client (JCLAW-778) — same tuning as
+     * {@link #llmSingleShot()} plus {@link SsrfGuard#PROVIDER_SAFE_DNS}. For
+     * agent-settable provider base URLs (model discovery). Permits loopback/LAN,
+     * blocks link-local + cloud metadata at resolve time.
+     */
+    public static @NonNull OkHttpClient llmSingleShotGuarded() {
+        return LLM_SINGLE_SHOT_GUARDED_CLIENT;
+    }
+
+    /**
+     * SSRF-guarded general client (JCLAW-778) — same tuning as
+     * {@link #general()} plus {@link SsrfGuard#PROVIDER_SAFE_DNS}. For the
+     * config-set leaderboard fetch. Permits loopback/LAN, blocks link-local +
+     * cloud metadata at resolve time.
+     */
+    public static @NonNull OkHttpClient generalGuarded() {
+        return GENERAL_GUARDED_CLIENT;
     }
 }

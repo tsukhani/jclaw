@@ -366,4 +366,85 @@ class SsrfGuardTest extends UnitTest {
         assertThrows(SecurityException.class,
                 () -> SsrfGuard.hostResolverRule("http://localhost:9000/"));
     }
+
+    // ── JCLAW-778: relaxed provider/MCP guard (permits loopback/LAN) ──
+
+    @Test
+    void isBlockedForProviderBlocksLinkLocalAndMetadata() throws Exception {
+        // The cloud-metadata IP and the rest of the link-local range are the
+        // one escalation surface this relaxed guard must still close.
+        assertTrue(SsrfGuard.isBlockedForProvider(InetAddress.getByName("169.254.169.254")));
+        assertTrue(SsrfGuard.isBlockedForProvider(InetAddress.getByName("169.254.0.1")));
+        assertTrue(SsrfGuard.isBlockedForProvider(InetAddress.getByName("fe80::1")));
+    }
+
+    @Test
+    void isBlockedForProviderBlocksMulticastAndAnyLocal() throws Exception {
+        assertTrue(SsrfGuard.isBlockedForProvider(InetAddress.getByName("224.0.0.1")));
+        assertTrue(SsrfGuard.isBlockedForProvider(InetAddress.getByName("0.0.0.0")));
+    }
+
+    @Test
+    void isBlockedForProviderPermitsLoopbackAndPrivate() throws Exception {
+        // Local self-hosted inference (Ollama/LM Studio) and LAN hosts must NOT
+        // be blocked — this is the whole reason for the relaxed variant.
+        assertFalse(SsrfGuard.isBlockedForProvider(InetAddress.getByName("127.0.0.1")));
+        assertFalse(SsrfGuard.isBlockedForProvider(InetAddress.getByName("::1")));
+        assertFalse(SsrfGuard.isBlockedForProvider(InetAddress.getByName("10.0.0.5")));
+        assertFalse(SsrfGuard.isBlockedForProvider(InetAddress.getByName("192.168.1.1")));
+        assertFalse(SsrfGuard.isBlockedForProvider(InetAddress.getByName("172.16.0.1")));
+        // Public IPs stay allowed too.
+        assertFalse(SsrfGuard.isBlockedForProvider(InetAddress.getByName("8.8.8.8")));
+    }
+
+    @Test
+    void providerSafeDnsAllowsLoopbackHostname() throws Exception {
+        // Unlike the strict SAFE_DNS (which rejects localhost), the provider DNS
+        // resolves loopback names without throwing.
+        var addrs = SsrfGuard.PROVIDER_SAFE_DNS.lookup("localhost");
+        assertFalse(addrs.isEmpty(), "localhost must resolve through the provider DNS");
+    }
+
+    @Test
+    void assertProviderUrlSafeRejectsMetadataLiteral() {
+        // http://169.254.169.254/... is the credential-theft primitive — must be
+        // rejected before any connect on the agent-settable provider/MCP path.
+        var ex = assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertProviderUrlSafe(
+                        "http://169.254.169.254/latest/meta-data/iam/security-credentials/"));
+        assertTrue(ex.getMessage().contains("SSRF guard"), "must identify the guard: " + ex.getMessage());
+    }
+
+    @Test
+    void assertProviderUrlSafeRejectsIpv6LinkLocalLiteral() {
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertProviderUrlSafe("http://[fe80::1]/mcp"));
+    }
+
+    @Test
+    void assertProviderUrlSafePermitsLoopbackAndPrivateLiterals() {
+        // These must NOT throw — local inference + LAN MCP servers depend on it.
+        SsrfGuard.assertProviderUrlSafe("http://127.0.0.1:11434/v1");
+        SsrfGuard.assertProviderUrlSafe("http://[::1]/mcp");
+        SsrfGuard.assertProviderUrlSafe("http://10.0.0.5:8080/v1");
+        SsrfGuard.assertProviderUrlSafe("http://192.168.1.50/mcp");
+    }
+
+    @Test
+    void assertProviderUrlSafePermitsHostnamesWithoutResolving() {
+        // Hostnames are screened at connect by PROVIDER_SAFE_DNS, not here, so a
+        // public host and even a not-yet-live host both pass validation offline.
+        SsrfGuard.assertProviderUrlSafe("https://openrouter.ai/api/v1");
+        SsrfGuard.assertProviderUrlSafe("http://not-a-real-host-xyz/mcp");
+    }
+
+    @Test
+    void assertProviderUrlSafeRejectsNonHttpSchemeAndHostless() {
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertProviderUrlSafe("file:///etc/passwd"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertProviderUrlSafe("gopher://evil/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertProviderUrlSafe("http:///no-host"));
+    }
 }
