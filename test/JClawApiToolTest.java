@@ -256,4 +256,39 @@ class JClawApiToolTest extends UnitTest {
     void nameMatchesPublicConstant() {
         assertEquals(JClawApiTool.TOOL_NAME, tool.name());
     }
+
+    // ============ JCLAW-844: per-call danger classification ============
+
+    @Test
+    void dangerousForMutatingVerbs() {
+        assertTrue(tool.dangerous("{\"method\":\"POST\",\"path\":\"/api/mcp-servers\"}"),
+                "POST is a mutation and must be gated");
+        assertTrue(tool.dangerous("{\"method\":\"PUT\",\"path\":\"/api/config\"}"), "PUT must be gated");
+        assertTrue(tool.dangerous("{\"method\":\"PATCH\",\"path\":\"/api/agents/1\"}"), "PATCH must be gated");
+        assertTrue(tool.dangerous("{\"method\":\"DELETE\",\"path\":\"/api/agents/1\"}"), "DELETE must be gated");
+    }
+
+    @Test
+    void dangerousIsCaseInsensitiveOnVerb() {
+        assertTrue(tool.dangerous("{\"method\":\"post\",\"path\":\"/api/mcp-servers\"}"),
+                "a lowercase verb must still classify as a mutation");
+    }
+
+    @Test
+    void notDangerousForReadsAndDiscover() {
+        assertFalse(tool.dangerous("{\"method\":\"GET\",\"path\":\"/api/mcp-servers\"}"),
+                "GET is a read; masking (JCLAW-780) handles read exposure, no gate");
+        assertFalse(tool.dangerous("{\"action\":\"discover\"}"),
+                "discover only lists endpoints; not a mutation");
+        assertFalse(tool.dangerous("{\"action\":\"discover\",\"method\":\"POST\"}"),
+                "discover is a read even if a stray method is present");
+    }
+
+    @Test
+    void notDangerousForMalformedOrMethodlessArgs() {
+        assertFalse(tool.dangerous(null), "null args -> no-op -> not dangerous");
+        assertFalse(tool.dangerous("not json"), "malformed args are rejected by execute() -> not dangerous");
+        assertFalse(tool.dangerous("[1,2,3]"), "non-object JSON -> not dangerous");
+        assertFalse(tool.dangerous("{\"path\":\"/api/agents\"}"), "method-less call is a no-op -> not dangerous");
+    }
 }

@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Call JClaw's own HTTP API from an agent (JCLAW-282).
@@ -108,6 +109,13 @@ public class JClawApiTool implements ToolRegistry.Tool {
     private static final List<String> ALLOWED_METHODS =
             List.of("GET", "POST", "PUT", "PATCH", "DELETE");
 
+    /** JCLAW-844: the mutating subset of {@link #ALLOWED_METHODS}. A jclaw_api call
+     *  with one of these verbs can create/alter server-side state (create an MCP
+     *  server = arbitrary local exec, set a provider baseUrl = SSRF, promote a
+     *  skill), so it routes through {@link agents.DangerousActionGate}; GET and
+     *  discovery are reads. */
+    private static final Set<String> MUTATING_METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
+
     @Override public String name() { return TOOL_NAME; }
     @Override public String category() { return "System"; }
     @Override public String icon() { return "cog"; }
@@ -172,6 +180,36 @@ public class JClawApiTool implements ToolRegistry.Tool {
      *  per-request JPA tx, so backend-side concurrency is governed by
      *  the controllers, not this tool. */
     @Override public boolean parallelSafe() { return true; }
+
+    /**
+     * JCLAW-844: {@code jclaw_api} is a universal proxy to every JClaw controller,
+     * so its danger depends on the specific call rather than on the tool. A mutating
+     * verb (POST/PUT/PATCH/DELETE) can create an MCP server (arbitrary local command
+     * execution via a STDIO transport), point a provider {@code baseUrl} at an
+     * internal host (SSRF), or promote a skill outside its root -- all actions the
+     * native {@code exec} tool gates -- so it must route through
+     * {@link agents.DangerousActionGate} with the agent's real conversation origin.
+     * Reads ({@code GET}) and {@code action="discover"} are not dangerous (read
+     * secret-exposure is handled at the serialization seam, JCLAW-780). A malformed,
+     * action-only, or method-less call is a no-op in {@link #execute}, so it is
+     * classified non-dangerous rather than raising a spurious approval prompt.
+     */
+    @Override
+    public boolean dangerous(String argsJson) {
+        if (argsJson == null) return false;
+        JsonObject args;
+        try {
+            args = JsonParser.parseString(argsJson).getAsJsonObject();
+        } catch (RuntimeException e) {
+            return false;   // execute() rejects malformed args before any request
+        }
+        var action = stringField(args, KEY_ACTION);
+        if (action != null && ACTION_DISCOVER.equalsIgnoreCase(action)) {
+            return false;   // discovery only lists endpoints
+        }
+        var method = stringField(args, KEY_METHOD);
+        return method != null && MUTATING_METHODS.contains(method.toUpperCase(Locale.ROOT));
+    }
 
     @Override
     public String execute(String argsJson, Agent agent) {

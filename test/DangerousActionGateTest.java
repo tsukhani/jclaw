@@ -41,6 +41,13 @@ class DangerousActionGateTest extends UnitTest {
     private static final String DANGEROUS_TOOL = "danger_tool";
     private static final String SAFE_TOOL = "safe_tool";
 
+    /** JCLAW-844: the real conditionally-dangerous tool and representative args. */
+    private static final String JCLAW_API = tools.JClawApiTool.TOOL_NAME;
+    private static final String MUTATION_ARGS =
+            "{\"method\":\"POST\",\"path\":\"/api/mcp-servers\","
+            + "\"body\":{\"transport\":\"STDIO\",\"command\":\"bash\"}}";
+    private static final String READ_ARGS = "{\"method\":\"GET\",\"path\":\"/api/agents\"}";
+
     /** Matches the approval id inside a recorded callback_data ("a:o:<id>", etc.). */
     private static final Pattern CALLBACK_ID = Pattern.compile("a:[osad]:([0-9a-f]+)");
 
@@ -57,7 +64,8 @@ class DangerousActionGateTest extends UnitTest {
         server.start();
         TelegramChannel.installForTest(BOT_TOKEN, server.telegramUrl());
         originalTools = ToolRegistry.listTools();
-        ToolRegistry.publish(List.of(stubTool(DANGEROUS_TOOL, true), stubTool(SAFE_TOOL, false)));
+        ToolRegistry.publish(List.of(stubTool(DANGEROUS_TOOL, true), stubTool(SAFE_TOOL, false),
+                new tools.JClawApiTool()));
     }
 
     @AfterEach
@@ -325,6 +333,64 @@ class DangerousActionGateTest extends UnitTest {
                 DangerousActionGate.guard(agent, null, DANGEROUS_TOOL, "{\"command\":\"echo task\"}"));
         assertEquals(0, server.countRequests("sendMessage"),
                 "a context-less (task) origin must not raise a prompt");
+    }
+
+    // ── JCLAW-844: jclaw_api mutations route through the same origin gate as exec;
+    //    reads (GET) and discover stay ungated on every origin. ──
+
+    @Test
+    void jclawApiReadOnUntrustedOriginProceedsUngated() {
+        // A GET through jclaw_api is not a mutation, so even an untrusted whatsapp
+        // origin proceeds with no prompt (read exposure is handled by masking, 780).
+        var agent = unboundAgent("gate-jclaw-read");
+        var convId = whatsappConvId(agent);
+
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, convId, JCLAW_API, READ_ARGS));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a jclaw_api GET must not gate on any origin");
+    }
+
+    @Test
+    void jclawApiMutationOnWhatsappFailsClosed() {
+        // The headline: a prompt-injected agent on whatsapp can no longer create a
+        // STDIO MCP server (arbitrary exec) — the mutation fails closed like exec.
+        var agent = unboundAgent("gate-jclaw-wa");
+        var convId = whatsappConvId(agent);
+
+        assertEquals(Decision.ABORT,
+                DangerousActionGate.guard(agent, convId, JCLAW_API, MUTATION_ARGS));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "an untrusted-origin jclaw_api mutation must fail closed, no prompt");
+    }
+
+    @Test
+    void jclawApiMutationOnWebProceedsUngated() {
+        // The operator's own web chat keeps full power: creating providers/MCP/bindings
+        // via chat proceeds with no prompt (trusted operator origin).
+        var agent = unboundAgent("gate-jclaw-web");
+        var convId = webConvId(agent);
+
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, convId, JCLAW_API, MUTATION_ARGS));
+        assertEquals(0, server.countRequests("sendMessage"),
+                "a web-origin jclaw_api mutation proceeds unprompted");
+    }
+
+    @Test
+    void jclawApiMutationOnBoundTelegramPromptsThenApproves() throws Exception {
+        // From a bound Telegram DM the operator gets an in-chat approve/deny; on
+        // Approve the mutation proceeds (not an ABORT).
+        var agent = boundAgent("gate-jclaw-tg");
+        var convId = telegramConvId(agent);
+
+        var verdict = runGateAsync(agent, convId, JCLAW_API, MUTATION_ARGS);
+        var approvalId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_ONCE, TG_USER);
+
+        assertEquals(Decision.PROCEED, verdict.get(2, TimeUnit.SECONDS));
+        assertTrue(server.countRequests("sendMessage") >= 1,
+                "a bound-Telegram jclaw_api mutation must raise an approve/deny prompt");
     }
 
     // ── Session/Always scope suppresses re-prompt ──────────────────────

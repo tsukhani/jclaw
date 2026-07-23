@@ -135,7 +135,7 @@ public final class DangerousActionGate {
      *         to skip it and return a denial result to the model
      */
     public static Decision guard(Agent agent, Long conversationId, String toolName, String argsJson) {
-        if (agent == null || !ToolRegistry.isDangerous(toolName)) {
+        if (agent == null || !ToolRegistry.isDangerous(toolName, argsJson)) {
             return Decision.PROCEED;
         }
         return arbitrate(agent, conversationId, toolName, argsJson);

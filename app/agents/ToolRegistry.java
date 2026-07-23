@@ -179,6 +179,15 @@ public class ToolRegistry {
          *  defaults off per server, so unflagged servers stay un-gated. */
         default boolean dangerous() { return false; }
 
+        /** JCLAW-844: per-call danger classification. Most tools are uniformly
+         *  dangerous (or not) regardless of arguments, so this defaults to the
+         *  argument-blind {@link #dangerous()}. A tool whose danger depends on the
+         *  specific call overrides it to inspect {@code argsJson} — {@code jclaw_api}
+         *  is a mutation (and thus dangerous) only for POST/PUT/PATCH/DELETE, and a
+         *  plain read otherwise. The gate passes the same wire-format args the tool
+         *  will receive, so the classification matches the call that would run. */
+        default boolean dangerous(String argsJson) { return dangerous(); }
+
         /** Serialization-group key for the parallel tool dispatcher. Tools
          *  returning the same non-null key are placed in the same serial
          *  queue and execute in LLM-declared order on a single virtual
@@ -341,6 +350,15 @@ public class ToolRegistry {
     public static boolean isDangerous(String toolName) {
         var tool = tools.get(toolName);
         return tool != null && tool.dangerous();
+    }
+
+    /** JCLAW-844: per-call danger resolution — passes {@code argsJson} to the tool
+     *  so a tool whose danger depends on its arguments (today {@code jclaw_api})
+     *  classifies per call. Defaults to {@code false} for unknown names, matching
+     *  {@link #isDangerous(String)}. */
+    public static boolean isDangerous(String toolName, String argsJson) {
+        var tool = tools.get(toolName);
+        return tool != null && tool.dangerous(argsJson);
     }
 
     /** JCLAW-170: resolve a tool's semantic icon key by name. Returns the
