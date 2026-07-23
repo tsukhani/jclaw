@@ -368,11 +368,14 @@ class ControllerApiTest extends FunctionalTest {
         assertTrue(content.contains("\"channelType\":\"telegram\""));
         assertTrue(content.contains("\"enabled\":true"));
 
-        // GET by type
+        // GET by type — botToken is masked in the response (JCLAW-780) so
+        // agent-reachable reads can't return raw secrets; the key still survives.
         var getResp = GET("/api/channels/telegram");
         assertIsOk(getResp);
-        assertTrue(getContent(getResp).contains("\"channelType\":\"telegram\""));
-        assertTrue(getContent(getResp).contains("test-token-123"));
+        var getBody = getContent(getResp);
+        assertTrue(getBody.contains("\"channelType\":\"telegram\""));
+        assertFalse(getBody.contains("test-token-123"), "raw botToken must not leak: " + getBody);
+        assertTrue(getBody.contains("test****"), "botToken must be masked: " + getBody);
 
         // UPDATE (save again with different values)
         var updateBody = """
@@ -380,8 +383,10 @@ class ControllerApiTest extends FunctionalTest {
                 """;
         var updateResp = PUT("/api/channels/telegram", "application/json", updateBody);
         assertIsOk(updateResp);
-        assertTrue(getContent(updateResp).contains("\"enabled\":false"));
-        assertTrue(getContent(updateResp).contains("updated-token"));
+        var updateContent = getContent(updateResp);
+        assertTrue(updateContent.contains("\"enabled\":false"));
+        assertFalse(updateContent.contains("updated-token"), "raw botToken must not leak: " + updateContent);
+        assertTrue(updateContent.contains("upda****"), "botToken must be masked: " + updateContent);
 
         // LIST should now contain the channel
         var listResp = GET("/api/channels");
