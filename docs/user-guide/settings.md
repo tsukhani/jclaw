@@ -45,16 +45,6 @@ Web search engines available to the `web_search` tool. Drag rows to **reorder pr
 
 Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
 
-## OCR
-
-Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
-
-- **active** — binary detected on PATH *and* enabled.
-- **disabled** — detected but turned off.
-- **not detected** — binary missing on PATH; install hint shown inline.
-
-Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
-
 ## Transcription
 
 Pairs every audio attachment with a text transcript before it reaches the LLM. Audio-capable models still receive native audio; text-only models receive the transcript as text.
@@ -71,6 +61,27 @@ Below the backend picker, a **Diarization** subsection covers the who-spoke-when
 
 - **Diarization** — who-said-what transcripts are produced by an **audio-capable cloud chat model**: turn the subsection on, pick a provider (OpenAI or OpenRouter, using the API keys from LLM Providers) and one of its audio-capable models (the picker lists only models that accept audio input — the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names. Ordinary voice-note transcription stays local (whisper) and works without any of this. A greyed-out **Local audio model (on-device)** option marks planned functionality: fully offline diarization will return once local audio models mature (JCLAW-656 tracks the survey and revival criteria).
 - **Emotion labels on diarized transcripts** — each diarized turn is tagged with how it was said (happy, sad, angry, disgust, fear, surprised or neutral), classified locally from the voice's tone by a multilingual emotion2vec+ model (~360 MB, downloads from Hugging Face on first use; holds up on non-English speech). Ordinary voice-note transcription is unaffected.
+
+## Speech
+
+Text-to-speech for reading replies aloud (the **speaker icon** on a message) and for real-time [Voice mode](/guide#chat). Pick an **engine**, a **model**, and — where the model offers presets — a **voice**. Changes apply on the next read-aloud, no restart.
+
+Two engines:
+
+- **Sidecar** — quality-first; runs a local Python process (needs `uv` on PATH), and weights download from Hugging Face on first use. Models: **Qwen3-TTS 0.6B** (plus a 4-bit variant), **Kokoro-82M**, and **Chatterbox** (a PyTorch model on Apple Silicon MPS or NVIDIA CUDA — the most natural voice, but noticeably slower than the others).
+- **JVM-native** — runs in-process via sherpa-onnx, no Python or sidecar. Models: **Piper Amy** (tiny, fast, English) and **Kokoro-82M multilingual**; the chosen voice downloads once (a button in the panel) then synthesizes on CPU.
+
+**Voice** — models with named speakers show a voice dropdown under the model. **Kokoro** offers American and British, male and female voices; **Qwen3-TTS** offers a few numbered speakers. Single-voice models (Piper) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
+
+## OCR
+
+Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
+
+- **active** — binary detected on PATH *and* enabled.
+- **disabled** — detected but turned off.
+- **not detected** — binary missing on PATH; install hint shown inline.
+
+Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
 
 ## Image Captioning
 

@@ -28,6 +28,8 @@ The reply streams in real time. While the model is generating, the **Send** butt
 
 If you regret a message, hover over it: you'll see **Edit & resubmit** and **Delete message** controls. Editing rewinds the conversation to that point and re-runs from the edited text.
 
+To hear a reply, hover it and click the **speaker icon** — text-to-speech streams the answer aloud sentence by sentence, using the engine you pick in [Settings → Speech](/guide#settings).
+
 ## Attachments
 
 Click the paperclip in the composer to attach files. JClaw supports:
@@ -38,6 +40,10 @@ Click the paperclip in the composer to attach files. JClaw supports:
 - **Video** — clips attached in the composer. Models that support video natively watch the clip directly; otherwise JClaw interprets it for them — a dedicated video-interpretation model summarizes the clip, or, failing that, frames are sampled and sent to a vision model as images, or captioned into a timestamped text summary for text-only models. Tune the sampling in [Settings → Video Interpretation](/guide#settings).
 
 The image and audio icons in the composer light up green when the active model supports those inputs natively, and a video capability pill appears for video — so you can tell at a glance whether the model will see the file or just a transcript, description, or summary.
+
+## Voice mode
+
+For a hands-free spoken conversation, click **Voice mode** (the voice button near the composer — distinct from the "Record voice" mic, which just attaches a clip). JClaw listens continuously, detects when you've finished speaking, sends your turn to the agent, and **speaks the reply back** aloud sentence by sentence. Start talking again to interrupt — playback stops and your new turn takes over. It reads replies with your [Settings → Speech](/guide#settings) engine; a text-only model gets a local transcript of what you said, while an audio-capable model hears your voice directly.
 
 ## Slash commands
 
