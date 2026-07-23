@@ -289,8 +289,10 @@ GET     /api/apps/{slug}/files/{uuid}           ApiAppInvokeController.file
 # e.g. /api/graphql get a 404 instead of an ActionNotFound ERROR + stack trace.
 *       /api/{<.*>path}                         ApiNotFoundController.handle
 
-# SPA static assets (production build: nuxi generate output copied to public/spa/)
-GET     /_nuxt/                                 staticDir:public/spa/_nuxt
+# SPA static assets (production build: nuxi generate output copied to public/spa/).
+# Routed through Application.nuxtAsset (not staticDir) so content-hashed chunks get
+# a 1-year immutable cache while the stable-named build manifest still revalidates.
+GET     /_nuxt/{<.+>path}                       Application.nuxtAsset
 
 # Hosted apps (SPEC-apps): /apps/<slug>/... serves the static site under
 # public/apps/<slug>/. Must precede the SPA catch-all, and `apps/` is excluded

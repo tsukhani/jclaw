@@ -28,6 +28,47 @@ public class Application extends Controller {
     }
 
     /**
+     * Serve a Nuxt build asset from {@code public/spa/_nuxt} with a cache policy
+     * matched to the file's mutability (see {@link #nuxtCacheControl}).
+     *
+     * <p>Replaces a bare {@code staticDir} route. {@code staticDir} is resolved by
+     * the router before any controller runs, so it can only apply Play's single
+     * {@code http.cacheControl} (1 h) to every file — forcing an hourly
+     * revalidation of chunks whose content-hashed names already make them
+     * permanently immutable. Routing through an action is the only way to set the
+     * per-file header {@code staticDir} can't.
+     */
+    @SuppressWarnings("java:S2259")
+    public static void nuxtAsset(String path) {
+        File nuxtRoot = Play.getFile("public/spa/_nuxt");
+        try {
+            if (path != null && !path.contains("..")) {
+                File asset = new File(nuxtRoot, path);
+                if (asset.exists() && asset.isFile()
+                        && asset.getCanonicalPath().startsWith(nuxtRoot.getCanonicalPath() + File.separator)) {
+                    response.setHeader("Cache-Control", nuxtCacheControl(path));
+                    renderBinary(asset);
+                }
+            }
+        } catch (IOException _) {}
+        notFound();
+    }
+
+    /**
+     * Cache-Control for a {@code _nuxt/}-relative asset path. Vite content-hashes
+     * every chunk and font filename, so those are immutable and cached for a year
+     * with no revalidation. The two exceptions carry no hash in their own name:
+     * {@code builds/latest.json} advertises the current build id and MUST
+     * revalidate (else a fresh deploy is never detected), while
+     * {@code builds/meta/<id>.json} embeds the id in its path and is immutable
+     * like the chunks. Mirrors Nitro's own default asset route rules.
+     */
+    public static String nuxtCacheControl(String relPath) {
+        boolean revalidate = relPath.startsWith("builds/") && !relPath.startsWith("builds/meta/");
+        return revalidate ? "no-cache" : "public, max-age=31536000, immutable";
+    }
+
+    /**
      * SPA catch-all: serves static files from the Nuxt build if they exist,
      * otherwise falls back to index.html for client-side routing.
      * Production build lives in public/spa/ (output of: nuxi generate).
