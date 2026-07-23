@@ -150,31 +150,20 @@ async function doImport(mode: 'merge' | 'replace') {
     <h1 class="text-lg font-semibold text-fg-strong mb-2">
       Prompts
     </h1>
-    <p class="text-sm text-fg-muted mb-6">
+    <p class="text-sm text-fg-muted mb-8">
       Save, organize, and reuse your frequently-used prompts. Filter by category or search
       titles, text, and tags. Hit <span class="font-medium text-fg-strong">Run</span> to open one
       in the chat composer, ready to edit before sending.
     </p>
 
-    <!-- Toolbar: create + import/export + search -->
-    <div class="flex flex-wrap items-center gap-2 mb-4">
-      <button
-        type="button"
-        data-testid="new-prompt-button"
-        class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
-        @click="openCreate"
-      >
-        <PlusIcon
-          class="w-4 h-4"
-          aria-hidden="true"
-        />
-        New prompt
-      </button>
+    <!-- Actions: Export / Import / New prompt, left-aligned below the intro text.
+         New prompt is the green primary; Export/Import are bordered secondaries. -->
+    <div class="flex flex-wrap items-center gap-2 mb-8">
       <button
         type="button"
         data-testid="export-prompts-button"
         :disabled="!prompts.length"
-        class="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-fg-primary border border-border rounded-lg hover:border-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 text-fg-primary border border-border hover:border-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         @click="exportPrompts"
       >
         <ArrowDownTrayIcon
@@ -186,7 +175,7 @@ async function doImport(mode: 'merge' | 'replace') {
       <button
         type="button"
         data-testid="import-prompts-button"
-        class="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-fg-primary border border-border rounded-lg hover:border-emerald-500 transition-colors"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 text-fg-primary border border-border hover:border-emerald-500 transition-colors"
         @click="triggerImport"
       >
         <ArrowUpTrayIcon
@@ -204,25 +193,18 @@ async function doImport(mode: 'merge' | 'replace') {
         data-testid="import-file-input"
         @change="onImportFile"
       >
-      <label
-        for="prompt-search"
-        class="ml-auto flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-surface-elevated w-full sm:w-64"
+      <button
+        type="button"
+        data-testid="new-prompt-button"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white transition-colors"
+        @click="openCreate"
       >
-        <MagnifyingGlassIcon
-          class="w-4 h-4 text-fg-muted shrink-0"
+        <PlusIcon
+          class="w-4 h-4"
           aria-hidden="true"
         />
-        <span class="sr-only">Search prompts</span>
-        <input
-          id="prompt-search"
-          v-model="search"
-          type="search"
-          placeholder="Search prompts"
-          data-testid="prompt-search"
-          class="flex-1 min-w-0 bg-transparent text-sm text-fg-strong placeholder:text-fg-muted focus:outline-none"
-          @keydown.escape="search = ''"
-        >
-      </label>
+        New prompt
+      </button>
     </div>
 
     <!-- Import mode picker (inline; appears after a file is chosen) -->
@@ -296,6 +278,28 @@ async function doImport(mode: 'merge' | 'replace') {
       </button>
     </div>
 
+    <!-- Search: left-aligned on its own row, directly below the category filters
+         (filters first, then a search that scopes within the active category). -->
+    <label
+      for="prompt-search"
+      class="mb-8 flex w-full max-w-sm items-center gap-2 px-3 py-1.5 border border-border bg-surface-elevated"
+    >
+      <MagnifyingGlassIcon
+        class="w-4 h-4 text-fg-muted shrink-0"
+        aria-hidden="true"
+      />
+      <span class="sr-only">Search prompts</span>
+      <input
+        id="prompt-search"
+        v-model="search"
+        type="search"
+        placeholder="Search prompts"
+        data-testid="prompt-search"
+        class="flex-1 min-w-0 bg-transparent text-sm text-fg-strong placeholder:text-fg-muted focus:outline-none"
+        @keydown.escape="search = ''"
+      >
+    </label>
+
     <!-- States -->
     <div
       v-if="pending"
@@ -313,7 +317,7 @@ async function doImport(mode: 'merge' | 'replace') {
       </p>
       <button
         type="button"
-        class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
+        class="inline-flex items-center gap-2 px-3 py-2 text-sm text-white bg-emerald-700 hover:bg-emerald-600 transition-colors"
         @click="openCreate"
       >
         <PlusIcon
