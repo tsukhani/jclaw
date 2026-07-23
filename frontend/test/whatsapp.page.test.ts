@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import { nextTick } from 'vue'
 import WhatsApp from '~/pages/channels/whatsapp.vue'
@@ -41,17 +42,24 @@ function binding(overrides: Record<string, unknown> = {}) {
 
 let bindingsResponse: unknown[] = []
 let qrResponse: Record<string, unknown> = { bindingId: 7, transport: 'WHATSAPP_WEB', paired: false, qr: 'pair-string-abc' }
+// Counts QR poll hits so the "stops once paired" test can prove the interval
+// was torn down (no further polls after paired=true).
+let qrPollCount = 0
 
 registerEndpoint('/api/agents', () => [AGENT])
 registerEndpoint('/api/channels/whatsapp/bindings', () => bindingsResponse)
 // JCLAW-448: the QR-pairing poll endpoint. Path id varies; match the suffix.
-registerEndpoint('/api/channels/whatsapp/bindings/7/qr', () => qrResponse)
+registerEndpoint('/api/channels/whatsapp/bindings/7/qr', () => {
+  qrPollCount++
+  return qrResponse
+})
 
 beforeEach(() => {
   // useFetch caches by URL across mounts; clear so each test re-fetches.
   clearNuxtData()
   bindingsResponse = []
   qrResponse = { bindingId: 7, transport: 'WHATSAPP_WEB', paired: false, qr: 'pair-string-abc' }
+  qrPollCount = 0
 })
 
 describe('whatsapp bindings page — transport choice + cards (JCLAW-444)', () => {
@@ -212,34 +220,53 @@ describe('whatsapp WhatsApp-Web QR pairing (JCLAW-448)', () => {
     bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
     const c = await mountSuspended(WhatsApp)
     await c.find('[aria-label="Pair binding"]').trigger('click')
-    // Let the immediate first poll + async QR render settle.
-    await new Promise(r => setTimeout(r, 0))
-    await nextTick()
-    expect(c.find('[role="dialog"]').exists()).toBe(true)
-    const img = c.find('img[alt="WhatsApp-Web pairing QR code"]')
-    expect(img.exists()).toBe(true)
-    expect(img.attributes('src')).toBe('data:image/png;base64,STUBQR')
+    // Wait on the end state, not a fixed delay: the immediate poll's $fetch and
+    // the async QR render settle over several microtasks, so vi.waitFor retries
+    // until the rendered image reflects the polled QR string.
+    await vi.waitFor(() => {
+      expect(c.find('[role="dialog"]').exists()).toBe(true)
+      const img = c.find('img[alt="WhatsApp-Web pairing QR code"]')
+      expect(img.exists()).toBe(true)
+      expect(img.attributes('src')).toBe('data:image/png;base64,STUBQR')
+    })
   })
 
   it('shows a Connected state and stops once paired=true', async () => {
     bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
     qrResponse = { bindingId: 7, transport: 'WHATSAPP_WEB', paired: true, qr: null }
     const c = await mountSuspended(WhatsApp)
-    await c.find('[aria-label="Pair binding"]').trigger('click')
-    await new Promise(r => setTimeout(r, 0))
-    await nextTick()
-    expect(c.text()).toContain('Connected')
-    // No QR image while paired.
-    expect(c.find('img[alt="WhatsApp-Web pairing QR code"]').exists()).toBe(false)
+    // Fake only the poll interval so we can prove polling stops; setTimeout and
+    // microtasks stay real, so the immediate first poll's $fetch chain still
+    // settles (and vi.waitFor — which needs a real interval — isn't usable here).
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      await c.find('[aria-label="Pair binding"]').trigger('click')
+      // The immediate first poll is a plain promise, not gated by the interval.
+      // Flush real macrotasks until it lands, then let paired→render commit.
+      for (let i = 0; i < 50 && qrPollCount < 1; i++) {
+        await flushPromises()
+      }
+      await flushPromises()
+      await nextTick()
+      expect(c.text()).toContain('Connected')
+      // No QR image while paired.
+      expect(c.find('img[alt="WhatsApp-Web pairing QR code"]').exists()).toBe(false)
+      // Headline behavior: paired=true clears the 2s interval. Advancing three
+      // more ticks (then draining any fetch they'd trigger) must not re-poll.
+      await vi.advanceTimersByTimeAsync(6000)
+      await flushPromises()
+      expect(qrPollCount).toBe(1)
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 
   it('closes the pairing panel on Cancel', async () => {
     bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
     const c = await mountSuspended(WhatsApp)
     await c.find('[aria-label="Pair binding"]').trigger('click')
-    await new Promise(r => setTimeout(r, 0))
-    await nextTick()
-    expect(c.find('[role="dialog"]').exists()).toBe(true)
+    await vi.waitFor(() => expect(c.find('[role="dialog"]').exists()).toBe(true))
     await c.findAll('button').find(b => b.text() === 'Cancel' || b.text() === 'Close')!.trigger('click')
     await nextTick()
     expect(c.find('[role="dialog"]').exists()).toBe(false)
