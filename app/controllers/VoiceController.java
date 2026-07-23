@@ -24,6 +24,7 @@ import services.tts.TtsRouter;
 import services.tts.TtsText;
 import services.voice.TurnEndpointer;
 import services.voice.VoiceSession;
+import services.voice.VoiceTurnMetrics;
 import services.voice.VoiceVad;
 
 import java.io.IOException;
@@ -289,6 +290,11 @@ public class VoiceController extends WebSocketController {
                                 AtomicBoolean cancel, int turnId, Http.Outbound out, Object lock) {
         try {
             long t0 = System.nanoTime(); // ≈ endpoint: the utterance is now in hand
+            // Per-stage voice latency (JCLAW-800): STT, first-chunk TTS synth, and the
+            // two voice-to-voice numbers, recorded under channel "voice" alongside the
+            // LLM segments the streaming trace already emits on that channel.
+            var metrics = new VoiceTurnMetrics(agent.id == null ? null : agent.id.toString(), t0);
+            int maxRunOn = ConfigService.getInt("voice.tts.maxRunOnChars", 220);
             // One transaction resolves the shared web conversation AND whether the
             // active model hears audio natively (both walk agent/conversation).
             var plan = Tx.run(() -> {
@@ -322,6 +328,7 @@ public class VoiceController extends WebSocketController {
             }
 
             long inputMs = (System.nanoTime() - t0) / 1_000_000L; // STT / attachment staging
+            metrics.sttDone();
 
             // Agent turn on the shared web conversation, so voice + text share
             // context. Run through the STREAMING runner with the barge-in cancel
@@ -337,7 +344,7 @@ public class VoiceController extends WebSocketController {
                     token -> {
                         synchronized (pending) {
                             pending.append(token);
-                            drainSentences(pending, sentences);
+                            drainSentences(pending, sentences, maxRunOn);
                         }
                     },
                     r -> { }, s -> { }, tc -> { },
@@ -371,13 +378,17 @@ public class VoiceController extends WebSocketController {
                 var speakable = TtsText.toSpeakable(sentence);
                 if (!speakable.isBlank()) { // skip whitespace-only chunks (e.g. stripped emoji)
                     if (cancel.get() || !out.isOpen()) return;
+                    long synthStart = System.nanoTime();
                     var audio = TtsRouter.synthesize(speakable);
+                    long synthMs = (System.nanoTime() - synthStart) / 1_000_000L;
                     if (cancel.get()) return;
                     spoken.append(!spoken.isEmpty() ? " " : "").append(speakable);
                     send(out, lock, Map.of("type", "reply", "turn", turnId, "text", spoken.toString()));
                     send(out, lock, Map.of("type", "audio", "turn", turnId, "index", i++,
                             "audio", enc.encodeToString(audio)));
                     if (i == 1) { // first audio out — the voice-to-voice metric that matters most
+                        metrics.ttsSynth(synthMs);
+                        metrics.firstAudioSent();
                         Logger.info("voice: turn %d — stt %dms, first audio %dms after endpoint",
                                 turnId, inputMs, (System.nanoTime() - t0) / 1_000_000L);
                     }
@@ -385,6 +396,7 @@ public class VoiceController extends WebSocketController {
             }
             if (!cancel.get()) {
                 send(out, lock, Map.of("type", "turn_complete", "turn", turnId));
+                metrics.turnComplete();
                 Logger.info("voice: turn %d complete — %dms end-to-end, %d chunk(s)",
                         turnId, (System.nanoTime() - t0) / 1_000_000L, i);
             }
@@ -399,14 +411,14 @@ public class VoiceController extends WebSocketController {
     /** Move complete sentences from the streaming token buffer into the queue,
      *  leaving the incomplete tail. Hard-flushes an over-long run-on (e.g. a
      *  markdown table with no sentence marks) so audio still starts promptly. */
-    private static void drainSentences(StringBuilder buf, Queue<String> out) {
+    private static void drainSentences(StringBuilder buf, Queue<String> out, int maxRunOn) {
         while (true) {
             var s = buf.toString();
             int idx = sentenceEnd(s);
             if (idx < 0) {
-                if (s.length() > 220) {                       // run-on guard
-                    int cut = s.lastIndexOf(' ', 220);
-                    if (cut <= 0) cut = 220;
+                if (s.length() > maxRunOn) {                  // run-on guard
+                    int cut = s.lastIndexOf(' ', maxRunOn);
+                    if (cut <= 0) cut = maxRunOn;
                     var piece = s.substring(0, cut).strip();
                     if (!piece.isEmpty()) out.offer(piece);
                     buf.delete(0, cut);
