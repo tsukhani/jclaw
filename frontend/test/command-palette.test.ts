@@ -76,7 +76,7 @@ describe('CommandPalette', () => {
     const text = getDialogText()
     expect(text).toContain('Navigation')
     expect(text).toContain('Dashboard')
-    expect(text).toContain('Chat')
+    expect(text).toContain('Chats')
     expect(text).toContain('Settings')
   })
 
@@ -87,7 +87,7 @@ describe('CommandPalette', () => {
     })
     await nextTick()
     const text = getDialogText()
-    const navItems = ['Dashboard', 'Chat', 'Channels', 'Conversations', 'Tasks', 'Agents', 'Skills', 'Tools', 'Settings', 'Logs']
+    const navItems = ['Dashboard', 'Chats', 'Channels', 'Conversations', 'Tasks', 'Agents', 'Skills', 'Tools', 'Settings', 'Logs']
     for (const item of navItems) {
       expect(text).toContain(item)
     }

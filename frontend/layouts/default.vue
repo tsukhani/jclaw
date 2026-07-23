@@ -201,12 +201,12 @@ const navGroups: NavGroup[] = [
   {
     label: 'Chat',
     items: [
-      { label: 'Chat', to: '/chat', icon: ChatBubbleOvalLeftEllipsisIcon },
-      { label: 'Channels', to: '/channels', icon: LinkIcon },
-      { label: 'Conversations', to: '/conversations', icon: ChatBubbleLeftRightIcon },
+      { label: 'Chats', to: '/chat', icon: ChatBubbleOvalLeftEllipsisIcon },
       // Prompts Library (JCLAW-813): saved reusable prompts you Run into the
       // composer — a chat-composition aid, so it sits with the chat surfaces.
       { label: 'Prompts', to: '/prompts', icon: RectangleStackIcon },
+      { label: 'Channels', to: '/channels', icon: LinkIcon },
+      { label: 'Conversations', to: '/conversations', icon: ChatBubbleLeftRightIcon },
     ],
   },
   {

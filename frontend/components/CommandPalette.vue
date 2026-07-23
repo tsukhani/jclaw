@@ -17,7 +17,7 @@ const router = useRouter()
 // ── Static navigation items ─────────────────────────────────────────────────
 const navItems = [
   { label: 'Dashboard', to: '/', keywords: 'home overview stats' },
-  { label: 'Chat', to: '/chat', keywords: 'message conversation talk' },
+  { label: 'Chats', to: '/chat', keywords: 'message conversation talk' },
   { label: 'Channels', to: '/channels', keywords: 'telegram slack whatsapp' },
   { label: 'Conversations', to: '/conversations', keywords: 'history messages' },
   { label: 'Tasks', to: '/tasks', keywords: 'jobs schedule cron' },
