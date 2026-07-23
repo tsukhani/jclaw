@@ -262,7 +262,7 @@ describe('Settings page — OCR section', () => {
     clearNuxtData()
   })
 
-  it('renders the OCR section between Search Providers and Transcription', async () => {
+  it('renders the OCR section in the Image group, after the Audio group', async () => {
     setupConfigApi()
     const component = await mountSettingsSection('ocr')
 
@@ -270,11 +270,10 @@ describe('Settings page — OCR section', () => {
     expect(text).toContain('OCR')
     expect(text).toContain('Tesseract OCR')
 
-    // Slot order (operator request 2026-07-03): LLM Providers, then Search
-    // Providers, then OCR, then Transcription. Post-JCLAW-680 the page swaps one
-    // section at a time, so this ordering guarantee now lives in the TOC rail
-    // (components/settings/sections.ts order) rather than a stacked DOM — assert
-    // the rail items appear in that order.
+    // Rail order after the media sections regrouped by modality (2026-07-23):
+    // LLM Providers, Search Providers, then Audio (Transcription, Speech), then
+    // Image (OCR, ...). This ordering guarantee lives in the TOC rail
+    // (components/settings/sections.ts order) rather than a stacked DOM.
     const html = component.html()
     const providersIdx = html.indexOf('data-testid="settings-toc-item-providers"')
     const searchIdx = html.indexOf('data-testid="settings-toc-item-search"')
@@ -285,8 +284,8 @@ describe('Settings page — OCR section', () => {
     expect(ocrIdx).toBeGreaterThan(-1)
     expect(transcriptionIdx).toBeGreaterThan(-1)
     expect(providersIdx).toBeLessThan(searchIdx)
-    expect(searchIdx).toBeLessThan(ocrIdx)
-    expect(ocrIdx).toBeLessThan(transcriptionIdx)
+    expect(searchIdx).toBeLessThan(transcriptionIdx) // Providers precede the Audio group
+    expect(transcriptionIdx).toBeLessThan(ocrIdx) // Audio precedes Image (Transcription before OCR)
   })
 
   it('shows the active pill and an interactive toggle when tesseract is detected', async () => {

@@ -76,12 +76,11 @@ export interface SettingsSectionGroup {
 }
 
 // Sections are organised into functional domains so the 20-item rail stays
-// scannable. The media features split by direction (2026-07-21): Understanding
-// turns media into text the model can read (OCR, Transcription, Image Captioning,
-// Video Interpretation); Generation produces media from the model (Speech, Image
-// Generation, Video Generation). Within Understanding, OCR precedes Transcription
-// to preserve the operator's requested slot order (Providers → Search → OCR →
-// Transcription, 2026-07-03).
+// scannable. The media features group by modality (2026-07-23): Audio
+// (Transcription, Speech), Image (OCR, Image Captioning, Image Generation), and
+// Video (Video Interpretation, Video Generation) — each modality pairs its
+// understand-media and generate-media features in one block. Section ids are
+// unchanged (stable deep-link URLs); only the grouping and rail order moved.
 export const sectionGroups: SettingsSectionGroup[] = [
   {
     label: 'System',
@@ -101,19 +100,24 @@ export const sectionGroups: SettingsSectionGroup[] = [
     ],
   },
   {
-    label: 'Understanding',
+    label: 'Audio',
     sections: [
-      { id: 'ocr', title: 'OCR', icon: DocumentMagnifyingGlassIcon, component: SettingsOcrPanel },
       { id: 'transcription', title: 'Transcription', icon: MicrophoneIcon, component: SettingsTranscriptionPanel },
-      { id: 'image-caption', title: 'Image Captioning', icon: ChatBubbleBottomCenterTextIcon, component: SettingsImageCaptionPanel },
-      { id: 'video-interpretation', title: 'Video Interpretation', icon: EyeIcon, component: SettingsVideoInterpPanel },
+      { id: 'speech', title: 'Speech', icon: SpeakerWaveIcon, component: SettingsSpeechPanel },
     ],
   },
   {
-    label: 'Generation',
+    label: 'Image',
     sections: [
-      { id: 'speech', title: 'Speech', icon: SpeakerWaveIcon, component: SettingsSpeechPanel },
+      { id: 'ocr', title: 'OCR', icon: DocumentMagnifyingGlassIcon, component: SettingsOcrPanel },
+      { id: 'image-caption', title: 'Image Captioning', icon: ChatBubbleBottomCenterTextIcon, component: SettingsImageCaptionPanel },
       { id: 'image-generation', title: 'Image Generation', icon: PhotoIcon, component: SettingsImageGenPanel },
+    ],
+  },
+  {
+    label: 'Video',
+    sections: [
+      { id: 'video-interpretation', title: 'Video Interpretation', icon: EyeIcon, component: SettingsVideoInterpPanel },
       { id: 'video-generation', title: 'Video Generation', icon: FilmIcon, component: SettingsVideoGenPanel },
     ],
   },
