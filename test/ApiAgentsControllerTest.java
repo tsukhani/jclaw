@@ -431,14 +431,24 @@ class ApiAgentsControllerTest extends FunctionalTest {
     @Test
     void mainAgentIsHiddenFromListEndpointWhenReservedFilterApplies() {
         // Sanity check: the "main" agent IS visible via the list endpoint
-        // (only __loadtest__ is hidden). This test guards against an
-        // accidental over-broadening of the reserved-name filter.
+        // (only reserved names like __loadtest__ / __loadtest_tools__ are
+        // hidden). This test guards against an accidental over-broadening of
+        // the reserved-name filter.
         login();
         createMainAgent();
         var response = GET("/api/agents");
         assertIsOk(response);
         assertTrue(getContent(response).contains("\"name\":\"main\""),
                 "main agent must remain visible in /api/agents listing");
+    }
+
+    @Test
+    void createRejectsReservedToolsLoadtestAgentName() {
+        // The single-tool benchmark agent (__loadtest_tools__) is reserved just
+        // like __loadtest__ — no public API surface may create it.
+        login();
+        assertStatus(409, POST("/api/agents", "application/json",
+                "{\"name\": \"__loadtest_tools__\", \"modelProvider\": \"openrouter\", \"modelId\": \"gpt-4.1\"}"));
     }
 
     /**

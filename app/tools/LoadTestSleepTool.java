@@ -8,6 +8,7 @@ import models.Agent;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -23,6 +24,19 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
 
     private static final int DEFAULT_MS = 200;
     private static final int MAX_MS = 10_000;
+
+    /**
+     * Process-wide count of tool executions. The real-provider tools loadtest
+     * ({@code __loadtest_tools__} agent) snapshots this before/after a run to
+     * report the model's actual tool-call rate — no forced tool_choice exists,
+     * so the model is prompted into calling and we measure how often it did.
+     */
+    private static final AtomicLong INVOCATIONS = new AtomicLong();
+
+    /** Total {@code loadtest_sleep} executions since JVM start. */
+    public static long invocations() {
+        return INVOCATIONS.get();
+    }
 
     @Override public String name() { return "loadtest_sleep"; }
     @Override public String category() { return "System"; }
@@ -63,6 +77,7 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
     @Override public boolean parallelSafe() { return true; }
 
     @Override public String execute(String argsJson, Agent agent) {
+        INVOCATIONS.incrementAndGet();
         int ms = DEFAULT_MS;
         try {
             var args = JsonParser.parseString(argsJson).getAsJsonObject();

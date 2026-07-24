@@ -482,6 +482,16 @@ public class ToolRegistry {
                 && LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
             return List.of();
         }
+        // Single-tool benchmark agent: expose ONLY loadtest_sleep (registered
+        // for the duration of a tools loadtest) so a real provider exercises
+        // exactly one deterministic tool round. Empty if the tool isn't
+        // currently registered, so nothing leaks outside a tools run.
+        if (agent != null
+                && LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME.equals(agent.name)) {
+            var sleep = tools.get("loadtest_sleep");
+            return sleep == null ? List.of()
+                    : List.of(ToolDef.of(sleep.name(), sleep.description(), sleep.parameters()));
+        }
         var disabled = loadDisabledTools(agent);
         // JCLAW-281: function-calling defs emit at most one entry per MCP
         // server (the server-level handle from McpServerTool). The per-

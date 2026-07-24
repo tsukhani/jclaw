@@ -1493,4 +1493,24 @@ class ToolSystemTest extends UnitTest {
             try { loadtestAgent.delete(); } catch (Exception _) { /* best-effort */ }
         }
     }
+
+    @Test
+    void toolsLoadtestAgentSeesAtMostLoadtestSleep() {
+        // The single-tool benchmark twin is exempt from the zero-tools gate but
+        // exposes ONLY loadtest_sleep — never the full registered set. Asserted
+        // as an upper bound (≤ 1) so it holds whether or not loadtest_sleep is
+        // currently registered: 0 when it isn't (the default, so nothing leaks
+        // outside a run), 1 while a tools loadtest holds it registered. We don't
+        // register it here — that's a process-global mutation that would race
+        // the concurrent test engine; the positive case is covered end-to-end
+        // by the real-provider tools loadtest.
+        var toolsAgent = AgentService.create(
+                services.LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME, "openrouter", "gpt-4.1");
+        try {
+            assertTrue(ToolRegistry.getToolDefsForAgent(toolsAgent).size() <= 1,
+                    "tools loadtest agent must expose at most loadtest_sleep, never the full tool set");
+        } finally {
+            try { toolsAgent.delete(); } catch (Exception _) { /* best-effort */ }
+        }
+    }
 }

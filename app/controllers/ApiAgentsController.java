@@ -94,7 +94,8 @@ public class ApiAgentsController extends Controller {
      */
     private static boolean isReservedName(String name) {
         return name != null
-                && LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name);
+                && (LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name)
+                        || LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME.equalsIgnoreCase(name));
     }
 
     @SuppressWarnings("java:S2259")

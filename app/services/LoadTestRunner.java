@@ -57,6 +57,14 @@ public final class LoadTestRunner {
      */
     public static final String LOADTEST_AGENT_NAME = "__loadtest__";
     /**
+     * Reserved agent name for the single-tool benchmark twin. Gets the same
+     * hide/reject treatment as {@link #LOADTEST_AGENT_NAME}, but is exempt from
+     * the zero-tools gate in {@link agents.ToolRegistry} so it exposes exactly
+     * {@code loadtest_sleep} — a real provider then drives one deterministic
+     * tool round, letting us baseline the tool path with real LLM latency.
+     */
+    public static final String LOADTEST_TOOLS_AGENT_NAME = "__loadtest_tools__";
+    /**
      * Reserved provider name. Config keys under {@code provider.loadtest-mock.*}
      * are filtered out of the public {@code /api/config} endpoints for the
      * same reason — the harness drives this provider via {@code ConfigService}
@@ -83,6 +91,15 @@ public final class LoadTestRunner {
      */
     public static final String DEFAULT_USER_MESSAGE =
             "Why is the sky blue? Answer in exactly 50 words.";
+
+    /**
+     * Default message for the tools benchmark ({@link #LOADTEST_TOOLS_AGENT_NAME}).
+     * Explicit and imperative because there is no forced tool_choice — the model
+     * must be prompted into calling {@code loadtest_sleep}, and the run reports
+     * how often it actually did (the tool-call rate).
+     */
+    public static final String DEFAULT_TOOL_USER_MESSAGE =
+            "Call the loadtest_sleep tool with ms=200 to pause, then reply with only: done";
 
     /**
      * Loadtest run shape.
@@ -113,7 +130,7 @@ public final class LoadTestRunner {
      */
     public record Request(int concurrency, int turns, boolean compress,
                           LoadTestHarness.Scenario scenario,
-                          boolean realProvider,
+                          boolean realProvider, boolean toolAgent,
                           String provider, String model,
                           String userMessage,
                           List<String> prompts) {
@@ -315,15 +332,27 @@ public final class LoadTestRunner {
      * threads can read them. Returns the agent id used by all workers.
      */
     private static long setupLoadtestAgent(Request req) throws IOException {
+        if (req.toolAgent() && !req.realProvider()) {
+            throw new IllegalArgumentException("toolAgent requires a real provider (provider+model)");
+        }
         var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
         if (!req.realProvider()) LoadTestHarness.setScenario(req.scenario());
         var realProviderName = (req.provider() == null || req.provider().isBlank())
                 ? DEFAULT_REAL_PROVIDER : req.provider();
+        var agentName = req.toolAgent() ? LOADTEST_TOOLS_AGENT_NAME : LOADTEST_AGENT_NAME;
         try {
-            return JPA.withTransaction(DEFAULT_DB, false,
-                    (F.Function0<Long>) () -> req.realProvider()
-                            ? ensureLoadtestAgentRealInner(realProviderName, req.model())
-                            : ensureLoadtestAgentInner(mockPort));
+            return JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Long>) () -> {
+                // Register loadtest_sleep for a tools run WITHOUT switching the
+                // agent off the real provider: the flag only drives tool
+                // registration (ToolRegistrationJob, re-run as a side effect);
+                // disable() flips it back and unregisters the tool on teardown.
+                if (req.toolAgent()) {
+                    ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
+                }
+                return req.realProvider()
+                        ? ensureLoadtestAgentRealInner(realProviderName, req.model(), agentName)
+                        : ensureLoadtestAgentInner(mockPort);
+            });
         } catch (Throwable t) {
             // JPA.withTransaction wraps callee throws as Throwable; surface IOException
             // unwrapped (harness start can throw it) so the caller's narrower throws clause holds.
@@ -334,8 +363,9 @@ public final class LoadTestRunner {
     }
 
     private static IntFunction<String> resolveMessageStrategy(Request req) {
+        var defaultMsg = req.toolAgent() ? DEFAULT_TOOL_USER_MESSAGE : DEFAULT_USER_MESSAGE;
         var userMessage = (req.userMessage() == null || req.userMessage().isBlank())
-                ? DEFAULT_USER_MESSAGE : req.userMessage();
+                ? defaultMsg : req.userMessage();
         boolean variedPrompts = req.prompts() != null && !req.prompts().isEmpty();
         return variedPrompts
                 ? idx -> req.prompts().get(idx)
@@ -867,15 +897,15 @@ public final class LoadTestRunner {
      * provider's own clear error rather than a duplicated up-front check
      * here that could rot out of sync with the registry.
      */
-    private static long ensureLoadtestAgentRealInner(String providerName, String model) {
+    private static long ensureLoadtestAgentRealInner(String providerName, String model, String agentName) {
         if (model == null || model.isBlank()) {
             throw new IllegalArgumentException(
                     "model is required when realProvider=true");
         }
-        var agent = Agent.findByName(LOADTEST_AGENT_NAME);
+        var agent = Agent.findByName(agentName);
         if (agent == null) {
             agent = new Agent();
-            agent.name = LOADTEST_AGENT_NAME;
+            agent.name = agentName;
         }
         agent.modelProvider = providerName;
         agent.modelId = model;
@@ -937,8 +967,11 @@ public final class LoadTestRunner {
     public static void cleanupConversations() {
         try {
             JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Void>) () -> {
-                var agent = Agent.findByName(LOADTEST_AGENT_NAME);
-                if (agent != null) {
+                // Sweep both benchmark agents (no-tool + single-tool twin).
+                var accumulatedIds = new ArrayList<Long>();
+                for (var name : List.of(LOADTEST_AGENT_NAME, LOADTEST_TOOLS_AGENT_NAME)) {
+                    var agent = Agent.findByName(name);
+                    if (agent == null) continue;
                     // JCLAW-135: collect message ids so their CONVERSATION_MESSAGE Lucene
                     // docs can be evicted after the delete — a bulk / cascade delete never
                     // fires Message.@PostRemove. The Conversation delete cascades
@@ -953,14 +986,15 @@ public final class LoadTestRunner {
                             .setParameter(PARAM_AGENT, agent)
                             .executeUpdate();
                     JPA.em().createQuery("DELETE FROM EventLog e WHERE e.agentId = :name")
-                            .setParameter("name", LOADTEST_AGENT_NAME)
+                            .setParameter("name", name)
                             .executeUpdate();
-                    for (Long messageId : messageIds) {
-                        LuceneIndexer.remove(LuceneIndexer.Scope.CONVERSATION_MESSAGE, messageId);
-                    }
-                    if (!messageIds.isEmpty()) {
-                        LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
-                    }
+                    accumulatedIds.addAll(messageIds);
+                }
+                for (Long messageId : accumulatedIds) {
+                    LuceneIndexer.remove(LuceneIndexer.Scope.CONVERSATION_MESSAGE, messageId);
+                }
+                if (!accumulatedIds.isEmpty()) {
+                    LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
                 }
                 return null;
             });

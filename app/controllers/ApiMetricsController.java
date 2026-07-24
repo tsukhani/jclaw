@@ -16,6 +16,7 @@ import services.CompressionMetrics;
 import services.ConfigService;
 import services.LoadTestHarness;
 import services.LoadTestRunner;
+import tools.LoadTestSleepTool;
 import utils.ApiResponses;
 import utils.HttpFactories;
 import utils.LatencyStats;
@@ -320,7 +321,7 @@ public class ApiMetricsController extends Controller {
     private record LoadtestInput(int concurrency, int turns, int ttftMs, int tokensPerSecond,
                                  int responseTokens, int simulatedToolCalls, int toolSleepMs,
                                  boolean compress, String provider, String model, boolean real,
-                                 String userMessage, List<String> prompts) {}
+                                 boolean toolAgent, String userMessage, List<String> prompts) {}
 
     /**
      * POST /api/metrics/loadtest — run a synchronous load test against
@@ -385,31 +386,40 @@ public class ApiMetricsController extends Controller {
             HttpFactories.setLlmDispatcherCapTransient(newPerHost, newMax);
         }
 
+        long toolInvocationsBefore = LoadTestSleepTool.invocations();
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
                     input.concurrency(), input.turns(), input.compress(),
                     new LoadTestHarness.Scenario(input.ttftMs(), input.tokensPerSecond(), input.responseTokens(),
                             input.simulatedToolCalls(), input.toolSleepMs()),
-                    input.real(), input.provider(), input.model(), input.userMessage(), input.prompts()));
+                    input.real(), input.toolAgent(), input.provider(), input.model(), input.userMessage(), input.prompts()));
 
-            if (!input.real()) {
-                LoadTestHarness.stop();
-                LoadTestRunner.disable();
-            }
-
-            renderJSON(GSON.toJson(buildLoadtestResponse(result, input)));
+            long toolInvocations = LoadTestSleepTool.invocations() - toolInvocationsBefore;
+            teardownLoadtest(input);
+            renderJSON(GSON.toJson(buildLoadtestResponse(result, input, toolInvocations)));
         } catch (Result r) {
             throw r;
         } catch (Exception e) {
-            if (!input.real()) {
-                LoadTestHarness.stop();
-                LoadTestRunner.disable();
-            }
+            teardownLoadtest(input);
             ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Load test failed: " + e.getMessage());
         } finally {
             if (dispatcherBumped) {
                 HttpFactories.setLlmDispatcherCapTransient(origPerHost, origMax);
             }
+        }
+    }
+
+    /**
+     * Undo per-run registration after a loadtest: stop the mock harness (mock
+     * runs) or unregister {@code loadtest_sleep} (tools runs). A real non-tool
+     * run leaves nothing to undo.
+     */
+    private static void teardownLoadtest(LoadtestInput input) {
+        if (!input.real()) {
+            LoadTestHarness.stop();
+            LoadTestRunner.disable();
+        } else if (input.toolAgent()) {
+            LoadTestRunner.disable();  // flips loadtest-mock.enabled=false → unregisters the tool
         }
     }
 
@@ -438,13 +448,21 @@ public class ApiMetricsController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "provider and model must be set together (or both omitted for mock mode)");
         }
         boolean real = providerSet;  // both set ⇔ real-provider run
+        // The single-tool benchmark twin (__loadtest_tools__): exposes
+        // loadtest_sleep to a real model. Requires real mode — a real model
+        // must decide to call the tool (there is no forced tool_choice).
+        boolean toolAgent = readBool(body, "toolAgent", false);
+        if (toolAgent && !real) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "toolAgent requires a real provider (set provider and model)");
+        }
         // Optional per-run user message override. Default lives in
         // LoadTestRunner so the constant has one home.
         String userMessage = readString(body, "userMessage", null);
         var prompts = parsePromptsField(body, userMessage);
 
         return new LoadtestInput(concurrency, turns, ttftMs, tokensPerSecond, responseTokens,
-                simulatedToolCalls, toolSleepMs, compress, provider, model, real, userMessage, prompts);
+                simulatedToolCalls, toolSleepMs, compress, provider, model, real, toolAgent, userMessage, prompts);
     }
 
     /**
@@ -520,7 +538,8 @@ public class ApiMetricsController extends Controller {
         }
     }
 
-    private static JsonObject buildLoadtestResponse(LoadTestRunner.Result result, LoadtestInput input) {
+    private static JsonObject buildLoadtestResponse(LoadTestRunner.Result result, LoadtestInput input,
+                                                    long toolInvocations) {
         var out = new JsonObject();
         out.addProperty("totalRequests", result.totalRequests());
         out.addProperty("successCount", result.successCount());
@@ -548,6 +567,16 @@ public class ApiMetricsController extends Controller {
         if (input.real()) {
             out.addProperty("provider", input.provider());
             out.addProperty("model", input.model());
+        }
+        // Tools benchmark: how often the real model actually invoked
+        // loadtest_sleep. No forced tool_choice, so the call is prompt-driven —
+        // toolCallsPerTurn near 1.0 means the model complied on (nearly) every
+        // turn; a low value means the metric is diluted by no-tool turns.
+        if (input.toolAgent()) {
+            out.addProperty("toolInvocations", toolInvocations);
+            long expectedTurns = (long) input.turns() * input.concurrency();
+            out.addProperty("toolCallsPerTurn",
+                    expectedTurns == 0 ? 0.0 : round1((double) toolInvocations / expectedTurns));
         }
         // Per-turn breakdown only when turns > 1 (LoadTestRunner returns
         // null otherwise). Renders as an array of {turn, count, ttftMeanMs,
