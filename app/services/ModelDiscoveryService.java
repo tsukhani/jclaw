@@ -232,6 +232,9 @@ public class ModelDiscoveryService {
 
     @SuppressWarnings("java:S1193") // Catches Exception broadly; instanceof InterruptedException restores interrupt status defensively
     private static DiscoveryResult discoverOpenAiCompat(String providerName, String baseUrl, String apiKey) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return new DiscoveryResult.Error(400, "Provider base URL is required for discovery");
+        }
         try {
             var url = baseUrl.endsWith("/") ? baseUrl + FIELD_MODELS : baseUrl + "/" + FIELD_MODELS;
             var req = new Request.Builder()

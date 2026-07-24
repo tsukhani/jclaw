@@ -9,6 +9,8 @@ import java.io.IOException;
 public class Application extends Controller {
 
     private static final String HTML_CONTENT_TYPE_PREFIX = "text/html; charset=";
+    private static final String CACHE_CONTROL = "Cache-Control";
+    private static final String NO_CACHE = "no-cache";
 
     public static void index() {
         // Serve the SPA if it's been built
@@ -19,7 +21,7 @@ public class Application extends Controller {
             // stale chunk hashes and a new frontend build never reaches users (Play's
             // PlayHandler.addEtag would otherwise apply http.cacheControl=3600 here).
             // The hashed chunks themselves stay long-cached via their own static route.
-            response.setHeader("Cache-Control", "no-cache");
+            response.setHeader(CACHE_CONTROL, NO_CACHE);
             renderBinary(spaIndex);
         }
         // SPA not built — return a simple HTML page instead of the legacy Groovy template
@@ -46,7 +48,7 @@ public class Application extends Controller {
                 File asset = new File(nuxtRoot, path);
                 if (asset.exists() && asset.isFile()
                         && asset.getCanonicalPath().startsWith(nuxtRoot.getCanonicalPath() + File.separator)) {
-                    response.setHeader("Cache-Control", nuxtCacheControl(path));
+                    response.setHeader(CACHE_CONTROL, nuxtCacheControl(path));
                     renderBinary(asset);
                 }
             }
@@ -65,7 +67,7 @@ public class Application extends Controller {
      */
     public static String nuxtCacheControl(String relPath) {
         boolean revalidate = relPath.startsWith("builds/") && !relPath.startsWith("builds/meta/");
-        return revalidate ? "no-cache" : "public, max-age=31536000, immutable";
+        return revalidate ? NO_CACHE : "public, max-age=31536000, immutable";
     }
 
     /**
@@ -94,7 +96,7 @@ public class Application extends Controller {
                 }
                 if (target.exists() && target.isFile()
                         && target.getCanonicalPath().startsWith(appsRoot.getCanonicalPath() + File.separator)) {
-                    response.setHeader("Cache-Control", "no-cache");
+                    response.setHeader(CACHE_CONTROL, NO_CACHE);
                     renderBinary(target);
                 }
             }
@@ -131,7 +133,7 @@ public class Application extends Controller {
         response.setContentTypeIfNotSet(HTML_CONTENT_TYPE_PREFIX + Play.defaultWebEncoding);
         // Always revalidate the SPA shell so a new build's chunk hashes are picked up
         // immediately (see index() above). Hashed _nuxt/ assets keep their long cache.
-        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader(CACHE_CONTROL, NO_CACHE);
         renderBinary(index);
     }
 

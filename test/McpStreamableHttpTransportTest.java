@@ -187,20 +187,17 @@ class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @Test
-    void sendRejectsMetadataEndpointBeforeConnect() throws Exception {
+    void sendRejectsMetadataEndpointBeforeConnect() {
         // JCLAW-778: an agent-settable endpoint pointing at the cloud-metadata IP
         // is rejected synchronously by the SSRF guard before the POST is enqueued.
-        var t = new McpStreamableHttpTransport("meta",
-                URI.create("http://169.254.169.254/mcp"), Map.of());
-        try {
+        try (var t = new McpStreamableHttpTransport("meta",
+                URI.create("http://169.254.169.254/mcp"), Map.of())) {
             t.start(received::add, error::set);
             var ex = assertThrows(java.io.IOException.class,
                     () -> t.send(new JsonRpc.Request(1L, "ping", null)));
             assertTrue(ex.getMessage().contains("SSRF guard"),
                     "rejection must come from the guard: " + ex.getMessage());
             assertEquals(0, server.getRequestCount(), "no request may reach any server");
-        } finally {
-            t.close();
         }
     }
 

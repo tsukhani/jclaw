@@ -200,7 +200,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         JsonObject args;
         try {
             args = JsonParser.parseString(argsJson).getAsJsonObject();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             return false;   // execute() rejects malformed args before any request
         }
         var action = stringField(args, KEY_ACTION);

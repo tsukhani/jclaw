@@ -46,6 +46,12 @@ public class WhatsAppChannel implements Channel {
     /** Graph messages-API envelope key, required on every outbound body. */
     private static final String MESSAGING_PRODUCT = "messaging_product";
 
+    /** Inbound webhook envelope keys: entry[].changes[].value.messages[].timestamp. */
+    private static final String KEY_ENTRY = "entry";
+    private static final String KEY_CHANGES = "changes";
+    private static final String KEY_MESSAGES = "messages";
+    private static final String KEY_TIMESTAMP = "timestamp";
+
     public record WhatsAppConfig(String phoneNumberId, String accessToken, String appSecret, String verifyToken) {
         public static WhatsAppConfig load() {
             var cc = ChannelConfig.findByType(WHATSAPP);
@@ -475,20 +481,20 @@ public class WhatsAppChannel implements Channel {
      *  Defensive against any missing hop so a malformed payload yields null (stale)
      *  rather than throwing. */
     private static String extractMessageTimestamp(JsonObject payload) {
-        if (payload == null || !payload.has("entry")) return null;
-        var entries = payload.getAsJsonArray("entry");
+        if (payload == null || !payload.has(KEY_ENTRY)) return null;
+        var entries = payload.getAsJsonArray(KEY_ENTRY);
         if (entries.isEmpty()) return null;
         var entry = entries.get(0).getAsJsonObject();
-        if (!entry.has("changes")) return null;
-        var changes = entry.getAsJsonArray("changes");
+        if (!entry.has(KEY_CHANGES)) return null;
+        var changes = entry.getAsJsonArray(KEY_CHANGES);
         if (changes.isEmpty()) return null;
         var value = changes.get(0).getAsJsonObject().getAsJsonObject("value");
-        if (value == null || !value.has("messages")) return null;
-        var messages = value.getAsJsonArray("messages");
+        if (value == null || !value.has(KEY_MESSAGES)) return null;
+        var messages = value.getAsJsonArray(KEY_MESSAGES);
         if (messages.isEmpty()) return null;
         var msg = messages.get(0).getAsJsonObject();
-        return msg.has("timestamp") && !msg.get("timestamp").isJsonNull()
-                ? msg.get("timestamp").getAsString() : null;
+        return msg.has(KEY_TIMESTAMP) && !msg.get(KEY_TIMESTAMP).isJsonNull()
+                ? msg.get(KEY_TIMESTAMP).getAsString() : null;
     }
 
     public static boolean verifySignature(String appSecret, String rawBody, String signatureHeader) {
@@ -511,20 +517,20 @@ public class WhatsAppChannel implements Channel {
     public record InboundMessage(String from, String text, String messageId, String phoneNumberId) {}
 
     public static InboundMessage parseWebhook(JsonObject payload) {
-        if (!payload.has("entry")) return null;
-        var entries = payload.getAsJsonArray("entry");
+        if (!payload.has(KEY_ENTRY)) return null;
+        var entries = payload.getAsJsonArray(KEY_ENTRY);
         if (entries.isEmpty()) return null;
 
         var entry = entries.get(0).getAsJsonObject();
-        if (!entry.has("changes")) return null;
-        var changes = entry.getAsJsonArray("changes");
+        if (!entry.has(KEY_CHANGES)) return null;
+        var changes = entry.getAsJsonArray(KEY_CHANGES);
         if (changes.isEmpty()) return null;
 
         var change = changes.get(0).getAsJsonObject();
         var value = change.getAsJsonObject("value");
-        if (value == null || !value.has("messages")) return null;
+        if (value == null || !value.has(KEY_MESSAGES)) return null;
 
-        var messages = value.getAsJsonArray("messages");
+        var messages = value.getAsJsonArray(KEY_MESSAGES);
         if (messages.isEmpty()) return null;
 
         var msg = messages.get(0).getAsJsonObject();

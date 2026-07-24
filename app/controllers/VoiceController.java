@@ -432,20 +432,25 @@ public class VoiceController extends WebSocketController {
             var s = buf.toString();
             int idx = sentenceEnd(s);
             if (idx < 0) {
-                if (s.length() > maxRunOn) {                  // run-on guard
-                    int cut = s.lastIndexOf(' ', maxRunOn);
-                    if (cut <= 0) cut = maxRunOn;
-                    var piece = s.substring(0, cut).strip();
-                    if (!piece.isEmpty()) out.offer(piece);
-                    buf.delete(0, cut);
-                    continue;
-                }
+                if (flushRunOn(buf, out, s, maxRunOn)) continue;   // run-on guard
                 return;
             }
             var sentence = s.substring(0, idx).strip();
             if (!sentence.isEmpty()) out.offer(sentence);
             buf.delete(0, idx);
         }
+    }
+
+    /** Flush an over-long run-on (no sentence mark) as one piece so audio starts
+     *  promptly; returns true if it cut (keep draining), false if nothing to do. */
+    private static boolean flushRunOn(StringBuilder buf, Queue<String> out, String s, int maxRunOn) {
+        if (s.length() <= maxRunOn) return false;
+        int cut = s.lastIndexOf(' ', maxRunOn);
+        if (cut <= 0) cut = maxRunOn;
+        var piece = s.substring(0, cut).strip();
+        if (!piece.isEmpty()) out.offer(piece);
+        buf.delete(0, cut);
+        return true;
     }
 
     /** Index just past a sentence-ending mark ({@code . ! ? …}) followed by

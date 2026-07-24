@@ -85,6 +85,10 @@ public final class VoiceTurnMetrics {
         return (clockNs.getAsLong() - endpointNs) / 1_000_000L;
     }
 
+    // S6213: `record` is the semantic verb here (delegates to LatencyStats.record,
+    // matching HdrHistogram.recordValue) — renaming would misname the metrics API
+    // purely to dodge Java's contextual keyword. Mirrors LatencyStats.record.
+    @SuppressWarnings("java:S6213")
     private void record(String segment, long ms) {
         LatencyStats.record(CHANNEL, segment, ms, agentId);
     }

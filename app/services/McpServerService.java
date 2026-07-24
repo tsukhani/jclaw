@@ -338,28 +338,34 @@ public final class McpServerService {
         }
         var cfg = explodeConfigJson(row.transport, row.configJson);
         switch (row.transport) {
-            case STDIO -> {
-                if (cfg.command() == null || cfg.command().isBlank()) {
-                    throw new IllegalArgumentException("STDIO transport requires command");
-                }
-            }
-            case HTTP -> {
-                if (cfg.url() == null || cfg.url().isBlank()) {
-                    throw new IllegalArgumentException("HTTP transport requires url");
-                }
-                try { URI.create(cfg.url()); }
-                catch (IllegalArgumentException _) {
-                    throw new IllegalArgumentException("HTTP transport url is not a valid URI");
-                }
-                // JCLAW-778: the url is agent-settable. Reject a metadata /
-                // link-local literal at validate time; loopback/LAN stay allowed
-                // for local MCP servers, and hostname rebinding is screened at
-                // connect by PROVIDER_SAFE_DNS on the guarded transport client.
-                try { SsrfGuard.assertProviderUrlSafe(cfg.url()); }
-                catch (SecurityException e) {
-                    throw new IllegalArgumentException("HTTP transport url rejected: " + e.getMessage());
-                }
-            }
+            case STDIO -> validateStdioConfig(cfg);
+            case HTTP -> validateHttpConfig(cfg);
+        }
+    }
+
+    /** STDIO transport requires a command. */
+    private static void validateStdioConfig(TransportConfig cfg) {
+        if (cfg.command() == null || cfg.command().isBlank()) {
+            throw new IllegalArgumentException("STDIO transport requires command");
+        }
+    }
+
+    /** HTTP transport requires a syntactically valid, SSRF-safe url. */
+    private static void validateHttpConfig(TransportConfig cfg) {
+        if (cfg.url() == null || cfg.url().isBlank()) {
+            throw new IllegalArgumentException("HTTP transport requires url");
+        }
+        try { URI.create(cfg.url()); }
+        catch (IllegalArgumentException _) {
+            throw new IllegalArgumentException("HTTP transport url is not a valid URI");
+        }
+        // JCLAW-778: the url is agent-settable. Reject a metadata / link-local
+        // literal at validate time; loopback/LAN stay allowed for local MCP
+        // servers, and hostname rebinding is screened at connect by
+        // PROVIDER_SAFE_DNS on the guarded transport client.
+        try { SsrfGuard.assertProviderUrlSafe(cfg.url()); }
+        catch (SecurityException e) {
+            throw new IllegalArgumentException("HTTP transport url rejected: " + e.getMessage());
         }
     }
 
