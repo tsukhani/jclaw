@@ -86,6 +86,8 @@ Optical character recognition for image and scanned-PDF attachments via the `doc
 
 Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
 
+A missing backend prints the install command for the operating system JClaw is running on, so you don't have to pick your line out of the table below — the same words the server logs at startup.
+
 Installing Tesseract:
 
 | | |

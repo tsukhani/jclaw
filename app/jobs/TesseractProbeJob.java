@@ -5,6 +5,7 @@ import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.OcrHealthProbe;
+import services.OcrInstallHint;
 
 /**
  * JCLAW-177: probe the {@code tesseract} binary at boot. When missing, log
@@ -29,28 +30,7 @@ public class TesseractProbeJob extends Job<Void> {
         } else {
             Logger.warn("OCR: %s. OCR-dependent inputs (image-only PDFs, plain images, "
                     + "scanned documents) will return empty text. Install with: %s",
-                    r.reason(), installHint());
+                    r.reason(), OcrInstallHint.current());
         }
-    }
-
-    /**
-     * Name the platform the operator is actually on. The previous message offered
-     * brew and apt to everyone, which on Windows is advice for two operating systems
-     * they are not running. The Windows installer does not put tesseract on PATH, so
-     * the caveat and the ocr.tesseract.path escape hatch both matter there
-     * (JCLAW-1107).
-     */
-    private static String installHint() {
-        var os = System.getProperty("os.name", "");
-        if (os.startsWith("Windows")) {
-            return "winget install -e --id UB-Mannheim.TesseractOCR — then either reopen "
-                    + "your terminal so the new PATH is visible, or set ocr.tesseract.path "
-                    + "to the install directory (e.g. C:\\Program Files\\Tesseract-OCR).";
-        }
-        if (os.startsWith("Mac")) {
-            return "brew install tesseract.";
-        }
-        return "apt-get install tesseract-ocr (Debian/Ubuntu), dnf install tesseract "
-                + "(Fedora/RHEL), or the equivalent for your distribution.";
     }
 }

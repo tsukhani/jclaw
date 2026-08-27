@@ -9,6 +9,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.OcrHealthProbe;
+import services.OcrInstallHint;
 
 import java.util.List;
 
@@ -56,9 +57,9 @@ public class ApiOcrController extends Controller {
                         + "scanned PDFs by shelling out to the tesseract binary. Fast and "
                         + "predictable for English-language print scans; weaker on "
                         + "handwriting and complex layouts.",
-                "Install tesseract on the host: brew install tesseract (macOS), "
-                        + "apt-get install tesseract-ocr (Debian/Ubuntu). A JVM restart is "
-                        + "required for the startup probe to re-detect the binary.");
+                // Worded for this host, and shared with the boot WARN so the operator
+                // reads the same instructions wherever they meet them (JCLAW-1108).
+                OcrInstallHint.current());
 
         renderJSON(gson.toJson(new OcrStatusResponse(List.of(tesseract))));
     }
