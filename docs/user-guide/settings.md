@@ -86,6 +86,18 @@ Optical character recognition for image and scanned-PDF attachments via the `doc
 
 Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
 
+Installing Tesseract:
+
+| | |
+|---|---|
+| macOS | `brew install tesseract` |
+| Debian/Ubuntu | `apt-get install tesseract-ocr` |
+| Windows | `winget install -e --id UB-Mannheim.TesseractOCR` |
+
+**On Windows the installer does not add Tesseract to your PATH.** Either add its folder yourself and open a new terminal, or — simpler — set `ocr.tesseract.path` in `conf/application.conf` to the install directory (`C:\Program Files\Tesseract-OCR`) and restart. Point it at the folder, not the `.exe`. A path that isn't a directory is refused at startup rather than ignored, so a typo tells you instead of silently leaving OCR off.
+
+Extra languages install separately (`tesseract-ocr-fra`, `tesseract-ocr-jpn`, …); list them in `ocr.tesseract.languages` as `eng+fra+jpn`.
+
 ## Image Captioning
 
 The vision analogue of Transcription: non-vision chat models get a short **text description** of an uploaded image before it reaches the LLM. Vision-capable models still receive the image natively. WebP and other formats are transcoded to PNG first so every backend can read them.
