@@ -202,6 +202,9 @@ POST    /api/providers/refresh-prices           ApiProvidersController.refreshPr
 
 # OCR backends — availability + enabled state for the Settings page
 GET     /api/ocr/status                         ApiOcrController.status
+GET     /api/ocr/tesseract/install-plan          ApiOcrController.installPlan
+POST    /api/ocr/tesseract/install               ApiOcrController.install
+GET     /api/ocr/tesseract/install-state         ApiOcrController.installState
 
 # Config API
 GET     /api/config                             ApiConfigController.list
