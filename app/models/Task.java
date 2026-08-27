@@ -320,13 +320,14 @@ public class Task extends TimestampedModel {
      * {@code "Asia/Tokyo"}) for {@link Type#CRON} and {@link Type#SCHEDULED}
      * fire-time resolution. When non-null, the scheduler interprets the
      * cron expression / {@link #scheduledAt} wall-clock in this zone.
-     * When null, the resolver falls back through:
-     * <ol>
-     *   <li>Config row {@code tasks.defaultTimezone} (operator-set default)</li>
-     *   <li>application.conf {@code tasks.defaultTimezone}</li>
-     *   <li>{@code ZoneId.systemDefault()}</li>
-     * </ol>
-     * {@link Type#INTERVAL} and {@link Type#IMMEDIATE} ignore this field —
+     *
+     * <p>When null the effective zone comes from {@link services.TimezoneResolver},
+     * whose chain ends at the operator's own wall-clock zone ({@code app.timezone},
+     * Settings &rarr; General) rather than the server's JVM zone — so a zone-less
+     * 9 AM task fires at the operator's 9 AM. The order lives in that class alone:
+     * a second copy here is a copy that drifts out of step with the resolver.
+     *
+     * <p>{@link Type#INTERVAL} and {@link Type#IMMEDIATE} ignore this field —
      * their fire schedule is duration-based, with no wall-clock dependence.
      */
     @Column(name = "timezone", length = 64)
