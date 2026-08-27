@@ -99,6 +99,43 @@ class ApiOcrControllerTest extends FunctionalTest {
     }
 
     @Test
+    void refreshProbesInsteadOfServingTheCache() {
+        // JCLAW-1108: /api/ocr/status re-probes so an agent asking through jclaw_api
+        // gets live state. Reset the cache to its unrun sentinel and require that
+        // refresh() does NOT hand that sentinel back -- it can only avoid doing so by
+        // actually invoking the probe.
+        //
+        // One-directional on purpose: if a concurrent test pins a result mid-flight,
+        // refresh() returns that pin and this still passes. Only the real defect
+        // (reading the cache) can turn it red, so the shared cache cannot flake it.
+        var saved = OcrHealthProbe.lastResult();
+        try {
+            OcrHealthProbe.setForTest(null);
+            var r = OcrHealthProbe.refresh();
+            assertFalse(r.reason() != null && r.reason().contains("has not run yet"),
+                    "refresh() returned the unrun sentinel, so it read the cache "
+                            + "instead of probing: " + r);
+        } finally {
+            OcrHealthProbe.setForTest(saved);
+        }
+    }
+
+    @Test
+    void refreshHonoursThePinnedTestResult() {
+        // The seam has to beat the probe, or every test forcing the unavailable path
+        // would fork the real binary and pass or fail on whether the host has it.
+        var saved = OcrHealthProbe.lastResult();
+        try {
+            OcrHealthProbe.setForTest(new OcrHealthProbe.ProbeResult(
+                    false, null, "pinned: binary absent"));
+            assertEquals("pinned: binary absent", OcrHealthProbe.refresh().reason());
+            assertFalse(OcrHealthProbe.refresh().available());
+        } finally {
+            OcrHealthProbe.setForTest(saved);
+        }
+    }
+
+    @Test
     void statusRequiresAuth() {
         POST("/api/auth/logout", "application/json", "{}");
         var response = GET("/api/ocr/status");

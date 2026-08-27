@@ -127,10 +127,11 @@ class DocumentsToolTest extends UnitTest {
 
             assertTrue(result.contains("tesseract"),
                     "Expected diagnostic to name 'tesseract', got: " + result);
-            assertTrue(result.contains("brew install tesseract"),
-                    "Expected diagnostic to suggest macOS install command, got: " + result);
-            assertTrue(result.contains("apt-get install tesseract-ocr"),
-                    "Expected diagnostic to suggest Debian/Ubuntu install command, got: " + result);
+            // The install command for THIS host, not a list of every platform's. The
+            // agent reads this string when OCR silently returns nothing, so on Windows
+            // the old brew/apt wording sent it to two package managers that are not there.
+            assertTrue(result.contains(services.OcrInstallHint.current()),
+                    "Expected the shared per-OS install hint, got: " + result);
         } finally {
             OcrHealthProbe.setForTest(saved);
         }

@@ -44,6 +44,10 @@ public class OcrHealthProbe {
         return java.nio.file.Paths.get(configuredDir.trim()).resolve(prog).toString();
     }
 
+    /** Set while a test has forced a result, so {@link #refresh} serves it instead of forking. */
+    private static final java.util.concurrent.atomic.AtomicBoolean PINNED_FOR_TEST =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+
     private static final ProbeCache<ProbeResult> CACHE = new ProbeCache<>(
             new ProbeResult(false, null, "tesseract probe has not run yet"));
 
@@ -72,11 +76,31 @@ public class OcrHealthProbe {
     }
 
     /**
+     * Probe now and return the fresh result, for callers that must not serve a
+     * stale answer. {@code /api/ocr/status} uses this: it backs the Settings
+     * panel and is reachable by agents through {@code jclaw_api}, so an operator
+     * who installs tesseract and asks "is OCR available yet?" would otherwise be
+     * told no until the next restart. Costs one bounded {@code tesseract
+     * --version} fork (5s ceiling, ~30ms typical) per call, which a page load
+     * and a tool call can both afford -- unlike {@link tools.DocumentsTool}, which
+     * stays on {@link #lastResult()} because it would fork on every empty parse.
+     *
+     * <p>A pinned test result wins over the probe. Without that, any test forcing
+     * the unavailable path through {@link #setForTest} would fork the real binary
+     * instead, and pass or fail on whether the host happens to have tesseract
+     * installed.
+     */
+    public static ProbeResult refresh() {
+        return PINNED_FOR_TEST.get() ? CACHE.get() : probe();
+    }
+
+    /**
      * Test seam: replace the cached probe result without invoking the binary.
      * Lets tests exercise the missing-tesseract code path on a host where the
      * binary is actually installed (and vice versa).
      */
     public static void setForTest(ProbeResult forced) {
+        PINNED_FOR_TEST.set(forced != null);
         CACHE.setForTest(forced);
     }
 }

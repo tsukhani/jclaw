@@ -41,7 +41,10 @@ public class ApiOcrController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = OcrStatusResponse.class)))
     @Operation(summary = "Report OCR provider availability and operator-enabled state for the Settings page")
     public static void status() {
-        var probe = OcrHealthProbe.lastResult();
+        // Probe now rather than serving the boot snapshot: an operator who just
+        // installed tesseract, or an agent asking through jclaw_api whether OCR
+        // works, would otherwise be told no until the next restart.
+        var probe = OcrHealthProbe.refresh();
         var enabled = "true".equalsIgnoreCase(
                 ConfigService.get("ocr.tesseract.enabled", "true"));
 
