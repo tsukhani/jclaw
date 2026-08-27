@@ -459,6 +459,69 @@ async function saveDelivery(task: Task) {
   }
 }
 
+// JCLAW-1106: per-task timezone override. Offered only for CRON and SCHEDULED —
+// INTERVAL and IMMEDIATE are duration-based and ignore the field, so a control
+// there would imply an effect that does not exist. An empty selection clears the
+// override and returns the task to the resolver's default chain.
+const editingTimezoneId = ref<number | null>(null)
+const editTimezone = ref('')
+const savingTimezone = ref(false)
+const timezoneError = ref<string | null>(null)
+const timezoneOptions = ref<string[]>([])
+const timezoneDefault = ref<string | null>(null)
+
+// ~600 zone ids, so fetch on first edit rather than on page load. /api/timezones
+// also returns the effective task-scheduling default, which names what "inherit"
+// actually resolves to instead of leaving the operator to guess.
+async function loadTimezoneOptions() {
+  if (timezoneOptions.value.length) return
+  try {
+    const r = await $fetch<{ timezones: string[], default: string }>('/api/timezones')
+    timezoneOptions.value = r?.timezones ?? []
+    timezoneDefault.value = r?.default ?? null
+  }
+  catch { /* non-fatal: the select still offers inherit + the stored value */ }
+}
+
+function startEditTimezone(task: Task) {
+  editTimezone.value = task.timezone ?? ''
+  timezoneError.value = null
+  editingTimezoneId.value = task.id
+  void loadTimezoneOptions()
+}
+
+function cancelEditTimezone() {
+  editingTimezoneId.value = null
+  editTimezone.value = ''
+  timezoneError.value = null
+}
+
+async function saveTimezone(task: Task) {
+  savingTimezone.value = true
+  timezoneError.value = null
+  try {
+    // null, not '': the backend reads an explicit null as "clear the override".
+    const timezone = editTimezone.value === '' ? null : editTimezone.value
+    await $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { timezone } })
+    editingTimezoneId.value = null
+    refresh()
+  }
+  catch (e) {
+    const data = (e as { data?: { error?: string } }).data
+    timezoneError.value = data?.error ?? (e instanceof Error ? e.message : 'Failed to save timezone')
+  }
+  finally {
+    savingTimezone.value = false
+  }
+}
+
+// The zone in force, and where it came from — a task showing only "Asia/Tokyo"
+// gives no way to tell an override from the inherited default.
+function timezoneLabel(task: Task): string {
+  const effective = task.effectiveTimezone ?? '—'
+  return task.timezone ? effective : `${effective} (inherited)`
+}
+
 // ── JCLAW-22 (slice P): TaskRun trace in a PeekPanel ──
 // The shared PeekPanel lazy-loads a run's task_run_message rows (turn-by-turn
 // trace) from /api/task-runs/{id}/messages. Opened either from a run row in
@@ -690,7 +753,8 @@ let liveRefreshHandle: ReturnType<typeof setTimeout> | undefined
 function scheduleLiveRefresh() {
   if (liveRefreshHandle) clearTimeout(liveRefreshHandle)
   liveRefreshHandle = setTimeout(() => {
-    if (editingId.value != null || editingDeliveryId.value != null || editingNameId.value != null) return
+    if (editingId.value != null || editingDeliveryId.value != null || editingNameId.value != null
+      || editingTimezoneId.value != null) return
     refresh()
     refreshStats()
     for (const id of expandedIds) void loadRuns(id)
@@ -1663,6 +1727,86 @@ function zoneForTaskRender(task: Task): string | undefined {
                           class="text-xs text-red-700 dark:text-red-400"
                         >
                           {{ deliveryError }}
+                        </p>
+                      </div>
+                    </section>
+
+                    <!-- JCLAW-1106: per-task timezone override, read-only with an
+                     inline editor behind Edit. CRON/SCHEDULED only — the other two
+                     types are duration-based and ignore the field entirely. -->
+                    <section v-if="task.type === 'CRON' || task.type === 'SCHEDULED'">
+                      <div class="flex items-center justify-between mb-1.5">
+                        <div class="text-[10px] uppercase tracking-wider font-medium text-fg-muted">
+                          Timezone
+                        </div>
+                        <button
+                          v-if="editingTimezoneId !== task.id"
+                          type="button"
+                          class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+                          @click="startEditTimezone(task)"
+                        >
+                          <PencilSquareIcon
+                            class="h-3 w-3"
+                            aria-hidden="true"
+                          />
+                          Edit
+                        </button>
+                      </div>
+
+                      <p
+                        v-if="editingTimezoneId !== task.id"
+                        class="text-xs text-fg-primary font-mono"
+                      >
+                        {{ timezoneLabel(task) }}
+                      </p>
+
+                      <div
+                        v-else
+                        class="space-y-2"
+                      >
+                        <select
+                          v-model="editTimezone"
+                          aria-label="Task timezone"
+                          class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden focus:border-ring transition-colors"
+                        >
+                          <option value="">
+                            Inherit the default{{ timezoneDefault ? ` (${timezoneDefault})` : '' }}
+                          </option>
+                          <option
+                            v-for="tz in timezoneOptions"
+                            :key="tz"
+                            :value="tz"
+                          >
+                            {{ tz }}
+                          </option>
+                        </select>
+                        <div class="flex items-center gap-2">
+                          <button
+                            type="button"
+                            :disabled="savingTimezone"
+                            class="px-2 py-1 text-xs bg-muted border border-input text-fg-muted hover:text-fg-strong disabled:opacity-50 cursor-pointer"
+                            @click="cancelEditTimezone"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            :disabled="savingTimezone"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs bg-muted border border-emerald-600 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-600/10 disabled:opacity-50 cursor-pointer"
+                            @click="saveTimezone(task)"
+                          >
+                            <CheckIcon
+                              class="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                            {{ savingTimezone ? 'Saving…' : 'Save' }}
+                          </button>
+                        </div>
+                        <p
+                          v-if="timezoneError"
+                          class="text-xs text-red-700 dark:text-red-400"
+                        >
+                          {{ timezoneError }}
                         </p>
                       </div>
                     </section>

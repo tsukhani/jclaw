@@ -172,6 +172,15 @@ public final class TaskWriteService {
         if (body.has(KEY_PRE_CHECK))           { task.preCheck          = readOptionalString(body, KEY_PRE_CHECK);           changed = true; }
         if (body.has(KEY_SCRIPT))              { task.script            = readOptionalString(body, KEY_SCRIPT);              changed = true; }
         if (body.has(KEY_CONTEXT_FROM_TASK_IDS)){ task.contextFromTaskIds= readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);changed = true; }
+        // JCLAW-1106: a per-task zone was settable at create but silently dropped on
+        // PATCH, so a timezone-only patch answered "No patchable fields in body".
+        // An explicit null clears the override and returns the task to the default
+        // chain. The controller's rejectInvalidTimezone guard covers this path too.
+        if (body.has(KEY_TIMEZONE)) {
+            var tz = readOptionalString(body, KEY_TIMEZONE);
+            task.timezone = tz != null ? tz.trim() : null;
+            changed = true;
+        }
         return changed;
     }
 

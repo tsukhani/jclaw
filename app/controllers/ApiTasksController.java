@@ -403,7 +403,9 @@ public class ApiTasksController extends Controller {
         if (body == null) badRequest();
 
         rejectInvalidDelivery(body);
+        rejectInvalidTimezone(body);
 
+        var timezoneBefore = task.timezone;
         boolean scheduleChanged = applyScheduleUpdate(task, body);
         boolean nameChanged = applyNameUpdate(task, body);
         boolean fieldsChanged = TaskWriteService.applyOptionalFieldUpdates(task, body);
@@ -423,7 +425,11 @@ public class ApiTasksController extends Controller {
         }
 
         task.save();
-        if (scheduleChanged) {
+        // A zone change moves future fire times as surely as a schedule change does:
+        // register() resolves the zone when it computes the next fire, so without a
+        // re-register the scheduled_tasks row would keep firing on the old zone until
+        // some later change happened to rebuild it (JCLAW-1106).
+        if (scheduleChanged || !Objects.equals(timezoneBefore, task.timezone)) {
             // cancel-then-register against db-scheduler. No-op in tests
             // where SchedulerClient isn't wired (null-soft per the
             // service's internal client() guard).

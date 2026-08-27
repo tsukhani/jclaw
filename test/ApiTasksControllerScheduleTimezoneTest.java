@@ -109,4 +109,66 @@ class ApiTasksControllerScheduleTimezoneTest extends FunctionalTest {
         }
         return makeRequest(request);
     }
+
+    /**
+     * JCLAW-1106: a per-task zone was accepted at create but dropped on PATCH —
+     * applyOptionalFieldUpdates never read the key, so a timezone-only patch fell
+     * through to "No patchable fields in body". These pin set, clear and reject.
+     */
+    @Test
+    void timezoneOnlyPatchIsAcceptedAndPersisted() {
+        var agent = seedAgent();
+        var created = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "tz-patch", "schedule": "now", "timezone": "Asia/Tokyo"}
+                """.formatted(agent));
+        assertIsOk(created);
+        var taskId = extractId(getContent(created));
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"timezone": "America/New_York"}
+                """);
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("America/New_York"),
+                "the patched zone should come back on the task: " + getContent(resp));
+    }
+
+    @Test
+    void anExplicitNullClearsThePerTaskZone() {
+        var agent = seedAgent();
+        var created = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "tz-clear", "schedule": "now", "timezone": "Asia/Tokyo"}
+                """.formatted(agent));
+        assertIsOk(created);
+        var taskId = extractId(getContent(created));
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"timezone": null}
+                """);
+        assertIsOk(resp);
+        // The override is gone; effectiveTimezone still resolves through the
+        // default chain, so the response carries a zone either way — what must
+        // NOT survive is the task's own Tokyo override.
+        assertFalse(getContent(resp).contains("\"timezone\":\"Asia/Tokyo\""),
+                "the per-task override should be cleared: " + getContent(resp));
+    }
+
+    @Test
+    void anInvalidZoneIsRejectedOnPatchNotJustOnCreate() {
+        var agent = seedAgent();
+        var created = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "tz-bad", "schedule": "now"}
+                """.formatted(agent));
+        assertIsOk(created);
+        var taskId = extractId(getContent(created));
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"timezone": "Not/AZone"}
+                """);
+        assertStatus(400, resp);
+        // Assert the REASON, not just the status: before this fix an unknown
+        // timezone was ignored, so the request fell through to "No patchable
+        // fields in body" — also a 400. Status alone cannot tell the two apart.
+        assertTrue(getContent(resp).contains("Invalid IANA timezone"),
+                "should be rejected as a bad zone, not as an empty patch: " + getContent(resp));
+    }
 }
