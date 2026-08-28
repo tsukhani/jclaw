@@ -51,7 +51,9 @@ import java.util.regex.Pattern;
  * <p>The formatter parses the input with flexmark-java (already on the classpath
  * for other markdown rendering) and walks the AST, emitting Telegram-safe HTML
  * directly. Tables are the interesting case: {@link TableMode#BULLETS} renders
- * each body row as a bulleted line keyed by the header row's cells;
+ * each body row as a bulleted line keyed by the header row's cells — or, once
+ * repeating the header would cost more than {@code HEADER_REPEAT_BUDGET_CHARS},
+ * by a single lead-in header line;
  * {@link TableMode#CODE} wraps the verbatim pipe text in {@code <pre><code>};
  * {@link TableMode#OFF} drops tables entirely.
  *
@@ -282,10 +284,34 @@ public final class TelegramMarkdownFormatter {
             List<String> headerLabels = collectHeaderLabels(head);
             if (body == null) return;
 
+            if (repeatHeaderPerRow(headerLabels, countRows(body))) {
+                emitTableRows(body, headerLabels);
+            } else {
+                emitHeaderLine(headerLabels);
+                emitTableRows(body, List.of());
+            }
+            out.append("\n");
+        }
+
+        private void emitTableRows(TableBody body, List<String> headerLabels) {
             for (Node row = body.getFirstChild(); row != null; row = row.getNext()) {
                 if (row instanceof TableRow) emitTableBodyRow(row, headerLabels);
             }
-            out.append("\n");
+        }
+
+        /** Lead-in line carrying the header once, for a table too large to repeat it per row. */
+        private void emitHeaderLine(List<String> headerLabels) {
+            var labels = headerLabels.stream().filter(l -> !l.isBlank()).toList();
+            if (labels.isEmpty()) return;
+            out.append("<b>").append(escapeHtml(String.join(" \u2014 ", labels))).append("</b>\n");
+        }
+
+        private static int countRows(TableBody body) {
+            int rows = 0;
+            for (Node row = body.getFirstChild(); row != null; row = row.getNext()) {
+                if (row instanceof TableRow) rows++;
+            }
+            return rows;
         }
 
         private void emitTableBodyRow(Node row, List<String> headerLabels) {
@@ -303,6 +329,26 @@ public final class TelegramMarkdownFormatter {
                 emitChildren(cells.get(i));
             }
             out.append("\n");
+        }
+
+        /** Per-label wrapper cost in {@link #emitTableBodyRow}: {@code <b>} plus {@code </b>: }. */
+        private static final int LABEL_WRAPPER_CHARS = 9;
+
+        /**
+         * Budget for the header text BULLETS mode duplicates across body rows. Keying every row
+         * by its header is what makes a table readable on a channel with no table grammar, but
+         * the cost is rows x labels: a 200-row table headed {@code | Response | Tool |} emitted
+         * each of those words 200 times and grew 3520 to 9089 chars, splitting one reply across
+         * three Telegram messages (GH issue #10).
+         */
+        private static final int HEADER_REPEAT_BUDGET_CHARS = 1000;
+
+        private static boolean repeatHeaderPerRow(List<String> headerLabels, int rows) {
+            int perRow = 0;
+            for (var label : headerLabels) {
+                if (!label.isBlank()) perRow += label.length() + LABEL_WRAPPER_CHARS;
+            }
+            return (long) rows * perRow <= HEADER_REPEAT_BUDGET_CHARS;
         }
 
         private List<String> collectHeaderLabels(TableHead head) {

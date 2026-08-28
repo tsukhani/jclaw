@@ -204,6 +204,31 @@ class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
+    void wideTableEmitsHeaderOnceInsteadOfPerRow() {
+        // GH #10: a long table headed "Response | Tool" rendered those two words once
+        // per row — 200 rows put each of them on screen 200 times and grew the reply
+        // 2.6x, splitting one Telegram message into three.
+        var md = new StringBuilder("| Response | Tool |\n| --- | --- |\n");
+        for (int i = 0; i < 200; i++) {
+            md.append("| ok").append(i).append(" | shell |\n");
+        }
+        var html = TelegramMarkdownFormatter.toHtml(md.toString());
+
+        assertEquals(1, countOccurrences(html, "Response"),
+                () -> "header emitted once, not per row: " + html.substring(0, 200));
+        assertEquals(1, countOccurrences(html, "Tool"),
+                () -> "header emitted once, not per row: " + html.substring(0, 200));
+        assertTrue(html.contains("<b>Response \u2014 Tool</b>"),
+                () -> "header rides one lead-in line: " + html.substring(0, 200));
+        assertTrue(html.contains("\u2022 ok0 \u2014 shell"),
+                () -> "rows keep their cells, unlabeled: " + html.substring(0, 200));
+        assertTrue(html.contains("\u2022 ok199 \u2014 shell"),
+                () -> "every row still rendered: " + html);
+        assertTrue(html.length() < md.length() * 1.2,
+                () -> "render must not balloon the reply: md=" + md.length() + " html=" + html.length());
+    }
+
+    @Test
     void tableCodeModeWrapsInPreCode() {
         var md = """
                 | A | B |
