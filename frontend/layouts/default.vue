@@ -574,11 +574,14 @@ const navGroups: NavGroup[] = [
                  spells out the comparison so an operator hovering an
                  amber dot can read the actual delta without digging.
                  Same size/position as the API-online dot above so the
-                 two rows read as visually parallel. -->
+                 two rows read as visually parallel. Amber comes from
+                 --warning, not yellow-500: that palette value is one
+                 colour for both themes and measures 1.87:1 on the light
+                 sidebar, under WCAG 1.4.11's 3:1 for a status dot. -->
             <span
               v-if="frameworkVersionMatch !== 'unknown'"
               class="w-2.5 h-2.5 rounded-full shrink-0"
-              :class="frameworkVersionMatch === 'match' ? 'bg-ok' : 'bg-yellow-500'"
+              :class="frameworkVersionMatch === 'match' ? 'bg-ok' : 'bg-warning'"
               :title="frameworkVersionMatch === 'match'
                 ? `Framework matches .play-version (${expectedFrameworkVersion})`
                 : `Framework drift: running v${frameworkVersion}, .play-version expects v${expectedFrameworkVersion}`"
@@ -615,7 +618,7 @@ const navGroups: NavGroup[] = [
         <span
           v-if="frameworkVersionMatch !== 'unknown'"
           class="w-2.5 h-2.5 rounded-full"
-          :class="frameworkVersionMatch === 'match' ? 'bg-ok' : 'bg-yellow-500'"
+          :class="frameworkVersionMatch === 'match' ? 'bg-ok' : 'bg-warning'"
           :title="frameworkVersionMatch === 'match'
             ? `Framework matches .play-version (v${expectedFrameworkVersion})`
             : `Framework drift: running v${frameworkVersion}, .play-version expects v${expectedFrameworkVersion}`"
