@@ -2127,17 +2127,38 @@ do_reset() {
     # connection-time options per file, and a mismatch would cost a
     # short reconnect dance.
     #
+    # IFEXISTS=TRUE: H2 otherwise auto-creates the database, parent directories and
+    # all, so a URL that resolves anywhere unexpected deletes from an empty decoy
+    # instead of failing.
+    #
     # No -user / -password flags: the app is configured with neither
     # db.user nor db.pass set in conf, so Play opens the database with
     # null credentials. Subsequent connects MUST use the same null
     # pattern — passing -user sa -password "" lands a 28000 invalid-
     # auth error against the very database we created.
-    local jdbc_url="jdbc:h2:file:$SCRIPT_DIR/data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE"
+    #
+    # Relative and run from $SCRIPT_DIR, exactly as application.conf spells it: under
+    # Git Bash an absolute $SCRIPT_DIR is /c/Users/..., which the native java.exe reads
+    # as the current drive's root (C:\c\Users\...) — same trap as the -Xlog paths in
+    # do_start_prod (JCLAW-1104).
+    local jdbc_url="jdbc:h2:file:./data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE;IFEXISTS=TRUE"
     local sql="DELETE FROM config WHERE config_key='auth.admin.passwordHash';"
 
     echo "==> Clearing auth.admin.passwordHash..."
-    if ! java -cp "$(native_path "$h2_jar")" org.h2.tools.Shell -url "$jdbc_url" -sql "$sql"; then
-        echo "Error: H2 Shell command failed. Inspect the output above."
+    local shell_out
+    if ! shell_out=$(cd "$SCRIPT_DIR" && java -cp "$(native_path "$h2_jar")" \
+            org.h2.tools.Shell -url "$jdbc_url" -sql "$sql" 2>&1); then
+        echo "$shell_out" >&2
+        echo "Error: could not open $data_file. Inspect the output above." >&2
+        exit 1
+    fi
+    # org.h2.tools.Shell prints a failing statement's error and still exits 0, so the
+    # status above catches a refused connect and nothing else. H2 emits one "Update
+    # count" line per statement that ran; its absence is the only signal that the
+    # DELETE never reached a table.
+    if ! grep -q 'Update count:' <<< "$shell_out"; then
+        echo "$shell_out" >&2
+        echo "Error: the DELETE did not run — the password hash was NOT cleared." >&2
         exit 1
     fi
 
@@ -2147,11 +2168,19 @@ do_reset() {
     # its own "Done" message — emitting both would print contradictory
     # advice ("no restart" then "restarting") in close succession.
     if [[ "${JCLAW_RESET_YES:-}" != "1" ]]; then
-        echo "==> Done. Open the app and use /setup-password to set a new password."
-        echo "    Note: ConfigService caches the hash in-process for up to 60s. If a"
-        echo "    'play run' is up, either wait for the TTL or restart the app so the"
-        echo "    /api/auth/status route reports passwordSet=false and the frontend"
-        echo "    redirects to /setup-password."
+        echo "==> Done. Cleared the admin password hash."
+        # ConfigService caches each key for 60s, and the DELETE above went in behind
+        # the JVM's back, so a live instance keeps answering passwordSet=true until
+        # the entry ages out. An unreadable probe advises the restart too — it is
+        # harmless on a stopped app, whereas staying quiet strands the operator.
+        local listeners probe_rc=0
+        listeners=$(port_listener_pids "$BACKEND_PORT") || probe_rc=$?
+        if [[ $probe_rc -ne 0 || -n "$listeners" ]]; then
+            echo "    Restart so the app stops serving the cached hash:"
+            echo "        ${INVOKE} restart"
+        else
+            echo "    Start the app and it will open on /setup-password."
+        fi
     fi
 }
 
