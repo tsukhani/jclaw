@@ -1,6 +1,7 @@
 package services;
 
 import play.Play;
+import utils.HandoffShell;
 
 import java.io.File;
 import java.io.IOException;
@@ -89,6 +90,9 @@ public final class RestartService {
         }
         if (!script.canExecute()) {
             return script.getAbsolutePath() + " is not executable.";
+        }
+        if (HandoffShell.locate() == null) {
+            return "No shell was found to run jclaw.sh — " + HandoffShell.missingShellHint();
         }
         return null;
     }
@@ -188,29 +192,10 @@ public final class RestartService {
         //noinspection ResultOfMethodCallIgnored
         log.getParentFile().mkdirs();
 
-        var shell = "sleep " + RESPONSE_FLUSH_DELAY_SECONDS + "; exec " + shellQuote(plan.command());
-
-        new ProcessBuilder("/bin/sh", "-c", shell)
+        new ProcessBuilder(HandoffShell.detached(plan.command(), RESPONSE_FLUSH_DELAY_SECONDS))
                 .directory(Play.applicationPath)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
                 .redirectErrorStream(true)
                 .start();
-    }
-
-    /**
-     * Render argv as a single-quoted shell word list. Needed because the
-     * command is handed to {@code sh -c} as one string: an application path
-     * containing a space (or worse) would otherwise word-split into a
-     * different command than the one {@link #plan()} resolved.
-     */
-    public static String shellQuote(List<String> argv) {
-        var sb = new StringBuilder();
-        for (var arg : argv) {
-            if (!sb.isEmpty()) {
-                sb.append(' ');
-            }
-            sb.append('\'').append(arg.replace("'", "'\\''")).append('\'');
-        }
-        return sb.toString();
     }
 }

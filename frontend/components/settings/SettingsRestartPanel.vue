@@ -18,7 +18,7 @@ interface RestartPreflight {
 }
 
 const { confirm } = useConfirm()
-const { mutate } = useApiMutation()
+const { mutate, error: mutationError } = useApiMutation()
 
 // useLazyFetch, not useFetch: a top-level `await` here suspends the whole
 // settings panel behind this request on a cold boot.
@@ -103,7 +103,11 @@ async function handleRestart() {
   const res = await mutate('/api/system/restart', { method: 'POST' })
   if (!res) {
     phase.value = 'idle'
-    failure.value = 'The restart request was rejected. The instance is still running.'
+    // The backend names the reason it refused; the generic line only stands in
+    // when the request never got an answer at all.
+    failure.value = mutationError.value
+      ? `${mutationError.value} The instance is still running.`
+      : 'The restart request was rejected. The instance is still running.'
     return
   }
 

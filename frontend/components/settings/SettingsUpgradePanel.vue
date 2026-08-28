@@ -34,7 +34,7 @@ interface UpgradeStatus {
 }
 
 const { confirm } = useConfirm()
-const { mutate } = useApiMutation()
+const { mutate, error: mutationError } = useApiMutation()
 
 // useLazyFetch, not useFetch: a top-level `await` here suspends the whole
 // settings panel behind a request that may be waiting on GitHub.
@@ -123,7 +123,9 @@ async function handleUpgrade() {
   const res = await mutate('/api/system/upgrade', { method: 'POST' })
   if (!res) {
     mode.value = 'idle'
-    failure.value = 'The upgrade request was rejected. This instance is unchanged.'
+    failure.value = mutationError.value
+      ? `${mutationError.value} This instance is unchanged.`
+      : 'The upgrade request was rejected. This instance is unchanged.'
     return
   }
 

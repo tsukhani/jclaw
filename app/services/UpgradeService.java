@@ -3,6 +3,7 @@ package services;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
 import play.Play;
+import utils.HandoffShell;
 import utils.HttpFactories;
 
 import java.io.File;
@@ -116,6 +117,9 @@ public final class UpgradeService {
         if (isContainer()) {
             return "This instance runs in a container — upgrade the image instead "
                     + "(docker compose pull && docker compose up -d).";
+        }
+        if (HandoffShell.locate() == null) {
+            return "No shell was found to run jclaw.sh — " + HandoffShell.missingShellHint();
         }
         var script = script();
         if (!script.isFile() || !script.canExecute()) {
@@ -325,10 +329,7 @@ public final class UpgradeService {
         //noinspection ResultOfMethodCallIgnored
         log.getParentFile().mkdirs();
 
-        var shell = "sleep " + RESPONSE_FLUSH_DELAY_SECONDS + "; exec "
-                + RestartService.shellQuote(plan.command());
-
-        new ProcessBuilder("/bin/sh", "-c", shell)
+        new ProcessBuilder(HandoffShell.detached(plan.command(), RESPONSE_FLUSH_DELAY_SECONDS))
                 .directory(Play.applicationPath)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
                 .redirectErrorStream(true)

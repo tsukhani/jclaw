@@ -57,22 +57,6 @@ class RestartServiceTest extends UnitTest {
     }
 
     @Test
-    void quotingSurvivesPathsWithSpacesAndQuotes() {
-        assertEquals("'/opt/jclaw/jclaw.sh' 'restart'",
-                RestartService.shellQuote(List.of("/opt/jclaw/jclaw.sh", "restart")));
-
-        // An install under "Application Support" must not word-split into a
-        // different command than plan() resolved.
-        assertEquals("'/Users/a/Application Support/jclaw.sh' '--dev'",
-                RestartService.shellQuote(List.of("/Users/a/Application Support/jclaw.sh", "--dev")));
-
-        // A single quote in the path can't be allowed to close our quoting and
-        // let the remainder be read as shell syntax.
-        assertEquals("'/tmp/it'\\''s/jclaw.sh'",
-                RestartService.shellQuote(List.of("/tmp/it's/jclaw.sh")));
-    }
-
-    @Test
     void requestRestartHandsOffThePlanWithoutSpawning() throws Exception {
         var captured = new ArrayList<RestartService.Plan>();
         RestartService.spawnerForTest = captured::add;

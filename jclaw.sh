@@ -4413,8 +4413,9 @@ upgrade_unavailable_reason() {
         echo "neither curl nor wget is available to download the release."
         return
     fi
-    if ! command -v unzip >/dev/null 2>&1 && ! command -v jar >/dev/null 2>&1; then
-        echo "neither unzip nor a JDK 'jar' tool is available to extract the release."
+    if ! command -v unzip >/dev/null 2>&1 && ! command -v jar >/dev/null 2>&1 \
+        && ! { command -v powershell.exe >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; }; then
+        echo "no unzip, JDK 'jar' or PowerShell is available to extract the release."
         return
     fi
 }
@@ -4927,8 +4928,19 @@ extract_zip() {
     local zip="$1" dest="$2"
     if command -v unzip >/dev/null 2>&1; then
         unzip -q -o "$zip" -d "$dest"
-    else
+    elif command -v jar >/dev/null 2>&1; then
         ( cd "$dest" && jar xf "$zip" )
+    else
+        # Git Bash ships neither unzip nor jar, and the Windows installer lays down
+        # a JRE, so PowerShell is the only extractor a stock Windows install has —
+        # which is why install.ps1 unpacks the first release with it too.
+        local zip_win dest_win
+        # Doubled, not backslash-escaped: '' is how a literal quote goes into a
+        # PowerShell single-quoted string, and C:\Users\O'Brien is a real home.
+        zip_win=$(cygpath -w "$zip"); zip_win=${zip_win//\'/\'\'}
+        dest_win=$(cygpath -w "$dest"); dest_win=${dest_win//\'/\'\'}
+        powershell.exe -NoProfile -NonInteractive -Command \
+            "Expand-Archive -LiteralPath '$zip_win' -DestinationPath '$dest_win' -Force"
     fi
 }
 
