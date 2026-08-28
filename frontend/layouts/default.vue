@@ -74,6 +74,47 @@ const frameworkVersionMatch = computed<'match' | 'mismatch' | 'unknown'>(() => {
 })
 const apiOnline = ref(false)
 
+const updateAvailable = ref(false)
+const latestVersion = ref('')
+
+// The GitHub lookup behind /api/system/upgrade is cached server-side for an
+// hour, so riding the 10s status chain would be ~360 round trips per cached
+// answer. Check at most once an hour and let the poll chain be the trigger.
+const UPDATE_CHECK_MS = 3_600_000
+let lastUpdateCheck = 0
+
+async function checkForUpdate() {
+  if (Date.now() - lastUpdateCheck < UPDATE_CHECK_MS) return
+  lastUpdateCheck = Date.now()
+  try {
+    const data = await $fetch<{
+      upgradeAvailable: boolean
+      latestVersion: string | null
+    }>('/api/system/upgrade', { retry: 0 })
+    updateAvailable.value = !!data?.upgradeAvailable
+    latestVersion.value = data?.latestVersion ?? ''
+  }
+  catch {
+    // A failed check is not evidence of being current, but an amber dot the
+    // operator cannot explain is worse than a missed one.
+    updateAvailable.value = false
+  }
+}
+
+/** Version-row dot. A dead backend outranks an update we could not act on. */
+const versionDotState = computed<'offline' | 'update' | 'ok'>(() => {
+  if (!apiOnline.value) return 'offline'
+  return updateAvailable.value ? 'update' : 'ok'
+})
+
+const versionDotTitle = computed(() => {
+  if (!apiOnline.value) return 'API offline'
+  if (updateAvailable.value) {
+    return `Update available${latestVersion.value ? `: v${latestVersion.value}` : ''} — open Settings → Maintenance`
+  }
+  return 'API online'
+})
+
 async function checkStatus() {
   try {
     const controller = new AbortController()
@@ -100,6 +141,9 @@ async function checkStatus() {
     frameworkVersion.value = data.frameworkVersion ?? ''
     expectedFrameworkVersion.value = data.expectedFrameworkVersion ?? ''
     apiOnline.value = data.status === 'ok'
+    // Not awaited: this call can reach GitHub on a cold cache and the status
+    // chain must not reschedule behind it.
+    if (apiOnline.value) void checkForUpdate()
   }
   catch {
     apiOnline.value = false
@@ -492,10 +536,26 @@ const navGroups: NavGroup[] = [
               <span class="text-xs text-fg-muted font-mono uppercase tracking-wider w-[5.5rem] shrink-0">Version</span>
               <span class="text-sm text-fg-primary font-mono truncate">{{ apiVersion ? `v${apiVersion}` : '...' }}</span>
             </div>
+            <!-- Amber when a release is newer than the running version, and
+                 then it is a link to the panel that installs it — an operator
+                 who notices the colour should not have to go hunting for the
+                 verb. The negative margin cancels the padding that lifts a
+                 10px dot to a 24px target (WCAG 2.5.8), so the row does not
+                 shift as the dot changes state. -->
+            <NuxtLink
+              v-if="versionDotState === 'update'"
+              to="/settings?section=maintenance"
+              class="-m-2 p-2 shrink-0 rounded-full hover:bg-warning/15 transition-colors"
+              :title="versionDotTitle"
+              :aria-label="versionDotTitle"
+            >
+              <span class="block w-2.5 h-2.5 rounded-full bg-warning" />
+            </NuxtLink>
             <span
+              v-else
               class="w-2.5 h-2.5 rounded-full transition-colors shrink-0"
               :class="apiOnline ? 'bg-ok' : 'bg-danger'"
-              :title="apiOnline ? 'API online' : 'API offline'"
+              :title="versionDotTitle"
             />
           </div>
         </div>
@@ -537,10 +597,20 @@ const navGroups: NavGroup[] = [
         v-else
         class="shrink-0 border-t border-fg-muted/40 px-0 py-3 flex justify-center items-center gap-1.5"
       >
+        <NuxtLink
+          v-if="versionDotState === 'update'"
+          to="/settings?section=maintenance"
+          class="-my-2 p-2 rounded-full hover:bg-warning/15 transition-colors"
+          :title="`${versionDotTitle}${apiVersion ? ` — running v${apiVersion}` : ''}`"
+          :aria-label="versionDotTitle"
+        >
+          <span class="block w-2.5 h-2.5 rounded-full bg-warning" />
+        </NuxtLink>
         <span
+          v-else
           class="w-2.5 h-2.5 rounded-full transition-colors"
           :class="apiOnline ? 'bg-ok' : 'bg-danger'"
-          :title="`${apiOnline ? 'API online' : 'API offline'}${apiVersion ? ` — v${apiVersion}` : ''}`"
+          :title="`${versionDotTitle}${apiVersion ? ` — v${apiVersion}` : ''}`"
         />
         <span
           v-if="frameworkVersionMatch !== 'unknown'"
