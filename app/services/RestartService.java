@@ -92,7 +92,7 @@ public final class RestartService {
             return script.getAbsolutePath() + " is not executable.";
         }
         if (HandoffShell.locate() == null) {
-            return "No shell was found to run jclaw.sh — " + HandoffShell.missingShellHint();
+            return "No shell was found to run jclaw.sh — " + HandoffShell.MISSING_SHELL_HINT;
         }
         return null;
     }

@@ -110,7 +110,8 @@ const versionDotState = computed<'offline' | 'update' | 'ok'>(() => {
 const versionDotTitle = computed(() => {
   if (!apiOnline.value) return 'API offline'
   if (updateAvailable.value) {
-    return `Update available${latestVersion.value ? `: v${latestVersion.value}` : ''} — open Settings → Maintenance`
+    const version = latestVersion.value ? `: v${latestVersion.value}` : ''
+    return `Update available${version} — open Settings → Maintenance`
   }
   return 'API online'
 })

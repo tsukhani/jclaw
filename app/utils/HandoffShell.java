@@ -27,6 +27,10 @@ public final class HandoffShell {
 
     private static final String POSIX_SHELL = "/bin/sh";
 
+    /** What an operator can do about {@link #locate()} finding nothing. */
+    public static final String MISSING_SHELL_HINT =
+            "install Git for Windows (which provides Git Bash), or run JClaw under WSL.";
+
     private HandoffShell() {}
 
     public static boolean isWindows() {
@@ -91,14 +95,23 @@ public final class HandoffShell {
      */
     private static void addUnder(List<String> out, String dir, String relative) {
         if (dir != null && !dir.isBlank()) {
-            out.add(dir.replaceAll("[\\\\/]+$", "") + "\\" + relative);
+            out.add(trimTrailingSeparators(dir) + "\\" + relative);
         }
+    }
+
+    /** Trailing separator trim. The regex form {@code [\\/]+$} is quadratic under
+     *  {@code replaceAll} — the anchored class retries at every start offset, which
+     *  possessive quantifiers do not fix (java:S5852). */
+    private static String trimTrailingSeparators(String s) {
+        int end = s.length();
+        while (end > 0 && (s.charAt(end - 1) == '\\' || s.charAt(end - 1) == '/')) end--;
+        return end == s.length() ? s : s.substring(0, end);
     }
 
     private static boolean isUnder(String dir, String parent) {
         if (parent == null || parent.isBlank()) return false;
         var d = dir.toLowerCase(Locale.ROOT);
-        var p = parent.toLowerCase(Locale.ROOT).replaceAll("[\\\\/]+$", "");
+        var p = trimTrailingSeparators(parent.toLowerCase(Locale.ROOT));
         // The trailing separator matters: C:\WindowsApps is not under C:\Windows.
         return d.equals(p) || d.startsWith(p + "\\") || d.startsWith(p + "/");
     }
@@ -116,14 +129,9 @@ public final class HandoffShell {
     public static List<String> detached(List<String> command, int delaySeconds) throws IOException {
         var shell = locate();
         if (shell == null) {
-            throw new IOException("no shell found to run " + String.join(" ", command) + " — " + missingShellHint());
+            throw new IOException("no shell found to run " + String.join(" ", command) + " — " + MISSING_SHELL_HINT);
         }
         return List.of(shell, "-c", commandLine(command, delaySeconds, isWindows()));
-    }
-
-    /** What an operator can do about {@link #locate()} finding nothing. */
-    public static String missingShellHint() {
-        return "install Git for Windows (which provides Git Bash), or run JClaw under WSL.";
     }
 
     /** Visible for testing: the Windows branch cannot be reached from a POSIX host. */

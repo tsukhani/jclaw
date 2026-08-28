@@ -119,7 +119,7 @@ public final class UpgradeService {
                     + "(docker compose pull && docker compose up -d).";
         }
         if (HandoffShell.locate() == null) {
-            return "No shell was found to run jclaw.sh — " + HandoffShell.missingShellHint();
+            return "No shell was found to run jclaw.sh — " + HandoffShell.MISSING_SHELL_HINT;
         }
         var script = script();
         if (!script.isFile() || !script.canExecute()) {
