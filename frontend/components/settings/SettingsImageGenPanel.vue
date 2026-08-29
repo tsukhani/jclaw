@@ -319,7 +319,7 @@ onUnmounted(() => stopImagegenLocalPolling())
             >Black Forest Labs (Flux)</span>
             <span
               v-if="!bflApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — set it below</span>
           </label>
           <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
@@ -398,7 +398,7 @@ onUnmounted(() => stopImagegenLocalPolling())
             >OpenAI (gpt-image-1)</span>
             <span
               v-if="!openaiApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — configure in LLM Providers</span>
           </label>
         </div>
@@ -431,7 +431,7 @@ onUnmounted(() => stopImagegenLocalPolling())
             >Replicate</span>
             <span
               v-if="!replicateApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — set it below</span>
           </label>
           <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
@@ -577,7 +577,7 @@ onUnmounted(() => stopImagegenLocalPolling())
             </label>
             <span
               v-if="!fluxUvAvailable"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >uv not found — install uv</span>
             <button
               v-else
@@ -664,7 +664,7 @@ onUnmounted(() => stopImagegenLocalPolling())
                 </div>
               </template>
               <template v-else-if="fluxModelStatus === 'AVAILABLE'">
-                <span class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1">Ready</span>
+                <span class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1">Ready</span>
               </template>
               <template v-else>
                 <button

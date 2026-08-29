@@ -414,7 +414,7 @@ onUnmounted(() => stopTranscriptionPolling())
               >OpenRouter</span>
               <span
                 v-if="!openrouterApiKeyConfigured"
-                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+                class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — configure in LLM Providers</span>
             </label>
             <label
@@ -443,7 +443,7 @@ onUnmounted(() => stopTranscriptionPolling())
               >OpenAI</span>
               <span
                 v-if="!openaiApiKeyConfigured"
-                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+                class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — configure in LLM Providers</span>
             </label>
             <label
@@ -461,7 +461,7 @@ onUnmounted(() => stopTranscriptionPolling())
               >
               <span class="flex-1 text-sm text-fg-primary">Local</span>
               <span
-                class="text-[10px] px-1 border"
+                class="text-xs px-1 border"
                 :class="selectedTranscriptionProvider === 'whisper-local'
                   ? 'text-green-700 dark:text-green-400 border-green-400/30'
                   : 'text-fg-muted border-input'"
@@ -526,7 +526,7 @@ onUnmounted(() => stopTranscriptionPolling())
               <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
             </template>
             <template v-else-if="selectedLocalModelStatus?.status === 'AVAILABLE'">
-              <span class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1">Ready</span>
+              <span class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1">Ready</span>
             </template>
             <template v-else-if="selectedLocalModelStatus?.status === 'ERROR'">
               <button
@@ -539,7 +539,7 @@ onUnmounted(() => stopTranscriptionPolling())
               </button>
             </template>
             <template v-else-if="selectedLocalModelStatus?.status === 'UNAVAILABLE'">
-              <span class="text-[10px] px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30">unavailable</span>
+              <span class="text-xs px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30">unavailable</span>
             </template>
           </div>
           <div
@@ -643,7 +643,7 @@ onUnmounted(() => stopTranscriptionPolling())
               >OpenRouter</span>
               <span
                 v-if="!openrouterApiKeyConfigured"
-                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+                class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — configure in LLM Providers</span>
             </label>
             <label
@@ -670,7 +670,7 @@ onUnmounted(() => stopTranscriptionPolling())
               >OpenAI</span>
               <span
                 v-if="!openaiApiKeyConfigured"
-                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+                class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — configure in LLM Providers</span>
             </label>
             <label
@@ -689,7 +689,7 @@ onUnmounted(() => stopTranscriptionPolling())
               >
               <span class="flex-1 text-sm text-fg-primary">llama.cpp</span>
               <span
-                class="text-[10px] px-1 border"
+                class="text-xs px-1 border"
                 :class="diarizationProvider === 'llama-cpp'
                   ? 'text-green-700 dark:text-green-400 border-green-400/30'
                   : 'text-fg-muted border-input'"
@@ -711,7 +711,7 @@ onUnmounted(() => stopTranscriptionPolling())
               >
               <span class="flex-1 text-sm text-fg-primary">vLLM</span>
               <span
-                class="text-[10px] px-1 border"
+                class="text-xs px-1 border"
                 :class="diarizationProvider === 'vllm'
                   ? 'text-green-700 dark:text-green-400 border-green-400/30'
                   : 'text-fg-muted border-input'"
@@ -733,7 +733,7 @@ onUnmounted(() => stopTranscriptionPolling())
               >
               <span class="flex-1 text-sm text-fg-primary">Local</span>
               <span
-                class="text-[10px] px-1 border"
+                class="text-xs px-1 border"
                 :class="diarizationProvider === 'pyannote-local'
                   ? 'text-green-700 dark:text-green-400 border-green-400/30'
                   : 'text-fg-muted border-input'"
@@ -791,11 +791,11 @@ onUnmounted(() => stopTranscriptionPolling())
             <span class="flex-1 text-sm font-mono text-fg-muted truncate">pyannote/speaker-diarization-community-1</span>
             <span
               v-if="!diarizerModelStatus"
-              class="text-[10px] text-fg-muted shrink-0"
+              class="text-xs text-fg-muted shrink-0"
             >checking…</span>
             <span
               v-else-if="diarizerModelStatus.status === 'AVAILABLE'"
-              class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1 shrink-0"
+              class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1 shrink-0"
             >Ready</span>
             <span
               v-else-if="diarizerModelStatus.status === 'DOWNLOADING'"
@@ -812,7 +812,7 @@ onUnmounted(() => stopTranscriptionPolling())
             </button>
             <span
               v-else-if="diarizerModelStatus.status === 'UNAVAILABLE'"
-              class="text-[10px] px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30 shrink-0"
+              class="text-xs px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30 shrink-0"
             >unavailable</span>
             <button
               v-else
@@ -851,11 +851,11 @@ onUnmounted(() => stopTranscriptionPolling())
             </select>
             <span
               v-if="!emotionModelStatus"
-              class="text-[10px] text-fg-muted shrink-0"
+              class="text-xs text-fg-muted shrink-0"
             >checking…</span>
             <span
               v-else-if="emotionModelStatus.status === 'AVAILABLE'"
-              class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1 shrink-0"
+              class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1 shrink-0"
             >Ready</span>
             <span
               v-else-if="emotionModelStatus.status === 'DOWNLOADING'"
@@ -872,7 +872,7 @@ onUnmounted(() => stopTranscriptionPolling())
             </button>
             <span
               v-else-if="emotionModelStatus.status === 'UNAVAILABLE'"
-              class="text-[10px] px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30 shrink-0"
+              class="text-xs px-1 border text-amber-700 dark:text-amber-400 border-amber-400/30 shrink-0"
             >unavailable</span>
             <button
               v-else

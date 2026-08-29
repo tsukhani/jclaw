@@ -128,7 +128,7 @@ function handleMouseLeave() {
           <span
             data-testid="context-bar"
             class="block h-full rounded-full transition-[width] duration-300 ease-out"
-            :class="percent >= 90 ? 'bg-red-400' : percent >= 70 ? 'bg-amber-400' : 'bg-emerald-400'"
+            :class="percent >= 90 ? 'bg-danger' : percent >= 70 ? 'bg-warning' : 'bg-ok'"
             :style="{ width: `${percent}%` }"
           />
         </span>

@@ -1542,7 +1542,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <div class="flex items-center gap-3 shrink-0">
               <span
                 v-if="agent.enabled && !agent.providerConfigured"
-                class="text-[10px] font-mono text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
+                class="text-xs font-mono text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
               >provider not configured</span>
               <!-- Enabled toggle -->
               <button
@@ -1915,11 +1915,11 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <span class="text-sm font-medium text-fg-strong">Core memories</span>
               <span
                 v-if="coreMigration.running"
-                class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+                class="ml-2 text-xs text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
               >migrating</span>
               <span
                 v-else-if="coreMigration.overCap"
-                class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+                class="ml-2 text-xs text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
                 data-testid="agent-core-over-cap"
               >over the limit</span>
             </div>
@@ -2117,7 +2117,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       >
         <div class="px-4 py-2.5 border-b border-border">
           <span class="text-sm font-medium text-fg-strong">Shell Exec Privileges</span>
-          <span class="ml-2 text-[10px] text-amber-700 dark:text-amber-400">main agent only</span>
+          <span class="ml-2 text-xs text-amber-700 dark:text-amber-400">main agent only</span>
         </div>
         <div class="divide-y divide-border">
           <div class="px-4 py-2.5 flex items-center justify-between">
@@ -2287,7 +2287,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 <span class="text-sm text-fg-strong font-mono">{{ skill.name }}</span>
                 <span
                   v-if="skill.isGlobal"
-                  class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+                  class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
                 >global</span>
               </div>
               <div
@@ -2297,7 +2297,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 <span
                   v-for="tool in skill.tools"
                   :key="tool"
-                  class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
+                  class="text-xs font-mono px-1.5 py-0.5 border rounded-sm"
                   :class="getPillClass(tool)"
                 >
                   {{ tool }}
@@ -2324,7 +2324,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </div>
               <div
                 v-if="skillDisabledTools(skill).length"
-                class="text-[10px] text-amber-700/70 dark:text-amber-400/70 mt-1.5"
+                class="text-xs text-amber-700/70 dark:text-amber-400/70 mt-1.5"
               >
                 requires {{ skillDisabledTools(skill).join(', ') }}
               </div>
@@ -2427,7 +2427,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   <div class="flex-1 min-w-0">
                     <span class="text-sm text-fg-strong font-mono">{{ row.group }}</span>
                     <div class="mt-1.5">
-                      <span class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
+                      <span class="text-xs font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
                         {{ row.functionCount }} function{{ row.functionCount === 1 ? '' : 's' }}
                       </span>
                     </div>
@@ -2468,7 +2468,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                       <span
                         v-for="fn in (getToolMeta(row.tool.name)?.functions ?? [])"
                         :key="fn.name"
-                        class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
+                        class="text-xs font-mono px-1.5 py-0.5 border rounded-sm"
                         :class="getPillClass(row.tool.name)"
                       >
                         {{ fn.name }}
@@ -2541,7 +2541,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <div class="flex-1 min-w-0">
                 <span class="text-sm text-fg-strong font-mono">{{ row.server }}</span>
                 <div class="mt-1.5">
-                  <span class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
+                  <span class="text-xs font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
                     {{ row.actions.length }} action{{ row.actions.length === 1 ? '' : 's' }}
                   </span>
                 </div>
@@ -2593,7 +2593,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     :key="action.name"
                     class="grid grid-cols-[2.5rem_1fr] items-baseline gap-x-3 px-4 py-2.5 hover:bg-muted/40 transition-colors"
                   >
-                    <span class="text-[10px] font-mono tabular-nums text-fg-muted/70 select-none">
+                    <span class="text-xs font-mono tabular-nums text-fg-muted/70 select-none">
                       {{ String(idx + 1).padStart(3, '0') }}
                     </span>
                     <div class="flex flex-col gap-0.5 min-w-0">
@@ -2745,20 +2745,20 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <h3 class="text-sm font-medium text-fg-strong truncate">
               System prompt — {{ promptBreakdownAgent?.name }}
             </h3>
-            <p class="text-[10px] text-fg-muted truncate">
+            <p class="text-xs text-fg-muted truncate">
               {{ promptBreakdownAgent?.modelProvider }} / {{ promptBreakdownAgent?.modelId }}
             </p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <label
               for="prompt-breakdown-channel"
-              class="flex items-center gap-1.5 text-[10px] text-fg-muted"
+              class="flex items-center gap-1.5 text-xs text-fg-muted"
             >
               <span>channel</span>
               <select
                 id="prompt-breakdown-channel"
                 v-model="promptBreakdownChannel"
-                class="px-2 py-1 bg-muted border border-input text-[10px] text-fg-strong
+                class="px-2 py-1 bg-muted border border-input text-xs text-fg-strong
                        focus:outline-hidden focus:border-ring transition-colors"
                 title="Preview the prompt as assembled for a specific channel"
                 @change="loadPromptBreakdown()"
@@ -2956,7 +2956,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <div class="text-sm font-mono text-fg-strong">
                 {{ formatChars(promptBreakdownData.totalChars) }}
               </div>
-              <div class="text-[10px] text-fg-muted">
+              <div class="text-xs text-fg-muted">
                 prompt + tool schemas
               </div>
             </div>
@@ -2967,7 +2967,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <div class="text-sm font-mono text-amber-700 dark:text-amber-300">
                 {{ formatTokens(promptBreakdownData.totalTokenEstimate) }}
               </div>
-              <div class="text-[10px] text-fg-muted">
+              <div class="text-xs text-fg-muted">
                 chars/4 heuristic
               </div>
             </div>
@@ -2981,7 +2981,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
                 {{ formatChars(promptBreakdownData.staticPrefixChars) }}
               </div>
-              <div class="text-[10px] text-fg-muted">
+              <div class="text-xs text-fg-muted">
                 ≈ {{ formatTokens(Math.round(promptBreakdownData.staticPrefixChars / 4)) }} tokens
               </div>
             </div>
@@ -2996,7 +2996,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <div class="text-sm font-mono text-amber-700 dark:text-amber-400">
                 {{ formatChars(promptBreakdownData.coreMemoryChars) }}
               </div>
-              <div class="text-[10px] text-fg-muted">
+              <div class="text-xs text-fg-muted">
                 ≈ {{ formatTokens(Math.round(promptBreakdownData.coreMemoryChars / 4)) }} tokens
               </div>
             </div>
@@ -3010,7 +3010,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <div class="text-sm font-mono text-rose-700 dark:text-rose-400">
                 {{ formatChars(promptBreakdownData.variableSuffixChars) }}
               </div>
-              <div class="text-[10px] text-fg-muted">
+              <div class="text-xs text-fg-muted">
                 ≈ {{ formatTokens(Math.round(promptBreakdownData.variableSuffixChars / 4)) }} tokens
               </div>
             </div>
@@ -3047,7 +3047,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 <col class="w-24">
                 <col class="w-24">
               </colgroup>
-              <thead class="text-[10px] text-fg-muted border-b border-border">
+              <thead class="text-xs text-fg-muted border-b border-border">
                 <tr>
                   <th class="text-left py-1 pr-2">
                     <button
@@ -3186,7 +3186,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <h4 class="text-[11px] text-fg-muted uppercase tracking-wide mb-1.5">
               Tool schemas ({{ promptBreakdownData.tools.length }})
             </h4>
-            <p class="text-[10px] text-fg-muted mb-1">
+            <p class="text-xs text-fg-muted mb-1">
               Sent separately as the <code class="text-fg-muted">tools</code> array, not part of the prompt string, but counted as input tokens by every provider.
             </p>
             <table
@@ -3198,7 +3198,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 <col class="w-24">
                 <col class="w-24">
               </colgroup>
-              <thead class="text-[10px] text-fg-muted border-b border-border">
+              <thead class="text-xs text-fg-muted border-b border-border">
                 <tr>
                   <th class="text-left py-1 pr-2">
                     <button

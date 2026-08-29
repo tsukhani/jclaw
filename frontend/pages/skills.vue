@@ -966,7 +966,7 @@ function totalSkillCount(agentId: number) {
                 <span class="text-xs text-fg-muted uppercase tracking-wider">Global Skills</span>
                 <div
                   v-if="promotingSkills.size"
-                  class="flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400"
+                  class="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400"
                 >
                   <ArrowPathIcon
                     class="w-3 h-3 animate-spin"
@@ -975,7 +975,7 @@ function totalSkillCount(agentId: number) {
                   Promoting {{ promotingSkills.size }}
                 </div>
               </div>
-              <span class="text-[10px] text-fg-muted shrink-0 tabular-nums">
+              <span class="text-xs text-fg-muted shrink-0 tabular-nums">
                 {{ filteredSkills.length }}{{ globalFilter ? ` / ${skills?.length ?? 0}` : '' }}
               </span>
             </div>
@@ -1004,7 +1004,7 @@ function totalSkillCount(agentId: number) {
           <!-- Drop hint when dragging an agent skill over the panel -->
           <div
             v-if="dragSource === 'agent' && dropTargetGlobal"
-            class="mx-3 mt-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-2 text-center text-[10px] text-emerald-700 dark:text-emerald-400 shrink-0"
+            class="mx-3 mt-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-2 text-center text-xs text-emerald-700 dark:text-emerald-400 shrink-0"
           >
             Release to promote (secrets will be stripped)
           </div>
@@ -1064,17 +1064,17 @@ function totalSkillCount(agentId: number) {
                         @dblclick.stop="startRename(skill)"
                       >{{ skill.folderName || skill.name }}</span>
                     </template>
-                    <span class="text-[10px] text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1 py-0.5">v{{ skill.version || '0.0.0' }}</span>
+                    <span class="text-xs text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1 py-0.5">v{{ skill.version || '0.0.0' }}</span>
                   </div>
                   <div
                     v-if="skill.description"
-                    class="text-[10px] text-fg-muted truncate mt-0.5"
+                    class="text-xs text-fg-muted truncate mt-0.5"
                   >
                     {{ skill.description }}
                   </div>
                   <div
                     v-if="skill.tools?.length || skill.commands?.length"
-                    class="flex items-center gap-2 mt-1 text-[10px] text-fg-muted"
+                    class="flex items-center gap-2 mt-1 text-xs text-fg-muted"
                   >
                     <span v-if="skill.tools?.length">{{ skill.tools.length }} tool{{ skill.tools.length !== 1 ? 's' : '' }}</span>
                     <span v-if="skill.commands?.length">{{ skill.commands.length }} cmd{{ skill.commands.length !== 1 ? 's' : '' }}</span>
@@ -1151,7 +1151,7 @@ function totalSkillCount(agentId: number) {
           <div class="px-3 py-2.5 border-b border-border flex flex-col gap-2 shrink-0">
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs text-fg-muted uppercase tracking-wider">Agent Skills</span>
-              <span class="text-[10px] text-fg-muted shrink-0 tabular-nums">
+              <span class="text-xs text-fg-muted shrink-0 tabular-nums">
                 {{ filteredAgents.length }}{{ agentFilter ? ` / ${agents?.length ?? 0}` : '' }}
               </span>
             </div>
@@ -1227,14 +1227,14 @@ function totalSkillCount(agentId: number) {
                     <span class="text-sm font-medium text-fg-strong truncate">{{ agent.name }}</span>
                     <span
                       v-if="agent.isMain"
-                      class="text-[10px] text-fg-muted border border-input px-1 shrink-0"
+                      class="text-xs text-fg-muted border border-input px-1 shrink-0"
                     >main</span>
                   </div>
-                  <span class="text-[10px] text-fg-muted shrink-0 tabular-nums">
+                  <span class="text-xs text-fg-muted shrink-0 tabular-nums">
                     {{ enabledSkillCount(agent.id) }}/{{ totalSkillCount(agent.id) }}
                   </span>
                 </button>
-                <div class="text-[10px] text-fg-muted mb-2 truncate">
+                <div class="text-xs text-fg-muted mb-2 truncate">
                   {{ agent.modelProvider }} / {{ agent.modelId }}
                 </div>
 
@@ -1271,7 +1271,7 @@ function totalSkillCount(agentId: number) {
                       </button>
                     </div>
                     <div class="flex items-center gap-1 shrink-0">
-                      <span class="text-[10px] text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1 py-0.5">v{{ skill.version || '0.0.0' }}</span>
+                      <span class="text-xs text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1 py-0.5">v{{ skill.version || '0.0.0' }}</span>
                       <button
                         class="p-1 text-fg-muted hover:text-fg-strong transition-colors opacity-0 group-hover/skill:opacity-100"
                         title="View skill"
@@ -1297,7 +1297,7 @@ function totalSkillCount(agentId: number) {
                 </div>
                 <div
                   v-else-if="!isAgentCollapsed(agent.id)"
-                  class="text-[10px] text-fg-muted italic"
+                  class="text-xs text-fg-muted italic"
                 >
                   {{ loadingAgents ? 'Loading...' : 'No skills assigned' }}
                 </div>
@@ -1306,13 +1306,13 @@ function totalSkillCount(agentId: number) {
                    being dragged AND this agent isn't already the active drop target. -->
                 <div
                   v-if="dragging && dragSource === 'global' && dropTarget !== agent.id"
-                  class="mt-2 border border-dashed border-input py-1.5 text-center text-[10px] text-fg-muted"
+                  class="mt-2 border border-dashed border-input py-1.5 text-center text-xs text-fg-muted"
                 >
                   Drop skill here
                 </div>
                 <div
                   v-if="dropTarget === agent.id"
-                  class="mt-2 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-1.5 text-center text-[10px] text-emerald-700 dark:text-emerald-400"
+                  class="mt-2 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-1.5 text-center text-xs text-emerald-700 dark:text-emerald-400"
                 >
                   Release to assign
                 </div>
@@ -1387,13 +1387,13 @@ function totalSkillCount(agentId: number) {
               <span class="text-sm font-medium text-fg-strong font-mono">{{ editing.folderName || editing.name }}</span>
               <span
                 v-if="editingAgentId != null"
-                class="text-[10px] text-blue-700 dark:text-blue-400 border border-blue-400/30 px-1"
+                class="text-xs text-blue-700 dark:text-blue-400 border border-blue-400/30 px-1"
               >
                 {{ agents?.find((a: any) => a.id === editingAgentId)?.name ?? 'agent' }}
               </span>
               <span
                 v-else
-                class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+                class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
               >global</span>
             </div>
             <div class="text-xs text-fg-muted">
@@ -1450,7 +1450,7 @@ function totalSkillCount(agentId: number) {
             aria-hidden="true"
           />
           <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Commands</span>
-          <span class="text-[10px] text-fg-muted normal-case tracking-normal">
+          <span class="text-xs text-fg-muted normal-case tracking-normal">
             added to the agent's shell allowlist when this skill is installed
           </span>
         </div>
@@ -1486,7 +1486,7 @@ function totalSkillCount(agentId: number) {
           <template v-if="activeFile">
             <div class="px-4 py-2 border-b border-border flex items-center gap-2">
               <span class="text-xs font-mono text-fg-muted">{{ activeFile }}</span>
-              <span class="text-[10px] text-fg-muted">(read-only — edit via skill-creator)</span>
+              <span class="text-xs text-fg-muted">(read-only — edit via skill-creator)</span>
               <div
                 v-if="isMarkdownFile"
                 class="ml-auto flex items-center gap-0.5"

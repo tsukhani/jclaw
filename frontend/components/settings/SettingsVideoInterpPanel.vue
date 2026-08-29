@@ -324,7 +324,7 @@ async function setVideoModel(value: string) {
             >OpenRouter</span>
             <span
               v-if="!openrouterApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — configure in LLM Providers</span>
           </label>
           <label
@@ -361,16 +361,16 @@ async function setVideoModel(value: string) {
             >{{ vllmProbing ? 'checking…' : 'recheck' }}</button>
             <span
               v-if="!vllmConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no base URL — configure in LLM Providers</span>
             <span
               v-else-if="!vllmReachable"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               :title="vllmReachableReason || ''"
             >not reachable</span>
             <span
               v-else
-              class="text-[10px] px-1 border"
+              class="text-xs px-1 border"
               :class="videoProvider === 'vllm' ? 'text-green-700 dark:text-green-400 border-green-400/30' : 'text-fg-muted border-input'"
             >reachable</span>
           </label>
@@ -400,7 +400,7 @@ async function setVideoModel(value: string) {
             >Ollama (local)</span>
             <span
               v-if="!ollamaLocalConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no base URL — configure in LLM Providers</span>
           </label>
           <label
@@ -429,7 +429,7 @@ async function setVideoModel(value: string) {
             >Ollama (cloud)</span>
             <span
               v-if="!ollamaCloudConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no base URL — configure in LLM Providers</span>
           </label>
         </div>

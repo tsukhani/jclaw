@@ -247,7 +247,7 @@ async function saveSubagentModel(value: string) {
                 class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                 aria-hidden="true"
               />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                 Max recursion depth for subagent_spawn. 1 = only top-level agents may spawn; a child trying to spawn its own subagent is refused.
               </span>
             </span>
@@ -304,7 +304,7 @@ async function saveSubagentModel(value: string) {
                 class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                 aria-hidden="true"
               />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                 Max concurrent RUNNING children per parent. Counted per direct parent, not across the whole subtree. The (N+1)th spawn from the same parent is refused while N children are in flight.
               </span>
             </span>
@@ -363,7 +363,7 @@ async function saveSubagentModel(value: string) {
                 class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                 aria-hidden="true"
               />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                 Default idle budget (seconds of inactivity) for subagent_spawn when the call omits runTimeoutSeconds. A call-site value overrides. Must be positive.
               </span>
             </span>
@@ -422,7 +422,7 @@ async function saveSubagentModel(value: string) {
                 class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                 aria-hidden="true"
               />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                 Default resume budget (seconds) for subagent_yield when the call omits timeoutSeconds. A call-site value overrides. Set 0 to disable the yield watchdog — the parent waits until the child ends via its own runTimeoutSeconds.
               </span>
             </span>
@@ -481,7 +481,7 @@ async function saveSubagentModel(value: string) {
                 class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                 aria-hidden="true"
               />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                 External agent harness for runtime="acp" subagents — e.g. "claude -p" or "codex exec". The task is sent on stdin and stdout becomes the reply. Empty disables ACP (runtime="acp" spawns are refused). Operator-set only; never model-supplied.
               </span>
             </span>
@@ -542,7 +542,7 @@ async function saveSubagentModel(value: string) {
                 class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                 aria-hidden="true"
               />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                 Coding-harness CLIs found on this host's PATH. Click an available one to fill acp.command + acp.harness. Re-open Settings to re-probe.
               </span>
             </span>
@@ -575,7 +575,7 @@ async function saveSubagentModel(value: string) {
                   {{ h.name }}
                   <span class="font-mono opacity-70">{{ h.command }}</span>
                   <span
-                    class="px-1 py-px text-[10px] leading-none border rounded"
+                    class="px-1 py-px text-xs leading-none border rounded"
                     :class="acpBadge(h).cls"
                     :title="h.acpDetail"
                     :data-testid="`acp-badge-${h.id}`"
@@ -623,7 +623,7 @@ async function saveSubagentModel(value: string) {
             </div>
             <p
               v-if="customError"
-              class="text-[10px] text-rose-600 dark:text-rose-400 w-full"
+              class="text-xs text-rose-600 dark:text-rose-400 w-full"
             >
               {{ customError }}
             </p>
@@ -639,7 +639,7 @@ async function saveSubagentModel(value: string) {
                 class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                 aria-hidden="true"
               />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                 Model subagents run on. "Conversation default" inherits the model your chat is using (your agent default unless you switch mid-chat). Pick a specific model to pin every fan-out to it — e.g. a cheaper model for large evaluations.
               </span>
             </span>

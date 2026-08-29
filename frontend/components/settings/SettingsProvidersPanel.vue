@@ -687,11 +687,11 @@ const groupedProviders = computed(() => {
             <span class="text-sm font-medium text-fg-strong">{{ providerLabel(name) }}</span>
             <span
               v-if="entries.some((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
-              class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+              class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
             >configured</span>
             <span
               v-if="!isProviderEnabled(name)"
-              class="text-[10px] text-fg-muted border border-input px-1"
+              class="text-xs text-fg-muted border border-input px-1"
             >disabled</span>
             <!-- JCLAW-113: audit pill when any agent still has this disabled
                    provider as their default. Makes the "hide from selector, not
@@ -699,7 +699,7 @@ const groupedProviders = computed(() => {
                    to read the hint text below. -->
             <span
               v-if="!isProviderEnabled(name) && agentsRoutingToProvider(name) > 0"
-              class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+              class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
               :title="`${agentsRoutingToProvider(name)} agent(s) still route LLM calls to this provider`"
             >{{ agentsRoutingToProvider(name) }} agent{{ agentsRoutingToProvider(name) === 1 ? '' : 's' }} still routing</span>
             <!-- JCLAW-110: per-provider enable/disable toggle. Hidden from
@@ -724,7 +724,7 @@ const groupedProviders = computed(() => {
                  is unambiguous and needs no explanation. -->
           <p
             v-if="!isProviderEnabled(name)"
-            class="mt-1.5 text-[10px] text-fg-muted leading-snug"
+            class="mt-1.5 text-xs text-fg-muted leading-snug"
           >
             Hidden from the model selector. Agents and conversations already using this provider will
             continue to route here — delete the provider row below to fully disconnect it.
@@ -801,7 +801,7 @@ const groupedProviders = computed(() => {
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                   aria-hidden="true"
                 />
-                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-60 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-60 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   How this provider bills you. <code class="font-mono">PER_TOKEN</code> uses model pricing to estimate cost per turn. <code class="font-mono">SUBSCRIPTION</code> ignores per-token pricing and pro-rates the monthly fee instead.
                 </span>
               </span>
@@ -862,7 +862,7 @@ const groupedProviders = computed(() => {
                   class="w-3.5 h-3.5"
                   aria-hidden="true"
                 />
-                <span class="absolute right-0 top-7 z-20 hidden group-hover/lock:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                <span class="absolute right-0 top-7 z-20 hidden group-hover/lock:block w-56 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   {{ providerLabel(name) }} only supports {{ paymentModalityFor(name) }} billing.
                 </span>
               </span>
@@ -882,7 +882,7 @@ const groupedProviders = computed(() => {
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                   aria-hidden="true"
                 />
-                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-60 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-60 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   Monthly USD you pay {{ providerLabel(name) }}. The Chat Cost dashboard pro-rates this to the selected time window (<code class="font-mono">monthly × window_days / 30</code>).
                 </span>
               </span>
@@ -944,7 +944,7 @@ const groupedProviders = computed(() => {
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                   aria-hidden="true"
                 />
-                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">5m</code> for 5 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever. Longer values hold GPU memory per model.
                 </span>
               </span>
@@ -1042,7 +1042,7 @@ const groupedProviders = computed(() => {
                     :for="`model-id-${name}`"
                     class="block"
                   >
-                    <span class="block text-[10px] text-fg-muted mb-0.5">ID</span>
+                    <span class="block text-xs text-fg-muted mb-0.5">ID</span>
                     <input
                       :id="`model-id-${name}`"
                       v-model="modelForm.id"
@@ -1053,7 +1053,7 @@ const groupedProviders = computed(() => {
                     :for="`model-name-${name}`"
                     class="block"
                   >
-                    <span class="block text-[10px] text-fg-muted mb-0.5">Display Name</span>
+                    <span class="block text-xs text-fg-muted mb-0.5">Display Name</span>
                     <input
                       :id="`model-name-${name}`"
                       v-model="modelForm.name"
@@ -1064,7 +1064,7 @@ const groupedProviders = computed(() => {
                     :for="`model-ctx-${name}`"
                     class="block"
                   >
-                    <span class="block text-[10px] text-fg-muted mb-0.5">Context Window</span>
+                    <span class="block text-xs text-fg-muted mb-0.5">Context Window</span>
                     <input
                       :id="`model-ctx-${name}`"
                       v-model.number="modelForm.contextWindow"
@@ -1073,14 +1073,14 @@ const groupedProviders = computed(() => {
                     >
                     <span
                       v-if="!modelForm.contextWindow || modelForm.contextWindow <= 0"
-                      class="block text-[10px] text-warning mt-0.5"
+                      class="block text-xs text-warning mt-0.5"
                     >Unknown — set from provider docs. Compaction and /usage depend on this.</span>
                   </label>
                   <label
                     :for="`model-maxtok-${name}`"
                     class="block"
                   >
-                    <span class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</span>
+                    <span class="block text-xs text-fg-muted mb-0.5">Max Tokens</span>
                     <input
                       :id="`model-maxtok-${name}`"
                       v-model.number="modelForm.maxTokens"
@@ -1092,7 +1092,7 @@ const groupedProviders = computed(() => {
                     :for="`model-price-in-${name}`"
                     class="block"
                   >
-                    <span class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</span>
+                    <span class="block text-xs text-fg-muted mb-0.5">Input $/M tokens</span>
                     <input
                       :id="`model-price-in-${name}`"
                       v-model.number="modelForm.promptPrice"
@@ -1105,7 +1105,7 @@ const groupedProviders = computed(() => {
                     :for="`model-price-out-${name}`"
                     class="block"
                   >
-                    <span class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</span>
+                    <span class="block text-xs text-fg-muted mb-0.5">Output $/M tokens</span>
                     <input
                       :id="`model-price-out-${name}`"
                       v-model.number="modelForm.completionPrice"
@@ -1119,7 +1119,7 @@ const groupedProviders = computed(() => {
                     class="block"
                     title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
                   >
-                    <span class="block text-[10px] text-fg-muted mb-0.5">Cache read $/M</span>
+                    <span class="block text-xs text-fg-muted mb-0.5">Cache read $/M</span>
                     <input
                       :id="`model-cache-read-${name}`"
                       v-model.number="modelForm.cachedReadPrice"
@@ -1133,7 +1133,7 @@ const groupedProviders = computed(() => {
                     class="block"
                     title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
                   >
-                    <span class="block text-[10px] text-fg-muted mb-0.5">Cache write $/M</span>
+                    <span class="block text-xs text-fg-muted mb-0.5">Cache write $/M</span>
                     <input
                       :id="`model-cache-write-${name}`"
                       v-model.number="modelForm.cacheWritePrice"
@@ -1254,7 +1254,7 @@ const groupedProviders = computed(() => {
                   <div class="flex items-center gap-2">
                     <span
                       v-if="getModelRank(name, model.id)"
-                      class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
+                      class="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded"
                       :class="getModelRank(name, model.id)! <= 3 ? 'text-amber-700 dark:text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
                       :title="`#${getModelRank(name, model.id)} on provider leaderboard`"
                     >
@@ -1312,7 +1312,7 @@ const groupedProviders = computed(() => {
                   :for="`addmodel-id-${name}`"
                   class="block"
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">ID</span>
+                  <span class="block text-xs text-fg-muted mb-0.5">ID</span>
                   <input
                     :id="`addmodel-id-${name}`"
                     v-model="modelForm.id"
@@ -1324,7 +1324,7 @@ const groupedProviders = computed(() => {
                   :for="`addmodel-name-${name}`"
                   class="block"
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Display Name</span>
+                  <span class="block text-xs text-fg-muted mb-0.5">Display Name</span>
                   <input
                     :id="`addmodel-name-${name}`"
                     v-model="modelForm.name"
@@ -1336,7 +1336,7 @@ const groupedProviders = computed(() => {
                   :for="`addmodel-ctx-${name}`"
                   class="block"
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Context Window</span>
+                  <span class="block text-xs text-fg-muted mb-0.5">Context Window</span>
                   <input
                     :id="`addmodel-ctx-${name}`"
                     v-model.number="modelForm.contextWindow"
@@ -1345,14 +1345,14 @@ const groupedProviders = computed(() => {
                   >
                   <span
                     v-if="!modelForm.contextWindow || modelForm.contextWindow <= 0"
-                    class="block text-[10px] text-warning mt-0.5"
+                    class="block text-xs text-warning mt-0.5"
                   >Unknown — set from provider docs. Compaction and /usage depend on this.</span>
                 </label>
                 <label
                   :for="`addmodel-maxtok-${name}`"
                   class="block"
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</span>
+                  <span class="block text-xs text-fg-muted mb-0.5">Max Tokens</span>
                   <input
                     :id="`addmodel-maxtok-${name}`"
                     v-model.number="modelForm.maxTokens"
@@ -1364,7 +1364,7 @@ const groupedProviders = computed(() => {
                   :for="`addmodel-price-in-${name}`"
                   class="block"
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</span>
+                  <span class="block text-xs text-fg-muted mb-0.5">Input $/M tokens</span>
                   <input
                     :id="`addmodel-price-in-${name}`"
                     v-model.number="modelForm.promptPrice"
@@ -1377,7 +1377,7 @@ const groupedProviders = computed(() => {
                   :for="`addmodel-price-out-${name}`"
                   class="block"
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</span>
+                  <span class="block text-xs text-fg-muted mb-0.5">Output $/M tokens</span>
                   <input
                     :id="`addmodel-price-out-${name}`"
                     v-model.number="modelForm.completionPrice"
@@ -1391,7 +1391,7 @@ const groupedProviders = computed(() => {
                   class="block"
                   title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Cache read $/M</span>
+                  <span class="block text-xs text-fg-muted mb-0.5">Cache read $/M</span>
                   <input
                     :id="`addmodel-cache-read-${name}`"
                     v-model.number="modelForm.cachedReadPrice"
@@ -1405,7 +1405,7 @@ const groupedProviders = computed(() => {
                   class="block"
                   title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Cache write $/M</span>
+                  <span class="block text-xs text-fg-muted mb-0.5">Cache write $/M</span>
                   <input
                     :id="`addmodel-cache-write-${name}`"
                     v-model.number="modelForm.cacheWritePrice"
@@ -1545,7 +1545,7 @@ const groupedProviders = computed(() => {
                 <span class="text-xs font-medium text-blue-700 dark:text-blue-400">Discover Models</span>
                 <span
                   v-if="!discoveryLoading && discoveredModels.length"
-                  class="text-[10px] text-fg-muted"
+                  class="text-xs text-fg-muted"
                 >
                   {{ discoveredModels.length }} available
                 </span>
@@ -1554,7 +1554,7 @@ const groupedProviders = computed(() => {
                      might be missing. The backend filter drops embedding /
                      audio / image-generation models because binding a chat
                      agent to one would fail at the first chat call. -->
-              <span class="text-[10px] text-fg-muted">
+              <span class="text-xs text-fg-muted">
                 Embedding-only and audio-only models are hidden; bind chat agents to chat-capable models.
               </span>
             </div>
@@ -1603,7 +1603,7 @@ const groupedProviders = computed(() => {
               <select
                 v-model="discoveryFilterThinking"
                 aria-label="Filter by thinking support"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                class="bg-muted border border-input text-xs text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
                   Thinking: All
@@ -1619,7 +1619,7 @@ const groupedProviders = computed(() => {
                 v-if="discoveryHasVision"
                 v-model="discoveryFilterVision"
                 aria-label="Filter by vision support"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                class="bg-muted border border-input text-xs text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
                   Vision: All
@@ -1635,7 +1635,7 @@ const groupedProviders = computed(() => {
                 v-if="discoveryHasAudio"
                 v-model="discoveryFilterAudio"
                 aria-label="Filter by audio support"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                class="bg-muted border border-input text-xs text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
                   Audio: All
@@ -1651,7 +1651,7 @@ const groupedProviders = computed(() => {
                 v-if="discoveryHasVideo"
                 v-model="discoveryFilterVideo"
                 aria-label="Filter by video support"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                class="bg-muted border border-input text-xs text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
                   Video: All
@@ -1667,7 +1667,7 @@ const groupedProviders = computed(() => {
                 v-if="discoveryHasToolIncapable"
                 v-model="discoveryFilterTools"
                 aria-label="Filter by tool-calling support"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                class="bg-muted border border-input text-xs text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
                   Tools: All
@@ -1683,7 +1683,7 @@ const groupedProviders = computed(() => {
                 v-if="discoveryHasFreeModels"
                 v-model="discoveryFilterCost"
                 aria-label="Filter by cost"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                class="bg-muted border border-input text-xs text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
                   Cost: All
@@ -1699,7 +1699,7 @@ const groupedProviders = computed(() => {
                 v-if="discoveryHasRankings"
                 v-model="discoveryFilterPopular"
                 aria-label="Filter by leaderboard rank"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                class="bg-muted border border-input text-xs text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
                   Rank: All
@@ -1714,7 +1714,7 @@ const groupedProviders = computed(() => {
                   All Ranked
                 </option>
               </select>
-              <span class="text-[10px] text-fg-muted shrink-0">{{ filteredDiscoveredModels.length }}</span>
+              <span class="text-xs text-fg-muted shrink-0">{{ filteredDiscoveredModels.length }}</span>
               <button
                 class="text-xs text-fg-muted hover:text-fg-strong transition-colors shrink-0"
                 @click="selectAllDiscovered"
@@ -1734,14 +1734,14 @@ const groupedProviders = computed(() => {
                 @click="toggleDiscoverySelect(model.id)"
               >
                 <span
-                  class="shrink-0 w-3.5 h-3.5 border border-input flex items-center justify-center text-[10px]"
+                  class="shrink-0 w-3.5 h-3.5 border border-input flex items-center justify-center text-xs"
                   :class="discoverySelected.has(model.id) ? 'bg-blue-500 border-blue-500 text-white' : ''"
                 >
                   <span v-if="discoverySelected.has(model.id)">&#10003;</span>
                 </span>
                 <span
                   v-if="model.leaderboardRank"
-                  class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  class="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded"
                   :class="model.leaderboardRank <= 3 ? 'text-amber-700 dark:text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
                   :title="`#${model.leaderboardRank} on provider leaderboard`"
                 >
@@ -1751,24 +1751,24 @@ const groupedProviders = computed(() => {
                   <span class="text-xs text-fg-strong font-mono truncate block">{{ model.id }}</span>
                   <span
                     v-if="model.name && model.name !== model.id"
-                    class="text-[10px] text-fg-muted"
+                    class="text-xs text-fg-muted"
                   >{{ model.name }}</span>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                   <span
                     v-if="model.isFree"
-                    class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+                    class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
                   >free</span>
                   <span
                     v-else-if="(model.promptPrice ?? -1) >= 0"
-                    class="text-[10px] text-fg-muted font-mono"
+                    class="text-xs text-fg-muted font-mono"
                     :title="`$${(model.promptPrice ?? 0).toFixed(2)}/M in, $${(model.completionPrice ?? 0).toFixed(2)}/M out`"
                   >
                     ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
                   </span>
                   <span
                     v-if="model.alwaysThinks"
-                    class="inline-flex items-center gap-0.5 text-[10px] text-emerald-700 dark:text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
+                    class="inline-flex items-center gap-0.5 text-xs text-emerald-700 dark:text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
                     :title="model.alwaysThinksDetectedFromProvider
                       ? 'Pure reasoning model (provider-confirmed) — thinking is always on'
                       : 'Pure reasoning model (id-pattern match) — thinking is always on'"
@@ -1778,54 +1778,54 @@ const groupedProviders = computed(() => {
                   /></span>
                   <span
                     v-else-if="model.supportsThinking && model.thinkingDetectedFromProvider"
-                    class="text-[10px] text-emerald-700 dark:text-emerald-400 border border-emerald-400/30 px-1"
+                    class="text-xs text-emerald-700 dark:text-emerald-400 border border-emerald-400/30 px-1"
                     title="Thinking support confirmed by provider"
                   >thinking</span>
                   <span
                     v-else-if="model.supportsThinking"
-                    class="text-[10px] text-fg-muted border border-input px-1"
+                    class="text-xs text-fg-muted border border-input px-1"
                     title="Thinking support guessed from model name (not confirmed by provider)"
                   >thinking?</span>
                   <span
                     v-if="model.supportsVision && model.visionDetectedFromProvider"
-                    class="text-[10px] text-sky-700 dark:text-sky-400 border border-sky-400/30 px-1"
+                    class="text-xs text-sky-700 dark:text-sky-400 border border-sky-400/30 px-1"
                     title="Vision support confirmed by provider"
                   >vision</span>
                   <span
                     v-else-if="model.supportsVision"
-                    class="text-[10px] text-fg-muted border border-input px-1"
+                    class="text-xs text-fg-muted border border-input px-1"
                     title="Vision support guessed from model name (not confirmed by provider)"
                   >vision?</span>
                   <span
                     v-if="model.supportsAudio && model.audioDetectedFromProvider"
-                    class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
+                    class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
                     title="Audio support confirmed by provider"
                   >audio</span>
                   <span
                     v-else-if="model.supportsAudio"
-                    class="text-[10px] text-fg-muted border border-input px-1"
+                    class="text-xs text-fg-muted border border-input px-1"
                     title="Audio support guessed from model name (not confirmed by provider)"
                   >audio?</span>
                   <span
                     v-if="model.supportsVideo && model.videoDetectedFromProvider"
-                    class="text-[10px] text-purple-700 dark:text-purple-400 border border-purple-400/30 px-1"
+                    class="text-xs text-purple-700 dark:text-purple-400 border border-purple-400/30 px-1"
                     title="Video support confirmed by provider"
                   >video</span>
                   <span
                     v-else-if="model.supportsVideo"
-                    class="text-[10px] text-fg-muted border border-input px-1"
+                    class="text-xs text-fg-muted border border-input px-1"
                     title="Video support guessed from model name (not confirmed by provider)"
                   >video?</span>
                   <!-- No guessed variant: unknown tool support reads as supported,
                      so only a provider-confirmed negative is ever shown. -->
                   <span
                     v-if="isDeclaredToolIncapable(model)"
-                    class="text-[10px] text-orange-700 dark:text-orange-400 border border-orange-400/30 px-1"
+                    class="text-xs text-orange-700 dark:text-orange-400 border border-orange-400/30 px-1"
                     title="This model cannot call tools — an agent's tools and skills are unavailable with it"
                   >no tools</span>
                   <span
                     v-if="model.contextWindow"
-                    class="text-[10px] text-fg-muted font-mono"
+                    class="text-xs text-fg-muted font-mono"
                   >{{ (model.contextWindow / 1024).toFixed(0) }}K</span>
                 </div>
               </button>
@@ -1833,7 +1833,7 @@ const groupedProviders = computed(() => {
 
             <!-- Add selected -->
             <div class="px-4 py-2.5 border-t border-border flex items-center justify-between">
-              <span class="text-[10px] text-fg-muted">{{ discoverySelected.size }} selected</span>
+              <span class="text-xs text-fg-muted">{{ discoverySelected.size }} selected</span>
               <button
                 :disabled="discoverySelected.size === 0"
                 class="px-3 py-1 bg-blue-600 text-white text-xs font-medium hover:bg-blue-500 disabled:opacity-40 transition-colors"

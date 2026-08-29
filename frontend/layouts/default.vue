@@ -429,7 +429,7 @@ const navGroups: NavGroup[] = [
         >BETA</span>
         <button
           v-if="sidebarOpen"
-          class="p-1.5 rounded-full border border-fg-muted/40 text-fg-muted hover:text-fg-strong hover:border-fg-muted transition-colors"
+          class="p-1.5 rounded-full border border-border text-fg-muted hover:text-fg-strong hover:border-fg-muted transition-colors"
           title="Collapse sidebar"
           @click="sidebarOpen = false"
         >

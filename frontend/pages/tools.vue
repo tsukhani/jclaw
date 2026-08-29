@@ -226,7 +226,7 @@ function toggleAllExpanded() {
                   {{ card.displayName }}
                 </span>
                 <span
-                  class="mt-1.5 inline-block text-[10px] font-medium px-1.5 py-px rounded-sm leading-tight border"
+                  class="mt-1.5 inline-block text-xs font-medium px-1.5 py-px rounded-sm leading-tight border"
                   :class="getPillClass(card.key)"
                 >
                   {{ card.category }}
@@ -255,7 +255,7 @@ function toggleAllExpanded() {
                 <span class="text-[11px] font-medium text-fg-muted group-hover:text-fg-primary transition-colors">
                   Functions
                 </span>
-                <span class="text-[10px] text-fg-primary bg-muted px-1.5 py-px rounded tabular-nums">
+                <span class="text-xs text-fg-primary bg-muted px-1.5 py-px rounded tabular-nums">
                   {{ card.functions.length }}
                 </span>
               </div>
@@ -276,8 +276,8 @@ function toggleAllExpanded() {
                 :key="fn.name"
                 class="px-4 py-2 flex items-start gap-3 border-b border-border last:border-b-0"
               >
-                <code class="text-[10px] font-mono text-emerald-700 dark:text-emerald-400/80 shrink-0 mt-px w-32 truncate">{{ fn.name }}</code>
-                <span class="text-[10px] text-fg-muted leading-relaxed">{{ fn.description }}</span>
+                <code class="text-xs font-mono text-emerald-700 dark:text-emerald-400/80 shrink-0 mt-px w-32 truncate">{{ fn.name }}</code>
+                <span class="text-xs text-fg-muted leading-relaxed">{{ fn.description }}</span>
               </div>
             </div>
           </div>

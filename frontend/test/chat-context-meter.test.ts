@@ -56,11 +56,11 @@ describe('ChatContextMeter — percentage rendering at 0 / 50 / 95 percent', () 
       },
     })
     // 95k of 100k -> 95% used. The component's color rule is
-    //   p >= 90 -> bg-red-400, p >= 70 -> bg-amber-400, else bg-emerald-400
+    //   p >= 90 -> bg-danger, p >= 70 -> bg-warning, else bg-ok
     expect(component.find('[data-testid="context-readout"]').text()).toBe('95,000 / 100.0k')
     const bar = component.find('[data-testid="context-bar"]')
     expect(bar.attributes('style')).toContain('width: 95%')
-    expect(bar.classes()).toContain('bg-red-400')
+    expect(bar.classes()).toContain('bg-danger')
   })
 })
 
@@ -91,7 +91,7 @@ describe('ChatContextMeter — capacity handling edge cases', () => {
     // bar must not visually overflow even when usage exceeds capacity.
     const bar = component.find('[data-testid="context-bar"]')
     expect(bar.attributes('style')).toContain('width: 100%')
-    expect(bar.classes()).toContain('bg-red-400')
+    expect(bar.classes()).toContain('bg-danger')
   })
 
   it('treats nullish promptTokens/completionTokens as zero', async () => {
@@ -263,7 +263,7 @@ describe('ChatContextMeter — trigger button interactions', () => {
       },
     })
     const bar = component.find('[data-testid="context-bar"]')
-    expect(bar.classes()).toContain('bg-amber-400')
+    expect(bar.classes()).toContain('bg-warning')
   })
 
   it('renders the trigger right-side as em-dash when capacity is null but uses kFormat when small', async () => {

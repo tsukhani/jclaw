@@ -85,7 +85,7 @@
     --fg-strong: hsl(0 0% 9%);             /* emphasis/hover — neutral-900 */
     --ok: hsl(160 84% 27%);                /* success — JCLAW-691 #2: darkened emerald so text ≥4.5:1 on white (was 39% ≈2.6:1); dark keeps 39% */
     --danger: hsl(0 72% 51%);              /* error — red-600 (already ≥4.5:1 on white) */
-    --warning: hsl(38 92% 33%);            /* warning — JCLAW-691 #2: darkened amber so text ≥4.5:1 on white (was amber-500 ≈2:1); dark keeps amber-500 */
+    --warning: hsl(38 92% 31%);            /* WCAG-2026-08 #5: 33%→31% so warning text ≥4.5:1 on every light surface incl. --muted (was 4.22:1 there, 4.49:1 on --surface-elevated) */
     --info: hsl(221 83% 45%);              /* informational — JCLAW-691 #2: darkened blue so text ≥4.5:1 on white (was blue-500 ≈3.6:1); dark keeps blue-500 */
   }
 

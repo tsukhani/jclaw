@@ -234,10 +234,10 @@ async function testFromForm() {
 }
 
 const statusBadgeClass: Record<McpServer['status'], string> = {
-  CONNECTED: 'text-green-700 dark:text-green-400 border-green-400/30',
-  CONNECTING: 'text-yellow-700 dark:text-yellow-400 border-yellow-400/30',
-  DISCONNECTED: 'text-fg-muted border-neutral-500/30',
-  ERROR: 'text-red-700 dark:text-red-400 border-red-400/30',
+  CONNECTED: 'text-green-700 dark:text-green-400 border-current',
+  CONNECTING: 'text-yellow-700 dark:text-yellow-400 border-current',
+  DISCONNECTED: 'text-fg-muted border-current',
+  ERROR: 'text-red-700 dark:text-red-400 border-current',
 }
 
 function addEnvRow() {
@@ -513,7 +513,7 @@ function removeHeaderRow(i: number) {
 
         <div
           v-if="saveError"
-          class="text-xs text-red-700 dark:text-red-400 border border-red-400/30 bg-red-400/5 p-2"
+          class="text-xs text-red-700 dark:text-red-400 border border-current bg-red-400/5 p-2"
         >
           {{ saveError }}
         </div>
@@ -918,7 +918,7 @@ function removeHeaderRow(i: number) {
                   <div
                     v-if="testResult && testResultForId === server.id"
                     class="text-xs p-2 border"
-                    :class="testResult.success ? 'text-green-700 dark:text-green-400 border-green-400/30 bg-green-400/5' : 'text-red-700 dark:text-red-400 border-red-400/30 bg-red-400/5'"
+                    :class="testResult.success ? 'text-green-700 dark:text-green-400 border-current bg-green-400/5' : 'text-red-700 dark:text-red-400 border-current bg-red-400/5'"
                   >
                     <div class="font-medium">
                       {{ testResult.success ? '✓ Connection successful' : '✗ Connection failed' }}
@@ -930,7 +930,7 @@ function removeHeaderRow(i: number) {
 
                   <div
                     v-if="saveError"
-                    class="text-xs text-red-700 dark:text-red-400 border border-red-400/30 bg-red-400/5 p-2"
+                    class="text-xs text-red-700 dark:text-red-400 border border-current bg-red-400/5 p-2"
                   >
                     {{ saveError }}
                   </div>
