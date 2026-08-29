@@ -25,7 +25,7 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Build-time assembly of a historical user turn into the OpenAI-style
- * {@link ChatMessage} shape, including the multi-part content used for
+ * {@link ChatMessage} shape, including the multipart content used for
  * images and audio (JCLAW-25 / JCLAW-132 / JCLAW-165). Extracted from
  * {@link AgentRunner} as part of JCLAW-299.
  *
@@ -74,7 +74,8 @@ public final class VisionAudioAssembler {
      */
     private static final long TRANSCRIPT_AWAIT_TIMEOUT_SECONDS = 60;
 
-    private VisionAudioAssembler() {}
+    private VisionAudioAssembler() {
+    }
 
     /**
      * JCLAW-165: tracks which user messages in the assembled list carry
@@ -90,7 +91,8 @@ public final class VisionAudioAssembler {
      * @param audioAttachmentIds the persisted audio attachment ids carried
      *                           on this user turn
      */
-    public record AudioBearer(int chatMessageIndex, Long msgId, List<Long> audioAttachmentIds) {}
+    public record AudioBearer(int chatMessageIndex, Long msgId, List<Long> audioAttachmentIds) {
+    }
 
     /**
      * JCLAW-215: the vision analogue of {@link AudioBearer}. Tracks which user
@@ -104,7 +106,8 @@ public final class VisionAudioAssembler {
      * @param msgId              re-locates the persisted Message at rewrite time
      * @param imageAttachmentIds the persisted image attachment ids on this turn
      */
-    public record ImageBearer(int chatMessageIndex, Long msgId, List<Long> imageAttachmentIds) {}
+    public record ImageBearer(int chatMessageIndex, Long msgId, List<Long> imageAttachmentIds) {
+    }
 
     /**
      * JCLAW-224: the video analogue of {@link ImageBearer}/{@link AudioBearer}. Tracks which user
@@ -118,7 +121,8 @@ public final class VisionAudioAssembler {
      * @param msgId              re-locates the persisted Message at splice time
      * @param videoAttachmentIds the persisted video attachment ids on this turn
      */
-    public record VideoBearer(int chatMessageIndex, Long msgId, List<Long> videoAttachmentIds) {}
+    public record VideoBearer(int chatMessageIndex, Long msgId, List<Long> videoAttachmentIds) {
+    }
 
     /**
      * Build the {@link ChatMessage} for a historical user turn, lifting
@@ -136,7 +140,7 @@ public final class VisionAudioAssembler {
      * so package-private access is unreachable from the test.
      */
     public static ChatMessage userMessageFor(Message msg) {
-        // Default behaviour preserves the pre-JCLAW-165 input_audio shape;
+        // Default behavior preserves the pre-JCLAW-165 input_audio shape;
         // audio-capable models still go through this overload from
         // buildMessages and from any caller that wants the Telegram
         // happy-path (Gemini accepting OGG Opus natively).
@@ -436,7 +440,8 @@ public final class VisionAudioAssembler {
      * package-private access is unreachable from the test.
      */
     public static List<ChatMessage> applyCaptionsForCapability(List<ChatMessage> messages,
-            List<ImageBearer> imageBearers, boolean supportsVision, boolean supportsAudio) {
+                                                               List<ImageBearer> imageBearers, boolean supportsVision,
+                                                               boolean supportsAudio) {
         if (supportsVision || imageBearers == null || imageBearers.isEmpty()) return messages;
 
         // Phase 1 (no Tx during the model call): compute + persist any missing
@@ -477,7 +482,8 @@ public final class VisionAudioAssembler {
      * functional test can drive it directly from the default test package.
      */
     public static List<ChatMessage> applyVideoForCapability(List<ChatMessage> messages,
-            List<VideoBearer> videoBearers, Agent agent, boolean supportsAudio, boolean supportsVision) {
+                                                            List<VideoBearer> videoBearers, Agent agent,
+                                                            boolean supportsAudio, boolean supportsVision) {
         if (videoBearers == null || videoBearers.isEmpty()) return messages;
 
         // Phase 1 (no Tx during sampling/captioning): dispatch each video attachment to its strategy.
@@ -517,8 +523,8 @@ public final class VisionAudioAssembler {
                             .formatted(attId, e.getMessage()));
                     acc.add(Map.of("type", "text", "text",
                             "[A video was attached but could not be interpreted. To handle videos, "
-                            + "pick a video- or image-capable model, set a dedicated video model in "
-                            + "Settings → Video Interpretation, or enable Image Captioning.]"));
+                                    + "pick a video- or image-capable model, set a dedicated video model in "
+                                    + "Settings → Video Interpretation, or enable Image Captioning.]"));
                 }
             }
             partsByIndex.put(b.chatMessageIndex(), acc);
@@ -555,7 +561,7 @@ public final class VisionAudioAssembler {
             var sb = new StringBuilder();
             for (var p : parts) {
                 if (!sb.isEmpty()) sb.append("\n\n");
-                sb.append(String.valueOf(p.get("text")));
+                sb.append(p.get("text"));
             }
             return new ChatMessage(MessageRole.USER.value, sb.toString(), null, null, null);
         }
@@ -627,7 +633,9 @@ public final class VisionAudioAssembler {
         return true;
     }
 
-    /** Await one transcript future. Returns {@code false} on interrupt. */
+    /**
+     * Await one transcript future. Returns {@code false} on interrupt.
+     */
     private static boolean awaitOneTranscript(Long attId) {
         var future = PendingTranscripts.lookup(attId);
         if (future.isEmpty()) return true;

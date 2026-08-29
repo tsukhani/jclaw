@@ -95,9 +95,8 @@ public class ApiAgentsController extends Controller {
      * {@code __LoadTest__} are also rejected.
      */
     private static boolean isReservedName(String name) {
-        return name != null
-                && (LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name)
-                        || LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME.equalsIgnoreCase(name));
+        return (LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name)
+                || LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME.equalsIgnoreCase(name));
     }
 
     /**
@@ -115,7 +114,7 @@ public class ApiAgentsController extends Controller {
      */
     private static boolean isHiddenFromList(String name) {
         return isReservedName(name)
-                || (name != null && Agent.EVALTEST_AGENT_NAME.equalsIgnoreCase(name));
+                || (Agent.EVALTEST_AGENT_NAME.equalsIgnoreCase(name));
     }
 
     @SuppressWarnings("java:S2259")
@@ -283,7 +282,7 @@ public class ApiAgentsController extends Controller {
     public static void effectiveShellAllowlist(Long id) {
         var agent = requireAgent(id);
 
-        // Global portion: re-parse the raw config string rather than call
+        // Global portion: reparse the raw config string rather than call
         // parsedAllowlist() directly, which lives on a tool instance. The parse
         // is cheap (bounded length, split-and-trim).
         var rawGlobal = ConfigService.get("shell.allowlist",

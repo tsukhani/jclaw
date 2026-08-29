@@ -155,7 +155,7 @@ public class ApiConversationsController extends Controller {
      * map and then refined with a Java word-boundary regex — at 50k+ rows
      * with a common search term that materialized the whole match set on
      * every keystroke. Substring is the standard chat-search semantic
-     * (Slack, Discord, etc); the upside of word-boundary refinement was
+     * (Slack, Discord, etc.); the upside of word-boundary refinement was
      * not worth the unbounded fetch cost.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConversationView.class))))

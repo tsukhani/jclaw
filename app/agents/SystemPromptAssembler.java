@@ -137,7 +137,7 @@ public class SystemPromptAssembler {
     }
 
     /**
-     * Variant that accepts a pre-loaded disabled-tools set. Hot streaming path uses
+     * Variant that accepts a preloaded disabled-tools set. Hot streaming path uses
      * this to avoid a redundant DB query — the same set is computed once per turn
      * and threaded through both the tool catalog embedded in the system prompt and
      * the tool schemas sent alongside the LLM request. Pass {@code null} for the
@@ -240,8 +240,8 @@ public class SystemPromptAssembler {
                 - (coreIdx >= 0 && coreIdx < cacheablePrefix ? CORE_MEMORY_BOUNDARY_MARKER.length() : 0);
 
         // Total input bytes the LLM actually sees: the prompt string (which already
-        // contains the skills XML, so those aren't double-counted) plus the separately-
-        // delivered tool schemas. Skill entries are broken out for reporting only.
+        // contains the skills XML, so those aren't double-counted) plus the
+        // separately-delivered tool schemas. Skill entries are broken out for reporting only.
         int totalChars = full.length() + toolEntries.stream().mapToInt(PromptBreakdown.Entry::chars).sum();
 
         return new PromptBreakdown(
@@ -899,8 +899,8 @@ public class SystemPromptAssembler {
     /**
      * JCLAW-532: rank recalled memories by a blend of REAL relevance and
      * importance, not rank position. {@code entry.relevance()} is the search
-     * backend's normalized {@code [0,1]} score (top hit = 1.0), so a weakly-
-     * matching but high-importance memory no longer displaces a strongly-matching
+     * backend's normalized {@code [0,1]} score (top hit = 1.0), so a
+     * weakly-matching but high-importance memory no longer displaces a strongly-matching
      * one purely on the importance weight — the pre-fix code derived relevance
      * from list position, handing the second hit ~0.9 no matter how weak it was.
      * Pure and public for unit testing.

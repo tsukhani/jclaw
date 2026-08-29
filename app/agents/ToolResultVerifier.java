@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
  * <p>This stage deliberately does not alter, block, or annotate what the model
  * sees. A tool that failed should still hand the model its error — the model
  * needs it to react — and rewriting results before anyone knows how often they
- * are bad would be changing behaviour on a guess. The verdict is recorded as a
+ * are bad would be changing behavior on a guess. The verdict is recorded as a
  * metric so the failure rate becomes a number first. What to DO about a failing
  * verdict is stage 2's decision, made against that evidence.
  *
@@ -125,7 +125,7 @@ public final class ToolResultVerifier {
      * The checks themselves, with configuration already resolved. Separate from
      * {@link #verify} so the verdicts can be tested without writing the two config
      * keys — this project runs test classes concurrently, so a test that flipped a
-     * process-global setting would change behaviour under whatever else is running.
+     * process-global setting would change behavior under whatever else is running.
      *
      * <p>Generic checks first, the tool's own post-condition last. A tool that
      * already said {@code "Error…"} should be {@link Verdict#ERROR_REPORTED}: it

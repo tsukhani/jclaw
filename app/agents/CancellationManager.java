@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>On detection, the cancellation is logged via {@code EventLogger}
  *       with {@link #STREAM_CANCELLED_MSG} so operators can correlate the
  *       cancel with the round in which it landed.</li>
- *   <li>When synthesis was cancelled before the model produced any content,
+ *   <li>When synthesis was canceled before the model produced any content,
  *       {@link #cancelledReturn} chooses between handing back prior content
  *       (if any) and emitting a labeled fallback so the client UI doesn't
  *       render an empty assistant turn.</li>
@@ -69,7 +69,7 @@ public final class CancellationManager {
     /**
      * Poll an accumulator for completion, checking for cancellation every
      * 5 s. Returns {@code true} if the accumulator completed, {@code false}
-     * if cancelled (in which case the cancellation has already been
+     * if canceled (in which case the cancellation has already been
      * logged via {@link #checkCancelled}).
      */
     static boolean awaitAccumulatorOrCancel(LlmProvider.StreamAccumulator accumulator,

@@ -33,7 +33,7 @@ import java.util.function.Supplier;
  *   <li>the tool is marked {@link ToolRegistry.Tool#dangerous() dangerous}
  *       (today: {@code exec}); AND</li>
  *   <li>the running agent (or an ancestor, for sub-agents) is bound to a
- *       Telegram bot via {@link TelegramBinding#findByAgentOrAncestor}; AND</li>
+ *       Telegram bot via {@link TelegramBinding#findByAgentOrAncestor(Agent)}; AND</li>
  *   <li>JCLAW-423: the conversation that triggered the action is itself on
  *       Telegram — the only channel with an interactive approve/deny surface,
  *       and the only one where a prompt actually reaches the operator.</li>

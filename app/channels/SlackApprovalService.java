@@ -99,7 +99,7 @@ public final class SlackApprovalService {
     /**
      * Block the calling (virtual) thread until the approval resolves or the timeout
      * elapses. On timeout the pending entry is dropped and its prompt is replaced
-     * with an "expired" line so the stale buttons can't be tapped afterwards.
+     * with an "expired" line so the stale buttons can't be tapped afterward.
      */
     public static Outcome await(CompletableFuture<Outcome> future, Duration timeout) {
         return REGISTRY.await(future, timeout, Outcome.TIMED_OUT);

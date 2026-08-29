@@ -19,7 +19,7 @@ import static utils.GsonHolder.GSON;
  * runtime ({@code runtime=acp}) can drive — {@code claude}, {@code pi}, {@code
  * codex}, {@code gemini}, {@code opencode}, plus operator-added custom commands.
  * Surfaced in Settings → Subagents so the operator picks a detected harness
- * (auto-filling {@code subagent.acp.command} + {@code subagent.acp.harness})
+ * (autofilling {@code subagent.acp.command} + {@code subagent.acp.harness})
  * instead of typing the command by hand. Probed fresh on each call.
  */
 @With(AuthCheck.class)

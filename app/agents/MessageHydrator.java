@@ -19,7 +19,7 @@ import static utils.GsonHolder.GSON;
 
 /**
  * History → {@link ChatMessage} list hydration: walks the persisted
- * {@code Message} rows for a conversation, normalises tool-call IDs,
+ * {@code Message} rows for a conversation, normalizes tool-call IDs,
  * and emits a system-prompt-prefixed {@code ChatMessage} list ready
  * for the LLM. Extracted from {@link AgentRunner} as part of
  * JCLAW-299.
@@ -29,11 +29,11 @@ import static utils.GsonHolder.GSON;
  *   <li>{@link #buildMessages} — the central history walker; returns a
  *   {@link Hydration} carrying the message list plus the audio / image /
  *   video attachment-bearer side-maps (JCLAW-165 / JCLAW-224).</li>
- *   <li>{@link #sanitizeToolCallId} — the JCLAW-119 ID normaliser used
+ *   <li>{@link #sanitizeToolCallId} — the JCLAW-119 ID normalizer used
  *   on both sides of an assistant-tool_calls / tool-result pair.</li>
  *   <li>{@link #parseToolCalls} — single-call JSON unpack with
- *   JCLAW-119 ID-normalisation applied.</li>
- *   <li>{@link #contentAsString} — flatten a multi-part vision content
+ *   JCLAW-119 ID-normalization applied.</li>
+ *   <li>{@link #contentAsString} — flatten a multipart vision content
  *   array back to a string (text-parts only).</li>
  * </ul>
  *
@@ -186,7 +186,7 @@ public final class MessageHydrator {
 
     /**
      * Safely extract string content from a {@link ChatMessage#content()}
-     * which may be a {@code String} or a multi-part content array
+     * which may be a {@code String} or a multipart content array
      * (vision). Returns empty string if content is null or a non-string
      * type that can't be converted.
      */

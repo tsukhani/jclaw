@@ -108,7 +108,7 @@ final class ApprovalRegistry<D, O> {
     /**
      * Block the calling (virtual) thread until the approval resolves or the timeout
      * elapses. On timeout the pending entry is dropped and expired so its stale
-     * prompt can't be tapped afterwards.
+     * prompt can't be tapped afterward.
      *
      * @param timedOut the outcome to yield (and expire with) on timeout
      */

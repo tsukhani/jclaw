@@ -202,6 +202,7 @@ public class ApiAppInvokeController extends Controller {
             ApiResponses.error(404, "no_such_app", "No such app: " + slug);
         }
         var agentIdStr = readAgentId(manifest, slug); // throws 4xx if manifest unreadable / no agent
+        assert agentIdStr != null;
         var agentId = parseAgentId(agentIdStr, slug);  // throws 400 if non-numeric
         var agent = Tx.run(() -> AgentService.findById(agentId));
         if (agent == null) {

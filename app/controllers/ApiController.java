@@ -76,7 +76,7 @@ public class ApiController extends Controller {
      * return its trimmed contents, or {@code null} when the file is absent
      * / unreadable (dist installs strip the dotfile; cleanly-installed
      * environments otherwise without it). Never throws — the status
-     * endpoint is health-check infrastructure and must not 500 on a
+     * endpoint is health check infrastructure and must not 500 on a
      * missing optional file.
      */
     private static String readExpectedFrameworkVersion() {
