@@ -34,7 +34,7 @@ final class FsLineEditor {
      * successful write.
      */
     static String editLines(Agent agent, Path target, JsonArray opsJson) {
-        if (opsJson.size() == 0) {
+        if (opsJson.isEmpty()) {
             return "Error: editLines requires a non-empty 'operations' array";
         }
         var loaded = FsSupport.loadEditableFile(target);

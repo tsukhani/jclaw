@@ -31,7 +31,7 @@ final class FsTextEditor {
      * pipeline fires exactly once against the fully-edited state.
      */
     static String editFile(Path target, JsonArray editsJson) {
-        if (editsJson.size() == 0) {
+        if (editsJson.isEmpty()) {
             return "Error: editFile requires a non-empty 'edits' array";
         }
         var loaded = FsSupport.loadEditableFile(target);
