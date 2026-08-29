@@ -75,11 +75,21 @@ const current = computed(() => {
   return rows.value.find(r => r.provider === provider && r.model === model) ?? null
 })
 
+// Semantic tokens rather than palette values: bg-amber-400 measured 1.72:1 against
+// the light surface, under the 3:1 WCAG 1.4.11 wants of a status indicator.
 const statusClass = computed(() => {
   switch (props.statusTone) {
-    case 'busy': return 'bg-amber-400'
-    case 'offline': return 'bg-neutral-500'
-    default: return 'bg-emerald-500'
+    case 'busy': return 'bg-warning'
+    case 'offline': return 'bg-fg-muted'
+    default: return 'bg-ok'
+  }
+})
+
+const statusLabel = computed(() => {
+  switch (props.statusTone) {
+    case 'busy': return 'Model busy'
+    case 'offline': return 'Model offline'
+    default: return 'Model ready'
   }
 })
 
@@ -111,6 +121,8 @@ function onCloseAutoFocus(event: Event) {
                hover:bg-muted focus:outline-hidden focus:bg-muted transition-colors max-w-[420px]"
       >
         <span
+          role="img"
+          :aria-label="statusLabel"
           class="w-2 h-2 rounded-full shrink-0"
           :class="statusClass"
         />
