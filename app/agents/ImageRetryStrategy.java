@@ -6,7 +6,7 @@ import models.Conversation;
 import services.EventLogger;
 
 /**
- * Runtime retry policy for the JCLAW-215 image-passthrough path — the vision analogue of
+ * Runtime retry policy for the JCLAW-215 image-passthrough path — the vision analog of
  * {@link AudioRetryStrategy} (JCLAW-216). When a model advertises {@code supportsVision} but the
  * provider rejects the actual image at call time (a 4xx format / size / decode error), the
  * synchronous tool loop downgrades that turn to a generated caption and retries once.

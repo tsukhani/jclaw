@@ -69,7 +69,7 @@ final class SubagentAsyncRunner {
     private SubagentAsyncRunner() {}
 
     /** Launch the async-spawn background VT and return the immediate JSON
-     *  acknowledgement payload. */
+     *  acknowledgment payload. */
     static String launchAsyncSpawn(Long runId, Long childAgentId, Long childConvId,
                                    Long parentConvId, String parentAgentName,
                                    SubagentSpawnArgs parsed, String runIdStr) {
@@ -178,7 +178,7 @@ final class SubagentAsyncRunner {
     }
 
     /** Block-await one detached async outcome, bounded a little past the ceiling so
-     *  it can't hang even if completion signalling misbehaves. */
+     *  it can't hang even if completion signaling misbehaves. */
     private static SyncRunOutcome awaitOutcomeFuture(CompletableFuture<SyncRunOutcome> f)
             throws InterruptedException, ExecutionException, TimeoutException {
         int ceiling = ConfigService.getInt(SubagentSpawnTool.MAX_WALLCLOCK_KEY,
@@ -321,7 +321,7 @@ final class SubagentAsyncRunner {
         // JCLAW-271: skip the write when /subagent kill already stamped
         // KILLED — the operator's reason is the source of truth, and
         // overwriting it here would replace "Killed by operator" with the
-        // TIMEOUT / FAILED message we synthesized when the cancelled
+        // TIMEOUT / FAILED message we synthesized when the canceled
         // Future threw.
         SubagentRunStore.persistAsyncTerminalRun(runId, outcome);
 

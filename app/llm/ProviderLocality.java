@@ -23,7 +23,7 @@ import java.util.Locale;
  * reaching the ISP's own equipment, so no range can be blessed on its behalf.
  *
  * <p>That makes locality an assertion rather than a proof. It is the operator's to make:
- * JClaw cannot tell a tailnet address from a carrier-NAT neighbour, and refusing the whole
+ * JClaw cannot tell a tailnet address from a carrier-NAT neighbor, and refusing the whole
  * class would rule out self-hosting over a VPN entirely.
  *
  * <p>{@link PaymentModality} is deliberately not used for this. Its empty supported-set marks

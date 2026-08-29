@@ -339,7 +339,7 @@ public final class SkillConformanceService {
      *
      * <p>{@code parseVersion} answers all-zero for both "absent" and "unparseable", and
      * 0.0.0 is the sentinel the loader uses for "no version" — so stamping it here would
-     * write the absence rather than fix it. Normalising through the parser also repairs
+     * write the absence rather than fix it. Normalizing through the parser also repairs
      * near-misses: {@code v2.1} renders as {@code 2.1.0}.
      */
     public static String resolveVersion(String declaredVersion) {

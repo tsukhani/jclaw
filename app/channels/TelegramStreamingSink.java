@@ -246,7 +246,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /**
      * JCLAW-342: hard cap on the typing heartbeat's total lifetime. The
-     * heartbeat is normally cancelled at seal / onCancel; this TTL is the
+     * heartbeat is normally canceled at seal / onCancel; this TTL is the
      * safety net for a turn that hangs without ever sealing, so the indicator
      * can't run forever. OpenClaw's typing driver uses 60s.
      */
@@ -555,7 +555,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     }
 
     /**
-     * Called when the turn was cancelled (JCLAW-181 follow-up: typing-indicator
+     * Called when the turn was canceled (JCLAW-181 follow-up: typing-indicator
      * leak on {@code /stop}). Quiesces the sink without sending anything new:
      * cancels the typing heartbeat, drops any pending flush, marks the sink
      * sealed so late tokens become no-ops, and clears stream-checkpoint state
@@ -563,7 +563,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      *
      * <p>Distinct from {@link #errorFallback}: no error message is sent and
      * any partial placeholder is left in place. The {@code /stop} slash command
-     * already sent its own "Stopped." acknowledgement on a separate sink, and
+     * already sent its own "Stopped." acknowledgment on a separate sink, and
      * the partial placeholder (when one exists) is informative — it shows the
      * user what was generated up to the cancel point.
      *
@@ -681,7 +681,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * <p>Called by {@code AgentRunner.processInboundForAgentStreaming}
      * <i>after</i> sink construction and <i>before</i> {@code runStreaming}
      * kicks off the LLM call. Safe to call once per sink; subsequent calls
-     * are no-ops. Cancelled automatically by the first {@link #update}
+     * are no-ops. Canceled automatically by the first {@link #update}
      * call, by {@link #seal}, or by {@link #errorFallback}.
      */
     public void startTypingHeartbeat() {
@@ -1135,7 +1135,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * JCLAW-378: rate-limit decision against an explicit {@code cooldownMs}
      * window — used by {@link #notifyDeliveryFailure} so a binding's per-binding
      * cooldown override (resolved via {@link #effectiveNotifierCooldownMs}) is
-     * honoured. The no-arg {@link #tryFireNotifier(Long)} delegates here with the
+     * honored. The no-arg {@link #tryFireNotifier(Long)} delegates here with the
      * config default. Null conversationIds always return false (no key to rate-
      * limit against). Public for the test seam.
      */

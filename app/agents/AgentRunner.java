@@ -39,8 +39,8 @@ public class AgentRunner {
      * Default per-turn tool-round cap. Raised from 10 to 100 ahead of
      * JCLAW-21 Tasks: scheduled task fires have no human in the loop to
      * nudge a continuation, so the budget needs headroom for fan-out work
-     * (e.g. "summarise yesterday + email it" runs through fetch → parse →
-     * summarise → format → send chains that legitimately consume rounds).
+     * (e.g. "summarize yesterday + email it" runs through fetch → parse →
+     * summarize → format → send chains that legitimately consume rounds).
      * Hermes ships with 90 by default for the same reason; OpenClaw
      * inherits per-agent. Override via {@code chat.maxToolRounds} in
      * application.conf.
@@ -231,7 +231,7 @@ public class AgentRunner {
 
     /**
      * JCLAW-414: cooperative-cancellation checkpoint for task fires, the task
-     * counterpart of {@link #checkSubagentCancel}. If the operator cancelled
+     * counterpart of {@link #checkSubagentCancel}. If the operator canceled
      * this run via {@code POST /api/task-runs/{id}/cancel} — which flips the
      * {@link services.TaskRunRegistry} flag — throws {@link RunCancelledException}
      * so the tool loop bails at the next safe boundary. No-op when
@@ -485,7 +485,7 @@ public class AgentRunner {
                         primary.config().name(),
                         ModelResolver.effectiveModelId(agent, stubConv)));
 
-        // JCLAW-414: a task fire is the one path that can be operator-cancelled
+        // JCLAW-414: a task fire is the one path that can be operator-canceled
         // mid-run; hand the TaskRun id to the loop so its checkpoints can poll
         // the cancel flag. null for any non-task sink (no-op checkpoint).
         Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;

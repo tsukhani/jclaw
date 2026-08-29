@@ -53,7 +53,7 @@ public final class RenderedFetcher {
             // Bound by callTimeout, not by the general client's 30s per-read timeout.
             // A render legitimately sends nothing while the browser launches, navigates
             // and settles, and the 30s default cut 64 corpus entries off mid-render and
-            // reported them as TIMEOUT — a latency artefact indistinguishable, in the
+            // reported them as TIMEOUT — a latency artifact indistinguishable, in the
             // report, from an origin refusing us. Same tradeoff SidecarHttpClient
             // documents: with readTimeout=0 a hung socket is bounded ONLY by callTimeout.
             .readTimeout(Duration.ZERO)
@@ -131,7 +131,7 @@ public final class RenderedFetcher {
         }
     }
 
-    /** The count is logged, never parsed: a total in a shape this JVM does not recognise
+    /** The count is logged, never parsed: a total in a shape this JVM does not recognize
      *  belongs in the line rather than turning a diagnostic into a fault. */
     private static void reportBlockedHosts(Response response, String url) {
         var hosts = response.header("X-Blocked-Hosts");

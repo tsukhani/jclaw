@@ -28,7 +28,7 @@ import java.util.List;
  * pins the byte order, and a printer that trusts the sync word will read a
  * little-endian header as garbage dimensions.
  *
- * <p>Colour space and resolution are the caller's to choose, from what the
+ * <p>Color space and resolution are the caller's to choose, from what the
  * printer advertises in {@code pwg-raster-document-type-supported} and
  * {@code pwg-raster-document-resolution-supported}. Both matter more than they
  * look: sending 300 DPI sRGB to a device that declares 600 DPI produced
@@ -50,10 +50,10 @@ public final class PwgRasterEncoder {
     /**
      * cupsColorSpace 18 = sGray, 8 bits x 1.
      *
-     * <p>Worth having rather than always sending colour: a page is a third the
+     * <p>Worth having rather than always sending color: a page is a third the
      * size, and this class of printer has a small spool. A 600 DPI A4 page is
      * 104 MB as sRGB and 35 MB as sGray before compression — the Canon answered
-     * a colour job with printer-state-reasons=spool-area-full and stopped.
+     * a color job with printer-state-reasons=spool-area-full and stopped.
      */
     private static final int COLORSPACE_SGRAY = 18;
 
@@ -166,7 +166,7 @@ public final class PwgRasterEncoder {
         u32(out, 0);                        // [4]  ImageBoxTop
         u32(out, width);                    // [5]  ImageBoxRight
         u32(out, height);                   // [6]  ImageBoxBottom
-        // AlternatePrimary is the colour used where the page is "blank"; white,
+        // AlternatePrimary is the color used where the page is "blank"; white,
         // as 0xFFFFFF, or the printer may treat unwritten area as black.
         u32(out, 0xFFFFFF);                 // [7]  AlternatePrimary
         u32(out, 0);                        // [8]  PrintQuality (0 = printer default)
@@ -252,7 +252,7 @@ public final class PwgRasterEncoder {
      * </pre>
      *
      * Runs are counted in <em>pixels</em>, not bytes — encoding by byte would
-     * split an RGB triple across a run boundary and shear the colour channels.
+     * split an RGB triple across a run boundary and shear the color channels.
      */
     static void encodeLine(OutputStream out, byte[] line, int width, int colors) throws IOException {
         int x = 0;

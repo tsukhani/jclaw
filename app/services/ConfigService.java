@@ -361,7 +361,7 @@ public class ConfigService {
         // old password kept working. Caching the absence instead makes that read a HIT: it
         // returns null without reaching the DB, so there is nothing stale to re-cache. Mirrors
         // the eager put set() makes for JCLAW-832; a plain deferral would not, because it would
-        // leave delete() unable to honour deleteEvictsCacheSoSubsequentGetReturnsNull.
+        // leave delete() unable to honor deleteEvictsCacheSoSubsequentGetReturnsNull.
         cache.put(key, Optional.empty());
         if (JPA.isInsideTransaction()) {
             // Same rollback contract as set(): an uncommitted delete must not leave the cache

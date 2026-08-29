@@ -426,7 +426,7 @@ public class SystemPromptAssembler {
 
         // 9b. Core memories (JCLAW-40) — the agent's high-importance, durable
         // facts, auto-loaded every session. Placed in the cacheable prefix as
-        // the dynamic analogue of USER.md: core-category memories above the
+        // the dynamic analog of USER.md: core-category memories above the
         // importance threshold are the slowest-changing memory tier, so the
         // block stays byte-stable within an agent's lifetime and only busts the
         // prefix cache when a core memory is actually added or edited. The

@@ -40,7 +40,7 @@ import java.util.List;
  * A row would drag in an entity, migration, and a transaction for no gain.
  *
  * <p><b>Fail-open.</b> An unreadable stored hash, a missing file, or a write failure
- * all degrade to "re-issue {@code setMyCommands}" — the pre-JCLAW-387 behaviour. The
+ * all degrade to "re-issue {@code setMyCommands}" — the pre-JCLAW-387 behavior. The
  * worst case is a redundant API call, never a skipped-but-needed one.
  */
 public final class TelegramCommandsHashStore {
@@ -162,7 +162,7 @@ public final class TelegramCommandsHashStore {
      * bot. No-op for a token with no derivable bot id. Persistence failures are
      * logged, not thrown: a missed write costs at most one redundant
      * {@code setMyCommands} on the next restart, which is the pre-JCLAW-387
-     * behaviour.
+     * behavior.
      */
     public static synchronized void persist(String token, String hash) {
         String botId = botId(token);

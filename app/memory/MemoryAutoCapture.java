@@ -327,7 +327,7 @@ public final class MemoryAutoCapture {
      * returns early in test mode, so anything buried in its virtual thread is
      * unreachable from a unit test — the same reason {@link #captureEligible} was
      * factored out. An unknown or null channel stays eligible: capture has always
-     * been the default and a channel we don't recognise is not a reason to drop it.
+     * been the default and a channel we don't recognize is not a reason to drop it.
      */
     public static boolean channelEligible(String channelType) {
         return !ChannelType.VOICE.value.equalsIgnoreCase(channelType);
@@ -825,7 +825,7 @@ public final class MemoryAutoCapture {
      * restatements land at 0.375-0.500 ("osteopath is called Ines and her clinic is on Rua
      * do Almada" → "osteopath is named Ines"), genuine corrections at 1.0 or above ("lives
      * in Porto" → "lives in Lisbon"; "flight is at 08:00" → "at 11:30 from Gate 4"). The
-     * sweep is clean anywhere in 0.55-1.00 and breaks at 0.50; 0.75 centres that gap.
+     * sweep is clean anywhere in 0.55-1.00 and breaks at 0.50; 0.75 centers that gap.
      */
     private static final double SUPERSEDE_MIN_CONTENT_RATIO = 0.75;
 
@@ -1025,7 +1025,7 @@ public final class MemoryAutoCapture {
 
     /**
      * The {@code questions} array as one newline-joined block, or null when the model
-     * omitted it (JCLAW-529). Absent is the pre-529 behaviour, not an error — the row
+     * omitted it (JCLAW-529). Absent is the pre-529 behavior, not an error — the row
      * simply embeds its statement alone.
      */
     private static String parseQuestions(com.google.gson.JsonObject o) {

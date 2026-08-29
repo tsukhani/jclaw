@@ -108,7 +108,7 @@ public final class TaskRunRegistry {
      * loop bails at its next safe checkpoint. Returns {@code true} when an
      * entry existed (the run is in-flight on this JVM and will observe the
      * flag), {@code false} when none is registered (already finished, or never
-     * ran here — the caller still marks the row CANCELLED in the DB). Does NOT
+     * ran here — the caller still marks the row CANCELED in the DB). Does NOT
      * write the DB or touch any thread — terminal-status persistence is the
      * caller's job (see {@code ApiTasksController.cancelRun}).
      */

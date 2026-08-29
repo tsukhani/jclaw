@@ -47,7 +47,7 @@ public final class BlockClassifier {
     };
 
     /**
-     * Prerendering services serve rendered HTML to user agents they recognise as
+     * Prerendering services serve rendered HTML to user agents they recognize as
      * crawlers. Measured on abundent.academy: 68 characters of text to a browser UA,
      * 5,169 to Googlebot — a 76x difference from the header alone.
      *

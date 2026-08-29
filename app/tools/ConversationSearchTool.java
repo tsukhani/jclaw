@@ -71,11 +71,11 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
     private static final int LUCENE_WINDOW = 500;
 
     /**
-     * Result timestamps, in the operator's zone, labelled with the zone's NAME rather
-     * than its numeric offset. A model reads "11:09 +08:00" as a time it may normalise
-     * and hands back 03:09 — the UTC value — still labelled +08. A named zone cannot be
+     * Result timestamps, in the operator's zone, labeled with the zone's NAME rather
+     * than its numeric offset. A model reads "11:09 +08:00" as a time it may normalize
+     * and hands back 03:09 — the UTC value — still labeled +08. A named zone cannot be
      * applied arithmetically, so the value stays put. Per line, not once in a header,
-     * because the compression pipeline can summarise whole lines away.
+     * because the compression pipeline can summarize whole lines away.
      */
     private static final DateTimeFormatter STAMP_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");

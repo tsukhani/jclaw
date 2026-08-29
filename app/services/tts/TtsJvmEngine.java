@@ -58,7 +58,7 @@ public final class TtsJvmEngine {
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/";
 
     /** Maps a {@link TtsModel} JVM id to its sherpa archive/config (the JVM-side
-     *  analogue of synth.py's MLX_REPOS). Adding a voice = one entry + one
+     *  analog of synth.py's MLX_REPOS). Adding a voice = one entry + one
      *  {@link TtsModel} enum row. */
     private static final Map<String, Spec> SPECS = Map.of(
             "piper-en_US-amy-low", new Spec(RELEASE + "vits-piper-en_US-amy-low.tar.bz2",

@@ -364,7 +364,7 @@ public final class SsrfGuard {
      * {@link #pinnedUrl(String)} and {@link #hostResolverRule(String)} (so a
      * future hardening edit touches one place). {@link #assertUrlSafe} has
      * already walked every resolved address and rejected the host if any was
-     * unsafe; this repins to the first and re-checks it as defence in depth so
+     * unsafe; this repins to the first and re-checks it as defense in depth so
      * an unsafe pin can never be emitted.
      *
      * @throws SecurityException if the host cannot resolve, or the pinned
@@ -377,7 +377,7 @@ public final class SsrfGuard {
         } catch (UnknownHostException e) {
             throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
         }
-        if (isUnsafe(pinned)) { // defence in depth: never emit an unsafe pin
+        if (isUnsafe(pinned)) { // defense in depth: never emit an unsafe pin
             throw new SecurityException(
                     BLOCKED_ADDRESS_MSG
                             .formatted(host, pinned.getHostAddress()));

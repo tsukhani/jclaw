@@ -44,7 +44,7 @@ public final class EvalScorer {
      * recording share one file format: the alternative, omitting the case
      * entirely, would reach the scorer as an indistinguishable "no response
      * recorded" and throw away the one detail someone debugging the sweep needs.
-     * Older recordings have no {@code error} field and deserialise to null.
+     * Older recordings have no {@code error} field and deserialize to null.
      */
     public record Response(String output, List<String> toolsCalled, List<String> toolsAttempted,
                            Map<String, List<String>> toolArgs, Map<String, List<String>> toolResults,
@@ -220,7 +220,7 @@ public final class EvalScorer {
         var results = response.resultsFor(tool);
         if (results.isEmpty()) {
             // Separated from "returned something else" because they need different
-            // fixes: one is a tool-selection failure, the other a behaviour failure.
+            // fixes: one is a tool-selection failure, the other a behavior failure.
             failures.add("tool_result_includes: " + tool + " recorded no dispatched call with a result"
                     + (response.toolsCalled().contains(tool) ? " (called, but the run recorded no result)" : ""));
             return;

@@ -50,7 +50,7 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
      * <p>The thread counts are named "platform" deliberately: {@code ThreadMXBean} does
      * not see virtual threads, and this fork runs virtual-thread-only for request and
      * tool work. A flat, low count here is therefore expected and is not evidence that
-     * nothing is running — labelling it "threads" would invite exactly that misreading.
+     * nothing is running — labeling it "threads" would invite exactly that misreading.
      *
      * <p>Absent values stay absent. GC beans may report -1, and {@code getProcessCpuLoad}
      * returns a negative sentinel when unavailable (commonly on its first call, which is

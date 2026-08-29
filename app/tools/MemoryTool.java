@@ -92,7 +92,7 @@ public class MemoryTool implements ToolRegistry.Tool {
      * against the stored "The user swims at the lido on Wednesday evenings." sits at
      * containment 0.750 — one uninflected pair, swims/swimming, out of four content tokens.
      * The nearest wrong candidate on that corpus ("...at the pool on Wednesday evenings")
-     * sits at 0.500, and the sweep is clean anywhere in 0.60-0.75. 0.70 centres that
+     * sits at 0.500, and the sweep is clean anywhere in 0.60-0.75. 0.70 centers that
      * window. Below 0.60 the pool row starts matching, which would be a destructive miss.
      *
      * <p>Re-derived for JCLAW-1054 and it stays. The hope there was that sharing the search
@@ -379,7 +379,7 @@ public class MemoryTool implements ToolRegistry.Tool {
 
     /**
      * The {@code questions} array as one newline-joined block, or null when absent
-     * (JCLAW-529). A model that omits it stores a keyless memory — the pre-529 behaviour,
+     * (JCLAW-529). A model that omits it stores a keyless memory — the pre-529 behavior,
      * not an error — and {@code MemoryKeyBackfillService} can key it later.
      */
     static String parseQuestions(JsonObject args) {

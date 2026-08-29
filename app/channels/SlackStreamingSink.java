@@ -202,7 +202,7 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
         }
     }
 
-    /** Honour the injected throttle (tests pass 0 → flush every update); in
+    /** Honor the injected throttle (tests pass 0 → flush every update); in
      *  production raise to {@link #DRAFT_THROTTLE_MS} so chat.update stays under its
      *  tighter rate limit than the native appendStream path. */
     private long draftThrottleMs() {

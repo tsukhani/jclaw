@@ -767,7 +767,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     /** Dedup key: scheme and host lowercased, fragment dropped. Path and query are kept
      *  verbatim — a trailing slash or a query parameter can select a different page, and
-     *  normalising those away merges pages that are not the same. */
+     *  normalizing those away merges pages that are not the same. */
     private static String canonical(URI uri) {
         var path = uri.getPath() == null ? "" : uri.getPath();
         var query = uri.getQuery() == null ? "" : "?" + uri.getQuery();

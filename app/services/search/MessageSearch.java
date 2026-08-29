@@ -52,7 +52,7 @@ public final class MessageSearch {
     private MessageSearch() {}
 
     /**
-     * Initialise the dialect-appropriate backend once. Idempotent —
+     * Initialize the dialect-appropriate backend once. Idempotent —
      * re-running just re-runs {@code init()} on the cached
      * impl, which is itself idempotent (H2's
      * {@code FullTextLucene.createIndex} no-ops when the index

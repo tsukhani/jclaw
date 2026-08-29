@@ -216,7 +216,7 @@ interface LlmStreamCarriers {
      * {@link StreamAccumulator}). Token counts get folded in via
      * {@link #addRound(StreamAccumulator)} after each round's stream completes.
      *
-     * <p>Summing per-round usage is the billing-correct behaviour because each
+     * <p>Summing per-round usage is the billing-correct behavior because each
      * round is a separate API call; it also matches user intuition for
      * reasoning/completion counts (the user sees all reasoning and all
      * synthesis output across rounds, not just round 1). Reasoning-phase
@@ -225,7 +225,7 @@ interface LlmStreamCarriers {
      * seconds" matches what the user saw live — from first reasoning event
      * of the turn to first content event of the turn, including any tool-
      * execution gap between rounds. Anchoring it to round 1 only (the
-     * pre-fix behaviour) made reloaded turns show e.g. 1.23s while the
+     * pre-fix behavior) made reloaded turns show e.g. 1.23s while the
      * live UI showed 9.60s for the same turn.
      *
      * <p>See JCLAW-76 for the accounting defect this class fixes.

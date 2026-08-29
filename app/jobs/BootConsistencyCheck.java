@@ -52,7 +52,7 @@ import java.util.Set;
  *   JCLAW-1103 added {@link #reconcileStrandedRunning} for a RUNNING
  *   Task that has lost it, which neither can see.</li>
  *
- *   <li>Tasks in terminal states (COMPLETED / FAILED / CANCELLED)
+ *   <li>Tasks in terminal states (COMPLETED / FAILED / CANCELED)
  *   — they shouldn't have rows in {@code scheduled_tasks} and we
  *   don't want to re-fire them.</li>
  *

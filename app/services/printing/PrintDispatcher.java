@@ -154,7 +154,7 @@ public final class PrintDispatcher {
      *
      * <p>A failure here is not a print failure: an unreachable Get-Printer-Attributes
      * just means we negotiate blind and send the source as-is, which is exactly the
-     * behaviour from before negotiation existed.
+     * behavior from before negotiation existed.
      */
     private static Set<String> supportedFormats(DiscoveredPrinter printer) {
         try {
@@ -177,7 +177,7 @@ public final class PrintDispatcher {
             parts.add(job.describe());
         }
         // Options beyond the three JClaw interprets are equally lost on raw/LPD;
-        // reporting only sides and colour would understate what was dropped.
+        // reporting only sides and color would understate what was dropped.
         for (var e : options.entrySet()) {
             if (!e.getKey().equals("sides") && !e.getKey().equals("print-color-mode")
                     && !e.getKey().equals("media")) {

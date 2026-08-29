@@ -38,14 +38,14 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
          * args asserts the agent called no tool at all.
          *
          * <p>An allowlist. It replaced a {@code tool_called} / {@code tool_not_called}
-         * pair, which was a denylist and therefore only caught rogue behaviour
+         * pair, which was a denylist and therefore only caught rogue behavior
          * someone predicted: {@code arithmetic-needs-no-tool} says in its rubric that
          * "any tool call here is pure overhead" but could only forbid the two tools
          * it happened to name, so a stray {@code task_manager} call passed it. This
          * kind is how a case says "only what was necessary" and means it (JCLAW-883).
          *
          * <p>Order is not compared. Two tools the agent could equally have called in
-         * either order are not a behaviour difference worth failing a suite over.
+         * either order are not a behavior difference worth failing a suite over.
          */
         TOOLS_CALLED_EXACTLY,
         /**

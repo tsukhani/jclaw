@@ -34,7 +34,7 @@ import java.util.function.Consumer;
  *
  * <p>Weights land under {@code data/image-models/} (jclaw's data/ convention) in
  * the Hugging Face cache layout. {@link #availableLocally} checks that layout so
- * a model pulled in a previous session is recognised without a running sidecar.
+ * a model pulled in a previous session is recognized without a running sidecar.
  */
 public final class ImageModelManager {
 

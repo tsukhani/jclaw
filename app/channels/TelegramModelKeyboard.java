@@ -18,7 +18,7 @@ import java.util.Map;
  *
  * <p>Layouts:
  * <ul>
- *   <li>Providers list: 2-per-row grid, each button labelled
+ *   <li>Providers list: 2-per-row grid, each button labeled
  *       {@code "{label} ({modelCount})"} with a leading {@code ✓} on the
  *       conversation's current provider. Bottom row is {@code × Cancel}.</li>
  *   <li>Models list: 2-per-row grid, paginated at {@link #MODELS_PER_PAGE},
@@ -52,7 +52,7 @@ public final class TelegramModelKeyboard {
             "anthropic", "Anthropic"
     );
 
-    /** Public so {@link TelegramModelSelector} can reuse the same labelling
+    /** Public so {@link TelegramModelSelector} can reuse the same labeling
      *  in body text (Provider line, switch confirmations, etc.). */
     public static String providerLabel(String registryName) {
         if (registryName == null) return "";

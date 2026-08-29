@@ -25,7 +25,7 @@ import models.TelegramBinding;
  *
  * <p>Unsupported channels (slack, whatsapp) return a failed result —
  * those targets need a per-channel "notification" surface that doesn't
- * exist yet, and the message tool's chat-append behaviour wouldn't be
+ * exist yet, and the message tool's chat-append behavior wouldn't be
  * right for a reminder (the LLM would see it on the next turn).
  *
  * <p>Companion to {@link DeliveryDispatcher} — both implement the

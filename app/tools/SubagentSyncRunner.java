@@ -128,7 +128,7 @@ final class SubagentSyncRunner {
                 var reason = "Parent thread interrupted while awaiting subagent";
                 return new SyncRunOutcome("", SubagentRun.Status.FAILED, reason, reason, false, false);
             } catch (CancellationException _) {
-                // JCLAW-291: kill primitive cancelled our Future. Registry already KILLED.
+                // JCLAW-291: kill primitive canceled our Future. Registry already KILLED.
                 return new SyncRunOutcome("", SubagentRun.Status.KILLED,
                         "Killed by operator", null, true, false);
             } catch (ExecutionException ee) {

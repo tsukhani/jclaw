@@ -112,7 +112,7 @@ public final class RobotsCache {
      * Block until this host's next slot, then claim the one after it.
      *
      * <p>The claim is made with a single {@code compute} so two threads racing on the
-     * same host serialise onto consecutive slots rather than both reading the same
+     * same host serialize onto consecutive slots rather than both reading the same
      * "next" and firing together.
      */
     public static void awaitSlot(URI uri, long delayMillis) throws InterruptedException {

@@ -196,7 +196,7 @@ public class ApiTtsController extends Controller {
         // length by construction: the text is sentence-chunked below, each chunk is
         // synthesized separately, and the per-chunk sidecar lock is fair, so a long
         // read-aloud interleaves with voice mode rather than starving it. Cancellation
-        // is honoured between chunks, so an operator who changes their mind stops the
+        // is honored between chunks, so an operator who changes their mind stops the
         // work within one sentence. A length cap here refused input the loop underneath
         // it was built to stream — a 5.7k-character reply is a long answer, not abuse.
         var chunks = TtsSentenceChunker.chunk(TtsText.toSpeakable(text));

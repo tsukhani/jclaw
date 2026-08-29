@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
  * offline eval sweep firing hundreds of turns would skew the very baseline the
  * epic compares against.
  *
- * <p>Serialised with Gson's record support so a run can be written to disk and fed
+ * <p>Serialized with Gson's record support so a run can be written to disk and fed
  * back as the baseline of a later run — which is what makes regression detection
  * mean anything across commits.
  */
@@ -125,7 +125,7 @@ public record EvalReport(String suiteId, String fingerprint, List<CaseResult> re
      * <p>Errored cases are not regressions either (JCLAW-883): the agent never
      * answered, so nothing about its quality changed. They still surface in
      * {@link #summary()} and still fail the run — they just do not masquerade as
-     * a behaviour change, which is the one reading that would send someone
+     * a behavior change, which is the one reading that would send someone
      * bisecting commits over a provider outage.
      */
     public List<String> regressionsAgainst(EvalReport baseline) {

@@ -134,7 +134,7 @@ public class ApiTaskRunsController extends Controller {
     /**
      * One TaskRun for the Timeline view (JCLAW-22 slice TL): the run plus its
      * parent task name — enough to plot a bar (startedAt position, duration
-     * width, status colour) and link to the run's trace.
+     * width, status color) and link to the run's trace.
      */
     private record RecentRunView(Long id, Long taskId, String taskName, String status,
                                  String startedAt, String completedAt, Long durationMs) {
@@ -210,9 +210,9 @@ public class ApiTaskRunsController extends Controller {
      * JCLAW-414: cancel an in-progress task run. Flips the run's cooperative-
      * cancellation flag ({@link services.TaskRunRegistry}) so the agent tool
      * loop bails at its next safe checkpoint (between LLM rounds / tool calls —
-     * cooperative, never {@code Thread.interrupt}), and stamps the run CANCELLED
+     * cooperative, never {@code Thread.interrupt}), and stamps the run CANCELED
      * immediately for instant UI feedback. The recurring schedule and next-run
-     * time are untouched — only this one fire is cancelled. 404 when no such
+     * time are untouched — only this one fire is canceled. 404 when no such
      * run; 400 when the run is not currently RUNNING (already terminal).
      */
     @SuppressWarnings("java:S2259")
@@ -222,14 +222,14 @@ public class ApiTaskRunsController extends Controller {
         TaskRun run = TaskService.findRunById(runId);
         if (run == null) notFound();
         if (run.status != TaskRun.Status.RUNNING) {
-            // Only an in-flight run can be cancelled; a terminal run has nothing
+            // Only an in-flight run can be canceled; a terminal run has nothing
             // to stop. (S2259: notFound() above halts on null, so run is non-null.)
             badRequest();
         }
 
         // Flip the cooperative flag first so the loop's next checkpoint observes
         // it (no-op if the run isn't in-flight on this JVM), then stamp the row
-        // CANCELLED so the UI reflects it at once. The tool loop's onCancelled is
+        // CANCELED so the UI reflects it at once. The tool loop's onCancelled is
         // idempotent and won't double-write once this terminal status lands.
         TaskRunRegistry.requestCancel(runId);
         run.completedAt = Instant.now();

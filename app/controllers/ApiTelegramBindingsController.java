@@ -228,7 +228,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
      * are present. A present-but-null JSON value clears the override (back to
      * config fallback); an absent key leaves the stored value untouched, so a
      * partial PUT that omits these keys never disturbs them. Enum-like values
-     * are validated against the same vocabulary the consumers honour; an
+     * are validated against the same vocabulary the consumers honor; an
      * out-of-range value 400s rather than silently persisting a no-op.
      */
     private static void applyBindingSettingOverrides(TelegramBinding binding,

@@ -232,7 +232,7 @@ public class JpaMemoryStore implements MemoryStore {
     /**
      * JCLAW-960: {@code queryEmbedding} is the vector {@link #embedQuery} produced outside
      * the caller's transaction. When it is null the vector leg embeds here, which is the
-     * pre-960 behaviour and still correct for callers that own no transaction boundary to
+     * pre-960 behavior and still correct for callers that own no transaction boundary to
      * hoist the call out of (the operator introspection and eval endpoints).
      */
     @Override
@@ -741,7 +741,7 @@ public class JpaMemoryStore implements MemoryStore {
      * JCLAW-938: 5, not the textbook 60, because this pipeline consumes RRF's scores as
      * magnitudes rather than as ranks.
      *
-     * <p>{@link ReciprocalRankFusion#fuse} normalises against the top hit and that value
+     * <p>{@link ReciprocalRankFusion#fuse} normalizes against the top hit and that value
      * becomes {@link MemoryEntry#relevance()}, which the recall blend weighs against
      * importance. At k=60 consecutive fused scores differ by under 2%, so relevance
      * arrives as a near-constant and importance — spanning 0.2 to 0.9 on a real corpus —

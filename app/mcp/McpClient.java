@@ -243,7 +243,7 @@ public class McpClient implements AutoCloseable {
                 }
             });
         }
-        // Other notifications (logging/message, progress, cancelled) are out of scope for JCLAW-31.
+        // Other notifications (logging/message, progress, canceled) are out of scope for JCLAW-31.
     }
 
     private void handleServerRequest(JsonRpc.Request r) {

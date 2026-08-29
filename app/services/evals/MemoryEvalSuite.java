@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * A memory-recall eval suite (JCLAW-529): questions paired with the memories that answer
- * them, for measuring retrieval rather than agent behaviour.
+ * them, for measuring retrieval rather than agent behavior.
  *
  * <p>Deliberately a sibling of {@link EvalSuite} rather than a variant of it. An
  * {@link EvalCase} carries a user turn and checks scored against a model's response; a

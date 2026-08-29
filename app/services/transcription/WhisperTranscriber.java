@@ -18,7 +18,7 @@ public final class WhisperTranscriber {
 
     private WhisperTranscriber() {}
 
-    /** One recognised segment, timestamps in milliseconds. (The JCLAW-635
+    /** One recognized segment, timestamps in milliseconds. (The JCLAW-635
      *  confidence triple was removed with the local diarization pipeline —
      *  its hallucination gates were the only reader.) */
     public record Segment(long startMs, long endMs, String text) {}

@@ -33,7 +33,7 @@ public final class RestartService {
     private static final String CATEGORY = "restart";
 
     /**
-     * Seconds the helper waits before signalling this JVM. Exists so the HTTP
+     * Seconds the helper waits before signaling this JVM. Exists so the HTTP
      * 202 reaches the browser first — without it the SIGTERM races the response
      * write and the operator sees a connection reset instead of an ack. Two
      * seconds is ~1000× the loopback write it is covering; the cost is paid

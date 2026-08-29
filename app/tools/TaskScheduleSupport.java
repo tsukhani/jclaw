@@ -55,7 +55,7 @@ final class TaskScheduleSupport {
     static void applyScheduleSpec(Task task, ScheduleShorthandParser.ScheduleSpec spec) {
         task.type = spec.type();
         // Re-derive status from the (possibly new) type, but ONLY when the
-        // task is still alive — terminal states (COMPLETED, FAILED, CANCELLED,
+        // task is still alive — terminal states (COMPLETED, FAILED, CANCELED,
         // LOST) must not get resurrected to PENDING/ACTIVE by a schedule edit.
         if (task.status == Task.Status.PENDING || task.status == Task.Status.ACTIVE) {
             task.status = Task.initialStatusFor(spec.type());

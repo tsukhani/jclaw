@@ -14,7 +14,7 @@ import java.util.HexFormat;
  * (JCLAW-282).
  *
  * <p>Tokens are 32 random bytes encoded as base64url, prefixed with
- * {@code jcl_} so operators and secret scanners can recognise a leaked
+ * {@code jcl_} so operators and secret scanners can recognize a leaked
  * token at a glance. The on-disk representation is the SHA-256 hex of
  * the full token string; the database stores the hash, the plaintext
  * sits in a JClaw-internal config row that's filtered from every

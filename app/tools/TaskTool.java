@@ -51,7 +51,7 @@ import java.util.Map;
  * <h2>Fan-out semantics</h2>
  * One-shot tasks (IMMEDIATE/SCHEDULED) allow duplicate names per agent.
  * {@code cancelTask}/{@code pause}/{@code resume}/{@code runNow} fan out
- * across all non-cancelled matches and report a count.
+ * across all non-canceled matches and report a count.
  * {@code updateTask} requires exactly one match (the patch surface is
  * wider, and silently mass-updating multiple tasks would be surprising
  * — the response calls out the ambiguity instead).
@@ -141,7 +141,7 @@ public class TaskTool implements ToolRegistry.Tool {
 
     // Each rule lives in exactly one place: the field it governs. Schedule syntax is on
     // `schedule`, delivery targets on `delivery`, reminder-fire semantics on `payloadType`,
-    // per-action behaviour in actions(). This text carries only what no single field owns —
+    // per-action behavior in actions(). This text carries only what no single field owns —
     // routing (Task vs subagent), cross-action hygiene, and the two non-obvious lookups.
     @Override
     public String description() {
@@ -288,7 +288,7 @@ public class TaskTool implements ToolRegistry.Tool {
      * in the existing description TEXT column; a string is stored verbatim;
      * missing or JSON-null yields null. {@link services.TaskSteps#parse}
      * reverses this at read/fire time. Both shapes are accepted because some
-     * models honour the string schema by sending a JSON-array string while
+     * models honor the string schema by sending a JSON-array string while
      * others send a real array.
      */
     private static String readDescriptionArg(JsonObject args) {
@@ -315,9 +315,9 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Non-cancelled task ids matching (name, agent). Returns empty list
+     * Non-canceled task ids matching (name, agent). Returns empty list
      * when nothing matches. Used by pause/resume/cancelTask — runNow uses
-     * the any-state variant below because it explicitly revives CANCELLED.
+     * the any-state variant below because it explicitly revives CANCELED.
      */
     private static List<Long> findTaskIds(String name, Agent agent) {
         return Tx.run(() -> {
@@ -752,7 +752,7 @@ public class TaskTool implements ToolRegistry.Tool {
         }
         var name = args.get(KEY_NAME).getAsString();
 
-        // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELLED too.
+        // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELED too.
         var scan = Tx.run(() -> collectRunNowTargets(name, agent));
         if (scan.ranIds().isEmpty()) return MSG_NO_TASK_FOUND.formatted(name);
         for (var id : scan.lostIds()) {
@@ -780,7 +780,7 @@ public class TaskTool implements ToolRegistry.Tool {
     /**
      * Inside the calling Tx: scan tasks matching (name, agent) and prepare
      * them for a manual fire. Mutates {@code revivedRef[0]} as it flips
-     * CANCELLED rows to PENDING, and appends LOST ids to {@code lostIds}
+     * CANCELED rows to PENDING, and appends LOST ids to {@code lostIds}
      * so the caller can force-remove their stale scheduled_tasks row.
      * Returns the full list of matched task ids (any state).
      */
@@ -795,7 +795,7 @@ public class TaskTool implements ToolRegistry.Tool {
             if (task.status == Task.Status.CANCELLED) {
                 // Revive — otherwise TaskExecutionHandler skips the fire body.
                 // Recurring tasks get ACTIVE; one-shot tasks get PENDING.
-                // JCLAW-733: genuine CANCELLED -> ACTIVE/PENDING transition, route
+                // JCLAW-733: genuine CANCELED -> ACTIVE/PENDING transition, route
                 // through the guard (both edges are legal for an existing task).
                 task.transitionTo(Task.initialStatusFor(task.type));
                 task.save();
@@ -835,8 +835,8 @@ public class TaskTool implements ToolRegistry.Tool {
             var ids = new ArrayList<Long>(tasks.size());
             for (var task : tasks) {
                 // JCLAW-733: intentionally NOT routed through transitionTo. The
-                // finder matches every non-CANCELLED state, including LOST /
-                // COMPLETED / FAILED, whose edge to CANCELLED the lifecycle guard
+                // finder matches every non-CANCELED state, including LOST /
+                // COMPLETED / FAILED, whose edge to CANCELED the lifecycle guard
                 // deliberately forbids — routing here would throw on a cancel
                 // that is legal today. Direct assignment preserves that behavior.
                 task.status = Task.Status.CANCELLED;

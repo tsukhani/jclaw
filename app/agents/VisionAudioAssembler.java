@@ -95,7 +95,7 @@ public final class VisionAudioAssembler {
     }
 
     /**
-     * JCLAW-215: the vision analogue of {@link AudioBearer}. Tracks which user
+     * JCLAW-215: the vision analog of {@link AudioBearer}. Tracks which user
      * messages carry image attachments so the post-Tx caption rewrite can
      * re-target them when the active model lacks {@code supportsVision}: each
      * image's persisted {@link models.MessageAttachment#caption} (computed on
@@ -110,7 +110,7 @@ public final class VisionAudioAssembler {
     }
 
     /**
-     * JCLAW-224: the video analogue of {@link ImageBearer}/{@link AudioBearer}. Tracks which user
+     * JCLAW-224: the video analog of {@link ImageBearer}/{@link AudioBearer}. Tracks which user
      * messages carry video attachments so {@link #applyVideoForCapability} can splice the chosen
      * interpretation strategy's content parts (native video / multi-image / text summary) into the
      * exact slot. Unlike images and audio — whose raw-media part is cheap to build inline — every
@@ -414,7 +414,7 @@ public final class VisionAudioAssembler {
     }
 
     /**
-     * JCLAW-215 outside-Tx helper, the vision analogue of
+     * JCLAW-215 outside-Tx helper, the vision analog of
      * {@link #applyTranscriptsForCapability}: when the active model lacks
      * {@code supportsVision}, ensure every image attachment on the
      * {@code imageBearers} turns has a caption (computing + persisting any that

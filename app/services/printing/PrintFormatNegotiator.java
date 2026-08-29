@@ -110,8 +110,8 @@ public final class PrintFormatNegotiator {
         }
 
         if (supported.contains(PWG_RASTER)) {
-            // Colour only when the printer has no greyscale mode or the operator
-            // explicitly asked for colour. Grey is a third the bytes and a quarter
+            // Color only when the printer has no greyscale mode or the operator
+            // explicitly asked for color. Gray is a third the bytes and a quarter
             // of the heap, and this class of printer has very little spool.
             var wantsColor = job != null && "color".equals(job.colorMode());
             var gray = raster.grayscale() && !wantsColor;

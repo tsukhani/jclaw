@@ -9,7 +9,7 @@ import java.util.Set;
  * Heuristic attention gate for memory auto-capture (JCLAW-39). A cheap,
  * deterministic filter that decides whether a completed turn is even worth
  * sending to the (LLM-backed) extractor, keeping trivial turns — greetings,
- * bare acknowledgements, empty input — off the extraction path so the system
+ * bare acknowledgments, empty input — off the extraction path so the system
  * doesn't pay an LLM call per turn.
  *
  * <p>Deliberately PERMISSIVE. The LLM extractor is the real signal/noise filter;
@@ -41,7 +41,7 @@ public final class MemoryAttentionGate {
         var user = userMessage.strip();
         int minChars = ConfigService.getInt("memory.autocapture.gate.minChars", 20);
 
-        // A short user turn that is nothing but a greeting/acknowledgement carries
+        // A short user turn that is nothing but a greeting/acknowledgment carries
         // no durable content worth an extraction call.
         if (user.length() < minChars && isTrivial(user)) {
             return Decision.skip("trivial");

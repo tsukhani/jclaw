@@ -19,7 +19,7 @@ public interface TranscriptionService {
 
     /**
      * Transcribe the audio bytes referenced by {@code attachment}. Returns
-     * the recognised text — possibly empty for silent input. Throws on
+     * the recognized text — possibly empty for silent input. Throws on
      * transport, configuration, or backend errors; never returns null.
      */
     String transcribe(MessageAttachment attachment);

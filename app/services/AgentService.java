@@ -94,7 +94,7 @@ public class AgentService {
      * Operator-created agents (any caller from the admin UI or
      * {@link controllers.ApiAgentsController}) still get the full workspace
      * via the three other {@code create} overloads, which default
-     * {@code createWorkspace=true} and preserve the pre-2026-05 behaviour.
+     * {@code createWorkspace=true} and preserve the pre-2026-05 behavior.
      *
      * @param name             agent name (unique within the deployment)
      * @param modelProvider    provider id the agent defaults to
@@ -256,7 +256,7 @@ public class AgentService {
     }
 
     /**
-     * Normalise a user-supplied description: null or blank becomes null, anything
+     * Normalize a user-supplied description: null or blank becomes null, anything
      * longer than 255 chars is truncated. The server mirrors the client-side
      * {@code maxlength="255"} so a direct API caller can't sneak past.
      */

@@ -17,7 +17,7 @@ import java.util.function.LongConsumer;
  * agent streams them, emits the growing reply text, and speaks each one.
  *
  * <p>Split out of {@code VoiceController.runTurn}, which had grown to do STT, the
- * agent run, and this, in one frame. Everything that survives here is behaviour
+ * agent run, and this, in one frame. Everything that survives here is behavior
  * that was arrived at by fixing a real bug, so each rule is stated with the
  * failure it prevents rather than left as folklore.
  *
@@ -85,7 +85,7 @@ public final class VoiceTurnSpeaker {
      * @param onFirstAudio invoked once, with the synthesis time of the first audio
      *                     chunk — the voice-to-voice number that actually matters.
      * @return true when the reply stream ended on its own, so the caller may emit
-     *         {@code turn_complete}; false when the turn was cancelled, the socket
+     *         {@code turn_complete}; false when the turn was canceled, the socket
      *         closed, or the thread was interrupted. None of those complete a turn.
      */
     public boolean speakAll(BlockingQueue<String> sentences, LongConsumer onFirstAudio) {

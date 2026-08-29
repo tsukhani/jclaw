@@ -212,15 +212,15 @@ public final class TaskExecutor {
             // Documented lifecycle: a one-shot (PENDING) or recurring (ACTIVE)
             // task — or a re-fired LOST one — enters RUNNING for the duration of
             // the fire, so the Status pill and LostTaskDetector observe it. Flip
-            // only alive/lost states; a task cancelled in the race window between
-            // the handler's CANCELLED check and here stays CANCELLED (the run we
+            // only alive/lost states; a task canceled in the race window between
+            // the handler's CANCELED check and here stays CANCELED (the run we
             // open is reconciled by the normal completion path).
             switch (resolvedTask.status) {
                 case PENDING, ACTIVE, LOST -> {
                     resolvedTask.status = Task.Status.RUNNING;
                     resolvedTask.save();
                 }
-                default -> { /* terminal / cancelled — never resurrect */ }
+                default -> { /* terminal / canceled — never resurrect */ }
             }
             var r = new TaskRun();
             r.task = resolvedTask;
@@ -352,7 +352,7 @@ public final class TaskExecutor {
             // JCLAW-414: this fire's cooperative-cancel flag was flipped mid-run.
             // Two flippers share this path: an operator (POST /task-runs/{id}/cancel)
             // and JCLAW-803's TaskFireDeadline watchdog (fire blew its max
-            // duration). Both stamp the run CANCELLED here (idempotent —
+            // duration). Both stamp the run CANCELED here (idempotent —
             // onCancelled only acts on a still-RUNNING row) so the run is terminal
             // even if the endpoint's write lagged. Do NOT rethrow — a clean
             // cancellation, not a failure for JClawFailureHandler to classify.
@@ -360,7 +360,7 @@ public final class TaskExecutor {
             sink.onCancelled(timedOut ? "Cancelled: exceeded max run duration" : "Cancelled by operator");
             // The fire ended without completing; return the task from RUNNING to
             // its alive state (ACTIVE for recurring, PENDING for one-shot) so it
-            // isn't stranded showing RUNNING. Only this fire was cancelled — the
+            // isn't stranded showing RUNNING. Only this fire was canceled — the
             // recurring schedule / next-run time are untouched. Guarded.
             leaveRunning(task.id, Task.initialStatusFor(task.type));
             EventLogger.info("task", null, null,
@@ -414,7 +414,7 @@ public final class TaskExecutor {
             // recurring (CRON/INTERVAL) ends RUNNING → ACTIVE, ready for its next
             // fire (the scheduled_tasks row carries the next time; per-fire
             // history lives in task_run rows). Both guarded on still-RUNNING so a
-            // concurrent operator cancel (→ CANCELLED) is not clobbered.
+            // concurrent operator cancel (→ CANCELED) is not clobbered.
             // Symmetric with JClawFailureHandler's RUNNING → FAILED on terminal
             // failure.
             if (task.type == Task.Type.IMMEDIATE || task.type == Task.Type.SCHEDULED) {
@@ -576,7 +576,7 @@ public final class TaskExecutor {
     }
 
     /**
-     * Deserialise one recorded tool call, deliberately not through
+     * Deserialize one recorded tool call, deliberately not through
      * {@code MessageHydrator.parseToolCalls}: that sanitises the id to {@code [a-zA-Z0-9_-]}
      * for re-shipping to a provider, which rewrites a real id like
      * {@code functions.message:27} and would no longer match the TOOL row it has to join to.

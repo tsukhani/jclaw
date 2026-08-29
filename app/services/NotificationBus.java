@@ -37,7 +37,7 @@ public class NotificationBus {
     /** JCLAW-662: bus event type for one persisted step of a coding-harness run
      *  (Rail B). Payload carries {@code runId}, {@code seq}, {@code kind}, {@code text}. */
     public static final String BUS_CODINGRUN_STEP = "codingrun.step";
-    /** JCLAW-662: bus event type signalling a coding-harness run's output stream
+    /** JCLAW-662: bus event type signaling a coding-harness run's output stream
      *  reached a terminal state, so a live monitor can stop tailing. */
     public static final String BUS_CODINGRUN_DONE = "codingrun.done";
 
@@ -95,7 +95,7 @@ public class NotificationBus {
                 // A non-positive remaining budget still means "wait until the shared
                 // deadline" of now — get(0) returns immediately if already done,
                 // otherwise times out, so a listener that finished in time is never
-                // dropped while late ones are cancelled.
+                // dropped while late ones are canceled.
                 future.get(Math.max(0L, remainingNanos), TimeUnit.NANOSECONDS);
             } catch (TimeoutException _) {
                 future.cancel(true);

@@ -21,7 +21,7 @@ import java.util.Set;
  * the pattern a WAF escalates on. Retrying only {@code 429}/{@code 503}/{@code 504} and
  * connection failures costs about nine requests for the same three pages.
  *
- * <p>{@code Retry-After} is honoured where the origin sends it, capped: a {@code 429}
+ * <p>{@code Retry-After} is honored where the origin sends it, capped: a {@code 429}
  * means we were going too fast, so retrying immediately is worse than not retrying at
  * all, and this codebase already paces per host and honours robots.txt — a retry loop
  * that ignored that would undercut it. An origin asking for an hour gets
@@ -103,7 +103,7 @@ public final class TransientRetryInterceptor implements Interceptor {
      * The origin's own {@code Retry-After} in seconds, floored at {@link #BASE_BACKOFF},
      * or null when it sent none this code can use.
      *
-     * <p>Floored, not honoured literally: "Retry-After: 0" asks for an immediate retry
+     * <p>Floored, not honored literally: "Retry-After: 0" asks for an immediate retry
      * against a limiter that has just refused us, which the scoping rationale above rules
      * out. An HTTP-date form is legal and rare, and falls through to the exponential
      * rather than earning a second grammar for a value that gets capped anyway.

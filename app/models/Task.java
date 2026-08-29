@@ -49,7 +49,7 @@ public class Task extends TimestampedModel {
      *       in its steady-state. Cycle: {@code ACTIVE → RUNNING → ACTIVE}.
      *       The Task row is the recurrence config; the {@code scheduled_tasks}
      *       row carries the next fire time. Recurring tasks never reach
-     *       {@code COMPLETED} unless explicitly cancelled.</li>
+     *       {@code COMPLETED} unless explicitly canceled.</li>
      * </ul>
      *
      * <p>JCLAW-258 introduced {@code LOST} between {@code RUNNING} and
@@ -413,7 +413,7 @@ public class Task extends TimestampedModel {
     /**
      * Reminder Tasks ({@code payloadType="reminder"}) for the given agent
      * still due to fire — {@code PENDING} (a one-shot waiting) or
-     * {@code ACTIVE} (a recurring reminder). Excludes fired/cancelled
+     * {@code ACTIVE} (a recurring reminder). Excludes fired/canceled
      * reminders so the agent's {@code listReminders} surfaces only what it
      * can still edit or cancel by name — the {@code /reminders} page's
      * {@code /api/tasks?payloadType=reminder} query narrowed to upcoming

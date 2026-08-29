@@ -113,7 +113,7 @@ public final class TelegramOffsetStore {
      * bot, but only if it exceeds the currently stored value (monotonic — never
      * rewinds). No-op for a token with no derivable bot id. Persistence failures
      * are logged, not thrown: a missed write costs at most a re-process of the
-     * affected updates on the next restart, which is the pre-JCLAW-361 behaviour.
+     * affected updates on the next restart, which is the pre-JCLAW-361 behavior.
      */
     public static void persist(String token, int updateId) {
         String botId = botId(token);

@@ -15,7 +15,7 @@ import java.util.Map;
  *                     (supported document formats), {@code rp} (IPP resource path),
  *                     {@code Color}, {@code Duplex} and friends. Empty when the
  *                     printer was addressed directly. Deliberately raw: the TXT keys
- *                     are vendor-flavoured and normalising them here would throw away
+ *                     are vendor-flavoured and normalizing them here would throw away
  *                     the detail an operator needs when a job lands wrong.
  */
 public record DiscoveredPrinter(String name, String host, int port,
@@ -29,7 +29,7 @@ public record DiscoveredPrinter(String name, String host, int port,
      * The IPP resource path this printer advertises, defaulting to {@code /ipp/print}
      * (the RFC 8011 convention) when no {@code rp} TXT record is present.
      *
-     * <p>Leading slash is normalised because the TXT record convention is to omit it
+     * <p>Leading slash is normalized because the TXT record convention is to omit it
      * ({@code rp=ipp/print}) while the URI needs it.
      */
     public String ippResourcePath() {

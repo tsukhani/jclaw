@@ -7,7 +7,7 @@ import services.EventLogger;
 import services.search.MessageSearch;
 
 /**
- * Initialise full-text search at {@code @OnApplicationStart}.
+ * Initialize full-text search at {@code @OnApplicationStart}.
  * {@link MessageSearch#init} picks the {@code MessageSearchRepository}
  * implementation and runs its idempotent setup:
  *

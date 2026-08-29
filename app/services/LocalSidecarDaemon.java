@@ -241,7 +241,7 @@ public final class LocalSidecarDaemon {
             spawnFailedUntil = 0;
             spawnFailureMessage = null;
         } catch (StartCancelledException e) {
-            // JCLAW-830: a concurrent stop() cancelled this launch — that is a
+            // JCLAW-830: a concurrent stop() canceled this launch — that is a
             // deliberate cancellation, not a startup failure, so do NOT poison the
             // cooldown. Surface it as the domain exception for the caller.
             throw cfg.fail().apply(e.getMessage(), null);

@@ -44,7 +44,7 @@ public final class ImpersonatedFetcher {
             // Bound by callTimeout, not by the general client's 30s per-read timeout.
             // A render legitimately sends nothing while the browser launches, navigates
             // and settles, and the 30s default cut 64 corpus entries off mid-render and
-            // reported them as TIMEOUT — a latency artefact indistinguishable, in the
+            // reported them as TIMEOUT — a latency artifact indistinguishable, in the
             // report, from an origin refusing us. Same tradeoff SidecarHttpClient
             // documents: with readTimeout=0 a hung socket is bounded ONLY by callTimeout.
             .readTimeout(Duration.ZERO)

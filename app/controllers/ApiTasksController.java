@@ -594,7 +594,7 @@ public class ApiTasksController extends Controller {
     }
 
     /**
-     * POST /api/tasks/{id}/reenable — re-arm a CANCELLED task's schedule
+     * POST /api/tasks/{id}/reenable — re-arm a CANCELED task's schedule
      * <em>without</em> an immediate fire. Revives status to the type's
      * initial live state (recurring → ACTIVE, one-shot → PENDING), clears any
      * stale paused flag, and registers a fresh scheduler row at the next
@@ -612,7 +612,7 @@ public class ApiTasksController extends Controller {
     public static void reenable(Long id) {
         Task task = TaskService.findById(id);
         if (task == null) notFound();
-        // Re-enable only applies to a CANCELLED task: reviving a live Task
+        // Re-enable only applies to a CANCELED task: reviving a live Task
         // would double-schedule, and reviving a COMPLETED/FAILED one would
         // resurrect a finished fire. Anything else is a client error.
         if (task.status != Task.Status.CANCELLED) {
@@ -631,8 +631,8 @@ public class ApiTasksController extends Controller {
     /**
      * Operator-initiated immediate fire — distinct from {@link #retry} which
      * is the FAILED-only "fix and rerun" path. Accepts any current status
-     * per AC; revives a CANCELLED task to PENDING first so
-     * {@link services.TaskExecutionHandler}'s CANCELLED-skip doesn't
+     * per AC; revives a CANCELED task to PENDING first so
+     * {@link services.TaskExecutionHandler}'s CANCELED-skip doesn't
      * swallow the fire. Other terminal states (COMPLETED, FAILED) don't
      * trigger that skip so their status stays intact — re-firing a
      * COMPLETED task is a deliberate operator action and the audit-log
@@ -674,7 +674,7 @@ public class ApiTasksController extends Controller {
         // terminated the previous fire) — register() inserts a fresh row.
         // LOST: scheduled_tasks row still exists (Design A keeps it intact
         // for db-scheduler's own recovery); operator click pre-empts that
-        // auto-recovery by cancelling the stale row and registering a
+        // auto-recovery by canceling the stale row and registering a
         // fresh one via update().
         boolean wasLost = task.status == Task.Status.LOST;
         if (task.status != Task.Status.FAILED && !wasLost) {

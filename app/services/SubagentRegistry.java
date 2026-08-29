@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Future here at start and unregister when the run terminates (success,
  * failure, timeout, or kill). The registry is JVM-local — a restart loses
  * every entry, which is fine because the still-RUNNING DB rows are recovered
- * by {@link jobs.SubagentOrphanRecoveryJob} and the cancelled VTs are gone
+ * by {@link jobs.SubagentOrphanRecoveryJob} and the canceled VTs are gone
  * anyway. No persistence required.
  *
  * <p><b>Cooperative cancellation (JCLAW-291).</b> {@link #kill(Long, String)}
@@ -66,7 +66,7 @@ public final class SubagentRegistry {
     /** Per-run handle. {@link #cancelRequested} is the cooperative
      *  cancellation flag {@link agents.AgentRunner}'s checkpoints poll;
      *  {@link #future} is kept around so awaiting callers (the spawn-tool's
-     *  {@code future.get(timeout)}) see CANCELLED on kill rather than blocking
+     *  {@code future.get(timeout)}) see CANCELED on kill rather than blocking
      *  to the full timeout. We deliberately do NOT capture the carrier
      *  Thread — see the class-level comment for why interrupts are forbidden. */
     private record Entry(Future<?> future, AtomicBoolean cancelRequested, AtomicLong lastActivityNanos) {}

@@ -508,7 +508,7 @@ public final class WebExtraction {
         return Collections.unmodifiableMap(out);
     }
 
-    /** True for a response the origin has labelled as markdown. Deliberately reads the
+    /** True for a response the origin has labeled as markdown. Deliberately reads the
      *  RESPONSE type: content negotiation is advisory and plenty of servers return HTML
      *  whatever was asked for, so the request header decides nothing on its own. */
     public static boolean isMarkdown(String contentType) {

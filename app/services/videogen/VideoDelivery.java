@@ -31,7 +31,7 @@ public final class VideoDelivery {
      *
      * <p>Never throws. A delivery failure must not undo a generation that succeeded — the
      * clip is already stored on the message either way, so the worst case degrades to the
-     * behaviour this method exists to fix rather than losing the job.
+     * behavior this method exists to fix rather than losing the job.
      *
      * <p>Public because Play compiles {@code test/} into the default package, which
      * cannot see package-private members of {@code services.videogen}.

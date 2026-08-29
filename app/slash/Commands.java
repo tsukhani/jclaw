@@ -45,11 +45,11 @@ import java.util.function.Supplier;
  * The user's slash text is <b>not</b> persisted as a message — it's a
  * control signal, not conversation content. The bot's canned response IS
  * persisted as an assistant message in the target conversation so history
- * reload shows the acknowledgement.
+ * reload shows the acknowledgment.
  *
  * <h2>/reset ordering</h2>
  * {@link Conversation#contextSince} is written <i>after</i> the assistant
- * response is appended, so the acknowledgement stays out of the next LLM
+ * response is appended, so the acknowledgment stays out of the next LLM
  * context window (its {@code createdAt} will be less than the watermark).
  */
 public final class Commands {
@@ -382,7 +382,7 @@ public final class Commands {
      * (SSE complete frame on web, sink.seal on Telegram) but NOT persisted
      * as a Message row — {@code /stop} is a control signal, not conversation
      * content, and persisting "Stopped." next to whatever partial assistant
-     * content the cancelled stream left behind would clutter history and
+     * content the canceled stream left behind would clutter history and
      * skew {@code /usage} accounting.
      */
     private static Result executeStop(Agent agent, String channelType, Conversation current) {
@@ -412,7 +412,7 @@ public final class Commands {
      *
      * <p>Cycle-safety is preserved — boundaries still anchor at user
      * messages, so tool_call/tool_result pairs are never split. The
-     * response is a canned acknowledgement with turn-count and rough
+     * response is a canned acknowledgment with turn-count and rough
      * token size of the summary; the summary itself is in the DB
      * ({@link models.SessionCompaction}) and re-injected into the next
      * turn's system prompt by {@link services.SessionCompactor#appendSummaryToPrompt}.
@@ -974,7 +974,7 @@ public final class Commands {
             if (m.usageJson == null || m.usageJson.isBlank()) continue;
             try {
                 var obj = JsonParser.parseString(m.usageJson).getAsJsonObject();
-                // Skip durationMs-only rows (cancelled turns, turns where the
+                // Skip durationMs-only rows (canceled turns, turns where the
                 // provider didn't return usage). Those carry no "prompt" field
                 // and reporting them as "current context = 0" would mislead
                 // the user when the actual last successful turn had real

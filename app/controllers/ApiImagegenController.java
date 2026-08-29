@@ -20,7 +20,7 @@ import java.util.LinkedHashMap;
 import static utils.GsonHolder.GSON;
 
 /**
- * Local image-generation Settings UI backend (JCLAW-226), the producing analogue
+ * Local image-generation Settings UI backend (JCLAW-226), the producing analog
  * of {@link ApiTranscriptionController}. Two endpoints:
  *
  * <ul>

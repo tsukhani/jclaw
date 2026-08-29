@@ -74,7 +74,7 @@ public class AuthCheck extends Controller {
             renderJSON("{\"error\":\"Authentication required\"}");
         }
 
-        // JCLAW-1034: a cookie minted under an older credential is no longer honoured, so
+        // JCLAW-1034: a cookie minted under an older credential is no longer honored, so
         // changing or resetting the password logs every other session out. Checked only on
         // the cookie path — a bearer carries no generation and is revoked through its own row.
         if (!ApiAuthController.credentialVersion().equals(session.get(ApiAuthController.SESSION_CREDENTIAL_VERSION))) {

@@ -212,7 +212,7 @@ public final class TaskExecutionHandler {
      * before giving up. {@link #FIND_TASK_ATTEMPTS} attempts spaced by
      * {@link #FIND_TASK_BACKOFF_MS} ms — total wall budget ~80 ms —
      * absorbs the observed window with three orders of magnitude of
-     * headroom. A genuinely-deleted Task (e.g. cancelled and
+     * headroom. A genuinely-deleted Task (e.g. canceled and
      * subsequently removed) still falls through to the skip-and-warn
      * path after the budget elapses.
      *

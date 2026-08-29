@@ -955,7 +955,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * Whether a 429 body identifies a permanently exhausted balance. Parsed rather
      * than substring-matched so a code only counts in the {@code code}/{@code type}
      * position; an unparseable body is treated as retryable, preserving today's
-     * behaviour when a provider returns something unexpected.
+     * behavior when a provider returns something unexpected.
      */
     private static boolean isPermanentQuotaError(String body) {
         if (body == null || body.isBlank()) return false;
@@ -1066,7 +1066,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * Instance method: parse a usage JSON object using this provider's template
      * methods ({@link #extractReasoningTokens}, {@link #extractCachedTokens},
      * {@link #extractCacheCreationTokens}, {@link #extractCostUsd}). Subclass
-     * overrides are honoured, so provider-specific JSON paths are handled correctly.
+     * overrides are honored, so provider-specific JSON paths are handled correctly.
      *
      * @param usageObj the provider's {@code usage} JSON object
      * @return the parsed {@link Usage} record with all token-count categories and

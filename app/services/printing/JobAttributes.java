@@ -34,7 +34,7 @@ public record JobAttributes(String sides, String colorMode, String media) {
     /**
      * The {@code print-color-mode} keywords offered when we have no printer to
      * ask. Three, because they are unambiguous to a model choosing between
-     * "colour" and "black and white" — a menu of eight is not more useful here.
+     * "color" and "black and white" — a menu of eight is not more useful here.
      *
      * <p>This is a UI default, NOT the validation vocabulary. See
      * {@link #ALL_COLOR_MODES}.

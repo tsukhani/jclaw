@@ -82,7 +82,7 @@ public class Application extends Controller {
      * the content-hashed SPA chunks (immutable, see {@link #nuxtCacheControl}), these
      * mini-apps keep stable filenames, so <em>every</em> file must revalidate — hence
      * {@code no-cache} across the board. A directory request serves its
-     * {@code index.html}, matching the old {@code staticDir} behaviour.
+     * {@code index.html}, matching the old {@code staticDir} behavior.
      */
     @SuppressWarnings("java:S2259")
     public static void appAsset(String path) {

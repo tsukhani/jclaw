@@ -55,7 +55,7 @@ import java.util.function.Supplier;
  *       the same controller / tool that invoked
  *       {@code task.save()}. Mixing the two in one place would
  *       create silent inversions where the {@code scheduled_tasks}
- *       row exists but the {@link Task} thinks it's CANCELLED, or
+ *       row exists but the {@link Task} thinks it's CANCELED, or
  *       vice versa.</li>
  *   <li>Does not handle {@code pause} / {@code resume} — those
  *       methods are deferred until the Task entity gains the
@@ -129,7 +129,7 @@ public final class TaskSchedulingService {
     /**
      * Apply a Task edit to the scheduler: cancel the existing
      * {@code scheduled_tasks} row (if any) and register a fresh one
-     * based on the Task's current shape. Cancelling-then-registering
+     * based on the Task's current shape. Canceling-then-registering
      * keeps the code path identical to first-time registration —
      * cheaper to maintain than a partial-update path that has to
      * detect whether the schedule changed.
@@ -157,15 +157,15 @@ public final class TaskSchedulingService {
      *       log and no-op, because the fire the operator wanted is
      *       already in flight.</li>
      *   <li>The row is gone — common after a one-shot Task COMPLETED
-     *       (OnCompleteRemove dropped it) or a Task was CANCELLED.
+     *       (OnCompleteRemove dropped it) or a Task was CANCELED.
      *       Reschedule throws {@code TaskInstanceNotFoundException};
      *       we fall through to {@link #scheduleFire} which registers
      *       a fresh row at {@code Instant.now()}.</li>
      * </ol>
      *
-     * <p>Note: case (3) for CANCELLED Tasks requires the caller to
+     * <p>Note: case (3) for CANCELED Tasks requires the caller to
      * have already flipped status back to PENDING — otherwise
-     * {@link services.TaskExecutionHandler}'s CANCELLED-skip swallows
+     * {@link services.TaskExecutionHandler}'s CANCELED-skip swallows
      * the fire body at pick-up time. The API's {@code /run} endpoint
      * is the canonical caller and does that revive itself.
      */
@@ -188,7 +188,7 @@ public final class TaskSchedulingService {
         } catch (TaskInstanceNotFoundException _) {
             // Row was removed (terminal one-shot completion, cancel, etc.)
             // — fall through to registration. Common after operators
-            // re-run a COMPLETED or CANCELLED Task.
+            // re-run a COMPLETED or CANCELED Task.
         }
         if (rescheduled) {
             EventLogger.info("task", null, null,

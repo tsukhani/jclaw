@@ -89,7 +89,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     public static final String TOOL_NAME = "subagent_spawn";
 
     static final String DEFAULT_MODE = "session";
-    /** JCLAW-666: codingSlug's fallback when a task normalises to nothing —
+    /** JCLAW-666: codingSlug's fallback when a task normalizes to nothing —
      *  a distinct concept from DEFAULT_MODE despite the shared string. */
     private static final String SLUG_FALLBACK = "session";
     static final String MODE_SESSION = "session";
@@ -743,7 +743,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** JCLAW-666: deterministic filename-safe session slug from the task text —
      *  lowercased, non-alphanumerics collapsed to single dashes, bounded, with
-     *  a fixed fallback for tasks that normalise to nothing. */
+     *  a fixed fallback for tasks that normalize to nothing. */
     public static String codingSlug(String task) {
         if (task == null) return SLUG_FALLBACK;
         var normalized = task.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-");

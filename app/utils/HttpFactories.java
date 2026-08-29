@@ -106,7 +106,7 @@ public final class HttpFactories {
         // Bootstrap defaults; DefaultConfigJob seeds the host-tuned values
         // post-JPA-init and calls applyDispatcherConfig() to swap them in.
         // Hardcoded here so any HTTP call that happens before the seed job
-        // runs (none today, but defence-in-depth) gets a sane cap.
+        // runs (none today, but defense-in-depth) gets a sane cap.
         LLM_DISPATCHER.setMaxRequests(128);
         LLM_DISPATCHER.setMaxRequestsPerHost(64);
         Logger.info("HttpFactories LLM_DISPATCHER bootstrap: maxRequests=%d maxRequestsPerHost=%d",

@@ -270,7 +270,7 @@ public final class TelegramPollingRunner {
         // poll) but never shuts down the per-session ScheduledExecutorService — so
         // without this every unregister leaks a pool-N thread. shutdown()
         // (not shutdownNow) so an in-flight dispatch isn't interrupted mid-DB
-        // write; stop() already cancelled the poll, so the executor is idle.
+        // write; stop() already canceled the poll, so the executor is idle.
         var leaked = SESSIONS.remove(bindingId);
         if (leaked != null) {
             try {

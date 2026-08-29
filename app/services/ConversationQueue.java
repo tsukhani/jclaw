@@ -144,7 +144,7 @@ public class ConversationQueue {
      * {@link agents.AgentRunner}) should poll this in their processing loops.
      *
      * @param conversationId the conversation whose cancel flag is needed
-     * @return the conversation's cancellation flag, or a never-cancelled
+     * @return the conversation's cancellation flag, or a never-canceled
      *         flag when the conversation has no state yet
      */
     public static AtomicBoolean cancellationFlag(Long conversationId) {

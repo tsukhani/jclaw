@@ -75,7 +75,7 @@ public final class ScheduleShorthandParser {
      *                        {@code null} otherwise
      * @param scheduleDisplay operator's raw input verbatim — preserved so
      *                        round-trip rendering shows the form the
-     *                        operator typed, not a normalised echo
+     *                        operator typed, not a normalized echo
      */
     public record ScheduleSpec(
             Task.Type type,
@@ -149,7 +149,7 @@ public final class ScheduleShorthandParser {
     /**
      * Resolve an absolute ISO date-time to an {@link Instant}. An explicit
      * offset ({@code 2026-06-13T15:00+08:00} or a trailing {@code Z}) is
-     * honoured as-is; a bare local date-time ({@code 2026-06-13T15:00}, with
+     * honored as-is; a bare local date-time ({@code 2026-06-13T15:00}, with
      * optional seconds and a {@code T} or space separator) is interpreted in
      * {@code zone}. Anything else throws with a form hint.
      */

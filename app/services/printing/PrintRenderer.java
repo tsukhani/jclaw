@@ -73,7 +73,7 @@ public final class PrintRenderer {
         /**
          * Page size from a PWG media name at {@code dpi}, defaulting to A4.
          *
-         * <p>Only the two common sizes are recognised. Guessing dimensions from an
+         * <p>Only the two common sizes are recognized. Guessing dimensions from an
          * arbitrary PWG name would produce a page that is subtly the wrong size,
          * which wastes paper more quietly than an obvious failure.
          */
@@ -121,7 +121,7 @@ public final class PrintRenderer {
     /**
      * Rasterise, optionally straight to 8-bit greyscale.
      *
-     * <p>The grey path is not just smaller on the wire — it is a quarter of the
+     * <p>The gray path is not just smaller on the wire — it is a quarter of the
      * heap. An A4 page at 600 DPI is 4961x7016; as {@code TYPE_INT_RGB} that is
      * 139 MB of {@code int[]} per page, which a multi-page job turns into an OOM.
      */

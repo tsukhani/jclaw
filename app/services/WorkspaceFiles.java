@@ -83,7 +83,7 @@ public final class WorkspaceFiles {
      * Maximum {@link models.Agent#parentAgent} hops walked by
      * {@link #resolveWorkspaceOwnerName} before bailing. A cycle in the
      * parent chain shouldn't be possible — the FK is set exactly once at
-     * spawn time and never re-pointed — but defence in depth keeps a
+     * spawn time and never re-pointed — but defense in depth keeps a
      * corrupted DB from spinning the thread forever.
      */
     private static final int MAX_PARENT_WALK_DEPTH = 32;
@@ -102,7 +102,7 @@ public final class WorkspaceFiles {
      *
      * <p>For unknown names (no matching {@link models.Agent} row) the
      * input is returned verbatim — this preserves the pre-2026-05
-     * behaviour for callers that resolve workspace paths before an agent
+     * behavior for callers that resolve workspace paths before an agent
      * row has been committed (admin tooling, tests that use
      * {@link play.test.Fixtures#deleteDatabase}).
      *

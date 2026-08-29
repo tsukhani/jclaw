@@ -20,7 +20,7 @@ import java.util.function.Function;
  *
  * <p><b>Privacy invariant.</b> The {@code agent_id} join column is {@code unique},
  * so exactly one binding may reference a given agent. This is a privacy
- * constraint, not a modelling nicety: agent memory is scoped by agentId alone,
+ * constraint, not a modeling nicety: agent memory is scoped by agentId alone,
  * so binding one agent to a second identity (a second bot/number/workspace)
  * would share memories across those end-users. The uniqueness is enforced here
  * at the schema, in {@link controllers.ApiBindingController} on the CRUD path,

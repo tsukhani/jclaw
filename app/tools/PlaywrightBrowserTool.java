@@ -387,7 +387,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * navigation (JCLAW-731). Returns empty when the session already covers the
      * navigation — the rule is absent (literal-IP / hostless URL) or the host is
      * already pinned — so the caller reuses the browser untouched. Otherwise
-     * returns the union of the existing pins and the new rule, signalling a
+     * returns the union of the existing pins and the new rule, signaling a
      * relaunch so the new host is pinned without dropping any prior host.
      *
      * <p>Exposed for unit tests; not part of the public tool API.

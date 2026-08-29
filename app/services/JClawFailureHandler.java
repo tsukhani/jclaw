@@ -192,7 +192,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             // (PENDING one-shot / ACTIVE recurring) for the backoff window so the
             // task isn't shown RUNNING while merely waiting to retry; the next
             // attempt re-enters RUNNING via openRunningTaskRun. Guarded on
-            // still-RUNNING so a raced operator cancel (→ CANCELLED) is preserved.
+            // still-RUNNING so a raced operator cancel (→ CANCELED) is preserved.
             if (task.status == Task.Status.RUNNING) {
                 task.status = Task.initialStatusFor(task.type);
             }

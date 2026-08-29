@@ -19,7 +19,7 @@ import java.util.List;
 
 /**
  * Discovers Replicate's curated <b>text-to-image</b> models for the Settings "Model" dropdown — the
- * image-gen analogue of {@link services.videogen.ReplicateVideoModelCatalog}. Replicate maintains a
+ * image-gen analog of {@link services.videogen.ReplicateVideoModelCatalog}. Replicate maintains a
  * {@code text-to-image} collection; {@code GET /v1/collections/text-to-image} returns its models, each an
  * {@code owner/name} slug — exactly what {@code imagegen.replicate.model} stores.
  *

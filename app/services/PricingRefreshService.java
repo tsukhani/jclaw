@@ -259,7 +259,7 @@ public final class PricingRefreshService {
      * Fill capability flags from a LiteLLM entry (JCLAW-1077).
      *
      * <p>Upward only: a capability is written when absent or {@code false} and
-     * never cleared. A third-party catalogue may add to what a provider
+     * never cleared. A third-party catalog may add to what a provider
      * reported, never contradict it.
      */
     private static boolean fillCapabilities(JsonObject model, JsonObject entry) {
@@ -279,7 +279,7 @@ public final class PricingRefreshService {
         return changed;
     }
 
-    /** Set {@code field} true when the catalogue says so and the model doesn't already. */
+    /** Set {@code field} true when the catalog says so and the model doesn't already. */
     private static boolean raiseFlag(JsonObject model, String field, JsonObject entry, String catalogKey) {
         if (!readFlag(entry, catalogKey)) return false;
         if (model.has(field) && !model.get(field).isJsonNull()

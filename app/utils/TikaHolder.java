@@ -29,14 +29,14 @@ public final class TikaHolder {
     private TikaHolder() {}
 
     /**
-     * JCLAW-1107: honour {@code ocr.tesseract.path} so OCR works when tesseract is
+     * JCLAW-1107: honor {@code ocr.tesseract.path} so OCR works when tesseract is
      * installed somewhere other than PATH — the default on Windows, whose installer
      * does not add itself.
      *
      * <p>Routed through a {@link TikaConfig} because Tika 3.x moved the setter off
      * {@code TesseractOCRConfig} onto the parser instance, so a per-parse
      * {@code ParseContext} cannot carry it; the value has to be baked into the
-     * parser registry. {@code setTesseractPath} normalises the value and appends the
+     * parser registry. {@code setTesseractPath} normalizes the value and appends the
      * separator itself, and rejects a non-directory with a TikaConfigException — so
      * a typo fails here, loudly, rather than silently reverting to no OCR.
      *

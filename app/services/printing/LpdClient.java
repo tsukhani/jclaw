@@ -106,7 +106,7 @@ public final class LpdClient {
         return sb.toString().getBytes(StandardCharsets.US_ASCII);
     }
 
-    /** Send a command line and require the daemon's zero-byte acknowledgement. */
+    /** Send a command line and require the daemon's zero-byte acknowledgment. */
     private static void command(OutputStream out, InputStream in, String line, String what)
             throws IOException {
         out.write(line.getBytes(StandardCharsets.US_ASCII));
@@ -126,7 +126,7 @@ public final class LpdClient {
     }
 
     /**
-     * Read the one-byte acknowledgement. End-of-stream is treated as a refusal
+     * Read the one-byte acknowledgment. End-of-stream is treated as a refusal
      * rather than success: a daemon that closes the connection mid-job has not
      * accepted it, and reporting success there is how a job silently vanishes.
      */

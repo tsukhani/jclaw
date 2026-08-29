@@ -397,7 +397,7 @@ public class ApiProvidersController extends Controller {
      * that name back — a chat model id and an invented one both return 200 with a valid
      * 768-dim vector. Without this check the probe would greenlight any string.
      *
-     * <p>Lenient on shape, strict on identity: a provider that merely normalises an id
+     * <p>Lenient on shape, strict on identity: a provider that merely normalizes an id
      * (dropping a vendor prefix, say) still counts as a match, because one name contains
      * the other. A blank echo means the provider did not say, which cannot be treated as
      * a mismatch. Comparison is case-insensitive.

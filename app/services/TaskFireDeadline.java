@@ -56,7 +56,7 @@ public final class TaskFireDeadline {
                 return t;
             });
 
-    /** Run ids the watchdog cancelled because they blew the deadline (as
+    /** Run ids the watchdog canceled because they blew the deadline (as
      *  opposed to an operator cancel), so the fire path can pick the right
      *  close-out note. Cleared by {@link #disarm}. */
     private static final Set<Long> TIMED_OUT = ConcurrentHashMap.newKeySet();
@@ -98,7 +98,7 @@ public final class TaskFireDeadline {
     }
 
     /**
-     * Whether the watchdog (not an operator) cancelled {@code taskRunId}. Read
+     * Whether the watchdog (not an operator) canceled {@code taskRunId}. Read
      * by the fire path's {@link agents.RunCancelledException} handler to pick
      * the close-out note; a peek, so it stays true until {@link #disarm} clears
      * it in the fire's {@code finally}.

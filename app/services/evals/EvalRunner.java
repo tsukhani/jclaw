@@ -87,7 +87,7 @@ public final class EvalRunner {
      *
      * <p>Shared with {@link EvalCapture} so the ceiling is defined once: capture and
      * live scoring are the two paths that put a model behind {@code fn}, and a bound
-     * that only one of them honoured would be no bound at all.
+     * that only one of them honored would be no bound at all.
      */
     static <T> List<T> mapCasesBounded(List<EvalCase> cases, int maxConcurrency, Function<EvalCase, T> fn) {
         var permits = new Semaphore(Math.max(1, maxConcurrency));

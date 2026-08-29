@@ -300,7 +300,7 @@ final class StreamingAgentRunner {
         // (no-longer-audio) messages rather than re-sending the rejected audio.
         var round1 = streamRound1WithAudioFallback(primary, effectiveModelIdForCall, messages, tools, cb,
                 maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, supportsAudioForStream);
-        if (round1 == null) return; // cancelled mid-stream
+        if (round1 == null) return; // canceled mid-stream
         var accumulator = round1.accumulator();
         messages = round1.messages();
 
@@ -404,7 +404,7 @@ final class StreamingAgentRunner {
      * mp3/flac/m4a/wav/ogg) <b>before any tokens stream</b>, the passthrough request is recoverable:
      * nothing has been emitted, so we await the Whisper transcript (the future was registered at send
      * time), rewrite audio→text via {@link VisionAudioAssembler#applyTranscriptsForCapability}, and
-     * re-stream once. This is the streaming analogue of the {@code ToolCallLoopRunner} sync-path retry,
+     * re-stream once. This is the streaming analog of the {@code ToolCallLoopRunner} sync-path retry,
      * which interactive voice notes never reached — they just errored. The {@code content.isEmpty()}
      * guard is what makes the re-stream safe (a partially-streamed reply can't be un-sent). When no
      * usable transcript results (Whisper failed/timed out) the original 4xx is surfaced unchanged.

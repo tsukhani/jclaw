@@ -81,7 +81,7 @@ public class PrinterTool implements ToolRegistry.Tool {
     @Override
     public boolean parallelSafe() {
         // Discovery and status are read-only, but print is not: two jobs racing to
-        // the same device interleave at the printer, not here. Serialised because
+        // the same device interleave at the printer, not here. Serialized because
         // the failure mode is physical and unrecoverable.
         return false;
     }

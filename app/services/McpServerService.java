@@ -149,7 +149,7 @@ public final class McpServerService {
      * <p>Two byte-identical registrations sat side by side for two days before anyone
      * noticed, because telling them apart meant reading two long endpoint strings and
      * finding them equal. Same transport and same config is the whole test — a duplicate
-     * spawns a second process and puts every one of its tools into the catalogue twice.
+     * spawns a second process and puts every one of its tools into the catalog twice.
      *
      * <p>Compares against the earliest-created match so exactly one of a pair is flagged:
      * the newer one, which is the one to remove.

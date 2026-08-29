@@ -239,7 +239,7 @@ public final class UpgradeService {
     /**
      * Gate for every version that reaches the helper argv. Rejects rather than
      * rewrites: a value that is not a release version is an attempt at something
-     * else, and quietly sanitising one hides it from the operator and the log.
+     * else, and quietly sanitizing one hides it from the operator and the log.
      *
      * @param version a release version, or null/blank for "the newest release"
      * @throws IllegalArgumentException if {@code version} is present and is not

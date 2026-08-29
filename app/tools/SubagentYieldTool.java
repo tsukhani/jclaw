@@ -111,7 +111,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
     }
 
     /** Marker that {@link agents.AgentRunner} scans for on tool-result text
-     *  to recognise a successful yield call and break out of its tool-call
+     *  to recognize a successful yield call and break out of its tool-call
      *  loop without persisting a final assistant reply. */
     public static final String YIELD_SENTINEL_PREFIX = "{\"action\":\"yielded\"";
 
@@ -254,7 +254,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
         SubagentRegistry.scheduleYieldTimeout(runId, parsed.timeoutSeconds());
 
         // Sentinel payload — AgentRunner scans tool-result text for
-        // YIELD_SENTINEL_PREFIX to recognise the yield and break out of the
+        // YIELD_SENTINEL_PREFIX to recognize the yield and break out of the
         // tool-call loop cleanly. Keeping the shape data-only (no
         // ThreadLocal, no exception) makes the suspend mechanism visible in
         // the persisted message log and easy to reason about post-hoc.

@@ -126,7 +126,7 @@ final class OkHttpLlmHttpDriver {
         } catch (InterruptedException ie) {
             // Tell OkHttp to abort the in-flight call so the underlying
             // socket connection isn't held open until readTimeout fires.
-            // Without this, a cancelled chat (user clicks Stop, route
+            // Without this, a canceled chat (user clicks Stop, route
             // navigation, etc.) would leak its connection for up to 180s.
             eventSource.cancel();
             Thread.currentThread().interrupt();

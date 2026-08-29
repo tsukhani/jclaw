@@ -7,7 +7,7 @@ package agents;
  * the admin SubagentRuns page's kill button).
  *
  * <p>Distinct from generic {@link RuntimeException} so the spawn-tool's
- * outer catch can tell "operator cancelled, registry already stamped
+ * outer catch can tell "operator canceled, registry already stamped
  * KILLED" apart from "run blew up, mark FAILED + announce." Catchers
  * MUST NOT overwrite the run row's terminal status when this fires — the
  * kill path beat them to it.

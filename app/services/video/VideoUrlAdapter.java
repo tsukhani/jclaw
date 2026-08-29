@@ -11,7 +11,7 @@ import java.util.Map;
  * Native-video adapter: wraps the WHOLE video as an OpenAI-compatible {@code video_url} content part
  * — a {@code {"type":"video_url","video_url":{"url":"data:<mime>;base64,<bytes>"}}} object. This is
  * the format video-capable models actually accept on OpenRouter and vLLM (validated live against a
- * Gemini route, which read a test clip's colours in order; the older Qwen frame-array format
+ * Gemini route, which read a test clip's colors in order; the older Qwen frame-array format
  * {@code {type:"video", video:[…]}} returned HTTP 200 but was silently dropped). Provider-agnostic —
  * no per-provider wire shapes, and gated on the model's {@code supportsVideo} ({@code input_modalities})
  * flag rather than any model-family guess.

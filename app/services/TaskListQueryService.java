@@ -27,7 +27,7 @@ public final class TaskListQueryService {
     /**
      * Outcome of a task-list query: the page of {@code tasks}, the {@code
      * total} matching the same WHERE clause (ignoring limit/offset), and {@code
-     * ftsEmpty} — true when a non-blank {@code q} matched nothing, signalling
+     * ftsEmpty} — true when a non-blank {@code q} matched nothing, signaling
      * the controller to short-circuit to zero rows with {@code X-Total-Count: 0}.
      */
     public record TaskListResult(List<Task> tasks, long total, boolean ftsEmpty) {}

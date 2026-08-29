@@ -139,8 +139,8 @@ public class TaskRunSink implements AgentExecutionSink {
      * JCLAW-414: close the run as {@link TaskRun.Status#CANCELLED} when the tool
      * loop bailed on an operator cancel ({@link agents.RunCancelledException}).
      * Idempotent on the terminal status: only a still-RUNNING row is transitioned,
-     * so this never clobbers the CANCELLED stamp the cancel endpoint already wrote
-     * (it sets the row CANCELLED immediately for instant UI feedback). Whichever
+     * so this never clobbers the CANCELED stamp the cancel endpoint already wrote
+     * (it sets the row CANCELED immediately for instant UI feedback). Whichever
      * writer reaches a RUNNING row first sets the timing.
      */
     public void onCancelled(String note) {

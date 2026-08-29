@@ -172,7 +172,7 @@ public class TaskCleanupJob extends Job<Void> {
 
         for (var taskId : expiredIds) {
             // Idempotent: terminal tasks usually have no scheduler row,
-            // but a CANCELLED-then-revived flow could leave one behind.
+            // but a CANCELED-then-revived flow could leave one behind.
             TaskSchedulingService.cancel(taskId);
         }
 

@@ -62,7 +62,7 @@ import java.util.stream.Collectors;
  * keeps running the VAD; when the endpointer detects the user speaking over an
  * in-flight turn, the server trips that turn's cancel flag and sends a {@code
  * flush} so the client drops its queued playback immediately. Generation is
- * cancelled too — {@code AgentRunner.runStreaming} takes the same flag — so a
+ * canceled too — {@code AgentRunner.runStreaming} takes the same flag — so a
  * barged turn stops producing tokens, not just audio. Every frame carries a
  * monotonic {@code turn} id so the client discards straggler audio from a
  * superseded turn.
@@ -94,7 +94,7 @@ public class VoiceController extends WebSocketController {
     private static final String VOICE_ATTACHMENT_LABEL = "(voice message)";
 
     /** Grace given to an in-flight turn to observe its cancel flag before the
-     *  session conversation is deleted (JCLAW-864). A cancelled turn stops at its
+     *  session conversation is deleted (JCLAW-864). A canceled turn stops at its
      *  next cooperative checkpoint, well inside this. */
     private static final long CANCEL_SETTLE_MS = 250;
 
@@ -226,7 +226,7 @@ public class VoiceController extends WebSocketController {
      * still be persisting when the socket closes. The caller trips the cancel flag
      * first; this waits briefly for the turn thread to notice before deleting, which
      * keeps the log clean of errors about a conversation that is being thrown away
-     * anyway. The wait is short and bounded — a cancelled turn stops at its next
+     * anyway. The wait is short and bounded — a canceled turn stops at its next
      * checkpoint — and expiring it is not a failure, just a noisier delete.
      *
      * <p>Best-effort by design: a failure here must not propagate out of the socket's
@@ -380,7 +380,7 @@ public class VoiceController extends WebSocketController {
         if (prev != null) prev.set(true);
     }
 
-    /** Serialize outbound writes so two overlapping turn threads (a cancelled one
+    /** Serialize outbound writes so two overlapping turn threads (a canceled one
      *  winding down + its successor) never interleave a partial frame. */
     private static void send(Http.Outbound out, Object lock, Map<String, Object> frame) {
         synchronized (lock) {
@@ -390,7 +390,7 @@ public class VoiceController extends WebSocketController {
 
     /** One voice turn: STT → agent → sentence-chunked streaming TTS. Bails at each
      *  step if superseded (barge-in), and never emits {@code turn_complete} for a
-     *  cancelled turn. */
+     *  canceled turn. */
     private static void runTurn(VoiceBinding binding, AsrSidecarClient asr, byte[] wav,
                                 AtomicBoolean cancel, int turnId, Http.Outbound out, Object lock) {
         var agent = binding.agent();
@@ -421,7 +421,7 @@ public class VoiceController extends WebSocketController {
             if (cancel.get()) return;
 
             var input = resolveInput(agent, asr, wav, plan.nativeAudio(), cancel, turnId, sink);
-            if (input.isEmpty()) return; // cancelled, or nothing was said
+            if (input.isEmpty()) return; // canceled, or nothing was said
 
             long inputMs = (System.nanoTime() - t0) / 1_000_000L; // STT / attachment staging
             metrics.sttDone();
@@ -477,7 +477,7 @@ public class VoiceController extends WebSocketController {
      * non-lexical cues reach the model. A text-only model gets a local-ASR
      * transcript. Either way the reply is text and is spoken via TTS.
      *
-     * <p>Empty when the turn is already over: cancelled mid-transcription, or nothing
+     * <p>Empty when the turn is already over: canceled mid-transcription, or nothing
      * intelligible was said — in which case {@code turn_complete} has been sent, since
      * the floor still has to go back to the mic.
      */

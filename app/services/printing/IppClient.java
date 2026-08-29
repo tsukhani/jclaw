@@ -149,7 +149,7 @@ public final class IppClient {
      * like an integer — and it is not cosmetic. Sending print-quality as an integer
      * got job 11 accepted with
      * {@code successful-ok-ignored-or-substituted-attributes}: the printer parsed
-     * the request, did not recognise the attribute as its enum, and quietly
+     * the request, did not recognize the attribute as its enum, and quietly
      * dropped it. A silently ignored option is worse than a rejected one.
      *
      * <p>Identified from the printer's own {@code -supported} types, which report
@@ -203,7 +203,7 @@ public final class IppClient {
     }
 
     /**
-     * How this printer wants PWG raster: resolution and colour space.
+     * How this printer wants PWG raster: resolution and color space.
      *
      * @param dpi       the resolution it declares, or 0 when it does not say
      * @param grayscale true when {@code sgray_8} is offered — a third the bytes

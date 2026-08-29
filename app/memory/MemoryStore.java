@@ -73,7 +73,7 @@ public interface MemoryStore {
     /**
      * As {@link #storeDeferred}, carrying the questions this memory answers (JCLAW-529).
      * Backends with no retrieval-key column ignore it and store the statement alone,
-     * which is the pre-529 behaviour rather than a degradation.
+     * which is the pre-529 behavior rather than a degradation.
      */
     default String storeDeferred(String agentId, String text, String category, double importance,
             String retrievalKey) {

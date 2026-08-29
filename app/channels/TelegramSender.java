@@ -26,7 +26,7 @@ import java.util.List;
  *   <li>{@link TelegramAdminSender} — commands, reactions, pin/unpin/delete,
  *       webhooks, the typing indicator, and polls;</li>
  *   <li>{@link TelegramKeyboardSender} — inline-keyboard sends/edits and callback
- *       acknowledgements.</li>
+ *       acknowledgments.</li>
  * </ul>
  *
  * <p>This class stays the single public send facade: the {@link TelegramChannel}

@@ -1,7 +1,7 @@
 package services.videogen;
 
 /**
- * Single contract for any video-generation backend in jclaw (JCLAW-231) — the video analogue of
+ * Single contract for any video-generation backend in jclaw (JCLAW-231) — the video analog of
  * {@code services.imagegen.ImageGenerationService}. The key difference: video generation is
  * unavoidably <b>asynchronous</b> (local WAN/LTX take minutes; every cloud provider returns a job
  * handle), so this splits into a non-blocking {@link #submit} that returns the provider's job id

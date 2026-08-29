@@ -214,7 +214,7 @@ public class ApiMemoryController extends Controller {
      * closed whitelist (switch) and direction resolves to the literal ASC/DESC,
      * so the concatenated JPQL carries no user input — no injection surface. An
      * absent/unknown column falls back to the recency default (newest first),
-     * matching the pre-sort behaviour. A stable id tiebreak keeps paging
+     * matching the pre-sort behavior. A stable id tiebreak keeps paging
      * deterministic when the sort key has ties.
      */
     private static String orderByClause(String sort, String dir) {

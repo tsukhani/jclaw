@@ -46,7 +46,7 @@ import java.util.List;
 public interface MessageSearchRepository {
 
     /**
-     * One-time initialisation. Idempotent — re-running on every boot
+     * One-time initialization. Idempotent — re-running on every boot
      * costs microseconds when the schema is already in place.
      *
      * <p>For H2 this calls {@code FullTextLucene.init} (creates the

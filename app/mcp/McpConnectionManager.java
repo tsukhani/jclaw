@@ -402,7 +402,7 @@ public final class McpConnectionManager {
             // orphaned doConnect would re-publish tools, re-write the
             // allowlist, and persist status=CONNECTED for a server the
             // user just disabled. (The first-attempt future on the orphan
-            // entry was already cancelled by the stop() that replaced us.)
+            // entry was already canceled by the stop() that replaced us.)
             if (connections.get(server.name) != entry) {
                 bestEffortClose(client);
                 return;

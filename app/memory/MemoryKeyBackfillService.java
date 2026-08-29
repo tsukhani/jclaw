@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *       network-bound, so it runs after the free pass rather than gating it.</li>
  * </ol>
  *
- * <p><b>Neighbour context is what makes the keys worth generating.</b> Asked to write
+ * <p><b>Neighbor context is what makes the keys worth generating.</b> Asked to write
  * questions for "Mateo's nickname is Ziggy" alone, a model can only produce questions
  * naming Mateo — which is the vocabulary that already worked. Shown the sibling memory
  * that says Mateo is the user's son, it can write "what do my kids go by?", and that is
@@ -171,7 +171,7 @@ public final class MemoryKeyBackfillService {
     }
 
     /*
-     * No deterministic guard rejects a key for describing a neighbour instead of its own
+     * No deterministic guard rejects a key for describing a neighbor instead of its own
      * memory, though the failure is real: "The user's name is Sam." came back keyed "what
      * does my business do / what is abundent", which a neighbouring memory answers.
      *
@@ -179,8 +179,8 @@ public final class MemoryKeyBackfillService {
      * flagged 5 of 89 — including the single most valuable key in the store, the one keying
      * the children's-nicknames memory as "what are my sons' nicknames / what do my kids
      * have". That key is the entire point of the feature, and the guard rejected it for the
-     * same property that makes it work: a bridge key borrows the neighbour's relation
-     * vocabulary by construction, so it necessarily overlaps the neighbour more than its own
+     * same property that makes it work: a bridge key borrows the neighbor's relation
+     * vocabulary by construction, so it necessarily overlaps the neighbor more than its own
      * memory. Stemming makes it worse — "nickname" and "nicknames" do not match.
      *
      * The measured miskey rate is roughly 2 in 89 and its cost is bounded: a bad key adds a

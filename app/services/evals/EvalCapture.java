@@ -124,7 +124,7 @@ public final class EvalCapture {
 
     /**
      * Create and COMMIT the eval agent with the given provider and model, returning a
-     * managed instance. Split from {@link #ensureEvalAgent} so the commit behaviour is
+     * managed instance. Split from {@link #ensureEvalAgent} so the commit behavior is
      * testable without a {@code main} agent: several test classes create one under
      * that exact name and this suite runs classes concurrently, so a test that seeded
      * or deleted {@code main} would be racing them.
@@ -237,7 +237,7 @@ public final class EvalCapture {
      *
      * <p>Routed through {@link TaskWriteService#deleteWithHistory} rather than a bulk
      * delete: a task owns TaskRun, TaskRunMessage and Notification rows, and a live
-     * scheduler entry that outlives the row unless cancelled. A bulk delete would
+     * scheduler entry that outlives the row unless canceled. A bulk delete would
      * leave a deleted reminder firing.
      *
      * <p>Caller guarantees this only ever runs for {@code __evaltest__} — see the
