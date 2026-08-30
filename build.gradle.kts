@@ -1,7 +1,7 @@
 plugins {
     id("org.playframework.play1")
     id("org.sonarqube") version "7.4.0.8496"
-    id("com.diffplug.spotless") version "8.10.0"
+    id("com.diffplug.spotless") version "8.10.1"
 }
 
 // Import hygiene enforcement for production Java (JCLAW code-audit follow-up). Two
