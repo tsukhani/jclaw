@@ -46,6 +46,12 @@ precompiled/
 # `play javadoc` output
 javadoc/
 
+# Benchmark/harness run output. Same rule as evals/reports/ below: a report is a
+# measurement of one run on one machine, not a fact about the code, so it ages
+# into noise and bloats the history. Keep a baseline you want to diff against out
+# of band.
+reports/
+
 # Eval run output (JCLAW-875). The suites in evals/suites/ ARE tracked — they
 # are the measuring stick. Reports are per-run measurements: keep the ones you
 # want to compare against out of band, not in the history.
