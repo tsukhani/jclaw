@@ -616,7 +616,10 @@ public class VoiceController extends WebSocketController {
      *  plus a DB cross-check so a cookie minted before a password reset can't
      *  pass. */
     private static boolean authenticated() {
-        if (!"true".equals(session.get("authenticated"))) return false;
+        // JCLAW-1121: the shared classifier, not the bare flag — a cookie from a superseded
+        // credential generation must not open a socket either. JCLAW-1031 replaces this whole
+        // hand-rolled helper with an @With(AuthCheck.class) mount.
+        if (ApiAuthController.sessionRejection() != null) return false;
         var hash = ConfigService.get(ApiAuthController.PASSWORD_HASH_KEY);
         return hash != null && !hash.isBlank();
     }

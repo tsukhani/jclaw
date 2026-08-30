@@ -55,6 +55,33 @@ public class ApiAuthController extends Controller {
         return ConfigService.get(CREDENTIAL_VERSION_KEY, "0");
     }
 
+    /** Why a session cookie is not a usable operator login. */
+    enum SessionRejection {
+        /** No login at all, or a cookie that never carried the flag. */
+        NOT_AUTHENTICATED,
+        /** Signature still valid, but minted before the last password change or reset. */
+        CREDENTIALS_CHANGED
+    }
+
+    /**
+     * Classify the current session cookie, or {@code null} when it is a live operator login.
+     *
+     * <p>JCLAW-1121: every cookie read goes through here. Checking the flag without the
+     * generation is what let a cookie from a superseded credential reach {@link #resetPassword}
+     * and wipe a newly set password — {@link AuthCheck} compared generations, the two readers
+     * that cannot sit behind it did not. Callers render their own body; only the decision is
+     * shared, because the three surfaces answer with different codes.
+     */
+    static SessionRejection sessionRejection() {
+        if (!"true".equals(session.get("authenticated"))) {
+            return SessionRejection.NOT_AUTHENTICATED;
+        }
+        if (!credentialVersion().equals(session.get(SESSION_CREDENTIAL_VERSION))) {
+            return SessionRejection.CREDENTIALS_CHANGED;
+        }
+        return null;
+    }
+
     /**
      * Advance the generation, invalidating every existing session cookie.
      *
@@ -292,9 +319,14 @@ public class ApiAuthController extends Controller {
         if (AppOriginGate.isBlocked()) {
             ApiResponses.error(403, APP_SCOPE_CODE, "App-originated request may not reset the password");
         }
-        var authed = session.get("authenticated");
-        if (!"true".equals(authed)) {
-            ApiResponses.error(401, "authentication_required", "Authentication required");
+        switch (sessionRejection()) {
+            case null -> { /* live operator session */ }
+            case CREDENTIALS_CHANGED -> {
+                session.clear();
+                ApiResponses.error(401, "credentials_changed", "Authentication required");
+            }
+            case NOT_AUTHENTICATED ->
+                    ApiResponses.error(401, "authentication_required", "Authentication required");
         }
         ConfigService.delete(PASSWORD_HASH_KEY);
         bumpCredentialVersion();

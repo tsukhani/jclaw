@@ -68,19 +68,20 @@ public class AuthCheck extends Controller {
             return;
         }
 
-        var authenticated = session.get("authenticated");
-        if (!"true".equals(authenticated)) {
-            response.status = 401;
-            renderJSON("{\"error\":\"Authentication required\"}");
-        }
-
         // JCLAW-1034: a cookie minted under an older credential is no longer honored, so
         // changing or resetting the password logs every other session out. Checked only on
         // the cookie path — a bearer carries no generation and is revoked through its own row.
-        if (!ApiAuthController.credentialVersion().equals(session.get(ApiAuthController.SESSION_CREDENTIAL_VERSION))) {
-            session.clear();
-            response.status = 401;
-            renderJSON("{\"error\":\"Authentication required\",\"code\":\"credentials_changed\"}");
+        switch (ApiAuthController.sessionRejection()) {
+            case null -> { /* live operator session */ }
+            case CREDENTIALS_CHANGED -> {
+                session.clear();
+                response.status = 401;
+                renderJSON("{\"error\":\"Authentication required\",\"code\":\"credentials_changed\"}");
+            }
+            case NOT_AUTHENTICATED -> {
+                response.status = 401;
+                renderJSON("{\"error\":\"Authentication required\"}");
+            }
         }
 
     }
