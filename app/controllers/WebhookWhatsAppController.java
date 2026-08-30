@@ -131,8 +131,8 @@ public class WebhookWhatsAppController extends Controller {
 
         // JCLAW-784 (VULN-012): the Cloud-API HMAC covers only the body — no
         // timestamp — so a captured signed body can be replayed indefinitely. Bound
-        // the replay window on the per-message timestamp (mirrors Slack's signed-
-        // timestamp check), enforced here in the authenticated path and independent
+        // the replay window on the per-message timestamp (mirrors Slack's
+        // signed-timestamp check), enforced here in the authenticated path and independent
         // of InboundEventDedup (which only drops exact-id repeats, not resigned or
         // cache-evicted replays).
         if (!WhatsAppChannel.isFreshTimestamp(payload, Instant.now())) {
