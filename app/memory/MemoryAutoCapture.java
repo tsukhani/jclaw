@@ -30,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -417,87 +418,8 @@ public final class MemoryAutoCapture {
         }
         List<Candidate> deduped = parsed;
 
-        // JCLAW-535: deterministic secret scrub — never persist credentials to
-        // long-term memory, even if the extractor ignores the prompt's guidance.
-        final List<Candidate> noSecrets =
-                deduped.stream().filter(c -> !MemorySafety.looksLikeSecret(c.text())).toList();
-        int scrubbed = deduped.size() - noSecrets.size();
-        if (scrubbed > 0) {
-            EventLogger.warn(EVENT_CATEGORY, agentName, null,
-                    "Dropped %d candidate memory(ies) containing apparent secrets".formatted(scrubbed));
-        }
-
-        // JCLAW-553: stored memories are re-injected into every future system
-        // prompt, so injection/exfiltration payloads are refused at write time.
-        final List<Candidate> candidates =
-                noSecrets.stream().filter(c -> !MemorySafety.looksLikeInjection(c.text())).toList();
-        int blocked = noSecrets.size() - candidates.size();
-        if (blocked > 0) {
-            EventLogger.warn(EVENT_CATEGORY, agentName, null,
-                    "Dropped %d candidate memory(ies) containing apparent injection payloads".formatted(blocked));
-        }
-
-        // JCLAW-919: the turn that asks to forget a fact states it, so without this the
-        // capture running on that same turn re-learns what forget just deleted.
-        final List<Candidate> notReforgotten =
-                candidates.stream().filter(c -> !MemoryForgetLog.recentlyForgotten(agentKey, c.text())).toList();
-        int reforgotten = candidates.size() - notReforgotten.size();
-        if (reforgotten > 0) {
-            EventLogger.info(EVENT_CATEGORY, agentName, null,
-                    "Dropped %d candidate memory(ies) the operator just asked to forget".formatted(reforgotten));
-        }
-
-        // JCLAW-1048: and the request itself is extractable — "the user wants X forgotten"
-        // stores as a durable, well-keyed memory the model then reads as standing policy,
-        // refusing the whole subject. The filter above cannot catch it: it tests for a
-        // restatement of the deleted fact, and this restates the request instead.
-        final List<Candidate> noForgetNotes =
-                notReforgotten.stream().filter(c -> !MemorySafety.looksLikeForgetRequest(c.text())).toList();
-        int forgetNotes = notReforgotten.size() - noForgetNotes.size();
-        if (forgetNotes > 0) {
-            EventLogger.info(EVENT_CATEGORY, agentName, null,
-                    "Dropped %d candidate memory(ies) recording a request to forget".formatted(forgetNotes));
-        }
-
-        // JCLAW-1051: and the same for any other instruction to drive the tool. UAT stored
-        // "the user wants the assistant to use the recall action of its memory tool", which
-        // then ranked ABOVE the real fact when recalling that topic. The filter above misses
-        // it — it carries no removal verb — just as this one misses a forget note naming no
-        // tool. Two shapes, neither subsuming the other.
-        final List<Candidate> noToolNotes =
-                noForgetNotes.stream().filter(c -> !MemorySafety.looksLikeToolInstruction(c.text())).toList();
-        int toolNotes = noForgetNotes.size() - noToolNotes.size();
-        if (toolNotes > 0) {
-            EventLogger.info(EVENT_CATEGORY, agentName, null,
-                    "Dropped %d candidate memory(ies) recording a memory-tool instruction".formatted(toolNotes));
-        }
-
-        // JCLAW-1055: the third shape, and the one the two filters above are structurally
-        // unable to see. "Forget my dentist's name" stored "The user has a dentist." — text
-        // that carries neither a removal verb nor a tool name because it is not a note about
-        // the request at all. It is the request's presupposition asserted as fact, so the
-        // guard has to read the candidate against the turn rather than on its own.
-        final List<Candidate> notPresupposed = noToolNotes.stream()
-                .filter(c -> !MemorySafety.assertsOnlyPresupposition(userMessage, c.text())).toList();
-        int presupposed = noToolNotes.size() - notPresupposed.size();
-        if (presupposed > 0) {
-            EventLogger.info(EVENT_CATEGORY, agentName, null,
-                    "Dropped %d candidate memory(ies) the turn only presupposed".formatted(presupposed));
-        }
-
-        // JCLAW-1056: and the fourth shape — substance taken from the assistant turn, which
-        // the prompt bars outright and a live model did anyway. The filter above cannot see
-        // it: that one needs the candidate to touch the user turn somewhere, and this fires
-        // precisely when it touches nothing in it. Worth a guard beyond the phrasing churn it
-        // was found causing, because the assistant turn carries tool output.
-        final List<Candidate> kept = notPresupposed.stream()
-                .filter(c -> !MemorySafety.assertsOnlyAssistantContent(userMessage, assistantResponse, c.text()))
-                .toList();
-        int assistantSourced = notPresupposed.size() - kept.size();
-        if (assistantSourced > 0) {
-            EventLogger.info(EVENT_CATEGORY, agentName, null,
-                    "Dropped %d candidate memory(ies) sourced from the assistant turn".formatted(assistantSourced));
-        }
+        final List<Candidate> kept =
+                applySafetyFilters(deduped, agentKey, agentName, userMessage, assistantResponse);
 
         // JCLAW-942: the maxPerTurn cut in plan() keeps the first survivors in list order, so
         // that order has to mean something. The extractor scores every candidate for
@@ -576,6 +498,71 @@ public final class MemoryAutoCapture {
             lock.unlock();
         }
     }
+
+    /**
+     * One deterministic pre-storage filter: the shape it refuses, and how a drop is
+     * reported. {@code security} routes the drop to {@code warn} rather than {@code info}.
+     */
+    private record SafetyFilter(Predicate<Candidate> refuses, boolean security, String dropped) {}
+
+    /**
+     * The safety filters, in application order.
+     *
+     * <p>Each entry catches a shape the entries around it are structurally unable to see, so
+     * none subsumes another and none may be merged — the per-entry notes record which
+     * distinction each one turns on. Adding an eighth is a new row here, nothing else.
+     */
+    private static List<SafetyFilter> safetyFilters(String agentKey, String userMessage,
+                                                    String assistantResponse) {
+        return List.of(
+                // JCLAW-535: never persist credentials, even when the extractor ignores the prompt.
+                new SafetyFilter(c -> MemorySafety.looksLikeSecret(c.text()), true,
+                        "containing apparent secrets"),
+                // JCLAW-553: stored text is re-injected into every future system prompt.
+                new SafetyFilter(c -> MemorySafety.looksLikeInjection(c.text()), true,
+                        "containing apparent injection payloads"),
+                // JCLAW-919: the turn asking to forget a fact states it, so capture re-learns it.
+                new SafetyFilter(c -> MemoryForgetLog.recentlyForgotten(agentKey, c.text()), false,
+                        "the operator just asked to forget"),
+                // JCLAW-1048: restates the request, not the deleted fact, so the entry above misses it.
+                new SafetyFilter(c -> MemorySafety.looksLikeForgetRequest(c.text()), false,
+                        "recording a request to forget"),
+                // JCLAW-1051: "use the recall action of its memory tool" ranked above the real fact.
+                // Carries no removal verb, so JCLAW-1048's test cannot see it, and vice versa.
+                new SafetyFilter(c -> MemorySafety.looksLikeToolInstruction(c.text()), false,
+                        "recording a memory-tool instruction"),
+                // JCLAW-1055: "forget my dentist's name" stored "The user has a dentist." — neither
+                // removal verb nor tool name, so it is read against the turn rather than alone.
+                new SafetyFilter(c -> MemorySafety.assertsOnlyPresupposition(userMessage, c.text()), false,
+                        "the turn only presupposed"),
+                // JCLAW-1056: substance from the assistant turn, which carries tool output. Fires
+                // precisely when the candidate touches nothing in the user turn — the inverse of above.
+                new SafetyFilter(
+                        c -> MemorySafety.assertsOnlyAssistantContent(userMessage, assistantResponse, c.text()),
+                        false, "sourced from the assistant turn"));
+    }
+
+    /** Run {@link #safetyFilters} in order, logging each filter's drop count once. */
+    private static List<Candidate> applySafetyFilters(List<Candidate> candidates, String agentKey,
+                                                      String agentName, String userMessage,
+                                                      String assistantResponse) {
+        var kept = candidates;
+        for (var filter : safetyFilters(agentKey, userMessage, assistantResponse)) {
+            var survivors = kept.stream().filter(c -> !filter.refuses().test(c)).toList();
+            int dropped = kept.size() - survivors.size();
+            if (dropped > 0) {
+                var message = "Dropped %d candidate memory(ies) %s".formatted(dropped, filter.dropped());
+                if (filter.security()) {
+                    EventLogger.warn(EVENT_CATEGORY, agentName, null, message);
+                } else {
+                    EventLogger.info(EVENT_CATEGORY, agentName, null, message);
+                }
+            }
+            kept = survivors;
+        }
+        return kept;
+    }
+
 
     /**
      * Semantic dedup phase (no Tx): which candidate indices already have a
