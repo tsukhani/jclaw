@@ -261,7 +261,7 @@ dependencies {
     // path (Stage 2) to speak real ACP instead of the stdin/stdout wrapper.
     // Pulls Jackson + Reactor transitively. Verified full round-trip against
     // claude-agent-acp.
-    implementation("com.agentclientprotocol:acp-core:0.14.0")
+    implementation("com.agentclientprotocol:acp-core:0.16.1")
 
     // JCLAW-735: JSpecify nullness annotations (@Nullable / @NonNull, TYPE_USE).
     // The tree-wide standard for expressing null contracts; introduced first on
