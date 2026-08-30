@@ -327,7 +327,7 @@ dependencies {
 
     // Tika core — drop OSGi/bndlib (Ivy promoted provided→runtime) and the
     // test/lombok pulls.
-    implementation("org.apache.tika:tika-core:3.3.2") {
+    implementation("org.apache.tika:tika-core:4.0.0") {
         exclude(group = "javax.mail")
         exclude(group = "com.sun.mail")
         exclude(group = "javax.activation")
@@ -342,7 +342,7 @@ dependencies {
 
     // Tika parsers — keep pdfbox-tools (PDF OCR depends on ImageIOUtil),
     // exclude picocli (CLI front-end only), exclude mail/lucene/cxf/etc.
-    implementation("org.apache.tika:tika-parsers-standard-package:3.3.2") {
+    implementation("org.apache.tika:tika-parsers-standard-package:4.0.0") {
         exclude(group = "org.apache.lucene")
         exclude(group = "org.ow2.asm")
         exclude(group = "org.apache.cxf")
