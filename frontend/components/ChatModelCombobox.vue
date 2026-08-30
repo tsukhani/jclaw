@@ -121,11 +121,11 @@ function onCloseAutoFocus(event: Event) {
                hover:bg-muted focus:outline-hidden focus:bg-muted transition-colors max-w-[420px]"
       >
         <span
-          role="img"
-          :aria-label="statusLabel"
+          aria-hidden="true"
           class="w-2 h-2 rounded-full shrink-0"
           :class="statusClass"
         />
+        <span class="sr-only">{{ statusLabel }}</span>
         <span class="font-medium truncate">{{ current?.label ?? 'Select a model' }}</span>
         <span
           v-if="current"
