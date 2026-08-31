@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { test, expect, gotoPage } from './helpers'
 
 /**
@@ -9,18 +11,35 @@ import { test, expect, gotoPage } from './helpers'
  * top-level-await regression), so every section is visited rather than
  * spot-checked.
  *
- * No setting is saved. Restart and Upgrade are visited but their action
- * buttons are never clicked — both stop this JVM.
+ * No setting is saved. Maintenance (Restart + Upgrade since JCLAW-1057) is visited but
+ * its action buttons are never clicked — both stop this JVM.
  */
-const SECTIONS = [
-  'timezone', 'logging', 'performance', 'uploads', 'printers', 'password',
-  'upgrade', 'restart', 'providers', 'search', 'transcription', 'speech',
-  'ocr', 'image-caption', 'image-generation', 'video-interpretation',
-  'video-generation', 'chat', 'subagents', 'tasks', 'skills',
-  'memory-limits', 'memory', 'memory-reranker', 'shell', 'malware',
-]
+/**
+ * Read the section ids out of the registry rather than restating them (JCLAW-1139).
+ *
+ * This list used to be hardcoded, and drifted: JCLAW-1057 merged Password, Upgrade and
+ * Restart into one Maintenance section, and five specs here failed from that merge until
+ * someone happened to run the suite by hand. Playwright needs the ids at collection time to
+ * generate one test per section, so the registry is parsed as text — importing it would pull
+ * in the `.vue` panel components, which this runner cannot compile.
+ *
+ * The regex is deliberately paired with a floor assertion below: if the registry's formatting
+ * ever changes, this yields an empty list, and an empty list would make every test here pass
+ * by doing nothing.
+ */
+const REGISTRY = fileURLToPath(new URL('../../components/settings/sections.ts', import.meta.url))
+const SECTIONS = [...readFileSync(REGISTRY, 'utf8').matchAll(/id: '([a-z0-9-]+)'/g)].map(m => m[1]!)
 
 test.describe('UAT-9 settings', () => {
+  test('the section registry was actually read', () => {
+    // Guards the parse above. Without this, a registry rename or a formatting change would
+    // empty SECTIONS and every per-section test would silently stop existing.
+    expect(SECTIONS.length,
+      `parsed no section ids from ${REGISTRY} — the registry format probably changed`)
+      .toBeGreaterThan(20)
+    expect(new Set(SECTIONS).size, 'duplicate section ids in the registry').toBe(SECTIONS.length)
+  })
+
   test('every section is listed in the table of contents', async ({ page }) => {
     await gotoPage(page, '/settings')
     for (const id of SECTIONS) {
@@ -65,11 +84,12 @@ test.describe('UAT-9 settings', () => {
     }
   })
 
-  test('restart preflight is a read, and is not triggered here', async ({ page }) => {
-    // Visiting the panel must not arm anything. The POST that reboots the JVM
-    // is deliberately never exercised by this suite.
+  test('maintenance preflight is a read, and is not triggered here', async ({ page }) => {
+    // Visiting the panel must not arm anything. The POSTs that reboot or upgrade the JVM are
+    // deliberately never exercised by this suite. Restart and Upgrade live under Maintenance
+    // since JCLAW-1057.
     await gotoPage(page, '/settings')
-    await page.getByTestId('settings-toc-item-restart').click()
+    await page.getByTestId('settings-toc-item-maintenance').click()
     await expect(page.locator('main')).toBeVisible()
   })
 })

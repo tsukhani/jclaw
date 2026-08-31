@@ -3,6 +3,7 @@ import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
+import { sections } from '~/components/settings/sections'
 
 /**
  * Tests for the Settings page's TOC + single-section swap shell (JCLAW-680).
@@ -28,10 +29,16 @@ describe('Settings page — TOC navigation + section swap', () => {
     const component = await mountSuspended(Settings)
     await flushPromises()
 
-    // Every section has a rail button.
-    for (const id of ['timezone', 'providers', 'transcription', 'shell', 'maintenance']) {
-      expect(component.find(`[data-testid="settings-toc-item-${id}"]`).exists()).toBe(true)
-    }
+    // EVERY registered section, not a spot-check (JCLAW-1139). This assertion is the merge
+    // gate for the section list: the e2e suite that would otherwise catch a drifted TOC is
+    // excluded from CI, so JCLAW-1057's Password/Upgrade/Restart -> Maintenance merge shipped
+    // green here while five e2e specs silently rotted. Driving off the imported registry means
+    // a renamed or removed section fails on the next merge instead.
+    expect(sections.length, 'the section registry is empty').toBeGreaterThan(20)
+    const missing = sections
+      .map(s => s.id)
+      .filter(id => !component.find(`[data-testid="settings-toc-item-${id}"]`).exists())
+    expect(missing, 'registered sections with no rail item').toEqual([])
     // Default active section is the first (timezone).
     const timezone = component.find('[data-testid="settings-toc-item-timezone"]')
     expect(timezone.attributes('aria-current')).toBe('page')
