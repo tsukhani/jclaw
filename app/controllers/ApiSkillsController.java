@@ -49,7 +49,6 @@ public class ApiSkillsController extends Controller {
     // Canonical tool name used both as an alias target and a body-text heuristic.
     private static final String TOOL_FILESYSTEM = "filesystem";
 
-    private static final String OPERATOR_ONLY = "operator_only";
 
     // JSON request/response payload keys.
     private static final String KEY_ENABLED = "enabled";
@@ -333,7 +332,7 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Delete a global skill (rejects the built-in skill-creator)")
     public static void delete(String name) {
         if ("skill-creator".equals(name)) {
-            ApiResponses.error(403, "forbidden", "The skill-creator skill is a built-in skill and cannot be deleted.");
+            ApiResponses.error(403, ApiResponses.FORBIDDEN, "The skill-creator skill is a built-in skill and cannot be deleted.");
         }
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
@@ -381,7 +380,7 @@ public class ApiSkillsController extends Controller {
      *  escalates just as well. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, OPERATOR_ONLY,
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "Skill configuration is operator-only; an agent cannot install or enable a skill "
                             + "for itself or for another agent.");
         }
@@ -692,7 +691,7 @@ public class ApiSkillsController extends Controller {
         try {
             target = WorkspacePathGuard.acquireContained(dir, filePath);
         } catch (SecurityException _) {
-            ApiResponses.error(403, "forbidden", "Path escapes skill directory");
+            ApiResponses.error(403, ApiResponses.FORBIDDEN, "Path escapes skill directory");
             return;  // javac definite-assignment: target is unassigned on this catch path
         }
         if (!Files.exists(target)) notFound();

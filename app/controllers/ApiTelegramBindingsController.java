@@ -132,7 +132,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
 
         Agent agent = requireEnabledAgent(agentId);
         if (TelegramBinding.findByBotToken(botToken) != null) {
-            ApiResponses.error(409, "bot_token_conflict", "A binding with this bot token already exists");
+            ApiResponses.error(409, ApiResponses.BOT_TOKEN_CONFLICT, "A binding with this bot token already exists");
         }
         // JCLAW-723: 1:1 agent<->binding privacy invariant — agent memory is
         // scoped per agent, so a second binding would share memory across users.
@@ -192,7 +192,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
         if (newToken == null || newToken.isBlank() || newToken.equals(binding.botToken)) return;
         var existing = TelegramBinding.findByBotToken(newToken);
         if (existing != null && !existing.id.equals(binding.id)) {
-            ApiResponses.error(409, "bot_token_conflict", "A binding with this bot token already exists");
+            ApiResponses.error(409, ApiResponses.BOT_TOKEN_CONFLICT, "A binding with this bot token already exists");
         }
         binding.botToken = newToken;
     }

@@ -114,9 +114,6 @@ public class ApiAuthController extends Controller {
     private static final int DEFAULT_LOGIN_MAX_FAILURES = 10;
     private static final long DEFAULT_LOGIN_WINDOW_SECONDS = 300L;
 
-    // JCLAW-764 / AD-1: one spelling of the app-origin refusal code, shared by the
-    // three credential/session routes that gate on AppOriginGate (JCLAW: java:S1192).
-    private static final String APP_SCOPE_CODE = "app_scope";
 
     public record AuthStatusResponse(boolean passwordSet) {}
 
@@ -156,7 +153,7 @@ public class ApiAuthController extends Controller {
         // safety no longer depends on that precondition surviving a future refactor. An
         // app-originated caller must never reach the credential-bootstrap path.
         if (AppOriginGate.isBlocked()) {
-            ApiResponses.error(403, APP_SCOPE_CODE, "App-originated request may not set up the password");
+            ApiResponses.error(403, ApiResponses.APP_SCOPE, "App-originated request may not set up the password");
         }
         // JCLAW-1025: the credential bootstrap binds to whoever arrives first, so an attacker
         // racing a fresh instance only needs to keep trying. Share the login throttle, keyed on
@@ -165,12 +162,12 @@ public class ApiAuthController extends Controller {
         String clientIp = request.remoteAddress != null ? request.remoteAddress : "unknown";
         if (!LoginRateLimiter.allow(clientIp, loginMaxFailures(), loginWindowSeconds())) {
             EventLogger.warn("auth", "Setup throttled for %s (too many recent attempts)".formatted(clientIp));
-            ApiResponses.error(429, "too_many_attempts", "Too many setup attempts. Try again later.");
+            ApiResponses.error(429, ApiResponses.TOO_MANY_ATTEMPTS, "Too many setup attempts. Try again later.");
         }
         var existing = ConfigService.get(PASSWORD_HASH_KEY);
         if (existing != null && !existing.isBlank()) {
             LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
-            ApiResponses.error(409, "already_set", "Password is already set");
+            ApiResponses.error(409, ApiResponses.ALREADY_SET, "Password is already set");
         }
         // JCLAW-674: parse via the shared JsonBodyReader so ONLY a malformed
         // body maps to 400. The prior broad catch (Exception) also turned a
@@ -182,18 +179,18 @@ public class ApiAuthController extends Controller {
         var password = JsonBodyReader.optString(body, "password", false);
         if (password == null) badRequest();
         if (password.length() < MIN_PASSWORD_LENGTH) {
-            ApiResponses.error(400, "password_too_short",
+            ApiResponses.error(400, ApiResponses.PASSWORD_TOO_SHORT,
                     "Password must be at least %d characters".formatted(MIN_PASSWORD_LENGTH));
         }
         if (password.length() > MAX_PASSWORD_LENGTH) {
-            ApiResponses.error(400, "password_too_long",
+            ApiResponses.error(400, ApiResponses.PASSWORD_TOO_LONG,
                     "Password must be at most %d characters".formatted(MAX_PASSWORD_LENGTH));
         }
         // JCLAW-741: reject passwords found in a known breach. Never blocks on
         // the network — a slow/unreachable HIBP lookup degrades to the offline
         // list (see BreachedPasswordChecker).
         if (BreachedPasswordChecker.isBreached(password)) {
-            ApiResponses.error(400, "password_breached",
+            ApiResponses.error(400, ApiResponses.PASSWORD_BREACHED,
                     "This password appears in a known data breach. Choose a different one.");
         }
         // JCLAW-782: the check above is a fast, friendly reject; the write itself
@@ -202,7 +199,7 @@ public class ApiAuthController extends Controller {
         // still absent, so a losing concurrent bootstrap gets the same 409.
         if (!ConfigService.setIfAbsent(PASSWORD_HASH_KEY, PasswordHasher.hash(password))) {
             LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
-            ApiResponses.error(409, "already_set", "Password is already set");
+            ApiResponses.error(409, ApiResponses.ALREADY_SET, "Password is already set");
         }
         bumpCredentialVersion();
         LoginRateLimiter.recordSuccess(clientIp);
@@ -224,7 +221,7 @@ public class ApiAuthController extends Controller {
         String clientIp = request.remoteAddress != null ? request.remoteAddress : "unknown";
         if (!LoginRateLimiter.allow(clientIp, loginMaxFailures(), loginWindowSeconds())) {
             EventLogger.warn("auth", "Login throttled for %s (too many failed attempts)".formatted(clientIp));
-            ApiResponses.error(429, "too_many_attempts", "Too many login attempts. Try again later.");
+            ApiResponses.error(429, ApiResponses.TOO_MANY_ATTEMPTS, "Too many login attempts. Try again later.");
         }
 
         // JCLAW-674: same migration as setup() — malformed body → 400 via
@@ -245,7 +242,7 @@ public class ApiAuthController extends Controller {
             // /setup-password via /api/auth/status. Surface the same
             // 401 as an invalid login so a curler can't tell whether
             // any account exists.
-            ApiResponses.error(401, "invalid_credentials", "Invalid credentials");
+            ApiResponses.error(401, ApiResponses.INVALID_CREDENTIALS, "Invalid credentials");
         }
 
         if (constantTimeEquals(expectedUser, username)
@@ -273,7 +270,7 @@ public class ApiAuthController extends Controller {
         else {
             LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
             EventLogger.warn("auth", "Admin login failed for username: %s".formatted(username));
-            ApiResponses.error(401, "invalid_credentials", "Invalid credentials");
+            ApiResponses.error(401, ApiResponses.INVALID_CREDENTIALS, "Invalid credentials");
         }
     }
 
@@ -290,7 +287,7 @@ public class ApiAuthController extends Controller {
         // JCLAW-764 / AD-1: same rationale as resetPassword — an app-originated
         // caller must not be able to log the operator out via the ambient cookie.
         if (AppOriginGate.isBlocked()) {
-            ApiResponses.error(403, APP_SCOPE_CODE, "App-originated request may not log the operator out");
+            ApiResponses.error(403, ApiResponses.APP_SCOPE, "App-originated request may not log the operator out");
         }
         session.clear();
         EventLogger.info("auth", "Admin logged out");
@@ -317,16 +314,16 @@ public class ApiAuthController extends Controller {
         // operator cookie — block an app-originated call before it can wipe the
         // admin credential.
         if (AppOriginGate.isBlocked()) {
-            ApiResponses.error(403, APP_SCOPE_CODE, "App-originated request may not reset the password");
+            ApiResponses.error(403, ApiResponses.APP_SCOPE, "App-originated request may not reset the password");
         }
         switch (sessionRejection()) {
             case null -> { /* live operator session */ }
             case CREDENTIALS_CHANGED -> {
                 session.clear();
-                ApiResponses.error(401, "credentials_changed", "Authentication required");
+                ApiResponses.error(401, ApiResponses.CREDENTIALS_CHANGED, "Authentication required");
             }
             case NOT_AUTHENTICATED ->
-                    ApiResponses.error(401, "authentication_required", "Authentication required");
+                    ApiResponses.error(401, ApiResponses.AUTHENTICATION_REQUIRED, "Authentication required");
         }
         ConfigService.delete(PASSWORD_HASH_KEY);
         bumpCredentialVersion();

@@ -37,7 +37,6 @@ public class ApiToolApprovalsController extends Controller {
 
     private static final Gson gson = GSON;
 
-    private static final String OPERATOR_ONLY = "operator_only";
 
     /** One standing grant, as the agent page renders it. */
     public record GrantView(Long id, String toolName) {}
@@ -52,7 +51,7 @@ public class ApiToolApprovalsController extends Controller {
      *  self-reference: enumerating another agent's grants maps the same boundary. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, OPERATOR_ONLY,
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "Tool approvals are operator-only; an agent cannot list or revoke standing approvals.");
         }
     }

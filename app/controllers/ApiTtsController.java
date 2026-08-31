@@ -173,7 +173,7 @@ public class ApiTtsController extends Controller {
             audio = TtsRouter.synthesize(speakable);
         } catch (TtsException e) {
             EventLogger.warn("tts", "read-aloud failed: " + e.getMessage());
-            ApiResponses.error(503, "tts_unavailable", e.getMessage());
+            ApiResponses.error(503, ApiResponses.TTS_UNAVAILABLE, e.getMessage());
             return; // unreachable (error() halts) — documents intent for javac
         }
         response.setHeader("Content-Type", "audio/wav");

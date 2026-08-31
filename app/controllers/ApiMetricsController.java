@@ -236,7 +236,7 @@ public class ApiMetricsController extends Controller {
     public static void dbPool() {
         var stats = DbPoolStats.snapshot();
         if (stats.isEmpty()) {
-            ApiResponses.error(503, "pool_unavailable",
+            ApiResponses.error(503, ApiResponses.POOL_UNAVAILABLE,
                     "The configured DataSource is not a HikariCP pool, so occupancy cannot be read.");
             throw ApiResponses.unreachable();
         }

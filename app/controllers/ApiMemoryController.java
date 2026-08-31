@@ -354,7 +354,7 @@ public class ApiMemoryController extends Controller {
         } catch (IllegalArgumentException e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
         } catch (IOException e) {
-            ApiResponses.error(500, "io_error", "Could not write suite: " + e.getMessage());
+            ApiResponses.error(500, ApiResponses.IO_ERROR, "Could not write suite: " + e.getMessage());
         }
     }
 

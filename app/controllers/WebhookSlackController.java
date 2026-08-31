@@ -96,7 +96,7 @@ public class WebhookSlackController extends Controller {
         if (!binding.enabled) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Webhook rejected: Slack binding %s is disabled".formatted(bindingId));
-            ApiResponses.error(403, "forbidden", "Binding disabled");
+            ApiResponses.error(403, ApiResponses.FORBIDDEN, "Binding disabled");
         }
         if (binding.signingSecret == null || binding.signingSecret.isBlank()) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,

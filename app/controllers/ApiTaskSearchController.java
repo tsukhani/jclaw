@@ -84,7 +84,7 @@ public class ApiTaskSearchController extends Controller {
             // — Error subclasses that escape a narrower catch and yield a
             // generic Play 500 page with no useful diagnostic. Log the full
             // stack so version-bump incompats are debuggable.
-            ApiResponses.errorAndLog(e, 500, "search_failed",
+            ApiResponses.errorAndLog(e, 500, ApiResponses.SEARCH_FAILED,
                     "Search failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }

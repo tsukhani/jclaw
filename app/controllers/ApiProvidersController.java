@@ -132,7 +132,7 @@ public class ApiProvidersController extends Controller {
             case DiscoveryResult.Ok(var models) ->
                     renderJSON(gson.toJson(new DiscoverModelsResponse(models, models.size())));
             case DiscoveryResult.Error(var statusCode, var message) ->
-                    ApiResponses.error(statusCode, "upstream_error", message);
+                    ApiResponses.error(statusCode, ApiResponses.UPSTREAM_ERROR, message);
         }
     }
 
@@ -203,7 +203,7 @@ public class ApiProvidersController extends Controller {
                 }
                 renderJSON(gson.toJson(new ProviderModelsResponse(name, refs, refs.size())));
             }
-            case DiscoveryResult.Error(var statusCode, var message) -> ApiResponses.error(statusCode, "upstream_error", message);
+            case DiscoveryResult.Error(var statusCode, var message) -> ApiResponses.error(statusCode, ApiResponses.UPSTREAM_ERROR, message);
         }
     }
 
@@ -346,7 +346,7 @@ public class ApiProvidersController extends Controller {
         // the save would then reject. After existence and argument checks, so an unknown
         // provider still reads as 404 rather than as a policy refusal.
         if (!ProviderLocality.isLocal(name)) {
-            ApiResponses.error(403, "forbidden",
+            ApiResponses.error(403, ApiResponses.FORBIDDEN,
                     "Provider '%s' is not local. Memory embeddings must use a provider on this "
                             .formatted(name) + "machine so memory text never leaves it.");
         }

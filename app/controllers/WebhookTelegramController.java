@@ -96,7 +96,7 @@ public class WebhookTelegramController extends Controller {
         if (!TelegramWebhookRateLimiter.allow(bindingId, rateLimitMax(), rateLimitWindowSeconds())) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Rate-limited webhook for binding %d from %s".formatted(bindingId, clientIp));
-            ApiResponses.error(429, "rate_limited", "Too Many Requests");
+            ApiResponses.error(429, ApiResponses.RATE_LIMITED, "Too Many Requests");
         }
 
         // M1: body-size limit. Check Content-Length first so an oversized POST
@@ -106,7 +106,7 @@ public class WebhookTelegramController extends Controller {
         if (contentLengthExceeds(maxBodyBytes)) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Oversized webhook body (Content-Length) for binding %d from %s".formatted(bindingId, clientIp));
-            ApiResponses.error(413, "payload_too_large", "Payload Too Large");
+            ApiResponses.error(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large");
         }
 
         if (!verifySecret(ctx, bindingId)) {
@@ -120,7 +120,7 @@ public class WebhookTelegramController extends Controller {
             if (rawBody.getBytes(StandardCharsets.UTF_8).length > maxBodyBytes) {
                 EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                         "Oversized webhook body (read length) for binding %d from %s".formatted(bindingId, clientIp));
-                ApiResponses.error(413, "payload_too_large", "Payload Too Large");
+                ApiResponses.error(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large");
             }
             dispatchUpdate(ctx, rawBody, bindingId);
         } catch (Result r) {

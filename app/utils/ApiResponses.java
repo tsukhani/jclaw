@@ -49,6 +49,56 @@ public final class ApiResponses {
     /** 404 — the addressed resource does not exist. */
     public static final String NOT_FOUND = "not_found";
 
+    // JCLAW-1138: the rest of the wire contract, promoted from string literals scattered
+    // across 15 controllers. These are values the SPA branches on, so a typo is a silently
+    // broken client path no test would catch — and javac inlines a constant reference into
+    // the caller's constant pool, so bytecode analysis cannot tell a literal from a constant
+    // after the fact. One declaration each is the only enforceable guarantee.
+
+    // Authentication and session.
+    public static final String AUTHENTICATION_REQUIRED = "authentication_required";
+    public static final String INVALID_CREDENTIALS = "invalid_credentials";
+    public static final String CREDENTIALS_CHANGED = "credentials_changed";
+    public static final String INVALID_TOKEN = "invalid_token";
+    public static final String PASSWORD_UNSET = "password_unset";
+    public static final String ALREADY_SET = "already_set";
+    public static final String TOO_MANY_ATTEMPTS = "too_many_attempts";
+    public static final String PASSWORD_TOO_SHORT = "password_too_short";
+    public static final String PASSWORD_TOO_LONG = "password_too_long";
+    public static final String PASSWORD_BREACHED = "password_breached";
+
+    // Authorization.
+    public static final String FORBIDDEN = "forbidden";
+    /** 403 — an operator-only write that an agent-originated principal may not perform. */
+    public static final String OPERATOR_ONLY = "operator_only";
+    /** 403 — a hosted app reaching outside the agent it was installed for. */
+    public static final String APP_SCOPE = "app_scope";
+
+    // Agents and apps.
+    public static final String NO_AGENT = "no_agent";
+    public static final String UNKNOWN_AGENT = "unknown_agent";
+    public static final String BAD_AGENT = "bad_agent";
+    public static final String NO_SUCH_APP = "no_such_app";
+
+    // Channel bindings.
+    public static final String BOT_TOKEN_CONFLICT = "bot_token_conflict";
+    public static final String PHONE_NUMBER_CONFLICT = "phone_number_conflict";
+    public static final String CLOUD_API_VERIFICATION_FAILED = "cloud_api_verification_failed";
+
+    // Request shape and limits.
+    public static final String NO_INPUT = "no_input";
+    public static final String PAYLOAD_TOO_LARGE = "payload_too_large";
+    public static final String RESERVED_KEY = "reserved_key";
+
+    // Upstream, capacity and I/O.
+    public static final String RATE_LIMITED = "rate_limited";
+    public static final String UPSTREAM_ERROR = "upstream_error";
+    public static final String UNAVAILABLE = "unavailable";
+    public static final String TTS_UNAVAILABLE = "tts_unavailable";
+    public static final String POOL_UNAVAILABLE = "pool_unavailable";
+    public static final String IO_ERROR = "io_error";
+    public static final String SEARCH_FAILED = "search_failed";
+
     private static final Gson GSON = GsonHolder.GSON;
     private static final String LOG_CATEGORY = "api";
 

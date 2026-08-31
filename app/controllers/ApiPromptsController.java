@@ -82,7 +82,7 @@ public class ApiPromptsController extends Controller {
         var description = JsonBodyReader.requiredOr400(body, "description");
         var generated = PromptGenerationService.generate(description);
         if (generated == null) {
-            ApiResponses.error(503, "unavailable",
+            ApiResponses.error(503, ApiResponses.UNAVAILABLE,
                     "Prompt generation is unavailable — configure an LLM provider for the main agent first.");
         }
         renderJSON(gson.toJson(generated));

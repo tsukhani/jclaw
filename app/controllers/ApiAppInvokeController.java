@@ -82,14 +82,14 @@ public class ApiAppInvokeController extends Controller {
         var message = params.get("message");
         var hasFiles = files != null && files.length > 0;
         if ((message == null || message.isBlank()) && !hasFiles) {
-            ApiResponses.error(400, "no_input", "invoke requires a 'message' and/or file uploads");
+            ApiResponses.error(400, ApiResponses.NO_INPUT, "invoke requires a 'message' and/or file uploads");
         }
         // AD-5 / JCLAW-766: server-side per-app rate limit, checked here — after input
         // validation but before any real work (staging, the agent run) — so a runaway app
         // can't drain cost. The effective cap is the app.json override tightened into the
         // authoritative ceiling; over-limit calls are rejected until the window rolls.
         if (!AppInvokeLimits.tryAcquire(slug, AppInvokeLimits.effectiveLimit(readLimitOverride(slug)))) {
-            ApiResponses.error(429, "rate_limited",
+            ApiResponses.error(429, ApiResponses.RATE_LIMITED,
                     "This app has reached its invoke limit; try again shortly");
         }
         var attachments = hasFiles ? UploadStaging.stage(agent, files) : List.<AttachmentService.Input>of();
@@ -199,14 +199,14 @@ public class ApiAppInvokeController extends Controller {
     private static Agent resolveDesignatedAgent(String slug) {
         var manifest = manifestPath(slug);
         if (manifest == null || !Files.isRegularFile(manifest)) {
-            ApiResponses.error(404, "no_such_app", "No such app: " + slug);
+            ApiResponses.error(404, ApiResponses.NO_SUCH_APP, "No such app: " + slug);
         }
         var agentIdStr = readAgentId(manifest, slug); // throws 4xx if manifest unreadable / no agent
         assert agentIdStr != null;
         var agentId = parseAgentId(agentIdStr, slug);  // throws 400 if non-numeric
         var agent = Tx.run(() -> AgentService.findById(agentId));
         if (agent == null) {
-            ApiResponses.error(400, "unknown_agent",
+            ApiResponses.error(400, ApiResponses.UNKNOWN_AGENT,
                     APP_PREFIX + slug + "' designates an agent that no longer exists");
         }
         return agent;
@@ -255,12 +255,12 @@ public class ApiAppInvokeController extends Controller {
         try {
             m = JsonParser.parseString(Files.readString(manifest)).getAsJsonObject();
         } catch (Exception _) {
-            ApiResponses.error(404, "no_such_app", "App manifest unreadable: " + slug);
+            ApiResponses.error(404, ApiResponses.NO_SUCH_APP, "App manifest unreadable: " + slug);
             return null; // unreachable — error() threw
         }
         var v = (m.has(AGENT_FIELD) && !m.get(AGENT_FIELD).isJsonNull()) ? m.get(AGENT_FIELD).getAsString() : null;
         if (v == null || v.isBlank()) {
-            ApiResponses.error(400, "no_agent", APP_PREFIX + slug + "' has no designated agent");
+            ApiResponses.error(400, ApiResponses.NO_AGENT, APP_PREFIX + slug + "' has no designated agent");
         }
         return v;
     }
@@ -269,7 +269,7 @@ public class ApiAppInvokeController extends Controller {
         try {
             return Long.parseLong(agentIdStr.trim());
         } catch (NumberFormatException _) {
-            ApiResponses.error(400, "bad_agent", APP_PREFIX + slug + "' has an invalid agent designation");
+            ApiResponses.error(400, ApiResponses.BAD_AGENT, APP_PREFIX + slug + "' has an invalid agent designation");
             return -1; // unreachable — error() threw
         }
     }

@@ -30,7 +30,6 @@ public class ApiToolsController extends Controller {
 
     private static final String KEY_ENABLED = "enabled";
 
-    private static final String OPERATOR_ONLY = "operator_only";
 
     // JCLAW-281: the `system` boolean is gone — there are no system tools
     // any more (list_mcp_tools deleted, loadtest_sleep gated by conditional
@@ -121,7 +120,7 @@ public class ApiToolsController extends Controller {
      *  written here is the execute-time guard's authoritative input. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, OPERATOR_ONLY,
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "Tool configuration is operator-only; an agent cannot grant tools to itself or to another agent.");
         }
     }

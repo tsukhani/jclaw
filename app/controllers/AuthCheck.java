@@ -6,6 +6,7 @@ import play.mvc.Controller;
 import play.mvc.Http;
 import services.ConfigService;
 import services.Tx;
+import utils.ApiResponses;
 
 /**
  * Auth interceptor. Use @With(AuthCheck.class) on controllers that require authentication.
@@ -54,7 +55,8 @@ public class AuthCheck extends Controller {
         requireProvisionedInstance();
         if (AppOriginGate.isBlocked()) {
             response.status = 403;
-            renderJSON("{\"error\":\"App may only invoke its own agent\",\"code\":\"app_scope\"}");
+            renderJSON("{\"error\":\"App may only invoke its own agent\",\"code\":\"%s\"}"
+                    .formatted(ApiResponses.APP_SCOPE));
         }
 
         // Bearer-token path takes precedence over session cookie. If the
@@ -76,7 +78,8 @@ public class AuthCheck extends Controller {
             case CREDENTIALS_CHANGED -> {
                 session.clear();
                 response.status = 401;
-                renderJSON("{\"error\":\"Authentication required\",\"code\":\"credentials_changed\"}");
+                renderJSON("{\"error\":\"Authentication required\",\"code\":\"%s\"}"
+                        .formatted(ApiResponses.CREDENTIALS_CHANGED));
             }
             case NOT_AUTHENTICATED -> {
                 response.status = 401;
@@ -102,7 +105,8 @@ public class AuthCheck extends Controller {
         if (hash == null || hash.isBlank()) {
             session.clear();
             response.status = 401;
-            renderJSON("{\"error\":\"Authentication required\",\"code\":\"password_unset\"}");
+            renderJSON("{\"error\":\"Authentication required\",\"code\":\"%s\"}"
+                    .formatted(ApiResponses.PASSWORD_UNSET));
         }
     }
 
@@ -155,7 +159,8 @@ public class AuthCheck extends Controller {
         // would unwind through the transaction on its way out.
         if (ownerUsername == null) {
             response.status = 401;
-            renderJSON("{\"error\":\"Invalid token\",\"code\":\"invalid_token\"}");
+            renderJSON("{\"error\":\"Invalid token\",\"code\":\"%s\"}"
+                    .formatted(ApiResponses.INVALID_TOKEN));
             return;
         }
 

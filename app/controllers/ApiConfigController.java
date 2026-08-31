@@ -46,7 +46,6 @@ public class ApiConfigController extends Controller {
      *  "token"/"secret"/"key" would otherwise get its level value masked. */
     private static final String LOGGING_KEY_PREFIX = LoggerLevelService.PREFIX;
 
-    private static final String OPERATOR_ONLY = "operator_only";
 
     public record ConfigEntry(String key, String value, String updatedAt) {}
 
@@ -107,7 +106,7 @@ public class ApiConfigController extends Controller {
      *  caller able to write it can widen every other gate rather than defeat one (JCLAW-1022). */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, OPERATOR_ONLY,
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "Configuration is operator-only; an agent cannot write or delete config values.");
         }
     }
@@ -130,13 +129,13 @@ public class ApiConfigController extends Controller {
             badRequest();
         }
         if (isReservedKey(key)) {
-            ApiResponses.error(409, "reserved_key", "The config key prefix '%s' is reserved for internal use"
+            ApiResponses.error(409, ApiResponses.RESERVED_KEY, "The config key prefix '%s' is reserved for internal use"
                     .formatted(RESERVED_KEY_PREFIX));
         }
 
         var rejection = ConfigService.setWithSideEffects(key, value);
         if (rejection != null) {
-            ApiResponses.error(403, "forbidden", rejection);
+            ApiResponses.error(403, ApiResponses.FORBIDDEN, rejection);
         }
 
         renderJSON(gson.toJson(new ConfigSaveResponse(
@@ -150,7 +149,7 @@ public class ApiConfigController extends Controller {
         requireOperator();
 
         if (isReservedKey(key)) {
-            ApiResponses.error(409, "reserved_key", "The config key prefix '%s' is reserved for internal use"
+            ApiResponses.error(409, ApiResponses.RESERVED_KEY, "The config key prefix '%s' is reserved for internal use"
                     .formatted(RESERVED_KEY_PREFIX));
         }
         ConfigService.deleteWithSideEffects(key);

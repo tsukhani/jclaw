@@ -43,7 +43,6 @@ public class ApiAgentsController extends Controller {
     private static final Gson gson = GSON;
 
     // JCLAW-682: canonical error codes for the ApiResponses envelope.
-    private static final String OPERATOR_ONLY = "operator_only";
 
     // JSON body keys reused across create/update/serve paths.
     private static final String KEY_MODEL_PROVIDER = "modelProvider";
@@ -441,7 +440,7 @@ public class ApiAgentsController extends Controller {
         if (!body.has(KEY_ACP_ALLOWED) || body.get(KEY_ACP_ALLOWED).isJsonNull()) return;
         if (body.get(KEY_ACP_ALLOWED).getAsBoolean() == agent.acpAllowed) return;
         if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, OPERATOR_ONLY,
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "acpAllowed is operator-only; an agent cannot grant itself or another agent the ACP runtime.");
         }
     }
@@ -587,7 +586,7 @@ public class ApiAgentsController extends Controller {
      *  jclaw_api a way around a withheld filesystem tool as well as a cross-agent one. */
     private static void requireOperatorForWorkspace() {
         if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, OPERATOR_ONLY,
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "Workspace files are operator-only through this API; an agent must use its "
                             + "filesystem tool, which is scoped to its own workspace.");
         }

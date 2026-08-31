@@ -125,7 +125,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
 
         Agent agent = requireEnabledAgent(agentId);
         if (phoneNumberId != null && WhatsAppBinding.findByPhoneNumberId(phoneNumberId) != null) {
-            ApiResponses.error(409, "phone_number_conflict", "A binding with this phone number id already exists");
+            ApiResponses.error(409, ApiResponses.PHONE_NUMBER_CONFLICT, "A binding with this phone number id already exists");
         }
         // JCLAW-723: 1:1 agent<->binding privacy invariant — a second binding on
         // one agent would share its memory across WhatsApp numbers/owners.
@@ -247,7 +247,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
         EventLogger.warn(EVENT_CATEGORY_CHANNEL,
                 binding.agent != null ? binding.agent.name : null, CHANNEL_WHATSAPP,
                 "Cloud-API credential verification failed: " + reason);
-        ApiResponses.error(422, "cloud_api_verification_failed", "WhatsApp Cloud-API verification failed: " + reason);
+        ApiResponses.error(422, ApiResponses.CLOUD_API_VERIFICATION_FAILED, "WhatsApp Cloud-API verification failed: " + reason);
         return false;
     }
 
@@ -263,7 +263,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
         if (next != null) {
             var existing = WhatsAppBinding.findByPhoneNumberId(next);
             if (existing != null && !existing.id.equals(binding.id)) {
-                ApiResponses.error(409, "phone_number_conflict", "A binding with this phone number id already exists");
+                ApiResponses.error(409, ApiResponses.PHONE_NUMBER_CONFLICT, "A binding with this phone number id already exists");
             }
         }
         binding.phoneNumberId = next;

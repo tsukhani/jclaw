@@ -118,13 +118,13 @@ public final class WebhookIngressGate {
         if (!allow(key, max, window)) {
             EventLogger.warn(CATEGORY_CHANNEL, null, channel,
                     "Rate-limited webhook (key %s) from %s".formatted(key, clientIp));
-            ApiResponses.error(429, "rate_limited", "Too Many Requests");
+            ApiResponses.error(429, ApiResponses.RATE_LIMITED, "Too Many Requests");
         }
         long maxBodyBytes = PlayConfig.longOr(prefix + CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
         if (contentLengthExceeds(maxBodyBytes)) {
             EventLogger.warn(CATEGORY_CHANNEL, null, channel,
                     "Oversized webhook body (Content-Length) key %s from %s".formatted(key, clientIp));
-            ApiResponses.error(413, "payload_too_large", "Payload Too Large");
+            ApiResponses.error(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large");
         }
         return maxBodyBytes;
     }
@@ -140,7 +140,7 @@ public final class WebhookIngressGate {
         if (rawBody.getBytes(StandardCharsets.UTF_8).length > maxBodyBytes) {
             EventLogger.warn(CATEGORY_CHANNEL, null, channel,
                     "Oversized webhook body (read length) key %s from %s".formatted(key, clientIp));
-            ApiResponses.error(413, "payload_too_large", "Payload Too Large");
+            ApiResponses.error(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large");
         }
     }
 
