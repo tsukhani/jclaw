@@ -363,15 +363,9 @@ Off by default; turn on for environments where users can upload arbitrary skill 
 
 ## Maintenance
 
-The operator actions that change this instance, ordered by how much they disrupt it: resetting the password costs nothing, an upgrade downloads a release and ends in a restart, and a restart cuts everything in flight.
+The operator actions that change this instance, ordered by how often one is wanted: upgrading is the reason to open this page, restarting is the follow-up, and a password reset is rare enough that it sits last.
 
 This section was previously three — **Password**, **Upgrade** and **Restart**. Links to the old `?section=password`, `?section=upgrade` and `?section=restart` addresses all still resolve here.
-
-### Password
-
-The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out — on the next access you'll be routed to the setup screen to choose a new password.
-
-When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
 
 ### Upgrade and restart
 
@@ -438,6 +432,12 @@ The page reconnects on its own: it waits for the backend to go down, then polls 
 - **In a source checkout** a production restart may recompile Java sources and rebuild the SPA. Both steps are gated on staleness and skipped when nothing changed, so this is usually quick. Two timed restarts on a developer clone: **48 s** with both steps skipped, **58 s** with a full SPA rebuild — the SPA is worth about ten seconds, not minutes. A cold Java recompile is the step that can take substantially longer, and it wasn't exercised in either measurement. The panel errs long when sizing how long it waits for the backend to return (15 minutes for a source checkout), so a genuinely slow restart is still survivable.
 
 If the instance wasn't started by `jclaw.sh`, the button is disabled and says so — there's nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app doesn't come back.
+
+### Password
+
+The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out — on the next access you'll be routed to the setup screen to choose a new password.
+
+When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
 
 ## Source-only controls
 
