@@ -5,6 +5,7 @@ import com.github.kagkarlsson.scheduler.task.ExecutionOperations;
 import com.github.kagkarlsson.scheduler.task.FailureHandler;
 import models.Task;
 import models.TaskRun;
+import play.Logger;
 import utils.TransientErrorClassifier;
 
 import java.time.Instant;
@@ -97,11 +98,25 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             return;
         }
 
-        Decision decision = decide(jclawTaskId, throwable);
-        switch (decision) {
-            case Decision.Reschedule r ->
-                    executionOps.reschedule(executionComplete, r.nextRunAt());
-            case Decision.Fail _ -> executionOps.stop();
+        // JCLAW-1144: every branch below writes to the database -- decide() mutates the Task
+        // row, and reschedule/stop rewrite the scheduled_tasks row. When db-scheduler
+        // interrupts its executor threads at shutdown, an interrupt inside H2 file I/O closes
+        // the store for every caller, so all of this fails and escapes as "Failed while
+        // completing execution". Contain it: the execution row is left untouched and
+        // db-scheduler's dead-execution detection re-fires it on the next boot.
+        try {
+            Decision decision = decide(jclawTaskId, throwable);
+            switch (decision) {
+                case Decision.Reschedule r ->
+                        executionOps.reschedule(executionComplete, r.nextRunAt());
+                case Decision.Fail _ -> executionOps.stop();
+            }
+        } catch (RuntimeException e) {
+            if (!EventLogger.isShuttingDown()) throw e;
+            // play.Logger, not EventLogger: this path exists because the DB is unreachable.
+            Logger.warn("JClawFailureHandler: task %d outcome not recorded during shutdown (%s); "
+                    + "db-scheduler will re-fire the execution on the next boot",
+                    jclawTaskId, e.toString());
         }
     }
 

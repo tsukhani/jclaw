@@ -3,7 +3,9 @@ package agents;
 import models.MessageRole;
 import models.TaskRun;
 import models.TaskRunMessage;
+import play.Logger;
 import services.AttachmentService;
+import services.EventLogger;
 import services.Tx;
 
 import java.time.Duration;
@@ -107,9 +109,35 @@ public class TaskRunSink implements AgentExecutionSink {
         });
     }
 
+    /**
+     * Persist a terminal status, tolerating a store that is already gone.
+     *
+     * <p>JCLAW-1144: db-scheduler interrupts its executor threads at shutdown, and an
+     * interrupt inside H2 file I/O closes the store's FileChannel for every caller. The
+     * close-out write then fails, and letting that escape replaces the run's real error with
+     * an MVStoreException and reaches db-scheduler as "Unhandled exception" plus "Failed
+     * while completing execution". Nothing is lost by swallowing it: the row stays RUNNING
+     * and BootConsistencyCheck reconciles it to FAILED on the next boot.
+     *
+     * <p>Swallowed only while shutting down. At any other time a failed close-out write is a
+     * real fault and must propagate. Deliberately not an isShuttingDown() early-return: the
+     * write usually succeeds even mid-shutdown, and skipping it would discard a terminal
+     * status that would have persisted fine.
+     */
+    private void persistTerminalStatus(String what, Runnable write) {
+        try {
+            write.run();
+        } catch (RuntimeException e) {
+            if (!EventLogger.isShuttingDown()) throw e;
+            // play.Logger, not EventLogger: this path exists because the DB is unreachable.
+            Logger.warn("TaskRunSink: %s for run %d not persisted during shutdown (%s); "
+                    + "BootConsistencyCheck will reconcile it", what, taskRunId, e.toString());
+        }
+    }
+
     @Override
     public void onComplete(String outputSummary) {
-        Tx.run(() -> {
+        persistTerminalStatus("completion", () -> Tx.run(() -> {
             var fresh = (TaskRun) TaskRun.findById(taskRunId);
             if (fresh == null) return null;
             fresh.completedAt = Instant.now();
@@ -118,12 +146,12 @@ public class TaskRunSink implements AgentExecutionSink {
             fresh.outputSummary = outputSummary;
             fresh.save();
             return null;
-        });
+        }));
     }
 
     @Override
     public void onFailure(String error) {
-        Tx.run(() -> {
+        persistTerminalStatus("failure", () -> Tx.run(() -> {
             var fresh = (TaskRun) TaskRun.findById(taskRunId);
             if (fresh == null) return null;
             fresh.completedAt = Instant.now();
@@ -132,7 +160,7 @@ public class TaskRunSink implements AgentExecutionSink {
             fresh.error = error;
             fresh.save();
             return null;
-        });
+        }));
     }
 
     /**
@@ -144,7 +172,7 @@ public class TaskRunSink implements AgentExecutionSink {
      * writer reaches a RUNNING row first sets the timing.
      */
     public void onCancelled(String note) {
-        Tx.run(() -> {
+        persistTerminalStatus("cancellation", () -> Tx.run(() -> {
             var fresh = (TaskRun) TaskRun.findById(taskRunId);
             if (fresh == null || fresh.status != TaskRun.Status.RUNNING) return null;
             fresh.completedAt = Instant.now();
@@ -153,7 +181,7 @@ public class TaskRunSink implements AgentExecutionSink {
             fresh.outputSummary = note;
             fresh.save();
             return null;
-        });
+        }));
     }
 
     @Override
