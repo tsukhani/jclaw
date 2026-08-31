@@ -1066,6 +1066,20 @@ public final class LoadTestRunner {
         var data = new LinkedHashMap<String, String>();
         data.put("authenticated", "true");
         data.put("username", "admin");
+        // Play's CookieSessionStore.restore discards the ENTIRE session when
+        // application.session.maxAge is set and the cookie carries no timestamp, so
+        // "authenticated" never survives and every request 401s with nothing logged
+        // server-side (a 401 never reaches a handler). Scope.Session.TS_KEY is
+        // package-private, hence the literal.
+        if (play.mvc.Scope.COOKIE_EXPIRE != null) {
+            long expiry = System.currentTimeMillis()
+                    + play.libs.Time.parseDuration(play.mvc.Scope.COOKIE_EXPIRE) * 1000L;
+            data.put("___TS", Long.toString(expiry));
+        }
+        // JCLAW-1034 rejects a cookie whose credential generation does not match the current
+        // one. Harmless today because no generation has been recorded and both sides default
+        // to "0", but the first password change would break the harness again.
+        controllers.ApiAuthController.stampCredentialVersion(data);
         var sessionData = CookieDataCodec.encode(data);
         var sign = Crypto.sign(sessionData, Play.secretKey.getBytes());
         return "PLAY_SESSION=" + sign + "-" + sessionData;

@@ -55,6 +55,26 @@ public class ApiAuthController extends Controller {
         return ConfigService.get(CREDENTIAL_VERSION_KEY, "0");
     }
 
+    /**
+     * Stamp the current credential generation into a hand-built session map, for the one
+     * caller that mints a cookie without going through {@link #login} — the load-test
+     * harness, which signs its own {@code PLAY_SESSION} with the application secret.
+     *
+     * <p>JCLAW-1034 began rejecting cookies whose generation does not match, which silently
+     * 401'd every harness request; the harness had no test coverage, so nothing caught it.
+     * Exposed as a stamping method rather than by widening the key and the accessor, so a
+     * caller cannot pair the wrong key with the wrong value.
+     *
+     * <p>{@code @Util} is load-bearing: Play enhances every public static method on a
+     * Controller into an action, so without it a call from outside this class returns an
+     * HTTP 302 redirect instead of running the method — which surfaces as the load test
+     * failing with "HTTP 302" and no other clue.
+     */
+    @play.mvc.Util
+    public static void stampCredentialVersion(java.util.Map<String, String> sessionData) {
+        sessionData.put(SESSION_CREDENTIAL_VERSION, credentialVersion());
+    }
+
     /** Why a session cookie is not a usable operator login. */
     enum SessionRejection {
         /** No login at all, or a cookie that never carried the flag. */
