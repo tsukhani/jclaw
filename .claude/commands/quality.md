@@ -1,23 +1,23 @@
 ---
 name: quality
-description: Five-pass source-quality sweep of app/ — trim verbose/redundant comments, normalize British spellings to American, remove provably-dead code, modernize to Java 25 idiom, and drop unused dependencies — each behavior-preserving, applied in an isolated worktree, and gated on spotlessApply + compile + play autotest. Destructive passes (dead code, deps) present evidence and confirm before removing.
+description: Six-pass source-quality sweep of app/ — trim verbose/redundant comments, normalize British spellings to American, remove provably-dead code, modernize to Java 25 idiom, replace inline fully-qualified names with imports, and drop unused dependencies — each behavior-preserving, applied in an isolated worktree, and gated on spotlessApply + compile + play autotest. Destructive passes (dead code, deps) present evidence and confirm before removing.
 category: Quality
-tags: [quality, refactor, cleanup, dead-code, java25, modernization, dependencies, comments, spelling, worktree]
-argument-hint: "[empty | comments | spelling | deadcode | modernize | deps] [path-scope]"
+tags: [quality, refactor, cleanup, dead-code, java25, modernization, imports, dependencies, comments, spelling, worktree]
+argument-hint: "[empty | comments | spelling | deadcode | modernize | imports | deps] [path-scope]"
 ---
 
 **Code Quality Sweep Workflow**
 
-Run up to five behavior-preserving cleanup passes over JClaw's production Java: **(1)** trim verbose/redundant comments, **(2)** normalize British spellings to American, **(3)** remove code that is *provably* dead, **(4)** modernize stale syntax to idiomatic Java 25, and **(5)** remove dependencies that are *provably* unused. Every pass runs in an **isolated git worktree**, is validated with `./gradlew spotlessApply && ./gradlew compileJava compileTestJava` and — for the passes that change behavior surface (dead code, modernization, deps) — a full `play autotest`, and lands as its **own commit**. Nothing is pushed. Use `/usr/bin/git` for every git invocation (project convention).
+Run up to six behavior-preserving cleanup passes over JClaw's production Java: **(1)** trim verbose/redundant comments, **(2)** normalize British spellings to American, **(3)** remove code that is *provably* dead, **(4)** modernize stale syntax to idiomatic Java 25, **(5)** replace inline fully-qualified names with imports, and **(6)** remove dependencies that are *provably* unused. Every pass runs in an **isolated git worktree**, is validated with `./gradlew spotlessApply && ./gradlew compileJava compileTestJava` and — for the passes that change behavior surface (dead code, modernization, imports, deps) — a full `play autotest`, and lands as its **own commit**. Nothing is pushed. Use `/usr/bin/git` for every git invocation (project convention).
 
 The bias throughout is **conservatism**: this codebase already scored A-/A on Clean Code and Imports & Idiom in the JCLAW-717 audit — its comments are largely intentional "why"s, its idiom is already broadly Java-25, and its deps are lean. So the job is to find the genuine residue, not to churn healthy code. **When in doubt, leave it and report it** rather than change it.
 
 **Arguments** — `$ARGUMENTS` may be:
-- *(empty)* → all five passes in order (comments → spelling → dead code → modernize → deps), scoped to `app/`.
-- a pass word — `comments` | `spelling` | `deadcode` | `modernize` | `deps` → run only that pass.
+- *(empty)* → all six passes in order (comments → spelling → dead code → modernize → imports → deps), scoped to `app/`.
+- a pass word — `comments` | `spelling` | `deadcode` | `modernize` | `imports` | `deps` → run only that pass.
 - an optional **path scope** as the last token (e.g. `deadcode app/services`, `modernize app/tools/TaskTool.java`, or just `app/channels` to sweep that subtree). Defaults to `app/`.
 
-**Scope & the deps pass.** The comments, spelling, dead-code, and modernize passes honor the path scope. The **deps pass (Phase 5) is whole-tree by nature** — it analyzes `build.gradle.kts` against usage everywhere — so it runs **only when the scope is the full production tree**: an empty/default run, or an explicit `app/` / `app`. A narrower subtree scope (`app/utils`, a single file, …) runs passes 1–4 and **skips Phase 5 with a one-line note** pointing the user at `/quality deps`. Naming the pass explicitly (`/quality deps`) always analyzes the whole tree, ignoring any trailing path.
+**Scope & the deps pass.** The comments, spelling, dead-code, modernize, and imports passes honor the path scope. The **deps pass (Phase 6) is whole-tree by nature** — it analyzes `build.gradle.kts` against usage everywhere — so it runs **only when the scope is the full production tree**: an empty/default run, or an explicit `app/` / `app`. A narrower subtree scope (`app/utils`, a single file, …) runs passes 1–5 and **skips Phase 6 with a one-line note** pointing the user at `/quality deps`. Naming the pass explicitly (`/quality deps`) always analyzes the whole tree, ignoring any trailing path.
 
 Reject anything else with a clear message; do not guess.
 
@@ -133,30 +133,57 @@ Goal: upgrade stale syntax to modern Java 25, behavior-preserving. This codebase
 
 ---
 
-**Phase 5 — Remove dead dependencies** *(whole-tree scope only)*
+**Phase 5 — Tighten fully-qualified names**
+
+Goal: an inline `java.util.Map` or `@play.mvc.Util` becomes an import plus `Map` / `Util`. Purely source-level — the compiled result must be identical — so the whole risk of this pass is binding a *different* type by accident, which still compiles. Placed before the deps pass deliberately: that pass keys candidacy on imports, so converting real usage into real imports makes its evidence sharper.
+
+15. **Convert** an inline fully-qualified **type reference in code**: a parameter or return type (`java.util.Map<String, String>`), an annotation (`@play.mvc.Util`), a cross-package static call (`controllers.ApiAuthController.stamp(...)`), a `new` expression, a catch type. Add the import, use the simple name. `java.lang.*` needs no import at all — just drop the qualifier.
+16. **Leave these alone** — each has bitten or would:
+    - **String literals — never touch.** `TikaHolder` holds `"org.apache.tika.parser.pkg.RarParser"` for a `Class.forName` lookup, in a file that *also imports* `org.apache.tika.parser.Parser` — so a pattern that matches code will match the literal too. Shortening it makes the lookup fail silently, the parser exclusion is lost, and the warnings it suppresses come back. Same for `META-INF/services` entries, config keys, and logger/MDC names.
+    - **Comments and Javadoc** — Phase 1's territory. `{@link java.util.Map}` stays as written.
+    - **Any simple-name collision.** Two FQNs sharing a simple name in one file (`java.util.Date` / `java.sql.Date`), or one colliding with an existing import or a type in the same package. There the qualification is load-bearing: converting it changes which type binds and **may still compile**.
+    - **Deliberate cross-layer qualification.** `controllers.X` called from `services` announces a layer hop that a bare class name hides. That is a judgment call, not residue — report it, do not auto-convert.
+    - **Do not introduce static imports.** Turning `Foo.bar()` into `bar()` removes the receiver from the call site; that is a readability change, not a qualification change, and belongs to no pass here.
+17. **Present the candidate list** (file:line, the FQN, the simple name it would become, and for anything in the "leave alone" categories why it was skipped) and get a quick confirmation before editing — some of these are judgment, not mechanics.
+18. **Verify against bytecode, not only tests.** A wrong binding compiles, and an untested path will not fail `play autotest`, so tests alone cannot clear this pass. Build before and after, then compare the disassembly with line numbers filtered — adding an import shifts every later line, so raw class-file bytes legitimately differ while the instruction stream must not:
+    ```bash
+    javap -p -c -cp build/classes/java/main <FQCN> | grep -vE 'LineNumberTable|^\s+line [0-9]+:' > /tmp/before.txt
+    # apply the edits, ./gradlew compileJava
+    javap -p -c -cp build/classes/java/main <FQCN> | grep -vE 'LineNumberTable|^\s+line [0-9]+:' > /tmp/after.txt
+    diff /tmp/before.txt /tmp/after.txt   # must be empty
+    ```
+    Any difference means the edit changed a type reference — revert that file. Then `./gradlew spotlessApply`, `./gradlew compileJava compileTestJava`, and `play autotest`. Commit:
+    ```
+    refactor(app): use imports instead of fully-qualified names
+    ```
+    Report the conversions by file and count, plus every FQN deliberately left and its reason.
+
+---
+
+**Phase 6 — Remove dead dependencies** *(whole-tree scope only)*
 
 **Gate:** run this pass only when the scope is the full production tree — an empty/default run, or an explicit `app/` / `app` (or a direct `deps` invocation). For any **narrower subtree scope**, do not attempt a partial dependency analysis: skip the pass and report one line — *"Deps analysis is whole-tree; skipped for this subtree scope — run `/quality deps` to sweep dependencies."*
 
 Goal: remove `build.gradle.kts` dependencies **definitely** unused. This is the highest-risk pass — a dep can be needed at *runtime* with no compile-time import, so a dropped dep may only fail under `play autotest`, not `compileJava`.
 
-15. **Enumerate** the declared dependencies (per configuration: `implementation`, `testImplementation`, `runtimeOnly`, `compileOnly`, annotation processors, and the deps the `/opt/play1` plugin contributes). For each, search app + test for imports and reflective/string usage of its packages.
-16. **A dependency is a removal candidate only if** it has zero compile-time imports **and** is not a known runtime-only kind:
+19. **Enumerate** the declared dependencies (per configuration: `implementation`, `testImplementation`, `runtimeOnly`, `compileOnly`, annotation processors, and the deps the `/opt/play1` plugin contributes). For each, search app + test for imports and reflective/string usage of its packages.
+20. **A dependency is a removal candidate only if** it has zero compile-time imports **and** is not a known runtime-only kind:
     - JDBC drivers (H2, Postgres), logging backends/bridges, SPI/`ServiceLoader` providers, Play 1.x plugins, Gradle plugins, annotation processors (used at build time, not imported), and anything pulled in a resource/config file (`application.conf`, `META-INF/services`).
     - Framework-provided deps: much of the stack (JPA, Play, JUnit) is transitively provided by the `play1` plugin — don't "remove" something the framework owns.
     If a dep is only *possibly* unused, classify it **"possibly unused — needs human confirmation"** and report it; do not remove it.
-17. **Present the candidate list** (dependency, configuration, the zero-usage evidence, why it's not runtime-only) and get confirmation. Remove confirmed-dead deps one at a time.
-18. Verify after **each** removal: `./gradlew compileJava compileTestJava` **and a full `play autotest`** (the runtime-only failure mode only surfaces in tests). Any red → the dep was live; restore it. `./gradlew spotlessApply`, then commit:
+21. **Present the candidate list** (dependency, configuration, the zero-usage evidence, why it's not runtime-only) and get confirmation. Remove confirmed-dead deps one at a time.
+22. Verify after **each** removal: `./gradlew compileJava compileTestJava` **and a full `play autotest`** (the runtime-only failure mode only surfaces in tests). Any red → the dep was live; restore it. `./gradlew spotlessApply`, then commit:
     ```
     build(deps): drop unused dependencies
     ```
 
 ---
 
-**Phase 6 — Validate & report**
+**Phase 7 — Validate & report**
 
-19. Final gate from the worktree: `cd ../jclaw-quality && ./gradlew spotlessApply && play autotest`. Confirm the JCLAW-684 green signal — the log contains `~ All tests passed` **and** there are no `test-result/*.class.failed.html` sentinels (exit code alone can lie). 
+23. Final gate from the worktree: `cd ../jclaw-quality && ./gradlew spotlessApply && play autotest`. Confirm the JCLAW-684 green signal — the log contains `~ All tests passed` **and** there are no `test-result/*.class.failed.html` sentinels (exit code alone can lie). 
     - **Env-flake guard:** if a broad batch of *unrelated* controller/functional tests fails (401s, FK violations, `awaitCommitted` timeouts), that's the known live-app / load interference (the primary tree's dev server adds load) — confirm the worktree's hook-seeded `PLAY_TEST_PORT` is actually free (`lsof -nP -iTCP:<port> -sTCP:LISTEN`) and re-run once; don't chase it as a real failure.
-20. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), British spellings normalized (per-word counts + the string-literal hits left for the user), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, and deps dropped (+ any "possibly unused" left) **or the "skipped — subtree scope" note** — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`. **If no pass produced a commit** (e.g. an already-clean subtree, as `app/utils` is post-audit), say so plainly and remove the empty worktree (`/usr/bin/git worktree remove ../jclaw-quality`) rather than leaving an empty branch to review.
+24. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), British spellings normalized (per-word counts + the string-literal hits left for the user), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, fully-qualified names converted to imports (+ every FQN deliberately left and why), and deps dropped (+ any "possibly unused" left) **or the "skipped — subtree scope" note** — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`. **If no pass produced a commit** (e.g. an already-clean subtree, as `app/utils` is post-audit), say so plainly and remove the empty worktree (`/usr/bin/git worktree remove ../jclaw-quality`) rather than leaving an empty branch to review.
 
 ---
 
