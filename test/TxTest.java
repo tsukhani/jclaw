@@ -160,4 +160,34 @@ class TxTest extends UnitTest {
         assertNotNull(thrown.getCause());
         assertEquals("checked", thrown.getCause().getMessage());
     }
+
+    // ---- JCLAW-1144: shutdown teardown must not reach the database ----
+
+    /**
+     * Tx.run warns when a shutdown component reaches the database, so teardown that depends
+     * on the DB names itself instead of surfacing as an unexplained "JDBC begin transaction
+     * failed". These cover the predicate rather than the wiring: driving the real path means
+     * calling EventLogger.markShuttingDown(), a one-way process-global latch that would send
+     * every concurrently-running test class's logging file-only for the rest of the JVM.
+     */
+    @Test
+    void tripwireFiresForShutdownThreadsDuringShutdown() {
+        assertTrue(Tx.isShutdownTeardownThread(true, "shutdown-tailscale-funnel"));
+        assertTrue(Tx.isShutdownTeardownThread(true, "shutdown-db-scheduler"));
+    }
+
+    @Test
+    void tripwireStaysSilentBeforeShutdownStarts() {
+        // The thread name alone must not trigger it — nothing is being torn down yet.
+        assertFalse(Tx.isShutdownTeardownThread(false, "shutdown-tailscale-funnel"));
+    }
+
+    @Test
+    void tripwireStaysSilentForOrdinaryThreadsDuringShutdown() {
+        // Request and agent threads legitimately finish DB work while shutdown runs.
+        assertFalse(Tx.isShutdownTeardownThread(true, "play-vthread-262"));
+        assertFalse(Tx.isShutdownTeardownThread(true, "agent-tool-parallel"));
+        assertFalse(Tx.isShutdownTeardownThread(true, ""));
+        assertFalse(Tx.isShutdownTeardownThread(true, null));
+    }
 }

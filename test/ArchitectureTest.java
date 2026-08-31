@@ -1,6 +1,7 @@
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
@@ -12,8 +13,14 @@ import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
@@ -260,5 +267,111 @@ class ArchitectureTest extends UnitTest {
                         + "depending back on models closes a write-path cycle. It takes scope + id + text, "
                         + "never an entity");
         rule.check(APP_CLASSES);
+    }
+
+    // ===== JCLAW-1143/1144: shutdown teardown must not reach the database =====
+
+    /** Call targets that mean "this reached the database". */
+    private static final Set<String> DB_SINK_OWNERS = Set.of(
+            "services.Tx", "services.ConfigService", "play.db.jpa.JPA");
+
+    /**
+     * Traversal stops here. EventLogger is called by nearly every component and its flush
+     * path does reach a transaction, but it is explicitly shutdown-aware: ShutdownJob calls
+     * markShuttingDown() before any component runs, after which record() and flush() go
+     * file-only. Following it would flag all 17 components for a path that cannot execute.
+     */
+    private static final Set<String> SHUTDOWN_AWARE = Set.of("services.EventLogger");
+
+    /**
+     * A method that consults {@code EventLogger.isShuttingDown()} has already been made
+     * teardown-aware, so neither its own DB calls nor anything it calls run during shutdown.
+     * {@code McpConnectionManager.clearAllowlistAndAudit} is the existing example: it skips
+     * its DELETE while shutting down because the next boot re-registers the allowlist anyway.
+     *
+     * <p>This is a heuristic and it cuts both ways — it cannot tell a real guard from an
+     * incidental read of the flag, so a method that checks it and then reaches the DB anyway
+     * would pass. Recognising the idiom beats a hard-coded name list, which would go stale.
+     */
+    private static boolean guardsOnShutdownFlag(JavaMethod method) {
+        return method.getCallsFromSelf().stream().anyMatch(call ->
+                "services.EventLogger".equals(call.getTargetOwner().getName())
+                        && "isShuttingDown".equals(call.getTarget().getName()));
+    }
+
+    /**
+     * No subsystem stopped by {@link jobs.ShutdownJob} may reach the database, transitively.
+     *
+     * <p>Teardown that needs a connection has no useful recovery when it cannot get one, and
+     * the one observed failure here was exactly that — a config read on the shutdown path
+     * that surfaced as an unexplained "JDBC begin transaction failed" (JCLAW-1143).
+     *
+     * <p>What this cannot see: anything inside a third-party frame. ArchUnit imports only
+     * {@code app/}, so db-scheduler reaching H2 through {@code Scheduler.stop()} is invisible
+     * here — that is what the runtime tripwire in {@link services.Tx} is for. Virtual calls
+     * also resolve to the declared target, so an interface hop can hide an implementation's
+     * DB access. Treat a pass as "no direct path in our own code", not as proof.
+     */
+    @Test
+    void shutdownComponentsMustNotReachTheDatabase() {
+        var doJob = APP_CLASSES.get("jobs.ShutdownJob").getMethod("doJob");
+
+        // The Component list holds method references, so the roots are discovered rather
+        // than hand-listed — a new subsystem is covered the moment it is registered.
+        List<JavaMethod> roots = doJob.getMethodReferencesFromSelf().stream()
+                .map(ref -> ref.getTarget().resolveMember())
+                .flatMap(Optional::stream)
+                .filter(JavaMethod.class::isInstance)
+                .map(JavaMethod.class::cast)
+                .toList();
+
+        assertFalse(roots.isEmpty(),
+                "no shutdown component method references resolved — the rule would pass vacuously");
+
+        var offenders = new ArrayList<String>();
+        for (JavaMethod root : roots) {
+            String path = findDbPath(root);
+            if (path != null) offenders.add(path);
+        }
+        assertTrue(offenders.isEmpty(),
+                "shutdown components must not reach the database:\n  " + String.join("\n  ", offenders));
+    }
+
+    /** BFS from a component's stop method; returns a readable call path to a DB sink, or null. */
+    private static String findDbPath(JavaMethod root) {
+        var seen = new HashSet<String>();
+        var parent = new HashMap<String, String>();
+        var queue = new ArrayDeque<JavaMethod>();
+        queue.add(root);
+        seen.add(root.getFullName());
+
+        while (!queue.isEmpty()) {
+            JavaMethod current = queue.poll();
+            if (guardsOnShutdownFlag(current)) continue;
+            for (var call : current.getCallsFromSelf()) {
+                String owner = call.getTargetOwner().getName();
+                if (DB_SINK_OWNERS.contains(owner)) {
+                    return renderPath(parent, current.getFullName(), root)
+                            + " -> " + owner + "." + call.getTarget().getName();
+                }
+                if (SHUTDOWN_AWARE.contains(owner)) continue;
+                var member = call.getTarget().resolveMember();
+                if (member.isEmpty() || !(member.get() instanceof JavaMethod next)) continue;
+                if (seen.add(next.getFullName())) {
+                    parent.put(next.getFullName(), current.getFullName());
+                    queue.add(next);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String renderPath(Map<String, String> parent, String from, JavaMethod root) {
+        var chain = new ArrayList<String>();
+        for (String at = from; at != null; at = parent.get(at)) {
+            chain.add(0, at);
+            if (at.equals(root.getFullName())) break;
+        }
+        return String.join(" -> ", chain);
     }
 }

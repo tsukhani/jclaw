@@ -3,6 +3,7 @@ package services;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import org.hibernate.Session;
+import play.Logger;
 import play.db.jpa.JPA;
 import play.libs.F;
 
@@ -14,13 +15,44 @@ import play.libs.F;
  */
 public class Tx {
 
+    /** ShutdownJob names each teardown virtual thread {@code shutdown-<component>}. */
+    private static final String SHUTDOWN_THREAD_PREFIX = "shutdown-";
+
     private Tx() {}
+
+    /**
+     * JCLAW-1144: name any shutdown component that reaches the database.
+     *
+     * <p>Teardown must not depend on the DB, and static analysis cannot check that on its
+     * own: the access is usually transitive ({@code disableIfEnabled -> isFunnelEnabled ->
+     * ConfigService.get}) and can sit inside a third-party frame that ArchUnit never
+     * imports. Every application transaction passes through here, so this is the one place
+     * that sees all of it, whatever the route.
+     *
+     * <p>The thread name carries the component identity, so a hit names the culprit
+     * directly. It reports only what actually executes — a warm config cache means no
+     * transaction and no warning — so treat a quiet shutdown as weak evidence, not proof.
+     */
+    public static boolean isShutdownTeardownThread(boolean shuttingDown, String threadName) {
+        return shuttingDown && threadName != null && threadName.startsWith(SHUTDOWN_THREAD_PREFIX);
+    }
+
+    private static void warnIfTeardownTouchesDb() {
+        var name = Thread.currentThread().getName();
+        // play.Logger, not EventLogger: EventLogger's own flush path can reach a transaction,
+        // and a warning that re-enters Tx.run would recurse.
+        if (isShutdownTeardownThread(EventLogger.isShuttingDown(), name)) {
+            Logger.warn("Shutdown teardown reached the database from %s — "
+                    + "teardown must not depend on the DB (JCLAW-1143)", name);
+        }
+    }
 
     /**
      * Run a block that returns a value, ensuring a JPA transaction is active.
      */
     @SuppressWarnings("java:S112") // Generic RuntimeException is the correct wrapper for the type-erased Throwable from F.Function0
     public static <T> T run(F.Function0<T> block) {
+        warnIfTeardownTouchesDb();
         if (JPA.isInsideTransaction()) {
             try {
                 return block.apply();
