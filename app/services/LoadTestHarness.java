@@ -10,6 +10,7 @@ import java.io.OutputStream;
 import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -153,11 +154,12 @@ public final class LoadTestHarness {
         // even at c=50 × 150 tps = 7500 writes/sec because each write is
         // a few µs of socket work; the chunked-write order across streams
         // is independent so two scheduler threads can serve them in
-        // parallel without any cross-stream ordering risk (within a stream
-        // consecutive chunk deadlines are always ≥ ~3 ms apart thanks to
-        // the inter-token jitter, so even if two scheduler threads picked
-        // them up, the earlier write has long completed before the later
-        // one fires).
+        // parallel without any cross-stream ordering risk. Within a stream the
+        // deadlines can be ~1 ms apart and a stalled pool brings several due at
+        // once, so streamResponse tracks frame completion explicitly instead of
+        // inferring it from deadline order (JCLAW-1141). Never park a pool thread
+        // waiting on another frame: with 2 threads, frames 1 and 2 would hold both
+        // while frame 0 waits for one.
         scheduler.set(Executors.newScheduledThreadPool(2, r -> {
             var t = new Thread(r, "loadtest-mock-scheduler");
             t.setDaemon(true);
@@ -313,7 +315,6 @@ public final class LoadTestHarness {
                 : 20.0 * n;
         int frames = Math.max(1, Math.min(n, (int) Math.floor(totalMs)));
         double spacingMs = totalMs / frames;
-        var done = new CompletableFuture<Void>();
         // Per-call dedicated lock for serializing the per-stream write+flush
         // pairs below. Replaces the prior `synchronized(out)` which Sonar
         // flags as S2445 (synchronizing on a method parameter is a frequent
@@ -325,6 +326,14 @@ public final class LoadTestHarness {
         // identity. Different streams get different writeLock instances
         // and continue to write in parallel.
         final var writeLock = new Object();
+        // One future per scheduled frame; the terminator goes out only once every one of
+        // them has written. JCLAW-1141: it used to be written by whichever task carried the
+        // last frame, which silently dropped frames. Deadlines forced 1 ms apart order task
+        // *dispatch*, not execution, so a stalled pool brings every deadline due at once and
+        // a later frame can terminate the stream while an earlier one is still queued behind
+        // writeLock — that frame then wrote to a closed stream, and its IOException landed on
+        // an already-completed future where completeExceptionally is a no-op.
+        var pending = new ArrayList<CompletableFuture<Void>>(frames);
         // Schedule each frame at an absolute deadline. TTFT is honored exactly for the first
         // frame (so ttftDelayIsHonored() stays correct). Subsequent frames are spaced by a
         // jittered cadence centred on spacingMs — uniform over ±50%, so the mean is the
@@ -334,9 +343,8 @@ public final class LoadTestHarness {
         // the nominal 80. Accumulating in double and rounding only at schedule time keeps
         // that bias out.
         //
-        // Deadlines are forced strictly increasing. Two frames landing on the same
-        // millisecond would race on different scheduler threads; the writeLock below also
-        // guards the byte interleaving, so this is belt-and-suspenders.
+        // Deadlines are forced strictly increasing so two frames never target the same
+        // millisecond; writeLock guards the byte interleaving when they overlap anyway.
         var rnd = ThreadLocalRandom.current();
         double cumDelayMs = Math.max(0, scn.ttftMs());
         long prevDeadline = -1;
@@ -344,10 +352,11 @@ public final class LoadTestHarness {
             // Even split, exact: consecutive boundaries sum to n with no remainder lost.
             int from = (int) ((long) f * n / frames);
             int to = (int) ((long) (f + 1) * n / frames);
-            boolean isLast = (f == frames - 1);
             var text = new StringBuilder();
             for (int t = from; t < to; t++) text.append(t == 0 ? "Hello" : " tok" + t);
             var content = text.toString();
+            var frameDone = new CompletableFuture<Void>();
+            pending.add(frameDone);
             Runnable chunkTask = () -> {
                 try {
                     var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
@@ -364,20 +373,10 @@ public final class LoadTestHarness {
                     synchronized (writeLock) {
                         out.write(chunk.getBytes(StandardCharsets.UTF_8));
                         out.flush();
-                        if (isLast) {
-                            var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
-                                    + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
-                                    + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":"
-                                    + n + ",\"total_tokens\":"
-                                    + (n + 10) + "}}\n\n"
-                                    + "data: [DONE]\n\n";
-                            out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
-                            out.flush();
-                            done.complete(null);
-                        }
                     }
+                    frameDone.complete(null);
                 } catch (IOException e) {
-                    done.completeExceptionally(e);
+                    frameDone.completeExceptionally(e);
                 }
             };
             long deadline = Math.max(prevDeadline + 1, Math.round(cumDelayMs));
@@ -385,15 +384,25 @@ public final class LoadTestHarness {
             try {
                 sch.schedule(chunkTask, deadline, TimeUnit.MILLISECONDS);
             } catch (RejectedExecutionException rejected) {
-                // Concurrent stop() shut the pool down mid-schedule. Complete
-                // exceptionally so awaitDone unblocks instead of parking forever
-                // (the already-scheduled earlier chunks may still fire, but the
-                // terminal-chunk task that completes `done` may never be queued).
-                done.completeExceptionally(new IOException("loadtest harness stopped", rejected));
+                // Concurrent stop() shut the pool down mid-schedule. Fail this frame so the
+                // wait below unblocks instead of parking on a task that will never run.
+                frameDone.completeExceptionally(new IOException("loadtest harness stopped", rejected));
                 break;
             }
             cumDelayMs += spacingMs * (0.5 + rnd.nextDouble());
         }
-        awaitDone(done);
+        // allOf waits for every frame to finish, so no writer is still running here and a
+        // failed frame surfaces as an IOException rather than a token missing from the body.
+        awaitDone(CompletableFuture.allOf(pending.toArray(CompletableFuture[]::new)));
+        var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
+                + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+                + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":"
+                + n + ",\"total_tokens\":"
+                + (n + 10) + "}}\n\n"
+                + "data: [DONE]\n\n";
+        synchronized (writeLock) {
+            out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        }
     }
 }
