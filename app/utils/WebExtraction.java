@@ -84,8 +84,13 @@ public final class WebExtraction {
             com.vladsch.flexmark.parser.Parser.builder().build();
 
     /** Shared and configured once (never mutated per-call) so {@code parseToString}
-     *  stays thread-safe under the parallel tool dispatch. */
-    private static final Tika TIKA = new Tika();
+     *  stays thread-safe under the parallel tool dispatch. Reuses TikaHolder's instance
+     *  rather than constructing a second one, which would re-walk the parser registry.
+     *  The cap is set here because this is the only parseToString caller — every other
+     *  TikaHolder.TIKA consumer calls detect(), which ignores it. Sitting above
+     *  MAX_TEXT_LENGTH keeps truncation this class's decision, with its explanatory
+     *  marker, rather than a silent cut by Tika. */
+    private static final Tika TIKA = TikaHolder.TIKA;
     static {
         TIKA.setMaxStringLength(MAX_TEXT_LENGTH + 10_000);
     }
