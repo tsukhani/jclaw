@@ -37,7 +37,7 @@ export class SchemaParseError extends Error {
  * schema failure, logs the zod issues to the console and throws a
  * {@link SchemaParseError}. Network and HTTP errors bubble through unchanged.
  */
-export async function fetchParsed<T extends z.ZodTypeAny>(
+export async function fetchParsed<T extends z.ZodType>(
   url: string,
   schema: T,
   opts?: Parameters<typeof $fetch>[1],

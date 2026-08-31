@@ -231,20 +231,6 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
     }
 
     /**
-     * Graceful stop hook for {@link ShutdownJob}. Plugged into the
-     * existing parallel-component shutdown list rather than a separate
-     * {@code @OnApplicationStop} job so the existing 15-second
-     * overall-timeout ceiling covers it and so two competing shutdown
-     * windows aren't fighting for Play's 30s scheduler budget.
-     *
-     * <p>{@link Scheduler#stop} blocks until in-flight fires finish or
-     * the executor times out (db-scheduler's internal default is 30s
-     * which is past our ceiling, but the parallel-VT pattern in
-     * {@code ShutdownJob} means our 15s overall-cap still bounds the
-     * wall-clock — db-scheduler's stop runs in a sibling VT alongside
-     * the other components and gets cut off by the latch await).
-     */
-    /**
      * JCLAW-1144: ask in-flight fires to stop before db-scheduler interrupts them.
      *
      * <p>{@code Scheduler.stop()} waits {@code shutdownMaxWait} and then interrupts its
@@ -288,6 +274,20 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         return asked;
     }
 
+    /**
+     * Graceful stop hook for {@link ShutdownJob}. Plugged into the
+     * existing parallel-component shutdown list rather than a separate
+     * {@code @OnApplicationStop} job so the existing 15-second
+     * overall-timeout ceiling covers it and so two competing shutdown
+     * windows aren't fighting for Play's 30s scheduler budget.
+     *
+     * <p>{@link Scheduler#stop} blocks until in-flight fires finish or
+     * the executor times out (db-scheduler's internal default is 30s
+     * which is past our ceiling, but the parallel-VT pattern in
+     * {@code ShutdownJob} means our 15s overall-cap still bounds the
+     * wall-clock — db-scheduler's stop runs in a sibling VT alongside
+     * the other components and gets cut off by the latch await).
+     */
     public static void shutdownGracefully() {
         Scheduler local = scheduler;
         if (local == null) return;

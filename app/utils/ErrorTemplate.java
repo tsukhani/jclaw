@@ -46,14 +46,19 @@ public record ErrorTemplate(@NonNull String code, @NonNull String whatBroke,
     }
 
     public String brokeKey() {
-        return "error." + code + ".broke";
+        return key("broke");
     }
 
     public String checkKey() {
-        return "error." + code + ".check";
+        return key("check");
     }
 
     public String retryKey() {
-        return "error." + code + ".retry";
+        return key("retry");
+    }
+
+    /** The message-bundle key shape, in one place so a prefix change is a single edit. */
+    private String key(String suffix) {
+        return "error." + code + "." + suffix;
     }
 }
