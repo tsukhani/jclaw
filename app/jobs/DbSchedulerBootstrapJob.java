@@ -10,6 +10,7 @@ import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.TaskExecutionHandler;
+import services.TaskRunRegistry;
 
 import javax.sql.DataSource;
 
@@ -18,6 +19,7 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 
 /**
@@ -242,10 +244,55 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
      * wall-clock — db-scheduler's stop runs in a sibling VT alongside
      * the other components and gets cut off by the latch await).
      */
+    /**
+     * JCLAW-1144: ask in-flight fires to stop before db-scheduler interrupts them.
+     *
+     * <p>{@code Scheduler.stop()} waits {@code shutdownMaxWait} and then interrupts its
+     * executor threads. A thread interrupted inside a {@code Tx.run} block closes H2's
+     * FileChannel for every caller, which is the MVStoreException cascade seen on shutdown;
+     * db-scheduler's own completion write then fails too, as an ExecutePicked error.
+     * Requesting the cancel first gives those fires a reason to exit during the wait
+     * {@code stop()} was already going to take, so it costs no additional shutdown time.
+     *
+     * <p>Best-effort by nature: a fire mid-LLM-round only observes the flag at its next
+     * checkpoint, so this reduces how many threads are alive to be interrupted rather than
+     * guaranteeing none. It is the same cooperative mechanism the deadline watchdog
+     * ({@link services.TaskFireDeadline}) and the operator cancel API already use.
+     *
+     * <p>Writes nothing: {@code requestCancel} only flips an in-memory flag and the fire
+     * persists its own terminal status on the way out, so teardown stays off the database
+     * (JCLAW-1143).
+     *
+     * @return how many in-flight fires were asked to stop
+     */
+    public static int cancelInFlightRuns() {
+        return cancelInFlightRuns(TaskRunRegistry.activeRunIds());
+    }
+
+    /**
+     * The id-set overload exists for tests. The no-arg form cancels every run registered in
+     * this JVM, and play1 runs test classes concurrently against the one registry, so a test
+     * calling it would flip the cancel flag of whatever fire another test class had in
+     * flight. Tests pass their own sentinel ids instead.
+     */
+    public static int cancelInFlightRuns(Set<Long> runIds) {
+        int asked = 0;
+        for (Long runId : runIds) {
+            if (TaskRunRegistry.requestCancel(runId)) asked++;
+        }
+        if (asked > 0) {
+            EventLogger.info("task", null, null,
+                    "db-scheduler shutdown: requested cooperative cancel of %d in-flight task run(s)"
+                            .formatted(asked));
+        }
+        return asked;
+    }
+
     public static void shutdownGracefully() {
         Scheduler local = scheduler;
         if (local == null) return;
         try {
+            cancelInFlightRuns();
             local.stop();
         } catch (Exception e) {
             EventLogger.warn("task", null, null,

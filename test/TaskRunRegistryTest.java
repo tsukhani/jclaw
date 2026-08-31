@@ -1,8 +1,11 @@
 import agents.AgentRunner;
 import agents.RunCancelledException;
+import jobs.DbSchedulerBootstrapJob;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.TaskRunRegistry;
+
+import java.util.Set;
 
 /**
  * JCLAW-414: unit contract for {@link TaskRunRegistry} and the
@@ -121,5 +124,46 @@ class TaskRunRegistryTest extends UnitTest {
         assertTrue(TaskRunRegistry.tryClaimTask(null), "null task id never blocks a fire");
         assertFalse(TaskRunRegistry.isTaskActive(null));
         assertDoesNotThrow(() -> TaskRunRegistry.releaseTask(null));
+    }
+
+    // ---- JCLAW-1144: shutdown asks in-flight fires to stop before db-scheduler interrupts ----
+
+    private static final Long SHUTDOWN_A = 991_144L;
+    private static final Long SHUTDOWN_B = 991_145L;
+    private static final Long NEVER_REGISTERED = 991_146L;
+
+    /**
+     * Uses the id-set overload deliberately: the no-arg form cancels everything registered
+     * in this JVM, which under concurrent test classes would cancel another test's fire.
+     */
+    @Test
+    void shutdownCancelFlagsEveryInFlightRunItIsGiven() {
+        TaskRunRegistry.register(SHUTDOWN_A);
+        TaskRunRegistry.register(SHUTDOWN_B);
+        try {
+            assertFalse(TaskRunRegistry.isCancelled(SHUTDOWN_A));
+            assertFalse(TaskRunRegistry.isCancelled(SHUTDOWN_B));
+
+            assertEquals(2, DbSchedulerBootstrapJob.cancelInFlightRuns(
+                    Set.of(SHUTDOWN_A, SHUTDOWN_B)));
+
+            assertTrue(TaskRunRegistry.isCancelled(SHUTDOWN_A), "run A must observe the cancel");
+            assertTrue(TaskRunRegistry.isCancelled(SHUTDOWN_B), "run B must observe the cancel");
+        } finally {
+            TaskRunRegistry.unregister(SHUTDOWN_A);
+            TaskRunRegistry.unregister(SHUTDOWN_B);
+        }
+    }
+
+    @Test
+    void shutdownCancelIgnoresRunsThatAlreadyFinished() {
+        // A fire that terminated and unregistered has nothing to cancel; it must not be
+        // counted, so the log line reports what was actually asked to stop.
+        assertEquals(0, DbSchedulerBootstrapJob.cancelInFlightRuns(Set.of(NEVER_REGISTERED)));
+    }
+
+    @Test
+    void shutdownCancelIsANoOpWhenNothingIsInFlight() {
+        assertEquals(0, DbSchedulerBootstrapJob.cancelInFlightRuns(Set.of()));
     }
 }
