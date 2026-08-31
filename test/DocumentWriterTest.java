@@ -1,6 +1,8 @@
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.STTblWidth;
 import play.test.UnitTest;
 import services.DocumentWriter;
 
@@ -103,6 +105,59 @@ class DocumentWriterTest extends UnitTest {
 
         assertTrue(Files.exists(target), "DOCX with table should exist");
         assertTrue(Files.size(target) > 0, "DOCX with table should not be empty");
+    }
+
+    /**
+     * JCLAW-1142: the width plumbing runs through the OOXML schema classes (CTTbl, CTRow,
+     * CTTc, STTblWidth) that ship in poi-ooxml-full. Tika 3.3.2 pulled that jar transitively
+     * and Tika 4.0.0 does not, so it is now declared directly — and an existence-and-size
+     * check on the file cannot tell a correct table from a structurally broken one.
+     */
+    @Test
+    void writeDocxTableCarriesGridAndCellWidths() throws IOException {
+        var markdown = """
+                | Name  | Value |
+                |-------|-------|
+                | Alpha | 1     |
+                | Beta  | 2     |
+                """;
+        var target = tempDir.resolve("table-widths.docx");
+        DocumentWriter.writeDocx(target, markdown);
+
+        // TABLE_TOTAL_WIDTH 9000 split across 2 columns.
+        int expectedColWidth = 4500;
+        try (var in = Files.newInputStream(target); var doc = new XWPFDocument(in)) {
+            var tables = doc.getTables();
+            assertEquals(1, tables.size(), "expected exactly one table");
+            var table = tables.get(0);
+
+            assertEquals(3, table.getRows().size(), "header row plus two body rows");
+
+            var grid = table.getCTTbl().getTblGrid();
+            assertEquals(2, grid.sizeOfGridColArray(), "one gridCol per column");
+            for (int i = 0; i < 2; i++) {
+                // getW() is an XmlBeans union type (ST_TwipsMeasure), so it comes back as
+                // Object; compare the lexical form rather than casting to a numeric type.
+                assertEquals(String.valueOf(expectedColWidth),
+                        String.valueOf(grid.getGridColArray(i).getW()), "gridCol " + i + " width");
+            }
+
+            String[][] expected = {{"Name", "Value"}, {"Alpha", "1"}, {"Beta", "2"}};
+            for (int r = 0; r < 3; r++) {
+                var row = table.getRow(r);
+                assertEquals(2, row.getTableCells().size(), "row " + r + " cell count");
+                for (int c = 0; c < 2; c++) {
+                    var cell = row.getCell(c);
+                    assertEquals(expected[r][c], cell.getText().trim(),
+                            "cell text at r" + r + "c" + c);
+                    var tcW = cell.getCTTc().getTcPr().getTcW();
+                    assertEquals(String.valueOf(expectedColWidth), String.valueOf(tcW.getW()),
+                            "cell width at r" + r + "c" + c);
+                    assertEquals(STTblWidth.DXA, tcW.getType(),
+                            "cell width type at r" + r + "c" + c);
+                }
+            }
+        }
     }
 
     // --- PDF ---

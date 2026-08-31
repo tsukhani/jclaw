@@ -5,14 +5,18 @@ import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.apache.tika.exception.TikaConfigException;
 import org.apache.tika.exception.TikaException;
+import org.apache.tika.io.TikaInputStream;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.ocr.TesseractOCRConfig;
+import org.apache.tika.parser.pdf.OcrConfig;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
 import org.xml.sax.SAXException;
+import play.Logger;
 import play.Play;
 import services.AgentService;
 import services.ConfigService;
@@ -22,7 +26,6 @@ import utils.JsonArgs;
 import utils.TikaHolder;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -421,7 +424,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
             var metadata = new Metadata();
             boolean ocrActive = ocrEnabled();
             boolean truncated = false;
-            try (InputStream in = Files.newInputStream(path)) {
+            try (var in = TikaInputStream.get(path)) {
                 parser.parse(in, handler, metadata, buildParseContext(ocrActive));
             } catch (SAXException e) {
                 if (!e.getClass().getSimpleName().contains("WriteLimitReached")) {
@@ -469,15 +472,18 @@ public class DocumentsTool implements ToolRegistry.Tool {
         var ocr = new TesseractOCRConfig();
         if (ocrActive) {
             ocr.setLanguage(stringOrDefault("ocr.tesseract.languages", "eng"));
-            ocr.setTimeoutSeconds(positiveIntOrDefault("ocr.tesseract.timeout", 60));
+            ocr.setTimeoutMillis(1000L * positiveIntOrDefault("ocr.tesseract.timeout", 60));
+            applyTesseractPath(ocr);
         }
         ocr.setSkipOcr(!ocrActive);
         ctx.set(TesseractOCRConfig.class, ocr);
 
-        var pdf = new PDFParserConfig();
-        pdf.setOcrStrategy(ocrActive
+        var pdfOcr = new OcrConfig();
+        pdfOcr.setStrategy(ocrActive
                 ? parsePdfStrategy(stringOrDefault("ocr.pdf.strategy", "auto"))
-                : PDFParserConfig.OCR_STRATEGY.NO_OCR);
+                : OcrConfig.Strategy.NO_OCR);
+        var pdf = new PDFParserConfig();
+        pdf.setOcr(pdfOcr);
         pdf.setExtractInlineImages(ocrActive);
         ctx.set(PDFParserConfig.class, pdf);
 
@@ -502,13 +508,30 @@ public class DocumentsTool implements ToolRegistry.Tool {
         }
     }
 
-    private static PDFParserConfig.OCR_STRATEGY parsePdfStrategy(String s) {
+    private static OcrConfig.Strategy parsePdfStrategy(String s) {
         return switch (s.toLowerCase(Locale.ROOT)) {
-            case "no_ocr" -> PDFParserConfig.OCR_STRATEGY.NO_OCR;
-            case "ocr_only" -> PDFParserConfig.OCR_STRATEGY.OCR_ONLY;
-            case "ocr_and_text_extraction" -> PDFParserConfig.OCR_STRATEGY.OCR_AND_TEXT_EXTRACTION;
-            default -> PDFParserConfig.OCR_STRATEGY.AUTO;
+            case "no_ocr" -> OcrConfig.Strategy.NO_OCR;
+            case "ocr_only" -> OcrConfig.Strategy.OCR_ONLY;
+            case "ocr_and_text_extraction" -> OcrConfig.Strategy.OCR_AND_TEXT_EXTRACTION;
+            default -> OcrConfig.Strategy.AUTO;
         };
+    }
+
+    /**
+     * JCLAW-1107: honor {@code ocr.tesseract.path} so OCR works when tesseract is installed
+     * somewhere other than PATH — the default on Windows, whose installer does not add itself.
+     * setTesseractPath normalizes the value and rejects a non-directory, so a typo degrades to
+     * a PATH lookup with a WARN rather than silently disabling OCR.
+     */
+    private static void applyTesseractPath(TesseractOCRConfig ocr) {
+        var dir = stringOrDefault(TikaHolder.OCR_PATH_KEY, "");
+        if (dir.isEmpty()) return;
+        try {
+            ocr.setTesseractPath(dir);
+        } catch (TikaConfigException e) {
+            Logger.warn("OCR: %s=%s could not be applied (%s); falling back to a PATH lookup",
+                    TikaHolder.OCR_PATH_KEY, dir, e.getMessage());
+        }
     }
 
     /**

@@ -325,13 +325,17 @@ dependencies {
         exclude(group = "org.slf4j", module = "slf4j-simple")
     }
 
+    // OOXML schema classes (STTblWidth, CTTbl, CTRow, CTTc) that DocumentWriter compiles
+    // against. Tika 3.3.2 pulled poi-ooxml-full transitively and Tika 4.0.0 does not; POI
+    // publishes -lite and -full under one capability, so nothing substitutes for it and the
+    // classes just vanish. Declared here because DocumentWriter needs them whatever Tika
+    // ships. Must stay on the same version as the poi/poi-ooxml that Tika resolves —
+    // xmlbeans-generated schemas and poi-ooxml are a matched pair (JCLAW-1142).
+    implementation("org.apache.poi:poi-ooxml-full:5.5.1")
+
     // Tika core — drop OSGi/bndlib (Ivy promoted provided→runtime) and the
     // test/lombok pulls.
     implementation("org.apache.tika:tika-core:4.0.0") {
-        exclude(group = "javax.mail")
-        exclude(group = "com.sun.mail")
-        exclude(group = "javax.activation")
-        exclude(group = "com.sun.activation")
         exclude(group = "org.apache.logging.log4j")
         exclude(group = "org.projectlombok")
         exclude(group = "org.assertj")
@@ -345,17 +349,10 @@ dependencies {
     implementation("org.apache.tika:tika-parsers-standard-package:4.0.0") {
         exclude(group = "org.apache.lucene")
         exclude(group = "org.ow2.asm")
-        exclude(group = "org.apache.cxf")
-        exclude(group = "org.apache.httpcomponents")
         exclude(group = "org.apache.logging.log4j")
         exclude(group = "org.bouncycastle")
         exclude(group = "org.slf4j")
         exclude(group = "com.healthmarketscience.jackcess")
-        exclude(group = "edu.ucar")
-        exclude(group = "javax.mail")
-        exclude(group = "com.sun.mail")
-        exclude(group = "javax.activation")
-        exclude(group = "com.sun.activation")
         exclude(group = "org.apache.tika", module = "tika-parser-mail-commons")
         exclude(group = "org.apache.tika", module = "tika-parser-mail-module")
         exclude(group = "org.projectlombok")
