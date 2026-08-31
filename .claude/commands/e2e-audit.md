@@ -12,7 +12,9 @@ The triage is the work. A raw pass/fail count is not the deliverable.
 ## Preconditions — check before running, and stop rather than reporting a false red
 
 1. **The app must be up.** `./jclaw.sh status`. If the backend is stopped, say so and stop — do NOT start it. A down instance fails `global-setup`'s login and every spec fails identically, which looks exactly like catastrophic drift.
-2. **Never run against an instance holding data that matters** unless the user has explicitly said this one is disposable. Only 2 of 17 specs have teardown; the rest create rows they do not remove, and `settings.uat.spec.ts` / `api-contract.uat.spec.ts` touch config and restart paths. Ask which instance this is if it is not obvious.
+2. **Know which instance you are pointed at, and say so.** The suite is safe against a live instance as of JCLAW-1140, but do not treat that as permanent — check rather than assume. Measured 2026-08-31: two specs create persistent rows (`agents`, `prompts`) and both delete them in `afterAll`; `skills-tools` flips one tool grant and restores it in a `finally`; every other spec either creates nothing or POSTs at a negative case. Verified after a full run — no leftover rows, no changed grant.
+
+   What to re-check before running against something you care about: whether a *new* spec creates data without cleanup, and whether anything now exercises the config or restart paths that `settings.uat.spec.ts` and `api-contract.uat.spec.ts` only read today. Confirm with the user if the target holds data that would be expensive to lose.
 3. **Use the wrapper.** `./jclaw.sh e2e` handles the three things that otherwise fail the suite before any spec runs: the credential from `certs/.env`, base-URL detection (`:3000` in dev, else `:9000`), and Playwright's per-version browser build. Do not invoke `playwright test` directly.
 
 ## Run
