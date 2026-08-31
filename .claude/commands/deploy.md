@@ -114,6 +114,12 @@ Reject anything else with a clear message; do not guess.
     > - origin (Bitbucket): `<old-sha>..a1b2c3d` + tag `v0.7.6`
     > - github: `<old-sha>..a1b2c3d` + tag `v0.7.6`
 
+19. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
+
+    > This release touched the frontend. To verify what shipped: `./jclaw.sh restart`, then `/e2e-audit`.
+
+    Only a reminder, deliberately. The e2e suite is **not** a release gate and must not become one: it needs a live instance, so at push time it would exercise whatever build is currently *running* — i.e. the one being replaced — and a stopped app would fail every spec and block the push on a false red. Everything in `./jclaw.sh test` is a pure function of the source tree; the e2e suite is a function of the tree *plus* deployed state, which makes it post-deploy verification rather than merge gating. Restarting first is what makes it meaningful. See JCLAW-1139.
+
 ---
 
 **Hard rules**
