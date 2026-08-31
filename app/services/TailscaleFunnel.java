@@ -98,6 +98,12 @@ public final class TailscaleFunnel {
     /** The node's public HTTPS base URL (e.g. {@code https://host.tailnet.ts.net}), or null. */
     public static String publicBaseUrl() { return publicBaseUrl(PROCESS_RUNNER); }
 
+    /** True once this JVM has started a funnel. Teardown consults this instead of the config
+     *  table so shutdown needs no database (JCLAW-1143), and it is also the question teardown
+     *  actually has: an operator who toggles the config off while a funnel is live would
+     *  otherwise leave it running with nothing to tear it down. */
+    private static volatile boolean funnelStartedHere = false;
+
     /** Start funnelling {@code localPort} to the public internet (idempotent). */
     public static boolean enable(int localPort) {
         boolean ok = enable(localPort, PROCESS_RUNNER);
@@ -111,6 +117,12 @@ public final class TailscaleFunnel {
         invalidateStatusCache();
         return ok;
     }
+
+    /** Visible for tests: the "this JVM started a funnel" latch that teardown reads. */
+    public static boolean funnelStartedHere() { return funnelStartedHere; }
+
+    /** Visible for tests: reset the latch. */
+    public static void resetFunnelStartedForTest() { funnelStartedHere = false; }
 
     /** Drop the cached status so the next {@link #status()} re-probes immediately,
      *  rather than serving a pre-toggle snapshot for up to the TTL. */
@@ -157,7 +169,7 @@ public final class TailscaleFunnel {
 
     /** Tear down the funnel on shutdown, but only if this instance enabled it. */
     public static void disableIfEnabled() {
-        if (isFunnelEnabled()) disable();
+        if (funnelStartedHere) disable();
     }
 
     // ===================== command builders (pure) =====================
@@ -287,6 +299,7 @@ public final class TailscaleFunnel {
             if (res.ok() && funnelServing(bin, runner)) {
                 EventLogger.info(CATEGORY, null, null, "Funnel enabled on local port " + localPort
                         + (attempt > 1 ? " (attempt " + attempt + ")" : ""));
+                funnelStartedHere = true;
                 return true;
             }
             lastError = res.ok()
@@ -320,6 +333,7 @@ public final class TailscaleFunnel {
         var res = runner.run(resetCmd(bin), EXEC_TIMEOUT);
         if (res.ok()) {
             EventLogger.info(CATEGORY, null, null, "Funnel reset");
+            funnelStartedHere = false;
             return true;
         }
         EventLogger.warn(CATEGORY, null, null, "Funnel reset failed: "

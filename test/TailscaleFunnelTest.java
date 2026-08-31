@@ -1,3 +1,4 @@
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.TailscaleFunnel;
@@ -12,6 +13,13 @@ import java.util.List;
  * binary (which need not be installed on CI / dev machines).
  */
 class TailscaleFunnelTest extends UnitTest {
+
+    // The latch is a process-global static; reset it so a prior method's successful
+    // enable() cannot leak into the next one.
+    @BeforeEach
+    void clearFunnelLatch() {
+        TailscaleFunnel.resetFunnelStartedForTest();
+    }
 
     /** Scriptable response for a captured command. */
     interface Responder {
@@ -184,5 +192,45 @@ class TailscaleFunnelTest extends UnitTest {
         var st = TailscaleFunnel.reconcile();
         assertFalse(st.available());
         assertNotNull(st.error());
+    }
+
+    // ---- JCLAW-1143: teardown must not depend on the database ----
+
+    /**
+     * disableIfEnabled() used to answer "should I tear down?" by reading
+     * tailscale.funnel.enabled out of the config table, which put a DB read on the
+     * shutdown path. It now reads a latch set when this JVM actually started a funnel.
+     * These cover the latch itself; they do not prove the absence of a config read,
+     * which would need a seam on ConfigService.
+     */
+    @Test
+    void funnelLatchStartsClearSoShutdownDoesNothingByDefault() {
+        assertFalse(TailscaleFunnel.funnelStartedHere());
+        TailscaleFunnel.disableIfEnabled();
+        assertFalse(TailscaleFunnel.funnelStartedHere(),
+                "a JVM that never enabled a funnel must stay latched off");
+    }
+
+    @Test
+    void successfulEnableSetsTheLatchAndSuccessfulDisableClearsIt() {
+        var fake = new FakeRunner(cmd -> {
+            if (cmd.contains("which")) return ok("/usr/bin/tailscale");
+            if (cmd.contains("status")) return ok("https://host.tailnet.ts.net (Funnel on)\n|-- / proxy http://127.0.0.1:9000");
+            return ok("");
+        });
+        assertTrue(TailscaleFunnel.enable(9000, fake, 1, 0));
+        assertTrue(TailscaleFunnel.funnelStartedHere(), "enable must latch on");
+
+        assertTrue(TailscaleFunnel.disable(fake));
+        assertFalse(TailscaleFunnel.funnelStartedHere(), "disable must latch off");
+    }
+
+    @Test
+    void failedEnableLeavesTheLatchClear() {
+        var fake = new FakeRunner(cmd ->
+                cmd.contains("which") ? ok("/usr/bin/tailscale") : failed("Funnel not available"));
+        assertFalse(TailscaleFunnel.enable(9000, fake, 1, 0));
+        assertFalse(TailscaleFunnel.funnelStartedHere(),
+                "a failed enable must not make shutdown try to tear anything down");
     }
 }

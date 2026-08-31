@@ -34,10 +34,21 @@ import java.util.concurrent.TimeUnit;
  * {@code max(component)} rather than {@code sum(component)}, well inside
  * Play's 30-second scheduler-shutdown budget.
  *
- * <p>Components are independent — they don't share state — so order
- * doesn't matter and concurrency is safe. Any individual component
- * failure is logged but doesn't block the others; the JVM exits
- * whatever the outcome.
+ * <p>JCLAW-1143: the fan-out is safe because no component depends on another's
+ * teardown, not because nothing shared is in play. Play stops plugins in reverse
+ * registration order and runs {@code @OnApplicationStop} jobs synchronously, so
+ * JobsPlugin (700) completes this method before JPAPlugin (400) and DBPlugin (300)
+ * close — the datasource is open throughout. Teardown still avoids the database:
+ * a component that needs a connection has no useful recovery when it cannot get
+ * one, and the one observed failure here was a shutdown-time config read.
+ *
+ * <p>The dependency that does bite lives inside a component rather than between
+ * them. db-scheduler's stop interrupts its own executor threads, and a JDK NIO
+ * interrupt closes H2's FileChannel for every caller, so its in-flight task
+ * executions can surface as MVStoreException reads at length -1.
+ *
+ * <p>Any individual component failure is logged but doesn't block the others;
+ * the JVM exits whatever the outcome.
  */
 @OnApplicationStop
 public class ShutdownJob extends Job<Void> {
@@ -52,10 +63,32 @@ public class ShutdownJob extends Job<Void> {
     /** EventLogger category for all messages emitted from this shutdown hook. */
     private static final String CATEGORY = "shutdown";
 
+    /** Cap on the rendered cause chain, so one wedged component cannot flood the log. */
+    private static final int MAX_CAUSE_CHARS = 500;
+
     /** Named subsystem-stop. The name drives the per-component progress
      *  logging so operators can see what is stopping and when (and which
      *  one is wedged if the overall timeout fires). */
     private record Component(String name, Runnable action) {}
+
+    /**
+     * Render the whole cause chain. A shutdown failure often carries a null or empty
+     * message at the top — {@code getMessage()} alone reported "JDBC begin transaction
+     * failed: " with nothing after it, which is not enough to diagnose from (JCLAW-1143).
+     * Stacks stay out of the shutdown log to keep it readable.
+     */
+    private static String describe(Throwable t) {
+        var sb = new StringBuilder();
+        for (Throwable c = t; c != null && sb.length() < MAX_CAUSE_CHARS; c = c.getCause()) {
+            if (!sb.isEmpty()) sb.append(" <- ");
+            sb.append(c.getClass().getSimpleName());
+            if (c.getMessage() != null && !c.getMessage().isBlank()) {
+                sb.append(": ").append(c.getMessage());
+            }
+            if (c.getCause() == c) break;
+        }
+        return sb.toString();
+    }
 
     @Override
     public void doJob() {
@@ -102,7 +135,7 @@ public class ShutdownJob extends Job<Void> {
                     // Top-level guard for shutdown VT — one component's failure must never break the latch
                     EventLogger.warn(CATEGORY,
                             "%s FAILED after %dms: %s".formatted(
-                                    component.name(), System.currentTimeMillis() - t0, t.getMessage()));
+                                    component.name(), System.currentTimeMillis() - t0, describe(t)));
                 } finally {
                     latch.countDown();
                 }
