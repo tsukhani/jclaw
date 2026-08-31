@@ -70,14 +70,19 @@ test.describe('UAT-10 capability surface', () => {
     const tool = tools[0]!
     const original = tool.enabled
 
-    const flip = await request.put(`/api/agents/${target!.id}/tools/${tool.name}`, { data: { enabled: !original } })
-    expect(flip.ok(), await flip.text()).toBeTruthy()
+    try {
+      const flip = await request.put(`/api/agents/${target!.id}/tools/${tool.name}`, { data: { enabled: !original } })
+      expect(flip.ok(), await flip.text()).toBeTruthy()
 
-    const after = await (await request.get(`/api/agents/${target!.id}/tools`)).json() as Array<{ name: string, enabled: boolean }>
-    expect(after.find(t => t.name === tool.name)?.enabled).toBe(!original)
-
-    // Restore the operator's configuration.
-    await request.put(`/api/agents/${target!.id}/tools/${tool.name}`, { data: { enabled: original } })
+      const after = await (await request.get(`/api/agents/${target!.id}/tools`)).json() as Array<{ name: string, enabled: boolean }>
+      expect(after.find(t => t.name === tool.name)?.enabled).toBe(!original)
+    }
+    finally {
+      // Restore in `finally`, not after the assertion: a failed expect aborts the test, and
+      // this suite runs against a live instance — the leftover would be a real tool silently
+      // granted or revoked on the operator's agent, not fixture data (JCLAW-1140).
+      await request.put(`/api/agents/${target!.id}/tools/${tool.name}`, { data: { enabled: original } })
+    }
     const restored = await (await request.get(`/api/agents/${target!.id}/tools`)).json() as Array<{ name: string, enabled: boolean }>
     expect(restored.find(t => t.name === tool.name)?.enabled).toBe(original)
   })
