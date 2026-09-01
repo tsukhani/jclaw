@@ -14,6 +14,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 /**
  * Seeds a crawl's frontier from the host's sitemaps (JCLAW-1092).
@@ -65,7 +66,7 @@ public final class SitemapSeeder {
      */
     public static List<URI> seedsFor(URI seed, OkHttpClient client,
                                      RobotsCache.Identity identity,
-                                     java.util.function.Predicate<URI> acceptable) {
+                                     Predicate<URI> acceptable) {
         List<String> sitemaps;
         try {
             sitemaps = RobotsCache.sitemapsFor(seed, client, identity);
@@ -97,7 +98,7 @@ public final class SitemapSeeder {
     private static int collect(SiteMapParser parser, String sitemapUrl,
                                OkHttpClient client, RobotsCache.Identity identity,
                                List<URI> out, int maxUrls, int documentsLeft,
-                               java.util.function.Predicate<URI> acceptable) {
+                               Predicate<URI> acceptable) {
         if (documentsLeft <= 0) return 0;
         AbstractSiteMap parsed;
         try {
@@ -150,7 +151,7 @@ public final class SitemapSeeder {
      * about six usable ones and a crawl that should have returned 25 pages returned 6.
      */
     private static void parse(String candidate, List<URI> out,
-                              java.util.function.Predicate<URI> acceptable) {
+                              Predicate<URI> acceptable) {
         try {
             var uri = URI.create(candidate);
             if (uri.getHost() != null && acceptable.test(uri)) out.add(uri);

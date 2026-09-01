@@ -19,6 +19,7 @@ import services.UploadStaging;
 import utils.ApiResponses;
 import utils.GsonHolder;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -243,7 +244,7 @@ public class ApiAppInvokeController extends Controller {
             if (m.has(LIMIT_FIELD) && !m.get(LIMIT_FIELD).isJsonNull()) {
                 return m.get(LIMIT_FIELD).getAsInt();
             }
-        } catch (RuntimeException | java.io.IOException _) {
+        } catch (RuntimeException | IOException _) {
             return null; // malformed manifest / non-numeric limit → fall back to the default
         }
         return null;

@@ -8,7 +8,9 @@ import javax.jmdns.ServiceInfo;
 import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
+import java.net.Socket;
 import java.net.SocketException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -209,8 +211,8 @@ public final class PrinterDiscovery {
         if (host == null || host.isBlank() || port <= 0) {
             return false;
         }
-        try (var socket = new java.net.Socket()) {
-            socket.connect(new java.net.InetSocketAddress(host, port), REACHABILITY_TIMEOUT_MS);
+        try (var socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), REACHABILITY_TIMEOUT_MS);
             return true;
         } catch (IOException | IllegalArgumentException | SecurityException _) {
             return false;

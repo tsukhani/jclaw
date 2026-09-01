@@ -3,6 +3,7 @@ package services.scrape;
 import utils.WebExtraction;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 /**
  * What one fetch attempt produced, as the classifier needs to see it (JCLAW-1086).
@@ -26,7 +27,7 @@ public record ScrapeObservation(String url, String contentType, String rawBody,
         var body = new String(fetched.body(), 0,
                 Math.min(fetched.body().length, SCAN_LIMIT), StandardCharsets.UTF_8);
         return new ScrapeObservation(fetched.finalUrl(), fetched.contentType(),
-                body.toLowerCase(java.util.Locale.ROOT), text == null ? "" : text, null);
+                body.toLowerCase(Locale.ROOT), text == null ? "" : text, null);
     }
 
     public static ScrapeObservation failed(String url, String error) {

@@ -13,7 +13,9 @@ import play.Play;
 import play.db.jpa.JPA;
 import play.libs.Crypto;
 import play.libs.F;
+import play.libs.Time;
 import play.mvc.CookieDataCodec;
+import play.mvc.Scope;
 import services.search.LuceneIndexer;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -1071,9 +1073,9 @@ public final class LoadTestRunner {
         // "authenticated" never survives and every request 401s with nothing logged
         // server-side (a 401 never reaches a handler). Scope.Session.TS_KEY is
         // package-private, hence the literal.
-        if (play.mvc.Scope.COOKIE_EXPIRE != null) {
+        if (Scope.COOKIE_EXPIRE != null) {
             long expiry = System.currentTimeMillis()
-                    + play.libs.Time.parseDuration(play.mvc.Scope.COOKIE_EXPIRE) * 1000L;
+                    + Time.parseDuration(Scope.COOKIE_EXPIRE) * 1000L;
             data.put("___TS", Long.toString(expiry));
         }
         // JCLAW-1034 rejects a cookie whose credential generation does not match the current

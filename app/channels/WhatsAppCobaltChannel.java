@@ -4,7 +4,9 @@ import it.auties.whatsapp.api.Whatsapp;
 import it.auties.whatsapp.model.contact.ContactStatus;
 import it.auties.whatsapp.model.info.ChatMessageInfo;
 import it.auties.whatsapp.model.jid.Jid;
+import it.auties.whatsapp.model.message.standard.DocumentMessage;
 import it.auties.whatsapp.model.message.standard.DocumentMessageSimpleBuilder;
+import it.auties.whatsapp.model.message.standard.ImageMessage;
 import it.auties.whatsapp.model.message.standard.ImageMessageSimpleBuilder;
 import models.WhatsAppBinding;
 import services.EventLogger;
@@ -137,7 +139,7 @@ public final class WhatsAppCobaltChannel implements Channel {
      * the class would fail to link, and we degrade to a logged null (→
      * {@link SendResult#FAILED}) rather than let an {@link Error} escape the send.
      */
-    private static it.auties.whatsapp.model.message.standard.ImageMessage buildImage(
+    private static ImageMessage buildImage(
             byte[] bytes, String mime, String caption) {
         try {
             return new ImageMessageSimpleBuilder()
@@ -150,7 +152,7 @@ public final class WhatsAppCobaltChannel implements Channel {
 
     /** Build an outbound document message; same shim-backed media path + defensive
      *  linkage guard as {@link #buildImage}. */
-    private static it.auties.whatsapp.model.message.standard.DocumentMessage buildDocument(
+    private static DocumentMessage buildDocument(
             byte[] bytes, String fileName, String mime, String title) {
         try {
             return new DocumentMessageSimpleBuilder()

@@ -2,6 +2,9 @@ package services;
 
 import play.Play;
 
+import java.nio.file.Paths;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * One-shot health check for the {@code tesseract} binary that Apache Tika
  * shells out to for OCR. Apache Tika's TesseractOCRParser fires opportunistically
@@ -41,12 +44,12 @@ public class OcrHealthProbe {
     public static String tesseractCommand(String osName, String configuredDir) {
         var prog = osName != null && osName.startsWith("Windows") ? "tesseract.exe" : "tesseract";
         if (configuredDir == null || configuredDir.isBlank()) return prog;
-        return java.nio.file.Paths.get(configuredDir.trim()).resolve(prog).toString();
+        return Paths.get(configuredDir.trim()).resolve(prog).toString();
     }
 
     /** Set while a test has forced a result, so {@link #refresh} serves it instead of forking. */
-    private static final java.util.concurrent.atomic.AtomicBoolean PINNED_FOR_TEST =
-            new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static final AtomicBoolean PINNED_FOR_TEST =
+            new AtomicBoolean(false);
 
     private static final ProbeCache<ProbeResult> CACHE = new ProbeCache<>(
             new ProbeResult(false, null, "tesseract probe has not run yet"));

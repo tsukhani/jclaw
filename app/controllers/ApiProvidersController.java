@@ -17,6 +17,7 @@ import memory.JpaMemoryStore;
 import memory.MemoryVectorSettings;
 import play.mvc.Controller;
 import play.mvc.With;
+import play.mvc.results.Result;
 import services.ConfigService;
 import services.LoadTestRunner;
 import services.LocalProviderProbeSupport;
@@ -32,6 +33,7 @@ import utils.Strings;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static utils.GsonHolder.GSON;
@@ -377,7 +379,7 @@ public class ApiProvidersController extends Controller {
                                 .formatted(vector.length, max))));
             }
             renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, true, vector.length, null)));
-        } catch (play.mvc.results.Result r) {
+        } catch (Result r) {
             throw r;   // renderJSON above signals success by throwing — never swallow it
         } catch (Exception e) {
             // The provider's own message is the useful one: a chat-only model reports as
@@ -404,8 +406,8 @@ public class ApiProvidersController extends Controller {
      */
     private static boolean substituted(String requested, String served) {
         if (served == null || served.isBlank()) return false;
-        var a = requested.trim().toLowerCase(java.util.Locale.ROOT);
-        var b = served.trim().toLowerCase(java.util.Locale.ROOT);
+        var a = requested.trim().toLowerCase(Locale.ROOT);
+        var b = served.trim().toLowerCase(Locale.ROOT);
         return !a.contains(b) && !b.contains(a);
     }
 

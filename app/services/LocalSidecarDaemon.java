@@ -6,6 +6,9 @@ import play.Logger;
 import play.Play;
 import utils.HttpFactories;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -15,6 +18,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -191,13 +195,13 @@ public final class LocalSidecarDaemon {
      */
     private String authTokenFor() {
         try {
-            var mac = javax.crypto.Mac.getInstance("HmacSHA256");
-            mac.init(new javax.crypto.spec.SecretKeySpec(
+            var mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(
                     Play.secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return Base64.getUrlEncoder().withoutPadding()
                     .encodeToString(mac.doFinal(
                             ("sidecar:" + cfg.displayName()).getBytes(StandardCharsets.UTF_8)));
-        } catch (java.security.GeneralSecurityException e) {
+        } catch (GeneralSecurityException e) {
             throw new IllegalStateException("cannot derive the sidecar auth token", e);
         }
     }

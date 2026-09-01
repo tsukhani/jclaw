@@ -3,8 +3,11 @@ package services.printing;
 import services.EventLogger;
 import utils.HttpKeys;
 
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
 
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
@@ -202,7 +205,7 @@ public final class PrintFormatNegotiator {
     }
 
     /** Encode one page as JPEG at {@link #JPEG_QUALITY}. */
-    static byte[] toJpeg(java.awt.image.BufferedImage page) throws IOException {
+    static byte[] toJpeg(BufferedImage page) throws IOException {
         var writers = ImageIO.getImageWritersByFormatName("jpeg");
         if (!writers.hasNext()) {
             throw new IOException("No JPEG encoder available in this JVM");
@@ -213,10 +216,10 @@ public final class PrintFormatNegotiator {
             writer.setOutput(stream);
             var params = writer.getDefaultWriteParam();
             if (params.canWriteCompressed()) {
-                params.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+                params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
                 params.setCompressionQuality(JPEG_QUALITY);
             }
-            writer.write(null, new javax.imageio.IIOImage(page, null, null), params);
+            writer.write(null, new IIOImage(page, null, null), params);
         } finally {
             writer.dispose();
         }

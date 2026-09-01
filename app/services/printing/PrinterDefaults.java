@@ -2,6 +2,7 @@ package services.printing;
 
 import services.ConfigService;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -109,7 +110,7 @@ public final class PrinterDefaults {
 
     /** Every saved {@code printer.default.option.*} row. */
     private static Map<String, String> loadOptions() {
-        var options = new java.util.LinkedHashMap<String, String>();
+        var options = new LinkedHashMap<String, String>();
         for (var row : ConfigService.listAll()) {
             if (row.key != null && row.key.startsWith(KEY_OPTION_PREFIX)) {
                 var value = blankToNull(row.value);

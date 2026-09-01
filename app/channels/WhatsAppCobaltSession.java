@@ -2,6 +2,7 @@ package channels;
 
 import it.auties.whatsapp.api.DisconnectReason;
 import it.auties.whatsapp.api.QrHandler;
+import it.auties.whatsapp.api.WebOptionsBuilder;
 import it.auties.whatsapp.api.Whatsapp;
 import it.auties.whatsapp.controller.ControllerSerializer;
 import it.auties.whatsapp.model.info.ChatMessageInfo;
@@ -194,7 +195,7 @@ public final class WhatsAppCobaltSession {
      *  serializer + a stable session UUID. {@code webBuilder().newConnection(uuid)}
      *  yields a {@link it.auties.whatsapp.api.WebOptionsBuilder} the caller turns
      *  into a paired/unpaired {@link Whatsapp}. */
-    private it.auties.whatsapp.api.WebOptionsBuilder builder(WhatsAppBinding binding) {
+    private WebOptionsBuilder builder(WhatsAppBinding binding) {
         var serializer = ControllerSerializer.toProtobuf(sessionDir());
         return Whatsapp.webBuilder()
                 .serializer(serializer)

@@ -10,6 +10,7 @@ import services.Tx;
 import utils.ApiResponses;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static utils.GsonHolder.GSON;
@@ -109,7 +110,7 @@ public class ApiToolApprovalsController extends Controller {
     public static void summary() {
         requireOperator();
         var view = Tx.run(() -> {
-            var byAgent = new java.util.LinkedHashMap<Long, AgentGrantsView>();
+            var byAgent = new LinkedHashMap<Long, AgentGrantsView>();
             var total = 0;
             for (var g : ToolApprovalGrant.findAllGrants()) {
                 total++;

@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.Play;
 import play.mvc.Controller;
+import play.mvc.Util;
 import services.BreachedPasswordChecker;
 import services.ConfigService;
 import services.EventLogger;
@@ -16,6 +17,7 @@ import utils.PlayConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Map;
 
 import static utils.GsonHolder.GSON;
 
@@ -70,8 +72,8 @@ public class ApiAuthController extends Controller {
      * HTTP 302 redirect instead of running the method — which surfaces as the load test
      * failing with "HTTP 302" and no other clue.
      */
-    @play.mvc.Util
-    public static void stampCredentialVersion(java.util.Map<String, String> sessionData) {
+    @Util
+    public static void stampCredentialVersion(Map<String, String> sessionData) {
         sessionData.put(SESSION_CREDENTIAL_VERSION, credentialVersion());
     }
 

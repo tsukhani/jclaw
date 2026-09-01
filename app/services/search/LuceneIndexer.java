@@ -7,6 +7,7 @@ import org.apache.lucene.analysis.en.EnglishPossessiveFilter;
 import org.apache.lucene.analysis.en.KStemFilter;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.analysis.standard.StandardTokenizer;
+import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.KnnFloatVectorField;
@@ -602,7 +603,7 @@ public final class LuceneIndexer {
      * from every recall path with nothing surfaced to the operator.
      */
     public static int maxVectorDimensions() {
-        return org.apache.lucene.codecs.KnnVectorsFormat.DEFAULT_MAX_DIMENSIONS;
+        return KnnVectorsFormat.DEFAULT_MAX_DIMENSIONS;
     }
 
     /** Whether the indexes have been opened. */

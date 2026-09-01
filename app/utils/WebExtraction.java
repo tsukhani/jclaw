@@ -1,6 +1,9 @@
 package utils;
 
+import com.vladsch.flexmark.ast.Link;
 import com.vladsch.flexmark.html2md.converter.FlexmarkHtmlConverter;
+import com.vladsch.flexmark.parser.Parser;
+import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
 import net.dankito.readability4j.Readability4J;
 import okhttp3.MediaType;
@@ -80,8 +83,8 @@ public final class WebExtraction {
 
     /** Shared and stateless, like {@link #HTML_TO_MARKDOWN} — flexmark parsers are
      *  documented as thread-safe once built. */
-    private static final com.vladsch.flexmark.parser.Parser MARKDOWN_PARSER =
-            com.vladsch.flexmark.parser.Parser.builder().build();
+    private static final Parser MARKDOWN_PARSER =
+            Parser.builder().build();
 
     /** Shared and configured once (never mutated per-call) so {@code parseToString}
      *  stays thread-safe under the parallel tool dispatch. Reuses TikaHolder's instance
@@ -538,10 +541,10 @@ public final class WebExtraction {
         return List.copyOf(out);
     }
 
-    private static void collectMarkdownLinks(com.vladsch.flexmark.util.ast.Node node,
+    private static void collectMarkdownLinks(Node node,
                                              URI base, LinkedHashSet<URI> out) {
         for (var child = node.getFirstChild(); child != null; child = child.getNext()) {
-            if (child instanceof com.vladsch.flexmark.ast.Link link) {
+            if (child instanceof Link link) {
                 try {
                     var resolved = base.resolve(link.getUrl().toString());
                     var scheme = resolved.getScheme();

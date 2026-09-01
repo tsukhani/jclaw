@@ -3,6 +3,7 @@ package controllers;
 import com.google.gson.JsonObject;
 import memory.MemoryAutoCapture;
 import models.Agent;
+import play.db.jpa.NoTransaction;
 import play.mvc.Before;
 import play.mvc.Controller;
 import services.Tx;
@@ -143,7 +144,7 @@ public class ApiEvalsController extends Controller {
      * committed yet. The cost is that the counts below need their own transaction — a bare
      * finder on a {@code @NoTransaction} path throws "No active EntityManager".
      */
-    @play.db.jpa.NoTransaction
+    @NoTransaction
     public static void memoryIngest() {
         var body = JsonBodyReader.readJsonBody();
         var agentName = JsonBodyReader.requiredOr400(body, "agent");

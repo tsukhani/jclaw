@@ -26,6 +26,7 @@ import utils.ApiResponses;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -93,7 +94,7 @@ public class ApiTtsController extends Controller {
         engines.add(sidecarEntry());
         engines.add(jvmEntry());
         var refPath = TtsReferenceVoice.activePath(TtsEngine.SIDECAR);
-        var refName = refPath == null ? null : java.nio.file.Path.of(refPath).getFileName().toString();
+        var refName = refPath == null ? null : Path.of(refPath).getFileName().toString();
         renderJSON(gson.toJson(new TtsStateResponse(TtsRouter.currentEngine().id(), engines, refName)));
     }
 

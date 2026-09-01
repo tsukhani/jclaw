@@ -2,6 +2,7 @@ package memory;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
@@ -1015,7 +1016,7 @@ public final class MemoryAutoCapture {
      * omitted it (JCLAW-529). Absent is the pre-529 behavior, not an error — the row
      * simply embeds its statement alone.
      */
-    private static String parseQuestions(com.google.gson.JsonObject o) {
+    private static String parseQuestions(JsonObject o) {
         if (!o.has(KEY_QUESTIONS) || !o.get(KEY_QUESTIONS).isJsonArray()) return null;
         var joined = new StringBuilder();
         for (var q : o.getAsJsonArray(KEY_QUESTIONS)) {

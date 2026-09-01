@@ -19,6 +19,7 @@ import models.Agent;
 import models.Memory;
 import play.mvc.Controller;
 import play.mvc.With;
+import play.mvc.results.Result;
 import services.ConfigService;
 import services.EventLogger;
 import services.MemoryService;
@@ -33,6 +34,7 @@ import utils.JpqlFilter;
 import utils.JsonArgs;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -346,10 +348,10 @@ public class ApiMemoryController extends Controller {
         try {
             MemoryEvalPaths.ensureLocalDir();
             var file = MemoryEvalPaths.suiteFile(suiteId);
-            java.nio.file.Files.writeString(file, gson.toJson(suite));
+            Files.writeString(file, gson.toJson(suite));
             renderJSON(gson.toJson(new EvalGenerateView(suite.id(), suite.fingerprint(),
                     suite.cases().size(), MemoryEvalPaths.LOCAL_DIR + "/" + suiteId + ".json")));
-        } catch (play.mvc.results.Result r) {
+        } catch (Result r) {
             throw r;
         } catch (IllegalArgumentException e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
@@ -379,7 +381,7 @@ public class ApiMemoryController extends Controller {
         MemoryEvalSuite suite;
         try {
             suite = gson.fromJson(
-                    java.nio.file.Files.readString(MemoryEvalPaths.suiteFile(suiteId)), MemoryEvalSuite.class);
+                    Files.readString(MemoryEvalPaths.suiteFile(suiteId)), MemoryEvalSuite.class);
         } catch (IllegalArgumentException e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
             throw ApiResponses.unreachable();

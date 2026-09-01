@@ -34,6 +34,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * JPA-backed memory store. Text search runs on the direct Lucene index for H2
@@ -367,7 +368,7 @@ public class JpaMemoryStore implements MemoryStore {
         if (pk == null) return List.of();
         List<Memory> rows = Tx.run(() -> Memory.find(
                 "agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL", pk, ids).fetch());
-        var alive = rows.stream().map(m -> m.id).collect(java.util.stream.Collectors.toSet());
+        var alive = rows.stream().map(m -> m.id).collect(Collectors.toSet());
         return ids.stream().filter(alive::contains).toList();
     }
 

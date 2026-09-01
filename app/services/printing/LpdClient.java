@@ -3,9 +3,11 @@ package services.printing;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 /**
  * RFC 1179 Line Printer Daemon client — the last-resort print backend (JCLAW-911).
@@ -71,8 +73,8 @@ public final class LpdClient {
         // Three digits, per the RFC's cfA<nnn> convention. Derived from the document
         // rather than a counter so the id is stable for a given job and carries no
         // cross-job state; collisions are harmless (the daemon scopes by host).
-        var jobId = String.format("%03d", Math.floorMod(java.util.Arrays.hashCode(document), 1000));
-        var localHost = safeToken(java.net.InetAddress.getLocalHost().getHostName());
+        var jobId = String.format("%03d", Math.floorMod(Arrays.hashCode(document), 1000));
+        var localHost = safeToken(InetAddress.getLocalHost().getHostName());
         var controlName = "cfA" + jobId + localHost;
         var dataName = "dfA" + jobId + localHost;
 

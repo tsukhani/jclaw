@@ -1,5 +1,6 @@
 package services;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
 import play.Play;
@@ -363,7 +364,7 @@ public final class UpgradeService {
         }
     }
 
-    private static String str(com.google.gson.JsonObject json, String key) {
+    private static String str(JsonObject json, String key) {
         return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : null;
     }
 

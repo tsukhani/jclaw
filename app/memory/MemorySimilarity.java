@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Near-duplicate detection for capture-time dedup (JCLAW-922). Deterministic and
@@ -51,7 +52,7 @@ public final class MemorySimilarity {
      */
     private static final Set<String> BOILERPLATE_NORMALIZED = BOILERPLATE.stream()
             .flatMap(w -> analyze(w).stream())
-            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            .collect(Collectors.toUnmodifiableSet());
 
     /** Both token views of one text, from a single analysis pass. */
     public record Tokens(Set<String> raw, Set<String> content) {

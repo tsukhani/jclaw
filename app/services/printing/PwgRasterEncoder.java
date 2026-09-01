@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -203,7 +204,7 @@ public final class PwgRasterEncoder {
 
         for (int y = 0; y < height; y++) {
             readLine(page, y, width, line, colors);
-            if (haveePrevious && java.util.Arrays.equals(line, previous) && repeats < 255) {
+            if (haveePrevious && Arrays.equals(line, previous) && repeats < 255) {
                 // Same as the line before: bump the repeat count rather than
                 // re-encoding it. The count is one byte, so runs cap at 256 lines.
                 repeats++;

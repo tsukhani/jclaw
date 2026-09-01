@@ -1,9 +1,15 @@
 package services.printing;
 
+import com.hp.jipp.encoding.Attribute;
 import com.hp.jipp.encoding.AttributeGroup;
+import com.hp.jipp.encoding.EnumType;
+import com.hp.jipp.encoding.IntRangeType;
+import com.hp.jipp.encoding.IntType;
 import com.hp.jipp.encoding.IppInputStream;
 import com.hp.jipp.encoding.IppPacket;
+import com.hp.jipp.encoding.KeywordType;
 import com.hp.jipp.encoding.Tag;
+import com.hp.jipp.encoding.UntypedEnum;
 import com.hp.jipp.model.Operation;
 import com.hp.jipp.model.Types;
 import okhttp3.MediaType;
@@ -15,7 +21,15 @@ import utils.HttpFactories;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * IPP print backend (JCLAW-911) — the primary one, and the only one that can
@@ -65,7 +79,7 @@ public final class IppClient {
     public static PrintResult print(String printerUri, String jobName, String user,
                                     String documentFormat, byte[] document,
                                     JobAttributes job) throws IOException {
-        return print(printerUri, jobName, user, documentFormat, document, job, java.util.Map.of());
+        return print(printerUri, jobName, user, documentFormat, document, job, Map.of());
     }
 
     /**
@@ -78,8 +92,8 @@ public final class IppClient {
     public static PrintResult print(String printerUri, String jobName, String user,
                                     String documentFormat, byte[] document,
                                     JobAttributes job,
-                                    java.util.Map<String, String> options) throws IOException {
-        var operation = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
+                                    Map<String, String> options) throws IOException {
+        var operation = new ArrayList<Attribute<?>>();
         operation.add(Types.attributesCharset.of(CHARSET));
         operation.add(Types.attributesNaturalLanguage.of("en"));
         operation.add(Types.printerUri.of(URI.create(printerUri)));
@@ -93,14 +107,14 @@ public final class IppClient {
         // operation attributes. RFC 8011 §4.2 separates "how to address this
         // request" from "how to print this job", and a printer that finds `sides`
         // in the operation group is entitled to reject the whole request.
-        var groups = new java.util.ArrayList<AttributeGroup>();
+        var groups = new ArrayList<AttributeGroup>();
         groups.add(AttributeGroup.groupOf(Tag.operationAttributes, operation));
 
         // Every option the operator chose, by IPP attribute name. Built generically
         // rather than from a fixed list of three: the options came from the
         // printer, so anything it announced must be sendable — otherwise choosing
         // a tray in Settings changes nothing, which is worse than not offering it.
-        var template = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
+        var template = new ArrayList<Attribute<?>>();
         for (var option : effectiveOptions(job, options).entrySet()) {
             template.add(toJobAttribute(option.getKey(), option.getValue()));
         }
@@ -129,10 +143,10 @@ public final class IppClient {
      * layered on top — those match the rendered raster and must win over a stale
      * saved value.
      */
-    private static java.util.Map<String, String> effectiveOptions(
-            JobAttributes job, java.util.Map<String, String> options) {
-        var merged = new java.util.LinkedHashMap<String, String>(
-                options == null ? java.util.Map.of() : options);
+    private static Map<String, String> effectiveOptions(
+            JobAttributes job, Map<String, String> options) {
+        var merged = new LinkedHashMap<String, String>(
+                options == null ? Map.of() : options);
         if (job != null) {
             if (job.sides() != null) merged.put("sides", job.sides());
             if (job.colorMode() != null) merged.put("print-color-mode", job.colorMode());
@@ -156,7 +170,7 @@ public final class IppClient {
      * {@code (1setOf enum)} for these and {@code (1setOf keyword)} or
      * {@code rangeOfInteger} for the rest.
      */
-    private static final java.util.Set<String> ENUM_ATTRIBUTES = java.util.Set.of(
+    private static final Set<String> ENUM_ATTRIBUTES = Set.of(
             "print-quality", "orientation-requested", "finishings", "printer-resolution");
 
     /**
@@ -166,16 +180,16 @@ public final class IppClient {
      * Getting the tag wrong does not fail loudly — the printer accepts the job and
      * ignores the attribute, which is exactly how a setting appears to do nothing.
      */
-    private static com.hp.jipp.encoding.Attribute<?> toJobAttribute(String name, String value) {
+    private static Attribute<?> toJobAttribute(String name, String value) {
         var numeric = value.matches("\\d+");
         if (numeric && ENUM_ATTRIBUTES.contains(name)) {
-            return new com.hp.jipp.encoding.EnumType<>(name, com.hp.jipp.encoding.UntypedEnum::new)
-                    .of(new com.hp.jipp.encoding.UntypedEnum(Integer.parseInt(value)));
+            return new EnumType<>(name, UntypedEnum::new)
+                    .of(new UntypedEnum(Integer.parseInt(value)));
         }
         if (numeric) {
-            return new com.hp.jipp.encoding.IntType(name).of(Integer.parseInt(value));
+            return new IntType(name).of(Integer.parseInt(value));
         }
-        return new com.hp.jipp.encoding.KeywordType(name).of(value);
+        return new KeywordType(name).of(value);
     }
 
     /**
@@ -187,7 +201,7 @@ public final class IppClient {
      * IPP attribute is the one the Print-Job operation is actually validated
      * against. Empty when the printer will not say.
      */
-    public static java.util.Set<String> supportedFormats(String printerUri) throws IOException {
+    public static Set<String> supportedFormats(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
                 AttributeGroup.groupOf(Tag.operationAttributes,
                         Types.attributesCharset.of(CHARSET),
@@ -196,10 +210,10 @@ public final class IppClient {
         var response = exchange(printerUri, packet, null);
         var formats = response.getStrings(Tag.printerAttributes, Types.documentFormatSupported);
         if (formats.isEmpty()) {
-            return java.util.Set.of();
+            return Set.of();
         }
         return formats.stream().map(f -> f.toLowerCase().trim())
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     /**
@@ -210,11 +224,11 @@ public final class IppClient {
      *                  of sRGB, and this class of printer has a small spool
      * @param types     the raw {@code pwg-raster-document-type-supported} keywords
      */
-    public record RasterCapabilities(int dpi, boolean grayscale, java.util.Set<String> types,
+    public record RasterCapabilities(int dpi, boolean grayscale, Set<String> types,
                                      String mediaReady) {
         /** What to assume when the printer will not say. */
         public static final RasterCapabilities UNKNOWN =
-                new RasterCapabilities(0, false, java.util.Set.of(), null);
+                new RasterCapabilities(0, false, Set.of(), null);
     }
 
     /**
@@ -235,7 +249,7 @@ public final class IppClient {
         var types = response.getStrings(Tag.printerAttributes,
                 Types.pwgRasterDocumentTypeSupported);
         var typeSet = types.stream().map(t -> t.toLowerCase().trim())
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
 
         var resolutions = response.getStrings(Tag.printerAttributes,
                 Types.pwgRasterDocumentResolutionSupported);
@@ -270,7 +284,7 @@ public final class IppClient {
      * @param max          upper bound when this is a range, else null
      * @param defaultValue what it uses when a job omits the attribute, or null
      */
-    public record JobOption(String name, String label, java.util.List<OptionValue> values,
+    public record JobOption(String name, String label, List<OptionValue> values,
                             Integer min, Integer max, String defaultValue) {
 
         /** True when this is a number input rather than a select. */
@@ -294,8 +308,8 @@ public final class IppClient {
     public record OptionValue(String value, String label) {}
 
     /** {@code name(code)} → the code; anything else is its own value. */
-    private static final java.util.regex.Pattern ENUM_DISPLAY =
-            java.util.regex.Pattern.compile("^(.*)\\((\\d+)\\)$");
+    private static final Pattern ENUM_DISPLAY =
+            Pattern.compile("^(.*)\\((\\d+)\\)$");
 
     public static OptionValue toOptionValue(String rendered) {
         var m = ENUM_DISPLAY.matcher(rendered);
@@ -318,8 +332,8 @@ public final class IppClient {
      * asked what it announces, not told what to have. A device offering
      * {@code output-bin} gets an output-bin select without anything here changing.
      */
-    private static final java.util.Map<String, String> JOB_TEMPLATE_LABELS =
-            java.util.LinkedHashMap.newLinkedHashMap(12);
+    private static final Map<String, String> JOB_TEMPLATE_LABELS =
+            LinkedHashMap.newLinkedHashMap(12);
 
     static {
         JOB_TEMPLATE_LABELS.put("media", "Paper");
@@ -343,8 +357,8 @@ public final class IppClient {
      * "1-99", not a set of values, and enumerating it would be a ninety-nine item
      * dropdown. The printer still decides the bounds.
      */
-    private static final java.util.Map<String, String> RANGE_LABELS =
-            java.util.Map.of("copies", "Copies", "job-priority", "Priority");
+    private static final Map<String, String> RANGE_LABELS =
+            Map.of("copies", "Copies", "job-priority", "Priority");
 
     private static final String SUPPORTED = "-supported";
 
@@ -360,7 +374,7 @@ public final class IppClient {
      * represent a printer that offers trays, output bins or quality levels, and
      * silently hides them.
      */
-    public static java.util.List<JobOption> jobOptions(String printerUri) throws IOException {
+    public static List<JobOption> jobOptions(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
                 AttributeGroup.groupOf(Tag.operationAttributes,
                         Types.attributesCharset.of(CHARSET),
@@ -369,18 +383,18 @@ public final class IppClient {
         var response = exchange(printerUri, packet, null);
         var group = response.get(Tag.printerAttributes);
         if (group == null) {
-            return java.util.List.of();
+            return List.of();
         }
 
         // Index by name once: the group is a flat list and defaults are looked up
         // per option, so scanning it repeatedly would be quadratic on a printer
         // that returns a couple of hundred attributes.
-        var byName = new java.util.HashMap<String, com.hp.jipp.encoding.Attribute<?>>();
+        var byName = new HashMap<String, Attribute<?>>();
         for (var attribute : group) {
             byName.put(attribute.getName(), attribute);
         }
 
-        var options = new java.util.ArrayList<JobOption>();
+        var options = new ArrayList<JobOption>();
         // JOB_TEMPLATE_LABELS order, not the printer's, so the form is stable
         // across devices instead of reshuffling with each vendor's attribute order.
         for (var entry : JOB_TEMPLATE_LABELS.entrySet()) {
@@ -403,7 +417,7 @@ public final class IppClient {
         // Ranges last: they render as number inputs and read as a different kind
         // of control, so grouping them keeps the form scannable.
         for (var entry : RANGE_LABELS.entrySet()) {
-            var range = group.getValue(new com.hp.jipp.encoding.IntRangeType(
+            var range = group.getValue(new IntRangeType(
                     entry.getKey() + SUPPORTED));
             if (range == null) {
                 continue;
@@ -411,10 +425,10 @@ public final class IppClient {
             var defaults = byName.get(entry.getKey() + "-default");
             var defaultValue = defaults == null || defaults.strings().isEmpty()
                     ? null : defaults.strings().getFirst();
-            options.add(new JobOption(entry.getKey(), entry.getValue(), java.util.List.of(),
+            options.add(new JobOption(entry.getKey(), entry.getValue(), List.of(),
                     range.getFirst(), range.getLast(), defaultValue));
         }
-        return java.util.List.copyOf(options);
+        return List.copyOf(options);
     }
 
     /** Query a printer's own state (Get-Printer-Attributes). */

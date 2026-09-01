@@ -8,6 +8,7 @@ import services.Tx;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Remembers models that answered "I don't support tools" (JCLAW-1076).
@@ -123,6 +124,6 @@ public final class ToolCapabilityMemo {
 
     /** Test seam: what has been learned, for assertions. */
     public static Map<String, Boolean> snapshotForTest() {
-        return LEARNED.stream().collect(java.util.stream.Collectors.toMap(k -> k, _ -> Boolean.TRUE));
+        return LEARNED.stream().collect(Collectors.toMap(k -> k, _ -> Boolean.TRUE));
     }
 }

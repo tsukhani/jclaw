@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -158,10 +159,10 @@ public final class McpServerService {
         return all.stream()
                 .filter(other -> !other.id.equals(row.id))
                 .filter(other -> other.transport == row.transport)
-                .filter(other -> java.util.Objects.equals(other.configJson, row.configJson))
+                .filter(other -> Objects.equals(other.configJson, row.configJson))
                 .filter(other -> other.createdAt != null && row.createdAt != null
                         && other.createdAt.isBefore(row.createdAt))
-                .min(java.util.Comparator.comparing(other -> other.createdAt))
+                .min(Comparator.comparing(other -> other.createdAt))
                 .map(other -> other.name)
                 .orElse(null);
     }

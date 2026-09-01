@@ -1,5 +1,6 @@
 package controllers;
 
+import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -15,6 +16,7 @@ import services.printing.PrinterDefaults;
 import services.printing.PrinterDiscovery;
 import utils.ApiResponses;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static utils.GsonHolder.GSON;
@@ -106,7 +108,7 @@ public class ApiPrintersController extends Controller {
         // Options arrive as an IPP attribute → value map, whatever the printer
         // offered. Named fields here would mean a code change every time a vendor
         // exposes something new, which is the opposite of reading capabilities.
-        var options = new java.util.LinkedHashMap<String, String>();
+        var options = new LinkedHashMap<String, String>();
         if (body.has(KEY_OPTIONS) && body.get(KEY_OPTIONS).isJsonObject()) {
             for (var entry : body.getAsJsonObject(KEY_OPTIONS).entrySet()) {
                 var value = entry.getValue().isJsonNull() ? null : entry.getValue().getAsString().trim();
@@ -183,7 +185,7 @@ public class ApiPrintersController extends Controller {
                 !discovered.isEmpty())));
     }
 
-    private static String str(com.google.gson.JsonObject body, String key) {
+    private static String str(JsonObject body, String key) {
         if (!body.has(key) || body.get(key).isJsonNull()) {
             return null;
         }

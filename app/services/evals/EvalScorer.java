@@ -90,7 +90,7 @@ public final class EvalScorer {
 
         /** Names the model emitted that never reached a tool — invented, or not granted. */
         public List<String> toolsRefused() {
-            var refused = new java.util.ArrayList<>(toolsAttempted);
+            var refused = new ArrayList<>(toolsAttempted);
             toolsCalled.forEach(refused::remove);
             return List.copyOf(refused);
         }

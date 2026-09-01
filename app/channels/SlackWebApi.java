@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.slack.api.Slack;
 import com.slack.api.methods.SlackApiException;
+import com.slack.api.model.Conversation;
 import com.slack.api.model.ConversationType;
 import com.slack.api.model.block.LayoutBlock;
 import services.EventLogger;
@@ -201,7 +202,7 @@ public final class SlackWebApi {
     /** Find a channel by case-insensitive name in one {@code conversations.list} page; null if not
      *  present in this page. Extracted from {@link #lookupChannelByNameLive} to keep it under the
      *  cognitive-complexity bound (Sonar S3776). */
-    private static ChannelInfo matchByName(List<com.slack.api.model.Conversation> channels, String name) {
+    private static ChannelInfo matchByName(List<Conversation> channels, String name) {
         if (channels == null) return null;
         for (var ch : channels) {
             if (name.equalsIgnoreCase(ch.getName())) {

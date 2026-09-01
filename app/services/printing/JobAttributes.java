@@ -3,6 +3,7 @@ package services.printing;
 import com.hp.jipp.model.PrintColorMode;
 import com.hp.jipp.model.Sides;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -63,7 +64,7 @@ public record JobAttributes(String sides, String colorMode, String media) {
 
     /** Human-readable list of what was requested, for the tool's reply. */
     public String describe() {
-        var parts = new java.util.ArrayList<String>();
+        var parts = new ArrayList<String>();
         if (sides != null) parts.add("sides=" + sides);
         if (colorMode != null) parts.add("color=" + colorMode);
         if (media != null) parts.add("media=" + media);

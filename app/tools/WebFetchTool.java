@@ -20,6 +20,7 @@ import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -69,7 +70,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
      *  to the workspace as {@code <host>.html}. */
     private static Map<String, String> headersFor(String mode) {
         if (!"html".equals(mode)) return HEADERS;
-        var withAccept = new java.util.HashMap<>(HEADERS);
+        var withAccept = new HashMap<>(HEADERS);
         withAccept.put("Accept", "text/html,application/xhtml+xml");
         return Map.copyOf(withAccept);
     }

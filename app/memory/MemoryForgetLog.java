@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
 
 import java.time.Duration;
+import java.util.Set;
 
 /**
  * Facts just forgotten on operator request, so auto-capture does not immediately
@@ -75,7 +76,7 @@ public final class MemoryForgetLog {
      * against dedup's 0.82 floor and was stored — putting the forgotten fact back in the
      * store, inside the record of its own deletion, and retrievable at rank 3.
      */
-    private static double restatement(java.util.Set<String> forgotten, java.util.Set<String> candidate) {
+    private static double restatement(Set<String> forgotten, Set<String> candidate) {
         if (forgotten.isEmpty()) return 0.0;
         return (double) forgotten.stream().filter(candidate::contains).count() / forgotten.size();
     }

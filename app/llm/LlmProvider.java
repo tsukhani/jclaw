@@ -41,6 +41,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -537,7 +538,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // Retrying after tokens have reached the user would replay them. A
         // tools-unsupported 400 is a request rejection so nothing has streamed
         // yet, but the latch makes that a guarantee rather than an assumption.
-        var emitted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var emitted = new AtomicBoolean(false);
         Consumer<Throwable> handleFailure = t -> {
             var retryable = mayRetryWithoutTools && !emitted.get()
                     && tools != null && !tools.isEmpty()

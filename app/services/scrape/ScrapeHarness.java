@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 /**
  * Runs the CF-100 corpus and reports per-rung access rates (JCLAW-1081).
@@ -380,7 +381,7 @@ public final class ScrapeHarness {
     }
 
     private static Map<String, Score> group(List<Result> results,
-                                            java.util.function.Function<Result, String> key) {
+                                            Function<Result, String> key) {
         var out = new LinkedHashMap<String, Score>();
         for (var r : results) {
             var k = key.apply(r);

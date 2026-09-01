@@ -10,10 +10,18 @@ import services.EventLogger;
 import services.SessionCompactor;
 import services.Tx;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Builds a memory-recall eval suite from an agent's own corpus (JCLAW-529).
@@ -67,7 +75,7 @@ public final class MemoryEvalGenerator {
     }
 
     /** A memory lifted out of its transaction, so the model calls hold no connection. */
-    private record Row(Long id, String text, String retrievalKey, java.time.Instant createdAt) {}
+    private record Row(Long id, String text, String retrievalKey, Instant createdAt) {}
 
     private static List<Row> corpus(Agent agent) {
         return Tx.run(() -> Memory.<Memory>find(ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
@@ -169,7 +177,7 @@ public final class MemoryEvalGenerator {
                                                    Clustering clustering, QuestionWriter writer) {
         var rows = corpus(agent);
         var cases = new ArrayList<MemoryEvalCase>();
-        var used = new java.util.HashSet<Long>();
+        var used = new HashSet<Long>();
 
         for (var seed : rows) {
             if (cases.size() >= maxCases) break;
@@ -255,7 +263,7 @@ public final class MemoryEvalGenerator {
         var docFreq = docFrequencies(rows);
 
         var cases = new ArrayList<MemoryEvalCase>();
-        var usedTargets = new java.util.HashSet<Long>();
+        var usedTargets = new HashSet<Long>();
         for (var relation : rows) {
             if (cases.size() >= maxCases) break;
             cases.addAll(bridgeCasesFor(relation, rows, docFreq, writer,
@@ -269,7 +277,7 @@ public final class MemoryEvalGenerator {
 
     /** How many corpus rows each content token appears in — the rarity signal pairing uses. */
     private static Map<String, Integer> docFrequencies(List<Row> rows) {
-        var docFreq = new java.util.HashMap<String, Integer>();
+        var docFreq = new HashMap<String, Integer>();
         for (var r : rows) {
             for (var t : MemorySimilarity.contentTokens(r.text())) docFreq.merge(t, 1, Integer::sum);
         }
@@ -357,9 +365,9 @@ public final class MemoryEvalGenerator {
             Output only the question, on one line, with no preamble and no quotation marks.""";
 
     /** Rendered into the temporal prompt so the model has a real span to phrase against. */
-    private static final java.time.format.DateTimeFormatter SPAN_FORMAT =
-            java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy")
-                    .withZone(java.time.ZoneOffset.UTC);
+    private static final DateTimeFormatter SPAN_FORMAT =
+            DateTimeFormatter.ofPattern("d MMMM yyyy")
+                    .withZone(ZoneOffset.UTC);
 
     /**
      * Generate temporal cases: questions that reach a stretch of the corpus through an
@@ -379,7 +387,7 @@ public final class MemoryEvalGenerator {
                                                    Clustering clustering, QuestionWriter writer) {
         var rows = corpus(agent).stream().filter(r -> r.createdAt() != null).toList();
         var cases = new ArrayList<MemoryEvalCase>();
-        var used = new java.util.HashSet<Long>();
+        var used = new HashSet<Long>();
         for (var seed : rows) {
             if (cases.size() >= maxCases) break;
             if (used.contains(seed.id())) continue;
@@ -387,7 +395,7 @@ public final class MemoryEvalGenerator {
             var groups = distinctFacts(cluster);
             if (groups.size() < clustering.minFacts() || groups.size() > clustering.maxFacts()) continue;
 
-            var last = cluster.stream().map(Row::createdAt).max(java.time.Instant::compareTo).orElse(seed.createdAt());
+            var last = cluster.stream().map(Row::createdAt).max(Instant::compareTo).orElse(seed.createdAt());
             String question;
             try {
                 question = writer.write(List.of(
@@ -443,7 +451,7 @@ public final class MemoryEvalGenerator {
         var rows = corpus(agent);
         var docFreq = docFrequencies(rows);
         var clusters = new ArrayList<List<Row>>();
-        var seen = new java.util.HashSet<Long>();
+        var seen = new HashSet<Long>();
         for (var seed : rows) {
             if (seen.contains(seed.id())) continue;
             var cluster = clusterAround(agent, seed, rows, clustering);
@@ -452,7 +460,7 @@ public final class MemoryEvalGenerator {
         }
 
         var cases = new ArrayList<MemoryEvalCase>();
-        var usedClusters = new java.util.HashSet<Integer>();
+        var usedClusters = new HashSet<Integer>();
         for (int i = 0; i < clusters.size() && cases.size() < maxCases; i++) {
             if (usedClusters.contains(i)) continue;
             for (int j = i + 1; j < clusters.size() && cases.size() < maxCases; j++) {
@@ -479,14 +487,14 @@ public final class MemoryEvalGenerator {
 
     /** A content token both clusters carry that is rare enough corpus-wide to be an entity. */
     private static String sharedRareToken(List<Row> a, List<Row> b, Map<String, Integer> docFreq) {
-        var aTokens = new java.util.HashSet<String>();
+        var aTokens = new HashSet<String>();
         a.forEach(r -> aTokens.addAll(MemorySimilarity.contentTokens(r.text())));
-        var bTokens = new java.util.HashSet<String>();
+        var bTokens = new HashSet<String>();
         b.forEach(r -> bTokens.addAll(MemorySimilarity.contentTokens(r.text())));
         return aTokens.stream()
                 .filter(bTokens::contains)
                 .filter(t -> docFreq.getOrDefault(t, 0) <= RARE_TOKEN_MAX_DOCS)
-                .min(java.util.Comparator.comparingInt(t -> docFreq.getOrDefault(t, 0)))
+                .min(Comparator.comparingInt(t -> docFreq.getOrDefault(t, 0)))
                 .orElse(null);
     }
 
@@ -518,7 +526,7 @@ public final class MemoryEvalGenerator {
     public static List<Integer> clusterSizes(Agent agent, Clustering clustering) {
         var rows = corpus(agent);
         var sizes = new ArrayList<Integer>();
-        var used = new java.util.HashSet<Long>();
+        var used = new HashSet<Long>();
         for (var seed : rows) {
             if (used.contains(seed.id())) continue;
             var cluster = clusterAround(agent, seed, rows, clustering);
@@ -545,12 +553,12 @@ public final class MemoryEvalGenerator {
      * as the latter would credit retrieval for a distinction the corpus cannot make.
      */
     private static List<Row> temporalCluster(Row seed, List<Row> all, double spanDays) {
-        var span = java.time.Duration.ofMinutes((long) (spanDays * 24 * 60));
+        var span = Duration.ofMinutes((long) (spanDays * 24 * 60));
         var cluster = new ArrayList<Row>();
         cluster.add(seed);
         for (var other : all) {
             if (other.id().equals(seed.id()) || other.createdAt() == null) continue;
-            if (java.time.Duration.between(seed.createdAt(), other.createdAt()).abs().compareTo(span) <= 0) {
+            if (Duration.between(seed.createdAt(), other.createdAt()).abs().compareTo(span) <= 0) {
                 cluster.add(other);
             }
         }
@@ -572,7 +580,7 @@ public final class MemoryEvalGenerator {
 
     /** Embedding neighbours of the seed, restricted to the corpus rows already in hand. */
     private static List<Row> semanticCluster(Agent agent, Row seed, List<Row> all, double minCosine) {
-        var byId = all.stream().collect(java.util.stream.Collectors.toMap(Row::id, r -> r, (a, b) -> a));
+        var byId = all.stream().collect(Collectors.toMap(Row::id, r -> r, (a, b) -> a));
         // Seed embedded as a document, matching what the index holds (JCLAW-529). Bare text
         // against statement+key vectors compares a format difference rather than a
         // similarity, which shrinks every cluster and quietly weakens the coverage suites

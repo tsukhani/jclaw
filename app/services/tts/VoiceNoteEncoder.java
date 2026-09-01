@@ -6,6 +6,7 @@ import services.transcription.FfmpegProbe;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -94,7 +95,7 @@ public final class VoiceNoteEncoder {
             out = Files.createTempFile("jclaw-tts-", "." + extension);
             Files.write(in, wavBytes);
             // -y so the pre-created temp output is overwritten rather than prompting.
-            var cmd = new java.util.ArrayList<>(List.of("ffmpeg", "-y", "-i", in.toString()));
+            var cmd = new ArrayList<>(List.of("ffmpeg", "-y", "-i", in.toString()));
             cmd.addAll(codecArgs);
             cmd.addAll(List.of("-ac", "1", out.toString()));
             var proc = new ProcessBuilder(cmd).redirectErrorStream(true).start();
