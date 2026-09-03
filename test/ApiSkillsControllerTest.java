@@ -305,6 +305,30 @@ class ApiSkillsControllerTest extends FunctionalTest {
     }
 
     /**
+     * Global skills live under the repo's own {@code skills/}, so the droppings a
+     * working copy accumulates are gitignored there and have no business in the
+     * file browser — including the count, which reads off this same listing.
+     */
+    @Test
+    void listGlobalSkillFilesOmitsIgnoredNoise() throws Exception {
+        login();
+        var dir = seedGlobalSkill("alpha-skill", "alpha", "First test skill");
+        Files.writeString(dir.resolve("README.md"), "Extra readme");
+        Files.writeString(dir.resolve(".DS_Store"), "finder noise");
+        var cache = Files.createDirectories(dir.resolve("__pycache__"));
+        Files.writeString(cache.resolve("mod.cpython-313.pyc"), "bytecode");
+
+        var resp = GET("/api/skills/alpha-skill/files");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("SKILL.md"), "authored file still listed: " + body);
+        assertTrue(body.contains("README.md"), "authored file still listed: " + body);
+        assertFalse(body.contains(".DS_Store"), "OS noise hidden: " + body);
+        // Naming the directory has to take the whole subtree, not just the dir entry.
+        assertFalse(body.contains("mod.cpython-313.pyc"), "ignored subtree hidden: " + body);
+    }
+
+    /**
      * Unknown-resource GETs that 404 with no per-test setup beyond login:
      * the global skill-files listing, the agent skills listing, the agent
      * skill-files listing, and the agent skill-file read. Each targets a

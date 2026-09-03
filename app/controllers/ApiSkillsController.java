@@ -46,6 +46,16 @@ public class ApiSkillsController extends Controller {
     private static final String SKILL_MD = "SKILL.md";
     private static final String SKILLS_DIR = "skills";
 
+    /**
+     * OS, VCS and build droppings a skill directory accumulates without its author
+     * ever declaring them. Global skills live under the repo's own {@code skills/},
+     * so these are literally gitignored there; matched per path segment, so naming a
+     * directory excludes its whole subtree.
+     */
+    private static final Set<String> IGNORED_PATH_SEGMENTS = Set.of(
+            ".DS_Store", "Thumbs.db", "desktop.ini",
+            ".git", "node_modules", "__pycache__", ".venv", ".pytest_cache", ".ruff_cache");
+
     // Canonical tool name used both as an alias target and a body-text heuristic.
     private static final String TOOL_FILESYSTEM = "filesystem";
 
@@ -649,10 +659,18 @@ public class ApiSkillsController extends Controller {
         var allTextContent = new StringBuilder();
         try (var walk = Files.walk(dir)) {
             walk.filter(Files::isRegularFile)
+                .filter(p -> !isIgnoredPath(dir.relativize(p)))
                 .sorted()
                 .forEach(p -> files.add(buildFileEntry(dir, p, allTextContent)));
         }
         return new SkillDirWalk(files, allTextContent.toString());
+    }
+
+    private static boolean isIgnoredPath(Path relative) {
+        for (var segment : relative) {
+            if (IGNORED_PATH_SEGMENTS.contains(segment.toString())) return true;
+        }
+        return false;
     }
 
     private static Map<String, Object> buildFileEntry(Path dir, Path p, StringBuilder allTextContent) {
