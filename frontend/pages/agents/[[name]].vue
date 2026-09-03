@@ -934,7 +934,7 @@ function skillDisabledTools(skill: AgentSkill): string[] {
 // Alphabetical display order. The API returns skills in agent-config insertion
 // order (whatever sequence the operator promoted/added them in), but the list
 // is much easier to scan if names are sorted — matches the cross-agent skills
-// matrix at pages/skills.vue's `sortedAgentSkillsMap`. Locale-aware,
+// matrix at pages/skills/[[name]].vue's `sortedAgentSkillsMap`. Locale-aware,
 // case-insensitive comparator so mixed-case names land where a human would
 // expect them, not where ASCII order would.
 const sortedAgentSkills = computed(() =>

@@ -33,7 +33,7 @@ marked.setOptions({
 // The wrapper div exists to be the positioning context: `pre` is
 // overflow-x:auto, and an absolute button inside a scrolling box slides out of
 // view with the content. A per-call renderer (not marked.setOptions) keeps the
-// button off pages/skills.vue, which parses through the same shared instance.
+// button off pages/skills/[[name]].vue, which parses through the same shared instance.
 const chatRenderer = new Renderer()
 const renderCodeBlock = chatRenderer.code.bind(chatRenderer)
 chatRenderer.code = (token: Tokens.Code) =>

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import Skills from '~/pages/skills.vue'
+import Skills from '~/pages/skills/[[name]].vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 
 /**
@@ -18,7 +18,7 @@ const SkillsHarness = defineComponent({
 })
 
 /**
- * JCLAW-314 — pages/skills.vue critical flow coverage.
+ * JCLAW-314 — pages/skills/[[name]].vue critical flow coverage.
  *
  * The page already has structural / render coverage in skills.test.ts;
  * this sibling spec exercises:
@@ -52,13 +52,20 @@ if (typeof globalThis.EventSource === 'undefined') {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   useState('promotingSkills', () => new Set())
   // useFetch caches by URL between mounts; flush so each test sees its own fixture.
   clearNuxtData()
+  // Opening a skill is a navigation now, and the router is shared across cases in
+  // this file — without this, a case that opened one leaks its URL into the next
+  // one's mount, which then starts with that skill already open.
+  await useRouter().replace('/skills')
 })
 
 function setupApi(opts?: { skills?: unknown[], agents?: unknown[] }) {
+  // Opening a skill navigates now, and the global auth middleware probes
+  // /api/config on every navigation; without it the push lands on /login.
+  registerEndpoint('/api/config', () => ({ entries: [] }))
   registerEndpoint('/api/skills', () => opts?.skills ?? [
     { name: 'web-search', folderName: 'web-search', description: 'Search the web', version: '1.0.0' },
     { name: 'code-review', folderName: 'code-review', description: 'Review code changes', version: '0.2.0' },
@@ -380,11 +387,10 @@ describe('Skills page — view-skill flow (read-only viewer)', () => {
     const viewBtn = webSearchRow!.find('button[title="View skill"]')
     expect(viewBtn.exists()).toBe(true)
     await viewBtn.trigger('click')
-    await flushPromises()
 
-    // Read-only viewer shell is now mounted; the back button has the canonical
-    // text from the template.
-    expect(component.text()).toContain('Back to skills')
+    // Opening pushes /skills/web-search and the route watcher does the loading, so
+    // the viewer appears a navigation later rather than on the click itself.
+    await vi.waitFor(() => expect(component.text()).toContain('Back to skills'))
     expect(component.text()).toContain('web-search')
   })
 
@@ -406,16 +412,16 @@ describe('Skills page — view-skill flow (read-only viewer)', () => {
     const codeRow = rows.find(r => r.text().includes('code-review'))
     expect(codeRow).toBeTruthy()
     await codeRow!.find('button[title="View skill"]').trigger('click')
-    await flushPromises()
-    expect(component.text()).toContain('Back to skills')
+    await vi.waitFor(() => expect(component.text()).toContain('Back to skills'))
 
     // Back button restores the two-column view; the page heading is visible again.
     const backBtn = component.findAll('button').find(b => b.text().includes('Back to skills'))
     expect(backBtn).toBeTruthy()
     await backBtn!.trigger('click')
-    await flushPromises()
-    // Filter input from the global skills column reappears.
-    expect(component.find('input[aria-label="Filter global skills by name"]').exists()).toBe(true)
+    // Closing navigates back to /skills, so the listing returns a navigation later.
+    await vi.waitFor(() =>
+      // Filter input from the global skills column reappears.
+      expect(component.find('input[aria-label="Filter global skills by name"]').exists()).toBe(true))
   })
 })
 

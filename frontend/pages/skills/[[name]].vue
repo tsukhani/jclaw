@@ -36,6 +36,15 @@ const { getPillClass } = useToolMeta()
 const { data: skills, refresh: refreshSkills } = await useFetch<Skill[]>('/api/skills')
 const { data: agents } = await useFetch<Agent[]>('/api/agents')
 
+// One page instance across /skills and /skills/<name>. NuxtPage keys by path by
+// default, so opening a skill would otherwise unmount and remount the whole page —
+// refetching every panel, and letting the outgoing instance's onUnmounted null the
+// breadcrumb the incoming one had already set.
+definePageMeta({ key: () => '/skills' })
+
+const route = useRoute()
+const router = useRouter()
+
 // Skills per agent, keyed by agent id
 const agentSkillsMap = ref<Record<number, AgentSkill[]>>({})
 const loadingAgents = ref(true)
@@ -682,6 +691,7 @@ async function commitRename(skill: Skill) {
 // The editing target is whichever skill was clicked — global Skill or per-agent
 // AgentSkill. Both flows set `folderName` explicitly so the API path is stable.
 const editing = ref<(Skill | AgentSkill) & { folderName?: string } | null>(null)
+const editingAgentId = ref<number | null>(null) // null = global skill, number = agent workspace skill
 
 // Feed the layout breadcrumb: show "Skills > {name}" when a skill is open;
 // reverse direction closes the viewer when the layout clears the extra (user
@@ -691,9 +701,11 @@ watch(editing, (skill) => {
   breadcrumbExtra.value = skill ? (skill.folderName ?? skill.name) : null
 }, { immediate: true })
 watch(breadcrumbExtra, (value) => {
-  if (value === null && editing.value) {
-    editing.value = null
-  }
+  // Only an agent skill needs this. It has no URL of its own, so a click on the
+  // "Skills" crumb is a same-route click NuxtLink skips, and this ref is the only
+  // signal it should close. A global skill closes through the route instead — that
+  // crumb genuinely changes path, and closing it from here would fight the watcher.
+  if (value === null && editing.value && editingAgentId.value !== null) clearViewer()
 })
 onUnmounted(() => {
   breadcrumbExtra.value = null
@@ -720,7 +732,6 @@ const renderedMarkdown = computed(() => {
   if (!isMarkdownFile.value || !fileContent.value) return ''
   return DOMPurify.sanitize(marked.parse(fileContent.value) as string)
 })
-const editingAgentId = ref<number | null>(null) // null = global skill, number = agent workspace skill
 
 async function editSkill(skill: Skill) {
   try {
@@ -751,6 +762,31 @@ async function editSkill(skill: Skill) {
     console.error('Failed to load skill:', e)
   }
 }
+
+/** Navigate to a skill's own URL; the route watcher below opens the viewer. */
+function openSkill(skill: Skill) {
+  router.push(`/skills/${encodeURIComponent(skill.folderName || skill.name)}`)
+}
+
+// The route is the source of truth for which global skill is open: /skills lists,
+// /skills/<name> opens that one. Agent workspace skills are deliberately absent from
+// this namespace — they are scoped to an agent, so they open through editAgentSkill
+// without touching the URL.
+watch(() => route.params.name, (raw) => {
+  const slug = Array.isArray(raw) ? raw[0] : raw
+  if (!slug) {
+    clearViewer()
+    return
+  }
+  // Case-insensitive so a hand-typed /skills/OReilly-Books still lands; the stored
+  // folder name is what the breadcrumb shows and the API path uses.
+  const wanted = decodeURIComponent(slug).toLowerCase()
+  const skill = (skills.value ?? []).find(s => (s.folderName || s.name).toLowerCase() === wanted)
+  // A name matching no skill falls back to the list rather than stranding the page
+  // on an empty viewer.
+  if (skill) void editSkill(skill)
+  else router.replace('/skills')
+}, { immediate: true })
 
 function skillFileApiBase() {
   const folderName = editing.value?.folderName || editing.value?.name
@@ -834,12 +870,18 @@ async function deleteAgentSkill(agentId: number, skill: Skill | AgentSkill) {
   }
 }
 
-function cancel() {
+function clearViewer() {
   editing.value = null
   editingAgentId.value = null
   skillFiles.value = []
   skillTools.value = []
   activeFile.value = null
+}
+
+function cancel() {
+  clearViewer()
+  // Only a global skill has a URL of its own; an agent skill closes in place.
+  if (route.params.name) router.push('/skills')
 }
 
 type FileNode = {
@@ -1084,7 +1126,7 @@ function totalSkillCount(agentId: number) {
                   <button
                     class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                     title="View skill"
-                    @click.stop="editSkill(skill)"
+                    @click.stop="openSkill(skill)"
                   >
                     <EyeIcon
                       class="w-3.5 h-3.5"

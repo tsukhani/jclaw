@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import Skills from '~/pages/skills.vue'
+import Skills from '~/pages/skills/[[name]].vue'
 
 // Stub EventSource since jsdom doesn't provide it and
 // the skills page uses useEventBus which creates an EventSource.
