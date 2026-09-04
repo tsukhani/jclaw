@@ -4,6 +4,7 @@ import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import models.SkillRegistryTool;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,6 +16,8 @@ import services.SkillPromotionService;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Set;
 
 /**
  * Functional HTTP tests for {@code ApiSkillsController} covering the
@@ -302,6 +305,32 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertTrue(body.contains("README.md"), "extra file listed: " + body);
         assertTrue(body.contains("\"tools\""));
         assertTrue(body.contains("\"commands\""));
+    }
+
+    /**
+     * {@code SkillLoader.parseSkillFile} swallows the IOException from an unreadable
+     * file and answers null, so the detail endpoint has to check before handing the
+     * result to {@code skillToMap} — otherwise the NPE pre-empts the 500 its own
+     * catch block exists to render, and the operator gets a stack trace instead of
+     * the reason.
+     */
+    @Test
+    void getGlobalSkillReportsUnreadableFileAsAnError() throws Exception {
+        login();
+        var dir = seedGlobalSkill("alpha-skill", "alpha", "First test skill");
+        var md = dir.resolve("SKILL.md");
+        try {
+            Files.setPosixFilePermissions(md, Set.of());
+            // chmod is a no-op for root, which would make this assert the old behavior.
+            Assumptions.assumeTrue(!Files.isReadable(md), "chmod 000 not effective; skipping");
+
+            var resp = GET("/api/skills/alpha-skill");
+            assertEquals(500, resp.status.intValue());
+            assertTrue(getContent(resp).contains("Failed to read skill"),
+                    "renders the reason, not an NPE page: " + getContent(resp));
+        } finally {
+            Files.setPosixFilePermissions(md, PosixFilePermissions.fromString("rw-r--r--"));
+        }
     }
 
     /**

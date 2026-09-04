@@ -184,6 +184,7 @@ public class ApiSkillsController extends Controller {
      * secret-sanitized before it is written. Runs synchronously — the conformance
      * + sanitization LLM passes plus the GitHub fetch make this a multi-second call.
      */
+    @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillImportRequest.class)))
     @Operation(summary = "Import a catalog skill from GitHub into the global registry")
     public static void catalogImport() {
@@ -213,6 +214,10 @@ public class ApiSkillsController extends Controller {
         if (!Files.exists(path)) notFound();
         try {
             var info = SkillLoader.parseSkillFile(path);
+            // Null means the file we just found is unreadable — parseSkillFile
+            // swallows that IOException. Without this the NPE from skillToMap
+            // pre-empts the clean 500 the catch below exists to render.
+            if (info == null) ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read skill: " + name);
             var map = skillToMap(info, true);
             map.put("content", Files.readString(path));
             renderJSON(gson.toJson(map));
@@ -368,7 +373,10 @@ public class ApiSkillsController extends Controller {
                         if (info != null) skills.add(info);
                     }
                 });
-            } catch (IOException _) {}
+            } catch (IOException _) {
+                // An unreadable workspace dir means this agent has no installed
+                // skills to report, which is what the empty list already says.
+            }
         }
 
         var configs = AgentSkillConfig.findByAgent(agent);
