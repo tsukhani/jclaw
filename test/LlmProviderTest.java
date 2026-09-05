@@ -583,13 +583,18 @@ class LlmProviderTest extends UnitTest {
     }
 
     // =====================
-    // alwaysThinks models are never sent a "reasoning off" signal
+    // alwaysThinks models: never "off", never the vendor's expensive default
     // =====================
 
     /** An Ollama catalog declaring one thinking-capable model's architecture lock. */
     private static OllamaProvider ollamaThinking(String modelId, boolean alwaysThinks) {
+        return ollamaThinking(modelId, alwaysThinks, null);
+    }
+
+    private static OllamaProvider ollamaThinking(String modelId, boolean alwaysThinks,
+                                                 List<String> levels) {
         var info = new ModelInfo(modelId, modelId, 8192, 0, true, false, false, false,
-                true, -1, -1, -1, -1, null, alwaysThinks);
+                true, -1, -1, -1, -1, levels, alwaysThinks);
         return new OllamaProvider(new ProviderConfig(
                 "ollama-cloud", "https://ollama.com/v1", "k", List.of(info)));
     }
@@ -600,26 +605,35 @@ class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    void noReasoningOffSignalIsSentToAnAlwaysThinksModel() throws Exception {
-        // Observed on ollama.com/v1: reasoning_effort:"none" makes Ollama stop tagging
-        // the reasoning delta while glm-5.3-flash reasons anyway, so the thought lands
-        // in content and the UI has no thinking block to fill. Sending neither field
-        // is what keeps the two channels split.
-        var json = serialize(ollamaThinking("glm-5.3-flash", true),
+    void anAlwaysThinksModelGetsItsLowestRungRatherThanAnOffSignal() throws Exception {
+        // "none" collapses the reasoning channel into content on Ollama, and omitting
+        // the field inherits the vendor default — max on this ladder. The lowest rung
+        // is the only option that both keeps the channels split and stays cheap.
+        var json = serialize(ollamaThinking("glm-5.3-flash", true, List.of("low", "high", "max")),
                 requestWithThinking("glm-5.3-flash", null));
-        assertFalse(json.has("reasoning_effort"),
-                "an always-thinking model must not be told to stop: " + json);
+        assertEquals("low", json.get("reasoning_effort").getAsString(),
+                "an always-thinking model must be pinned to its cheapest rung: " + json);
         assertFalse(json.has("think"),
-                "the native think:false fallback must not ride along either: " + json);
+                "the native think:false fallback must not ride along: " + json);
+    }
+
+    @Test
+    void theRungComesFromTheModelsOwnLadderNotAHardcodedLow() throws Exception {
+        // Ladders differ per model — OpenRouter-routed effort models advertise
+        // "minimal" below "low". Sending a level the model never advertised is the
+        // failure this guards.
+        var json = serialize(ollamaThinking("effort-model", true, List.of("minimal", "xhigh")),
+                requestWithThinking("effort-model", null));
+        assertEquals("minimal", json.get("reasoning_effort").getAsString());
     }
 
     @Test
     void anExplicitEffortLevelStillReachesAnAlwaysThinksModel() throws Exception {
-        // The skip covers the disable path only — an operator-chosen level is still
-        // the model's to honor.
-        var json = serialize(ollamaThinking("glm-5.3-flash", true),
-                requestWithThinking("glm-5.3-flash", "high"));
-        assertEquals("high", json.get("reasoning_effort").getAsString());
+        // The fallback covers an unset preference only — an operator-chosen level is
+        // still the model's to honor, including the top rung.
+        var json = serialize(ollamaThinking("glm-5.3-flash", true, List.of("low", "high", "max")),
+                requestWithThinking("glm-5.3-flash", "max"));
+        assertEquals("max", json.get("reasoning_effort").getAsString());
     }
 
     @Test
@@ -637,5 +651,15 @@ class LlmProviderTest extends UnitTest {
         // No metadata means no lock: an undiscovered model keeps the normal path.
         var json = serialize(ollama(), requestWithThinking("never-discovered", null));
         assertEquals("none", json.get("reasoning_effort").getAsString());
+    }
+
+    @Test
+    void anAlwaysThinksModelWithNoDeclaredLadderFallsBackToTheDefaultRungs() throws Exception {
+        // thinkingLevels is optional metadata; effectiveThinkingLevels() supplies
+        // low/medium/high, so the pin still resolves rather than silently reverting
+        // to the disable path.
+        var json = serialize(ollamaThinking("mystery-reasoner", true),
+                requestWithThinking("mystery-reasoner", null));
+        assertEquals("low", json.get("reasoning_effort").getAsString());
     }
 }

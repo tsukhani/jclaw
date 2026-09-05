@@ -466,6 +466,7 @@ public class ApiProvidersController extends Controller {
         boolean thinking = JsonArgs.optBool(body, "supportsThinking");
         m.addProperty("supportsThinking", thinking);
         if (thinking && JsonArgs.optBool(body, "alwaysThinks")) m.addProperty("alwaysThinks", true);
+        if (thinking) addThinkingLevelsIfSet(m, body);
         m.addProperty(SUPPORTS_VISION, JsonArgs.optBool(body, SUPPORTS_VISION));
         m.addProperty("supportsAudio", JsonArgs.optBool(body, "supportsAudio"));
         addPriceIfSet(m, body, "promptPrice");
@@ -473,6 +474,28 @@ public class ApiProvidersController extends Controller {
         addPriceIfSet(m, body, "cachedReadPrice");
         addPriceIfSet(m, body, "cacheWritePrice");
         return m;
+    }
+
+    /**
+     * Carry an explicit reasoning-effort ladder onto the saved model.
+     *
+     * <p>Ladders are not uniform: GLM-5.3 accepts low/high/max with no medium rung,
+     * and out-of-enum values are answered HTTP 200 while silently falling back to
+     * max — so an unlisted level is billed, not rejected. Without this the field
+     * was dropped on every save and every model collapsed to the low/medium/high
+     * default in {@link llm.LlmTypes#DEFAULT_THINKING_LEVELS}.
+     *
+     * <p>Omitted when empty so the shared default keeps applying.
+     */
+    private static void addThinkingLevelsIfSet(JsonObject out, JsonObject body) {
+        if (!body.has("thinkingLevels") || !body.get("thinkingLevels").isJsonArray()) return;
+        var levels = new JsonArray();
+        for (var el : body.getAsJsonArray("thinkingLevels")) {
+            if (el == null || !el.isJsonPrimitive()) continue;
+            var level = el.getAsString().trim();
+            if (!level.isEmpty()) levels.add(level);
+        }
+        if (!levels.isEmpty()) out.add("thinkingLevels", levels);
     }
 
     private static void addPriceIfSet(JsonObject out, JsonObject body, String key) {

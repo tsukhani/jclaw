@@ -306,6 +306,56 @@ class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
+    void addModelPersistsAnExplicitThinkingLadder() {
+        // Ladders are not uniform — GLM-5.3 takes low/high/max with no medium rung —
+        // and an unlisted level is answered 200 and billed at the vendor default
+        // rather than rejected. Dropping the field on save silently collapsed every
+        // model to DEFAULT_THINKING_LEVELS.
+        login();
+        configureProvider();
+
+        var add = POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"glm-5.3-flash\",\"supportsThinking\":true,\"alwaysThinks\":true,"
+                        + "\"thinkingLevels\":[\"low\",\"high\",\"max\"]}");
+        assertIsOk(add);
+
+        var stored = ConfigService.get("provider.test-provider.models");
+        assertTrue(stored.contains("\"thinkingLevels\":[\"low\",\"high\",\"max\"]"),
+                "ladder must survive the save verbatim and in order: " + stored);
+    }
+
+    @Test
+    void addModelDropsBlankLadderEntries() {
+        login();
+        configureProvider();
+
+        var add = POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"m\",\"supportsThinking\":true,"
+                        + "\"thinkingLevels\":[\" low \",\"\",\"   \",\"max\"]}");
+        assertIsOk(add);
+
+        var stored = ConfigService.get("provider.test-provider.models");
+        assertTrue(stored.contains("\"thinkingLevels\":[\"low\",\"max\"]"),
+                "blank rungs must be dropped and survivors trimmed: " + stored);
+    }
+
+    @Test
+    void addModelOmitsTheLadderWhenNotSupplied() {
+        // Absent must stay absent so effectiveThinkingLevels() keeps supplying the
+        // shared default — writing an empty array would read as "no levels at all".
+        login();
+        configureProvider();
+
+        var add = POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"m\",\"supportsThinking\":true}");
+        assertIsOk(add);
+
+        var stored = ConfigService.get("provider.test-provider.models");
+        assertFalse(stored.contains("thinkingLevels"),
+                "no ladder supplied means no ladder stored: " + stored);
+    }
+
+    @Test
     void addModelDerivesNameFromIdWhenOmitted() {
         login();
         configureProvider();

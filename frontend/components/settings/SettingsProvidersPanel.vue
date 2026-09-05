@@ -153,7 +153,7 @@ const editingModelIdx = ref<number | null>(null)
 // previously silently wrote 131072 (kimi-k2.5 is actually 256K), which
 // then broke /usage and compaction-budget math. Show 0 honestly instead
 // and let the user enter the real value from the provider's docs.
-const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, supportsVideo: false, supportsTools: true, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
+const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, thinkingLevels: '', supportsVision: false, supportsAudio: false, supportsVideo: false, supportsTools: true, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
 const addingModel = ref(false)
 
 // Rankings cache for configured models (providerName -> { modelId -> rank })
@@ -259,6 +259,7 @@ function startEditModel(providerName: string, idx: number) {
     maxTokens: m.maxTokens ?? 0,
     supportsThinking: m.supportsThinking || false,
     alwaysThinks: m.alwaysThinks || false,
+    thinkingLevels: (m.thinkingLevels ?? []).join(', '),
     supportsVision: m.supportsVision || false,
     supportsTools: m.supportsTools !== false,
     supportsAudio: m.supportsAudio || false,
@@ -273,7 +274,7 @@ function startEditModel(providerName: string, idx: number) {
 }
 
 function startAddModel() {
-  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, supportsVideo: false, supportsTools: true, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
+  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, thinkingLevels: '', supportsVision: false, supportsAudio: false, supportsVideo: false, supportsTools: true, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
   addingModel.value = true
   editingModelIdx.value = null
 }
@@ -284,6 +285,18 @@ async function saveModels(providerName: string, models: ProviderModelDef[]) {
     body: { key: `provider.${providerName}.models`, value: JSON.stringify(models) },
   })
   refresh()
+}
+
+/**
+ * Split the comma-separated ladder field into the stored string array.
+ *
+ * Ladders are per-model and not uniform — GLM-5.3 takes low/high/max with no
+ * medium rung — and an unlisted level is answered 200 and billed at the vendor
+ * default rather than rejected, so a typo is silent. Order matters: the first
+ * rung is what an always-thinking model falls back to when no level is chosen.
+ */
+function parseThinkingLevels(raw: string): string[] {
+  return raw.split(',').map(v => v.trim()).filter(Boolean)
 }
 
 /**
@@ -310,6 +323,8 @@ function modelFormToSaved(): ProviderModelDef {
     // "unknown", which reads as supported — see isDeclaredToolIncapable.
     ...(f.supportsTools ? {} : { supportsTools: false }),
   }
+  const levels = f.supportsThinking ? parseThinkingLevels(f.thinkingLevels) : []
+  if (levels.length) out.thinkingLevels = levels
   if (f.promptPrice >= 0) out.promptPrice = f.promptPrice
   if (f.completionPrice >= 0) out.completionPrice = f.completionPrice
   if (f.cachedReadPrice >= 0) out.cachedReadPrice = f.cachedReadPrice
@@ -1170,6 +1185,20 @@ const groupedProviders = computed(() => {
                       > Always Thinks
                     </label>
                     <label
+                      v-if="modelForm.supportsThinking"
+                      :for="`model-thinking-levels-${name}`"
+                      class="flex items-center gap-1.5 text-xs text-fg-muted"
+                      title="Reasoning-effort rungs this model accepts, lowest first (GLM-5.3: low, high, max — no medium). Blank uses the low/medium/high default. The first rung is what an always-thinking model uses when no level is picked."
+                    >
+                      Levels
+                      <input
+                        :id="`model-thinking-levels-${name}`"
+                        v-model="modelForm.thinkingLevels"
+                        placeholder="low, high, max"
+                        class="w-32 px-2 py-0.5 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
+                      >
+                    </label>
+                    <label
                       :for="`model-vision-${name}`"
                       class="flex items-center gap-1.5 text-xs text-fg-muted"
                     >
@@ -1440,6 +1469,20 @@ const groupedProviders = computed(() => {
                       type="checkbox"
                       class="accent-white"
                     > Always Thinks
+                  </label>
+                  <label
+                    v-if="modelForm.supportsThinking"
+                    :for="`addmodel-thinking-levels-${name}`"
+                    class="flex items-center gap-1.5 text-xs text-fg-muted"
+                    title="Reasoning-effort rungs this model accepts, lowest first (GLM-5.3: low, high, max — no medium). Blank uses the low/medium/high default. The first rung is what an always-thinking model uses when no level is picked."
+                  >
+                    Levels
+                    <input
+                      :id="`addmodel-thinking-levels-${name}`"
+                      v-model="modelForm.thinkingLevels"
+                      placeholder="low, high, max"
+                      class="w-32 px-2 py-0.5 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
+                    >
                   </label>
                   <label
                     :for="`addmodel-vision-${name}`"

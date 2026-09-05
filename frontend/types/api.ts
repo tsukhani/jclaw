@@ -751,8 +751,11 @@ export interface ProviderModelDef {
   supportsThinking?: boolean
   /**
    * Pure reasoning models with no non-thinking mode. UI surfaces a locked-on
-   * thinking pill; the API-level off value is sent anyway but the model
-   * ignores it. Implies supportsThinking.
+   * thinking pill, and the backend sends the model's lowest advertised rung
+   * rather than an off signal — on Ollama the off value stops the reasoning
+   * being tagged without stopping it happening, and omitting the field
+   * inherits the vendor default, which is the priciest rung. The lock governs
+   * on/off only; effort levels stay selectable. Implies supportsThinking.
    */
   alwaysThinks?: boolean
   supportsVision?: boolean

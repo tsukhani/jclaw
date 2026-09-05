@@ -14,6 +14,15 @@ const PROVIDERS: Provider[] = [
     ],
   },
   { name: 'anthropic', models: [{ id: 'opus', name: 'Opus', supportsThinking: true, supportsVision: true, supportsAudio: true }] },
+  {
+    name: 'ollama-cloud',
+    models: [
+      // Always thinks AND exposes an effort ladder — the two are independent axes.
+      { id: 'glm-5.3-flash', name: 'GLM 5.3 Flash', supportsThinking: true, alwaysThinks: true, thinkingLevels: ['low', 'high', 'max'] },
+      // Always thinks with nothing to choose between: genuinely inoperable.
+      { id: 'one-rung', name: 'One Rung', supportsThinking: true, alwaysThinks: true, thinkingLevels: ['high'] },
+    ],
+  },
 ]
 
 // Record PUT bodies so the write-path tests can assert what was sent.
@@ -149,5 +158,57 @@ describe('useAgentModel', () => {
     const { api } = await mountAgentModel({ agents: ref([agent({ thinkingMode: null })]) })
     api.openThinkingMenu()
     expect(api.thinkingMenuOpen.value).toBe(false) // inactive → stays closed
+  })
+
+  // === always-thinking models: the lock covers on/off, not effort ===
+
+  it('reports thinking as active on a locked model even with no level stored', async () => {
+    // The model reasons regardless of what we persist, so reporting "off" would
+    // contradict both the pill and the request the backend actually sends.
+    const { api } = await mountAgentModel({
+      agents: ref([agent({ modelProvider: 'ollama-cloud', modelId: 'glm-5.3-flash', thinkingMode: null })]),
+    })
+    expect(api.thinkingLock.value.locked).toBe(true)
+    expect(api.thinkingActive.value).toBe(true)
+  })
+
+  it('leaves the level menu reachable on a locked model that advertises a ladder', async () => {
+    const { api } = await mountAgentModel({
+      agents: ref([agent({ modelProvider: 'ollama-cloud', modelId: 'glm-5.3-flash', thinkingMode: null })]),
+    })
+    expect(api.thinkingLevels.value).toEqual(['low', 'high', 'max'])
+    expect(api.thinkingPillInert.value).toBe(false)
+    expect(api.thinkingPillTitle.value).toContain('Hover to pick an effort level.')
+    api.openThinkingMenu()
+    expect(api.thinkingMenuOpen.value).toBe(true)
+  })
+
+  it('treats a locked model with a single rung as genuinely inoperable', async () => {
+    // Nothing to pick between, so the pill really is inert and must say so —
+    // aria-disabled on a menu trigger with a menu would be a lie either way.
+    const { api } = await mountAgentModel({
+      agents: ref([agent({ modelProvider: 'ollama-cloud', modelId: 'one-rung', thinkingMode: null })]),
+    })
+    expect(api.thinkingPillInert.value).toBe(true)
+    expect(api.thinkingPillTitle.value).toBe(api.thinkingLock.value.reason)
+  })
+
+  it('setThinkingLevel writes the chosen effort on a locked model', async () => {
+    // The regression this guards: the lock used to bar setThinkingLevel outright,
+    // which left these models pinned to the vendor default with no way down.
+    const { api, deps } = await mountAgentModel({
+      agents: ref([agent({ modelProvider: 'ollama-cloud', modelId: 'glm-5.3-flash', thinkingMode: null })]),
+    })
+    api.setThinkingLevel('max')
+    await vi.waitFor(() => expect(deps.refreshAgents).toHaveBeenCalled())
+    expect(put.agent).toEqual({ thinkingMode: 'max' })
+  })
+
+  it('still refuses to toggle thinking off on a locked model', async () => {
+    const { api } = await mountAgentModel({
+      agents: ref([agent({ modelProvider: 'ollama-cloud', modelId: 'glm-5.3-flash', thinkingMode: 'high' })]),
+    })
+    api.toggleThinkingPill()
+    expect(put.agent).toBeNull()
   })
 })

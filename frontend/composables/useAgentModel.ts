@@ -34,6 +34,8 @@ export interface UseAgentModel {
   thinkingLock: ComputedRef<ThinkingLock>
   thinkingLevels: ComputedRef<string[]>
   thinkingActive: ComputedRef<boolean>
+  thinkingPillInert: ComputedRef<boolean>
+  thinkingPillTitle: ComputedRef<string>
   visionSupported: ComputedRef<boolean>
   audioSupported: ComputedRef<boolean>
   videoSupported: ComputedRef<boolean>
@@ -154,10 +156,32 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   // --- Pill toggle state ---
 
   // Think pill: active when the agent currently has a reasoning-effort level set.
-  // Null/blank thinkingMode means thinking is off even on a capable model.
+  // Null/blank thinkingMode means thinking is off even on a capable model — except
+  // on a locked one, which reasons regardless of what we store, so reporting it as
+  // off would contradict both the pill and the request the backend actually sends.
   const thinkingActive = computed(() => {
+    if (thinkingLock.value.locked) return true
     const mode = selectedAgent.value?.thinkingMode
     return typeof mode === 'string' && mode.length > 0
+  })
+
+  // A locked pill still opens the level menu, so it is only truly inoperable when
+  // the model advertises nothing to pick between. Marking a menu trigger
+  // aria-disabled would tell assistive tech the opposite of what it does.
+  const thinkingPillInert = computed(() =>
+    thinkingLock.value.locked && thinkingLevels.value.length <= 1)
+
+  // The lock reason alone reads as a dead end. When a ladder exists the tooltip
+  // has to say what is still possible, or the effort control stays undiscovered.
+  const thinkingPillTitle = computed(() => {
+    if (thinkingLock.value.locked) {
+      return thinkingPillInert.value
+        ? thinkingLock.value.reason
+        : `${thinkingLock.value.reason} Hover to pick an effort level.`
+    }
+    return thinkingActive.value
+      ? 'Thinking on — click to turn off, or hover to pick a level'
+      : 'Thinking off — click to turn on'
   })
 
   // Remember the last non-off thinking level the operator picked for THIS session so
@@ -174,9 +198,9 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
 
   function toggleThinkingPill() {
     if (!thinkingSupported.value) return
-    // JCLAW-127: on a locked combo (ollama-cloud + Gemini 2.5 Pro / 3) the
-    // upstream Google API ignores our off signal, so clicking is a no-op. The
-    // tooltip communicates why.
+    // A locked model cannot be turned off — either its architecture has no
+    // non-thinking mode or the upstream API ignores the off signal — so clicking
+    // is a no-op. Choosing a LEVEL is still allowed; only this toggle is barred.
     if (thinkingLock.value.locked) return
     if (thinkingActive.value) {
       updateAgentSetting({ thinkingMode: null })
@@ -243,7 +267,6 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
       thinkingMenuCloseTimer = null
     }
     if (!thinkingSupported.value) return
-    if (thinkingLock.value.locked) return
     if (!thinkingLevels.value.length) return
     // Only surface the level picker when Think is currently on. The pill's
     // click-to-toggle handles on/off; the menu is purely "now that thinking
@@ -267,7 +290,6 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
 
   function setThinkingLevel(level: string) {
     if (!thinkingSupported.value) return
-    if (thinkingLock.value.locked) return
     lastThinkingLevel.value = level
     updateAgentSetting({ thinkingMode: level })
     thinkingMenuOpen.value = false
@@ -358,6 +380,8 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     thinkingLock,
     thinkingLevels,
     thinkingActive,
+    thinkingPillInert,
+    thinkingPillTitle,
     visionSupported,
     audioSupported,
     videoSupported,

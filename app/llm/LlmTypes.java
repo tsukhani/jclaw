@@ -297,14 +297,18 @@ public final class LlmTypes {
      *                         {@code supportsThinking} is true, and
      *                         meaningless otherwise.
      * @param alwaysThinks     marks pure reasoning models (e.g. OpenAI o1/o3,
-     *                         DeepSeek-R1, Qwen QwQ) whose architecture has no
+     *                         DeepSeek-R1, GLM-5.3) whose architecture has no
      *                         non-thinking mode — the provider API accepts a
      *                         "reasoning off" value but the model thinks
      *                         anyway. The UI surfaces these as a locked-on
      *                         pill so the operator isn't misled into believing
-     *                         their off preference was honored. Implies
-     *                         {@code supportsThinking == true}; meaningless
-     *                         otherwise.
+     *                         their off preference was honored, and
+     *                         {@code serializeRequest} sends the first entry of
+     *                         {@link ModelInfo#effectiveThinkingLevels()}
+     *                         instead of an off signal. Does not imply the
+     *                         effort is fixed: the ladder is still selectable.
+     *                         Implies {@code supportsThinking == true};
+     *                         meaningless otherwise.
      */
     public record ModelInfo(
             String id,

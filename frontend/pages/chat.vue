@@ -149,6 +149,8 @@ const {
   thinkingLock,
   thinkingLevels,
   thinkingActive,
+  thinkingPillInert,
+  thinkingPillTitle,
   visionSupported,
   audioSupported,
   videoSupported,
@@ -1178,17 +1180,15 @@ function exportConversation() {
                   class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
                   :class="[
                     thinkingLock.locked
-                      ? 'bg-emerald-700/30 text-emerald-700 dark:text-emerald-300 cursor-not-allowed'
+                      ? `bg-emerald-700/30 text-emerald-700 dark:text-emerald-300 ${thinkingPillInert ? 'cursor-not-allowed' : 'cursor-default'}`
                       : (thinkingActive
                         ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25'
                         : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'),
                   ]"
-                  :aria-disabled="thinkingLock.locked"
-                  :aria-haspopup="thinkingActive && thinkingLevels.length > 1 && !thinkingLock.locked ? 'menu' : undefined"
+                  :aria-disabled="thinkingPillInert"
+                  :aria-haspopup="thinkingActive && thinkingLevels.length > 1 ? 'menu' : undefined"
                   :aria-expanded="thinkingMenuOpen"
-                  :title="thinkingLock.locked
-                    ? thinkingLock.reason
-                    : (thinkingActive ? 'Thinking on — click to turn off, or hover to pick a level' : 'Thinking off — click to turn on')"
+                  :title="thinkingPillTitle"
                   @click="toggleThinkingPill"
                   @mouseenter="openThinkingMenu"
                   @mouseleave="scheduleCloseThinkingMenu"
@@ -1335,7 +1335,7 @@ function exportConversation() {
               leave-to-class="opacity-0 translate-y-1"
             >
               <div
-                v-if="thinkingMenuOpen && thinkingActive && thinkingLevels.length > 1 && !thinkingLock.locked"
+                v-if="thinkingMenuOpen && thinkingActive && thinkingLevels.length > 1"
                 role="menu"
                 tabindex="-1"
                 class="fixed flex flex-col bg-surface-elevated border border-border rounded-lg shadow-lg overflow-hidden z-50 min-w-24"

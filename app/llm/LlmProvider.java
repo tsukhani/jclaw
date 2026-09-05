@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -771,28 +772,33 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     }
 
     /**
-     * True when the model reasons no matter what the request asks for.
+     * The reasoning-effort level to send when the operator has chosen none, for a
+     * model that reasons no matter what the request asks for.
      *
-     * <p>Verified on ollama.com/v1 with {@code glm-5.3-flash}:
-     * {@code reasoning_effort:"none"} stops Ollama emitting the {@code reasoning}
-     * delta field but does not stop the model reasoning, so the chain-of-thought
-     * arrives as ordinary {@code content} and renders as the first paragraph of
-     * the reply. The same request with no reasoning params keeps the channels
-     * split — so skipping the disable path costs no tokens the model wasn't
-     * already spending.
+     * <p>Verified on ollama.com/v1 with {@code glm-5.3-flash} (n=4 per level,
+     * reasoning-field chars): {@code low} 180, {@code high} 650, {@code max} 2940,
+     * omitted 3195. Two things follow. Omitting the parameter inherits the
+     * vendor's default, which on this ladder is the most expensive rung — so
+     * sending nothing is not a neutral choice. And {@code reasoning_effort:"none"}
+     * yields 0: Ollama stops emitting the {@code reasoning} delta field while the
+     * model reasons anyway, so the chain-of-thought arrives as ordinary
+     * {@code content} and the thinking block never fills.
      *
-     * <p>Unknown resolves to false: a model the provider publishes no metadata
-     * for keeps the normal disable path.
+     * <p>Sending the model's lowest advertised rung avoids both. Empty for every
+     * model that can genuinely stop reasoning, and for one absent from the
+     * catalog — both keep the normal disable path.
      */
-    protected boolean modelAlwaysThinks(String modelId) {
-        if (modelId == null) return false;
+    protected Optional<String> mandatoryThinkingLevel(String modelId) {
+        if (modelId == null) return Optional.empty();
         var models = config().models();
-        if (models == null) return false;
+        if (models == null) return Optional.empty();
         return models.stream()
                 .filter(m -> modelId.equals(m.id()))
                 .findFirst()
-                .map(ModelInfo::alwaysThinks)
-                .orElse(false);
+                .filter(ModelInfo::alwaysThinks)
+                .map(ModelInfo::effectiveThinkingLevels)
+                .filter(levels -> !levels.isEmpty())
+                .map(List::getFirst);
     }
 
     protected String serializeRequest(ChatRequest request) {
@@ -813,8 +819,10 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
         if (request.thinkingMode() != null && !request.thinkingMode().isBlank()) {
             addReasoningParams(obj, request.thinkingMode());
-        } else if (!modelAlwaysThinks(request.model())) {
-            disableReasoning(obj);
+        } else {
+            mandatoryThinkingLevel(request.model()).ifPresentOrElse(
+                    level -> addReasoningParams(obj, level),
+                    () -> disableReasoning(obj));
         }
         applyCacheDirectives(obj, request);
         stripCacheBoundaryMarker(obj);

@@ -4,6 +4,13 @@
  * with an explanatory tooltip instead of silently ignoring the operator's
  * preference.
  *
+ * The lock covers on/off ONLY. Effort levels remain selectable: always-on
+ * thinking and a reasoning-effort ladder are independent axes — GLM-5.3 removed
+ * the off switch while keeping low/high/max, and a measured low→max spread of
+ * roughly 16x in reasoning volume makes that ladder the only cost control left
+ * on such a model. Hiding it behind the lock is what made these models default
+ * to the vendor's priciest rung with no way down.
+ *
  * Two distinct causes converge on the same UX:
  *
  * 1. Model architecture ({@code model.alwaysThinks}). Pure reasoning models
