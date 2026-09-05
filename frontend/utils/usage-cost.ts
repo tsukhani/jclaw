@@ -161,7 +161,34 @@ export function providerMetricRows(usage: MessageUsage): ProviderMetricRow[] {
       label: providerMetricLabel(key, (leafCounts.get(metricLeaf(key)) ?? 0) > 1),
       value: formatProviderMetric(key, value),
     }))
-    .sort((a, b) => a.label.localeCompare(b.label))
+    .sort(compareMetricRows)
+}
+
+/**
+ * Counts first then costs, and within each the provider's own nest, before falling
+ * back to the label.
+ *
+ * Sorting on the label alone wedged the three `cost_details` rows between the token
+ * counts, so a modality count could end up stranded below them looking unrelated.
+ * The nest is the provider's own grouping and carries real meaning — `video_tokens`
+ * is an input-side count and `image_tokens` an output-side one — so honouring it
+ * keeps each pair together instead of interleaving the two sides alphabetically.
+ */
+function compareMetricRows(a: ProviderMetricRow, b: ProviderMetricRow): number {
+  const kind = Number(isCostMetric(a.key)) - Number(isCostMetric(b.key))
+  if (kind !== 0) return kind
+  const nest = metricParent(a.key).localeCompare(metricParent(b.key))
+  if (nest !== 0) return nest
+  return a.label.localeCompare(b.label)
+}
+
+function metricParent(key: string): string {
+  const dot = key.lastIndexOf('.')
+  return dot < 0 ? '' : key.slice(0, dot)
+}
+
+function isCostMetric(key: string): boolean {
+  return /cost$/.test(key)
 }
 
 function metricLeaf(key: string): string {
@@ -186,7 +213,7 @@ function providerMetricLabel(key: string, qualify: boolean): string {
 }
 
 function formatProviderMetric(key: string, value: number): string {
-  if (/cost$/.test(key)) {
+  if (isCostMetric(key)) {
     return value > 0 && value < 0.0001 ? '< $0.0001' : '$' + value.toFixed(4)
   }
   return value.toLocaleString()

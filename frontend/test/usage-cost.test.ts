@@ -658,6 +658,33 @@ describe('providerMetricRows (JCLAW-1147)', () => {
     expect(labels).toContain('Upstream inference cost')
   })
 
+  it('keeps counts together and costs last instead of interleaving them by label', () => {
+    // The real key set from an openrouter turn. Sorting on the label alone wedged the
+    // three cost rows between the counts and stranded "Video tokens" at the bottom.
+    const rows = providerMetricRows(usage({
+      providerMetrics: {
+        'prompt_tokens_details.video_tokens': 0,
+        'cost_details.upstream_inference_cost': 0.003145,
+        'completion_tokens_details.image_tokens': 0,
+        'cost_details.upstream_inference_prompt_cost': 0.002815,
+        'prompt_tokens_details.audio_tokens': 0,
+        'completion_tokens_details.audio_tokens': 0,
+        'cost_details.upstream_inference_completions_cost': 0.00033,
+      },
+    }))
+    expect(rows.map(r => r.label)).toEqual([
+      // completion nest, then prompt nest — each modality sits with its own side...
+      'Completion audio tokens',
+      'Image tokens',
+      'Prompt audio tokens',
+      'Video tokens',
+      // ...and every cost lands after the counts, never between them.
+      'Upstream inference completions cost',
+      'Upstream inference cost',
+      'Upstream inference prompt cost',
+    ])
+  })
+
   it('orders rows by label so the popover is stable between turns', () => {
     const rows = providerMetricRows(usage({
       providerMetrics: { zebra_count: 1, alpha_count: 2 },
