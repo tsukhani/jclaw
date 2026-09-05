@@ -94,7 +94,7 @@ public class AgentService {
      * Operator-created agents (any caller from the admin UI or
      * {@link controllers.ApiAgentsController}) still get the full workspace
      * via the three other {@code create} overloads, which default
-     * {@code createWorkspace=true} and preserve the pre-2026-05 behavior.
+     * {@code createWorkspace=true}.
      *
      * @param name             agent name (unique within the deployment)
      * @param modelProvider    provider id the agent defaults to
@@ -273,12 +273,6 @@ public class AgentService {
      * collapse to null (silent drop — the model can't reason anyway). Unknown
      * levels for a thinking model also collapse to null rather than 500-ing,
      * which protects against stale frontend state after a model swap.
-     *
-     * @param requested      operator-supplied thinking mode
-     * @param modelProvider  provider id to validate against
-     * @param modelId        model id to validate against
-     * @return the validated thinking mode, or {@code null} when not
-     *         applicable / unknown
      */
     private static String normalizeThinkingMode(String requested, String modelProvider, String modelId) {
         if (requested == null || requested.isBlank()) return null;
@@ -288,14 +282,7 @@ public class AgentService {
         return levels.contains(requested) ? requested : null;
     }
 
-    /**
-     * Check whether the given provider+model combination is currently
-     * configured and available.
-     *
-     * @param providerName provider id to check
-     * @param modelId      model id to check within that provider's list
-     * @return true when the provider is registered and lists this model id
-     */
+    /** True when {@code providerName} is a registered provider whose model list contains {@code modelId}. */
     public static boolean isProviderConfigured(String providerName, String modelId) {
         return findModel(providerName, modelId).isPresent();
     }

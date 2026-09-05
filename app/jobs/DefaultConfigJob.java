@@ -76,10 +76,8 @@ public class DefaultConfigJob extends Job<Void> {
      * lands.
      */
     private void seedTranscription() {
-        // JCLAW-164: provider radio defaults to whisper-local — the only
-        // shipped engine today (cloud backends arrive in JCLAW-162). Switch
-        // via Settings → Transcription once an OpenRouter / OpenAI API key
-        // is configured.
+        // JCLAW-164: provider defaults to whisper-local; the cloud backends (JCLAW-162) are
+        // switched on via Settings → Transcription once an OpenRouter / OpenAI API key is configured.
         seedIfAbsent("transcription.provider", "whisper-local");
         // JCLAW-654: diarization is cloud-only — an audio-capable chat model
         // chosen in Settings; empty means "not configured" and the diarize
@@ -108,23 +106,6 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("tts.local.port", "9531");
         seedIfAbsent("tts.sidecar.model", TtsModel.defaultFor(TtsEngine.SIDECAR).id());
         seedIfAbsent("tts.jvm.model", TtsModel.defaultFor(TtsEngine.JVM).id());
-        // JCLAW-563: per-turn acoustic emotion labels on diarized
-        // transcripts. On by default (best-effort — failures never break a
-        // transcript); set false to skip the ~95 MB model download and the
-        // extra per-turn inference.
-        // JCLAW-565/614: Hugging Face token for the gated community-1
-        // weights, passed to the sidecar process as HF_TOKEN. Blank = reuse
-        // imagegen.local.hfToken; with neither set diarization fails fast
-        // with setup instructions (sidecar-or-error). Masked in
-        // Settings (key name contains "token").
-        // JCLAW-605: cross-talk turns re-attributed via MossFormer2 source
-        // separation in the sidecar + WeSpeaker stem voiceprints. Only
-        // activates on the pyannote path when overlap regions exist; every
-        // failure degrades to the merge's attribution.
-        // JCLAW-612: NeMo MSDD consulted as a second opinion on contested
-        // turns (pyannote path only). First use builds a separate uv env.
-        // JCLAW-613: transcribe backchannel interjections from minor
-        // separation stems so under-speech appears as its own turn.
     }
 
     /**
@@ -297,18 +278,15 @@ public class DefaultConfigJob extends Job<Void> {
         // fallback, so an unset key is the correct resting state.
         renameKeyIfPresent("ollama.keepAlive", "provider.ollama-local.keepAlive");
 
-        // JCLAW-172: playwright.enabled / playwright.headless / shell.enabled
-        // are gone — the browser is always headless and both tools register
-        // unconditionally; per-agent enable/disable still happens via the
-        // Tools page (AgentToolConfig). The shell allowlist + timeout knobs
-        // remain useful operator config and stay seeded.
+        // JCLAW-172: playwright.enabled / playwright.headless / shell.enabled are gone (always headless,
+        // both tools register unconditionally, per-agent enable via the Tools page); the shell knobs below stay.
 
         // OCR backends. The parse-time tunables (languages, timeout, pdf
         // strategy) stay in conf/application.conf because they're read once
         // per parse and don't need a UI; the user-facing on/off lives here
         // so the Settings page OCR section can flip it. The actual binary's
         // presence is detected at boot by jobs.TesseractProbeJob — when the
-        // probe says missing, the Settings UI greys out the toggle even if
+        // probe says missing, the Settings UI grays out the toggle even if
         // this row is "true", so the stored value tracks user intent rather
         // than runtime availability.
         seedIfAbsent("ocr.tesseract.enabled", "true");
@@ -435,11 +413,7 @@ public class DefaultConfigJob extends Job<Void> {
      * </ol>
      */
     private void seedJClawApiTooling() {
-        // Step 1: ensure the internal bearer token exists. The first
-        // call mints it; subsequent boots reuse the stored value.
         InternalApiTokenService.token();
-
-        // Step 2: install the skill into main's workspace.
         seedJClawApiSkillForMain();
     }
 

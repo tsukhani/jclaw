@@ -23,7 +23,7 @@ public interface ValueEnum {
     /**
      * Build a {@code value -> constant} lookup over an enum's constants, for
      * a {@code fromValue} resolver. Preserves the prior switch semantics:
-     * {@link #fromValue} returns {@code null} for {@code null} or unrecognised
+     * {@link #fromValue} returns {@code null} for {@code null} or unrecognized
      * input rather than throwing.
      */
     static <E extends Enum<E> & ValueEnum> Map<String, E> indexOf(E[] constants) {
@@ -36,7 +36,7 @@ public interface ValueEnum {
 
     /**
      * Resolve a raw string against a lookup built by {@link #indexOf}. Returns
-     * {@code null} for {@code null} or unrecognised input so callers can fall
+     * {@code null} for {@code null} or unrecognized input so callers can fall
      * through to a default branch without throwing.
      */
     static <E extends Enum<E> & ValueEnum> E fromValue(Map<String, E> index, String value) {

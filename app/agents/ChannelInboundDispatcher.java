@@ -10,6 +10,7 @@ import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
+import slash.Commands;
 
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -73,14 +74,14 @@ final class ChannelInboundDispatcher {
         // JCLAW-26: intercept slash commands before the LLM round. /new creates
         // a fresh conversation and short-circuits; /reset + /help mutate the
         // current conversation and short-circuit. Unknown /foo falls through.
-        var slashCmd = slash.Commands.parse(text);
+        var slashCmd = Commands.parse(text);
         if (slashCmd.isPresent()) {
             var cmd = slashCmd.get();
-            Conversation current = cmd == slash.Commands.Command.NEW
+            Conversation current = cmd == Commands.Command.NEW
                     ? null
                     : Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
-            var result = slash.Commands.execute(cmd, agent, channelType, peerId, current,
-                    slash.Commands.extractArgs(text));
+            var result = Commands.execute(cmd, agent, channelType, peerId, current,
+                    Commands.extractArgs(text));
             sendResponse.accept(peerId, result.responseText());
             return;
         }
@@ -177,14 +178,14 @@ final class ChannelInboundDispatcher {
         // existing sink machinery to deliver the canned response — an unused
         // sink's seal() path falls through to the per-binding TelegramChannel's
         // sendTurn, which keeps the bot-token / chat-id routing owned by the caller.
-        var slashCmd = slash.Commands.parse(text);
+        var slashCmd = Commands.parse(text);
         if (slashCmd.isPresent()) {
             var cmd = slashCmd.get();
-            Conversation current = cmd == slash.Commands.Command.NEW
+            Conversation current = cmd == Commands.Command.NEW
                     ? null
                     : Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId, chatType));
-            var result = slash.Commands.execute(cmd, agent, channelType, peerId, current,
-                    slash.Commands.extractArgs(text));
+            var result = Commands.execute(cmd, agent, channelType, peerId, current,
+                    Commands.extractArgs(text));
             var slashSink = sinkFactory.apply(
                     result.conversation() != null ? result.conversation().id : null);
             // JCLAW-109: an empty responseText is the handler's signal that
@@ -204,8 +205,8 @@ final class ChannelInboundDispatcher {
         // hand it the slash-command list, so it produces a proper self-
         // introduction instead of improvising from "/start" alone. Replaces the
         // first-contact-only deterministic welcome (JCLAW-97).
-        final boolean isStart = slash.Commands.isStart(text);
-        final String turnText = isStart ? slash.Commands.startIntroPrompt() : text;
+        final boolean isStart = Commands.isStart(text);
+        final String turnText = isStart ? Commands.startIntroPrompt() : text;
         var conversation = Tx.run(() -> isStart
                 ? ConversationService.create(agent, channelType, peerId)
                 : ConversationService.findOrCreate(agent, channelType, peerId, chatType));

@@ -106,9 +106,7 @@ public class ModelDiscoveryService {
      * ({@link #parseModels}, {@link #parseLmStudioNativeResponse},
      * {@link #parseOllamaShow}). Centralizing the field set — and the
      * {@code key -> value} projection in {@link #toMap()} — keeps the three
-     * paths from drifting: every parser emits the full key set (including the
-     * {@code supportsVideo} / {@code videoDetectedFromProvider} pair that the
-     * LM Studio and Ollama parsers previously omitted) by construction.
+     * paths from drifting: every parser emits the full key set by construction.
      */
     record ModelInfo(
             String id, String name, int contextWindow, int maxTokens,
@@ -403,9 +401,8 @@ public class ModelDiscoveryService {
      * {@code -preview}).
      */
     public static CapabilityDetection detectAlwaysThinks(JsonObject obj) {
-        // OpenRouter publishes architecture.instruct_type — the only
-        // provider-surfaced signal we get for "always thinks." For the
-        // R1 family it's exactly "deepseek-r1"; treat as confirmed.
+        // OpenRouter's architecture.instruct_type is the only provider-surfaced signal for
+        // "always thinks"; for the R1 family it's exactly "deepseek-r1", so treat as confirmed.
         if (obj.has(FIELD_ARCHITECTURE) && obj.get(FIELD_ARCHITECTURE).isJsonObject()) {
             var arch = obj.getAsJsonObject(FIELD_ARCHITECTURE);
             if (arch.has(FIELD_INSTRUCT_TYPE) && arch.get(FIELD_INSTRUCT_TYPE).isJsonPrimitive()) {
@@ -472,13 +469,7 @@ public class ModelDiscoveryService {
         return new ThinkingDetection(false, false);
     }
 
-    /**
-     * Return {@code true} if any JSON-primitive element of {@code array} equals
-     * one of the {@code needles}. {@code caseInsensitive} toggles between
-     * {@link String#equals} and {@link String#equalsIgnoreCase}. Used by the
-     * capability detectors to scan provider-reported arrays
-     * ({@code supported_parameters}, {@code capabilities}).
-     */
+    /** True when any JSON-primitive element of {@code array} equals one of {@code needles}. */
     private static boolean arrayContainsAny(JsonArray array, boolean caseInsensitive, String... needles) {
         for (var el : array) {
             if (!el.isJsonPrimitive()) continue;
@@ -646,10 +637,7 @@ public class ModelDiscoveryService {
      *       in dollars <i>per token</i> — multiplied by 1e6 to reach JClaw's
      *       per-million convention.</li>
      *   <li><b>Together AI:</b> {@code pricing.{input,output,cached_input}}
-     *       quoted in dollars <i>per million tokens</i> already — used as-is.
-     *       These were previously dropped (returned {@code -1}) because only
-     *       the OpenRouter keys were read, which is why Together models
-     *       discovered unpriced.</li>
+     *       quoted in dollars <i>per million tokens</i> already — used as-is.</li>
      * </ul>
      *
      * <p>The key shape is the discriminator: among JClaw's supported providers
@@ -1015,8 +1003,7 @@ public class ModelDiscoveryService {
                 vision.confirmed(), vision.fromProvider(),
                 audio.confirmed(), audio.fromProvider(),
                 // Video: the Ollama native path is image-only (JCLAW-208); a
-                // Qwen-VL model served here stays supportsVideo=false, matching
-                // the pre-existing behavior where the video keys were absent.
+                // Qwen-VL model served here stays supportsVideo=false.
                 false, false,
                 tools.confirmed(), tools.fromProvider(),
                 // Ollama doesn't publish pricing via the API. -1 means "unset" —

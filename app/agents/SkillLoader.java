@@ -138,7 +138,6 @@ public class SkillLoader {
      * Called at startup to sync DB with the actual skills/ directory.
      */
     public static void syncSkillConfigs() {
-        // Collect all skill names that exist on disk (global + all agent workspaces)
         var existingSkills = new HashSet<String>();
         collectSkillNamesUnder(globalSkillsPath(), existingSkills);
         collectWorkspaceSkillNames(AgentService.workspaceRoot(), existingSkills);
@@ -229,7 +228,7 @@ public class SkillLoader {
      * resolves relative to workspace). Preserves every field on the
      * record — earlier truncated constructors silently defaulted later
      * fields to empty, which is how JCLAW-71's icon field leaked back
-     * to "" after parsing. JCLAW-281 adds mcpServers as the tenth field.
+     * to "" after parsing.
      */
     private static void relativizeSkillLocations(List<SkillInfo> allSkills, Path workspaceDir) {
         allSkills.replaceAll(s -> {
@@ -466,7 +465,7 @@ public class SkillLoader {
      */
     public static List<String> extractYamlList(String yaml, String key) {
         // Inline form: key: [a, b, c]. Pre-compiled for the known closed-set
-        // keys; only an unrecognised custom key pays the per-call compile.
+        // keys; only an unrecognized custom key pays the per-call compile.
         var inlinePattern = switch (key) {
             case KEY_TOOLS -> TOOLS_INLINE_LIST;
             case KEY_COMMANDS -> COMMANDS_INLINE_LIST;

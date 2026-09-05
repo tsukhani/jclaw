@@ -107,7 +107,7 @@ public final class TailscaleFunnel {
     /** Start funnelling {@code localPort} to the public internet (idempotent). */
     public static boolean enable(int localPort) {
         boolean ok = enable(localPort, PROCESS_RUNNER);
-        invalidateStatusCache();  // state changed — the next status() must re-probe
+        invalidateStatusCache();
         return ok;
     }
 

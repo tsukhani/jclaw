@@ -52,8 +52,6 @@ public class ApiSlackBindingsController extends ApiBindingController {
     /** The fixed Slack Events API contract path; the per-binding id is appended. */
     private static final String WEBHOOK_PATH = "/api/webhooks/slack/";
 
-    // JCLAW-682: canonical error codes for the ApiResponses envelope.
-
     /** Flat projection the frontend consumes. The secrets ({@code botToken},
      *  {@code signingSecret}, {@code appToken}) are elided; only presence flags
      *  are surfaced. {@code effectiveRequestUrl} is the full Events API Request

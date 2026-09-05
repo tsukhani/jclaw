@@ -33,13 +33,9 @@ public final class WorkspaceFiles {
     private static final String LOG_CATEGORY = "agent";
 
     /**
-     * Workspace-file cache (JCLAW-202). Caffeine handles concurrent access
-     * and size-bound eviction under the hood; no manual LRU bookkeeping or
-     * lock acquire/release needed. The previous hand-rolled {@code LinkedHashMap}
-     * + {@code ReentrantLock} variant guarded against a {@code ConcurrentHashMap}
-     * size-check race that would let workspace files overshoot the cap and
-     * leak heap; Caffeine's atomic eviction makes both the lock and the
-     * race moot.
+     * Workspace-file cache (JCLAW-202). Caffeine's atomic size-bound eviction closes the
+     * {@code ConcurrentHashMap} size-check race that let workspace files overshoot the cap
+     * and leak heap, so no hand-rolled LRU or lock bookkeeping is needed.
      */
     private static final Cache<String, String> fileCache = Caches.named(
             "agent-files",
@@ -65,9 +61,6 @@ public final class WorkspaceFiles {
      * Throws {@link SecurityException} when the resolved path escapes the
      * workspace root — callers should not attempt to recover, the only
      * correct response is to refuse the operation.
-     *
-     * @param agentName agent whose workspace folder is requested
-     * @return the agent's workspace directory path
      */
     public static Path workspacePath(String agentName) {
         var rootName = resolveWorkspaceOwnerName(agentName);
@@ -363,7 +356,7 @@ public final class WorkspaceFiles {
         var cacheKey = agentName + "/" + filename;
         var cached = fileCache.getIfPresent(cacheKey);
         if (cached != null) return cached;
-        // Cache miss: read from disk. Use getIfPresent + put rather than
+        // Use getIfPresent + put rather than
         // get(key, loader) so the loader's null-on-error path doesn't get
         // memoized (Cache.get(loader) treats null as "skip caching" but a
         // raised IOException would propagate; we want to swallow + log

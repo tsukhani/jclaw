@@ -11,6 +11,7 @@ import services.EventLogger;
 import services.Tx;
 import services.caption.CaptionRouter;
 import services.caption.ImageCaptionService;
+import services.transcription.LlmAudio;
 import services.transcription.PendingTranscripts;
 import services.video.VideoUnderstandingDispatcher;
 
@@ -360,7 +361,7 @@ public final class VisionAudioAssembler {
                 // call just retries out. LlmAudio transcodes once to mono
                 // MP3 and caches beside the attachment.
                 try {
-                    var prepared = services.transcription.LlmAudio.prepare(a);
+                    var prepared = LlmAudio.prepare(a);
                     var inner = new LinkedHashMap<String, Object>();
                     inner.put("data", prepared.base64());
                     if (!prepared.format().isEmpty()) inner.put("format", prepared.format());

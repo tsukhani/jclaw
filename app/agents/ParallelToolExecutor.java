@@ -220,7 +220,7 @@ public final class ParallelToolExecutor {
             if (groupKey == null) {
                 safeCalls.add(i);
             } else {
-                unsafeGroups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(i);
+                unsafeGroups.computeIfAbsent(groupKey, _ -> new ArrayList<>()).add(i);
             }
         }
 

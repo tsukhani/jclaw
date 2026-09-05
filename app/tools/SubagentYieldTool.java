@@ -24,7 +24,7 @@ import java.util.Map;
  * {@code run_id} (or alternatively {@code conversation_id}) returned from a
  * prior {@code subagent_spawn} with {@code async=true}; the tool flips
  * {@link SubagentRun#yielded} to {@code true} and returns a sentinel JSON
- * payload that {@link agents.AgentRunner} recognises to exit its tool-call
+ * payload that {@link agents.AgentRunner} recognizes to exit its tool-call
  * loop without emitting a final assistant reply.
  *
  * <p>The actual resume — the child's final reply landing as the parent's

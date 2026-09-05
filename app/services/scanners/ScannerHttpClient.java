@@ -8,9 +8,7 @@ import java.io.IOException;
 /**
  * Functional interface for scanner HTTP calls. Wraps an OkHttp
  * {@link okhttp3.OkHttpClient} call so test fixtures can stub the
- * response without a real network round-trip. JCLAW-188 reshaped this
- * around OkHttp; the prior version returned a JDK
- * {@code java.net.http.HttpResponse}.
+ * response without a real network round-trip.
  *
  * <p>{@code timeoutMs} bounds the entire call (connect plus write plus read);
  * the production implementation sets {@code Call.timeout(...)} so each

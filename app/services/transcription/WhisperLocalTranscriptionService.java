@@ -26,8 +26,7 @@ public final class WhisperLocalTranscriptionService implements TranscriptionServ
         var model = AsrModel.byId(modelId).orElse(AsrModel.DEFAULT);
         var path = AgentService.workspaceRoot().resolve(attachment.storagePath);
         // Language follows the model selection (JCLAW-556): multilingual
-        // models auto-detect per clip, .en models decode English. Before,
-        // multilingual models were silently forced to "en".
+        // models auto-detect per clip, .en models decode English.
         return WhisperTranscriber.transcribe(path, model);
     }
 }

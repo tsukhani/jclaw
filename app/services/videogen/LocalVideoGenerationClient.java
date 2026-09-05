@@ -21,7 +21,7 @@ import java.io.IOException;
  * returns state+percent, and on success {@code resultUrl} is the sidecar's {@code /jobs/<id>/result},
  * which the runner fetches and fills into the placeholder verbatim, exactly as it does for a cloud URL.
  *
- * <p>The only behavioural difference from cloud is upside: {@link #poll} carries a real {@code percent}
+ * <p>The only behavioral difference from cloud is upside: {@link #poll} carries a real {@code percent}
  * (from the sidecar's diffusion step callback), whereas cloud reports {@code null}.
  *
  * <p>Parameterised by the engine model id ({@code ltx} / {@code wan-5b} / {@code wan-14b}); each

@@ -14,7 +14,7 @@ import java.util.List;
  *   <li>{@link ConversationSink} — writes Message rows linked to a
  *       {@link models.Conversation}. Powers all existing chat flows
  *       (web, Telegram, slash commands, channel adapters).</li>
- *   <li>{@code TaskRunSink} (subsequent JCLAW-21 commit) — writes
+ *   <li>{@code TaskRunSink} — writes
  *       {@code task_run_message} rows linked to a {@code TaskRun}, so
  *       task fires record their per-turn transcript without
  *       manufacturing a Conversation.</li>

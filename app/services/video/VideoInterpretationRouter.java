@@ -22,7 +22,7 @@ import java.util.Optional;
  *       so a vision model interprets sampled frames as {@code image_url} parts).</li>
  * </ul>
  *
- * <p>Returns {@link Optional#empty()} when unset/unrecognised — the dispatcher then falls back to
+ * <p>Returns {@link Optional#empty()} when unset/unrecognized — the dispatcher then falls back to
  * interpreting the video with the agent's own chat model. Resolved per call so a Settings change
  * takes effect on the next video without a restart.
  */

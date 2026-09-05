@@ -162,7 +162,6 @@ public class ApiTasksController extends Controller {
      *     completed a run.
      */
     public static String nextRunAtForDisplay(Task t, Instant lastFiredAt) {
-        // Paused recurring tasks won't fire until resumed.
         if (t.paused) return null;
         // Only live tasks (PENDING one-shot / ACTIVE recurring) have a
         // meaningful "next fire" — terminal-state tasks fall through to the
@@ -239,9 +238,7 @@ public class ApiTasksController extends Controller {
         rejectInvalidDelivery(body);
 
         rejectDuplicateRecurringTask(name, agent, spec);
-        // Validated here (not in the service) so the invalid-timezone 400 stays
-        // a controller guard, fired at the same point persistNewTask used to
-        // validate it — after the duplicate-recurring 409, before the persist.
+        // Stays a controller guard, ordered after the duplicate-recurring 409 and before the persist.
         rejectInvalidTimezone(body);
 
         var origin = creationOrigin();
@@ -420,7 +417,7 @@ public class ApiTasksController extends Controller {
         // execute an attacker-chosen prompt at operator trust. Trust may fall on mutation, never
         // rise — the mirror of TaskTool.applyPatch's downgrade, at the REST door (JCLAW-1021).
         if (RequestPrincipal.isAgentOriginated()
-                && utils.ChannelOriginTrust.isOperatorOrigin(task.originChannel)) {
+                && ChannelOriginTrust.isOperatorOrigin(task.originChannel)) {
             task.originChannel = null;
         }
 
@@ -508,8 +505,6 @@ public class ApiTasksController extends Controller {
     public static void cancel(Long id) {
         Task task = TaskService.findById(id);
         if (task == null) notFound();
-        // Both PENDING (one-shot waiting) and ACTIVE (recurring ongoing)
-        // are cancellable; other states (RUNNING, terminal) are not.
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
@@ -582,7 +577,6 @@ public class ApiTasksController extends Controller {
     public static void resume(Long id) {
         Task task = TaskService.findById(id);
         if (task == null) notFound();
-        // Resume mirrors pause — accept PENDING or ACTIVE alive states.
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }

@@ -66,18 +66,14 @@ final class TelegramAdminSender {
         }
     }
 
-    // ── JCLAW-364: dormant send primitives (consumed by JCLAW-374/375) ──
-    //
-    // Added but intentionally not wired into any dispatch path yet. They follow
-    // the static-helper + execute + warn-on-fail shape of setMyCommands so the
-    // next wave can call them directly.
+    // ── JCLAW-364: message-admin send primitives (consumed by JCLAW-374/375) ──
 
     /**
      * JCLAW-364: set (or clear) the bot's reaction on a message. A non-blank
      * {@code emoji} sets a single {@link ReactionTypeEmoji} reaction; a
      * {@code null}/blank emoji sends an empty reaction list, which clears any
      * reaction the bot previously placed. Returns false (logged) on any API
-     * failure — never throws. Dormant: no caller yet (JCLAW-374).
+     * failure — never throws.
      */
     boolean setMessageReaction(String chatId, Integer messageId, String emoji) {
         if (ctx.botToken() == null || chatId == null || messageId == null) return false;
@@ -103,7 +99,7 @@ final class TelegramAdminSender {
 
     /**
      * JCLAW-364: pin {@code messageId} in {@code chatId}. Returns false (logged)
-     * on any API failure — never throws. Dormant: no caller yet (JCLAW-375).
+     * on any API failure — never throws.
      */
     boolean pinChatMessage(String chatId, Integer messageId) {
         if (ctx.botToken() == null || chatId == null || messageId == null) return false;
@@ -122,8 +118,7 @@ final class TelegramAdminSender {
 
     /**
      * JCLAW-364: unpin {@code messageId} in {@code chatId}. Returns false
-     * (logged) on any API failure — never throws. Dormant: no caller yet
-     * (JCLAW-375).
+     * (logged) on any API failure — never throws.
      */
     boolean unpinChatMessage(String chatId, Integer messageId) {
         if (ctx.botToken() == null || chatId == null || messageId == null) return false;

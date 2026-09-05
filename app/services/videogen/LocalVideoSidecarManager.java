@@ -48,7 +48,7 @@ public final class LocalVideoSidecarManager {
         if (model.equals(runningModel) && DAEMON.isHealthy()) return DAEMON.baseUrl();
         return DAEMON.singleFlight(() -> {
             if (model.equals(runningModel) && DAEMON.isHealthy()) return DAEMON.baseUrl();
-            if (!UvProbe.isAvailable()) { // shared uv-on-PATH probe
+            if (!UvProbe.isAvailable()) {
                 throw new VideoGenerationException(
                         "local video generation requires 'uv' on PATH: " + UvProbe.lastResult().reason());
             }

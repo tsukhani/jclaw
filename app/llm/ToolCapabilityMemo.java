@@ -5,10 +5,8 @@ import play.Logger;
 import services.ConfigService;
 import services.Tx;
 
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * Remembers models that answered "I don't support tools" (JCLAW-1076).
@@ -120,10 +118,5 @@ public final class ToolCapabilityMemo {
     /** Test seam: drop everything learned this run. */
     public static void clearForTest() {
         LEARNED.clear();
-    }
-
-    /** Test seam: what has been learned, for assertions. */
-    public static Map<String, Boolean> snapshotForTest() {
-        return LEARNED.stream().collect(Collectors.toMap(k -> k, _ -> Boolean.TRUE));
     }
 }

@@ -1,11 +1,13 @@
 package tools;
 
+import agents.PromptFenceScrubber;
 import agents.SystemPromptAssembler;
 import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import memory.MemoryCategory;
+import memory.MemoryForgetLog;
 import memory.MemorySafety;
 import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
@@ -275,7 +277,7 @@ public class MemoryTool implements ToolRegistry.Tool {
             // JCLAW-976: a tool result reaches the model too, so it gets the same scrub the
             // prompt block does — a forged fence here would claim stored-fact authority just
             // as effectively.
-            sb.append(agents.PromptFenceScrubber.scrubForInjection(e.text(), "memory " + e.id()))
+            sb.append(PromptFenceScrubber.scrubForInjection(e.text(), "memory " + e.id()))
                     .append('\n');
         }
         return sb.toString();
@@ -331,7 +333,7 @@ public class MemoryTool implements ToolRegistry.Tool {
 
         // An explicit re-store inside the forget window must take effect, or "forget X"
         // followed by "actually, remember X" silently does nothing.
-        memory.MemoryForgetLog.clearMatching(agentId, text);
+        MemoryForgetLog.clearMatching(agentId, text);
         // storeDeferred + embedStored rather than store(): the embedding is a blocking
         // HTTP call and store() would run it inside this transaction, pinning a pooled
         // connection across the network (the JCLAW-807 shape). Same split as applyPlan.
@@ -473,7 +475,7 @@ public class MemoryTool implements ToolRegistry.Tool {
         // Only after the deletes commit, and before capture runs on this turn — the turn
         // that named the fact.
         for (var m : matches) {
-            memory.MemoryForgetLog.noteForgotten(agentId, m.text);
+            MemoryForgetLog.noteForgotten(agentId, m.text);
         }
         EventLogger.info(EVENT_CATEGORY, agent.name, null,
                 "Forgot %d memory(ies) on operator request matching: \"%s\"".formatted(removed.size(), snippet(query)));
@@ -535,7 +537,7 @@ public class MemoryTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Memories that state the same thing as {@code text}: embedding neighbours above the
+     * Memories that state the same thing as {@code text}: embedding neighbors above the
      * capture dedup threshold, plus lexical near-duplicates for the case where no vector
      * backend is configured or the wording matches but the vector does not.
      *
@@ -551,7 +553,7 @@ public class MemoryTool implements ToolRegistry.Tool {
     private static List<Memory> matching(String agentId, String text, String retrievalKey,
             double jaccard, double containment) {
         // Keyless callers (forget) take the lexical leg only: a semantic hit is topical, and
-        // deleting on topic removes neighbouring facts the operator did not name.
+        // deleting on topic removes neighboring facts the operator did not name.
         var ids = (retrievalKey == null || retrievalKey.isBlank())
                 ? List.<Long>of()
                 : semanticNeighbours(agentId, text, retrievalKey);

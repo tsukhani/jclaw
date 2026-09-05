@@ -330,8 +330,6 @@ public final class Commands {
 
     private static Result executeReset(Agent agent, String channelType, Conversation current) {
         if (current == null) {
-            // Nothing to reset. Treat as help-like: tell the user we can't
-            // reset because there's no current conversation.
             var fallback = "No active conversation to reset.";
             EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/reset with no current conversation");
@@ -430,9 +428,7 @@ public final class Commands {
             return new Result(null, fallback, Command.COMPACT);
         }
 
-        // Resolve provider: prefer the conversation override, fall back to
-        // the agent default, then to the registry's primary. Mirrors
-        // AgentRunner.run's provider-selection flow.
+        // Provider selection mirrors AgentRunner.run: override → agent default → registry primary.
         var resolved = ModelOverrideResolver.resolve(current, agent);
         var providerName = resolved.provider();
         var primary = ProviderRegistry.get(providerName);
@@ -1017,7 +1013,6 @@ public final class Commands {
     }
 
     private static String formatTokens(int tokens) {
-        // Thousands separator for readability at larger counts.
         return String.format("%,d", tokens);
     }
 

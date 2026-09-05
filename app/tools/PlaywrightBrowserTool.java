@@ -292,15 +292,6 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * <p>Exposed for unit tests; not part of the public tool API.
      */
     public static String formatScreenshotResult(String url) {
-        // Keep the markdown image so AgentRunner.extractImageUrls picks up
-        // the URL for the buildImagePrefix pipeline. Everything else is the
-        // LLM's call — if the user asked only to take a screenshot, a short
-        // acknowledgment is fine; if they asked for a summary, it'll describe.
-        // Pre-JCLAW-104 this instruction was a three-directive block telling
-        // the LLM what to embed, what not to embed, and what link to include;
-        // every directive has been replaced by a runtime guarantee (see the
-        // class javadoc).
-        //
         // The one remaining directive — "don't quote the file path" — targets
         // a specific chatty-model failure mode (observed with Kimi-K2.5 on
         // Telegram): models sometimes echo the URL from the tool return as
@@ -332,7 +323,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      */
     private static SessionHolder acquireHolder(String agentName) {
         while (true) {
-            var holder = sessions.computeIfAbsent(agentName, k -> new SessionHolder());
+            var holder = sessions.computeIfAbsent(agentName, _ -> new SessionHolder());
             holder.lock.lock();
             if (!holder.removed) {
                 return holder;

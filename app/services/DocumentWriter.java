@@ -146,7 +146,7 @@ public class DocumentWriter {
     }
 
     private static String toXhtml(String html) {
-        // Flying Saucer requires well-formed XHTML. Jsoup re-serialises with
+        // Flying Saucer requires well-formed XHTML. Jsoup re-serializes with
         // self-closing void elements and properly escaped entities.
         Document parsed = Jsoup.parse(html);
         parsed.outputSettings()
@@ -285,7 +285,6 @@ public class DocumentWriter {
             currentParagraph = p;
             var markerRun = p.createRun();
             markerRun.setText(marker);
-            // Render the item's inline content.
             for (Node child = item.getFirstChild(); child != null; child = child.getNext()) {
                 if (child instanceof Paragraph para) {
                     emitInline(para, false, false, false, false, BODY_FONT_SIZE, null);

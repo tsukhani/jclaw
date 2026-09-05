@@ -50,7 +50,7 @@ public final class PrivilegedConfig {
     private static final String KEY_ALLOWLIST = "shell.allowlist";
     private static final String KEY_OFF_CHANNEL_POLICY = "tool.approval.offChannelPolicy";
 
-    /** {@code allow} is the sink's reading of anything unrecognised, so rank it the same way —
+    /** {@code allow} is the sink's reading of anything unrecognized, so rank it the same way —
      *  a ceiling that disagreed with the gate about what a value means would be worse than none. */
     private static final List<String> POLICY_ORDER = List.of("allow", "ask", "deny");
 

@@ -78,9 +78,9 @@ public final class LatencyStats {
      */
     public static @NonNull JsonObject snapshot() {
         var root = new JsonObject();
-        for (Map.Entry<String, ConcurrentHashMap<String, Histogram>> channelEntry : BY_CHANNEL.entrySet()) {
+        for (var channelEntry : BY_CHANNEL.entrySet()) {
             var channelObj = new JsonObject();
-            for (Map.Entry<String, Histogram> e : channelEntry.getValue().entrySet()) {
+            for (var e : channelEntry.getValue().entrySet()) {
                 channelObj.add(e.getKey(), e.getValue().toJson());
             }
             root.add(channelEntry.getKey(), channelObj);

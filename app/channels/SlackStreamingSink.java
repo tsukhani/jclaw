@@ -266,7 +266,7 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
             slacker.appendStream(channelId, streamTs, "\n\n" + msg);
             slacker.stopStream(channelId, streamTs);
         } else if (draftTs != null) {
-            slacker.editMessage(channelId, draftTs, msg); // edit the draft in place
+            slacker.editMessage(channelId, draftTs, msg);
         } else {
             slacker.postFallback(channelId, msg, threadTs);
         }

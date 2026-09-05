@@ -115,13 +115,8 @@ public class ApiSubagentRunsController extends Controller {
                 .eq("r." + STATUS, statusEnum)
                 .gte(COL_STARTED_AT, sinceInstant);
 
-        // JCLAW-304: q resolves against TWO Lucene scopes and unions the
-        // resulting run-id sets — SUBAGENT_RUN directly (label + outcome
-        // virtual doc) plus CONVERSATION_MESSAGE → distinct child
-        // conversation ids → SubagentRun ids whose childConversation
-        // matches. Null when q is absent/blank (no FTS filter); empty
-        // list when q matched nothing across both scopes (caller short-
-        // circuits to zero rows); non-empty narrows via `r.id IN (:fts)`.
+        // JCLAW-304: q narrows by run id — see ftsSubagentRunIds for the two-scope
+        // union and the null / empty / non-empty tri-state.
         var ftsRunIds = ftsSubagentRunIds(q);
 
         var where = filter.toWhereClause();
@@ -353,8 +348,7 @@ public class ApiSubagentRunsController extends Controller {
 
     /**
      * Resolve the explicit-ids delete set. An empty {@code ids} array yields an
-     * empty list — the caller then reports 0 deleted, identical to the prior
-     * inline fast-path, so no special-casing leaks back into {@link #deleteBulk()}.
+     * empty list, so {@link #deleteBulk()} reports 0 deleted without special-casing.
      */
     private static List<SubagentRun> targetsFromIds(JsonObject body) {
         var ids = new ArrayList<Long>();
@@ -582,8 +576,7 @@ public class ApiSubagentRunsController extends Controller {
         // rows that can match. The run-id literals are numeric — they carry
         // no LIKE wildcards or special chars — so the only `%` are our own
         // anchoring ones, and the trailing quote in `"run_id":"<id>"` keeps
-        // id 5 from matching id 50. The in-Java idSet/most-recent-wins parse
-        // below is preserved verbatim so the run→mode mapping is identical.
+        // id 5 from matching id 50.
         var likeClauses = new ArrayList<String>(ids.size());
         var params = new ArrayList<Object>(ids.size() + 1);
         params.add("SUBAGENT_SPAWN");

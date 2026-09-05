@@ -31,9 +31,7 @@ public class ApiToolsController extends Controller {
     private static final String KEY_ENABLED = "enabled";
 
 
-    // JCLAW-281: the `system` boolean is gone — there are no system tools
-    // any more (list_mcp_tools deleted, loadtest_sleep gated by conditional
-    // registration). The field is removed from every entry record.
+    // JCLAW-281: no `system` flag — there are no system tools (list_mcp_tools deleted, loadtest_sleep gated by conditional registration).
     public record ToolListEntry(String name, String description) {}
 
     public record ToolMetaEntry(String name, String category, String icon, String shortDescription,
@@ -95,18 +93,12 @@ public class ApiToolsController extends Controller {
         Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 
-        // Ask the agent loop what it will actually do rather than re-deriving the
-        // policy here. The previous version reimplemented it as "native tools are
-        // on, MCP is on for main", which silently stopped being true once tools
-        // began opting out by default: generate_image (JCLAW-228), generate_video
-        // (JCLAW-235), generate_audio (JCLAW-876) and printer (JCLAW-911) are all
-        // hidden from the model unless a row explicitly enables them, but this
-        // endpoint kept reporting them enabled. The agent editor therefore showed
-        // a ticked box for a tool the agent could not call, and ticking it again
-        // was what actually turned it on. Found during JCLAW-911 UAT.
-        //
-        // One source of truth means a tool added to the default-off list later
-        // shows up correctly here without anyone remembering to update this file.
+        // Ask the agent loop what it will actually do rather than re-deriving the policy here:
+        // a local copy ("native tools on, MCP on for main") silently drifted once tools began
+        // opting out by default — generate_image (JCLAW-228), generate_video (JCLAW-235),
+        // generate_audio (JCLAW-876), printer (JCLAW-911) — so the agent editor showed a ticked
+        // box for a tool the agent could not call (found during JCLAW-911 UAT). One source of
+        // truth also covers tools added to the default-off list later.
         var disabled = ToolRegistry.loadDisabledTools(agent);
         var result = ToolRegistry.listTools().stream()
                 .map(t -> new AgentToolEntry(t.name(), t.description(), t.group(),
@@ -231,7 +223,6 @@ public class ApiToolsController extends Controller {
                 .orElse(null);
         if (serverLevel == null) notFound();
 
-        // Write the single server-level row.
         var config = McpGrants.find(agent, serverLevel.name());
         if (config == null) config = McpGrants.newRow(agent, serverLevel.name());
         config.enabled = enabled;

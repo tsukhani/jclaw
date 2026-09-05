@@ -305,22 +305,14 @@ public final class LoadTestRunner {
         var sessionCookie = mintAdminSessionCookie();
         var baseUrl = "http://127.0.0.1:" + Play.configuration.getProperty("http.port", "9000");
 
-        // Resolve per-turn message strategy. {@code prompts} (when present)
-        // overrides {@code userMessage}: turn t sends prompts.get(t), exposing
-        // the model to a varied question sequence inside the same growing
-        // conversation. Falling back to userMessage replays the same single
-        // prompt every turn — useful for in-context recall and prompt-cache
-        // diagnostics. JsonObject + addProperty handles escaping for both
-        // paths so quotes, backslashes, or non-ASCII flow through the wire
-        // format unchanged.
+        // prompts (when present) overrides userMessage: turn t sends prompts.get(t); otherwise
+        // the single prompt is replayed every turn. JsonObject.addProperty handles escaping on
+        // both paths so quotes, backslashes and non-ASCII reach the wire unchanged.
         var messageFor = resolveMessageStrategy(req);
 
-        // Drive the loadtest through the same OkHttp client tuning that the
-        // production LLM stack uses — virtual-thread dispatcher, 64-slot
-        // ConnectionPool — so concurrent loadtest workers exercise the
-        // exact connection-pooling and threading model that production chat
-        // traffic does. Per-call 120s timeout is set on each individual
-        // Call below.
+        // Same OkHttp tuning as the production LLM stack (virtual-thread dispatcher, 64-slot
+        // ConnectionPool) so workers exercise the connection-pooling and threading model real
+        // chat traffic does. The 120s timeout is set per Call below.
         var client = HttpFactories.llmSingleShot();
 
         runWarmup(client, baseUrl, sessionCookie, agentId, messageFor, req.compress());
@@ -336,12 +328,8 @@ public final class LoadTestRunner {
         var serverSegments = computeSegmentDeltas(segmentsBefore);
         long avgTtftMs = extractServerTtftMs(serverSegments);
 
-        // Pull avg completion tokens AND avg per-request tokens-per-second
-        // from the assistant messages this run persisted under the loadtest
-        // agent. Per-row tokens/s = completion / (durationMs/1000), then
-        // arithmetic mean across rows — this is the "average generation
-        // speed observed" metric, not the aggregate-throughput ratio
-        // (which biases toward longer responses).
+        // Per-row tokens/s averaged across rows — "average generation speed observed", not
+        // the aggregate-throughput ratio (which biases toward longer responses).
         var tokenStats = perRequestTokenStats(agentId, persistMarker);
 
         // Per-turn breakdown only when there's something to distribute over.
@@ -384,7 +372,7 @@ public final class LoadTestRunner {
         }
         if (req.hasNamedAgent() && req.toolAgent()) {
             // toolAgent pins the surface to loadtest_sleep; agentName exists to
-            // ship a real one. Honouring both would silently drop one.
+            // ship a real one. Honoring both would silently drop one.
             throw new IllegalArgumentException("agentName and toolAgent are mutually exclusive");
         }
         var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
@@ -577,11 +565,8 @@ public final class LoadTestRunner {
     }
 
     /**
-     * Per-run worker context. Bundles the wire-level inputs and shared
-     * collaborators (request shape, target URL/cookie, agent id, message
-     * resolver, HTTP client, metrics aggregator) so the worker / turn
-     * methods stay readable. Created once per run() and passed to every
-     * worker; immutable references throughout.
+     * Per-run worker context, created once per run() and passed to every worker so the
+     * worker / turn methods stay readable; immutable references throughout.
      */
     private record WorkerCtx(Request req, String baseUrl, String sessionCookie,
                               long agentId, IntFunction<String> messageFor,
@@ -622,10 +607,7 @@ public final class LoadTestRunner {
      * newly-discovered) conversationId for the next turn.
      */
     private static Long runTurn(int workerIdx, int t, WorkerCtx ctx, Long conversationId) {
-        // Build per-turn body: pull message from prompts[t] when in
-        // varied-prompts mode, replay userMessage otherwise.
-        // conversationId is set from turn 2 onward so the server
-        // resumes the same row.
+        // conversationId is set from turn 2 onward so the server resumes the same row.
         var turnBodyObj = new JsonObject();
         turnBodyObj.addProperty("agentId", ctx.agentId());
         turnBodyObj.addProperty("message", ctx.messageFor().apply(t));
@@ -678,9 +660,6 @@ public final class LoadTestRunner {
         call.timeout().timeout(120, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             if (resp.code() == 200) {
-                // Stream-parse the SSE body to capture the server-assigned
-                // conversationId (init event) and client-side TTFT (first
-                // token frame). Drain to end so timing covers full round-trip.
                 return consumeSseStream(resp.body(), t0);
             }
             resp.body().bytes();
@@ -916,10 +895,8 @@ public final class LoadTestRunner {
             var json = (String) row[1];
             var obj = JsonParser.parseString(json).getAsJsonObject();
             long visible = approxTokens(content == null ? 0 : content.length());
-            // completion - visible = "everything else the provider
-            // billed for but didn't show the user" (true internal
-            // work). More accurate than the provider's reasoning
-            // field for models that under-report it.
+            // completion - visible = what the provider billed for but didn't show the user;
+            // truer than its reasoning field, which some models under-report.
             long completion = obj.has("completion") ? obj.get("completion").getAsLong() : 0L;
             long internal = Math.max(0L, completion - visible);
             double rate = 0.0;
@@ -958,9 +935,6 @@ public final class LoadTestRunner {
             try (var resp = call.execute()) {
                 resp.body().bytes();  // drain
             }
-            // The warmup response populates all the caches but does not count
-            // in the result set. Histograms recorded during warmup will show
-            // in GET /api/metrics/latency — the caller is expected to reset.
         } catch (Exception _) {
             // Warmup failures are ignored: the real run will surface them.
         }
@@ -1050,18 +1024,12 @@ public final class LoadTestRunner {
      * authenticated traffic at /api/chat/stream without an HTTP login
      * round-trip.
      *
-     * <p>JCLAW-181 replaced the previous {@code internalLogin()} HTTP call
-     * with this in-process mint. The previous version read
-     * {@code jclaw.admin.password} from {@code application.conf} and POSTed
-     * {@code /api/auth/login}, but commit caf9422 moved the admin password
-     * to a PBKDF2 hash in the Config DB — there is no plaintext to log in
-     * with anymore. Signing with {@link play.Play#secretKey} produces a
-     * cookie {@link AuthCheck} accepts identically to a real login.
+     * <p>Minted in-process rather than via {@code POST /api/auth/login} (JCLAW-181): the
+     * admin password is a PBKDF2 hash in the Config DB (commit caf9422), so there is no
+     * plaintext to log in with. Signing with {@link play.Play#secretKey} produces a cookie
+     * {@link AuthCheck} accepts identically to a real login.
      *
      * <p>Session data: only the keys {@code AuthCheck} actually checks.
-     * No {@code ___TS} entry — application.session.maxAge is not set in
-     * jclaw, so {@link play.mvc.CookieSessionStore} doesn't enforce a
-     * timestamp and won't reject a cookie that lacks one.
      */
     @SuppressWarnings("java:S112") // Play's CookieDataCodec.encode declares throws Exception; rewrapping is noise for a test-only helper
     private static String mintAdminSessionCookie() throws Exception {
@@ -1138,8 +1106,7 @@ public final class LoadTestRunner {
                     // JCLAW-135: collect message ids so their CONVERSATION_MESSAGE Lucene
                     // docs can be evicted after the delete — a bulk / cascade delete never
                     // fires Message.@PostRemove. The Conversation delete cascades
-                    // chat_message_attachment + message at the DB (ON DELETE CASCADE,
-                    // JCLAW-542), so the old explicit MessageAttachment/Message sweep is gone.
+                    // chat_message_attachment + message at the DB (ON DELETE CASCADE, JCLAW-542).
                     List<Long> messageIds = JPA.em().createQuery(
                             "SELECT m.id FROM Message m WHERE m.conversation IN " +
                             "(SELECT c FROM Conversation c WHERE c.agent = :agent)", Long.class)

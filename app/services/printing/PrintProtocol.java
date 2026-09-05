@@ -52,7 +52,7 @@ public enum PrintProtocol {
         return null;
     }
 
-    /** Parse a caller-supplied protocol name, case-insensitively. Null when unrecognised. */
+    /** Parse a caller-supplied protocol name, case-insensitively. Null when unrecognized. */
     public static PrintProtocol parse(String name) {
         if (name == null || name.isBlank()) {
             return null;

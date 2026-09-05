@@ -69,10 +69,4 @@ public final class PromptFenceScrubber {
         }
         return out;
     }
-
-    /** Whether {@code text} contains anything this scrubber would strip. */
-    public static boolean hasFence(String text) {
-        if (text == null || text.isEmpty()) return false;
-        return MARKERS.stream().anyMatch(text::contains) || HEADINGS.stream().anyMatch(text::contains);
-    }
 }

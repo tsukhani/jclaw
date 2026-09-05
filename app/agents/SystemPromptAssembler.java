@@ -14,6 +14,7 @@ import services.ConfigService;
 import services.EventLogger;
 import services.LoadTestRunner;
 import utils.GsonHolder;
+import utils.LatencyTrace;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -211,15 +212,6 @@ public class SystemPromptAssembler {
         // they travel separately as the `tools` array on the API request — but they are
         // counted as input tokens by every provider, so the breakdown surfaces them
         // alongside the prompt sections for a realistic total-token picture.
-        //
-        // We deliberately compute the FRESH-CONVERSATION baseline (empty
-        // discovered-MCP-servers set), not the worst-case "all servers
-        // discovered" view. Phase 2 lazy discovery means MCP tool schemas
-        // only ship to the LLM after the model has called list_mcp_tools
-        // for that server; counting them in the breakdown total when no
-        // conversation has happened would double-count cost the operator
-        // never pays. Native tools + the discovery tool itself ship every
-        // turn and are correctly included.
         var toolEntries = new ArrayList<PromptBreakdown.Entry>();
         var toolDefs = ToolRegistry.getToolDefsForAgent(agent, Set.<String>of());
         for (var tool : toolDefs) {
@@ -416,11 +408,9 @@ public class SystemPromptAssembler {
             appendChannelGuidanceSection(b.sb, channelType, guidance);
         });
 
-        // 9. Environment info — only JVM-stable, per-agent values. The current
-        // date/time used to live here, but it is per-turn-variable and was
-        // moved below the cache boundary (appendCurrentTimeSection) so this
-        // whole section stays byte-identical within an agent's lifetime and
-        // never busts the LLM prompt-prefix cache.
+        // 9. Environment info — only JVM-stable, per-agent values, so the section
+        // stays byte-identical within an agent's lifetime and never busts the LLM
+        // prompt-prefix cache (the clock lives in CurrentTimeInjector; see 10 below).
         b.startSection("Environment");
         appendEnvironmentSection(b.sb, agent);
 
@@ -764,7 +754,7 @@ public class SystemPromptAssembler {
      * the selection — and report both the outcome and the reasoning.
      *
      * <p>Single-sourced deliberately. {@link #appendMemories} renders this and the
-     * introspection endpoint serialises it, so the two cannot disagree; an introspection
+     * introspection endpoint serializes it, so the two cannot disagree; an introspection
      * surface that has drifted from production is worse than none, because it reports
      * confidently on something no longer true. Same argument {@link SectionedBuilder}
      * makes for {@code assemble} versus {@code breakdown}.
@@ -802,7 +792,7 @@ public class SystemPromptAssembler {
         try {
             return recallTimed(agentId, query, excludeIds, queryEmbedding, limitOverride);
         } finally {
-            utils.LatencyTrace.recordMemoryRecall((System.nanoTime() - startNs) / 1_000_000L);
+            LatencyTrace.recordMemoryRecall((System.nanoTime() - startNs) / 1_000_000L);
         }
     }
 

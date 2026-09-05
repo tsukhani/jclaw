@@ -27,7 +27,7 @@ import java.util.Locale;
  * class would rule out self-hosting over a VPN entirely.
  *
  * <p>{@link PaymentModality} is deliberately not used for this. Its empty supported-set marks
- * both free-at-point-of-use providers and unrecognised ones, so an unknown cloud provider
+ * both free-at-point-of-use providers and unrecognized ones, so an unknown cloud provider
  * would read as local.
  *
  * <p>{@link #isLocalUrl} survives as a pure address predicate for callers asking where a

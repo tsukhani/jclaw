@@ -48,7 +48,7 @@ public class AgentToolConfig extends AgentFeatureConfig {
      * policy, so deleting a server removes its grants with no application code involved.
      *
      * <p>Lazy: {@code computeDisabledTools} resolves the name through this association on
-     * every cache miss, and {@link McpServer} is L2-cached, so the proxy initialises from
+     * every cache miss, and {@link McpServer} is L2-cached, so the proxy initializes from
      * the cache rather than a per-row select.
      */
     @ManyToOne(fetch = FetchType.LAZY)

@@ -27,9 +27,6 @@ public class MemoryStoreFactory {
     }
 
     private static MemoryStore create() {
-        // Single Postgres/H2-backed store (pgvector for vectors). The former
-        // pluggable Neo4j backend was dropped — vector similarity and graph/
-        // ontology now live in Postgres.
         EventLogger.info(EVENT_CATEGORY_MEMORY, "Initializing JPA memory store");
         return new JpaMemoryStore();
     }

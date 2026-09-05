@@ -254,8 +254,7 @@ public final class DeliveryDispatcher {
         }
         // JCLAW-447: route via the per-agent binding (transport-aware through the
         // factory), parent-walked so a subagent reaches the user via an ancestor's
-        // binding — mirrors the Telegram/Slack paths above. Replaces the pre-447
-        // app-global WhatsAppConfig path.
+        // binding — mirrors the Telegram/Slack paths above.
         var binding = WhatsAppBinding.findByAgentOrAncestor(agent);
         if (binding == null) {
             return DispatchResult.noConfig(WHATSAPP,

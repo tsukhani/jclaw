@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
 import services.AgentService;
+import services.ConfigService;
 import services.EventLogger;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
@@ -66,7 +67,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
             Map.of("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)");
 
     /** Mode {@code html} promises the page's own source, so it asks for it: the shared
-     *  default prefers markdown, and a site that honours that had its markdown written
+     *  default prefers markdown, and a site that honors that had its markdown written
      *  to the workspace as {@code <host>.html}. */
     private static Map<String, String> headersFor(String mode) {
         if (!"html".equals(mode)) return HEADERS;
@@ -132,7 +133,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
     /** {@link #claimEscalation(String, int, long)} against the wall clock + live limit config. */
     private static boolean claimEscalation(Agent agent) {
         return claimEscalation(agent == null ? "" : agent.name,
-                services.ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS_PER_MINUTE),
+                ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS_PER_MINUTE),
                 System.currentTimeMillis());
     }
 

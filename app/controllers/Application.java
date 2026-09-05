@@ -13,7 +13,6 @@ public class Application extends Controller {
     private static final String NO_CACHE = "no-cache";
 
     public static void index() {
-        // Serve the SPA if it's been built
         File spaIndex = Play.getFile("public/spa/index.html");
         if (spaIndex.exists()) {
             // The SPA shell references content-hashed _nuxt/ chunks, so it MUST always
@@ -90,7 +89,6 @@ public class Application extends Controller {
         try {
             if (path != null && !path.contains("..")) {
                 File target = new File(appsRoot, path);
-                // A directory request (/apps/<slug>/ or /apps/<slug>) serves index.html.
                 if (target.isDirectory()) {
                     target = new File(target, "index.html");
                 }
@@ -113,7 +111,6 @@ public class Application extends Controller {
     public static void spa(String path) {
         File spaRoot = Play.getFile("public/spa");
 
-        // Check if path matches a static file in the SPA build (e.g., avatar.png)
         try {
             if (path != null && !path.contains("..")) {
                 File staticFile = new File(spaRoot, path);
@@ -124,8 +121,6 @@ public class Application extends Controller {
             }
         } catch (IOException _) {}
 
-
-        // Fall back to index.html for client-side routing
         File index = new File(spaRoot, "index.html");
         if (!index.exists()) {
             notFound("SPA not built. Run: cd frontend && pnpm generate, then copy .output/public/* to public/spa/");

@@ -79,11 +79,7 @@ public class ApiTaskSearchController extends Controller {
             var hits = MessageSearch.search(q, effectiveLimit);
             renderJSON(gson.toJson(hits.stream().map(TranscriptSearchHit::of).toList()));
         } catch (Throwable e) {
-            // Throwable (not just Exception) because Lucene API removals
-            // surface as NoClassDefFoundError / LinkageError / AbstractMethodError
-            // — Error subclasses that escape a narrower catch and yield a
-            // generic Play 500 page with no useful diagnostic. Log the full
-            // stack so version-bump incompats are debuggable.
+            // Error subclasses escape a narrower catch as a generic Play 500 with no diagnostic; log the full stack.
             ApiResponses.errorAndLog(e, 500, ApiResponses.SEARCH_FAILED,
                     "Search failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }

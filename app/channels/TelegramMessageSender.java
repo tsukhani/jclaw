@@ -84,7 +84,6 @@ final class TelegramMessageSender {
         if (ctx.botToken() == null || chatId == null || text == null || replyToMessageId == null) {
             return false;
         }
-        // No excerpt → ordinary reply path; preserves today's exact behavior.
         if (quote == null || quote.isBlank()) {
             return sendTurn(chatId, text, agent, replyToMessageId, null);
         }
@@ -93,7 +92,6 @@ final class TelegramMessageSender {
                 .quote(quote)
                 .allowSendingWithoutReply(true)
                 .build();
-        // First attempt: reply WITH the native quote excerpt.
         SendResult quoted = trySend(chatId, TelegramMarkdownFormatter.toHtml(text), quoteParams, null);
         if (quoted.ok()) return true;
         // Best-effort fallback (JCLAW-387 A3): a quote that isn't a verbatim
@@ -142,9 +140,7 @@ final class TelegramMessageSender {
      *       topic; General is omitted (a bare send already lands there).</li>
      * </ul>
      *
-     * <p>JCLAW-141: was the static {@code sendMessage(botToken, ...)} 6-arg entry
-     * point; now an instance method on the per-binding channel (token bound at
-     * construction). Distinct name from the generic {@link #sendText} interface
+     * <p>JCLAW-141: distinct name from the generic {@link #sendText} interface
      * methods because it carries Telegram-specific reply/topic params and returns
      * the per-chunk boolean the streaming-sink / planner callers expect. Returns
      * true when the whole turn landed.
@@ -347,8 +343,6 @@ final class TelegramMessageSender {
         if (media.sendMediaGroup(chatId, mg.items(), mg.caption(), reply, threadId)) {
             return true;
         }
-        // Album send failed — fall back to one individual send per item so the
-        // user still gets the media. The album caption rides the first item only.
         EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                 "Media group failed; falling back to %d individual sends".formatted(mg.items().size()));
         boolean allOk = true;

@@ -1,6 +1,7 @@
 package tools;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import com.agentclientprotocol.sdk.client.AcpClient;
 import com.agentclientprotocol.sdk.client.transport.AgentParameters;
 import com.agentclientprotocol.sdk.client.transport.StdioAcpClientTransport;
@@ -133,11 +134,11 @@ final class SubagentAcpRunner {
         // (SubagentChildBootstrap.resolveParentConversation), so inside an untrusted fire it is
         // typically the operator's own web row — reading it directly would hand a spawned run
         // operator trust one hop out of the fire that must have floored it.
-        var originChannel = agents.DangerousActionGate.effectiveOrigin(parentConversationId(runId));
+        var originChannel = DangerousActionGate.effectiveOrigin(parentConversationId(runId));
         if (ChannelOriginTrust.isOperatorOrigin(originChannel)) return;
-        var decision = agents.DangerousActionGate.guardHarnessPermission(
+        var decision = DangerousActionGate.guardHarnessPermission(
                 childAgent, parentConversationId(runId), "coding_harness_run", task);
-        var approved = decision == agents.DangerousActionGate.Decision.PROCEED;
+        var approved = decision == DangerousActionGate.Decision.PROCEED;
         dispatchHarnessEvent(runId, new HarnessEvent(
                 approved ? HarnessEvent.STEP : HarnessEvent.ERROR,
                 "channel approval (%s): coding run %s".formatted(
@@ -160,14 +161,8 @@ final class SubagentAcpRunner {
                                                  Conversation childConv, String task, boolean inlineMode) {
         var acpCommand = ACP_RUNS.remove(runId);
         if (acpCommand != null) {
-            // JCLAW-669: a coding-harness run whose ORIGIN is an unsafe channel
-            // (anything but the operator's web chat) must be operator-approved
-            // before the process launches — an inbound Telegram/Slack message
-            // can prompt-inject an agent into spawning arbitrary code
-            // execution. Web spawns pass untouched (the pi -p / claude -p
-            // uninterrupted contract); Telegram/Slack route through the
-            // existing DangerousActionGate approval prompt; other channels
-            // follow tool.approval.offChannelPolicy.
+            // JCLAW-669: gate an unsafe-origin run before the process launches (see
+            // enforceChannelApproval for the per-channel policy).
             enforceChannelApproval(runId, childAgent, task);
             // JCLAW-657 (finding A): scope the harness's cwd to a configured
             // workdir or the child agent's workspace instead of the backend's
@@ -522,7 +517,7 @@ final class SubagentAcpRunner {
                 })
                 .requestPermissionHandler(req -> {
                     SubagentRegistry.touch(runId);   // operator deliberation isn't idle
-                    var decision = agents.DangerousActionGate.guardHarnessPermission(childAgent, conversationId,
+                    var decision = DangerousActionGate.guardHarnessPermission(childAgent, conversationId,
                             AcpEventMapper.permissionToolName(req), AcpEventMapper.permissionArgsJson(req));
                     return AcpEventMapper.permissionResponse(req, decision);
                 })
@@ -603,7 +598,7 @@ final class SubagentAcpRunner {
      *  ({@code subagent.acp.sandbox=untrusted}) now confines it too. */
     private static boolean sandboxTrustedOrigin(Long runId) {
         return ChannelOriginTrust.isOperatorOrigin(
-                agents.DangerousActionGate.effectiveOrigin(parentConversationId(runId)));
+                DangerousActionGate.effectiveOrigin(parentConversationId(runId)));
     }
 
     /**

@@ -96,11 +96,8 @@ public class TaskCleanupJob extends Job<Void> {
      * defensive handling: missing → {@link #DEFAULT_RETENTION_DAYS}, 0 →
      * disabled, negative or above ceiling → default plus a warn.
      *
-     * <p>Public so {@code TaskCleanupJobTest} (which sits in the default
-     * package) can pin every parsing branch without going through the
-     * full {@code doJob} path. Play 1.x's test compilation places test
-     * classes in the default package, so package-private here would block
-     * direct access.
+     * <p>Public because Play 1.x test classes live in the default package, so
+     * {@code TaskCleanupJobTest} could not reach a package-private method.
      */
     public static int resolveRetentionDays() {
         var raw = ConfigService.get(CONFIG_KEY);

@@ -37,7 +37,7 @@ public record EvalReport(String suiteId, String fingerprint, List<CaseResult> re
      * a prompt bug that does not exist. An errored case therefore stays out of
      * {@link EvalReport#passRate()} and {@link EvalReport#regressionsAgainst}.
      *
-     * <p>Older report JSON has no {@code errored} field and deserialises to
+     * <p>Older report JSON has no {@code errored} field and deserializes to
      * false, which is the honest reading: before this distinction existed, an
      * error really was recorded as an ordinary failure.
      */

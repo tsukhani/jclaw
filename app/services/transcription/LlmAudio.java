@@ -2,6 +2,7 @@ package services.transcription;
 
 import models.MessageAttachment;
 import play.Logger;
+import services.AgentService;
 import services.MimeExtensions;
 
 import java.io.IOException;
@@ -40,7 +41,7 @@ public final class LlmAudio {
 
     /** Prepare an attachment, using/refreshing the sibling MP3 cache. */
     public static Prepared prepare(MessageAttachment att) throws IOException {
-        var path = services.AgentService.workspaceRoot().resolve(att.storagePath);
+        var path = AgentService.workspaceRoot().resolve(att.storagePath);
         return prepare(path, att.mimeType);
     }
 

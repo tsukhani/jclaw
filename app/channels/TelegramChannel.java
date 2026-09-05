@@ -85,19 +85,7 @@ public class TelegramChannel implements Channel {
     TelegramClient client() { return sender.client(); }
 
     // ── JCLAW-383: bot-sent-message-id cache record + query ──────────────
-    //
-    // To make telegram.reactions.notify=own work in groups (where the reacted
-    // message's author is NOT carried on the message_reaction update), we
-    // remember the ids of messages THIS bot sent, per chat, so the reaction
-    // gate can ask "was this message one of ours?". The cache is bounded two
-    // ways so it can't grow without limit on a busy multi-chat bot:
-    //   - at most {@link #SENT_CHATS_CAP} chats are tracked (access-ordered
-    //     LRU: the least-recently-touched chat is evicted first);
-    //   - within each chat, at most {@link #SENT_IDS_PER_CHAT_CAP} message ids
-    //     are retained (insertion-ordered FIFO: the oldest id is evicted).
-    // It populates only from sends this process made, so it is cold after a
-    // restart — acceptable: a cold miss under-notifies (conservative), it
-    // never over-notifies. See {@link #wasSentByBot}.
+    // Eviction bounds + the notify=own rationale live on TelegramSentMessageCache.
 
     /** Max number of distinct chats tracked before LRU eviction of the coldest chat. */
     public static final int SENT_CHATS_CAP = 256;
@@ -180,14 +168,13 @@ public class TelegramChannel implements Channel {
         forToken(botToken).sender.setMyCommands(commands);
     }
 
-    // ── JCLAW-364: dormant send primitives (consumed by JCLAW-374/375) ──
+    // ── JCLAW-364: message-admin send primitives (consumed by JCLAW-374/375) ──
 
     /**
      * JCLAW-364: set (or clear) the bot's reaction on a message. A non-blank
      * {@code emoji} sets a single reaction; a {@code null}/blank emoji sends an
      * empty reaction list, which clears any reaction the bot previously placed.
-     * Returns false (logged) on any API failure — never throws. Dormant: no
-     * caller yet (JCLAW-374).
+     * Returns false (logged) on any API failure — never throws.
      */
     public static boolean setMessageReaction(String botToken, String chatId, Integer messageId, String emoji) {
         if (botToken == null || chatId == null || messageId == null) return false;
@@ -196,7 +183,7 @@ public class TelegramChannel implements Channel {
 
     /**
      * JCLAW-364: pin {@code messageId} in {@code chatId}. Returns false (logged)
-     * on any API failure — never throws. Dormant: no caller yet (JCLAW-375).
+     * on any API failure — never throws.
      */
     public static boolean pinChatMessage(String botToken, String chatId, Integer messageId) {
         if (botToken == null || chatId == null || messageId == null) return false;
@@ -205,8 +192,7 @@ public class TelegramChannel implements Channel {
 
     /**
      * JCLAW-364: unpin {@code messageId} in {@code chatId}. Returns false
-     * (logged) on any API failure — never throws. Dormant: no caller yet
-     * (JCLAW-375).
+     * (logged) on any API failure — never throws.
      */
     public static boolean unpinChatMessage(String botToken, String chatId, Integer messageId) {
         if (botToken == null || chatId == null || messageId == null) return false;
@@ -374,9 +360,7 @@ public class TelegramChannel implements Channel {
      *       send already lands there).</li>
      * </ul>
      *
-     * <p>JCLAW-141: was the static {@code sendMessage(botToken, ...)} 6-arg entry
-     * point; now an instance method on the per-binding channel (token bound at
-     * construction). Distinct name from the generic {@link #sendText} interface
+     * <p>JCLAW-141: distinct name from the generic {@link #sendText} interface
      * methods because it carries Telegram-specific reply/topic params and returns
      * the per-chunk boolean the streaming-sink / planner callers expect. Returns
      * true when the whole turn landed.
@@ -667,10 +651,9 @@ public class TelegramChannel implements Channel {
      * (null to omit) is General-stripped before being set. The shorter overload
      * preserves the legacy call sites.
      *
-     * <p>JCLAW-141: was a static {@code sendMessageWithKeyboard(botToken, ...)}
-     * entry point; now an instance method on the per-binding channel (token bound
-     * at construction). The inline-keyboard markup itself is Telegram-specific and
-     * out of scope for the generic {@link Channel} contract.
+     * <p>JCLAW-141: an instance method on the per-binding channel (token bound at
+     * construction) rather than part of the generic {@link Channel} contract — the
+     * inline-keyboard markup is Telegram-specific.
      */
     public Integer sendMessageWithKeyboard(String chatId,
                                            String htmlText, InlineKeyboardMarkup keyboard,

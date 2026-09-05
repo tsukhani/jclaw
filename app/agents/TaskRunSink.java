@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@link #onFailure}) close the TaskRun row with timing, status, and
  * outcome.
  *
- * <p>The caller (TaskExecutor, future JCLAW-21 commit) creates and
+ * <p>The caller ({@code TaskExecutor}) creates and
  * persists the {@link TaskRun} row, then wraps it here. This sink does
  * not create or own the TaskRun — it just writes to it. Mirrors the
  * {@link ConversationSink} pattern where the Conversation is constructed

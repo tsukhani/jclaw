@@ -21,6 +21,7 @@ import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
 import services.UploadStaging;
+import slash.Commands;
 import tools.SubagentSpawnTool;
 import utils.ApiResponses;
 import utils.LatencyTrace;
@@ -134,12 +135,6 @@ public class ApiChatController extends Controller {
                 ? body.get(KEY_CONVERSATION_ID).getAsLong() : null;
 
         var attachments = parseAttachments(body);
-        // JCLAW-165 / JCLAW-215: audio and image attachments are universally
-        // accepted now. Text-only models receive a transcript / caption text
-        // part (via the transcription + captioning pipelines + capability
-        // routing in AgentRunner.userMessageFor); audio-/vision-capable models
-        // receive native input_audio / image_url parts. No model-side gate; the
-        // rest of the pipeline handles the format.
 
         return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments);
     }
@@ -179,10 +174,10 @@ public class ApiChatController extends Controller {
         // JCLAW-26: intercept slash commands before the LLM round. The
         // handler owns conversation creation (/new) or context-reset state
         // (/reset). Unknown slash-prefixed input falls through as normal text.
-        var slashCmd = slash.Commands.parse(ctx.message());
+        var slashCmd = Commands.parse(ctx.message());
         if (slashCmd.isPresent()) {
             Conversation current;
-            if (slashCmd.get() == slash.Commands.Command.NEW) {
+            if (slashCmd.get() == Commands.Command.NEW) {
                 current = null;
             } else if (ctx.conversationId() != null) {
                 current = ConversationService.findById(ctx.conversationId());
@@ -196,9 +191,9 @@ public class ApiChatController extends Controller {
             // summary branch on web. Telegram got this fix in JCLAW-109 via
             // AgentRunner.processInboundForAgentStreaming; the web path
             // needs the same treatment.
-            var slashResult = slash.Commands.execute(
+            var slashResult = Commands.execute(
                     slashCmd.get(), ctx.agent(), "web", ctx.username(), current,
-                    slash.Commands.extractArgs(ctx.message()));
+                    Commands.extractArgs(ctx.message()));
             var slashResp = new HashMap<String, Object>();
             slashResp.put(KEY_CONVERSATION_ID,
                     slashResult.conversation() != null ? slashResult.conversation().id : null);
@@ -331,14 +326,14 @@ public class ApiChatController extends Controller {
      */
     private static boolean handleStreamingSlashCommand(SseStream sse, Agent agent, String messageText,
                                                        Long conversationId, String username) {
-        var slashCmd = slash.Commands.parse(messageText);
+        var slashCmd = Commands.parse(messageText);
         if (slashCmd.isEmpty()) return false;
 
         Conversation slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
         // JCLAW-111: args-aware execute so /model status etc. work via SSE.
-        var slashResult = slash.Commands.execute(
+        var slashResult = Commands.execute(
                 slashCmd.get(), agent, "web", username, slashConv,
-                slash.Commands.extractArgs(messageText));
+                Commands.extractArgs(messageText));
         if (slashResult.conversation() != null) {
             sse.send(Map.of("type", "init", KEY_CONVERSATION_ID, slashResult.conversation().id));
         }
@@ -351,9 +346,9 @@ public class ApiChatController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static Conversation resolveSlashConversation(slash.Commands.Command cmd, Agent agent,
+    private static Conversation resolveSlashConversation(Commands.Command cmd, Agent agent,
                                                           Long conversationId, String username) {
-        if (cmd == slash.Commands.Command.NEW) return null;
+        if (cmd == Commands.Command.NEW) return null;
         if (conversationId != null) {
             // JCLAW-199: streamChat is @NoTransaction; explicit Tx.run for
             // the lookup since ConversationService.findById assumes its

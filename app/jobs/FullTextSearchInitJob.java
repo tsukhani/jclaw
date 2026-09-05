@@ -52,19 +52,13 @@ public class FullTextSearchInitJob extends Job<Void> {
     @Override
     public void doJob() {
         if (Play.runningInTestMode()) {
-            // Skip in test mode — same rationale as
-            // DbSchedulerBootstrapJob's test-mode skip.
             return;
         }
         try {
             MessageSearch.init();
         } catch (Exception e) {
-            // Don't crash the JVM if FT init fails — searches will
-            // return empty (the facade returns List.of() pre-init)
-            // and operators can re-run init from the admin path
-            // once the underlying problem is fixed. Logging the
-            // failure surfaces it to the dashboard's Recent Activity
-            // feed for operator-side triage.
+            // Don't crash the JVM: the facade returns List.of() pre-init, so searches come back empty
+            // until an operator re-runs init from the admin path; the error surfaces in Recent Activity.
             EventLogger.error("search", null, null,
                     "FullTextSearchInitJob: init failed (%s) — searches will return empty until repaired"
                             .formatted(e.getMessage()));

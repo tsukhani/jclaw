@@ -148,8 +148,6 @@ public class ApiMcpServersController extends Controller {
         row.save();
 
         if (!priorName.equals(row.name)) {
-            // Renamed. Disconnect under the old name FIRST so the registry
-            // doesn't carry both. syncRuntime then connects under the new name.
             McpConnectionManager.stop(priorName);
             // No grant fix-up: JCLAW-983 keys them by this row's id, so the rename cannot
             // strand any. Restoring one here would reintroduce the coupling it removed.

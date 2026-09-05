@@ -260,7 +260,6 @@ public final class TelegramCallbackDispatcher {
     private static String toHtmlSafe(String plain) {
         if (plain == null) return "";
         var escaped = TelegramMarkdownFormatter.escapeHtml(plain);
-        // Convert `backtick` spans to <code>spans</code>.
         var result = new StringBuilder(escaped.length());
         boolean inCode = false;
         for (int i = 0; i < escaped.length(); i++) {

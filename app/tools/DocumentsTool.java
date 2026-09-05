@@ -22,6 +22,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.DocumentWriter;
 import services.OcrHealthProbe;
+import services.OcrInstallHint;
 import utils.JsonArgs;
 import utils.TikaHolder;
 
@@ -257,8 +258,6 @@ public class DocumentsTool implements ToolRegistry.Tool {
         // renderDocument flow drafts into a .md file, then renders it with an
         // explicit format; without this a PDF/DOCX would be written to a path
         // still named ".md" — a file whose name misreports its contents.
-        // Retarget to the format's canonical extension whenever the path
-        // extension denotes a different format (or none).
         if (!resolved.equals(resolveFormat(null, relativePath))) {
             var corrected = withFormatExtension(target.getFileName().toString(), resolved);
             relativePath = replaceFinalSegment(relativePath, corrected);
@@ -557,6 +556,6 @@ public class DocumentsTool implements ToolRegistry.Tool {
         if (probe.available()) return null;
         return "Note: tesseract is unavailable (" + probe.reason() + "). "
                 + "OCR-dependent inputs (image-only PDFs, plain images, scanned documents) "
-                + "require tesseract. Install: " + services.OcrInstallHint.current();
+                + "require tesseract. Install: " + OcrInstallHint.current();
     }
 }

@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * questions for "Mateo's nickname is Ziggy" alone, a model can only produce questions
  * naming Mateo — which is the vocabulary that already worked. Shown the sibling memory
  * that says Mateo is the user's son, it can write "what do my kids go by?", and that is
- * the question the corpus could not previously answer. Neighbours are found by shared
+ * the question the corpus could not previously answer. Neighbors are found by shared
  * entity name.
  *
  * <p>Rewrites no stored text. A key is additive and reversible; editing the operator's
@@ -173,7 +173,7 @@ public final class MemoryKeyBackfillService {
     /*
      * No deterministic guard rejects a key for describing a neighbor instead of its own
      * memory, though the failure is real: "The user's name is Sam." came back keyed "what
-     * does my business do / what is abundent", which a neighbouring memory answers.
+     * does my business do / what is abundent", which a neighboring memory answers.
      *
      * A token-overlap guard was written for it and then measured against the corpus, where it
      * flagged 5 of 89 — including the single most valuable key in the store, the one keying

@@ -51,7 +51,6 @@ public final class SlackAccessPolicy {
             var fromOwner = ownerUserId.equals(fromUserId);
             return isGroupLike(channelType) ? (botMentioned && fromOwner) : fromOwner;
         }
-        // No owner configured.
         if (ownerRequired) {
             return false; // a full-access agent (main) must have an owner — fail closed
         }

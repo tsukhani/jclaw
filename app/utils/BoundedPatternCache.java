@@ -12,10 +12,10 @@ import java.util.regex.Pattern;
  *
  * <p>The backing {@link LinkedHashMap} is unguarded on its own; the public
  * methods here synchronize on the cache's monitor for atomic LRU updates.
- * The previous implementation also wrapped the map in {@link
- * java.util.Collections#synchronizedMap}, which doubled the locking on
- * every access without making {@code computeIfAbsent} any more atomic
- * (the wrapper does not lift the remapping function into the lock).
+ * Not additionally wrapped in {@link java.util.Collections#synchronizedMap}:
+ * that doubles the locking on every access without making
+ * {@code computeIfAbsent} atomic (the wrapper does not lift the remapping
+ * function into the lock).
  */
 public final class BoundedPatternCache {
 

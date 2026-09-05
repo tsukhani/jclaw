@@ -52,8 +52,7 @@ public final class ModelResolver {
      * Effective model id for this turn — honors the conversation-scoped
      * override (JCLAW-108 per-conversation, JCLAW-269 per-spawn) when
      * present, otherwise returns the agent's default. Thin wrapper over
-     * {@link ModelOverrideResolver#modelId} kept here so call sites read
-     * naturally next to the rest of the runner's helpers.
+     * {@link ModelOverrideResolver#modelId}.
      */
     public static String effectiveModelId(Agent agent, Conversation conv) {
         return ModelOverrideResolver.modelId(conv, agent);

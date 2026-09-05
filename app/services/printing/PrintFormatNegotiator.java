@@ -113,7 +113,7 @@ public final class PrintFormatNegotiator {
         }
 
         if (supported.contains(PWG_RASTER)) {
-            // Color only when the printer has no greyscale mode or the operator
+            // Color only when the printer has no grayscale mode or the operator
             // explicitly asked for color. Gray is a third the bytes and a quarter
             // of the heap, and this class of printer has very little spool.
             var wantsColor = job != null && "color".equals(job.colorMode());
@@ -178,7 +178,7 @@ public final class PrintFormatNegotiator {
         var i = 2;
         while (i + 3 < document.length) {
             if ((document[i] & 0xFF) != 0xFF) {
-                return false;  // desynchronised — do not guess
+                return false;  // desynchronized — do not guess
             }
             var marker = document[i + 1] & 0xFF;
             if (marker == 0xFF) {

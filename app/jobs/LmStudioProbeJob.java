@@ -19,10 +19,7 @@ public class LmStudioProbeJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        // Skip in test mode — same rationale as OllamaLocalProbeJob: the
-        // probe is operator guidance, contributes zero signal under
-        // autotest (which points providers at 127.0.0.1 mock servers),
-        // and creates a path for external-state flakiness.
+        // Skip in test mode — same rationale as OllamaLocalProbeJob (zero signal under autotest, external-state flakiness).
         if (Play.runningInTestMode()) return;
         ProbeJobs.run("lm-studio", "provider.lm-studio.baseUrl",
                 "Download LM Studio from https://lmstudio.ai, load a model in the My Models "

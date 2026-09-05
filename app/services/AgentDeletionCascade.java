@@ -55,10 +55,8 @@ public final class AgentDeletionCascade {
     public static void delete(Agent agent) {
         var rootId = agent.id;
 
-        // Collect the whole sub-agent subtree (root + all transitive
-        // descendants) up front, before anything is deleted. We need the set
-        // only for the out-of-band cleanup below; the database computes the
-        // actual row-delete order via the cascade when the root is removed.
+        // Collect the subtree before anything is deleted; it's needed only for the
+        // out-of-band cleanup — the DB computes the cascade's row-delete order itself.
         var subtree = collectSubtree(agent);
         var names = subtree.stream().map(a -> a.name).toList();
 

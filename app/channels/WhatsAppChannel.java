@@ -430,27 +430,6 @@ public class WhatsAppChannel implements Channel {
         return "document";
     }
 
-    public static void markAsRead(WhatsAppConfig config, String messageId) {
-        var url = API_BASE + config.phoneNumberId() + "/messages";
-        var body = gson.toJson(Map.of(
-                MESSAGING_PRODUCT, WHATSAPP,
-                "status", "read",
-                "message_id", messageId
-        ));
-
-        var request = new Request.Builder()
-                .url(url)
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
-                .post(RequestBody.create(body, JSON_MEDIA_TYPE))
-                .build();
-        try (var resp = HttpFactories.general().newCall(request).execute()) {
-            // Drain the body so the connection returns to the pool; result discarded.
-            resp.body().bytes();
-        } catch (Exception _) {
-            // Read receipt failure is non-critical
-        }
-    }
-
     // --- HMAC-SHA256 signature verification ---
 
     /** JCLAW-784 (VULN-012): replay acceptance window in seconds. A message whose

@@ -42,8 +42,6 @@ public class Memory extends Model {
      * Owning agent (JCLAW-537). A real foreign key with {@code ON DELETE CASCADE}
      * so deleting an agent removes its memories at the DB level — referential
      * integrity is DB-enforced, not only app-managed via {@code AgentService.delete}.
-     * Replaces the former opaque {@code String agentId} that existed so the
-     * {@code MemoryStore} abstraction could swap in Neo4j (now dropped).
      *
      * <p>{@code LAZY}: the recall, dedup, and index paths read only
      * {@code agent.id}, which a lazy proxy supplies without loading the Agent row,

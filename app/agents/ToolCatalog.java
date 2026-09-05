@@ -56,10 +56,6 @@ public class ToolCatalog {
      * markdown section per category in canonical order (System → Files → Web → Utilities).
      * Categories outside the canonical set are appended at the end in the order the LLM
      * first encountered them, so a future custom category doesn't silently disappear.
-     *
-     * <p>JCLAW-281: MCP servers used to collapse here behind a {@code list_mcp_tools}
-     * discovery row; they now own a separate ## MCP Servers section via
-     * {@link McpServerCatalog}, so this catalog is grouped tools only.
      */
     private static String renderGroupedCatalog(List<ToolRegistry.Tool> tools) {
         var byCategory = new LinkedHashMap<String, List<ToolRegistry.Tool>>();

@@ -13,13 +13,10 @@ import java.util.regex.Pattern;
  * JCLAW-294: parse the operator-friendly {@code schedule} string into a
  * concrete {@link Task.Type} plus the type-specific fire-time field.
  *
- * <p>Replaces the old typed quartet of TaskTool actions
- * ({@code createTask} / {@code scheduleTask} /
- * {@code scheduleRecurringTask} / {@code scheduleIntervalTask}) with a
- * single {@code schedule} parameter and removes the matching three
- * typed body fields ({@code executionTime}, {@code cronExpression},
- * {@code intervalSeconds}) from the API surface. Both the chat tool
- * and the upcoming POST / PATCH endpoints route here.
+ * <p>The single {@code schedule} parameter stands in for typed
+ * {@code executionTime} / {@code cronExpression} / {@code intervalSeconds}
+ * fields on the API surface; both the chat tool and the POST / PATCH
+ * endpoints route here.
  *
  * <h2>Accepted forms</h2>
  * <table border="1">

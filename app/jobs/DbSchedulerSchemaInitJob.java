@@ -31,11 +31,9 @@ import java.util.stream.Collectors;
  * {@link DB#datasource} for the DDL run, separate from anything Hibernate
  * is managing.
  *
- * <p>Future commits in this story add a {@code DbSchedulerBootstrapJob}
- * that builds the Scheduler. Since Play 1.x doesn't strictly order
- * {@code @OnApplicationStart} jobs, the bootstrap will explicitly call
- * {@link #ensureSchema()} as its first step rather than rely on this job
- * having already run.
+ * <p>Play 1.x doesn't strictly order {@code @OnApplicationStart} jobs, so
+ * {@link DbSchedulerBootstrapJob} calls {@link #ensureSchema()} explicitly
+ * rather than rely on this job having already run.
  */
 @OnApplicationStart
 @NoTransaction
@@ -54,8 +52,8 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
 
     /**
      * Apply the dialect-appropriate {@code scheduled_tasks} DDL. Idempotent;
-     * exposed publicly so the bootstrap job (subsequent JCLAW-21 commit) can
-     * call it directly without depending on Play's job ordering.
+     * exposed publicly so {@link DbSchedulerBootstrapJob} can call it directly
+     * without depending on Play's job ordering.
      */
     public static void ensureSchema() throws SQLException, IOException {
         try (Connection conn = DB.getDataSource().getConnection()) {

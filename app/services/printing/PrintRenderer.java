@@ -119,7 +119,7 @@ public final class PrintRenderer {
     }
 
     /**
-     * Rasterise, optionally straight to 8-bit greyscale.
+     * Rasterise, optionally straight to 8-bit grayscale.
      *
      * <p>The gray path is not just smaller on the wire — it is a quarter of the
      * heap. An A4 page at 600 DPI is 4961x7016; as {@code TYPE_INT_RGB} that is
@@ -135,7 +135,7 @@ public final class PrintRenderer {
         }
     }
 
-    /** Per-call greyscale flag; avoids threading a parameter through every helper. */
+    /** Per-call grayscale flag; avoids threading a parameter through every helper. */
     private static final ThreadLocal<Boolean> RENDER_GRAY = ThreadLocal.withInitial(() -> false);
 
     private static List<BufferedImage> renderInternal(byte[] document, String sourceFormat,
@@ -189,7 +189,7 @@ public final class PrintRenderer {
         return canvas;
     }
 
-    /** Render each PDF page at {@link #DPI}, then fit it to the target page. */
+    /** Render each PDF page at the page's DPI, then fit it to the target page. */
     static List<BufferedImage> renderPdf(byte[] pdf, PageSize page) throws IOException {
         var pages = new ArrayList<BufferedImage>();
         try (var document = Loader.loadPDF(pdf)) {

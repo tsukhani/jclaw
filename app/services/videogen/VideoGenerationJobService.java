@@ -5,6 +5,7 @@ import models.Conversation;
 import models.MessageAttachment;
 import models.VideoGenerationJob;
 import models.VideoGenerationJob.State;
+import okhttp3.HttpUrl;
 import okhttp3.Request;
 import play.Logger;
 import services.AttachmentService;
@@ -179,8 +180,8 @@ public final class VideoGenerationJobService {
     /** Whether {@code url} really addresses this host's video sidecar, compared as
      *  parsed host and port so userinfo cannot spoof the authority. */
     private static boolean isLocalSidecar(String url) {
-        var sidecar = okhttp3.HttpUrl.parse(LocalVideoSidecarManager.baseUrl());
-        var target = okhttp3.HttpUrl.parse(url);
+        var sidecar = HttpUrl.parse(LocalVideoSidecarManager.baseUrl());
+        var target = HttpUrl.parse(url);
         return sidecar != null && target != null
                 && sidecar.host().equals(target.host())
                 && sidecar.port() == target.port();

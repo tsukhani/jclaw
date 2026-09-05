@@ -73,11 +73,7 @@ public class SlackChannel implements Channel {
     @Override
     public String channelName() { return CHANNEL_NAME; }
 
-    /**
-     * JCLAW-141: generic cross-channel text send (the {@link Channel} contract).
-     * Still resolves the legacy app-global token; JCLAW-441 unit 5 switches this
-     * to the agent's binding via {@code DeliveryDispatcher}.
-     */
+    /** JCLAW-141: generic cross-channel text send (the {@link Channel} contract). */
     @Override
     public SendResult sendText(String peerId, String text) {
         return sendWithRetry(peerId, text) ? SendResult.OK : SendResult.FAILED;
@@ -380,10 +376,6 @@ public class SlackChannel implements Channel {
         if (eventObj == null || !"message".equals(str(eventObj, "type"))) {
             return null;
         }
-        // Drop the bot's own messages (bot_id, or user == this bot). Most message
-        // subtypes (edits, joins, bot_message, ...) are still ignored, but admit
-        // `file_share` — it carries inbound files (JCLAW-344). Edit/delete subtypes
-        // remain pending JCLAW-352/353.
         if (eventObj.has("bot_id")) {
             return null;
         }

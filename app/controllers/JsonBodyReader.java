@@ -9,10 +9,7 @@ import utils.JsonArgs;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
-/**
- * Shared JSON body parsing for API controllers. Previously duplicated as a
- * private static {@code readJsonBody()} in every {@code Api*Controller}.
- */
+/** Shared JSON body parsing for API controllers. */
 public final class JsonBodyReader {
 
     private JsonBodyReader() { /* static-only utility */ }

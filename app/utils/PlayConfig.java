@@ -8,8 +8,7 @@ import play.Play;
  * application.conf properties), with a fallback when the key is absent, blank,
  * or unparseable. This is the operator-set, boot-time config source — distinct
  * from {@link services.ConfigService}, which reads the DB-backed runtime
- * {@code Config} model. Factored out of {@code TelegramInboundTextBuffer} and
- * {@code WebhookTelegramController}, which had byte-identical private copies.
+ * {@code Config} model.
  */
 public final class PlayConfig {
 

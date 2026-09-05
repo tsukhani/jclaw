@@ -377,8 +377,6 @@ public final class WhatsAppMediaDownloader {
         return mime != null ? MIME_EXT.getOrDefault(mime.toLowerCase(Locale.ROOT), "") : "";
     }
 
-    /** Map MIME to the inbound modality kind, mirroring
-     *  {@link models.MessageAttachment#kindForMime}. */
     private static String kindFor(String mime) {
         return MessageAttachment.kindForMime(mime);
     }

@@ -67,15 +67,15 @@ public enum MemoryCategory {
 
     /**
      * The canonical label to <em>store</em> a raw category under: one of the six, with
-     * anything unrecognised becoming {@link #FACT} — the same bucket a missing category
+     * anything unrecognized becoming {@link #FACT} — the same bucket a missing category
      * already falls back to.
      *
      * <p>Distinct from {@link #normalize}, which is the read path and must keep passing
-     * unrecognised values through so pre-existing rows still render. Coercing on write and
+     * unrecognized values through so pre-existing rows still render. Coercing on write and
      * passing through on read is the split that lets the taxonomy tighten without a data
      * migration.
      *
-     * <p>Unrecognised labels are not mapped to a "nearest" bucket. The extractor is given
+     * <p>Unrecognized labels are not mapped to a "nearest" bucket. The extractor is given
      * a closed set of six and told to pick one; when it returns {@code opinion} or
      * {@code project} instead, any specific bucket we chose would be our guess at an intent
      * the model did not express. {@code fact} is the neutral option that adds no meaning.

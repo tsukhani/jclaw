@@ -50,7 +50,7 @@ public final class ReplicatePredictions {
                 .url(baseUrl + "/models/" + model + "/predictions")
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey);
         if (preferWait) {
-            builder.header("Prefer", "wait"); // run inline up to ~60s, then fall back to polling
+            builder.header("Prefer", "wait");
         }
         return execute(builder.post(RequestBody.create(root.toString(), JSON)).build());
     }

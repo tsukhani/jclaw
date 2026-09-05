@@ -288,14 +288,4 @@ public final class PrintDispatcher {
         }
         return IppClient.cancel(uri, jobId, user);
     }
-
-    /** Test seam: drop the recent-jobs index so tests don't leak state into each other. */
-    static void clearRecentJobsForTest() {
-        RECENT_JOBS.clear();
-    }
-
-    /** Test seam: register a job→printer mapping without performing a print. */
-    static void rememberJobForTest(int jobId, String printerUri) {
-        RECENT_JOBS.put(jobId, printerUri);
-    }
 }

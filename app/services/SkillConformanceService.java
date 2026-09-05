@@ -79,10 +79,9 @@ public final class SkillConformanceService {
          * order, with {@code version:} directly after {@code description:} — the slot
          * skill-creator reserves for the system-managed field.
          *
-         * <p>It used to be omitted here on the reasoning that the write path injects it.
-         * That held only for skills written through the filesystem tool: this method's
-         * output is written straight to disk by {@link #conform}, so a promoted skill
-         * reached the global registry with no version at all.
+         * <p>Rendered here rather than left to the write path: only skills written
+         * through the filesystem tool get {@code version:} injected there, and
+         * {@link #conform} writes this output straight to disk.
          */
         public String toSkillMd() {
             return """
@@ -361,7 +360,7 @@ public final class SkillConformanceService {
         if (s == null) return null;
         var kebab = s.strip().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("^-++", "")    // strip leading hyphens
+                .replaceAll("^-++", "")
                 .replaceAll("-++$", "");   // strip trailing hyphens (single anchored possessive pattern — no group, no alternation, no backtracking)
         return kebab.isBlank() ? null : kebab;
     }

@@ -343,10 +343,8 @@ public class TaskTool implements ToolRegistry.Tool {
         }
         final ScheduleShorthandParser.ScheduleSpec spec;
         try {
-            // The zone is resolved up front (inside TaskScheduleSupport.parse) so
-            // an absolute date-time schedule ("2026-06-13T15:00") is interpreted
-            // in the same timezone the task is saved with (validated again in
-            // persistNewTask).
+            // TaskScheduleSupport.parse resolves the zone up front (see its Javadoc); the
+            // timezone is validated again in persistNewTask.
             spec = TaskScheduleSupport.parse(args.get(KEY_SCHEDULE).getAsString(), optStr(args, KEY_TIMEZONE));
         } catch (IllegalArgumentException e) {
             return "Error: Invalid schedule: " + e.getMessage();
@@ -469,16 +467,12 @@ public class TaskTool implements ToolRegistry.Tool {
         task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
 
         // Plumbing fields (consumed by JCLAW-295/296/297/298).
-        // Default (no delivery arg) → infer "<channel>:<target>" from the
-        // calling agent's most-recently-touched Conversation so a task
-        // created from a chat auto-delivers back to that chat on completion
-        // (via TaskExecutor.dispatchDelivery → DeliveryDispatcher.dispatchSpec).
-        // A bare channel name like "web" or "telegram" (no colon) is also
-        // common from the LLM — interpret it as "use this channel, look up
-        // the target from the calling chat", because the alternative is a
-        // hard rejection at fire time with a "Delivery spec must be
-        // channel:target" error that the operator never sees. Headless API
-        // creation (no chat context) leaves delivery null.
+        // Delivery inference (resolveDeliverySpec) exists so a task created from a chat
+        // auto-delivers back to it on completion (TaskExecutor.dispatchDelivery →
+        // DeliveryDispatcher.dispatchSpec), and so a bare channel name from the LLM is
+        // filled in rather than rejected at fire time with a "Delivery spec must be
+        // channel:target" error the operator never sees. Headless API creation (no chat
+        // context) leaves delivery null.
         task.delivery = resolveDeliverySpec(optStr(args, KEY_DELIVERY), agent);
         task.payloadType = optStr(args, KEY_PAYLOAD_TYPE);
         // Reminders default to auto-delete-after-fire; regular tasks keep their
@@ -705,8 +699,6 @@ public class TaskTool implements ToolRegistry.Tool {
             if (el.isJsonNull()) {
                 task.timezone = null;
             } else {
-                // TaskScheduleSupport.parseTimezone treats blank as null and
-                // validates non-blank values as IANA zone ids.
                 task.timezone = TaskScheduleSupport.parseTimezone(optStr(args, KEY_TIMEZONE));
             }
             anyChange = true;

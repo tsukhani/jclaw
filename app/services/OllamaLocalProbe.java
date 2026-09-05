@@ -27,10 +27,9 @@ public class OllamaLocalProbe {
      * Ollama's /v1 endpoint returns the same shape.
      */
     public static ProbeResult probe(String baseUrl) {
-        // JCLAW-186: probeModels now uses OkHttp. The previous HTTP_2 hint
-        // is gone — OkHttp speaks HTTP/1.1 to plain-HTTP cleartext
-        // endpoints by default (no h2c upgrade), which is what Ollama
-        // serves on the loopback /v1 port.
+        // JCLAW-186: no HTTP-version hint needed — OkHttp speaks HTTP/1.1 to cleartext
+        // endpoints by default (no h2c upgrade), which is what Ollama serves on the loopback
+        // /v1 port.
         var r = LocalProviderProbeSupport.probeModels(baseUrl, "Ollama");
         return CACHE.set(new ProbeResult(r.available(), r.modelCount(), r.reason(), r.connectionRefused()));
     }

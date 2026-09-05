@@ -320,11 +320,8 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         EventLogger.info(LOG_CATEGORY, agentName(), LOG_SOURCE,
                 "Streaming start (chat.type=%s)"
                         .formatted(chatType != null ? chatType : "unknown"));
-        // JCLAW-375: opt-in ack lifecycle. On turn start, place a "working"
-        // reaction (👀) on the triggering message so the user sees the bot
-        // picked up their message before the first token lands. seal swaps it
-        // to ✅, errorFallback to ❌. No-op when the feature is off or there is
-        // no message to react to (a fresh sink per turn means this fires once).
+        // JCLAW-375: opt-in "working" ack (👀) so the user sees the bot picked up their
+        // message before the first token lands; a fresh sink per turn means this fires once.
         ackTurnStart();
     }
 
@@ -832,13 +829,9 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         try {
             if (wasFirstSend) {
                 messageId = sendPlaceholder(toShow);
-                // JCLAW-384: the placeholder message id is the streamed reply
-                // bubble — record it in the per-bot bot-sent-id cache so a later
-                // reaction on the bot's own reply is recognized (notify=own).
-                // The sink owns its send path entirely (placeholder + edits +
-                // final), bypassing TelegramChannel's direct send methods that
-                // would otherwise populate the cache. Recorded once on the first
-                // send; subsequent edits keep the same id.
+                // JCLAW-384: the placeholder id is the streamed reply bubble, and the sink
+                // bypasses TelegramChannel's cache-feeding send methods — record it here so
+                // notify=own recognizes a later reaction on it. Once: edits keep the same id.
                 TelegramChannel.recordSentMessage(botToken, chatId, messageId);
                 // JCLAW-95: persist the checkpoint so a crash between here and
                 // seal() leaves a recoverable breadcrumb.
@@ -946,12 +939,10 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /**
      * D2: the {@link LinkPreviewOptions} to attach to a streaming send/edit, or
-     * null to leave Telegram's default preview-on behavior. Mirrors
-     * {@code TelegramChannel.linkPreviewOptions()} (private there) but reads the
-     * public {@link TelegramChannel#suppressLinkPreview()} accessor so the live
+     * null to leave Telegram's default preview-on behavior. Reads the public
+     * {@link TelegramChannel#suppressLinkPreview()} accessor so the live
      * placeholder + every streaming edit honor {@code telegram.linkPreview=off}
-     * the same way the non-streaming send paths do — previously the live drafts
-     * still rendered URL preview cards until the final seal edit. Public so the
+     * the same way the non-streaming send paths do. Public so the
      * default-package test can assert the config-read contract, mirroring
      * {@link TelegramChannel#suppressLinkPreview()}'s own public-for-tests scope.
      */
@@ -1083,7 +1074,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * If the notifier's own send fails, we log a warning and give up:
      * the user will notice their bot stopped replying anyway.
      *
-     * <p>JCLAW-362: honours the {@code telegram.notifier.policy} setting —
+     * <p>JCLAW-362: honors the {@code telegram.notifier.policy} setting —
      * under {@code silent} the failure is logged but no chat message is sent.
      */
     private void notifyDeliveryFailure() {
@@ -1169,8 +1160,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         if (html) builder.parseMode(ParseMode.HTML);
         // D2: honor telegram.linkPreview=off on every streaming edit (live draft
         // + the final seal edit), matching the non-streaming edit path in
-        // TelegramChannel.editMessageText. Previously the live drafts rendered
-        // URL preview cards until the seal.
+        // TelegramChannel.editMessageText.
         var linkPreview = streamingLinkPreviewOptions();
         if (linkPreview != null) builder.linkPreviewOptions(linkPreview);
         client.execute(builder.build());

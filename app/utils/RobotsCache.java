@@ -42,7 +42,7 @@ public final class RobotsCache {
     public static final long DEFAULT_DELAY_MS = 250;
 
     /** Ceiling on a single wait. Some sites declare crawl-delay in the tens of seconds;
-     *  honouring that literally would park a virtual thread for the whole crawl budget.
+     *  honoring that literally would park a virtual thread for the whole crawl budget.
      *  The wait is capped and the crawl's own wall-clock budget ends it instead, so the
      *  outcome is fewer pages rather than a stalled tool call.
      *

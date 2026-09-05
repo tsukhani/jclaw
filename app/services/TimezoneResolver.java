@@ -83,9 +83,7 @@ public final class TimezoneResolver {
         zone = tryParse(confDefault, "application.conf '" + CONFIG_KEY + "'");
         if (zone != null) return zone;
 
-        // Default: follow the operator's wall-clock zone (Settings → General),
-        // so tasks fire at the operator's local time rather than UTC. appZone()
-        // ends in ZoneId.systemDefault(), so the chain still never returns null.
+        // appZone() ends in ZoneId.systemDefault(), so the chain never returns null.
         return appZone();
     }
 

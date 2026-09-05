@@ -225,7 +225,6 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
         var byId = new LinkedHashMap<Long, Message>();
         for (var m : rows) byId.put(m.id, m);
 
-        // Walk the ranked ids, keep the ones the boundary let through, stop at the cap.
         var out = order.stream()
                 .map(byId::get)
                 .filter(Objects::nonNull)

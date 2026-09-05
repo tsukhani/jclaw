@@ -2,6 +2,7 @@ package services.transcription;
 
 import com.google.gson.JsonParser;
 import services.EventLogger;
+import services.UvProbe;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -37,9 +38,9 @@ public final class AsrModelStore extends ModelPrefetchStore<AsrModelStore.Status
      */
     public static Map<String, Status> statusAll() {
         var out = new ConcurrentHashMap<String, Status>();
-        if (!services.UvProbe.isAvailable()) {
+        if (!UvProbe.isAvailable()) {
             var reason = "ASR requires the 'uv' launcher on PATH: "
-                    + services.UvProbe.lastResult().reason();
+                    + UvProbe.lastResult().reason();
             for (var m : AsrModel.values()) {
                 out.put(m.id(), new Status(State.UNAVAILABLE, 0, 0, null, reason));
             }

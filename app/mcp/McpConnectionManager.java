@@ -205,7 +205,6 @@ public final class McpConnectionManager {
 
     private static void connectInternal(McpServer server, CompletableFuture<Void> firstAttemptFuture) {
         ensureScheduler();
-        // Tear down any prior entry for this name first.
         stop(server.name);
         var entry = new Entry(server.name);
         entry.firstAttemptFuture = firstAttemptFuture;
@@ -360,13 +359,10 @@ public final class McpConnectionManager {
     }
 
     private static void launchConnect(Entry entry, McpServer server, int attempt) {
-        // Identity, not just presence: if the entry was replaced (admin toggle/
-        // config edit re-runs connectInternal, which stop()s then re-adds a
-        // fresh entry under the same name) while this attempt waited on the
-        // backoff timer, this orphan must not launch — a containsKey check would
-        // see the live replacement's entry and wrongly proceed. Mirror the
-        // success-path identity guard in doConnect.
-        if (connections.get(server.name) != entry) return;  // stopped or replaced while waiting
+        // Identity, not presence: an admin toggle/config edit re-runs connectInternal, which
+        // stop()s and re-adds a fresh entry under the same name, so a containsKey check would
+        // see the live replacement and let this orphan launch. Mirrors the guard in doConnect.
+        if (connections.get(server.name) != entry) return;
         Thread.ofVirtual().name("mcp-connect-" + server.name).start(() -> doConnect(entry, server, attempt));
     }
 
@@ -384,35 +380,25 @@ public final class McpConnectionManager {
             return;
         }
 
-        // JCLAW-288: extended request timeout on the first attempt so
-        // cold-cache uvx / npx / pipx subprocesses have headroom to install
-        // + bootstrap before the initialize handshake. Steady-state retries
-        // keep the snappier default — by the second attempt the cache is
-        // warm (or there's a real problem) and a long timeout would only
-        // delay the failure signal.
+        // JCLAW-288: the first attempt gets cold-cache install headroom (see
+        // firstAttemptRequestTimeout); by the second the cache is warm or there's a real
+        // problem, and a long timeout would only delay the failure signal.
         var requestTimeout = (attempt == 0) ? firstAttemptRequestTimeout : DEFAULT_REQUEST_TIMEOUT;
         var client = new McpClient(server.name, transport, clientVersion(), requestTimeout);
         client.onToolsChanged(tools -> republishTools(server.name, tools));
         try {
             client.connect();
-            // If the operator toggled this server off (or replaced its
-            // config) while client.connect() was in-flight, the entry was
-            // removed from the connections map by stop(). Detect that and
-            // roll back the just-finished handshake — without this, the
-            // orphaned doConnect would re-publish tools, re-write the
-            // allowlist, and persist status=CONNECTED for a server the
-            // user just disabled. (The first-attempt future on the orphan
-            // entry was already canceled by the stop() that replaced us.)
+            // stop() may have removed this entry while connect() was in flight (operator
+            // toggled the server off or replaced its config); an orphaned doConnect would
+            // re-publish tools, re-write the allowlist and persist CONNECTED for it. That
+            // stop() already canceled the orphan's first-attempt future.
             if (connections.get(server.name) != entry) {
                 bestEffortClose(client);
                 return;
             }
-            // Defensive: if a prior client is still attached (e.g. a watchdog-
-            // driven reconnect after onTransportError), close it before
-            // overwriting the reference. The transport close above on the
-            // McpClient.onTransportError path normally has this covered, but
-            // any future path that calls scheduleConnect without going
-            // through transport-error should still leave us leak-free.
+            // A prior client may still be attached (watchdog reconnect after onTransportError);
+            // close it before overwriting so a path that reaches scheduleConnect without a
+            // transport error cannot leak one.
             var prior = entry.client;
             if (prior != null && prior != client) bestEffortClose(prior);
             entry.client = client;
@@ -504,22 +490,17 @@ public final class McpConnectionManager {
         entry.lastError = client.lastError();
         persistStatus(server.id, McpServer.Status.DISCONNECTED, client.lastError());
         persistTimestamp(server.id, TIMESTAMP_LAST_DISCONNECTED);
-        // Re-verify identity after the teardown above: an admin toggle/delete
-        // could have replaced this entry between the initial guard and here.
-        // Rescheduling an orphan would race the live replacement's own
-        // backoff loop against the same server name.
-        if (connections.get(server.name) != entry) return;  // stopped or replaced during teardown
+        // Re-check identity: a toggle/delete during the teardown above would leave this
+        // orphan racing the live replacement's own backoff loop for the same server name.
+        if (connections.get(server.name) != entry) return;
         scheduleConnect(entry, server, entry.attempts + 1);
     }
 
     private static void handleFailure(Entry entry, McpServer server, int attempt, String error) {
-        // If the entry was replaced or removed (admin toggle/delete or a
-        // concurrent connect) while this attempt was in flight, this orphaned
-        // failure path must not touch shared state: unpublishing the live
-        // replacement's tools, clobbering its DB row, or deleting its allowlist
-        // rows. Guard before any mutation — this is the doConnect catch-path
-        // counterpart to the success-path identity check. The caller has
-        // already closed its own local client, so no leak escapes here.
+        // Identity guard before any mutation — the catch-path counterpart to doConnect's
+        // success-path check: an orphaned failure must not unpublish the live replacement's
+        // tools, clobber its DB row or delete its allowlist rows. The caller already closed
+        // its own client, so nothing leaks by returning here.
         if (connections.get(server.name) != entry) return;
         var hadConnection = entry.client != null;
         if (entry.client != null) {
@@ -545,15 +526,10 @@ public final class McpConnectionManager {
     }
 
     private static void republishTools(String serverName, List<McpToolDef> defs) {
-        // JCLAW-281: the server-level handle is what the LLM sees in its
-        // function-calling defs (one parameterized entry per server). The
-        // per-action McpToolAdapter wrappers stay in the registry too —
-        // they're the execution path that McpServerTool delegates to once
-        // the model has chosen an action — but they're hidden from the
-        // function-calling defs by Tool.isServerLevel + the filter in
-        // ToolRegistry.getToolDefsForAgent. Server-level handle goes
-        // first so iteration order keeps the per-server card grouping
-        // intact in the admin UI.
+        // JCLAW-281: the server-level handle is the one entry per server the LLM sees; the
+        // per-action adapters stay registered as McpServerTool's execution path but are hidden
+        // from the function-calling defs by Tool.isServerLevel + ToolRegistry.getToolDefsForAgent.
+        // Handle first so iteration order keeps the admin UI's per-server card grouping intact.
         var tools = new ArrayList<ToolRegistry.Tool>(defs.size() + 1);
         tools.add(new McpServerTool(serverName));
         for (var def : defs) {
@@ -578,13 +554,10 @@ public final class McpConnectionManager {
      *  every disconnect path: explicit {@link #stop}, watchdog teardown,
      *  and connect-failure rollback. */
     private static void clearAllowlistAndAudit(String serverName) {
-        // During graceful shutdown the JPA layer is tearing down, so this DELETE
-        // can't begin a transaction — and it's redundant: the next boot's connect
-        // calls McpAllowlist.registerForAllAgents, which clears the prior set
-        // first. Nothing can use the grants while the app is down, so skipping the
-        // revoke here is safe and avoids a spurious "begin transaction failed" WARN.
-        // (Runtime disconnect paths — admin DELETE, watchdog — are not shutting
-        // down, so they still revoke with JPA alive.)
+        // During graceful shutdown JPA is tearing down, so this DELETE cannot begin a
+        // transaction — and it is redundant: the next boot's registerForAllAgents clears the
+        // prior set first, and nothing can use the grants while the app is down. Skipping it
+        // avoids a spurious "begin transaction failed" WARN; runtime disconnects still revoke.
         if (EventLogger.isShuttingDown()) return;
         try {
             Tx.run(() -> {
@@ -671,13 +644,10 @@ public final class McpConnectionManager {
         } catch (RuntimeException _) { /* best effort persistence */ }
     }
 
-    /** Stamp a timestamp column to now(). {@code column} is a fixed,
-     *  caller-supplied literal (never user input) — mapped here to a fully-static
-     *  JPQL string so nothing is ever concatenated into the query. That removes
-     *  the injection surface entirely (and stays safe even if a future caller
-     *  passed a tainted value — an unknown column is rejected). Best-effort —
-     *  swallows persistence failures (and an unsupported column) like its
-     *  siblings. */
+    /** Stamp a timestamp column to now(). {@code column} selects a fully-static JPQL string —
+     *  nothing is concatenated into the query and an unknown column is rejected, so even a
+     *  tainted caller value has no injection surface. Best-effort like its siblings: swallows
+     *  persistence failures and an unsupported column alike. */
     private static void persistTimestamp(Long serverId, String column) {
         if (serverId == null) return;
         try {

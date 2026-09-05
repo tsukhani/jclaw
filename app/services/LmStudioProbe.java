@@ -17,10 +17,9 @@ public class LmStudioProbe {
             new ProbeResult(false, 0, "lm-studio probe has not run yet", false));
 
     public static ProbeResult probe(String baseUrl) {
-        // JCLAW-186: probeModels now uses OkHttp under the hood. OkHttp does
-        // not attempt h2c upgrade on plain HTTP, so the LM Studio
-        // Express/Node upgrade-event hang the JDK driver had to dodge is
-        // structurally absent — no version pin needed.
+        // JCLAW-186: no HTTP-version pin needed — OkHttp never attempts h2c upgrade on plain
+        // HTTP, so the LM Studio Express/Node upgrade-event hang the JDK driver had to dodge
+        // is structurally absent.
         var r = LocalProviderProbeSupport.probeModels(baseUrl, "LM Studio");
         return CACHE.set(new ProbeResult(r.available(), r.modelCount(), r.reason(), r.connectionRefused()));
     }

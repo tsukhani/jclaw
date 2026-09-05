@@ -57,10 +57,6 @@ import java.util.function.Supplier;
  *       create silent inversions where the {@code scheduled_tasks}
  *       row exists but the {@link Task} thinks it's CANCELED, or
  *       vice versa.</li>
- *   <li>Does not handle {@code pause} / {@code resume} — those
- *       methods are deferred until the Task entity gains the
- *       {@code paused} boolean column (separate JCLAW-21 commit,
- *       part of the entity refactor section of the spec).</li>
  * </ul>
  *
  * <p>{@link SchedulerClient} is sourced from
@@ -406,7 +402,7 @@ public final class TaskSchedulingService {
             // The row is locked mid-fire (db-scheduler holds it for the fire's
             // duration); cancel() can't remove it while the executor owns it.
             // Mirror runNow's typed handling and surface this distinctly rather
-            // than relabelling it "no scheduled row" — the schedule survives
+            // than relabeling it "no scheduled row" — the schedule survives
             // because a fire is in flight, not because it was missing.
             EventLogger.warn("task", null, null,
                     "TaskSchedulingService.cancel: Task id %d is currently executing; scheduled row not removed"

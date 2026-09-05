@@ -21,7 +21,7 @@ import java.util.Optional;
  * WAN 2 and LTX, so another aggregator would add no capability, only a price/speed hedge — fal.ai is the
  * documented future option if that hedge is ever wanted (the true Replicate peer: same poll-without-webhook
  * queue API), rather than a first-party API like Runway/Luma/Kling. Returns {@link Optional#empty()}
- * when unset/unrecognised — the {@code generate_video} tool (JCLAW-235) then reports "video generation is
+ * when unset/unrecognized — the {@code generate_video} tool (JCLAW-235) then reports "video generation is
  * not configured" rather than attempting a call. Resolved per call so a Settings change takes effect on
  * the next generation without a restart.
  */

@@ -232,7 +232,6 @@ final class FsPatchApplier {
     }
 
     private static String applyUpdateMoveOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, FileOp.Update upd) {
-        // Write edited content to new path, then remove original.
         var writeResult = FsWriter.writeFile(r.moveTarget, plan.newContent);
         if (writeResult.startsWith(FsSupport.ERROR_PREFIX)) {
             return "Error applying Update+Move '%s'→'%s': %s"

@@ -55,13 +55,11 @@ public final class WhatsAppCobaltRunner {
         var desiredIds = new HashSet<Long>();
         for (var b : desired) desiredIds.add(b.id);
 
-        // Close active sessions that vanished or were disabled.
         for (var bindingId : new HashSet<>(HANDLES.keySet())) {
             if (!desiredIds.contains(bindingId)) {
                 unregister(bindingId);
             }
         }
-        // Open any desired binding not currently active.
         for (var target : desired) {
             if (!HANDLES.containsKey(target.id)) {
                 register(target);

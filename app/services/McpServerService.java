@@ -94,10 +94,7 @@ public final class McpServerService {
             var maskedHeaders = maskHeaderValues(cfg.headers);
             var liveTools = McpConnectionManager.tools(row.name);
             int tools = liveTools.size();
-            // Expose name + description per advertised tool so the UI
-            // can render the action list without a follow-up fetch.
-            // Description falls back to empty string when the MCP server
-            // doesn't supply one — keeps the JSON shape stable.
+            // Description falls back to "" when the server supplies none — keeps the JSON shape stable.
             var toolInfo = liveTools.stream()
                     .map(t -> new ToolInfo(t.name(), t.description() == null ? "" : t.description()))
                     .toList();

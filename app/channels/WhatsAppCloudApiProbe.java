@@ -79,7 +79,7 @@ public final class WhatsAppCloudApiProbe {
 
     /**
      * Probe {@code phoneNumberId} with {@code accessToken} against the live Graph
-     * API. Never throws — transport failures map to {@link Failed}. Honours a
+     * API. Never throws — transport failures map to {@link Failed}. Honors a
      * {@link #installForTest} override when one is set.
      */
     public static Result probe(String phoneNumberId, String accessToken) {

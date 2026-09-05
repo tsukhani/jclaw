@@ -407,8 +407,7 @@ public final class LuceneIndexer {
      * <p>{@code null} or blank content writes an empty content field —
      * the doc still exists so a subsequent {@link #remove} can target it
      * by id, but it matches no full-text queries until content arrives
-     * via a later update. This matches the pre-multi-scope behavior where
-     * empty TaskRunMessage rows were still indexed.
+     * via a later update.
      */
     public static void upsert(Scope scope, long id, String content) {
         upsert(scope, id, content, null);
@@ -680,8 +679,7 @@ public final class LuceneIndexer {
     /**
      * Test-only: clear every open scope's index in place (deleteAll + commit)
      * and refresh the searchers, leaving the writers open at the current path.
-     * Replaces ad-hoc reflection into {@link #writers} from test setup
-     * (JCLAW-428). Callers serialize via {@code LuceneTestSync} so a wipe never
+     * Callers serialize via {@code LuceneTestSync} (JCLAW-428) so a wipe never
      * races a concurrent search test on a shared scope. No-op when closed.
      */
     public static synchronized void wipeForTest() {
@@ -706,7 +704,7 @@ public final class LuceneIndexer {
         // Resolution order:
         //   1. explicit System-property override (setIndexPathForTest) — kept
         //      for tests that drive the path directly (e.g. LuceneIndexerTest);
-        //   2. Play config jclaw.search.lucenePath, which honours the %test.
+        //   2. Play config jclaw.search.lucenePath, which honors the %test.
         //      prefix so the autotest JVM lands in data/jclaw-lucene-test and
         //      never the production index (JCLAW-428);
         //   3. production default data/jclaw-lucene.

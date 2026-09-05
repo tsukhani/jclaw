@@ -23,8 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *       {@link okhttp3.Dispatcher#getMaxRequestsPerHost()} — surface as
  *       a distinct segment instead of hiding inside {@code ttft}.</li>
  *   <li>Logs the negotiated wire protocol ({@code h2}, {@code http/1.1})
- *       once per {@code host:port}. Replaces the standalone
- *       PROTOCOL_LOGGER that previously served the LLM clients.</li>
+ *       once per {@code host:port}.</li>
  * </ul>
  *
  * <p>Per-instance state ({@link #callStartNs}) means this MUST be created

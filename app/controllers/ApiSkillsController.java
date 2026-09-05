@@ -475,7 +475,6 @@ public class ApiSkillsController extends Controller {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "Global skill '%s' not found".formatted(name));
         }
 
-        // Verify the agent has every tool this skill declares it needs
         var toolCheck = SkillPromotionService.validateToolRequirements(agent, name);
         if (!toolCheck.ok()) {
             response.status = 400;
@@ -497,7 +496,6 @@ public class ApiSkillsController extends Controller {
         try {
             SkillPromotionService.copyToAgentWorkspace(agent, name);
 
-            // Ensure skill is enabled for this agent
             var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
             if (config != null && !config.enabled) {
                 config.enabled = true;

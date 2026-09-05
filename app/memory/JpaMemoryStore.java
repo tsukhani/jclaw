@@ -684,24 +684,6 @@ public class JpaMemoryStore implements MemoryStore {
         return fuseHydrateRerank(agentId, query, ftsIds, knnIds, preloaded, limit);
     }
 
-    /**
-     * JCLAW-527: the shared retrieval contract — RRF fusion (k = 60), agent-
-     * bounded hydration, and the optional cross-encoder rerank — written once,
-     * above the backend seam. The Lucene path (H2, all dev/test) and the
-     * Postgres path (production) both land here, so the fusion logic the AC
-     * cares about is exercised by every test run, not only on live Postgres.
-     *
-     * <p>Legs arrive as best-first id lists plus whatever {@code Memory} rows
-     * the caller already loaded; KNN-only ids are hydrated re-bounded to the
-     * agent so a stale/foreign index id can never leak another agent's memory
-     * into recall (same guard as {@code Memory.searchByTextScored}).
-     *
-     * <p>When a rerank is active it runs over the full fused-and-hydrated
-     * shortlist (up to two legs' worth of candidates, before the limit cut) and
-     * the result carries rank-derived relevance — the cross-encoder's opinion
-     * replaces the fused scores, otherwise downstream importance blending
-     * (JCLAW-40) would re-sort on scores the rerank just overruled.
-     */
     public static final String KEY_RECALL_MIN_COSINE = "memory.recall.minCosine";
 
     /**
@@ -755,6 +737,24 @@ public class JpaMemoryStore implements MemoryStore {
      */
     public static final int DEFAULT_RECALL_RRF_K = 5;
 
+    /**
+     * JCLAW-527: the shared retrieval contract — RRF fusion (k = 60), agent-
+     * bounded hydration, and the optional cross-encoder rerank — written once,
+     * above the backend seam. The Lucene path (H2, all dev/test) and the
+     * Postgres path (production) both land here, so the fusion logic the AC
+     * cares about is exercised by every test run, not only on live Postgres.
+     *
+     * <p>Legs arrive as best-first id lists plus whatever {@code Memory} rows
+     * the caller already loaded; KNN-only ids are hydrated re-bounded to the
+     * agent so a stale/foreign index id can never leak another agent's memory
+     * into recall (same guard as {@code Memory.searchByTextScored}).
+     *
+     * <p>When a rerank is active it runs over the full fused-and-hydrated
+     * shortlist (up to two legs' worth of candidates, before the limit cut) and
+     * the result carries rank-derived relevance — the cross-encoder's opinion
+     * replaces the fused scores, otherwise downstream importance blending
+     * (JCLAW-40) would re-sort on scores the rerank just overruled.
+     */
     private List<MemoryEntry> fuseHydrateRerank(String agentId, String query,
             List<Long> keywordIds, List<Long> vectorIds,
             HashMap<Long, Memory> preloaded, int limit) {
@@ -794,7 +794,7 @@ public class JpaMemoryStore implements MemoryStore {
 
     /**
      * Entity names in {@code text}: capitalised, alphabetic, not boilerplate. Used by
-     * {@link MemoryKeyBackfillService} to find a memory's neighbours when writing its
+     * {@link MemoryKeyBackfillService} to find a memory's neighbors when writing its
      * retrieval key.
      */
     public static List<String> entityNames(String text) {

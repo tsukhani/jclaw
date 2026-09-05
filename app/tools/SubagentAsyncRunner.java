@@ -317,15 +317,12 @@ final class SubagentAsyncRunner {
             return;
         }
 
-        // Update the SubagentRun audit row (terminal status + outcome).
-        // JCLAW-271: skip the write when /subagent kill already stamped
-        // KILLED — the operator's reason is the source of truth, and
-        // overwriting it here would replace "Killed by operator" with the
-        // TIMEOUT / FAILED message we synthesized when the canceled
-        // Future threw.
+        // JCLAW-271: persistAsyncTerminalRun skips the write when /subagent kill already
+        // stamped KILLED — the operator's reason is the source of truth, and overwriting
+        // it would replace "Killed by operator" with the TIMEOUT / FAILED message we
+        // synthesized when the canceled Future threw.
         SubagentRunStore.persistAsyncTerminalRun(runId, outcome);
 
-        // Build + post the announce Message into the parent Conversation.
         var yieldedFlag = SubagentResponses.postAnnounceAndReadYieldFlag(runId, childConvId, parentConvId,
                 label, outcome);
 

@@ -1,6 +1,7 @@
 package services;
 
 import play.Play;
+import utils.TikaHolder;
 
 import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,7 +33,7 @@ public class OcrHealthProbe {
     static String tesseractCommand() {
         return tesseractCommand(System.getProperty("os.name", ""),
                 Play.configuration != null
-                        ? Play.configuration.getProperty(utils.TikaHolder.OCR_PATH_KEY) : null);
+                        ? Play.configuration.getProperty(TikaHolder.OCR_PATH_KEY) : null);
     }
 
     /**
@@ -63,7 +64,7 @@ public class OcrHealthProbe {
      * probe ({@link jobs.TesseractProbeJob}) forever — the shared helper caps
      * the wait and {@code destroyForcibly()}'s a hung child, yielding an
      * unavailable result instead of hanging. On success the printed version's
-     * first line is surfaced as before.
+     * first line is surfaced.
      */
     public static ProbeResult probe() {
         var r = ExecutableProbeSupport.probeCapturing(tesseractCommand(), "--version", "");

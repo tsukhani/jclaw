@@ -47,7 +47,7 @@ public enum ChannelType implements ValueEnum {
 
     /**
      * Resolve a raw database/wire string to the corresponding enum constant.
-     * Returns {@code null} for unrecognised values so callers can fall through
+     * Returns {@code null} for unrecognized values so callers can fall through
      * to a default branch without throwing.
      */
     public static ChannelType fromValue(String value) {

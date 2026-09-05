@@ -3,6 +3,7 @@ package services.transcription;
 import com.google.gson.JsonParser;
 import services.ConfigService;
 import services.EventLogger;
+import services.UvProbe;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -70,9 +71,9 @@ public final class DiarizeModelStore extends ModelPrefetchStore<DiarizeModelStor
         repos.add(PYANNOTE_REPO);
         repos.add(serRepo);
         var out = new LinkedHashMap<String, Status>();
-        if (!services.UvProbe.isAvailable()) {
+        if (!UvProbe.isAvailable()) {
             var reason = "on-device diarization requires the 'uv' launcher on PATH: "
-                    + services.UvProbe.lastResult().reason();
+                    + UvProbe.lastResult().reason();
             for (var r : repos) out.put(r, new Status(State.UNAVAILABLE, 0, null, reason));
             return out;
         }

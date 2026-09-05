@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
+import services.ConfigService;
 import services.EventLogger;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
@@ -39,7 +40,7 @@ import java.util.concurrent.Executors;
  * one and each redirect hop.
  *
  * <p>Breadth-first on purpose. A crawl that runs out of budget mid-way should have
- * spent it on the seed's immediate neighbours rather than one deep chain, because
+ * spent it on the seed's immediate neighbors rather than one deep chain, because
  * the pages nearest the seed are the ones the caller asked about.
  */
 public class WebScrapeTool implements ToolRegistry.Tool {
@@ -356,7 +357,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *
      * <p>Runs single-threaded before any work is submitted. Both checks are cheap, and
      * rejecting here keeps {@code seen}, the refusal list and the page budget free of
-     * synchronisation.
+     * synchronization.
      */
     private static List<URI> admit(List<URI> level, boolean respectRobots, CrawlState state) {
         var admitted = new ArrayList<URI>();
@@ -720,7 +721,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     /** Runs after a level completes, single-threaded, so {@code seen} needs no
-     *  synchronisation and the next level's order is deterministic. */
+     *  synchronization and the next level's order is deterministic. */
     private static void collectLinks(WebExtraction.FetchResult fetched, URI seed,
                                      boolean sameHostOnly, CrawlState state,
                                      List<URI> next) {
@@ -778,7 +779,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private static int configConcurrency() {
         return Math.clamp(
-                services.ConfigService.getInt(CFG_CONCURRENCY, DEFAULT_CONCURRENCY),
+                ConfigService.getInt(CFG_CONCURRENCY, DEFAULT_CONCURRENCY),
                 1, MAX_CONCURRENCY);
     }
 
@@ -858,7 +859,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *  described this as operator-tunable but read it from application.conf, which needs
      *  a restart to change — not tunable in the sense the ticket meant. */
     private static int maxEscalations() {
-        return services.ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
+        return ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
     }
 
     private static int configTimeoutSeconds() {
@@ -866,13 +867,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     private static String languageDefault() {
-        var configured = services.ConfigService.get(CFG_LANGUAGE, DEFAULT_LANGUAGE).strip();
+        var configured = ConfigService.get(CFG_LANGUAGE, DEFAULT_LANGUAGE).strip();
         return configured.isEmpty() ? DEFAULT_LANGUAGE : configured;
     }
 
     private static boolean seedFromSitemapDefault() {
         return !"false".equalsIgnoreCase(
-                services.ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());
+                ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());
     }
 
     /**
@@ -888,6 +889,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      */
     private static boolean respectRobotsDefault() {
         return !"false".equalsIgnoreCase(
-                services.ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());
+                ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());
     }
 }

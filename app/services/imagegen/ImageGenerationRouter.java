@@ -17,7 +17,7 @@ import java.util.Optional;
  *   <li>{@code flux-local} → {@link LocalImageGenerationClient} (local Flux 2 Klein via the Python sidecar)</li>
  * </ul>
  *
- * <p>Returns {@link Optional#empty()} when unset/unrecognised — the {@code generate_image} tool then
+ * <p>Returns {@link Optional#empty()} when unset/unrecognized — the {@code generate_image} tool then
  * reports "image generation is not configured" to the agent rather than attempting a call. Resolved
  * per call so a Settings change takes effect on the next generation without a restart. (OpenRouter is
  * not wired here yet: its image surface uses a different chat-completions/modalities shape — JCLAW-225

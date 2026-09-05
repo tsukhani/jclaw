@@ -191,11 +191,9 @@ public class ApiAuthController extends Controller {
             LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
             ApiResponses.error(409, ApiResponses.ALREADY_SET, "Password is already set");
         }
-        // JCLAW-674: parse via the shared JsonBodyReader so ONLY a malformed
-        // body maps to 400. The prior broad catch (Exception) also turned a
-        // genuine infra failure in ConfigService.set / PasswordHasher.hash into
-        // a misleading 400; keeping those outside any catch lets them surface
-        // as Play's 500 instead.
+        // JCLAW-674: only a malformed body maps to 400 (JsonBodyReader);
+        // ConfigService.set / PasswordHasher.hash stay outside any catch so a
+        // genuine infra failure surfaces as Play's 500, not a misleading 400.
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
         var password = JsonBodyReader.optString(body, "password", false);

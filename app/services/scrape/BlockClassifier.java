@@ -13,8 +13,7 @@ import java.util.regex.Pattern;
  * <p>Classifies from the <em>raw</em> markup rather than the extracted text. Readability
  * strips scripts, so a Cloudflare gate and a client-rendered app both extract to nothing
  * and are indistinguishable after extraction — the markers that separate them are in the
- * markup the extractor discarded. The provisional version of this class could not tell
- * them apart and said so; this one can.
+ * markup the extractor discarded.
  */
 public final class BlockClassifier {
 

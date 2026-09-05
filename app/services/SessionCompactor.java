@@ -409,7 +409,6 @@ public final class SessionCompactor {
         if (raw == null || raw.isBlank()) return null;
         var trimmed = raw.strip();
         if (trimmed.length() <= PARENT_CONTEXT_MAX_CHARS) return trimmed;
-        // Hard cap with ellipsis — never trust the model alone to honor the budget.
         return trimmed.substring(0, PARENT_CONTEXT_MAX_CHARS - 1).stripTrailing() + "…";
     }
 

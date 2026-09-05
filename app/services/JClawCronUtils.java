@@ -43,7 +43,7 @@ public final class JClawCronUtils {
      * expression in the JVM-default zone. Returns null on blank input
      * or any parse failure — callers (TaskSchedulingService.computeNextRunAt,
      * TaskExecutionHandler.scheduleCronNextCompletion) treat null as
-     * "skip and log", matching the pre-migration behavior.
+     * "skip and log".
      *
      * <p>Prefer {@link #nextExecution(String, ZoneId)} for per-task
      * timezone support (JCLAW-261). This single-arg overload is kept

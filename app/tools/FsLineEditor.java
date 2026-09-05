@@ -115,8 +115,6 @@ final class FsLineEditor {
      */
     private static OpCounts applyParsedLineOps(List<LineOp> parsed, List<String> lines) {
         var ordered = new ArrayList<>(parsed);
-        // Stable sort by startLine; Collections.sort is stable so equal-startLine ops
-        // retain their original (request) order — matching the prior tie semantics.
         ordered.sort(Comparator.comparingInt(LineOp::startLine));
 
         var merged = new ArrayList<String>(lines.size());
@@ -126,8 +124,7 @@ final class FsLineEditor {
         int deleted = 0;
         for (var op : ordered) {
             int start = op.startLine() - 1; // 0-indexed anchor in original coordinates
-            // Emit the untouched original lines before this op's anchor. Guarded so an
-            // op whose start falls inside an earlier op's consumed range copies nothing.
+            // Guarded so an op whose start falls inside an earlier op's consumed range copies nothing.
             if (start > cursor) {
                 merged.addAll(lines.subList(cursor, start));
                 cursor = start;

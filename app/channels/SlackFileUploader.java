@@ -51,7 +51,7 @@ public final class SlackFileUploader {
      *  uploads, matching the Telegram upload timeout). */
     static OkHttpClient UPLOAD_CLIENT = HttpFactories.general().newBuilder()
             .dns(SsrfGuard.SAFE_DNS)
-            .writeTimeout(Duration.ofSeconds(60)) // large uploads
+            .writeTimeout(Duration.ofSeconds(60))
             .followRedirects(false)
             .followSslRedirects(false)
             .build();

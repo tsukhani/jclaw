@@ -58,8 +58,8 @@ import java.util.concurrent.Executors;
  * <h2>Migration of pre-cutover PENDING Tasks</h2>
  * Pre-cutover Tasks (created before this scheduler was wired in)
  * exist as PENDING rows with no corresponding {@code scheduled_tasks}
- * row. {@link BootConsistencyCheck} runs as a separate
- * {@code @OnApplicationStart} job and registers them with
+ * row. {@link BootConsistencyCheck}, driven from {@link #doJob} once the
+ * scheduler is up, registers them with
  * {@link services.TaskSchedulingService} so they don't sit stranded.
  * The crash-recovery case (Task persisted but register() never
  * ran) is closed by the same sweep.
@@ -78,10 +78,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
      * {@code @OnApplicationStop} callback (which fans out to
      * {@link #shutdownGracefully}) runs on a different thread.
      */
-    // Publish-once-read-many handoff between the @OnApplicationStart
-    // bootstrap and the @OnApplicationStop shutdown hook. S3077 targets
-    // compound mutation on volatile non-primitives; a pure reference
-    // handoff is the canonical valid use of volatile.
+    // S3077 targets compound mutation on volatile non-primitives; a pure reference handoff is the canonical valid use.
     @SuppressWarnings("java:S3077")
     private static volatile Scheduler scheduler;
 
@@ -196,9 +193,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
 
         // JCLAW-411/413: built-in tools are guaranteed registered before this
         // point — ToolRegistrationJob runs at default priority (0), this job at
-        // 100 — so an overdue boot-time fire no longer races an empty
-        // ToolRegistry. (Pre-1.13.27 this job called ToolRegistrationJob.registerAll()
-        // inline as a workaround for the lack of startup-job ordering.)
+        // 100 — so an overdue boot-time fire no longer races an empty ToolRegistry.
         // Publish the SchedulerClient synchronously so web-UI CRUD can schedule
         // tasks immediately (TaskSchedulingService.register writes via 'built').
         TaskExecutionHandler.setSchedulerClient(built);

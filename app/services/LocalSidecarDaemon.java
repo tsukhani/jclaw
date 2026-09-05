@@ -2,6 +2,7 @@ package services;
 
 import com.google.gson.JsonParser;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import play.Logger;
 import play.Play;
 import utils.HttpFactories;
@@ -92,11 +93,8 @@ public final class LocalSidecarDaemon {
      *  which the diarization facade holds across a multi-minute spawn. */
     private final Object tokenLock = new Object();
 
-    /** JCLAW-830 single-flight: only one thread spawns on the fixed port at a
-     *  time. Held across spawn + {@link #awaitHealthy()} so a second concurrent
-     *  starter waits for the in-flight spawn then re-checks health and no-ops,
-     *  rather than double-spawning. Deliberately NOT the lock {@link #stop()}
-     *  uses, so a stop never stalls behind the startup poll. */
+    /** JCLAW-830 single-flight lock, held across spawn + {@link #awaitHealthy()}; see
+     *  {@link #singleFlight(Supplier)}. Deliberately NOT the lock {@link #stop()} uses. */
     private final ReentrantLock startLock = new ReentrantLock();
 
     /** JCLAW-830 short-held publication guard for {@link #process} and the drain
@@ -555,7 +553,7 @@ public final class LocalSidecarDaemon {
         var call = HttpFactories.general().newCall(new Request.Builder()
                 .url(baseUrl() + "/shutdown")
                 .header(AUTH_HEADER, authToken())
-                .post(okhttp3.RequestBody.create(new byte[0]))
+                .post(RequestBody.create(new byte[0]))
                 .build());
         call.timeout().timeout(5, TimeUnit.SECONDS);
         try (var resp = call.execute()) {

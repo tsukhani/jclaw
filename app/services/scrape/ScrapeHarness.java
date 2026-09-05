@@ -1,6 +1,10 @@
 package services.scrape;
 
 import okhttp3.OkHttpClient;
+import tools.WebScrapeTool;
+import tools.scrape.ImpersonatedFetcher;
+import tools.scrape.RenderedFetcher;
+import tools.scrape.ScrapeLadder;
 import utils.SsrfGuard;
 import utils.WebExtraction;
 
@@ -83,7 +87,7 @@ public final class ScrapeHarness {
      * scores per-URL reach and a crawl would conflate that with link discovery.
      */
     public static Rung rungScrape() {
-        var tool = new tools.WebScrapeTool();
+        var tool = new WebScrapeTool();
         return tool::fetchSingle;
     }
 
@@ -103,9 +107,9 @@ public final class ScrapeHarness {
     public static Rung rung2() {
         return url -> {
             try {
-                var fetched = tools.scrape.ImpersonatedFetcher.fetch(url,
-                        tools.scrape.ScrapeLadder.impersonatedHeaders(
-                                tools.scrape.ScrapeLadder.DEFAULT_LANGUAGE));
+                var fetched = ImpersonatedFetcher.fetch(url,
+                        ScrapeLadder.impersonatedHeaders(
+                                ScrapeLadder.DEFAULT_LANGUAGE));
                 return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
             } catch (Exception e) {
                 var m = e.getMessage();
@@ -131,7 +135,7 @@ public final class ScrapeHarness {
     public static Rung rung3() {
         return url -> {
             try {
-                var fetched = tools.scrape.RenderedFetcher.fetch(url);
+                var fetched = RenderedFetcher.fetch(url);
                 return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
             } catch (Exception e) {
                 var m = e.getMessage();
@@ -158,10 +162,10 @@ public final class ScrapeHarness {
     public static Rung rungLadder() {
         return url -> {
             var plain = rung1().fetch(url);
-            var first = new tools.scrape.ScrapeLadder.Attempt(
+            var first = new ScrapeLadder.Attempt(
                     ScrapeRung.PLAIN, null, plain.extractedText(),
                     BlockClassifier.classify(plain), plain.error());
-            var best = tools.scrape.ScrapeLadder.climb(url, first);
+            var best = ScrapeLadder.climb(url, first);
             if (best.servedBy() == ScrapeRung.PLAIN) return plain;
             return best.fetched() == null
                     ? ScrapeObservation.failed(url, best.detail())
