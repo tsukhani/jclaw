@@ -8,6 +8,7 @@ import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.JPA;
 import play.db.jpa.Model;
+import utils.AppClock;
 import utils.TokenHasher;
 
 import java.time.Instant;
@@ -78,12 +79,12 @@ public class ApiToken extends Model {
 
     @PrePersist
     void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
+        if (createdAt == null) createdAt = AppClock.now();
     }
 
     /** True when this row may still authenticate a request. */
     public boolean isActive() {
-        var now = Instant.now();
+        var now = AppClock.now();
         return revokedAt == null && (expiresAt == null || expiresAt.isAfter(now));
     }
 
@@ -107,7 +108,7 @@ public class ApiToken extends Model {
      *  the next save() — preserving both the query-cache entry and the
      *  L2 entity-cache entry for this row. */
     public void markUsed() {
-        var now = Instant.now();
+        var now = AppClock.now();
         if (lastUsedAt == null || lastUsedAt.isBefore(now.minusSeconds(MARK_USED_THROTTLE_SECONDS))) {
             lastUsedAt = now;
         }

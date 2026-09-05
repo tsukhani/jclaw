@@ -3,8 +3,8 @@ package services;
 import mcp.McpAllowlist;
 import models.Agent;
 import models.SubagentRun;
+import utils.AppClock;
 
-import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -408,7 +408,7 @@ public final class SubagentRegistry {
                 return fresh.status;
             }
             fresh.status = SubagentRun.Status.KILLED;
-            fresh.endedAt = Instant.now();
+            fresh.endedAt = AppClock.now();
             fresh.outcome = reason != null && !reason.isBlank() ? reason : "Killed by operator";
             fresh.save();
             McpAllowlist.releaseSubagentGrants(fresh.childAgent);

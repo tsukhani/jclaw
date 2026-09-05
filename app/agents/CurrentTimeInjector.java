@@ -2,8 +2,8 @@ package agents;
 
 import llm.LlmTypes.ChatMessage;
 import services.TimezoneResolver;
+import utils.AppClock;
 
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -91,7 +91,7 @@ public final class CurrentTimeInjector {
      */
     public static String block() {
         var zone = TimezoneResolver.appZone();
-        var now = ZonedDateTime.now(zone);
+        var now = AppClock.now().atZone(zone);
         return "\n" + HEADING + "\n"
                 + "- Now: %s\n".formatted(now.format(FORMAT))
                 + "- Timezone: %s\n".formatted(zone.getId())

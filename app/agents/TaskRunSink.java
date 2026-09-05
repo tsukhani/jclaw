@@ -7,9 +7,9 @@ import play.Logger;
 import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
+import utils.AppClock;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -140,7 +140,7 @@ public class TaskRunSink implements AgentExecutionSink {
         persistTerminalStatus("completion", () -> Tx.run(() -> {
             var fresh = (TaskRun) TaskRun.findById(taskRunId);
             if (fresh == null) return null;
-            fresh.completedAt = Instant.now();
+            fresh.completedAt = AppClock.now();
             fresh.durationMs = Duration.between(fresh.startedAt, fresh.completedAt).toMillis();
             fresh.status = TaskRun.Status.COMPLETED;
             fresh.outputSummary = outputSummary;
@@ -154,7 +154,7 @@ public class TaskRunSink implements AgentExecutionSink {
         persistTerminalStatus("failure", () -> Tx.run(() -> {
             var fresh = (TaskRun) TaskRun.findById(taskRunId);
             if (fresh == null) return null;
-            fresh.completedAt = Instant.now();
+            fresh.completedAt = AppClock.now();
             fresh.durationMs = Duration.between(fresh.startedAt, fresh.completedAt).toMillis();
             fresh.status = TaskRun.Status.FAILED;
             fresh.error = error;
@@ -175,7 +175,7 @@ public class TaskRunSink implements AgentExecutionSink {
         persistTerminalStatus("cancellation", () -> Tx.run(() -> {
             var fresh = (TaskRun) TaskRun.findById(taskRunId);
             if (fresh == null || fresh.status != TaskRun.Status.RUNNING) return null;
-            fresh.completedAt = Instant.now();
+            fresh.completedAt = AppClock.now();
             fresh.durationMs = Duration.between(fresh.startedAt, fresh.completedAt).toMillis();
             fresh.status = TaskRun.Status.CANCELLED;
             fresh.outputSummary = note;

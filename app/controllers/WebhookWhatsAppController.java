@@ -11,9 +11,9 @@ import models.WhatsAppTransport;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
+import utils.AppClock;
 import utils.WebhookUtil;
 
-import java.time.Instant;
 
 /**
  * Cloud-API inbound webhook for WhatsApp (JCLAW-446). Per-binding routed: a single
@@ -134,7 +134,7 @@ public class WebhookWhatsAppController extends Controller {
         // signed-timestamp check), enforced here in the authenticated path and independent
         // of InboundEventDedup (which only drops exact-id repeats, not resigned or
         // cache-evicted replays).
-        if (!WhatsAppChannel.isFreshTimestamp(payload, Instant.now())) {
+        if (!WhatsAppChannel.isFreshTimestamp(payload, AppClock.now())) {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
                     "Webhook rejected: stale/replayed timestamp for binding " + binding.id);
             unauthorized("Stale request");
@@ -143,7 +143,7 @@ public class WebhookWhatsAppController extends Controller {
         // JCLAW-447: record the 24h customer-service window on the request thread's
         // transaction (a tiny upsert; commits with the request). Reactions still
         // open the window — the user touched the conversation.
-        WhatsAppConversationWindow.recordInbound(binding.id, msg.from(), Instant.now());
+        WhatsAppConversationWindow.recordInbound(binding.id, msg.from(), AppClock.now());
 
         WhatsAppInbound.dispatchMessage(binding, msg);
         ok();

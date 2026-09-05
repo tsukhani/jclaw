@@ -24,12 +24,12 @@ import services.UploadStaging;
 import slash.Commands;
 import tools.SubagentSpawnTool;
 import utils.ApiResponses;
+import utils.AppClock;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -400,7 +400,7 @@ public class ApiChatController extends Controller {
                         // HashMap allocation isn't worth the pre-built-frame
                         // dance the steady-state path uses.
                         sse.send(Map.of("type", "token", KEY_CONTENT, token,
-                                "timestamp", Instant.now().toString()));
+                                "timestamp", AppClock.now().toString()));
                     } else {
                         tokenCoalescer.accept(token);
                     }

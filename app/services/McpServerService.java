@@ -11,11 +11,11 @@ import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
 import models.McpServer;
 import play.Play;
+import utils.AppClock;
 import utils.SsrfGuard;
 
 import java.net.URI;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -303,7 +303,7 @@ public final class McpServerService {
             McpConnectionManager.stop(row.name);
             row.status = McpServer.Status.DISCONNECTED;
             row.lastError = null;
-            row.lastDisconnectedAt = Instant.now();
+            row.lastDisconnectedAt = AppClock.now();
             row.save();
         }
     }

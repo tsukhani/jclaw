@@ -5,6 +5,7 @@ import jakarta.persistence.MappedSuperclass;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 
@@ -42,13 +43,13 @@ public abstract class TimestampedModel extends Model {
 
     @PrePersist
     void onCreate() {
-        var now = Instant.now();
+        var now = AppClock.now();
         createdAt = now;
         updatedAt = now;
     }
 
     @PreUpdate
     void onUpdate() {
-        updatedAt = Instant.now();
+        updatedAt = AppClock.now();
     }
 }

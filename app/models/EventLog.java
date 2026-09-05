@@ -6,6 +6,7 @@ import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.util.List;
@@ -43,7 +44,7 @@ public class EventLog extends Model {
 
     @PrePersist
     void onCreate() {
-        createdAt = Instant.now();
+        createdAt = AppClock.now();
         if (timestamp == null) {
             timestamp = createdAt;
         }

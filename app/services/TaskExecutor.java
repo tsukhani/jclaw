@@ -12,9 +12,9 @@ import models.TaskRunMessage;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 import tools.MessageTool;
+import utils.AppClock;
 import utils.GsonHolder;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -222,7 +222,7 @@ public final class TaskExecutor {
             }
             var r = new TaskRun();
             r.task = resolvedTask;
-            r.startedAt = Instant.now();
+            r.startedAt = AppClock.now();
             r.status = TaskRun.Status.RUNNING;
             r.save();
             return Optional.of(r);

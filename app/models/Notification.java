@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.util.List;
@@ -95,7 +96,7 @@ public class Notification extends Model {
 
     @PrePersist
     void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
+        if (createdAt == null) createdAt = AppClock.now();
     }
 
     /** Un-acknowledged notifications, newest first, capped at {@code limit}. */

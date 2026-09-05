@@ -14,11 +14,11 @@ import services.LocalSidecarDaemon;
 import services.videogen.VideoGenerationService.PollResult;
 import services.videogen.VideoGenerationService.VideoGenRequest;
 import tools.GeneratedMediaFile;
+import utils.AppClock;
 import utils.HttpFactories;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.time.Instant;
 
 /**
  * Drives the {@link VideoGenerationJob} lifecycle (JCLAW-230). {@link #submit} creates a job and hands
@@ -128,7 +128,7 @@ public final class VideoGenerationJobService {
         // local MLX hook caps RUNNING at 95 (reserving headroom for the decode/mux phase), so the terminal
         // transition is where 100 belongs.
         job.percent = 100;
-        job.completedAt = Instant.now();
+        job.completedAt = AppClock.now();
         job.save();
         if (resultUrl == null) return;
 
@@ -206,14 +206,14 @@ public final class VideoGenerationJobService {
     }
 
     private static boolean isTimedOut(VideoGenerationJob job, int maxMinutes) {
-        var since = job.createdAt != null ? job.createdAt : Instant.now();
-        return Duration.between(since, Instant.now()).toMinutes() >= maxMinutes;
+        var since = job.createdAt != null ? job.createdAt : AppClock.now();
+        return Duration.between(since, AppClock.now()).toMinutes() >= maxMinutes;
     }
 
     private static VideoGenerationJob fail(VideoGenerationJob job, String message) {
         job.state = State.FAILED;
         job.errorMessage = message;
-        job.completedAt = Instant.now();
+        job.completedAt = AppClock.now();
         job.save();
         return job;
     }

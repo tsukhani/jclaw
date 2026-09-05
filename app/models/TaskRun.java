@@ -12,6 +12,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 
@@ -91,7 +92,7 @@ public class TaskRun extends Model {
 
     @PrePersist
     void onCreate() {
-        var now = Instant.now();
+        var now = AppClock.now();
         if (createdAt == null) createdAt = now;
         if (startedAt == null) startedAt = now;
     }

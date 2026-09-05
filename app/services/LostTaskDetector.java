@@ -2,6 +2,7 @@ package services;
 
 import models.Task;
 import play.db.DB;
+import utils.AppClock;
 
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -77,7 +78,7 @@ public final class LostTaskDetector {
      *         tests).
      */
     public static int detect() {
-        return detect(Instant.now().minus(STALE_THRESHOLD));
+        return detect(AppClock.now().minus(STALE_THRESHOLD));
     }
 
     /**
@@ -115,7 +116,7 @@ public final class LostTaskDetector {
      */
     public static int markLost(List<StaleRow> rows) {
         int flipped = 0;
-        var now = Instant.now();
+        var now = AppClock.now();
         for (var row : rows) {
             long staleSeconds = row.lastHeartbeat() != null
                     ? Math.max(0L, Duration.between(row.lastHeartbeat(), now).getSeconds())

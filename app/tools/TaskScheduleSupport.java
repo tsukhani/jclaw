@@ -3,9 +3,9 @@ package tools;
 import models.Task;
 import services.ScheduleShorthandParser;
 import services.TimezoneResolver;
+import utils.AppClock;
 
 import java.time.DateTimeException;
-import java.time.Instant;
 import java.time.ZoneId;
 
 /**
@@ -64,7 +64,7 @@ final class TaskScheduleSupport {
         task.cronExpression = spec.cronExpression();
         task.intervalSeconds = spec.intervalSeconds();
         task.scheduleDisplay = spec.scheduleDisplay();
-        task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
+        task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : AppClock.now();
     }
 
     /**

@@ -19,9 +19,9 @@ import services.ModelOverrideResolver;
 import services.SessionCompactor;
 import services.SubagentRegistry;
 import services.Tx;
+import utils.AppClock;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -347,7 +347,7 @@ public final class Commands {
             // rounding) that flaked on lower-resolution Linux clocks.
             // Keeping it transient sidesteps the problem entirely — the
             // event_log entry below is the durable record of the reset.
-            conv.contextSince = Instant.now();
+            conv.contextSince = AppClock.now();
             conv.save();
             return conv;
         });

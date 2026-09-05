@@ -11,6 +11,7 @@ import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.TaskExecutionHandler;
 import services.TaskRunRegistry;
+import utils.AppClock;
 
 import javax.sql.DataSource;
 
@@ -110,7 +111,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         // instant — not RuntimeMXBean's JVM-start, which is constant for the JVM's
         // life — keeps this correct across Play dev-mode hot reloads, where
         // @OnApplicationStart re-runs in the SAME JVM on each code change.
-        Instant bootInstant = Instant.now();
+        Instant bootInstant = AppClock.now();
 
         // Defense-in-depth: re-assert the scheduled_tasks DDL. Priority ordering
         // (this job runs last) already means DbSchedulerSchemaInitJob has run,

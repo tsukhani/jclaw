@@ -23,6 +23,7 @@ import services.EventLogger;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import services.search.MessageSearchRepository;
+import utils.AppClock;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -137,7 +138,7 @@ public class Memory extends Model {
      * backstop for anything already hydrating.
      */
     public void supersede(Long newerId) {
-        supersededAt = Instant.now();
+        supersededAt = AppClock.now();
         supersededById = newerId;
         save();
     }
@@ -148,7 +149,7 @@ public class Memory extends Model {
     // timestamp lines are the cheaper price.
     @PrePersist
     void onCreate() {
-        var now = Instant.now();
+        var now = AppClock.now();
         createdAt = now;
         updatedAt = now;
         clampImportance();
@@ -156,7 +157,7 @@ public class Memory extends Model {
 
     @PreUpdate
     void onUpdate() {
-        updatedAt = Instant.now();
+        updatedAt = AppClock.now();
         clampImportance();
     }
 
@@ -261,7 +262,7 @@ public class Memory extends Model {
         if (ids == null || ids.isEmpty()) return;
         JPA.em()
                 .createQuery("UPDATE Memory m SET m.lastAccessedAt = :now WHERE m.id IN (:ids)")
-                .setParameter("now", Instant.now())
+                .setParameter("now", AppClock.now())
                 .setParameter("ids", ids)
                 .executeUpdate();
     }

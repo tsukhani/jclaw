@@ -10,6 +10,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 
@@ -62,7 +63,7 @@ public class SessionCompaction extends Model {
 
     @PrePersist
     void onCreate() {
-        var now = Instant.now();
+        var now = AppClock.now();
         createdAt = now;
         if (compactedAt == null) compactedAt = now;
     }

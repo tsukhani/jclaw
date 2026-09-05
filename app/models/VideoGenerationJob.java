@@ -14,6 +14,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.util.List;
@@ -134,14 +135,14 @@ public class VideoGenerationJob extends Model {
     // help when the point is to NOT do what super does.
     @PrePersist
     void onCreate() {
-        var now = Instant.now();
+        var now = AppClock.now();
         if (createdAt == null) createdAt = now;
         updatedAt = now;
     }
 
     @PreUpdate
     void onUpdate() {
-        updatedAt = Instant.now();
+        updatedAt = AppClock.now();
     }
 
     public static List<VideoGenerationJob> findRunning() {

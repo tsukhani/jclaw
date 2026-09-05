@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import utils.AppClock;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -140,7 +141,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
 
     private String now(JsonObject args) {
         var zone = resolveZone(args, ARG_TIMEZONE);
-        var now = ZonedDateTime.now(zone);
+        var now = AppClock.now().atZone(zone);
         return formatResult(now);
     }
 
@@ -182,7 +183,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
         try {
             var base = timestamp != null
                     ? LocalDateTime.parse(timestamp).atZone(zone)
-                    : ZonedDateTime.now(zone);
+                    : AppClock.now().atZone(zone);
 
             var result = switch (unit) {
                 case "minutes" -> base.plusMinutes(amount);
@@ -205,7 +206,7 @@ public class DateTimeTool implements ToolRegistry.Tool {
         try {
             var startStr = args.has(ARG_TIMESTAMP)
                     ? args.get(ARG_TIMESTAMP).getAsString()
-                    : ZonedDateTime.now(zone).toLocalDateTime().toString();
+                    : AppClock.now().atZone(zone).toLocalDateTime().toString();
             var endStr = args.get(ARG_END_TIMESTAMP).getAsString();
 
             var start = LocalDateTime.parse(startStr).atZone(zone).toInstant();

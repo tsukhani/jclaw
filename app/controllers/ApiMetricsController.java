@@ -20,6 +20,7 @@ import services.LoadTestHarness;
 import services.LoadTestRunner;
 import tools.LoadTestSleepTool;
 import utils.ApiResponses;
+import utils.AppClock;
 import utils.DbPoolStats;
 import utils.HttpFactories;
 import utils.JvmStats;
@@ -766,7 +767,7 @@ public class ApiMetricsController extends Controller {
     @SuppressWarnings("java:S2259")
     private static Instant parseSinceParam(String sinceParam) {
         if (sinceParam == null || sinceParam.isBlank()) {
-            return Instant.now().minus(30, ChronoUnit.DAYS);
+            return AppClock.now().minus(30, ChronoUnit.DAYS);
         }
         try {
             return Instant.parse(sinceParam);

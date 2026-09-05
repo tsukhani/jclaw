@@ -13,6 +13,7 @@ import play.mvc.With;
 import services.EventLogger;
 import services.TaskStatsService;
 import services.TimezoneResolver;
+import utils.AppClock;
 
 import java.time.LocalDate;
 
@@ -50,7 +51,7 @@ public class ApiTaskStatsController extends Controller {
     @Operation(summary = "Task dashboard KPIs (runs today, success rate, avg duration, pending/running/active/failed counts, retention days)")
     public static void stats(String payloadType, String excludePayloadType) {
         var zone = TimezoneResolver.currentDefault();
-        var since = LocalDate.now(zone).atStartOfDay(zone).toInstant();
+        var since = LocalDate.ofInstant(AppClock.now(), zone).atStartOfDay(zone).toInstant();
 
         // payloadType / excludePayloadType scope these aggregates exactly the
         // way they scope GET /api/tasks: the /tasks page passes

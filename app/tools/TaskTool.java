@@ -17,9 +17,9 @@ import services.ScheduleShorthandParser;
 import services.TaskSchedulingService;
 import services.Tx;
 import services.search.LuceneIndexer;
+import utils.AppClock;
 import utils.ChannelOriginTrust;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -464,7 +464,7 @@ public class TaskTool implements ToolRegistry.Tool {
         task.cronExpression = spec.cronExpression();
         task.intervalSeconds = spec.intervalSeconds();
         task.scheduleDisplay = spec.scheduleDisplay();
-        task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
+        task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : AppClock.now();
 
         // Plumbing fields (consumed by JCLAW-295/296/297/298).
         // Delivery inference (resolveDeliverySpec) exists so a task created from a chat

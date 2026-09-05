@@ -2,6 +2,7 @@ package services;
 
 import com.github.kagkarlsson.scheduler.task.ExecutionComplete;
 import com.github.kagkarlsson.scheduler.task.schedule.CronSchedule;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -68,7 +69,7 @@ public final class JClawCronUtils {
                     ? new CronSchedule(expr, zone)
                     : new CronSchedule(expr);
             return schedule.getNextExecutionTime(
-                    ExecutionComplete.simulatedSuccess(Instant.now()));
+                    ExecutionComplete.simulatedSuccess(AppClock.now()));
         } catch (RuntimeException _) {
             // Bad expression — caller logs and skips via null check.
             return null;

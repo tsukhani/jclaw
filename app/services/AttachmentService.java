@@ -5,6 +5,7 @@ import models.Message;
 import models.MessageAttachment;
 import play.Logger;
 import services.transcription.LlmAudio;
+import utils.AppClock;
 import utils.TikaHolder;
 import utils.WorkspacePathGuard;
 
@@ -14,7 +15,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Comparator;
@@ -181,7 +182,7 @@ public final class AttachmentService {
         att.uuid = uuid;
         att.originalFilename = displayFilename != null && !displayFilename.isBlank()
                 ? displayFilename
-                : "generated-" + GENERATED_TS.format(LocalDateTime.now()) + "." + ext;
+                : "generated-" + GENERATED_TS.format(AppClock.now().atZone(ZoneId.systemDefault())) + "." + ext;
         att.storagePath = toStoragePath(agent.name, message.conversation.id, leaf);
         att.mimeType = mime;
         att.sizeBytes = bytes.length;
@@ -206,7 +207,8 @@ public final class AttachmentService {
         var att = new MessageAttachment();
         att.message = message;
         att.uuid = uuid;
-        att.originalFilename = "generated-" + GENERATED_TS.format(LocalDateTime.now()) + ".mp4";
+        att.originalFilename =
+                "generated-" + GENERATED_TS.format(AppClock.now().atZone(ZoneId.systemDefault())) + ".mp4";
         att.storagePath = toStoragePath(agent.name, message.conversation.id, leaf);
         att.mimeType = "video/mp4";
         att.sizeBytes = 0; // filled on job success

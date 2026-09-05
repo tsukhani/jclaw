@@ -8,6 +8,7 @@ import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import jobs.DbSchedulerBootstrapJob;
 import models.Task;
 import play.db.DB;
+import utils.AppClock;
 
 import java.sql.SQLException;
 import java.time.Instant;
@@ -36,7 +37,7 @@ import java.util.function.Supplier;
  * {@link #register} computes the first scheduled time from the Task's
  * shape:
  * <ul>
- *   <li>{@link Task.Type#IMMEDIATE} → {@code Instant.now()}</li>
+ *   <li>{@link Task.Type#IMMEDIATE} → {@code AppClock.now()}</li>
  *   <li>{@link Task.Type#SCHEDULED} → {@link Task#scheduledAt}
  *       (caller validates non-null at form-bind time; defensive
  *       fall-through to {@code now()} keeps the system live if a stale
@@ -156,7 +157,7 @@ public final class TaskSchedulingService {
      *       (OnCompleteRemove dropped it) or a Task was CANCELED.
      *       Reschedule throws {@code TaskInstanceNotFoundException};
      *       we fall through to {@link #scheduleFire} which registers
-     *       a fresh row at {@code Instant.now()}.</li>
+     *       a fresh row at {@code AppClock.now()}.</li>
      * </ol>
      *
      * <p>Note: case (3) for CANCELED Tasks requires the caller to
@@ -172,7 +173,7 @@ public final class TaskSchedulingService {
         var instanceId = TaskInstanceId.of(TaskExecutionHandler.TASK_NAME, taskId.toString());
         boolean rescheduled = false;
         try {
-            rescheduled = client.reschedule(instanceId, Instant.now());
+            rescheduled = client.reschedule(instanceId, AppClock.now());
         } catch (TaskInstanceCurrentlyExecutingException _) {
             // Fire is already in progress — that IS the outcome the
             // operator wanted. Log and no-op rather than racing with
@@ -199,7 +200,7 @@ public final class TaskSchedulingService {
                             .formatted(taskId));
             return;
         }
-        scheduleFire(task, Instant.now());
+        scheduleFire(task, AppClock.now());
     }
 
     /**
@@ -227,7 +228,7 @@ public final class TaskSchedulingService {
 
     private static Instant computeFirstFire(Task task) {
         return switch (task.type) {
-            case IMMEDIATE -> Instant.now();
+            case IMMEDIATE -> AppClock.now();
             case SCHEDULED -> computeScheduledFire(task);
             case INTERVAL -> computeIntervalFirstFire(task);
             case CRON -> computeCronFirstFire(task);
@@ -240,7 +241,7 @@ public final class TaskSchedulingService {
                     task.agent != null ? task.agent.name : null, null,
                     "SCHEDULED Task '%s' has null scheduledAt; firing now as fallback"
                             .formatted(task.name));
-            return Instant.now();
+            return AppClock.now();
         }
         return task.scheduledAt;
     }
@@ -256,7 +257,7 @@ public final class TaskSchedulingService {
         // First fire happens immediately; subsequent fires
         // self-reschedule from TaskExecutionHandler's
         // CompletionHandler at {@code completionTime + intervalSeconds}.
-        return Instant.now();
+        return AppClock.now();
     }
 
     private static Instant computeCronFirstFire(Task task) {
