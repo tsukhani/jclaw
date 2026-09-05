@@ -3,6 +3,7 @@ package controllers;
 import com.google.gson.JsonObject;
 import memory.MemoryAutoCapture;
 import models.Agent;
+import models.Memory;
 import play.db.jpa.NoTransaction;
 import play.mvc.Before;
 import play.mvc.Controller;
@@ -160,7 +161,7 @@ public class ApiEvalsController extends Controller {
         var pairs = body.getAsJsonArray("pairs");
         int limit = Math.clamp(readInt(body, "limit", pairs.size()), 0, MAX_INGEST_PAIRS);
 
-        long before = Tx.run(() -> models.Memory.count("agent.id = ?1", agent.id));
+        long before = Tx.run(() -> Memory.count("agent.id = ?1", agent.id));
         long t0 = System.currentTimeMillis();
         int captured = 0;
         int n = Math.min(limit, pairs.size());
@@ -171,7 +172,7 @@ public class ApiEvalsController extends Controller {
             captured += MemoryAutoCapture.captureSync(agent, user, assistant).captured();
         }
         long elapsed = System.currentTimeMillis() - t0;
-        long after = Tx.run(() -> models.Memory.count("agent.id = ?1", agent.id));
+        long after = Tx.run(() -> Memory.count("agent.id = ?1", agent.id));
         renderJSON(GSON.toJson(new IngestResult(agent.name, n, captured, (int) (after - before),
                 elapsed, n == 0 ? 0 : elapsed / n)));
     }

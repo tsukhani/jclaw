@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
+import services.ConfigService;
 import services.EventLogger;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
@@ -778,7 +779,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private static int configConcurrency() {
         return Math.clamp(
-                services.ConfigService.getInt(CFG_CONCURRENCY, DEFAULT_CONCURRENCY),
+                ConfigService.getInt(CFG_CONCURRENCY, DEFAULT_CONCURRENCY),
                 1, MAX_CONCURRENCY);
     }
 
@@ -858,7 +859,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *  described this as operator-tunable but read it from application.conf, which needs
      *  a restart to change — not tunable in the sense the ticket meant. */
     private static int maxEscalations() {
-        return services.ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
+        return ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
     }
 
     private static int configTimeoutSeconds() {
@@ -866,13 +867,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     private static String languageDefault() {
-        var configured = services.ConfigService.get(CFG_LANGUAGE, DEFAULT_LANGUAGE).strip();
+        var configured = ConfigService.get(CFG_LANGUAGE, DEFAULT_LANGUAGE).strip();
         return configured.isEmpty() ? DEFAULT_LANGUAGE : configured;
     }
 
     private static boolean seedFromSitemapDefault() {
         return !"false".equalsIgnoreCase(
-                services.ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());
+                ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());
     }
 
     /**
@@ -888,6 +889,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      */
     private static boolean respectRobotsDefault() {
         return !"false".equalsIgnoreCase(
-                services.ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());
+                ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());
     }
 }

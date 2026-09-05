@@ -4,6 +4,7 @@ import models.Agent;
 import models.Message;
 import models.MessageAttachment;
 import play.Logger;
+import services.transcription.LlmAudio;
 import utils.TikaHolder;
 import utils.WorkspacePathGuard;
 
@@ -296,7 +297,7 @@ public final class AttachmentService {
             Files.deleteIfExists(file);
             // Kind-agnostic despite the name: audio leaves a transcoded sibling
             // (JCLAW-654), and freeing only the original left a playable copy.
-            Files.deleteIfExists(services.transcription.LlmAudio.cachePath(file));
+            Files.deleteIfExists(LlmAudio.cachePath(file));
         } catch (IOException | SecurityException e) {
             Logger.warn("Failed to delete attachment file %s: %s", att.uuid, e.getMessage());
         }

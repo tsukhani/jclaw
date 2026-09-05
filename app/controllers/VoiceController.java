@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import llm.LlmTypes.ModelInfo;
 import llm.ProviderRegistry;
 import models.Agent;
+import models.ChannelType;
 import models.Conversation;
 import models.MessageAttachment;
 import play.Logger;
@@ -111,7 +112,7 @@ public class VoiceController extends WebSocketController {
      *  hear the user. The conversation used to stay {@code "web"}, shared with the
      *  typed chat — it is now created fresh per session on this channel, so voice
      *  history resets each time the operator opens voice mode. */
-    private static final String VOICE_CHANNEL = models.ChannelType.VOICE.value;
+    private static final String VOICE_CHANNEL = ChannelType.VOICE.value;
 
     /** Server→client frame tokens, de-duplicated per S1192 — the {@code type}
      *  discriminators and the field keys reused across frames. */

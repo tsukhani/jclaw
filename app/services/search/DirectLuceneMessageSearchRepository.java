@@ -416,7 +416,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * memories don't crowd the prompt. Tunable via {@code memory.recall.minScoreRatio}.
      */
     private static double recallMinScoreRatio() {
-        return services.ConfigService.getDouble("memory.recall.minScoreRatio", 0.2);
+        return ConfigService.getDouble("memory.recall.minScoreRatio", 0.2);
     }
 
     /**

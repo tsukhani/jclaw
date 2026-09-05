@@ -1,5 +1,6 @@
 package llm;
 
+import agents.CurrentTimeInjector;
 import agents.SystemPromptAssembler;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -249,7 +250,7 @@ public final class OpenRouterProvider extends LlmProvider {
         }
         var content = msg.get(FIELD_CONTENT);
         return content != null && content.isJsonPrimitive()
-                && agents.CurrentTimeInjector.isClockBlock(content.getAsString());
+                && CurrentTimeInjector.isClockBlock(content.getAsString());
     }
 
     /**

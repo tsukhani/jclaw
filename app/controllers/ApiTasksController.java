@@ -417,7 +417,7 @@ public class ApiTasksController extends Controller {
         // execute an attacker-chosen prompt at operator trust. Trust may fall on mutation, never
         // rise — the mirror of TaskTool.applyPatch's downgrade, at the REST door (JCLAW-1021).
         if (RequestPrincipal.isAgentOriginated()
-                && utils.ChannelOriginTrust.isOperatorOrigin(task.originChannel)) {
+                && ChannelOriginTrust.isOperatorOrigin(task.originChannel)) {
             task.originChannel = null;
         }
 

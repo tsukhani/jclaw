@@ -89,7 +89,7 @@ final class AgentPromptPreparer {
         // recall's embedding round-trip would otherwise hold a pooled connection across it.
         long embedStartNs = System.nanoTime();
         var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
-        utils.LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
+        LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
         return Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             // JCLAW-273: skipUserAppend=true comes from runYieldResume — the
@@ -208,7 +208,7 @@ final class AgentPromptPreparer {
         // JCLAW-960: BEFORE the Tx — see the sibling call in buildPrologue.
         long embedStartNs = System.nanoTime();
         var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
-        utils.LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
+        LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
         return Tx.run(() -> {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
             var convo = ConversationService.findById(conversation.id);

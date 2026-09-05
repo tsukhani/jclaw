@@ -22,6 +22,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.DocumentWriter;
 import services.OcrHealthProbe;
+import services.OcrInstallHint;
 import utils.JsonArgs;
 import utils.TikaHolder;
 
@@ -555,6 +556,6 @@ public class DocumentsTool implements ToolRegistry.Tool {
         if (probe.available()) return null;
         return "Note: tesseract is unavailable (" + probe.reason() + "). "
                 + "OCR-dependent inputs (image-only PDFs, plain images, scanned documents) "
-                + "require tesseract. Install: " + services.OcrInstallHint.current();
+                + "require tesseract. Install: " + OcrInstallHint.current();
     }
 }

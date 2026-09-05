@@ -2,6 +2,7 @@ package services;
 
 import com.google.gson.JsonParser;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import play.Logger;
 import play.Play;
 import utils.HttpFactories;
@@ -552,7 +553,7 @@ public final class LocalSidecarDaemon {
         var call = HttpFactories.general().newCall(new Request.Builder()
                 .url(baseUrl() + "/shutdown")
                 .header(AUTH_HEADER, authToken())
-                .post(okhttp3.RequestBody.create(new byte[0]))
+                .post(RequestBody.create(new byte[0]))
                 .build());
         call.timeout().timeout(5, TimeUnit.SECONDS);
         try (var resp = call.execute()) {

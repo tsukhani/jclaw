@@ -2,6 +2,7 @@ package services.evals;
 
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import memory.JpaMemoryStore;
 import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
 import models.Agent;
@@ -349,7 +350,7 @@ public final class MemoryEvalGenerator {
      * manufacture a case that entity-name linking happens to be good at.
      */
     static boolean namesItsOwnGold(String question, String goldText) {
-        return memory.JpaMemoryStore.entityNames(goldText).stream().anyMatch(question::contains);
+        return JpaMemoryStore.entityNames(goldText).stream().anyMatch(question::contains);
     }
 
     private static final String TEMPORAL_INSTRUCTIONS = """

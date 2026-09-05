@@ -14,6 +14,7 @@ import services.ConfigService;
 import services.EventLogger;
 import services.LoadTestRunner;
 import utils.GsonHolder;
+import utils.LatencyTrace;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -791,7 +792,7 @@ public class SystemPromptAssembler {
         try {
             return recallTimed(agentId, query, excludeIds, queryEmbedding, limitOverride);
         } finally {
-            utils.LatencyTrace.recordMemoryRecall((System.nanoTime() - startNs) / 1_000_000L);
+            LatencyTrace.recordMemoryRecall((System.nanoTime() - startNs) / 1_000_000L);
         }
     }
 

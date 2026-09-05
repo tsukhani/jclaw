@@ -7,6 +7,7 @@ import models.SlackBinding;
 import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
+import slash.Commands;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -154,7 +155,7 @@ public final class SlackInbound {
             // commands use a ! prefix in messages; rewrite !cmd → /cmd here so the
             // shared slash interception below handles it and the canned reply lands
             // in-thread via the sink.
-            var text = slash.Commands.rewriteBangCommand(message.text());
+            var text = Commands.rewriteBangCommand(message.text());
             // JCLAW-442: route through the shared higher-level entry (as Telegram does)
             // so slash commands + the conversation lifecycle are handled centrally. The
             // factory owns the per-binding bot token + channel/thread;

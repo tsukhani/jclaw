@@ -1,6 +1,7 @@
 package tools;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import com.agentclientprotocol.sdk.client.AcpClient;
 import com.agentclientprotocol.sdk.client.transport.AgentParameters;
 import com.agentclientprotocol.sdk.client.transport.StdioAcpClientTransport;
@@ -133,11 +134,11 @@ final class SubagentAcpRunner {
         // (SubagentChildBootstrap.resolveParentConversation), so inside an untrusted fire it is
         // typically the operator's own web row — reading it directly would hand a spawned run
         // operator trust one hop out of the fire that must have floored it.
-        var originChannel = agents.DangerousActionGate.effectiveOrigin(parentConversationId(runId));
+        var originChannel = DangerousActionGate.effectiveOrigin(parentConversationId(runId));
         if (ChannelOriginTrust.isOperatorOrigin(originChannel)) return;
-        var decision = agents.DangerousActionGate.guardHarnessPermission(
+        var decision = DangerousActionGate.guardHarnessPermission(
                 childAgent, parentConversationId(runId), "coding_harness_run", task);
-        var approved = decision == agents.DangerousActionGate.Decision.PROCEED;
+        var approved = decision == DangerousActionGate.Decision.PROCEED;
         dispatchHarnessEvent(runId, new HarnessEvent(
                 approved ? HarnessEvent.STEP : HarnessEvent.ERROR,
                 "channel approval (%s): coding run %s".formatted(
@@ -516,7 +517,7 @@ final class SubagentAcpRunner {
                 })
                 .requestPermissionHandler(req -> {
                     SubagentRegistry.touch(runId);   // operator deliberation isn't idle
-                    var decision = agents.DangerousActionGate.guardHarnessPermission(childAgent, conversationId,
+                    var decision = DangerousActionGate.guardHarnessPermission(childAgent, conversationId,
                             AcpEventMapper.permissionToolName(req), AcpEventMapper.permissionArgsJson(req));
                     return AcpEventMapper.permissionResponse(req, decision);
                 })
@@ -597,7 +598,7 @@ final class SubagentAcpRunner {
      *  ({@code subagent.acp.sandbox=untrusted}) now confines it too. */
     private static boolean sandboxTrustedOrigin(Long runId) {
         return ChannelOriginTrust.isOperatorOrigin(
-                agents.DangerousActionGate.effectiveOrigin(parentConversationId(runId)));
+                DangerousActionGate.effectiveOrigin(parentConversationId(runId)));
     }
 
     /**

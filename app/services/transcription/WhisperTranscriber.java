@@ -1,6 +1,8 @@
 package services.transcription;
 
 
+import services.UvProbe;
+
 import java.nio.file.Path;
 import java.util.List;
 
@@ -52,10 +54,10 @@ public final class WhisperTranscriber {
         // host-relevant (mlx-whisper on Apple silicon, faster-whisper on
         // CUDA/CPU) and its only prerequisite is uv — whisper weights are
         // NOT gated, unlike the diarization model.
-        if (!services.UvProbe.isAvailable()) {
+        if (!UvProbe.isAvailable()) {
             throw new TranscriptionException(
                     "transcription requires the 'uv' launcher on PATH (it runs the GPU ASR sidecar; "
-                            + "./jclaw.sh setup installs it): " + services.UvProbe.lastResult().reason());
+                            + "./jclaw.sh setup installs it): " + UvProbe.lastResult().reason());
         }
         return new AsrSidecarClient().transcribe(audioFile, model.id(), language);
     }
