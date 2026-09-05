@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Single source of truth for outbound HTTP-client provisioning. Callers
@@ -70,7 +71,9 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>The factory-method shape (never public static client fields) gives a
  * single Information Expert, declared intent at every call site, and a
- * single place to evolve tuning.
+ * single place to evolve tuning. It is also what makes the transport
+ * substitutable: {@link #runWith} rebinds all six accessors at once
+ * (JCLAW-1151), which a call site holding its own client could not offer.
  *
  * <p><b>Per-call timeouts.</b> Use {@link okhttp3.Call#timeout()
  * Call.timeout()} on the returned call, not a derived client. That sets
@@ -240,31 +243,63 @@ public final class HttpFactories {
     private HttpFactories() { }
 
     /**
+     * Test-installed transport, bound only for the dynamic extent of
+     * {@link #runWith}/{@link #callWith} (JCLAW-1151). A {@link ScopedValue}
+     * rather than a static field so a leaked binding is impossible: the value
+     * is unreachable once the body returns, and one test class cannot leak a
+     * transport into another running concurrently (play1 runs test classes in
+     * parallel).
+     */
+    private static final ScopedValue<OkHttpClient> TRANSPORT = ScopedValue.newInstance();
+
+    /**
+     * Run {@code body} with every accessor on this class — guarded variants
+     * included — returning {@code transport} instead of its production client,
+     * so code under test reaches a canned-response interceptor rather than a
+     * socket. The guarded accessors are rebound too: leaving them live would
+     * let a guarded call path still hit the network from a test.
+     *
+     * <p>The binding follows the calling thread and threads it forks
+     * structurally, so it covers code invoked directly. It does <em>not</em>
+     * reach Play's own request threads — a {@code FunctionalTest} driving a
+     * controller needs a different seam.
+     */
+    public static void runWith(@NonNull OkHttpClient transport, @NonNull Runnable body) {
+        ScopedValue.where(TRANSPORT, transport).run(body);
+    }
+
+    /** Value-returning {@link #runWith}. */
+    public static <T> T callWith(@NonNull OkHttpClient transport, @NonNull Supplier<T> body) {
+        return ScopedValue.where(TRANSPORT, transport).call(body::get);
+    }
+
+    /**
      * Streaming LLM SSE client. {@code callTimeout(0)} so individual streams
      * are bounded only by per-frame {@code readTimeout}, not by an overall
      * call deadline.
      */
     public static @NonNull OkHttpClient llmStreaming() {
-        return LLM_STREAMING_CLIENT;
+        return TRANSPORT.orElse(LLM_STREAMING_CLIENT);
     }
 
     /**
      * Single-shot LLM client. 180s default {@code callTimeout}; callers
      * override per-call via {@link okhttp3.Call#timeout() Call.timeout()}.
-     * Always returns the same shared instance — no per-call client allocation.
+     * Absent a {@link #runWith} binding, always the same shared instance — no
+     * per-call client allocation.
      */
     public static @NonNull OkHttpClient llmSingleShot() {
-        return LLM_SINGLE_SHOT_CLIENT;
+        return TRANSPORT.orElse(LLM_SINGLE_SHOT_CLIENT);
     }
 
     /**
      * General-purpose non-LLM client. 60s default {@code callTimeout};
      * callers override per-call via {@link okhttp3.Call#timeout()
-     * Call.timeout()}. Always returns the same shared instance — no
-     * per-call client allocation.
+     * Call.timeout()}. Absent a {@link #runWith} binding, always the same
+     * shared instance — no per-call client allocation.
      */
     public static @NonNull OkHttpClient general() {
-        return GENERAL_CLIENT;
+        return TRANSPORT.orElse(GENERAL_CLIENT);
     }
 
     /**
@@ -274,7 +309,7 @@ public final class HttpFactories {
      * link-local + cloud metadata at resolve time.
      */
     public static @NonNull OkHttpClient llmStreamingGuarded() {
-        return LLM_STREAMING_GUARDED_CLIENT;
+        return TRANSPORT.orElse(LLM_STREAMING_GUARDED_CLIENT);
     }
 
     /**
@@ -284,7 +319,7 @@ public final class HttpFactories {
      * blocks link-local + cloud metadata at resolve time.
      */
     public static @NonNull OkHttpClient llmSingleShotGuarded() {
-        return LLM_SINGLE_SHOT_GUARDED_CLIENT;
+        return TRANSPORT.orElse(LLM_SINGLE_SHOT_GUARDED_CLIENT);
     }
 
     /**
@@ -294,6 +329,6 @@ public final class HttpFactories {
      * cloud metadata at resolve time.
      */
     public static @NonNull OkHttpClient generalGuarded() {
-        return GENERAL_GUARDED_CLIENT;
+        return TRANSPORT.orElse(GENERAL_GUARDED_CLIENT);
     }
 }
