@@ -3,6 +3,7 @@ package llm;
 import models.MessageRole;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -140,8 +141,21 @@ public final class LlmTypes {
             int reasoningTokens,
             int cachedTokens,
             int cacheCreationTokens,
-            double costUsd
+            double costUsd,
+            ProviderMetrics providerMetrics
     ) {
+        /** Normalise null to {@link ProviderMetrics#EMPTY} so readers never null-check. */
+        public Usage {
+            providerMetrics = providerMetrics == null ? ProviderMetrics.EMPTY : providerMetrics;
+        }
+
+        /** Back-compat for the call sites that predate JCLAW-1147's provider metrics. */
+        public Usage(int promptTokens, int completionTokens, int totalTokens,
+                     int reasoningTokens, int cachedTokens, int cacheCreationTokens, double costUsd) {
+            this(promptTokens, completionTokens, totalTokens, reasoningTokens,
+                    cachedTokens, cacheCreationTokens, costUsd, ProviderMetrics.EMPTY);
+        }
+
         /**
          * Back-compat for the providers and tests that report no cost — same pattern as
          * {@code ConversationQueue.QueuedMessage}, so adding the component did not have
@@ -150,7 +164,41 @@ public final class LlmTypes {
         public Usage(int promptTokens, int completionTokens, int totalTokens,
                      int reasoningTokens, int cachedTokens, int cacheCreationTokens) {
             this(promptTokens, completionTokens, totalTokens, reasoningTokens,
-                    cachedTokens, cacheCreationTokens, 0d);
+                    cachedTokens, cacheCreationTokens, 0d, ProviderMetrics.EMPTY);
+        }
+    }
+
+    /**
+     * Numeric telemetry a provider reports that the OpenAI usage schema has no slot for
+     * (JCLAW-1147). Keys are the provider's own dotted JSON path — {@code
+     * cost_details.upstream_inference_cost} — so two providers naming different things
+     * the same never collide on one turn, since a turn only ever talks to one provider.
+     *
+     * <p>Values are {@code double} because the fields span both fractional costs and
+     * integer counts/durations; every one observed so far is additive per round, which
+     * is what makes {@link #plus} a sum rather than a merge policy per key. A
+     * non-additive field (a flag, a ratio, a high-water mark) must not be collected
+     * here — it would be silently wrong once a turn runs more than one round.
+     */
+    public record ProviderMetrics(Map<String, Double> values) {
+
+        public static final ProviderMetrics EMPTY = new ProviderMetrics(Map.of());
+
+        public ProviderMetrics {
+            values = values == null || values.isEmpty() ? Map.of() : Map.copyOf(values);
+        }
+
+        public boolean isEmpty() {
+            return values.isEmpty();
+        }
+
+        /** Key-wise sum, for folding each LLM round of a turn into the turn total. */
+        public ProviderMetrics plus(ProviderMetrics other) {
+            if (other == null || other.isEmpty()) return this;
+            if (isEmpty()) return other;
+            var merged = new LinkedHashMap<>(values);
+            other.values().forEach((k, v) -> merged.merge(k, v, Double::sum));
+            return new ProviderMetrics(merged);
         }
     }
 

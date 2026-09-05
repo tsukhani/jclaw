@@ -1,5 +1,6 @@
 package llm;
 
+import llm.LlmTypes.ProviderMetrics;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.Usage;
 
@@ -248,6 +249,12 @@ interface LlmStreamCarriers {
          * tells "cost nothing" apart from "provider said nothing".
          */
         double costUsd;
+        /**
+         * Key-wise sum of the provider-specific metrics reported by each round
+         * (JCLAW-1147). Stays {@link ProviderMetrics#EMPTY} for providers that report
+         * nothing beyond the OpenAI usage schema.
+         */
+        ProviderMetrics providerMetrics = ProviderMetrics.EMPTY;
         /** Sum of streamed reasoning-text chars, used as a token fallback when the provider returns 0 reasoning_tokens. */
         int reasoningChars;
         /** True once any round has detected reasoning, used to gate the fallback estimate. */
@@ -298,6 +305,7 @@ interface LlmStreamCarriers {
                 cachedTokens += u.cachedTokens();
                 cacheCreationTokens += u.cacheCreationTokens();
                 costUsd += u.costUsd();
+                providerMetrics = providerMetrics.plus(u.providerMetrics());
             }
             addJtokkitRound(acc);
             if (acc.reasoningDetected) reasoningDetected = true;
@@ -370,6 +378,7 @@ interface LlmStreamCarriers {
         public int cachedTokens() { return cachedTokens; }
         public int cacheCreationTokens() { return cacheCreationTokens; }
         public double costUsd() { return costUsd; }
+        public ProviderMetrics providerMetrics() { return providerMetrics; }
         public int reasoningChars() { return reasoningChars; }
         public boolean reasoningDetected() { return reasoningDetected; }
         public boolean hasProviderUsage() { return hasProviderUsage; }

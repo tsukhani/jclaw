@@ -5,6 +5,7 @@ import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatCompletionChunk;
@@ -19,6 +20,7 @@ import llm.LlmTypes.EmbeddingResponse;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
+import llm.LlmTypes.ProviderMetrics;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
@@ -35,9 +37,11 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -404,10 +408,14 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             int cached = Math.max(chunk.usage().cachedTokens(), extractCachedTokens(usageObj));
             int cacheCreation = Math.max(chunk.usage().cacheCreationTokens(), extractCacheCreationTokens(usageObj));
             double cost = Math.max(chunk.usage().costUsd(), extractCostUsd(usageObj));
+            // Provider metrics live only in the raw tree — Gson's field mapping has no
+            // component to bind them to — so this pass is their only way in on a stream.
+            var metrics = extractProviderMetrics(usageObj);
             if (reasoning == chunk.usage().reasoningTokens()
                     && cached == chunk.usage().cachedTokens()
                     && cacheCreation == chunk.usage().cacheCreationTokens()
-                    && cost == chunk.usage().costUsd()) {
+                    && cost == chunk.usage().costUsd()
+                    && metrics.isEmpty()) {
                 return chunk;
             }
             var augmented = new Usage(
@@ -417,7 +425,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                     reasoning,
                     cached,
                     cacheCreation,
-                    cost);
+                    cost,
+                    metrics);
             return new ChatCompletionChunk(chunk.id(), chunk.model(), chunk.choices(), augmented);
         } catch (Exception _) {
             return chunk;
@@ -1100,6 +1109,68 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * @return the parsed {@link Usage} record with all token-count categories and
      *         the provider-reported cost populated
      */
+    /**
+     * Leaf key names already carried by a dedicated {@link Usage} component, in every
+     * spelling the providers use. {@link #extractProviderMetrics} skips these so a
+     * field is never reported twice under two names.
+     */
+    private static final Set<String> MAPPED_USAGE_KEYS = Set.of(
+            "prompt_tokens", "completion_tokens", "total_tokens",
+            "reasoning_tokens", "cached_tokens",
+            "cache_creation_input_tokens", "cache_creation_tokens", "cache_write_tokens",
+            "cost");
+
+    /**
+     * Collect the numeric usage fields this provider reports that no {@link Usage}
+     * component covers (JCLAW-1147).
+     *
+     * <p>Collection is by shape rather than by allow-list, because an allow-list goes
+     * stale silently: OpenRouter alone currently reports seven such fields
+     * ({@code cost_details.upstream_inference_cost} and the audio/image/video token
+     * breakdowns), and the set grows without notice. Walking one level of nesting
+     * matches the paths {@link #readUsageInt(JsonObject, String, String)} already
+     * reads, and keys are namespaced by their parent so {@code cost_details.*} cannot
+     * collide with a same-named top-level field.
+     *
+     * <p>Only JSON numbers are taken. That is what keeps the turn-level sum in
+     * {@link llm.LlmTypes.ProviderMetrics#plus} honest — it also happens to exclude
+     * flags such as OpenRouter's {@code is_byok}, which is a boolean on the wire and
+     * would be meaningless added across rounds.
+     *
+     * <p>Override to refine when a provider reports a field that is not additive.
+     */
+    protected ProviderMetrics extractProviderMetrics(JsonObject usageObj) {
+        if (usageObj == null) return ProviderMetrics.EMPTY;
+        var out = new LinkedHashMap<String, Double>();
+        for (var entry : usageObj.entrySet()) {
+            var value = entry.getValue();
+            if (value == null || value.isJsonNull()) continue;
+            if (value.isJsonObject()) {
+                collectNumerics(value.getAsJsonObject(), entry.getKey() + ".", out);
+            } else {
+                collectNumeric(entry.getKey(), entry.getKey(), value, out);
+            }
+        }
+        return out.isEmpty() ? ProviderMetrics.EMPTY : new ProviderMetrics(out);
+    }
+
+    private static void collectNumerics(JsonObject obj, String prefix, Map<String, Double> out) {
+        for (var entry : obj.entrySet()) {
+            collectNumeric(entry.getKey(), prefix + entry.getKey(), entry.getValue(), out);
+        }
+    }
+
+    private static void collectNumeric(String leafKey, String path,
+                                       JsonElement value, Map<String, Double> out) {
+        if (MAPPED_USAGE_KEYS.contains(leafKey)) return;
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) return;
+        try {
+            out.put(path, value.getAsDouble());
+        } catch (NumberFormatException _) {
+            // A provider sending a non-parsable number must not fail the whole turn.
+        }
+    }
+
     public Usage parseUsage(JsonObject usageObj) {
         return new Usage(
                 readUsageInt(usageObj, "prompt_tokens"),
@@ -1108,7 +1179,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                 extractReasoningTokens(usageObj),
                 extractCachedTokens(usageObj),
                 extractCacheCreationTokens(usageObj),
-                extractCostUsd(usageObj));
+                extractCostUsd(usageObj),
+                extractProviderMetrics(usageObj));
     }
 
     public static class LlmException extends RuntimeException {

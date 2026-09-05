@@ -13,7 +13,7 @@ import {
   UsersIcon,
 } from '@heroicons/vue/24/outline'
 import { formatTokensPerSec, renderMarkdown } from '~/utils/chat-markdown'
-import { formatUsageCost, formatUsageCostTooltip } from '~/utils/usage-cost'
+import { formatUsageCost, formatUsageCostTooltip, providerMetricRows } from '~/utils/usage-cost'
 import { thinkingHeaderLabel } from '~/utils/thinking'
 import type { VideoJobStatus } from '~/utils/video-job'
 import type { Message, MessageAttachment, ToolCall } from '~/types/api'
@@ -618,6 +618,30 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
                     {{ formatUsageCost(msg.usage) }}
                   </dd>
                 </div>
+                <!--
+                  JCLAW-1147: whatever this provider reports beyond the OpenAI usage
+                  schema. Rendered last and only when present, so a provider that says
+                  nothing extra leaves the popover exactly as it was.
+                -->
+                <template v-if="providerMetricRows(msg.usage).length">
+                  <div
+                    aria-hidden="true"
+                    class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
+                  />
+                  <div
+                    v-for="row in providerMetricRows(msg.usage)"
+                    :key="row.key"
+                    class="flex items-center justify-between gap-4"
+                    :title="row.key"
+                  >
+                    <dt class="text-muted-foreground">
+                      {{ row.label }}
+                    </dt>
+                    <dd class="font-mono tabular-nums">
+                      {{ row.value }}
+                    </dd>
+                  </div>
+                </template>
               </dl>
             </PopoverContent>
           </Popover>

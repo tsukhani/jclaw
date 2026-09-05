@@ -71,6 +71,25 @@ When the agent decides to call a tool, you'll see a tool-call chip in its messag
 
 Reasoning-capable models (the ones that surface their internal thought before answering) render their reasoning in a separate, distinctively-styled block above the final reply. Reasoning collapses by default; click to expand. You can copy the reasoning text on its own.
 
+## Per-message usage
+
+Every assistant message carries a small **tok/s** badge. Hover it for the full accounting of that turn: prompt, thinking and cached tokens, completion, speed, wall-clock time, and the computed dollar cost.
+
+Below those, when the provider reports them, come **provider-specific metrics** — numbers a provider returns that the common OpenAI usage schema has no field for, so they differ by provider rather than being a fixed list. Hovering a row shows the provider's own field name for it.
+
+The most useful today come from OpenRouter, which reports what your call cost *it* upstream alongside what it charged you:
+
+| Row | Meaning |
+|---|---|
+| Upstream inference cost | What the underlying provider charged OpenRouter for the call. Compare against **Cost** to see the routing margin. |
+| Upstream inference prompt cost | The input half of that upstream charge. |
+| Upstream inference completions cost | The output half. |
+| Audio / image / video tokens | Per-modality token breakdown, for multimodal turns. |
+
+Ollama (local and Cloud) reports nothing beyond the standard schema over its OpenAI-compatible endpoint, so the section is absent there. Its native API exposes timing fields that this endpoint does not — capturing those is tracked separately.
+
+Metrics are summed across every round of a turn, so a turn that made several tool calls shows the total rather than the last round.
+
 ## Exporting a conversation
 
 The composer has an **Export as Markdown** button. It downloads the full thread — messages, tool calls, and reasoning — as a markdown file you can share or archive.

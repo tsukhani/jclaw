@@ -662,4 +662,81 @@ class LlmProviderTest extends UnitTest {
                 requestWithThinking("mystery-reasoner", null));
         assertEquals("low", json.get("reasoning_effort").getAsString());
     }
+
+    // =====================
+    // JCLAW-1147 — provider-specific metrics the OpenAI usage schema has no slot for
+    // =====================
+
+    /** Verbatim usage block from a live openrouter.ai call, 2026-09-05. */
+    private static final String OPENROUTER_USAGE = """
+            {"prompt_tokens": 17, "completion_tokens": 347, "total_tokens": 364,
+             "cost": 0.0001705,
+             "is_byok": false,
+             "cost_details": {"upstream_inference_cost": 0.0001705,
+                              "upstream_inference_prompt_cost": 0.0000025,
+                              "upstream_inference_completions_cost": 0.000168},
+             "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0,
+                                       "audio_tokens": 3, "video_tokens": 0},
+             "completion_tokens_details": {"reasoning_tokens": 0, "audio_tokens": 0,
+                                           "image_tokens": 7}}
+            """;
+
+    @Test
+    void collectsTheProviderFieldsNoUsageComponentCovers() {
+        var metrics = openRouter().parseUsage(
+                JsonParser.parseString(OPENROUTER_USAGE).getAsJsonObject()).providerMetrics();
+
+        // Namespaced by parent so cost_details.* can never collide with top-level "cost".
+        assertEquals(0.0001705, metrics.values().get("cost_details.upstream_inference_cost"), 1e-12);
+        assertEquals(0.000168, metrics.values().get("cost_details.upstream_inference_completions_cost"), 1e-12);
+        assertEquals(3d, metrics.values().get("prompt_tokens_details.audio_tokens"), 1e-9);
+        assertEquals(7d, metrics.values().get("completion_tokens_details.image_tokens"), 1e-9);
+    }
+
+    @Test
+    void neverRepeatsAFieldThatAlreadyHasItsOwnUsageComponent() {
+        // Double-reporting would double-count once these are summed across rounds.
+        var usage = openRouter().parseUsage(JsonParser.parseString(OPENROUTER_USAGE).getAsJsonObject());
+        var keys = usage.providerMetrics().values().keySet();
+
+        assertFalse(keys.contains("prompt_tokens"), keys.toString());
+        assertFalse(keys.contains("completion_tokens"), keys.toString());
+        assertFalse(keys.contains("total_tokens"), keys.toString());
+        assertFalse(keys.contains("cost"), keys.toString());
+        assertFalse(keys.contains("prompt_tokens_details.cached_tokens"), keys.toString());
+        assertFalse(keys.contains("prompt_tokens_details.cache_write_tokens"), keys.toString());
+        assertFalse(keys.contains("completion_tokens_details.reasoning_tokens"), keys.toString());
+        // ...and the first-class components still carry them.
+        assertEquals(17, usage.promptTokens());
+        assertEquals(0.0001705, usage.costUsd(), 1e-12);
+    }
+
+    @Test
+    void skipsNonNumericFieldsSoTheTurnLevelSumStaysMeaningful() {
+        // OpenRouter's is_byok is a flag; summed across rounds it would be nonsense.
+        var metrics = openRouter().parseUsage(
+                JsonParser.parseString(OPENROUTER_USAGE).getAsJsonObject()).providerMetrics();
+        assertFalse(metrics.values().containsKey("is_byok"), metrics.values().toString());
+    }
+
+    @Test
+    void providerMetricsAreEmptyWhenTheProviderReportsOnlyTheStandardSchema() {
+        // Ollama Cloud's OpenAI-compat endpoint returns exactly these three.
+        var metrics = ollama().parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": 27, "completion_tokens": 79, "total_tokens": 106}
+                """).getAsJsonObject()).providerMetrics();
+        assertTrue(metrics.isEmpty(), "nothing beyond the schema means no metrics: " + metrics.values());
+    }
+
+    @Test
+    void providerMetricsSurviveAMalformedNeighbour() {
+        // One unparsable value must not cost us the fields either side of it.
+        var metrics = openRouter().parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": 1, "cost_details": {"upstream_inference_cost": 0.5},
+                 "weird": "not-a-number", "other_count": 9}
+                """).getAsJsonObject()).providerMetrics();
+        assertEquals(0.5, metrics.values().get("cost_details.upstream_inference_cost"), 1e-12);
+        assertEquals(9d, metrics.values().get("other_count"), 1e-9);
+        assertFalse(metrics.values().containsKey("weird"));
+    }
 }

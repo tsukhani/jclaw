@@ -119,6 +119,7 @@ public final class UsageMetricsBuilder {
         if (reasoningMs > 0L) usageMap.addProperty("reasoningDurationMs", reasoningMs);
         if (streamBodyMs > 0L) usageMap.addProperty("streamBodyMs", streamBodyMs);
         addJtokkitFields(usageMap, turnUsage, providerUsage);
+        addProviderMetrics(usageMap, turnUsage);
 
         addModelInfoFields(usageMap, modelInfo);
         addResolvedModelIdentity(usageMap, agent, conversation);
@@ -148,6 +149,22 @@ public final class UsageMetricsBuilder {
                     turnUsage.completionTokens() - turnUsage.jtokkitCompletionTokens());
             usageMap.addProperty("jtokkitTotalDelta", turnUsage.totalTokens() - turnUsage.jtokkitTotalTokens());
         }
+    }
+
+    /**
+     * Emit the provider's own telemetry (JCLAW-1147) under a nested object, so a field
+     * the provider adds later can never collide with a first-class usage key.
+     *
+     * <p>Omitted when the provider reported none — the same rule {@code costUsd}
+     * follows, and for the same reason: an emitted 0 cannot be told apart from a
+     * measurement that really was zero.
+     */
+    private static void addProviderMetrics(JsonObject usageMap, LlmProvider.TurnUsage turnUsage) {
+        var metrics = turnUsage.providerMetrics();
+        if (metrics == null || metrics.isEmpty()) return;
+        var obj = new JsonObject();
+        metrics.values().forEach((key, value) -> obj.addProperty(key, value));
+        usageMap.add("providerMetrics", obj);
     }
 
     /**

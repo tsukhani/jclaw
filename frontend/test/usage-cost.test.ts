@@ -10,6 +10,7 @@ import {
   formatUsageCost,
   formatUsageCostTooltip,
   listChannelsInRows,
+  providerMetricRows,
   type FleetCostRow,
   type MessageUsage,
 } from '~/utils/usage-cost'
@@ -595,5 +596,55 @@ describe('formatStatCurrency', () => {
   it('keeps two decimals on fractional dollar amounts', () => {
     expect(formatStatCurrency(99.99)).toBe('$99.99')
     expect(formatStatCurrency(120.0101)).toBe('$120.01')
+  })
+})
+
+describe('providerMetricRows (JCLAW-1147)', () => {
+  it('returns nothing when the provider reported no extra metrics', () => {
+    expect(providerMetricRows(usage({ prompt: 10 }))).toEqual([])
+  })
+
+  it('labels a dotted provider path from its leaf', () => {
+    // Keys arrive as the provider's raw JSON path because the backend collects by
+    // shape; the label has to be derived or an unmapped metric renders as gibberish.
+    const rows = providerMetricRows(usage({
+      providerMetrics: { 'cost_details.upstream_inference_cost': 0.0001705 },
+    }))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.label).toBe('Upstream inference cost')
+    expect(rows[0]!.key).toBe('cost_details.upstream_inference_cost')
+  })
+
+  it('formats cost-suffixed keys as currency and everything else as a count', () => {
+    const rows = providerMetricRows(usage({
+      providerMetrics: {
+        'cost_details.upstream_inference_cost': 0.25,
+        'prompt_tokens_details.audio_tokens': 4200,
+      },
+    }))
+    const byKey = Object.fromEntries(rows.map(r => [r.key, r.value]))
+    expect(byKey['cost_details.upstream_inference_cost']).toBe('$0.2500')
+    expect(byKey['prompt_tokens_details.audio_tokens']).toBe('4,200')
+  })
+
+  it('marks a sub-cent cost rather than rendering it as $0.0000', () => {
+    const rows = providerMetricRows(usage({
+      providerMetrics: { 'cost_details.upstream_inference_cost': 0.00001 },
+    }))
+    expect(rows[0]!.value).toBe('< $0.0001')
+  })
+
+  it('drops non-finite values instead of rendering NaN', () => {
+    const rows = providerMetricRows(usage({
+      providerMetrics: { good: 1, bad: Number.NaN, worse: Number.POSITIVE_INFINITY },
+    }))
+    expect(rows.map(r => r.key)).toEqual(['good'])
+  })
+
+  it('orders rows by label so the popover is stable between turns', () => {
+    const rows = providerMetricRows(usage({
+      providerMetrics: { zebra_count: 1, alpha_count: 2 },
+    }))
+    expect(rows.map(r => r.label)).toEqual(['Alpha count', 'Zebra count'])
   })
 })

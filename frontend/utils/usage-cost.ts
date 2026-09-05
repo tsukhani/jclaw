@@ -50,6 +50,12 @@ export interface MessageUsage {
   jtokkitPromptDelta?: number
   jtokkitCompletionDelta?: number
   jtokkitTotalDelta?: number
+  /**
+   * JCLAW-1147: numeric telemetry the provider reports that the OpenAI usage schema
+   * has no slot for, keyed by the provider's own dotted JSON path (e.g.
+   * `cost_details.upstream_inference_cost`). Absent for providers that report none.
+   */
+  providerMetrics?: Record<string, number>
 }
 
 export interface UsageCostBreakdown {
@@ -119,6 +125,45 @@ export function formatUsageCost(usage: MessageUsage): string | null {
   if (b === null) return null
   if (b.total < 0.0001) return '< $0.0001'
   return '$' + b.total.toFixed(4)
+}
+
+/** One provider-specific metric, formatted for display. */
+export interface ProviderMetricRow {
+  key: string
+  label: string
+  value: string
+}
+
+/**
+ * Turn `usage.providerMetrics` into rendered rows (JCLAW-1147).
+ *
+ * Keys arrive as the provider's raw dotted path because the backend collects by shape
+ * rather than by allow-list — so the label is derived here rather than mapped, and an
+ * unrecognised metric still renders readably instead of being dropped. Cost-suffixed
+ * keys format as currency; everything else is a count. Nanosecond durations get their
+ * own branch when a provider that reports them is actually wired up.
+ */
+export function providerMetricRows(usage: MessageUsage): ProviderMetricRow[] {
+  const raw = usage?.providerMetrics
+  if (!raw) return []
+  return Object.entries(raw)
+    .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+    .map(([key, value]) => ({ key, label: providerMetricLabel(key), value: formatProviderMetric(key, value) }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+}
+
+/** `cost_details.upstream_inference_cost` → `Upstream inference cost`. */
+function providerMetricLabel(key: string): string {
+  const leaf = key.slice(key.lastIndexOf('.') + 1).replace(/_/g, ' ').trim()
+  if (!leaf) return key
+  return leaf.charAt(0).toUpperCase() + leaf.slice(1)
+}
+
+function formatProviderMetric(key: string, value: number): string {
+  if (/cost$/.test(key)) {
+    return value > 0 && value < 0.0001 ? '< $0.0001' : '$' + value.toFixed(4)
+  }
+  return value.toLocaleString()
 }
 
 /**

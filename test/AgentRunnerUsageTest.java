@@ -2,10 +2,13 @@ import agents.UsageMetricsBuilder;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
+import llm.LlmTypes.ProviderMetrics;
 import llm.LlmTypes.Usage;
 import llm.TokenUsageEstimator;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+
+import java.util.Map;
 
 /**
  * JCLAW-76 — verifies that {@code UsageMetricsBuilder.buildUsageJson} surfaces
@@ -436,6 +439,79 @@ class AgentRunnerUsageTest extends UnitTest {
 
         assertFalse(obj.has("modelProvider"), "no modelProvider field when agent is null: " + json);
         assertFalse(obj.has("modelId"), "no modelId field when agent is null: " + json);
+    }
+
+    // --- JCLAW-1147: provider-specific metrics ---
+
+    private static Usage usageWithMetrics(Map<String, Double> metrics) {
+        return new Usage(10, 5, 15, 0, 0, 0, 0d, new ProviderMetrics(metrics));
+    }
+
+    @Test
+    void turnUsageSumsProviderMetricsKeyWise() {
+        // Every field collected is additive per round, which is the premise that lets
+        // the turn total be a plain sum — a tool-using turn runs several rounds.
+        var t = new LlmProvider.TurnUsage();
+        t.addRound(roundWithUsage(usageWithMetrics(Map.of(
+                "cost_details.upstream_inference_cost", 0.0001,
+                "prompt_tokens_details.audio_tokens", 4d))));
+        t.addRound(roundWithUsage(usageWithMetrics(Map.of(
+                "cost_details.upstream_inference_cost", 0.0002))));
+
+        var summed = t.providerMetrics().values();
+        assertEquals(0.0003, summed.get("cost_details.upstream_inference_cost"), 1e-9);
+        assertEquals(4d, summed.get("prompt_tokens_details.audio_tokens"), 1e-9,
+                "a key present in only one round must survive the fold");
+    }
+
+    @Test
+    void turnUsageProviderMetricsStayEmptyWhenNoProviderReportsAny() {
+        var t = new LlmProvider.TurnUsage();
+        t.addRound(roundWithUsage(new Usage(100, 10, 110, 5, 20, 0)));
+        assertTrue(t.providerMetrics().isEmpty(),
+                "a provider that reports nothing extra must not manufacture an empty map entry");
+    }
+
+    @Test
+    void buildUsageJsonNestsProviderMetricsUnderTheirOwnKey() {
+        // Nested rather than flattened: a provider adding a field named like a
+        // first-class usage key must not be able to overwrite it.
+        var t = new LlmProvider.TurnUsage();
+        t.addRound(roundWithUsage(usageWithMetrics(Map.of(
+                "cost_details.upstream_inference_cost", 0.0001705))));
+
+        var obj = JsonParser.parseString(
+                UsageMetricsBuilder.buildUsageJson(t, null, System.currentTimeMillis(), null, null))
+                .getAsJsonObject();
+
+        assertTrue(obj.has("providerMetrics"), "providerMetrics must be emitted: " + obj);
+        assertEquals(0.0001705,
+                obj.getAsJsonObject("providerMetrics").get("cost_details.upstream_inference_cost").getAsDouble(),
+                1e-12);
+    }
+
+    @Test
+    void buildUsageJsonOmitsProviderMetricsWhenThereAreNone() {
+        // Absent, not an empty object — same rule costUsd follows, so a reader can tell
+        // "provider said nothing" from "provider said zero".
+        var t = new LlmProvider.TurnUsage();
+        t.addRound(roundWithUsage(new Usage(100, 10, 110, 5, 20, 0)));
+
+        var obj = JsonParser.parseString(
+                UsageMetricsBuilder.buildUsageJson(t, null, System.currentTimeMillis(), null, null))
+                .getAsJsonObject();
+
+        assertFalse(obj.has("providerMetrics"), "no metrics means no key at all: " + obj);
+    }
+
+    @Test
+    void usageConstructorsWithoutMetricsDefaultToEmpty() {
+        // AC4: the pre-JCLAW-1147 construction sites must keep compiling AND keep
+        // producing a non-null map, so no reader has to null-check.
+        assertTrue(new Usage(1, 2, 3, 0, 0, 0).providerMetrics().isEmpty());
+        assertTrue(new Usage(1, 2, 3, 0, 0, 0, 1.5d).providerMetrics().isEmpty());
+        assertTrue(new Usage(1, 2, 3, 0, 0, 0, 1.5d, null).providerMetrics().isEmpty(),
+                "an explicit null must normalise rather than propagate");
     }
 
     // --- Helpers ---
