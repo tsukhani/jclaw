@@ -33,7 +33,7 @@ final class FsLocks {
     }
 
     static String withLock(Path target, Supplier<String> block) {
-        var lock = FILE_LOCKS.computeIfAbsent(lockKey(target), k -> new ReentrantLock());
+        var lock = FILE_LOCKS.computeIfAbsent(lockKey(target), _ -> new ReentrantLock());
         lock.lock();
         try {
             return block.get();
@@ -63,7 +63,7 @@ final class FsLocks {
         // window between lock() and locks.add() the previous shape had.
         var locks = new ArrayList<ReentrantLock>(sortedKeys.size());
         for (var key : sortedKeys) {
-            locks.add(FILE_LOCKS.computeIfAbsent(key, k -> new ReentrantLock()));
+            locks.add(FILE_LOCKS.computeIfAbsent(key, _ -> new ReentrantLock()));
         }
         int acquired = 0;
         try {

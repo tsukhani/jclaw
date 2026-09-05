@@ -323,7 +323,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      */
     private static SessionHolder acquireHolder(String agentName) {
         while (true) {
-            var holder = sessions.computeIfAbsent(agentName, k -> new SessionHolder());
+            var holder = sessions.computeIfAbsent(agentName, _ -> new SessionHolder());
             holder.lock.lock();
             if (!holder.removed) {
                 return holder;

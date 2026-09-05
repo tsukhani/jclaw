@@ -115,7 +115,7 @@ public class TokenizerCalibrationJob extends Job<Void> {
         for (var usageJson : usageJsons) {
             var sample = parseSample(usageJson);
             if (sample != null) {
-                ratiosByKey.computeIfAbsent(sample.key(), k -> new ArrayList<>()).add(sample.ratio());
+                ratiosByKey.computeIfAbsent(sample.key(), _ -> new ArrayList<>()).add(sample.ratio());
             }
         }
         return ratiosByKey;

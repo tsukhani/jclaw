@@ -420,7 +420,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 var result = parsed.get(i);
                 sb.append("### %d. %s\n".formatted(i + 1, result.title()));
                 sb.append("URL: %s\n".formatted(result.url()));
-                if (r.has(KEY_HIGHLIGHTS) && r.getAsJsonArray(KEY_HIGHLIGHTS).size() > 0) {
+                if (r.has(KEY_HIGHLIGHTS) && !r.getAsJsonArray(KEY_HIGHLIGHTS).isEmpty()) {
                     for (var h : r.getAsJsonArray(KEY_HIGHLIGHTS)) {
                         sb.append("> %s\n".formatted(h.getAsString().strip()));
                     }
