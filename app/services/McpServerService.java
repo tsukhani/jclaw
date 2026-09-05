@@ -1,5 +1,6 @@
 package services;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -329,6 +330,9 @@ public final class McpServerService {
      * does not interact with the live {@link McpConnectionManager} entry
      * for this server, so it's safe to test while a connection is active.
      */
+    // MustBeClosed: the transport is handed to the McpClient below, whose close() closes it;
+    // it is built first so a bad config reports as such instead of as a connect failure.
+    @SuppressWarnings("MustBeClosed")
     public static TestResult testConnection(McpServer row) {
         McpTransport transport;
         try {
@@ -434,6 +438,11 @@ public final class McpServerService {
         return value.length() > 4 ? value.substring(0, 4) + "****" : "****";
     }
 
+    // Suppressed in the body only: MustBeClosed does not treat a `yield` from a switch
+    // block arm as a return position (a plain `->` arm it does). Callers stay checked —
+    // the @MustBeClosed contract on this method is what the suppression does not touch.
+    @MustBeClosed
+    @SuppressWarnings("MustBeClosed")
     private static McpTransport buildTransport(McpServer row) {
         var cfg = explodeConfigJson(row.transport, row.configJson);
         return switch (row.transport) {

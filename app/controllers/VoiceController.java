@@ -257,7 +257,9 @@ public class VoiceController extends WebSocketController {
      *  endpointing, JCLAW-797) for this connection. Utterances detected server-side
      *  flow one at a time to {@link #runTurn}; the mic stays open so a new utterance
      *  during an in-flight turn is a server-driven barge-in. */
-    @SuppressWarnings("java:S107") // per-connection wiring — all captured by the session listener
+    // MustBeClosed: the VAD is handed to the VoiceSession, which sessionRef publishes to
+    // socket()'s finally; the local `handedOff` flag closes it on every path that never gets there.
+    @SuppressWarnings({"java:S107", "MustBeClosed"}) // S107: per-connection wiring — all captured by the session listener
     private static void initSession(JsonObject msg, String username, AsrSidecarClient asr,
                                     Http.Outbound out, Object writeLock,
                                     AtomicReference<AtomicBoolean> current, AtomicInteger turnSeq,

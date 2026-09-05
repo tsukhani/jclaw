@@ -1,5 +1,6 @@
 package mcp;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonObject;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpTransport;
@@ -63,10 +64,13 @@ public class McpClient implements AutoCloseable {
     @SuppressWarnings("java:S3077")
     private volatile Consumer<List<McpToolDef>> onToolsChanged = tools -> {};
 
+    @MustBeClosed
     public McpClient(String name, McpTransport transport, String clientVersion) {
         this(name, transport, clientVersion, DEFAULT_REQUEST_TIMEOUT);
     }
 
+    /** Takes ownership of {@code transport}: {@link #close()} closes it. */
+    @MustBeClosed
     public McpClient(String name, McpTransport transport, String clientVersion, Duration requestTimeout) {
         this.name = name;
         this.transport = transport;

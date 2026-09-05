@@ -1,5 +1,6 @@
 package services.search;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import memory.MemoryReembedService;
 import models.Memory;
 import models.Message;
@@ -468,6 +469,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         private final SearcherManager sm;
         private final IndexSearcher searcher;
 
+        @MustBeClosed
         LeasedSearcher(SearcherManager sm) throws IOException {
             this.sm = sm;
             this.searcher = sm.acquire();

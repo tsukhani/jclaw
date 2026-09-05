@@ -1,5 +1,6 @@
 package utils;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
@@ -205,6 +206,7 @@ public final class LatencyTrace {
      * <p>{@code null} is accepted and binds nothing, so dispatch paths that may
      * or may not be inside a turn need no guard of their own.
      */
+    @MustBeClosed
     public static @NonNull Binding bind(@Nullable LatencyTrace trace) {
         var prev = CURRENT.get();
         if (trace == null) CURRENT.remove();

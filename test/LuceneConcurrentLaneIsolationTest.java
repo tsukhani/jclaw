@@ -26,8 +26,7 @@ class LuceneConcurrentLaneIsolationTest extends UnitTest {
 
     @Test
     void closedWindowStaysClosedWhenConcurrentLaneOpensIndex() throws Exception {
-        LuceneTestSync.closedForTest();
-        try {
+        try (var _ = LuceneTestSync.closedLease()) {
             assertFalse(LuceneIndexer.isOpen(), "precondition: this test holds the index closed");
 
             // A different test lane opens the index WITHOUT going through
@@ -49,8 +48,6 @@ class LuceneConcurrentLaneIsolationTest extends UnitTest {
 
             assertFalse(LuceneIndexer.isOpen(),
                     "a concurrent lane's open() must not flip THIS test's closed window (JCLAW-737)");
-        } finally {
-            LuceneTestSync.release();
         }
     }
 }

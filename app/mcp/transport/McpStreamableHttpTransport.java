@@ -1,5 +1,6 @@
 package mcp.transport;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import mcp.jsonrpc.JsonRpc;
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -78,6 +79,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
      *  participate in session tracking (legacy non-streamable HTTP servers). */
     private final AtomicReference<String> sessionId = new AtomicReference<>();
 
+    @MustBeClosed
     public McpStreamableHttpTransport(String name, URI endpoint, Map<String, String> headers) {
         if (endpoint == null) throw new IllegalArgumentException("endpoint required");
         this.name = name;

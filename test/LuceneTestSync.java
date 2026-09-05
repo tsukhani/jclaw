@@ -1,3 +1,4 @@
+import com.google.errorprone.annotations.MustBeClosed;
 import services.search.LuceneIndexer;
 
 import java.util.concurrent.locks.ReentrantLock;
@@ -105,5 +106,40 @@ public final class LuceneTestSync {
                 LOCK.unlock();
             }
         }
+    }
+
+    /**
+     * A held lock, released by {@link #close()}. Obtained only from
+     * {@link #openLease()} / {@link #closedLease()}, both {@code @MustBeClosed}, so a
+     * test that acquires the index inside a method body cannot reach the closing brace
+     * without releasing — the leak that starves every later Lucene test is a compile
+     * error rather than a hung suite.
+     *
+     * <p>Tests whose Lucene window spans JUnit lifecycle hooks keep the
+     * {@link #openForTest()} / {@link #release()} pair: {@code @MustBeClosed} accepts
+     * only a resource variable or a return, never a field, so a hook pair cannot be
+     * expressed as a lease. {@code ResourceLeakGateConformanceTest} covers those.
+     */
+    public static final class Lease implements AutoCloseable {
+        private Lease() {}
+
+        @Override
+        public void close() {
+            release();
+        }
+    }
+
+    /** {@link #openForTest()} as a try-with-resources lease. */
+    @MustBeClosed
+    public static Lease openLease() {
+        openForTest();
+        return new Lease();
+    }
+
+    /** {@link #closedForTest()} as a try-with-resources lease. */
+    @MustBeClosed
+    public static Lease closedLease() {
+        closedForTest();
+        return new Lease();
     }
 }

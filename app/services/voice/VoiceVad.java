@@ -1,5 +1,6 @@
 package services.voice;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig;
 import com.k2fsa.sherpa.onnx.Vad;
 import com.k2fsa.sherpa.onnx.VadModelConfig;
@@ -50,6 +51,7 @@ public final class VoiceVad implements AutoCloseable {
 
     private final Vad vad;
 
+    @MustBeClosed
     public VoiceVad() {
         var model = ensureModel();
         var threshold = configFloat("voice.vad.threshold", 0.5f);

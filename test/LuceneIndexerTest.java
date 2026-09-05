@@ -1,5 +1,3 @@
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.search.DirectLuceneMessageSearchRepository;
@@ -31,81 +29,77 @@ class LuceneIndexerTest extends UnitTest {
 
     private static final LuceneIndexer.Scope SCOPE = LuceneIndexer.Scope.TASK_RUN_MESSAGE;
 
-    private DirectLuceneMessageSearchRepository repo;
-
-    @BeforeEach
-    void setup() {
-        // JCLAW-428: serialize against other Lucene tests and open a clean index
-        // at the %test path (data/jclaw-lucene-test). openForTest() opens it (the
-        // boot job skips Lucene init in test mode) and wipes leftover docs.
-        LuceneTestSync.openForTest();
-        repo = new DirectLuceneMessageSearchRepository();
-    }
-
-    @AfterEach
-    void teardown() {
-        LuceneTestSync.release();
-    }
-
     @Test
     void upsertedDocIsSearchableAfterRefreshWithoutPerWriteCommit() throws Exception {
-        // No commit() between upsert and search. searchIds() calls
-        // maybeRefresh internally; the writer-NRT SearcherManager surfaces
-        // the in-RAM segment even though it was never fsynced.
-        LuceneIndexer.upsert(SCOPE, 42L, "the quick brown fox");
+        try (var _ = LuceneTestSync.openLease()) {
+            var repo = new DirectLuceneMessageSearchRepository();
+            // No commit() between upsert and search. searchIds() calls
+            // maybeRefresh internally; the writer-NRT SearcherManager surfaces
+            // the in-RAM segment even though it was never fsynced.
+            LuceneIndexer.upsert(SCOPE, 42L, "the quick brown fox");
 
-        var hits = repo.searchIds(SCOPE, "brown", 10);
-        assertEquals(1, hits.size(), "upserted doc must be searchable via maybeRefresh, no per-write commit");
-        assertEquals(Long.valueOf(42L), hits.getFirst());
+            var hits = repo.searchIds(SCOPE, "brown", 10);
+            assertEquals(1, hits.size(), "upserted doc must be searchable via maybeRefresh, no per-write commit");
+            assertEquals(Long.valueOf(42L), hits.getFirst());
+        }
     }
 
     @Test
     void removeMakesDocNonSearchableAfterRefresh() throws Exception {
-        LuceneIndexer.upsert(SCOPE, 7L, "uniquetoken12345 payload");
-        assertEquals(1, repo.searchIds(SCOPE, "uniquetoken12345", 10).size(),
-                "doc must be findable before remove");
+        try (var _ = LuceneTestSync.openLease()) {
+            var repo = new DirectLuceneMessageSearchRepository();
+            LuceneIndexer.upsert(SCOPE, 7L, "uniquetoken12345 payload");
+            assertEquals(1, repo.searchIds(SCOPE, "uniquetoken12345", 10).size(),
+                    "doc must be findable before remove");
 
-        LuceneIndexer.remove(SCOPE, 7L);
+            LuceneIndexer.remove(SCOPE, 7L);
 
-        // Again no commit() — maybeRefresh inside searchIds picks up the
-        // in-RAM delete.
-        assertTrue(repo.searchIds(SCOPE, "uniquetoken12345", 10).isEmpty(),
-                "removed doc must drop from search via maybeRefresh, no per-write commit");
+            // Again no commit() — maybeRefresh inside searchIds picks up the
+            // in-RAM delete.
+            assertTrue(repo.searchIds(SCOPE, "uniquetoken12345", 10).isEmpty(),
+                    "removed doc must drop from search via maybeRefresh, no per-write commit");
+        }
     }
 
     @Test
     void upsertOverwritesPriorContentForSameId() throws Exception {
-        // updateDocument keys on the id Term, so a second upsert for the
-        // same id replaces — not duplicates — the doc. Verifies the
-        // commit-free path keeps the id unique.
-        LuceneIndexer.upsert(SCOPE, 99L, "originalcontenttoken");
-        assertEquals(1, repo.searchIds(SCOPE, "originalcontenttoken", 10).size());
+        try (var _ = LuceneTestSync.openLease()) {
+            var repo = new DirectLuceneMessageSearchRepository();
+            // updateDocument keys on the id Term, so a second upsert for the
+            // same id replaces — not duplicates — the doc. Verifies the
+            // commit-free path keeps the id unique.
+            LuceneIndexer.upsert(SCOPE, 99L, "originalcontenttoken");
+            assertEquals(1, repo.searchIds(SCOPE, "originalcontenttoken", 10).size());
 
-        LuceneIndexer.upsert(SCOPE, 99L, "replacementcontenttoken");
+            LuceneIndexer.upsert(SCOPE, 99L, "replacementcontenttoken");
 
-        assertTrue(repo.searchIds(SCOPE, "originalcontenttoken", 10).isEmpty(),
-                "old content must no longer match after overwrite");
-        var hits = repo.searchIds(SCOPE, "replacementcontenttoken", 10);
-        // Exactly one hit proves the id was overwritten, not duplicated — a
-        // second copy of id 99 would surface as a second hit for this token.
-        // Token-scoped (not a global docCount) so a concurrent test lane's
-        // incidental doc can't perturb it (JCLAW-737: the shared-index residual).
-        assertEquals(1, hits.size(), "new content must match the same id exactly once, not duplicated");
-        assertEquals(Long.valueOf(99L), hits.getFirst());
+            assertTrue(repo.searchIds(SCOPE, "originalcontenttoken", 10).isEmpty(),
+                    "old content must no longer match after overwrite");
+            var hits = repo.searchIds(SCOPE, "replacementcontenttoken", 10);
+            // Exactly one hit proves the id was overwritten, not duplicated — a
+            // second copy of id 99 would surface as a second hit for this token.
+            // Token-scoped (not a global docCount) so a concurrent test lane's
+            // incidental doc can't perturb it (JCLAW-737: the shared-index residual).
+            assertEquals(1, hits.size(), "new content must match the same id exactly once, not duplicated");
+            assertEquals(Long.valueOf(99L), hits.getFirst());
+        }
     }
 
     @Test
     void closeStopsTheCommitSchedulerAndKeepsUncommittedWritesDurable() throws Exception {
-        // JCLAW-752: close() now shuts the periodic-commit daemon down and waits
-        // for an in-flight commit instead of interrupting it mid-fsync. The
-        // observable contract either way is that nothing buffered is lost across
-        // the shutdown and the next open() re-reads it from disk.
-        LuceneIndexer.upsert(SCOPE, 4242L, "shutdownsurvivortoken");
-        LuceneIndexer.close();
-        assertFalse(LuceneIndexer.isOpen(), "close() must publish the closed state");
+        try (var _ = LuceneTestSync.openLease()) {
+            var repo = new DirectLuceneMessageSearchRepository();
+            // JCLAW-752: close() now shuts the periodic-commit daemon down and waits
+            // for an in-flight commit instead of interrupting it mid-fsync. The
+            // observable contract either way is that nothing buffered is lost across
+            // the shutdown and the next open() re-reads it from disk.
+            LuceneIndexer.upsert(SCOPE, 4242L, "shutdownsurvivortoken");
+            LuceneIndexer.close();
+            assertFalse(LuceneIndexer.isOpen(), "close() must publish the closed state");
 
-        LuceneIndexer.open();
-        assertEquals(1, repo.searchIds(SCOPE, "shutdownsurvivortoken", 10).size(),
-                "close() must commit the in-RAM segment, not abandon it");
+            LuceneIndexer.open();
+            assertEquals(1, repo.searchIds(SCOPE, "shutdownsurvivortoken", 10).size(),
+                    "close() must commit the in-RAM segment, not abandon it");
+        }
     }
 }
