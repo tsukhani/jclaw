@@ -42,7 +42,7 @@ public final class Filenames {
         return "";
     }
 
-    private static String candidateExtension(String s) {
+    private static @Nullable String candidateExtension(@Nullable String s) {
         if (s == null) return null;
         int dot = s.lastIndexOf('.');
         if (dot <= 0) return null;

@@ -26,6 +26,7 @@ import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
 import llm.ToolCallChunkMerger.ToolCallBuilder;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import utils.HttpKeys;
 import utils.LatencyTrace;
@@ -187,7 +188,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      *         this chunk
      */
     @SuppressWarnings("java:S1172") // template method — subclasses use the delta
-    protected String extractReasoningFromDelta(ChunkDelta delta) {
+    protected @Nullable String extractReasoningFromDelta(ChunkDelta delta) {
         return null;
     }
 
@@ -373,7 +374,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     }
 
     /** The first {@code role=system} message in a serialized request, or null when there is none. */
-    protected static JsonObject findFirstSystemMessage(JsonObject request) {
+    protected static @Nullable JsonObject findFirstSystemMessage(JsonObject request) {
         if (!request.has(JSON_MESSAGES) || !request.get(JSON_MESSAGES).isJsonArray()) return null;
         for (var el : request.getAsJsonArray(JSON_MESSAGES)) {
             if (!el.isJsonObject()) continue;
@@ -435,8 +436,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     // ─── Synchronous chat ────────────────────────────────────────────────
 
-    public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
-                             Integer maxTokens, String thinkingMode, String channel) {
+    public ChatResponse chat(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                             @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                             @Nullable String channel) {
         return chat(model, messages, tools, maxTokens, thinkingMode, null, channel);
     }
 
@@ -461,9 +463,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      *                       slash commands, scheduled summarization).
      * @return the parsed chat completion response
      */
-    public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
-                             Integer maxTokens, String thinkingMode, Integer timeoutSeconds,
-                             String channel) {
+    public ChatResponse chat(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                             @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                             @Nullable Integer timeoutSeconds, @Nullable String channel) {
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
         var json = serializeRequest(request);
         // JCLAW-882: the sync dispatch point. Counted before the wire call so a
@@ -506,7 +508,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * efficiency NFR needs the split rather than the total alone. No-op outside a
      * turn or when the provider reports no cache reads.
      */
-    private static void noteCachedCall(LatencyTrace trace, Usage usage) {
+    private static void noteCachedCall(@Nullable LatencyTrace trace, @Nullable Usage usage) {
         if (trace != null && usage != null && usage.cachedTokens() > 0) {
             trace.noteCachedLlmCall();
         }
@@ -520,10 +522,11 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     // independent. Bundling into a Callbacks DTO would lose the lambda-literal
     // call-site ergonomics every caller depends on.
     @SuppressWarnings("java:S107")
-    public void chatStream(String model, List<ChatMessage> messages, List<ToolDef> tools,
+    public void chatStream(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                            Consumer<ChatCompletionChunk> onChunk,
                            Runnable onComplete, Consumer<Exception> onError,
-                           Integer maxTokens, String thinkingMode, String channel) {
+                           @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                           @Nullable String channel) {
         // JCLAW-882: the streaming dispatch point. Counted here rather than inside
         // the virtual thread below, because the turn binding lives on the calling
         // thread — the stream thread and the provider's IO thread carry none.
@@ -538,10 +541,11 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * so a tools-unsupported error can be handled at most once (JCLAW-1076).
      */
     @SuppressWarnings("java:S107") // same shape as chatStream, plus the retry latch
-    private void streamOnce(String model, List<ChatMessage> messages, List<ToolDef> tools,
+    private void streamOnce(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                             Consumer<ChatCompletionChunk> onChunk,
                             Runnable onComplete, Consumer<Exception> onError,
-                            Integer maxTokens, String thinkingMode, String channel,
+                            @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                            @Nullable String channel,
                             boolean mayRetryWithoutTools) {
         // Retrying after tokens have reached the user would replay them. A
         // tools-unsupported 400 is a request rejection so nothing has streamed
@@ -593,10 +597,12 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     // frontend renders thinking and content tokens through different paths.
     @SuppressWarnings("java:S107")
     public StreamAccumulator chatStreamAccumulate(String model, List<ChatMessage> messages,
-                                                   List<ToolDef> tools, Consumer<String> onToken,
+                                                   @Nullable List<ToolDef> tools,
+                                                   Consumer<String> onToken,
                                                    Consumer<String> onReasoning,
-                                                   Integer maxTokens, String thinkingMode,
-                                                   String channel) {
+                                                   @Nullable Integer maxTokens,
+                                                   @Nullable String thinkingMode,
+                                                   @Nullable String channel) {
         var accumulator = new StreamAccumulator();
         accumulator.promptTokenEstimate = TokenUsageEstimator.estimateChatRequest(model, messages, tools);
         var contentBuilder = new StringBuilder();
@@ -729,10 +735,12 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     // pushing the chat tuple into a DTO would force every caller of the
     // primary {@link #chat} path to pre-build one, which they don't.
     @SuppressWarnings("java:S107")
-    public static ChatResponse chatWithFailover(LlmProvider primary, LlmProvider secondary,
+    public static ChatResponse chatWithFailover(LlmProvider primary, @Nullable LlmProvider secondary,
                                                  String model, List<ChatMessage> messages,
-                                                 List<ToolDef> tools, Integer maxTokens,
-                                                 String thinkingMode, String channel) {
+                                                 @Nullable List<ToolDef> tools,
+                                                 @Nullable Integer maxTokens,
+                                                 @Nullable String thinkingMode,
+                                                 @Nullable String channel) {
         try {
             return primary.chat(model, messages, tools, maxTokens, thinkingMode, channel);
         } catch (LlmException e) {
@@ -933,7 +941,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         return URI.create(url);
     }
 
-    protected String executeWithRetry(String path, String json, Integer timeoutSeconds, String channel) {
+    protected String executeWithRetry(String path, String json, @Nullable Integer timeoutSeconds,
+                                      @Nullable String channel) {
         var uri = buildUri(path);
         var auth = HttpKeys.BEARER_PREFIX + config.apiKey();
         var timeout = Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180);
@@ -971,7 +980,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * waited (the 429 path parks for Retry-After itself), so {@code executeWithRetry} must
      * not stack the standard backoff on top.
      */
-    private record AttemptOutcome(String body, Exception error, boolean alreadyBackedOff) {}
+    private record AttemptOutcome(@Nullable String body, @Nullable Exception error,
+                                  boolean alreadyBackedOff) {}
 
     /**
      * Error codes on a 429 that mean the balance is gone rather than the rate is too
@@ -1021,7 +1031,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * returns an error outcome on 5xx for the caller to retry.
      */
     private AttemptOutcome attemptRequest(URI uri, String auth, String json, Duration timeout,
-                                          String channel, int attempt) throws InterruptedException, IOException {
+                                          @Nullable String channel, int attempt)
+            throws InterruptedException, IOException {
         var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout, channel);
 
         if (reply.statusCode() == 200) return new AttemptOutcome(reply.body(), null, false);
@@ -1185,6 +1196,6 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     public static class LlmException extends RuntimeException {
         public LlmException(String message) { super(message); }
-        public LlmException(String message, Throwable cause) { super(message, cause); }
+        public LlmException(String message, @Nullable Throwable cause) { super(message, cause); }
     }
 }

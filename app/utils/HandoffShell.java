@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -42,7 +44,7 @@ public final class HandoffShell {
     }
 
     /** Absolute path of the shell to hand off through, or null when none is installed. */
-    public static String locate() {
+    public static @Nullable String locate() {
         return locate(System.getProperty("os.name", ""), System::getenv, p -> new File(p).canExecute());
     }
 
@@ -51,7 +53,8 @@ public final class HandoffShell {
      * the suite runs tests concurrently, so the platform branches have to be reachable
      * without setting either.
      */
-    public static String locate(String osName, UnaryOperator<String> env, Predicate<String> executable) {
+    public static @Nullable String locate(String osName, UnaryOperator<String> env,
+                                          Predicate<String> executable) {
         if (!isWindows(osName)) {
             return POSIX_SHELL;
         }

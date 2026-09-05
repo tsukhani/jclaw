@@ -1,5 +1,7 @@
 package agents;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * JCLAW-291: thrown by {@link AgentRunner}'s cooperative-cancellation
  * checkpoints when the {@link services.SubagentRegistry} flag for the
@@ -25,19 +27,19 @@ package agents;
  */
 public class RunCancelledException extends RuntimeException {
 
-    private final Long runId;
+    private final @Nullable Long runId;
 
-    public RunCancelledException(Long runId) {
+    public RunCancelledException(@Nullable Long runId) {
         super("Subagent run " + runId + " cancelled by operator");
         this.runId = runId;
     }
 
     /** JCLAW-414: neutral variant so non-subagent callers (task runs) get a
      *  correct message, e.g. {@code new RunCancelledException(id, "Task")}. */
-    public RunCancelledException(Long runId, String entity) {
+    public RunCancelledException(@Nullable Long runId, String entity) {
         super(entity + " run " + runId + " cancelled by operator");
         this.runId = runId;
     }
 
-    public Long runId() { return runId; }
+    public @Nullable Long runId() { return runId; }
 }

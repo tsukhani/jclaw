@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.Nullable;
+
 import java.lang.management.ManagementFactory;
 
 /**
@@ -35,13 +37,13 @@ import java.lang.management.ManagementFactory;
  */
 public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
                        long nonHeapUsed, long nonHeapCommitted,
-                       Long rssBytes,
+                       @Nullable Long rssBytes,
                        long gcCount, long gcTimeMs,
                        int platformThreads, int peakPlatformThreads,
                        long uptimeMs,
-                       Double processCpuLoad,
+                       @Nullable Double processCpuLoad,
                        int availableProcessors,
-                       Long machineMemoryBytes,
+                       @Nullable Long machineMemoryBytes,
                        int llmCallsRunning, int llmCallsQueued, int llmCallsMax) {
 
     /**

@@ -7,6 +7,7 @@ import llm.ProviderRegistry;
 import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.ConversationService;
 import services.EventLogger;
@@ -52,7 +53,7 @@ final class AgentPromptPreparer {
     record PreparedData(
         List<ChatMessage> messages,
         LlmProvider primary,
-        LlmProvider secondary,
+        @Nullable LlmProvider secondary,
         List<ToolDef> tools,
         List<VisionAudioAssembler.AudioBearer> audioBearers,
         List<VisionAudioAssembler.ImageBearer> imageBearers,
@@ -82,7 +83,7 @@ final class AgentPromptPreparer {
      * (after persisting the canned error via the sink) when no provider is configured.
      */
     static Optional<PreparedData> prepareSyncData(Agent agent, String userMessage,
-                                        List<AttachmentService.Input> attachments,
+                                        @Nullable List<AttachmentService.Input> attachments,
                                         boolean skipUserAppend, Long conversationId,
                                         AgentExecutionSink sink, LatencyTrace trace) {
         // JCLAW-960: BEFORE the Tx. Everything below runs in one transaction by design, so

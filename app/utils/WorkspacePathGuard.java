@@ -95,7 +95,7 @@ public final class WorkspacePathGuard {
      *         always exists)
      * @throws IOException if realpath'ing the deepest existing ancestor fails
      */
-    private static Path canonicalize(Path path) throws IOException {
+    private static @Nullable Path canonicalize(Path path) throws IOException {
         var existing = path;
         var missingSuffix = new ArrayDeque<Path>();
         while (existing != null && !Files.exists(existing)) {

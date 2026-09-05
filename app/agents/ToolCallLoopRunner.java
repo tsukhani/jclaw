@@ -8,6 +8,7 @@ import llm.LlmTypes.ToolDef;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import tools.SubagentYieldTool;
 import utils.LatencyTrace;
@@ -81,7 +82,7 @@ public final class ToolCallLoopRunner {
      * Computed here rather than in the executor because the tool-dispatch threads
      * hold no JPA transaction, and recomputing per-agent config there throws.
      */
-    private static Set<String> offeredToolNames(List<ToolDef> tools) {
+    private static Set<String> offeredToolNames(@Nullable List<ToolDef> tools) {
         if (tools == null) return Set.of();
         return tools.stream().map(t -> t.function().name()).collect(Collectors.toSet());
     }
@@ -126,12 +127,13 @@ public final class ToolCallLoopRunner {
     }
 
     @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is the single-use audio-format (JCLAW-165) / image-format (JCLAW-216) retry
-    static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
+    static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation,
+                                         @Nullable Long conversationId,
                                          List<ChatMessage> messages, List<ToolDef> tools,
-                                         LlmProvider primary, LlmProvider secondary,
+                                         LlmProvider primary, @Nullable LlmProvider secondary,
                                          List<VisionAudioAssembler.AudioBearer> audioBearers,
                                          List<VisionAudioAssembler.ImageBearer> imageBearers,
-                                         AgentExecutionSink sink, Long taskRunId) {
+                                         AgentExecutionSink sink, @Nullable Long taskRunId) {
         // Sibling helpers accept a null conversation, but this loop dereferences
         // conversation.channelType for the provider call — fail here rather than
         // with an opaque NPE deeper in the stack.
@@ -154,7 +156,7 @@ public final class ToolCallLoopRunner {
             var attempt = invokeOneRound(agent, conversation, primary, secondary, effectiveModelId, thinkingMode,
                     currentMessages, tools, audioBearers, imageBearers, audioState, visionState, supportsAudioInitially);
             if (attempt.retry()) {
-                currentMessages = attempt.rewrittenMessages();
+                currentMessages = attempt.retryMessages();
                 round--;  // re-issue this round with the rewritten messages (gated by audio/vision retryAttempted)
                 continue;
             }
@@ -163,7 +165,7 @@ public final class ToolCallLoopRunner {
             logRoundZeroPassthroughOutcomes(round, agent, conversation, primary,
                     audioBearers, imageBearers, audioState, visionState);
 
-            var roundOutcome = handleSyncRoundResponse(attempt.response(), agent, conversation, conversationId, primary,
+            var roundOutcome = handleSyncRoundResponse(attempt.okResponse(), agent, conversation, conversationId, primary,
                     currentMessages, tools, sink, round, taskRunId);
             if (roundOutcome != null) return roundOutcome;
         }
@@ -203,11 +205,18 @@ public final class ToolCallLoopRunner {
      *   <li>{@code retry == true} — JCLAW-165 audio-format retry; caller rewrites messages and re-issues the round.</li>
      * </ul>
      */
-    private record RoundAttempt(ChatResponse response, LoopOutcome terminal, boolean retry,
-                                 ArrayList<ChatMessage> rewrittenMessages) {
+    private record RoundAttempt(@Nullable ChatResponse response, @Nullable LoopOutcome terminal,
+                                 boolean retry,
+                                 @Nullable ArrayList<ChatMessage> rewrittenMessages) {
         static RoundAttempt ok(ChatResponse r) { return new RoundAttempt(r, null, false, null); }
         static RoundAttempt terminal(LoopOutcome o) { return new RoundAttempt(null, o, false, null); }
         static RoundAttempt retry(ArrayList<ChatMessage> rewritten) { return new RoundAttempt(null, null, true, rewritten); }
+
+        /** The response of an attempt that is neither a retry nor terminal — the only state that has one. */
+        ChatResponse okResponse() { return Objects.requireNonNull(response); }
+
+        /** The rewritten history of a retry attempt — the only state that carries one. */
+        ArrayList<ChatMessage> retryMessages() { return Objects.requireNonNull(rewrittenMessages); }
     }
 
     /**
@@ -217,7 +226,8 @@ public final class ToolCallLoopRunner {
      */
     @SuppressWarnings("java:S107") // Round invocation surface mirrors the loop's per-round state
     private static RoundAttempt invokeOneRound(Agent agent, Conversation conversation, LlmProvider primary,
-                                                LlmProvider secondary, String effectiveModelId, String thinkingMode,
+                                                @Nullable LlmProvider secondary, String effectiveModelId,
+                                                @Nullable String thinkingMode,
                                                 ArrayList<ChatMessage> currentMessages, List<ToolDef> tools,
                                                 List<VisionAudioAssembler.AudioBearer> audioBearers,
                                                 List<VisionAudioAssembler.ImageBearer> imageBearers,
@@ -239,8 +249,8 @@ public final class ToolCallLoopRunner {
             var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, imageBearers,
                     audioState, visionState, supportsAudioInitially, currentMessages);
             return retryOutcome.retry()
-                    ? RoundAttempt.retry(retryOutcome.rewrittenMessages())
-                    : RoundAttempt.terminal(retryOutcome.outcome());
+                    ? RoundAttempt.retry(retryOutcome.retryMessages())
+                    : RoundAttempt.terminal(retryOutcome.terminalOutcome());
         }
         if (response.choices() == null || response.choices().isEmpty()) {
             return RoundAttempt.terminal(new LoopOutcome("No response received from the AI provider."));
@@ -253,7 +263,8 @@ public final class ToolCallLoopRunner {
      * {@link LoopOutcome} or an instruction to retry the current round
      * with rewritten messages (JCLAW-165 transcript-as-text fallback).
      */
-    private record LlmCallExceptionOutcome(LoopOutcome outcome, boolean retry, ArrayList<ChatMessage> rewrittenMessages) {
+    private record LlmCallExceptionOutcome(@Nullable LoopOutcome outcome, boolean retry,
+                                           @Nullable ArrayList<ChatMessage> rewrittenMessages) {
         static LlmCallExceptionOutcome terminal(LoopOutcome outcome) {
             return new LlmCallExceptionOutcome(outcome, false, null);
         }
@@ -261,6 +272,12 @@ public final class ToolCallLoopRunner {
         static LlmCallExceptionOutcome retry(ArrayList<ChatMessage> rewritten) {
             return new LlmCallExceptionOutcome(null, true, rewritten);
         }
+
+        /** The rewritten history of a retry outcome — the only state that carries one. */
+        ArrayList<ChatMessage> retryMessages() { return Objects.requireNonNull(rewrittenMessages); }
+
+        /** The outcome of a non-retry result — the only state that carries one. */
+        LoopOutcome terminalOutcome() { return Objects.requireNonNull(outcome); }
     }
 
     /**
@@ -338,19 +355,23 @@ public final class ToolCallLoopRunner {
      * caller continues to the next round.
      */
     @SuppressWarnings("java:S107") // round-response dispatcher mirrors the loop's per-round state + the JCLAW-414 task-run id
-    private static LoopOutcome handleSyncRoundResponse(ChatResponse response, Agent agent, Conversation conversation,
-                                                       Long conversationId, LlmProvider primary,
-                                                       ArrayList<ChatMessage> currentMessages, List<ToolDef> tools,
-                                                       AgentExecutionSink sink, int round, Long taskRunId) {
+    private static @Nullable LoopOutcome handleSyncRoundResponse(
+                                                       ChatResponse response, Agent agent,
+                                                       Conversation conversation,
+                                                       @Nullable Long conversationId, LlmProvider primary,
+                                                       ArrayList<ChatMessage> currentMessages,
+                                                       @Nullable List<ToolDef> tools,
+                                                       AgentExecutionSink sink, int round,
+                                                       @Nullable Long taskRunId) {
         var choice = response.choices().getFirst();
         var assistantMsg = choice.message();
-        boolean toolCallsEmpty = assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty();
+        var assistantToolCalls = assistantMsg.toolCalls();
 
         // No tool calls — return the content. JCLAW-291: when finish_reason
         // signals truncation on this branch, the model ran out of output
         // budget mid-reply (the prompt-fills-window scenario). Carry the
         // flag up to the persist site so the chat UI can mark the row.
-        if (toolCallsEmpty) {
+        if (assistantToolCalls == null || assistantToolCalls.isEmpty()) {
             if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
                 TruncationDiagnostics.logEmptyToolCallsTruncation("callWithToolLoop", agent, conversation, primary,
                         conversation.channelType, choice.finishReason(), currentMessages, tools);
@@ -372,9 +393,9 @@ public final class ToolCallLoopRunner {
         currentMessages.add(assistantMsg);
         int toolResultsAnchor = currentMessages.size();
         EventLogger.info("tool", agent.name, null,
-                "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
+                "Round %d: executing %d tool call(s)".formatted(round + 1, assistantToolCalls.size()));
 
-        ParallelToolExecutor.executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
+        ParallelToolExecutor.executeToolsParallel(assistantToolCalls, agent, conversationId,
                 currentMessages, null, null, null, null, sink, offeredToolNames(tools));
 
         // JCLAW-291: cooperative-cancel checkpoint between tool calls
@@ -447,12 +468,13 @@ public final class ToolCallLoopRunner {
      * early round still reach the final {@code buildImagePrefix} call.
      */
     // Visible (public) for ToolCallLoopRunnerStreamingTest in the default package
-    public record StreamingTurnContext(Agent agent, Conversation conversation, Long conversationId,
-                                       List<ToolDef> tools, LlmProvider provider,
-                                       AgentRunner.StreamingCallbacks cb, String thinkingMode,
+    public record StreamingTurnContext(Agent agent, Conversation conversation,
+                                       @Nullable Long conversationId,
+                                       @Nullable List<ToolDef> tools, LlmProvider provider,
+                                       AgentRunner.StreamingCallbacks cb, @Nullable String thinkingMode,
                                        AtomicBoolean isCancelled, LatencyTrace trace,
                                        LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
-                                       String channelType, AgentExecutionSink sink) {}
+                                       @Nullable String channelType, AgentExecutionSink sink) {}
 
     static String handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
                                            List<ToolCall> toolCalls, String priorContent, int round) {

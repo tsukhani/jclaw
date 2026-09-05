@@ -2,6 +2,7 @@ package agents;
 
 import llm.LlmProvider;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.util.List;
@@ -56,9 +57,10 @@ public final class CancellationManager {
      * wired implementation, so multiple checkpoints along an early-return
      * path are safe.
      */
-    static boolean checkCancelled(AtomicBoolean isCancelled, Agent agent, String channelType,
+    static boolean checkCancelled(@Nullable AtomicBoolean isCancelled, Agent agent,
+                                  @Nullable String channelType,
                                   AgentRunner.StreamingCallbacks cb) {
-        if (isCancelled.get()) {
+        if (isCancelled != null && isCancelled.get()) {
             EventLogger.info("llm", agent.name, channelType, STREAM_CANCELLED_MSG);
             if (cb != null && cb.onCancel() != null) cb.onCancel().run();
             return true;
@@ -73,8 +75,8 @@ public final class CancellationManager {
      * logged via {@link #checkCancelled}).
      */
     static boolean awaitAccumulatorOrCancel(LlmProvider.StreamAccumulator accumulator,
-                                            AtomicBoolean isCancelled,
-                                            Agent agent, String channelType,
+                                            @Nullable AtomicBoolean isCancelled,
+                                            Agent agent, @Nullable String channelType,
                                             AgentRunner.StreamingCallbacks cb)
             throws InterruptedException {
         while (!accumulator.awaitCompletion(5000)) {
@@ -105,8 +107,8 @@ public final class CancellationManager {
      * is a no-op (SseStream catches the write exception and auto-closes);
      * on Telegram the sink's {@code update} is similarly tolerant.
      */
-    static String cancelledReturn(String priorContent, List<String> collectedImages,
-                                  String channelType, AgentRunner.StreamingCallbacks cb,
+    static String cancelledReturn(@Nullable String priorContent, List<String> collectedImages,
+                                  @Nullable String channelType, AgentRunner.StreamingCallbacks cb,
                                   Agent agent, int round) {
         if (priorContent != null && !priorContent.isBlank()) {
             return priorContent;

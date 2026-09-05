@@ -7,6 +7,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 import services.ConversationService;
 
 import java.util.ArrayList;
@@ -154,7 +155,8 @@ public final class MessageHydrator {
      * id → function name pair into {@code toolNamesById} so the matching
      * TOOL-row hydration can recover the function name (JCLAW-193).
      */
-    private static ChatMessage hydrateAssistantMessage(Message msg, HashMap<String, String> toolNamesById) {
+    private static ChatMessage hydrateAssistantMessage(Message msg,
+                                                       HashMap<String, String> toolNamesById) {
         if (msg.toolCalls == null || msg.toolCalls.isBlank()) {
             return ChatMessage.assistant(msg.content != null ? msg.content : "");
         }
@@ -179,7 +181,7 @@ public final class MessageHydrator {
      * context. Returns {@code null} unchanged so callers can detect
      * missing IDs.
      */
-    public static String sanitizeToolCallId(String id) {
+    public static @Nullable String sanitizeToolCallId(@Nullable String id) {
         if (id == null) return null;
         return id.replaceAll("[^a-zA-Z0-9_-]", "_");
     }
@@ -190,7 +192,7 @@ public final class MessageHydrator {
      * (vision). Returns empty string if content is null or a non-string
      * type that can't be converted.
      */
-    public static String contentAsString(Object content) {
+    public static String contentAsString(@Nullable Object content) {
         if (content instanceof String s) return s;
         if (content == null) return "";
         // Multi-part content (e.g. vision blocks): extract text parts

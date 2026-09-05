@@ -1,5 +1,7 @@
 package llm;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -82,7 +84,7 @@ public enum PaymentModality {
      *  default when the stored value is null, blank, or unrecognized — the
      *  registry never refuses to load a provider over a malformed modality
      *  string. */
-    public static PaymentModality parseOrDefault(String value, String providerName) {
+    public static PaymentModality parseOrDefault(@Nullable String value, String providerName) {
         if (value == null || value.isBlank()) return defaultFor(providerName);
         try {
             return valueOf(value.trim().toUpperCase(Locale.ROOT));

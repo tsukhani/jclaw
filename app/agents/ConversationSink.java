@@ -3,6 +3,7 @@ package agents;
 import models.Conversation;
 import models.MessageAttachment;
 import models.VideoGenerationJob;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.ConversationService;
 import services.EventLogger;
@@ -71,7 +72,8 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
-    public void appendUserMessage(String content, List<AttachmentService.Input> attachments) {
+    public void appendUserMessage(String content,
+                                  @Nullable List<AttachmentService.Input> attachments) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped("user");
@@ -81,8 +83,9 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
-    public void appendAssistantMessage(String content, String toolCalls, String usageJson,
-                                       String reasoning, boolean truncated) {
+    public void appendAssistantMessage(@Nullable String content, @Nullable String toolCalls,
+                                       @Nullable String usageJson, @Nullable String reasoning,
+                                       boolean truncated) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
@@ -94,7 +97,8 @@ public class ConversationSink implements AgentExecutionSink {
 
     @Override
     public List<MessageAttachment> appendAssistantMessage(
-            String content, String toolCalls, List<GeneratedAttachment> attachments) {
+            @Nullable String content, @Nullable String toolCalls,
+            List<GeneratedAttachment> attachments) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
@@ -113,7 +117,8 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
-    public MessageAttachment appendVideoPlaceholder(String content, String toolCalls, ToolRegistry.VideoJobRef videoJob) {
+    public @Nullable MessageAttachment appendVideoPlaceholder(@Nullable String content,
+            @Nullable String toolCalls, ToolRegistry.VideoJobRef videoJob) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
@@ -138,7 +143,8 @@ public class ConversationSink implements AgentExecutionSink {
     }
 
     @Override
-    public void appendToolResult(String toolCallId, String result, String structuredJson) {
+    public void appendToolResult(@Nullable String toolCallId, String result,
+                                 @Nullable String structuredJson) {
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped("tool-result");

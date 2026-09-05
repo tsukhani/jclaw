@@ -3,6 +3,7 @@ package agents;
 import models.MessageRole;
 import models.TaskRun;
 import models.TaskRunMessage;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.AttachmentService;
 import services.EventLogger;
@@ -60,7 +61,8 @@ public class TaskRunSink implements AgentExecutionSink {
     }
 
     @Override
-    public void appendUserMessage(String content, List<AttachmentService.Input> attachments) {
+    public void appendUserMessage(String content,
+                                  @Nullable List<AttachmentService.Input> attachments) {
         // Attachments don't apply to task runs — there's no external upload
         // path that feeds a task fire. The parameter exists on the interface
         // for ConversationSink's benefit.
@@ -68,14 +70,16 @@ public class TaskRunSink implements AgentExecutionSink {
     }
 
     @Override
-    public void appendAssistantMessage(String content, String toolCalls, String usageJson,
-                                       String reasoning, boolean truncated) {
+    public void appendAssistantMessage(@Nullable String content, @Nullable String toolCalls,
+                                       @Nullable String usageJson, @Nullable String reasoning,
+                                       boolean truncated) {
         appendInTx(new MessageFields(MessageRole.ASSISTANT, content, toolCalls, null, null,
                 usageJson, reasoning, truncated));
     }
 
     @Override
-    public void appendToolResult(String toolCallId, String result, String structuredJson) {
+    public void appendToolResult(@Nullable String toolCallId, String result,
+                                 @Nullable String structuredJson) {
         // {@code toolCallId} identifies which assistant tool-call this row
         // answers; matches the data layout that ConversationService.appendToolResult
         // uses (the id goes into the tool_results column).
@@ -84,8 +88,9 @@ public class TaskRunSink implements AgentExecutionSink {
     }
 
     /** Column-shaped bundle mirroring the {@link TaskRunMessage} write surface. */
-    private record MessageFields(MessageRole role, String content, String toolCalls, String toolResults,
-                                  String toolResultStructured, String usageJson, String reasoning,
+    private record MessageFields(MessageRole role, @Nullable String content, @Nullable String toolCalls,
+                                  @Nullable String toolResults, @Nullable String toolResultStructured,
+                                  @Nullable String usageJson, @Nullable String reasoning,
                                   boolean truncated) {}
 
     private void appendInTx(MessageFields fields) {

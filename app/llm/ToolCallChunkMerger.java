@@ -3,6 +3,7 @@ package llm;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolCallChunk;
+import org.jspecify.annotations.Nullable;
 
 import java.util.HashSet;
 import java.util.List;
@@ -25,9 +26,9 @@ public final class ToolCallChunkMerger {
 
     /** Mutable, per-slot accumulator for one streaming tool call. */
     public static final class ToolCallBuilder {
-        private String id;
+        private @Nullable String id;
         private String type = TYPE_FUNCTION;
-        private String functionName;
+        private @Nullable String functionName;
         private final StringBuilder arguments = new StringBuilder();
 
         public ToolCallBuilder id(String id) {

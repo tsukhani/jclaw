@@ -9,6 +9,7 @@ import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
 import models.TaskRun;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationQueue;
@@ -121,16 +122,16 @@ public class AgentRunner {
      *                             emit a structured view
      */
     public record ToolCallEvent(
-            String id,
-            String name,
+            @Nullable String id,
+            @Nullable String name,
             String icon,
             String arguments,
             String resultText,
-            String resultStructuredJson,
+            @Nullable String resultStructuredJson,
             // JCLAW-228/562: JSON array of tool-produced attachments (generate_image's image,
             // diarize_audio's voice clips) so the live SSE tool_call frame can render them inline;
             // null for every ordinary tool call.
-            String generatedAttachmentsJson,
+            @Nullable String generatedAttachmentsJson,
             // uuids of this call's persisted generated attachments. The web transport renders them
             // from generatedAttachmentsJson above; external channels (Telegram) that deliver out-of-
             // band resolve the persisted files by uuid and upload them. Empty for ordinary calls.
@@ -235,7 +236,7 @@ public class AgentRunner {
      * {@code Thread.interrupt()}); see {@link services.SubagentRegistry} for the
      * H2-corruption post-mortem.
      */
-    public static void checkTaskRunCancel(Long taskRunId) {
+    public static void checkTaskRunCancel(@Nullable Long taskRunId) {
         if (TaskRunRegistry.isCancelled(taskRunId)) {
             throw new RunCancelledException(taskRunId, "Task");
         }
@@ -273,7 +274,7 @@ public class AgentRunner {
      * @return the run outcome
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage,
-                                List<AttachmentService.Input> attachments) {
+                                @Nullable List<AttachmentService.Input> attachments) {
         var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, conversation.channelType, conversation.peerId, agent);
         if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
@@ -354,7 +355,7 @@ public class AgentRunner {
     }
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
-                                             List<AttachmentService.Input> attachments) {
+                                             @Nullable List<AttachmentService.Input> attachments) {
         return runAfterAcquire(agent, conversation, userMessage, attachments, false);
     }
 
@@ -427,7 +428,8 @@ public class AgentRunner {
      */
     public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
                                                             AgentExecutionSink sink,
-                                                            Set<String> allowedTools, String taskName) {
+                                                            @Nullable Set<String> allowedTools,
+                                                            @Nullable String taskName) {
         Objects.requireNonNull(agent, EVT_CATEGORY_AGENT);
         Objects.requireNonNull(userPrompt, "userPrompt");
         Objects.requireNonNull(sink, "sink");
@@ -503,7 +505,7 @@ public class AgentRunner {
      * the operator's trust. Public so a test in the default package can pin the
      * resolution the fire's trust decision rests on.
      */
-    public static String taskFireOrigin(Long taskRunId) {
+    public static @Nullable String taskFireOrigin(@Nullable Long taskRunId) {
         if (taskRunId == null) {
             return null;
         }
@@ -514,7 +516,7 @@ public class AgentRunner {
     }
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
-                                             List<AttachmentService.Input> attachments,
+                                             @Nullable List<AttachmentService.Input> attachments,
                                              boolean skipUserAppend) {
         final Long conversationId = conversation.id;
         // JCLAW-21: every persistence write inside the runner routes
@@ -646,7 +648,7 @@ public class AgentRunner {
                                     String userMessage,
                                     AtomicBoolean isCancelled,
                                     StreamingCallbacks cb,
-                                    Long acceptedAtNs) {
+                                    @Nullable Long acceptedAtNs) {
         runStreaming(agent, conversationId, channelType, peerId, userMessage,
                 isCancelled, cb, acceptedAtNs, null);
     }
@@ -674,8 +676,8 @@ public class AgentRunner {
                                     String userMessage,
                                     AtomicBoolean isCancelled,
                                     StreamingCallbacks cb,
-                                    Long acceptedAtNs,
-                                    List<AttachmentService.Input> attachments) {
+                                    @Nullable Long acceptedAtNs,
+                                    @Nullable List<AttachmentService.Input> attachments) {
         StreamingAgentRunner.runStreaming(agent, conversationId, channelType, peerId, userMessage,
                 isCancelled, cb, acceptedAtNs, attachments);
     }
@@ -684,7 +686,7 @@ public class AgentRunner {
      * Agent id as a string for latency-metric tagging (JCLAW-515); null for a null/transient agent.
      * Package-private so the extracted {@link AgentPromptPreparer} / {@link StreamingAgentRunner} (JCLAW-678) share it.
      */
-    static String agentIdOf(Agent agent) {
+    static @Nullable String agentIdOf(@Nullable Agent agent) {
         return agent == null || agent.id == null ? null : agent.id.toString();
     }
 

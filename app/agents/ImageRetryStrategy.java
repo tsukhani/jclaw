@@ -3,6 +3,7 @@ package agents;
 import llm.LlmProvider;
 import models.Agent;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 /**
@@ -54,7 +55,7 @@ public final class ImageRetryStrategy {
      *                 null otherwise.
      */
     static void logImagePassthroughOutcome(Agent agent, Conversation conversation, LlmProvider provider,
-                                           String outcome, String errorTag) {
+                                           String outcome, @Nullable String errorTag) {
         var providerName = provider != null && provider.config() != null ? provider.config().name() : "unknown";
         var modelId = ModelResolver.effectiveModelId(agent, conversation);
         var channel = conversation != null ? conversation.channelType : null;

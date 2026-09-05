@@ -6,6 +6,7 @@ import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolCall;
 import models.Agent;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 import utils.LatencyTrace;
@@ -67,9 +68,11 @@ public final class ParallelToolExecutor {
      * effects on shared state (message lists, image collector, DB). Safe
      * to call from multiple virtual threads concurrently.
      */
-    static ToolRegistry.ToolResult runToolCall(ToolCall toolCall, Agent agent, Long conversationId,
-                                               Long taskRunId, Consumer<String> onStatus,
-                                               Set<String> offeredTools) {
+    static ToolRegistry.ToolResult runToolCall(ToolCall toolCall, Agent agent,
+                                               @Nullable Long conversationId,
+                                               @Nullable Long taskRunId,
+                                               @Nullable Consumer<String> onStatus,
+                                               @Nullable Set<String> offeredTools) {
         var rawName = toolCall.function().name();
         var rawArgs = toolCall.function().arguments();
         // JCLAW-281: when the model invokes a server-level mcp_<server> handle
@@ -114,7 +117,7 @@ public final class ParallelToolExecutor {
         return result;
     }
 
-    private record McpCallDisplay(String name, String args) {}
+    private record McpCallDisplay(@Nullable String name, String args) {}
 
     /**
      * JCLAW-281: synthesize the human-friendly display name and args for a
@@ -124,18 +127,19 @@ public final class ParallelToolExecutor {
      * ({@code mcp_<server>_<action>}, inner args) so operators can scan
      * the event log without manually unpacking the parameterized envelope.
      */
-    private static McpCallDisplay expandMcpCallForLogging(String rawName, String rawArgs) {
+    private static McpCallDisplay expandMcpCallForLogging(@Nullable String rawName,
+                                                          @Nullable String rawArgs) {
         if (rawName == null || !rawName.startsWith("mcp_")) {
             return new McpCallDisplay(rawName, rawArgs == null ? "" : rawArgs);
         }
         try {
             var parsed = JsonParser.parseString(
                     rawArgs == null || rawArgs.isBlank() ? "{}" : rawArgs);
-            if (!parsed.isJsonObject()) return new McpCallDisplay(rawName, rawArgs);
+            if (!parsed.isJsonObject()) return new McpCallDisplay(rawName, rawArgs == null ? "" : rawArgs);
             var obj = parsed.getAsJsonObject();
             if (!obj.has("tool") || obj.get("tool").isJsonNull()) {
                 // Discovery call (no tool field) — display as-is.
-                return new McpCallDisplay(rawName, rawArgs);
+                return new McpCallDisplay(rawName, rawArgs == null ? "" : rawArgs);
             }
             var actionName = obj.get("tool").getAsString();
             var actionArgs = obj.has("args") && obj.get("args").isJsonObject()
@@ -159,14 +163,14 @@ public final class ParallelToolExecutor {
     // Visible (public) for ToolCallLoopRunnerEdgeCasesTest in the default package
     @SuppressWarnings("java:S107") // every parameter is required to schedule and surface tool results
     public static void executeToolsParallel(List<ToolCall> toolCalls,
-                                      Agent agent, Long conversationId,
+                                      Agent agent, @Nullable Long conversationId,
                                       List<ChatMessage> currentMessages,
-                                      Consumer<String> onStatus,
-                                      Consumer<AgentRunner.ToolCallEvent> onToolCall,
-                                      List<String> imageCollector,
-                                      AtomicBoolean isCancelled,
+                                      @Nullable Consumer<String> onStatus,
+                                      @Nullable Consumer<AgentRunner.ToolCallEvent> onToolCall,
+                                      @Nullable List<String> imageCollector,
+                                      @Nullable AtomicBoolean isCancelled,
                                       AgentExecutionSink sink,
-                                      Set<String> offeredTools) {
+                                      @Nullable Set<String> offeredTools) {
         int n = toolCalls.size();
         if (n == 0) return;
 
@@ -208,10 +212,13 @@ public final class ParallelToolExecutor {
      * like the safe singletons, see their declared positions.
      */
     @SuppressWarnings("java:S107") // scheduling state; collapses into DispatchContext once the latch is known
-    private static void dispatchMultiToolCalls(List<ToolCall> toolCalls, Agent agent, Long conversationId,
-                                               Long taskRunId, ToolRegistry.ToolResult[] results,
-                                               Consumer<String> onStatus, AtomicBoolean isCancelled,
-                                               Set<String> offeredTools) {
+    private static void dispatchMultiToolCalls(List<ToolCall> toolCalls, Agent agent,
+                                               @Nullable Long conversationId,
+                                               @Nullable Long taskRunId,
+                                               ToolRegistry.ToolResult[] results,
+                                               @Nullable Consumer<String> onStatus,
+                                               @Nullable AtomicBoolean isCancelled,
+                                               @Nullable Set<String> offeredTools) {
         var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
         var safeCalls = new ArrayList<Integer>();
         for (int i = 0; i < toolCalls.size(); i++) {
@@ -269,10 +276,11 @@ public final class ParallelToolExecutor {
      * sink and the per-unit selector ({@code int} index or group) are passed
      * separately.
      */
-    private record DispatchContext(List<ToolCall> toolCalls, Agent agent, Long conversationId,
-                                   Long taskRunId, Consumer<String> onStatus,
-                                   AtomicBoolean isCancelled, CountDownLatch latch,
-                                   Set<String> offeredTools) {}
+    private record DispatchContext(List<ToolCall> toolCalls, Agent agent,
+                                   @Nullable Long conversationId,
+                                   @Nullable Long taskRunId, @Nullable Consumer<String> onStatus,
+                                   @Nullable AtomicBoolean isCancelled, CountDownLatch latch,
+                                   @Nullable Set<String> offeredTools) {}
 
     /** Body of one parallel-safe work unit: dispatch a single call. */
     private static void runSafeCall(DispatchContext ctx, ToolRegistry.ToolResult[] results, int i) {
@@ -304,9 +312,11 @@ public final class ParallelToolExecutor {
      * Dispatch one call and convert any thrown exception into an
      * {@code Error executing tool} {@link ToolRegistry.ToolResult}.
      */
-    private static ToolRegistry.ToolResult runToolCallSafely(ToolCall tc, Agent agent, Long conversationId,
-                                                             Long taskRunId, Consumer<String> onStatus,
-                                                             Set<String> offeredTools) {
+    private static ToolRegistry.ToolResult runToolCallSafely(ToolCall tc, Agent agent,
+                                                             @Nullable Long conversationId,
+                                                             @Nullable Long taskRunId,
+                                                             @Nullable Consumer<String> onStatus,
+                                                             @Nullable Set<String> offeredTools) {
         try {
             return runToolCall(tc, agent, conversationId, taskRunId, onStatus, offeredTools);
         } catch (Exception e) {
@@ -326,7 +336,7 @@ public final class ParallelToolExecutor {
      * <p>Never throws: a defect in verification must not cost the turn its tool
      * result, which would turn an observability feature into an outage.
      */
-    private static void verifyAndCount(String toolName, ToolRegistry.ToolResult result) {
+    private static void verifyAndCount(@Nullable String toolName, ToolRegistry.ToolResult result) {
         try {
             var verification = ToolResultVerifier.verify(toolName, result);
             if (verification.verdict() == ToolResultVerifier.Verdict.SKIPPED) return;
@@ -351,8 +361,8 @@ public final class ParallelToolExecutor {
      */
     private static void commitToolResults(List<ToolCall> toolCalls, ToolRegistry.ToolResult[] results,
                                           List<ChatMessage> currentMessages,
-                                          Consumer<AgentRunner.ToolCallEvent> onToolCall,
-                                          List<String> imageCollector, AgentExecutionSink sink) {
+                                          @Nullable Consumer<AgentRunner.ToolCallEvent> onToolCall,
+                                          @Nullable List<String> imageCollector, AgentExecutionSink sink) {
         var frames = new ArrayList<AgentRunner.ToolCallEvent>();
         var frameSink = onToolCall != null ? frames : null;
         Tx.run(() -> {
@@ -375,8 +385,10 @@ public final class ParallelToolExecutor {
      * as the inline version did).
      */
     private static void commitOneResult(ToolCall tc, ToolRegistry.ToolResult result,
-                                        List<ChatMessage> currentMessages, List<String> imageCollector,
-                                        AgentExecutionSink sink, List<AgentRunner.ToolCallEvent> frameSink) {
+                                        List<ChatMessage> currentMessages,
+                                        @Nullable List<String> imageCollector,
+                                        AgentExecutionSink sink,
+                                        @Nullable List<AgentRunner.ToolCallEvent> frameSink) {
         var text = result.text();
         var structured = result.structuredJson();
         // JCLAW-836 stage 1: judge the result, do not change it. The model still
@@ -428,7 +440,7 @@ public final class ParallelToolExecutor {
      * uses, so the chat UI can render generated images / voice clips inline without waiting for a
      * reload. {@code null} when the call produced nothing.
      */
-    private static String generatedAttachmentsJson(List<MessageAttachment> atts) {
+    private static @Nullable String generatedAttachmentsJson(@Nullable List<MessageAttachment> atts) {
         if (atts == null || atts.isEmpty()) return null;
         var list = new ArrayList<Map<String, Object>>(atts.size());
         for (var att : atts) {

@@ -2,6 +2,7 @@ package agents;
 
 import models.Agent;
 import models.AgentSkillConfig;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.cache.Cache;
 import play.cache.CacheConfig;
@@ -412,7 +413,9 @@ public class SkillLoader {
     private static final Pattern MCP_SERVERS_INLINE_LIST = Pattern.compile("^mcp_servers:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
     private static final Pattern MCP_SERVERS_BLOCK_LIST = Pattern.compile("^mcp_servers:\\s*\\n((?:\\s*-\\s*.*\\n?)++)", Pattern.MULTILINE);
 
-    public static SkillInfo parseSkillFile(Path path) {
+    // Every caller resolves SKILL.md under a skill directory, so getParent() is never null.
+    @SuppressWarnings("NullAway")
+    public static @Nullable SkillInfo parseSkillFile(Path path) {
         try {
             var content = Files.readString(path);
             var info = parseSkillContent(content, path);
@@ -428,7 +431,7 @@ public class SkillLoader {
      * Parse a SKILL.md content string without reading from disk. Returns null if no
      * {@code name:} key is found (caller decides how to handle the fallback).
      */
-    public static SkillInfo parseSkillContent(String content, Path locationHint) {
+    public static @Nullable SkillInfo parseSkillContent(@Nullable String content, Path locationHint) {
         if (content == null) return null;
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (!matcher.find()) return null;
@@ -554,15 +557,15 @@ public class SkillLoader {
         return SkillVersionManager.finalizeSkillMdWrite(targetPath, newContent);
     }
 
-    public record FrontmatterSplit(String frontmatter, String body) {}
+    public record FrontmatterSplit(@Nullable String frontmatter, @Nullable String body) {}
 
     /** Delegates to {@link SkillVersionManager}. */
-    public static FrontmatterSplit splitFrontmatter(String content) {
+    public static FrontmatterSplit splitFrontmatter(@Nullable String content) {
         var result = SkillVersionManager.splitFrontmatter(content);
         return new FrontmatterSplit(result.frontmatter(), result.body());
     }
 
-    public static String extractYamlValue(String yaml, String key) {
+    public static @Nullable String extractYamlValue(String yaml, String key) {
         var valuePattern = switch (key) {
             case "name" -> NAME_VALUE;
             case KEY_DESCRIPTION -> DESCRIPTION_VALUE;

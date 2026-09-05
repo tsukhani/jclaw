@@ -1,5 +1,7 @@
 package agents;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.function.Supplier;
 
 /**
@@ -25,12 +27,13 @@ public final class ToolContext {
     private ToolContext() {}
 
     /** The scope ids visible to a tool during its dispatch; exactly one is set. */
-    public record Scope(Long conversationId, Long taskRunId) {}
+    public record Scope(@Nullable Long conversationId, @Nullable Long taskRunId) {}
 
     private static final ThreadLocal<Scope> SCOPE = new ThreadLocal<>();
 
     /** Run {@code body} with both scope ids visible via {@link #conversationId()} / {@link #taskRunId()}. */
-    public static <T> T withScope(Long conversationId, Long taskRunId, Supplier<T> body) {
+    public static <T> T withScope(@Nullable Long conversationId, @Nullable Long taskRunId,
+                                  Supplier<T> body) {
         var prev = SCOPE.get();
         SCOPE.set(new Scope(conversationId, taskRunId));
         try {
@@ -42,18 +45,18 @@ public final class ToolContext {
     }
 
     /** Chat-path convenience: {@link #withScope} with no task-run id. */
-    public static <T> T withConversation(Long conversationId, Supplier<T> body) {
+    public static <T> T withConversation(@Nullable Long conversationId, Supplier<T> body) {
         return withScope(conversationId, null, body);
     }
 
     /** The active conversation id (chat path), or {@code null} outside a chat tool dispatch. */
-    public static Long conversationId() {
+    public static @Nullable Long conversationId() {
         var s = SCOPE.get();
         return s == null ? null : s.conversationId();
     }
 
     /** The active task-run id (task-fire path), or {@code null} outside a task tool dispatch. */
-    public static Long taskRunId() {
+    public static @Nullable Long taskRunId() {
         var s = SCOPE.get();
         return s == null ? null : s.taskRunId();
     }

@@ -6,6 +6,7 @@ import llm.LlmTypes.ToolDef;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
@@ -44,8 +45,9 @@ public class ToolRegistry {
      *                       so re-opening a conversation keeps the richer
      *                       render. {@code null} means "no structured view".
      */
-    public record ToolResult(String text, String structuredJson, List<GeneratedAttachment> attachments,
-                             VideoJobRef videoJob, Outcome outcome) {
+    public record ToolResult(String text, @Nullable String structuredJson,
+                             List<GeneratedAttachment> attachments,
+                             @Nullable VideoJobRef videoJob, Outcome outcome) {
 
         /**
          * Whether the registry actually handed this call to a tool (JCLAW-883).
@@ -74,7 +76,7 @@ public class ToolRegistry {
         }
 
         /** Back-compat 2-arg form — most tools produce no inline attachment. */
-        public ToolResult(String text, String structuredJson) {
+        public ToolResult(String text, @Nullable String structuredJson) {
             this(text, structuredJson, List.of(), null, Outcome.DISPATCHED);
         }
         public ToolResult {
@@ -83,7 +85,8 @@ public class ToolRegistry {
         }
 
         /** 4-arg form: a dispatched result. Refusals use {@link #refused}. */
-        public ToolResult(String text, String structuredJson, List<GeneratedAttachment> attachments, VideoJobRef videoJob) {
+        public ToolResult(String text, @Nullable String structuredJson,
+                          List<GeneratedAttachment> attachments, @Nullable VideoJobRef videoJob) {
             this(text, structuredJson, attachments, videoJob, Outcome.DISPATCHED);
         }
 
@@ -99,26 +102,29 @@ public class ToolRegistry {
         /** JCLAW-228: a tool ({@code generate_image}) that produced an image to inline on the
          *  assistant turn. The commit path ({@link ParallelToolExecutor}) attaches it to
          *  the assistant message via {@link AgentExecutionSink}; the model still sees {@code text}. */
-        public static ToolResult withImage(String text, String structuredJson, GeneratedAttachment image) {
+        public static ToolResult withImage(String text, @Nullable String structuredJson,
+                                           @Nullable GeneratedAttachment image) {
             return new ToolResult(text, structuredJson, image == null ? List.of() : List.of(image), null);
         }
         /** JCLAW-562: a tool that produced several inline attachments (the diarize_audio
          *  extract action's per-speaker voice clips). All land on the one assistant turn
          *  that carried the tool call. */
-        public static ToolResult withAttachments(String text, String structuredJson, List<GeneratedAttachment> attachments) {
+        public static ToolResult withAttachments(String text, @Nullable String structuredJson,
+                                                 List<GeneratedAttachment> attachments) {
             return new ToolResult(text, structuredJson, attachments, null);
         }
         /** JCLAW-235: a tool ({@code generate_video}) that submitted an async job. The commit path
          *  creates a placeholder MessageAttachment linked to the job on the assistant turn (JCLAW-234);
          *  the model sees {@code text} (a "generating, appears when ready" confirmation). */
-        public static ToolResult withVideoJob(String text, Long jobId, String generationMetadata) {
+        public static ToolResult withVideoJob(String text, Long jobId,
+                                              @Nullable String generationMetadata) {
             return new ToolResult(text, null, List.of(), new VideoJobRef(jobId, generationMetadata));
         }
     }
 
     /** JCLAW-235: reference to a submitted video-generation job, carried on a {@link ToolResult} so the
      *  tool-call commit path can create a placeholder attachment linked to it on the assistant turn. */
-    public record VideoJobRef(Long jobId, String generationMetadata) {}
+    public record VideoJobRef(@Nullable Long jobId, @Nullable String generationMetadata) {}
 
     public interface Tool {
         String name();
@@ -204,7 +210,7 @@ public class ToolRegistry {
         /** Runtime config key (in {@code ConfigService}) that must be truthy for
          *  this tool to be usable. The admin UI gates the "Enable" toggle on
          *  this. {@code null} means no runtime dependency. */
-        default String requiresConfig() { return null; }
+        default @Nullable String requiresConfig() { return null; }
 
         /** Safe to invoke concurrently from multiple virtual threads on behalf
          *  of the SAME agent in a SINGLE round?
@@ -276,7 +282,7 @@ public class ToolRegistry {
          *  even when the LLM emits both in one assistant message. Both
          *  return the same {@code "subagent_lifecycle"} key from this
          *  method, forcing them onto one serial queue. */
-        default String serializationGroup() {
+        default @Nullable String serializationGroup() {
             return parallelSafe() ? null : name();
         }
 
@@ -287,7 +293,7 @@ public class ToolRegistry {
          *  tools advertised by one MCP server display as one card titled
          *  with the server name, instead of 72 separate cards. Native
          *  tools default to {@code null} (one card per tool). */
-        default String group() { return null; }
+        default @Nullable String group() { return null; }
 
         /** JCLAW-281: marks a tool as the server-level handle for its
          *  {@link #group()}, i.e. the single parameterized entry that
@@ -306,7 +312,7 @@ public class ToolRegistry {
      *  parameterized invocations to the per-action adapter that already
      *  carries the allowlist gate + audit trail. Returns {@code null} when
      *  no tool with that name is registered. */
-    public static Tool lookupTool(String name) {
+    public static @Nullable Tool lookupTool(@Nullable String name) {
         return tools.get(name);
     }
 
@@ -399,7 +405,7 @@ public class ToolRegistry {
      *  queues for the {@code subagent_spawn}/{@code subagent_yield} pair
      *  and similar future cases. For unknown tools we fall back to the tool
      *  name as the group key so a typo can't accidentally unlock parallelism. */
-    public static String serializationGroupFor(String toolName) {
+    public static @Nullable String serializationGroupFor(@Nullable String toolName) {
         var tool = tools.get(toolName);
         if (tool == null) return toolName;
         return tool.serializationGroup();
@@ -409,7 +415,7 @@ public class ToolRegistry {
      *  defaulting to {@code false} for unknown names. Used by
      *  {@link DangerousActionGate} to decide whether a dispatch needs an
      *  interactive approve/deny gate. */
-    public static boolean isDangerous(String toolName) {
+    public static boolean isDangerous(@Nullable String toolName) {
         var tool = tools.get(toolName);
         return tool != null && tool.dangerous();
     }
@@ -418,7 +424,7 @@ public class ToolRegistry {
      *  so a tool whose danger depends on its arguments (today {@code jclaw_api})
      *  classifies per call. Defaults to {@code false} for unknown names, matching
      *  {@link #isDangerous(String)}. */
-    public static boolean isDangerous(String toolName, String argsJson) {
+    public static boolean isDangerous(@Nullable String toolName, String argsJson) {
         var tool = tools.get(toolName);
         return tool != null && tool.dangerous(argsJson);
     }
@@ -427,7 +433,7 @@ public class ToolRegistry {
      *  registered tool's {@link Tool#icon} hint, or {@code "wrench"} for
      *  unknown/unregistered names. Used by the agent loop to stamp every
      *  {@code tool_call} SSE frame with the icon hint the UI renders. */
-    public static String iconFor(String toolName) {
+    public static String iconFor(@Nullable String toolName) {
         var tool = tools.get(toolName);
         return tool != null ? tool.icon() : "wrench";
     }
@@ -462,12 +468,12 @@ public class ToolRegistry {
      * <p>{@code null} means unrestricted, for callers that are not dispatching a
      * model-chosen call (tests, internal invocation).
      */
-    private static boolean notOffered(String toolName, Set<String> offered) {
+    private static boolean notOffered(@Nullable String toolName, @Nullable Set<String> offered) {
         return offered != null && !offered.contains(toolName);
     }
 
     /** Phrased so the model stops rather than retrying, and without enumerating what it cannot see. */
-    private static String notEnabledError(String toolName) {
+    private static String notEnabledError(@Nullable String toolName) {
         return ("Error: Tool '%s' is not enabled for this agent. Do not retry it — "
                 + "use only the tools listed in your request.").formatted(toolName);
     }
@@ -485,7 +491,8 @@ public class ToolRegistry {
      * <p>Every rejection here carries a non-{@code DISPATCHED} {@link ToolResult.Outcome},
      * because nothing downstream can recover that distinction from the text alone.
      */
-    public static ToolResult executeRich(String toolName, String argsJson, Agent agent, Set<String> offered) {
+    public static ToolResult executeRich(@Nullable String toolName, String argsJson, Agent agent,
+                                         @Nullable Set<String> offered) {
         var tool = tools.get(toolName);
         if (tool == null) {
             return ToolResult.refused("Error: Unknown tool '%s'".formatted(toolName),
@@ -565,7 +572,7 @@ public class ToolRegistry {
      * new design folds that bootstrap into every server's own surface.
      */
     @SuppressWarnings("java:S1172") // conv retained for binary compatibility per Javadoc (JCLAW-281)
-    public static List<ToolDef> getToolDefsForAgent(Agent agent, Conversation conv) {
+    public static List<ToolDef> getToolDefsForAgent(Agent agent, @Nullable Conversation conv) {
         return getToolDefsForAgent(agent, Set.<String>of());
     }
 

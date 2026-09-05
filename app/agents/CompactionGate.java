@@ -6,6 +6,7 @@ import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.TokenUsageEstimator;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
@@ -43,7 +44,8 @@ public final class CompactionGate {
     private CompactionGate() {
     }
 
-    private record CompactionDecision(ModelInfo modelInfo, String modelId, String channelType) {
+    private record CompactionDecision(@Nullable ModelInfo modelInfo, @Nullable String modelId,
+                                      @Nullable String channelType) {
     }
 
     /**
@@ -60,7 +62,7 @@ public final class CompactionGate {
      */
     public static List<ChatMessage> maybeCompactAndRebuild(
             Agent agent, Long conversationId, String userMessage,
-            Set<String> disabledTools, LlmProvider primary,
+            @Nullable Set<String> disabledTools, LlmProvider primary,
             List<ChatMessage> current) {
         return maybeCompactAndRebuild(agent, conversationId, userMessage, disabledTools,
                 primary, current, List.of());
@@ -76,7 +78,7 @@ public final class CompactionGate {
      */
     public static List<ChatMessage> maybeCompactAndRebuild(
             Agent agent, Long conversationId, String userMessage,
-            Set<String> disabledTools, LlmProvider primary,
+            @Nullable Set<String> disabledTools, LlmProvider primary,
             List<ChatMessage> current, List<ToolDef> tools) {
         // Cheap snapshot: model info + effective model id + channel type.
         // resolveModelInfo reads only in-memory provider config, so this

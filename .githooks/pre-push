@@ -97,6 +97,19 @@ if ! spotless_out=$(cd "$repo_root" && ./gradlew --quiet spotlessCheck 2>&1); th
     exit 1
 fi
 
+# JCLAW-1149: nullness gate. Play's dev-mode ECJ compile cannot host a javac plugin, so
+# the Gradle compileJava is the only place NullAway runs — if it is not run here it is not
+# run before a push at all. ~10 s, and it fails on the first violation.
+echo "[jclaw pre-push] Checking nullness (NullAway on compileJava)..."
+if ! nullaway_out=$(cd "$repo_root" && ./gradlew --quiet compileJava 2>&1); then
+    printf '%s\n' "$nullaway_out" >&2
+    echo "[jclaw pre-push] compileJava failed — see the output above." >&2
+    if printf '%s' "$nullaway_out" | grep -q '\[NullAway\]'; then
+        echo "[jclaw pre-push] Annotate the nullable contract (@Nullable / @NullMarked), then re-commit." >&2
+    fi
+    exit 1
+fi
+
 echo "[jclaw pre-push] Testing HEAD $current_sha before push..."
 if (cd "$repo_root" && ./jclaw.sh test); then
     echo "$current_sha" > "$cache_file"

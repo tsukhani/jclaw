@@ -7,6 +7,7 @@ import okhttp3.Response;
 import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
+import org.jspecify.annotations.Nullable;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.Strings;
@@ -45,8 +46,8 @@ final class OkHttpLlmHttpDriver {
      * (connection refused, timeout, malformed URL); HTTP errors are reflected
      * as non-200 status codes in the result, not thrown.
      */
-    static HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout, String channel)
-            throws IOException {
+    static HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout,
+                          @Nullable String channel) throws IOException {
         var builder = new Request.Builder()
                 .url(uri.toString())
                 .header(HttpKeys.AUTHORIZATION, authHeader)
@@ -83,7 +84,7 @@ final class OkHttpLlmHttpDriver {
      */
     static void streamSse(URI uri, String authHeader, String jsonBody,
                           Consumer<String> onEvent, Runnable onComplete, Consumer<Throwable> onError,
-                          String channel) {
+                          @Nullable String channel) {
         var builder = new Request.Builder()
                 .url(uri.toString())
                 .header(HttpKeys.AUTHORIZATION, authHeader)

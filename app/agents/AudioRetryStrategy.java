@@ -4,6 +4,7 @@ import llm.LlmProvider;
 import models.Agent;
 import models.Conversation;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 
@@ -119,7 +120,7 @@ public final class AudioRetryStrategy {
      */
     static void logAudioPassthroughOutcome(Agent agent, Conversation conversation,
                                             LlmProvider provider, String outcome,
-                                            String errorTag, boolean transcriptAwaited) {
+                                            @Nullable String errorTag, boolean transcriptAwaited) {
         var providerName = provider != null && provider.config() != null
                 ? provider.config().name() : "unknown";
         var modelId = ModelResolver.effectiveModelId(agent, conversation);

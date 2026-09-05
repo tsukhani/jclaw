@@ -5,6 +5,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.reflect.TypeToken;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.ConfigService;
 import services.Tx;
@@ -53,7 +54,7 @@ public final class ProviderRegistry {
     private static final Object refreshLock = new Object();
     private static final AtomicBoolean refreshing = new AtomicBoolean(false);
 
-    public static LlmProvider get(String name) {
+    public static @Nullable LlmProvider get(String name) {
         refreshIfNeeded();
         return cache.get(name);
     }
@@ -63,12 +64,12 @@ public final class ProviderRegistry {
         return new ArrayList<>(cache.values());
     }
 
-    public static LlmProvider getPrimary() {
+    public static @Nullable LlmProvider getPrimary() {
         var providers = listAll();
         return providers.isEmpty() ? null : providers.getFirst();
     }
 
-    public static LlmProvider getSecondary() {
+    public static @Nullable LlmProvider getSecondary() {
         var providers = listAll();
         return providers.size() > 1 ? providers.get(1) : null;
     }
@@ -157,7 +158,8 @@ public final class ProviderRegistry {
      * Assemble a {@link ProviderConfig} for {@code name} from {@code configMap},
      * or return {@code null} when required credentials are missing.
      */
-    private static ProviderConfig buildProviderConfig(String name, HashMap<String, String> configMap) {
+    private static @Nullable ProviderConfig buildProviderConfig(String name,
+                                                                HashMap<String, String> configMap) {
         var baseUrl = configMap.get(CONFIG_KEY_PREFIX + name + ".baseUrl");
         var apiKey = configMap.get(CONFIG_KEY_PREFIX + name + ".apiKey");
         if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) return null;
@@ -180,7 +182,7 @@ public final class ProviderRegistry {
         return new ProviderConfig(name, baseUrl, apiKey, models, modality, subscriptionMonthly);
     }
 
-    private static List<ModelInfo> parseModels(String modelsJson) {
+    private static List<ModelInfo> parseModels(@Nullable String modelsJson) {
         if (modelsJson == null || modelsJson.isBlank()) return List.of();
         try {
             return gson.fromJson(modelsJson, new TypeToken<List<ModelInfo>>() {}.getType());
@@ -190,7 +192,7 @@ public final class ProviderRegistry {
         }
     }
 
-    private static BigDecimal parseSubscriptionMonthly(String raw) {
+    private static BigDecimal parseSubscriptionMonthly(@Nullable String raw) {
         if (raw == null || raw.isBlank()) return BigDecimal.ZERO;
         try {
             var v = new BigDecimal(raw.trim());

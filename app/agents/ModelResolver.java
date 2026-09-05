@@ -4,6 +4,7 @@ import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import models.Agent;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.ModelOverrideResolver;
 
 import java.util.Optional;
@@ -69,7 +70,8 @@ public final class ModelResolver {
      * (JCLAW-108): when {@code conv.modelIdOverride} is set, looks up
      * that id instead of the agent's default.
      */
-    public static Optional<ModelInfo> resolveModelInfo(Agent agent, Conversation conv, LlmProvider provider) {
+    public static Optional<ModelInfo> resolveModelInfo(Agent agent, Conversation conv,
+                                                       LlmProvider provider) {
         var modelId = effectiveModelId(agent, conv);
         if (modelId == null) return Optional.empty();
         return provider.config().models().stream()
@@ -84,7 +86,8 @@ public final class ModelResolver {
      * thinking and the stored level is still advertised by the model.
      * Otherwise returns {@code null} (reasoning disabled).
      */
-    public static String resolveThinkingMode(Agent agent, Conversation conv, LlmProvider provider) {
+    public static @Nullable String resolveThinkingMode(Agent agent, Conversation conv,
+                                                       LlmProvider provider) {
         if (agent.thinkingMode == null || agent.thinkingMode.isBlank()) return null;
         return resolveModelInfo(agent, conv, provider)
                 .filter(ModelInfo::supportsThinking)

@@ -1,6 +1,7 @@
 package utils;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Map;
 
@@ -144,7 +145,7 @@ public final class ErrorTemplates {
 
     /** Terser construction for the table above, which is otherwise 33 near-identical calls. */
     private static Map.Entry<String, ErrorTemplate> e(String code, String broke, String check,
-                                                      String retry) {
+                                                      @Nullable String retry) {
         return Map.entry(code, new ErrorTemplate(code, broke, check, retry));
     }
 
