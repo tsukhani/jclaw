@@ -23,7 +23,7 @@ import java.util.Set;
  *
  * <p>{@code Retry-After} is honored where the origin sends it, capped: a {@code 429}
  * means we were going too fast, so retrying immediately is worse than not retrying at
- * all, and this codebase already paces per host and honours robots.txt — a retry loop
+ * all, and this codebase already paces per host and honors robots.txt — a retry loop
  * that ignored that would undercut it. An origin asking for an hour gets
  * {@link #MAX_BACKOFF} instead, because a crawl cannot stall on one host.
  *

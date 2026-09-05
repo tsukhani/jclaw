@@ -402,7 +402,7 @@ public final class TaskSchedulingService {
             // The row is locked mid-fire (db-scheduler holds it for the fire's
             // duration); cancel() can't remove it while the executor owns it.
             // Mirror runNow's typed handling and surface this distinctly rather
-            // than relabelling it "no scheduled row" — the schedule survives
+            // than relabeling it "no scheduled row" — the schedule survives
             // because a fire is in flight, not because it was missing.
             EventLogger.warn("task", null, null,
                     "TaskSchedulingService.cancel: Task id %d is currently executing; scheduled row not removed"

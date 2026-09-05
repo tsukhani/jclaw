@@ -26,7 +26,7 @@ import java.util.Locale;
  *
  * <ul>
  *   <li><b>Ollama</b> — {@code keep_alive: -1} holds the model until the server exits, and
- *       only its native API honours the field: sending it on the OpenAI-compatible
+ *       only its native API honors the field: sending it on the OpenAI-compatible
  *       {@code /v1} route left {@code ollama ps} reporting the ordinary five-minute expiry,
  *       while the same value on {@code /api/embed} reported "Forever". Hence the URL
  *       derivation below. The pin is durable against other models loading — measured by
@@ -142,7 +142,7 @@ public final class EmbeddingModelKeepAlive {
 
     /**
      * Ollama's configured base URL addresses its OpenAI-compatible surface ({@code .../v1});
-     * the native API that honours {@code keep_alive} sits at the root.
+     * the native API that honors {@code keep_alive} sits at the root.
      */
     public static String nativeRoot(String baseUrl) {
         var trimmed = trimSlash(baseUrl);

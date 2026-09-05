@@ -34,7 +34,7 @@ import java.util.List;
  * {@code pwg-raster-document-resolution-supported}. Both matter more than they
  * look: sending 300 DPI sRGB to a device that declares 600 DPI produced
  * {@code printer-state-reasons=spool-area-full} and a stopped printer, not a
- * page. Greyscale ({@code sgray_8}) is a third the bytes of {@code srgb_8},
+ * page. Grayscale ({@code sgray_8}) is a third the bytes of {@code srgb_8},
  * which is the difference between fitting a small printer's spool and not.
  */
 public final class PwgRasterEncoder {
@@ -233,7 +233,7 @@ public final class PwgRasterEncoder {
             var i = x * colors;
             if (colors == 1) {
                 // Rec. 601 luma. Averaging the channels instead would render red
-                // text near-white on a greyscale printer.
+                // text near-white on a grayscale printer.
                 into[i] = (byte) ((299 * ((rgb >> 16) & 0xFF)
                         + 587 * ((rgb >> 8) & 0xFF) + 114 * (rgb & 0xFF)) / 1000);
             } else {

@@ -86,7 +86,7 @@ public final class MemoryEvalGenerator {
      * How a coverage question's set of distinct facts is decided.
      *
      * @param by        {@code "lexical"} groups on shared content tokens; {@code "semantic"}
-     *                  groups on embedding neighbours. This choice decides what the A/B can
+     *                  groups on embedding neighbors. This choice decides what the A/B can
      *                  conclude — see {@link #generateCoverage}
      * @param threshold lexical: minimum token Jaccard. semantic: minimum cosine
      * @param maxFacts  ceiling on distinct facts per question; past it the cluster is a
@@ -251,7 +251,7 @@ public final class MemoryEvalGenerator {
      * <em>different</em> row, and pairing the two is the whole job.
      *
      * <p><b>Pairs on rare shared content tokens, deliberately not on capitalisation.</b>
-     * Retrieval-key generation gathers a memory's neighbours from
+     * Retrieval-key generation gathers a memory's neighbors from
      * {@code JpaMemoryStore.entityNames}, a capitalisation rule; generating gold with that
      * same rule would select for pairs the keys already link and report the mechanism's own
      * heuristic back as a score. Rarity is independent of it, so a case survives or fails on
@@ -578,7 +578,7 @@ public final class MemoryEvalGenerator {
         return cluster;
     }
 
-    /** Embedding neighbours of the seed, restricted to the corpus rows already in hand. */
+    /** Embedding neighbors of the seed, restricted to the corpus rows already in hand. */
     private static List<Row> semanticCluster(Agent agent, Row seed, List<Row> all, double minCosine) {
         var byId = all.stream().collect(Collectors.toMap(Row::id, r -> r, (a, b) -> a));
         // Seed embedded as a document, matching what the index holds (JCLAW-529). Bare text

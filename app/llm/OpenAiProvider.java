@@ -62,7 +62,7 @@ public final class OpenAiProvider extends LlmProvider {
     }
 
     /** True when the request's model is configured as thinking-capable. Unknown
-     *  models return false: silence is the safe default, since an unrecognised
+     *  models return false: silence is the safe default, since an unrecognized
      *  model is more likely a plain chat model than a reasoner. */
     private boolean modelSupportsThinking(JsonObject request) {
         var modelEl = request.get("model");

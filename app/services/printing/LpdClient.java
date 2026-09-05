@@ -28,7 +28,7 @@ import java.util.Arrays;
  * </pre>
  *
  * <p>Not implemented, deliberately: the RFC's requirement that the client bind a
- * source port in 721–731. Those are privileged ports, so honouring it would mean
+ * source port in 721–731. Those are privileged ports, so honoring it would mean
  * running JClaw as root — a far worse trade than the trust it buys, and modern
  * daemons do not enforce it.
  */

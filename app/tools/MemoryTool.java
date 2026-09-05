@@ -535,7 +535,7 @@ public class MemoryTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Memories that state the same thing as {@code text}: embedding neighbours above the
+     * Memories that state the same thing as {@code text}: embedding neighbors above the
      * capture dedup threshold, plus lexical near-duplicates for the case where no vector
      * backend is configured or the wording matches but the vector does not.
      *
@@ -551,7 +551,7 @@ public class MemoryTool implements ToolRegistry.Tool {
     private static List<Memory> matching(String agentId, String text, String retrievalKey,
             double jaccard, double containment) {
         // Keyless callers (forget) take the lexical leg only: a semantic hit is topical, and
-        // deleting on topic removes neighbouring facts the operator did not name.
+        // deleting on topic removes neighboring facts the operator did not name.
         var ids = (retrievalKey == null || retrievalKey.isBlank())
                 ? List.<Long>of()
                 : semanticNeighbours(agentId, text, retrievalKey);

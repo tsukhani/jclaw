@@ -39,7 +39,7 @@ import java.util.concurrent.Executors;
  * one and each redirect hop.
  *
  * <p>Breadth-first on purpose. A crawl that runs out of budget mid-way should have
- * spent it on the seed's immediate neighbours rather than one deep chain, because
+ * spent it on the seed's immediate neighbors rather than one deep chain, because
  * the pages nearest the seed are the ones the caller asked about.
  */
 public class WebScrapeTool implements ToolRegistry.Tool {
@@ -356,7 +356,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *
      * <p>Runs single-threaded before any work is submitted. Both checks are cheap, and
      * rejecting here keeps {@code seen}, the refusal list and the page budget free of
-     * synchronisation.
+     * synchronization.
      */
     private static List<URI> admit(List<URI> level, boolean respectRobots, CrawlState state) {
         var admitted = new ArrayList<URI>();
@@ -720,7 +720,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     /** Runs after a level completes, single-threaded, so {@code seen} needs no
-     *  synchronisation and the next level's order is deterministic. */
+     *  synchronization and the next level's order is deterministic. */
     private static void collectLinks(WebExtraction.FetchResult fetched, URI seed,
                                      boolean sameHostOnly, CrawlState state,
                                      List<URI> next) {

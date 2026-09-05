@@ -465,7 +465,7 @@ public class SkillLoader {
      */
     public static List<String> extractYamlList(String yaml, String key) {
         // Inline form: key: [a, b, c]. Pre-compiled for the known closed-set
-        // keys; only an unrecognised custom key pays the per-call compile.
+        // keys; only an unrecognized custom key pays the per-call compile.
         var inlinePattern = switch (key) {
             case KEY_TOOLS -> TOOLS_INLINE_LIST;
             case KEY_COMMANDS -> COMMANDS_INLINE_LIST;

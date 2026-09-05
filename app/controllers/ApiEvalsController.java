@@ -186,7 +186,7 @@ public class ApiEvalsController extends Controller {
      * {@code evals/suites}: that directory is tracked and this repository is mirrored
      * publicly, so committing one would republish the dataset. A boolean rather than a
      * caller-supplied path — the two legal directories are both known here, so there is no
-     * reason to accept a string that would then need traversal defences.
+     * reason to accept a string that would then need traversal defenses.
      */
     private static EvalSuite resolveSuite(String suiteId, boolean local) {
         var dir = local ? LOCAL_SUITE_DIR : SUITE_DIR;

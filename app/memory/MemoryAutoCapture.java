@@ -55,7 +55,7 @@ import java.util.regex.Pattern;
  *       logged</em> (the turn is already durable as Message rows) rather than
  *       silently dropped.</li>
  *   <li><b>Consolidation, not append.</b> Each candidate is deduplicated against a
- *       pool of the agent's recent memories plus a retrieval neighbourhood, by the
+ *       pool of the agent's recent memories plus a retrieval neighborhood, by the
  *       deterministic {@link MemorySimilarity} test — a NOOP when a near-duplicate
  *       already exists anywhere in the store. Beyond the NOOP, a batched
  *       {@link Consolidator} judge (JCLAW-525) marks same-subject older
@@ -604,7 +604,7 @@ public final class MemoryAutoCapture {
      * fact can never NOOP a re-emerging new one.
      *
      * <p>The pool is the agent's recency slice <em>plus</em> a per-candidate
-     * retrieval neighbourhood (JCLAW-920). The slice alone bounded dedup to the
+     * retrieval neighborhood (JCLAW-920). The slice alone bounded dedup to the
      * newest {@code dedupScan} rows, so a fact restated after the window had moved
      * on was compared against nothing and stored again — two byte-identical pairs
      * survived that way in a 1248-row store, 1312 and 5214 ids apart. Retrieval

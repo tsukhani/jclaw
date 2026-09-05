@@ -323,7 +323,7 @@ public class AgentRunner {
      * async child terminates. The yield-resume announce Message has already
      * been persisted into the parent conversation as a USER-role row (with
      * {@code messageKind=subagent_announce}); this entrypoint acquires the
-     * conversation queue (so it serialises against any concurrent inbound
+     * conversation queue (so it serializes against any concurrent inbound
      * turn) and then runs the standard {@link #runAfterAcquire} pipeline
      * with {@code skipUserAppend=true} so the announce isn't duplicated.
      * The LLM sees the announce verbatim via

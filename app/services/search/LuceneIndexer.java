@@ -704,7 +704,7 @@ public final class LuceneIndexer {
         // Resolution order:
         //   1. explicit System-property override (setIndexPathForTest) — kept
         //      for tests that drive the path directly (e.g. LuceneIndexerTest);
-        //   2. Play config jclaw.search.lucenePath, which honours the %test.
+        //   2. Play config jclaw.search.lucenePath, which honors the %test.
         //      prefix so the autotest JVM lands in data/jclaw-lucene-test and
         //      never the production index (JCLAW-428);
         //   3. production default data/jclaw-lucene.

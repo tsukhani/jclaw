@@ -753,7 +753,7 @@ public class SystemPromptAssembler {
      * the selection — and report both the outcome and the reasoning.
      *
      * <p>Single-sourced deliberately. {@link #appendMemories} renders this and the
-     * introspection endpoint serialises it, so the two cannot disagree; an introspection
+     * introspection endpoint serializes it, so the two cannot disagree; an introspection
      * surface that has drifted from production is worse than none, because it reports
      * confidently on something no longer true. Same argument {@link SectionedBuilder}
      * makes for {@code assemble} versus {@code breakdown}.

@@ -19,7 +19,7 @@ import java.util.Optional;
  *       Ollama vision model, so a blank model is a clean no-op rather than a guess).</li>
  * </ul>
  *
- * <p>Returns {@link Optional#empty()} when unset/unrecognised — callers then emit the "description
+ * <p>Returns {@link Optional#empty()} when unset/unrecognized — callers then emit the "description
  * unavailable" note rather than blocking the turn. Resolved per call so a Settings change takes
  * effect on the next image without a restart.
  */

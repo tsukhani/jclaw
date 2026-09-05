@@ -567,7 +567,7 @@ public final class TaskExecutor {
 
     /**
      * Deserialize one recorded tool call, deliberately not through
-     * {@code MessageHydrator.parseToolCalls}: that sanitises the id to {@code [a-zA-Z0-9_-]}
+     * {@code MessageHydrator.parseToolCalls}: that sanitizes the id to {@code [a-zA-Z0-9_-]}
      * for re-shipping to a provider, which rewrites a real id like
      * {@code functions.message:27} and would no longer match the TOOL row it has to join to.
      */

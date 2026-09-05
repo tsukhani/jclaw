@@ -1074,7 +1074,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * If the notifier's own send fails, we log a warning and give up:
      * the user will notice their bot stopped replying anyway.
      *
-     * <p>JCLAW-362: honours the {@code telegram.notifier.policy} setting —
+     * <p>JCLAW-362: honors the {@code telegram.notifier.policy} setting —
      * under {@code silent} the failure is logged but no chat message is sent.
      */
     private void notifyDeliveryFailure() {

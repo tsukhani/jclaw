@@ -372,7 +372,7 @@ public final class LoadTestRunner {
         }
         if (req.hasNamedAgent() && req.toolAgent()) {
             // toolAgent pins the surface to loadtest_sleep; agentName exists to
-            // ship a real one. Honouring both would silently drop one.
+            // ship a real one. Honoring both would silently drop one.
             throw new IllegalArgumentException("agentName and toolAgent are mutually exclusive");
         }
         var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();

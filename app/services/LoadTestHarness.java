@@ -323,7 +323,7 @@ public final class LoadTestHarness {
         var pending = new ArrayList<CompletableFuture<Void>>(frames);
         // Schedule each frame at an absolute deadline. TTFT is honored exactly for the first
         // frame (so ttftDelayIsHonored() stays correct). Subsequent frames are spaced by a
-        // jittered cadence centred on spacingMs — uniform over ±50%, so the mean is the
+        // jittered cadence centered on spacingMs — uniform over ±50%, so the mean is the
         // requested rate rather than under it. The previous form, `spacing/2 +
         // nextInt(spacing)`, averaged spacing-0.5 in integer arithmetic and delivered
         // measurably faster than asked: at 500 tok/s it streamed 40 tokens in 58 ms against

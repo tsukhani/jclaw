@@ -80,7 +80,7 @@ public final class TaskToolPolicy {
     /**
      * Accept the shapes already in the column. {@code TaskTool} stored whatever the model
      * wrote — live data holds {@code "a,b,c"} and a bare {@code "a"} alongside JSON arrays,
-     * because nothing read or validated the field before JCLAW-1068. Honouring them matters:
+     * because nothing read or validated the field before JCLAW-1068. Honoring them matters:
      * dropping one to "unrestricted" would run a task the operator believed was fenced.
      *
      * <p>Anything carrying JSON punctuation was *meant* to be JSON, so a parse failure there

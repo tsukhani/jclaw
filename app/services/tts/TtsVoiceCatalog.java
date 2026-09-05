@@ -37,7 +37,7 @@ public final class TtsVoiceCatalog {
             new Voice("bm_lewis", "Lewis (British, male)"));
 
     // Qwen3-TTS-Base has no named voices; a numeric `voice` deterministically
-    // seeds a stable (but unlabelled) speaker via synth.py's _voice_seed.
+    // seeds a stable (but unlabeled) speaker via synth.py's _voice_seed.
     private static final List<Voice> QWEN3_VOICES = List.of(
             new Voice("1", "Voice 1"),
             new Voice("2", "Voice 2"),

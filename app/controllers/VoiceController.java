@@ -680,7 +680,7 @@ public class VoiceController extends WebSocketController {
     /** Resolve audio-capability once at session start — gates interim transcripts.
      *
      *  <p>Reads the session's own conversation, not the web one. Beyond tidiness:
-     *  {@code ModelResolver} honours a per-conversation model override, so probing
+     *  {@code ModelResolver} honors a per-conversation model override, so probing
      *  the web conversation would apply the text chat's override to voice. A fresh
      *  conversation carries none and falls back to the agent default. */
     private static boolean modelHearsAudioAtInit(VoiceBinding binding) {

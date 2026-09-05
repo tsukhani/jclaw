@@ -534,7 +534,7 @@ public class ApiMemoryController extends Controller {
     }
 
     /**
-     * POST /api/agents/{agentId}/core-migration — recategorise this agent's core memories
+     * POST /api/agents/{agentId}/core-migration — recategorize this agent's core memories
      * past the cap, using its own model to choose the new bucket (JCLAW-981).
      *
      * <p>Operator-triggered rather than automatic: the memory tool can refuse a core write

@@ -286,7 +286,7 @@ public class DefaultConfigJob extends Job<Void> {
         // per parse and don't need a UI; the user-facing on/off lives here
         // so the Settings page OCR section can flip it. The actual binary's
         // presence is detected at boot by jobs.TesseractProbeJob — when the
-        // probe says missing, the Settings UI greys out the toggle even if
+        // probe says missing, the Settings UI grays out the toggle even if
         // this row is "true", so the stored value tracks user intent rather
         // than runtime availability.
         seedIfAbsent("ocr.tesseract.enabled", "true");

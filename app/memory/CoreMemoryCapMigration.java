@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Recategorise core memories beyond the cap (JCLAW-981).
+ * Recategorize core memories beyond the cap (JCLAW-981).
  *
  * <p>Operator-triggered rather than automatic. The tool-side rule guarantees no core
  * memory is written past {@code memory.coreload.maxCount}, but it cannot guarantee the

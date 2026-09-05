@@ -148,7 +148,7 @@ public class MessageTool implements ToolRegistry.Tool {
      *
      * <p>Every success path returns a JSON object carrying {@code action}; every failure path
      * returns a bare {@code "Error: ..."} string, which is not parseable JSON. Tested
-     * positively — for a caller deciding whether the agent already delivered, an unrecognised
+     * positively — for a caller deciding whether the agent already delivered, an unrecognized
      * result must not read as success.
      */
     public static boolean isSuccessResult(String toolResult) {

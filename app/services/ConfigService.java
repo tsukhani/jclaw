@@ -218,7 +218,7 @@ public class ConfigService {
         }
 
         // JCLAW-1102: this classification is what lets memory text reach a host, so a typo
-        // must not read as "remote". Boolean.parseBoolean maps anything unrecognised to
+        // must not read as "remote". Boolean.parseBoolean maps anything unrecognized to
         // false, which would leave embeddings refusing a provider the operator declared local.
         if (key.startsWith(PROVIDER_KEY_PREFIX) && key.endsWith(ProviderLocality.DECLARED_LOCAL_SUFFIX)
                 && value != null && !value.isBlank()

@@ -116,7 +116,7 @@ public class ApiVideogenController extends Controller {
 
     /** GET /api/videogen/capability — adaptive local-engine capability snapshot for the Settings dropdown
      *  (SV-2 / JCLAW-232/233). The page polls this while the probe is PROBING, then renders the per-host
-     *  tiered engine list (and greys out what won't run). */
+     *  tiered engine list (and grays out what won't run). */
     @Operation(summary = "Local video-gen host capability (GPU, free VRAM, per-engine runnable tiers)")
     public static void capability() {
         renderJSON(gson.toJson(VideoCapabilityProbe.snapshot()));

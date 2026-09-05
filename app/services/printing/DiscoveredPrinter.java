@@ -15,7 +15,7 @@ import java.util.Map;
  *                     (supported document formats), {@code rp} (IPP resource path),
  *                     {@code Color}, {@code Duplex} and friends. Empty when the
  *                     printer was addressed directly. Deliberately raw: the TXT keys
- *                     are vendor-flavoured and normalizing them here would throw away
+ *                     are vendor-flavored and normalizing them here would throw away
  *                     the detail an operator needs when a job lands wrong.
  */
 public record DiscoveredPrinter(String name, String host, int port,

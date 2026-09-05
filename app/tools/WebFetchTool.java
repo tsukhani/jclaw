@@ -66,7 +66,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
             Map.of("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)");
 
     /** Mode {@code html} promises the page's own source, so it asks for it: the shared
-     *  default prefers markdown, and a site that honours that had its markdown written
+     *  default prefers markdown, and a site that honors that had its markdown written
      *  to the workspace as {@code <host>.html}. */
     private static Map<String, String> headersFor(String mode) {
         if (!"html".equals(mode)) return HEADERS;

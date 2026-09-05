@@ -794,7 +794,7 @@ public class JpaMemoryStore implements MemoryStore {
 
     /**
      * Entity names in {@code text}: capitalised, alphabetic, not boilerplate. Used by
-     * {@link MemoryKeyBackfillService} to find a memory's neighbours when writing its
+     * {@link MemoryKeyBackfillService} to find a memory's neighbors when writing its
      * retrieval key.
      */
     public static List<String> entityNames(String text) {

@@ -146,7 +146,7 @@ public class DocumentWriter {
     }
 
     private static String toXhtml(String html) {
-        // Flying Saucer requires well-formed XHTML. Jsoup re-serialises with
+        // Flying Saucer requires well-formed XHTML. Jsoup re-serializes with
         // self-closing void elements and properly escaped entities.
         Document parsed = Jsoup.parse(html);
         parsed.outputSettings()
