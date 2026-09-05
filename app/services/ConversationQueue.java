@@ -53,12 +53,6 @@ public class ConversationQueue {
          */
         volatile long lastActivityMs = System.currentTimeMillis();
 
-        synchronized boolean tryStartProcessing() {
-            if (processing) return false;
-            processing = true;
-            return true;
-        }
-
         synchronized void finishProcessing() {
             processing = false;
         }

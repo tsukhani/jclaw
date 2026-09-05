@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -274,10 +273,5 @@ public class McpClient implements AutoCloseable {
         // the orphaned docker container persists. Idempotent in transport
         // impls (McpStdioTransport sets `closed=true` and skips repeat work).
         try { transport.close(); } catch (RuntimeException _) { /* best effort */ }
-    }
-
-    // visible for test
-    Map<Object, CompletableFuture<JsonRpc.Response>> pendingForTest() {
-        return pending;
     }
 }

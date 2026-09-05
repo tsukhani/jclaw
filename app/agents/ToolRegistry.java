@@ -392,15 +392,6 @@ public class ToolRegistry {
                 .toList();
     }
 
-    /** Resolve a tool's {@link Tool#parallelSafe()} flag by name, defaulting
-     *  to {@code false} for unknown names. Used by
-     *  {@link ParallelToolExecutor#executeToolsParallel} to decide whether
-     *  multiple calls to the same tool in one round may race or must serialize. */
-    public static boolean isParallelSafe(String toolName) {
-        var tool = tools.get(toolName);
-        return tool != null && tool.parallelSafe();
-    }
-
     /** Resolve a tool's {@link Tool#serializationGroup()} key by name. Returns
      *  {@code null} for unknown names AND for tools whose own
      *  {@code serializationGroup()} is {@code null} (the parallel-safe case);

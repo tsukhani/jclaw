@@ -80,11 +80,6 @@ public final class TtsJvmEngine {
         return new File(Play.applicationPath, "data/tts-models/sherpa").toPath();
     }
 
-    /** Whether a model id is one this engine knows how to serve. */
-    public static boolean isKnownModel(String modelId) {
-        return SPECS.containsKey(modelId);
-    }
-
     /** Whether the model's weights are already extracted on disk (no download
      *  needed). Drives the {@code /api/tts/state} readiness flag. */
     public static boolean isModelPresent(String modelId) {
