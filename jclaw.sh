@@ -104,7 +104,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|test|e2e|dist|bundle|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|shim|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -143,6 +143,10 @@ Commands:
   loadtest  Drive the in-process load-test harness against /api/chat/stream
   evals     Validate the eval dataset in evals/suites, and score a
             recorded agent run against it. Offline — no backend, no model.
+  diagnostics
+            Compile (and optionally test) and print every compile error,
+            test failure and ArchUnit violation as one JSON array — the
+            machine-readable form of what 'test' prints for a human.
   test      Run backend tests (play autotest), frontend tests (pnpm test),
             and frontend quality gates (stylelint, lint, typecheck), and
             report a consolidated pass/fail summary. Exits non-zero on any
@@ -338,7 +342,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|loadtest|evals|test|e2e|dist|bundle|completion|uninstall)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
@@ -367,6 +371,7 @@ usage_for() {
         loadtest) usage_loadtest ;;
         scrapetest) usage_scrapetest ;;
         evals)    usage_evals    ;;
+        diagnostics) usage_diagnostics ;;
         test)     usage_test     ;;
         e2e)      usage_e2e      ;;
         dist)     usage_dist     ;;
@@ -977,6 +982,53 @@ EOF
     fi
 }
 
+usage_diagnostics() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: ${INVOKE} diagnostics [--tests] [--out <file>]
+
+Report every compile error, test failure and ArchUnit violation as one JSON
+array (JCLAW-1157). Same facts \`${INVOKE} test\` prints for a human, in the
+form an agent repair loop can consume without scraping console output.
+
+The command parses rather than builds: it runs \`./gradlew compileTestJava\`,
+and with --tests \`play autotest\` as well, then reads javac's output and the
+xunit reports in test-result/. Nothing else is compiled or started.
+
+Without --tests, test-result/ is not read at all — those reports belong to
+whenever the suite last ran, and reporting them as current findings is exactly
+the plausible nonsense this command exists to avoid. A tree that does not
+compile skips the suite: the reports would describe the previous build.
+
+A clean tree prints \`[]\`, never nothing. Each record carries kind (compile,
+test or arch), file, line, message, and fix when the compiler suggested one;
+bin/README.md is the schema contract.
+
+Options:
+  --tests            Also run \`play autotest\` and report its failures
+                     (~7 minutes; without it only the compile is checked)
+  --out <file>       Write the JSON there; stdout stays empty
+
+Exit codes: 0 nothing to report, 1 diagnostics reported, 2 the harness itself
+failed (a build that broke without printing a diagnostic, a missing toolchain).
+
+Examples:
+  ${INVOKE} diagnostics                        # compile errors only, on stdout
+  ${INVOKE} diagnostics --tests --out d.json   # full sweep, written to a file
+EOF
+    else
+        cat <<EOF
+Usage: ${INVOKE} diagnostics
+
+Not available in this distribution. The 'diagnostics' command compiles from
+source and reads the test reports of a developer checkout; neither ships in a
+'play dist' tarball.
+
+For the full list of commands in this distribution: ${INVOKE} help
+EOF
+    fi
+}
+
 usage_test() {
     if is_developer_clone; then
         cat <<EOF
@@ -1257,6 +1309,8 @@ LT_PROMPTS_JSON=""
 HTTPS_INSTALL_CA=false
 # Arguments forwarded verbatim to the eval CLI (services.evals.EvalRunner).
 EVAL_ARGS=()
+# Arguments forwarded verbatim to bin/diagnostics.mjs.
+DIAGNOSTICS_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1388,6 +1442,21 @@ while [[ $# -gt 0 ]]; do
                 exit 0
             fi
             EVAL_ARGS=("$@")
+            break
+            ;;
+        diagnostics)
+            # Developer-only, flags forwarded verbatim — same reasoning as `evals` above.
+            if ! is_developer_clone; then
+                echo "Error: 'diagnostics' is a developer-only command, not available in this distribution."
+                exit 1
+            fi
+            COMMAND="$1"
+            shift
+            if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+                usage_diagnostics
+                exit 0
+            fi
+            DIAGNOSTICS_ARGS=("$@")
             break
             ;;
         setup|init-worktree|loadtest|test|e2e|dist|bundle)
@@ -3783,6 +3852,23 @@ do_evals() {
     java -cp "$(native_path "$classes")${CP_SEP}$(native_path "$lib_dir")/*" services.evals.EvalRunner ${EVAL_ARGS[@]+"${EVAL_ARGS[@]}"}
 }
 
+# Machine-readable build state: compile errors, test failures and ArchUnit violations as
+# one JSON array on stdout (JCLAW-1157). The script owns the option vocabulary — this
+# wrapper only checks the toolchains it will reach for. Its exit status is the command's,
+# carried out by `set -e`: 1 means diagnostics were reported, not that the wrapper broke.
+do_diagnostics() {
+    cd "$SCRIPT_DIR"
+    check_node
+    local arg
+    for arg in ${DIAGNOSTICS_ARGS[@]+"${DIAGNOSTICS_ARGS[@]}"}; do
+        if [[ "$arg" == "--tests" ]]; then
+            check_play
+            break
+        fi
+    done
+    node "$SCRIPT_DIR/bin/diagnostics.mjs" ${DIAGNOSTICS_ARGS[@]+"${DIAGNOSTICS_ARGS[@]}"}
+}
+
 # ─── Consolidated test runner ───
 
 # Runs the full pre-push validation suite: backend tests (play autotest),
@@ -4017,6 +4103,7 @@ do_completion() {
             init-worktree "Per-worktree bootstrap"
             loadtest      "Run the load-test harness"
             evals         "Validate or score the eval dataset"
+            diagnostics   "Report build and test failures as JSON"
             test          "Run backend + frontend tests"
             dist          "Build the developer-distribution zip"
             bundle        "Build the self-contained bundle zip"
@@ -5024,6 +5111,9 @@ case "$COMMAND" in
         ;;
     evals)
         do_evals
+        ;;
+    diagnostics)
+        do_diagnostics
         ;;
     test)
         check_prereqs
