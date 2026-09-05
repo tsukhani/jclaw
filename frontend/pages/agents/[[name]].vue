@@ -2128,6 +2128,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </div>
             </div>
             <button
+              type="button"
+              role="switch"
+              :aria-checked="execBypassAllowlist"
+              aria-label="Bypass allowlist"
               :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
               class="relative w-9 h-5 rounded-full transition-colors shrink-0"
               @click="execBypassAllowlist = !execBypassAllowlist; toggleExecConfig('bypassAllowlist', execBypassAllowlist)"
@@ -2146,6 +2150,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </div>
             </div>
             <button
+              type="button"
+              role="switch"
+              :aria-checked="execAllowGlobalPaths"
+              aria-label="Allow global paths"
               :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
               class="relative w-9 h-5 rounded-full transition-colors shrink-0"
               @click="execAllowGlobalPaths = !execAllowGlobalPaths; toggleExecConfig('allowGlobalPaths', execAllowGlobalPaths)"
@@ -2232,7 +2240,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   v-for="cmd in cmds"
                   :key="skillName + ':' + cmd"
                 >
-                  <td class="py-1 pr-4 font-mono text-cyan-700/80 dark:text-cyan-400/80">
+                  <td class="py-1 pr-4 font-mono text-cyan-700 dark:text-cyan-400">
                     {{ cmd }}
                   </td>
                   <td class="py-1 text-fg-muted">
@@ -2317,14 +2325,14 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 <span
                   v-for="cmd in skill.commands"
                   :key="cmd"
-                  class="font-mono text-cyan-700/80 dark:text-cyan-400/80 bg-cyan-400/5 border border-cyan-400/20 px-1.5 py-0.5 rounded-sm"
+                  class="font-mono text-cyan-700 dark:text-cyan-400 bg-cyan-400/5 border border-cyan-400/20 px-1.5 py-0.5 rounded-sm"
                 >
                   {{ cmd }}
                 </span>
               </div>
               <div
                 v-if="skillDisabledTools(skill).length"
-                class="text-xs text-amber-700/70 dark:text-amber-400/70 mt-1.5"
+                class="text-xs text-amber-700 dark:text-amber-400 mt-1.5"
               >
                 requires {{ skillDisabledTools(skill).join(', ') }}
               </div>
@@ -2401,9 +2409,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 class="text-[10px] font-semibold uppercase tracking-widest"
                 :class="{
                   'text-fg-muted': catGroup.category === 'System',
-                  'text-amber-700/70 dark:text-amber-400/70': catGroup.category === 'Files',
-                  'text-blue-700/70 dark:text-blue-400/70': catGroup.category === 'Web',
-                  'text-emerald-700/70 dark:text-emerald-400/70': catGroup.category === 'Utilities',
+                  'text-amber-700 dark:text-amber-400': catGroup.category === 'Files',
+                  'text-blue-700 dark:text-blue-400': catGroup.category === 'Web',
+                  'text-emerald-700 dark:text-emerald-400': catGroup.category === 'Utilities',
                 }"
               >
                 {{ catGroup.category }}
@@ -2593,7 +2601,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     :key="action.name"
                     class="grid grid-cols-[2.5rem_1fr] items-baseline gap-x-3 px-4 py-2.5 hover:bg-muted/40 transition-colors"
                   >
-                    <span class="text-xs font-mono tabular-nums text-fg-muted/70 select-none">
+                    <span class="text-xs font-mono tabular-nums text-fg-muted select-none">
                       {{ String(idx + 1).padStart(3, '0') }}
                     </span>
                     <div class="flex flex-col gap-0.5 min-w-0">
@@ -3118,7 +3126,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     <td class="py-1 px-2 text-right text-fg-muted">
                       {{ formatChars(s.chars) }}
                     </td>
-                    <td class="py-1 px-2 text-right text-amber-700/80 dark:text-amber-300/80">
+                    <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300">
                       {{ formatTokens(s.tokens) }}
                     </td>
                     <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
@@ -3142,7 +3150,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
                       {{ formatChars(sk.chars) }}
                     </td>
-                    <td class="py-0.5 px-2 text-right text-amber-700/60 dark:text-amber-300/60 text-[11px]">
+                    <td class="py-0.5 px-2 text-right text-amber-700 dark:text-amber-300 text-[11px]">
                       {{ formatTokens(sk.tokens) }}
                     </td>
                     <td class="py-0.5 pl-2 text-right text-[11px]" />
@@ -3157,7 +3165,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
                       {{ formatChars(skillsMatchingGap.chars) }}
                     </td>
-                    <td class="py-0.5 px-2 text-right text-amber-700/60 dark:text-amber-300/60 text-[11px]">
+                    <td class="py-0.5 px-2 text-right text-amber-700 dark:text-amber-300 text-[11px]">
                       {{ formatTokens(skillsMatchingGap.tokens) }}
                     </td>
                     <td class="py-0.5 pl-2 text-right text-[11px]" />
@@ -3260,7 +3268,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   <td class="py-1 px-2 text-right text-fg-muted">
                     {{ formatChars(t.chars) }}
                   </td>
-                  <td class="py-1 px-2 text-right text-amber-700/80 dark:text-amber-300/80">
+                  <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300">
                     {{ formatTokens(t.tokens) }}
                   </td>
                   <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
@@ -3326,7 +3334,8 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
 .md-preview strong { color: var(--fg-strong); font-weight: 600; }
 .md-preview em { font-style: italic; }
 
-.md-preview a { color: hsl(160 84% 30%); text-decoration: underline; }
+/* --ok (27% L), not emerald at 30%: that measured 4.09:1 on the card, under AA. */
+.md-preview a { color: var(--ok); text-decoration: underline; }
 html.dark .md-preview a { color: hsl(152 76% 60%); }
 
 .md-preview code {

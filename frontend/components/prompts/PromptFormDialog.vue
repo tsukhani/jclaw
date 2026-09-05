@@ -213,7 +213,7 @@ async function save() {
           class="block"
         >
           <span class="block text-xs text-fg-muted mb-1">
-            Tags <span class="text-fg-muted/70">(optional, comma-separated)</span>
+            Tags <span class="text-fg-muted">(optional, comma-separated)</span>
           </span>
           <input
             id="pf-tags"

@@ -693,7 +693,7 @@ function removeHeaderRow(i: number) {
                       :key="tool.name"
                       class="grid grid-cols-[2.5rem_1fr] items-baseline gap-x-3 px-4 py-2.5 hover:bg-muted/40 transition-colors"
                     >
-                      <span class="text-[10px] font-mono tabular-nums text-fg-muted/70 select-none">
+                      <span class="text-[10px] font-mono tabular-nums text-fg-muted select-none">
                         {{ String(idx + 1).padStart(3, '0') }}
                       </span>
                       <div class="flex flex-col gap-0.5 min-w-0">

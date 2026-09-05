@@ -288,7 +288,7 @@ async function deleteApp(app: AppEntry) {
           for="new-app-name"
           class="block"
         >
-          <span class="block text-xs text-fg-muted mb-1">App name <span class="text-fg-muted/70">(optional)</span></span>
+          <span class="block text-xs text-fg-muted mb-1">App name <span class="text-fg-muted">(optional)</span></span>
           <input
             id="new-app-name"
             v-model="newAppName"
@@ -301,7 +301,7 @@ async function deleteApp(app: AppEntry) {
           for="new-app-author"
           class="block"
         >
-          <span class="block text-xs text-fg-muted mb-1">Author <span class="text-fg-muted/70">(optional)</span></span>
+          <span class="block text-xs text-fg-muted mb-1">Author <span class="text-fg-muted">(optional)</span></span>
           <input
             id="new-app-author"
             v-model="newAppAuthor"
@@ -327,7 +327,7 @@ async function deleteApp(app: AppEntry) {
           for="new-app-agent"
           class="block"
         >
-          <span class="block text-xs text-fg-muted mb-1">Designated agent <span class="text-fg-muted/70">(optional — lets the app invoke this agent)</span></span>
+          <span class="block text-xs text-fg-muted mb-1">Designated agent <span class="text-fg-muted">(optional — lets the app invoke this agent)</span></span>
           <select
             id="new-app-agent"
             v-model="newAppAgent"

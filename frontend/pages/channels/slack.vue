@@ -353,7 +353,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
       <button
         type="button"
         aria-label="Dismiss warning"
-        class="text-amber-700/70 dark:text-amber-300/70 hover:text-amber-200 bg-transparent border-0 cursor-pointer"
+        class="text-amber-700 dark:text-amber-300 hover:text-amber-200 bg-transparent border-0 cursor-pointer"
         @click="scopeNotice = ''"
       >
         ×

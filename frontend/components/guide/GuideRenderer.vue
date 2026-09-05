@@ -282,9 +282,13 @@ function onClick(event: MouseEvent) {
    weight as ones nested inside `**...**` emphasis (e.g. numbered list
    items in getting-started.md). Without this, a link's visual weight
    depended on whether its surrounding sentence was bolded — visibly
-   inconsistent across the guide. */
+   inconsistent across the guide.
+
+   The colour is --ok rather than a literal emerald: at 30% lightness it
+   measured 4.09:1 on the page and 4.00:1 inside a gotcha callout, both
+   under AA. The token is 27%. */
 .guide-section a {
-  color: hsl(160 84% 30%);
+  color: var(--ok);
   font-weight: 700;
   text-decoration: none;
 }
@@ -293,7 +297,7 @@ html.dark .guide-section a { color: hsl(152 76% 60%); }
 
 .guide-section code {
   font-family: ui-monospace, monospace;
-  font-size: 0.8em;
+  font-size: 0.875em;
   padding: 0.15em 0.4em;
   border-radius: 0.25rem;
   background: hsl(0 0% 90% / 60%);
@@ -310,7 +314,10 @@ html.dark .guide-section code { background: hsl(0 0% 18% / 60%); }
   overflow-x: auto;
 }
 html.dark .guide-section pre { background: hsl(0 0% 16% / 60%); }
-.guide-section pre code { padding: 0; background: transparent; }
+
+/* 1em, not the 0.875em the standalone rule gives: inside a 0.8rem pre that
+   multiplies out to 10.24px of rendered code. */
+.guide-section pre code { padding: 0; background: transparent; font-size: 1em; }
 
 .guide-section blockquote {
   margin: 0.75rem 0;
@@ -363,7 +370,7 @@ html.dark .guide-section blockquote {
 
 .guide-section kbd {
   font-family: ui-monospace, monospace;
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   padding: 0.1rem 0.35rem;
   border-radius: 0.25rem;
   border: 1px solid var(--border);
@@ -409,14 +416,14 @@ html.dark .guide-section .guide-callout-note {
 }
 
 .guide-section .guide-callout-title {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 0.25rem;
 }
-.guide-section .guide-callout-tip .guide-callout-title { color: hsl(160 84% 30%); }
-.guide-section .guide-callout-gotcha .guide-callout-title { color: hsl(35 85% 35%); }
+.guide-section .guide-callout-tip .guide-callout-title { color: var(--ok); }
+.guide-section .guide-callout-gotcha .guide-callout-title { color: var(--warning); }
 .guide-section .guide-callout-note .guide-callout-title { color: var(--fg-muted); }
 html.dark .guide-section .guide-callout-tip .guide-callout-title { color: hsl(152 76% 60%); }
 html.dark .guide-section .guide-callout-gotcha .guide-callout-title { color: hsl(40 96% 65%); }

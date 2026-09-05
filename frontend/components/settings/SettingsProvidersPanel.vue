@@ -1281,7 +1281,7 @@ const groupedProviders = computed(() => {
                   <div class="flex items-center gap-2">
                     <span
                       v-if="(model.promptPrice ?? 0) > 0"
-                      class="text-xs text-amber-700/70 dark:text-amber-400/70 font-mono"
+                      class="text-xs text-amber-700 dark:text-amber-400 font-mono"
                       :title="`Input: $${model.promptPrice}/M tokens, Output: $${model.completionPrice}/M tokens`"
                     >
                       ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M

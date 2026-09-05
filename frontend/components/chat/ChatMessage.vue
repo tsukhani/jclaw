@@ -614,7 +614,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
                   <dt class="text-muted-foreground">
                     Cost
                   </dt>
-                  <dd class="font-mono tabular-nums text-amber-700/80 dark:text-amber-400/80">
+                  <dd class="font-mono tabular-nums text-amber-700 dark:text-amber-400">
                     {{ formatUsageCost(msg.usage) }}
                   </dd>
                 </div>

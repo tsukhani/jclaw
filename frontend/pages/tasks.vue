@@ -1881,7 +1881,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                           </p>
                           <p
                             v-else-if="run.status === 'RUNNING' && run.latestTurnPreview"
-                            class="text-blue-700/80 dark:text-blue-300/80 mt-0.5 whitespace-pre-wrap break-words line-clamp-2 italic"
+                            class="text-blue-700 dark:text-blue-300 mt-0.5 whitespace-pre-wrap break-words line-clamp-2 italic"
                           >
                             {{ run.latestTurnPreview }}
                           </p>

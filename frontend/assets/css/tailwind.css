@@ -169,6 +169,15 @@
     border-color: var(--border);
   }
 
+  /* Tailwind v4's preflight renders ::placeholder as currentColor at 50%
+     opacity, which measures 3.34:1 against our fields — under the 4.5:1 WCAG
+     1.4.3 wants. Only four of this app's placeholders set a colour of their
+     own, and a `placeholder:` utility still wins over this base rule. */
+  ::placeholder {
+    color: var(--fg-muted);
+    opacity: 1;
+  }
+
   /* Inter Variable as the default sans — matches Unsloth Studio's body
      font. The `--font-sans` @theme token below wires the class utility;
      these rules apply the font globally so prose inherits it without

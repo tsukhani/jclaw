@@ -89,13 +89,13 @@ const expanded = ref(false)
         <span class="text-sm font-medium text-amber-800 dark:text-amber-300">
           {{ unmanaged.length }} unmanaged config {{ unmanaged.length === 1 ? 'key' : 'keys' }}
         </span>
-        <span class="block text-[11px] text-amber-700/80 dark:text-amber-400/70">
+        <span class="block text-[11px] text-amber-700 dark:text-amber-400">
           Config DB rows not owned by any Settings section — usually stale keys from a prior
           version. They shouldn't exist; review and remove them.
         </span>
       </span>
       <ChevronDownIcon
-        class="w-4 h-4 mt-0.5 shrink-0 text-amber-600/70 dark:text-amber-400/70 transition-transform"
+        class="w-4 h-4 mt-0.5 shrink-0 text-amber-700 dark:text-amber-400 transition-transform"
         :class="expanded ? 'rotate-180' : ''"
         aria-hidden="true"
       />
