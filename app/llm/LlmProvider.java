@@ -770,6 +770,31 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                 .orElse(true);
     }
 
+    /**
+     * True when the model reasons no matter what the request asks for.
+     *
+     * <p>Verified on ollama.com/v1 with {@code glm-5.3-flash}:
+     * {@code reasoning_effort:"none"} stops Ollama emitting the {@code reasoning}
+     * delta field but does not stop the model reasoning, so the chain-of-thought
+     * arrives as ordinary {@code content} and renders as the first paragraph of
+     * the reply. The same request with no reasoning params keeps the channels
+     * split — so skipping the disable path costs no tokens the model wasn't
+     * already spending.
+     *
+     * <p>Unknown resolves to false: a model the provider publishes no metadata
+     * for keeps the normal disable path.
+     */
+    protected boolean modelAlwaysThinks(String modelId) {
+        if (modelId == null) return false;
+        var models = config().models();
+        if (models == null) return false;
+        return models.stream()
+                .filter(m -> modelId.equals(m.id()))
+                .findFirst()
+                .map(ModelInfo::alwaysThinks)
+                .orElse(false);
+    }
+
     protected String serializeRequest(ChatRequest request) {
         var obj = new JsonObject();
         obj.addProperty(JSON_MODEL, request.model());
@@ -788,7 +813,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
         if (request.thinkingMode() != null && !request.thinkingMode().isBlank()) {
             addReasoningParams(obj, request.thinkingMode());
-        } else {
+        } else if (!modelAlwaysThinks(request.model())) {
             disableReasoning(obj);
         }
         applyCacheDirectives(obj, request);

@@ -581,4 +581,61 @@ class LlmProviderTest extends UnitTest {
         assertFalse(new ModelInfo("m", "m", 1, 1, false, false, false, false,
                 false, -1, -1, -1, -1, null, false).toolCallingSupported());
     }
+
+    // =====================
+    // alwaysThinks models are never sent a "reasoning off" signal
+    // =====================
+
+    /** An Ollama catalog declaring one thinking-capable model's architecture lock. */
+    private static OllamaProvider ollamaThinking(String modelId, boolean alwaysThinks) {
+        var info = new ModelInfo(modelId, modelId, 8192, 0, true, false, false, false,
+                true, -1, -1, -1, -1, null, alwaysThinks);
+        return new OllamaProvider(new ProviderConfig(
+                "ollama-cloud", "https://ollama.com/v1", "k", List.of(info)));
+    }
+
+    private static ChatRequest requestWithThinking(String modelId, String thinkingMode) {
+        return new ChatRequest(modelId, List.of(ChatMessage.user("hi")),
+                null, false, null, thinkingMode);
+    }
+
+    @Test
+    void noReasoningOffSignalIsSentToAnAlwaysThinksModel() throws Exception {
+        // Observed on ollama.com/v1: reasoning_effort:"none" makes Ollama stop tagging
+        // the reasoning delta while glm-5.3-flash reasons anyway, so the thought lands
+        // in content and the UI has no thinking block to fill. Sending neither field
+        // is what keeps the two channels split.
+        var json = serialize(ollamaThinking("glm-5.3-flash", true),
+                requestWithThinking("glm-5.3-flash", null));
+        assertFalse(json.has("reasoning_effort"),
+                "an always-thinking model must not be told to stop: " + json);
+        assertFalse(json.has("think"),
+                "the native think:false fallback must not ride along either: " + json);
+    }
+
+    @Test
+    void anExplicitEffortLevelStillReachesAnAlwaysThinksModel() throws Exception {
+        // The skip covers the disable path only — an operator-chosen level is still
+        // the model's to honor.
+        var json = serialize(ollamaThinking("glm-5.3-flash", true),
+                requestWithThinking("glm-5.3-flash", "high"));
+        assertEquals("high", json.get("reasoning_effort").getAsString());
+    }
+
+    @Test
+    void reasoningIsStillDisabledForAModelThatCanActuallyStop() throws Exception {
+        // The disable path is load-bearing for every ordinary thinking model —
+        // narrowing it to alwaysThinks must not turn reasoning on for the rest.
+        var json = serialize(ollamaThinking("kimi-k2.5", false),
+                requestWithThinking("kimi-k2.5", null));
+        assertEquals("none", json.get("reasoning_effort").getAsString());
+        assertFalse(json.get("think").getAsBoolean());
+    }
+
+    @Test
+    void reasoningIsStillDisabledForAModelMissingFromTheCatalog() throws Exception {
+        // No metadata means no lock: an undiscovered model keeps the normal path.
+        var json = serialize(ollama(), requestWithThinking("never-discovered", null));
+        assertEquals("none", json.get("reasoning_effort").getAsString());
+    }
 }
