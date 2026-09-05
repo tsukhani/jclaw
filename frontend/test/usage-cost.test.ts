@@ -641,6 +641,23 @@ describe('providerMetricRows (JCLAW-1147)', () => {
     expect(rows.map(r => r.key)).toEqual(['good'])
   })
 
+  it('qualifies a leaf that two nests share, so the rows are not read as duplicates', () => {
+    // Live check on an openrouter turn showed two rows both labelled "Audio tokens 0".
+    const rows = providerMetricRows(usage({
+      providerMetrics: {
+        'prompt_tokens_details.audio_tokens': 1,
+        'completion_tokens_details.audio_tokens': 2,
+        'cost_details.upstream_inference_cost': 0.5,
+      },
+    }))
+    const labels = rows.map(r => r.label)
+    expect(new Set(labels).size).toBe(labels.length)
+    expect(labels).toContain('Prompt audio tokens')
+    expect(labels).toContain('Completion audio tokens')
+    // An unambiguous leaf keeps its short label rather than being qualified needlessly.
+    expect(labels).toContain('Upstream inference cost')
+  })
+
   it('orders rows by label so the popover is stable between turns', () => {
     const rows = providerMetricRows(usage({
       providerMetrics: { zebra_count: 1, alpha_count: 2 },

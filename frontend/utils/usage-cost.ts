@@ -146,17 +146,43 @@ export interface ProviderMetricRow {
 export function providerMetricRows(usage: MessageUsage): ProviderMetricRow[] {
   const raw = usage?.providerMetrics
   if (!raw) return []
-  return Object.entries(raw)
-    .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
-    .map(([key, value]) => ({ key, label: providerMetricLabel(key), value: formatProviderMetric(key, value) }))
+  const entries = Object.entries(raw).filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+  // Two providers' nests can share a leaf — prompt_tokens_details.audio_tokens and
+  // completion_tokens_details.audio_tokens both end in `audio_tokens`, and rendering
+  // both as "Audio tokens" makes one turn look like it has a duplicated row.
+  const leafCounts = new Map<string, number>()
+  for (const [key] of entries) {
+    const leaf = metricLeaf(key)
+    leafCounts.set(leaf, (leafCounts.get(leaf) ?? 0) + 1)
+  }
+  return entries
+    .map(([key, value]) => ({
+      key,
+      label: providerMetricLabel(key, (leafCounts.get(metricLeaf(key)) ?? 0) > 1),
+      value: formatProviderMetric(key, value),
+    }))
     .sort((a, b) => a.label.localeCompare(b.label))
 }
 
-/** `cost_details.upstream_inference_cost` → `Upstream inference cost`. */
-function providerMetricLabel(key: string): string {
-  const leaf = key.slice(key.lastIndexOf('.') + 1).replace(/_/g, ' ').trim()
+function metricLeaf(key: string): string {
+  return key.slice(key.lastIndexOf('.') + 1)
+}
+
+/**
+ * `cost_details.upstream_inference_cost` → `Upstream inference cost`.
+ *
+ * When the leaf is ambiguous the parent's first segment is prepended —
+ * `prompt_tokens_details.audio_tokens` → `Prompt audio tokens` — which is enough to
+ * tell the pair apart without the full dotted path. The row's title attribute carries
+ * that path verbatim for anyone who needs it.
+ */
+function providerMetricLabel(key: string, qualify: boolean): string {
+  const leaf = metricLeaf(key).replace(/_/g, ' ').trim()
   if (!leaf) return key
-  return leaf.charAt(0).toUpperCase() + leaf.slice(1)
+  const dot = key.lastIndexOf('.')
+  const parent = dot < 0 ? '' : key.slice(0, dot).split('.').pop()!.split('_')[0]!
+  const text = qualify && parent ? `${parent} ${leaf}` : leaf
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
 function formatProviderMetric(key: string, value: number): string {
