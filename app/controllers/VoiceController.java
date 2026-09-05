@@ -403,11 +403,10 @@ public class VoiceController extends WebSocketController {
             // LLM segments the streaming trace already emits on that channel.
             var metrics = new VoiceTurnMetrics(agent.id == null ? null : agent.id.toString(), t0);
             int maxRunOn = ConfigService.getInt("voice.tts.maxRunOnChars", 220);
-            // One transaction resolves the shared web conversation AND whether the
-            // active model hears audio natively (both walk agent/conversation).
-            // JCLAW-862: the session's own conversation, created at init. Audio
-            // capability is still resolved per turn so switching the model mid-
-            // session takes effect on the next utterance, as it did before.
+            // One transaction resolves the session conversation (JCLAW-862, created at init)
+            // AND whether the active model hears audio natively — both walk agent/conversation.
+            // Audio capability is resolved per turn so a mid-session model switch takes effect
+            // on the next utterance.
             var plan = Tx.run(() -> {
                 var conv = ConversationService.findById(binding.conversationId());
                 if (conv == null) return null;  // deleted mid-session
@@ -426,13 +425,11 @@ public class VoiceController extends WebSocketController {
             long inputMs = (System.nanoTime() - t0) / 1_000_000L; // STT / attachment staging
             metrics.sttDone();
 
-            // Agent turn on the shared web conversation, so voice + text share
-            // context. Run through the STREAMING runner with the barge-in cancel
-            // flag (an interruption stops GENERATION, not just audio) and
-            // sentence-chunk the reply AS IT STREAMS: the callback buffers tokens
-            // and queues each complete sentence, while the consumer below
-            // synthesizes them — so audio starts on the first sentence instead of
-            // after the whole reply.
+            // Agent turn through the STREAMING runner with the barge-in cancel flag (an
+            // interruption stops GENERATION, not just audio); the reply is sentence-chunked
+            // AS IT STREAMS — the callback buffers tokens and queues each complete sentence
+            // while the consumer below synthesizes them — so audio starts on the first
+            // sentence instead of after the whole reply.
             var sentences = new LinkedBlockingQueue<String>();
             AgentRunner.runStreaming(agent, plan.conversationId(), VOICE_CHANNEL, username,
                     input.get().userMessage(), cancel, sentenceChunking(sentences, maxRunOn),

@@ -83,12 +83,7 @@ public class AgentRunner {
      *                     came back with {@code finish_reason=length}
      */
     public record RunResult(String response, Conversation conversation, boolean truncated) {
-        /**
-         * 2-arg compatibility: legacy paths that don't track truncation.
-         *
-         * @param response     the model's final assistant content
-         * @param conversation the resolved conversation
-         */
+        /** 2-arg compatibility: legacy paths that don't track truncation. */
         public RunResult(String response, Conversation conversation) {
             this(response, conversation, false);
         }
@@ -349,10 +344,7 @@ public class AgentRunner {
      * conversation queue is currently owned by another turn
      */
     public static RunResult runYieldResume(Agent agent, Conversation conversation) {
-        // Empty user message because the actual input — the child's reply —
-        // is already in the persisted USER-role announce row. The
-        // skipUserAppend flag suppresses appendUserMessage so we don't
-        // double-append.
+        // Empty text + skipUserAppend=true: the child's reply is already the persisted announce row.
         var queueMsg = new ConversationQueue.QueuedMessage(
                 "", conversation.channelType, conversation.peerId, agent, true);
         if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {

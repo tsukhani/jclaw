@@ -190,11 +190,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * Read an integer field from a usage JSON object, returning 0 when the
      * field is missing or JSON null. Top-level form — {@code usage.field}.
      *
-     * <p>Companion to the nested overload below; together they collapse the
-     * "{@code if (obj.has(f) && !obj.get(f).isJsonNull()) return obj.get(f).getAsInt();}"
-     * idiom that every provider's usage-extraction methods used to open-code.
-     * Callers that need a fallback chain (top-level, then nested) can compose
-     * the two: {@code int top = readUsageInt(usage, "x"); return top > 0 ? top : readUsageInt(usage, "details", "x");}.
+     * <p>Companion to the nested overload below. Callers that need a fallback chain
+     * (top-level, then nested) compose the two:
+     * {@code int top = readUsageInt(usage, "x"); return top > 0 ? top : readUsageInt(usage, "details", "x");}.
      *
      * <p>The "missing-or-null returns 0" semantic is correct for token-count
      * fields specifically — providers either omit the field or report 0 when
@@ -561,11 +559,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                         // The server closes the stream right after the [DONE]
                         // sentinel, so we skip parsing it here.
                         if ("[DONE]".equals(data)) return;
-                        // Parse once, reuse for both deserialization and usage
-                        // augmentation. The previous implementation parsed
-                        // twice on every final-usage chunk: once implicitly
-                        // inside gson.fromJson(String, Class), once explicitly
-                        // inside augmentChunkUsage via JsonParser.parseString.
+                        // Parse once; augmentChunkUsage reuses the tree rather than re-parsing the final-usage chunk.
                         try {
                             var root = JsonParser.parseString(data).getAsJsonObject();
                             var chunk = gson.fromJson(root, ChatCompletionChunk.class);

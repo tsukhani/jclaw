@@ -575,9 +575,6 @@ public class ToolRegistry {
      */
     @SuppressWarnings("java:S1172") // conv retained for binary compatibility per Javadoc (JCLAW-281)
     public static List<ToolDef> getToolDefsForAgent(Agent agent, Conversation conv) {
-        // JCLAW-281: discoveredMcpServers no longer drives filtering, but
-        // the overload is kept so callers don't need to track which
-        // signature to use. Just delegates with an empty set.
         return getToolDefsForAgent(agent, Set.<String>of());
     }
 

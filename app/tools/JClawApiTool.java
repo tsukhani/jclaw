@@ -315,10 +315,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
     }
 
     private static String stringField(JsonObject obj, String key) {
-        // Keep the non-primitive guard before delegating: optNonBlankString would
-        // throw on an object/array value (getAsString). Gating on isJsonPrimitive
-        // first (a JsonNull is also non-primitive) leaves only the null/blank
-        // collapse for the shared reader — same result as the inline dance.
+        // Guard before delegating: optNonBlankString calls getAsString, which throws on
+        // an object/array value (a JsonNull is also non-primitive).
         JsonElement el = obj.get(key);
         if (el == null || !el.isJsonPrimitive()) return null;
         return JsonArgs.optNonBlankString(obj, key);

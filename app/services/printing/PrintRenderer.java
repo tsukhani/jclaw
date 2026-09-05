@@ -189,7 +189,7 @@ public final class PrintRenderer {
         return canvas;
     }
 
-    /** Render each PDF page at {@link #DPI}, then fit it to the target page. */
+    /** Render each PDF page at the page's DPI, then fit it to the target page. */
     static List<BufferedImage> renderPdf(byte[] pdf, PageSize page) throws IOException {
         var pages = new ArrayList<BufferedImage>();
         try (var document = Loader.loadPDF(pdf)) {

@@ -28,8 +28,6 @@ import java.util.stream.Collectors;
  * metric so the failure rate becomes a number first. What to DO about a failing
  * verdict is stage 2's decision, made against that evidence.
  *
- * <h2>What the verdicts mean</h2>
- *
  * <h2>Two layers</h2>
  *
  * <p>Generic checks first — they know nothing about any particular tool, so they can

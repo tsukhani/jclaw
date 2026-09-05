@@ -94,8 +94,6 @@ final class SubagentSyncRunner {
      * wall-clock deadline. Every other terminal path (success, kill,
      * yield-watchdog timeout, runner exception) is translated to a uniform
      * {@link SyncRunOutcome} exactly as before.
-     *
-     * <p>Public for {@code SubagentSpawnToolTest} (default package).
      */
     static SyncRunOutcome awaitFuture(
             CompletableFuture<AgentRunner.RunResult> future,

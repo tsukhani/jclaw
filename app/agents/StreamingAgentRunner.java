@@ -291,8 +291,8 @@ final class StreamingAgentRunner {
         // not just round 1 (JCLAW-76).
         var turnUsage = new LlmProvider.TurnUsage();
         // JCLAW-108: route the actual LLM call through the effective modelId,
-        // so conversation overrides take effect on the wire. Failover (line 706)
-        // and tool-loop continuations (line 781) use the same effective id.
+        // so conversation overrides take effect on the wire. Failover and
+        // tool-loop continuations use the same effective id.
         var effectiveModelIdForCall = ModelResolver.effectiveModelId(agent, conversation);
         // Round-1 stream, with a transient-5xx retry and (JCLAW) an audio-format-rejection →
         // Whisper-transcript re-stream. When the audio fallback fires it rewrites the message to the

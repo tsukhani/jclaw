@@ -61,7 +61,6 @@ public final class TelegramWebhookRateLimiter {
             }
             long start = existing.windowStartMs.get();
             if (now - start >= windowMs) {
-                // Window elapsed — roll over to a fresh window.
                 existing.windowStartMs.set(now);
                 existing.count.set(0);
             }

@@ -131,14 +131,10 @@ public final class WhatsAppCobaltChannel implements Channel {
         }
     }
 
-    /**
-     * Build an outbound image message. Cobalt's media builders route through
-     * {@code it.auties.whatsapp.util.Medias}, whose {@code com.aspose.words} link is
-     * satisfied by the PDFBox-backed shim (JCLAW-451), so this normally succeeds.
-     * The {@link LinkageError} catch is a defensive guard: were the shim ever absent
-     * the class would fail to link, and we degrade to a logged null (→
-     * {@link SendResult#FAILED}) rather than let an {@link Error} escape the send.
-     */
+    /** Build an outbound image message. The {@link LinkageError} catch is defensive: were
+     *  the {@code com.aspose.words} shim (JCLAW-451) ever absent, Cobalt's media builder
+     *  would fail to link, and we degrade to a logged null ({@link SendResult#FAILED})
+     *  rather than let an {@link Error} escape the send. */
     private static ImageMessage buildImage(
             byte[] bytes, String mime, String caption) {
         try {

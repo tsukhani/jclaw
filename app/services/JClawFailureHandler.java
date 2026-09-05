@@ -155,13 +155,9 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                         "Task '%s' failed (%s) after %d attempt(s): %s"
                                 .formatted(outcome.taskName(), reason,
                                         outcome.attempts(), errorMessage));
-                // JCLAW-21 lifecycle audit: TASK_FAILED bookmark. Sibling
-                // to TASK_STARTED / TASK_COMPLETED emitted by TaskExecutor.
-                // Fired only when the failure is terminal — transient
-                // retries emit the WARN under "task" category above.
-                // Pass both the classification (permanent vs exhausted) and
-                // the raw error message so dashboards can group by class
-                // while still showing the operator what actually happened.
+                // JCLAW-21 lifecycle audit: TASK_FAILED, sibling to TASK_STARTED / TASK_COMPLETED
+                // in TaskExecutor. Both the classification (permanent vs exhausted) and the raw
+                // message go out so dashboards can group by class while still showing what happened.
                 TaskLifecycleEvents.recordFailed(outcome.task(), outcome.runForLifecycle(),
                         reason, errorMessage);
             }
@@ -228,11 +224,6 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                 task.name, agentName, budget, 0L, currentRetry + 1);
     }
 
-    /**
-     * Best-effort human message for a failure: prefer the throwable's
-     * own message, fall back to its simple class name, and finally
-     * "Unknown error" when there is no throwable at all.
-     */
     private static String describeError(Throwable throwable) {
         if (throwable == null) return "Unknown error";
         var msg = throwable.getMessage();

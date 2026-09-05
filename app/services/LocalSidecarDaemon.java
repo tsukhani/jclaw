@@ -92,11 +92,8 @@ public final class LocalSidecarDaemon {
      *  which the diarization facade holds across a multi-minute spawn. */
     private final Object tokenLock = new Object();
 
-    /** JCLAW-830 single-flight: only one thread spawns on the fixed port at a
-     *  time. Held across spawn + {@link #awaitHealthy()} so a second concurrent
-     *  starter waits for the in-flight spawn then re-checks health and no-ops,
-     *  rather than double-spawning. Deliberately NOT the lock {@link #stop()}
-     *  uses, so a stop never stalls behind the startup poll. */
+    /** JCLAW-830 single-flight lock, held across spawn + {@link #awaitHealthy()}; see
+     *  {@link #singleFlight(Supplier)}. Deliberately NOT the lock {@link #stop()} uses. */
     private final ReentrantLock startLock = new ReentrantLock();
 
     /** JCLAW-830 short-held publication guard for {@link #process} and the drain

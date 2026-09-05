@@ -99,7 +99,6 @@ public final class AcpCapabilityCatalog {
             if (cap.note() != null) detail += " (" + cap.note() + ")";
             return new Classification(NATIVE, detail);
         }
-        // adapter
         if (cap.adapterBinary() == null) {
             // ACP rides the harness's own binary (codex app-server).
             return harnessAvailable

@@ -260,7 +260,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
             return "Error: " + e.getMessage();
         }
 
-        // Timeout
         var defaultTimeout = ConfigService.getInt("shell.defaultTimeoutSeconds", 30);
         var maxTimeout = ConfigService.getInt("shell.maxTimeoutSeconds", 300);
         var timeout = defaultTimeout;
@@ -269,10 +268,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             if (timeout <= 0) timeout = defaultTimeout;
         }
 
-        // Max output
         var maxOutputBytes = ConfigService.getInt("shell.maxOutputBytes", 102400);
 
-        // Build environment
         var env = buildEnvironment(args);
 
         // Operator audit line: exec runs are dangerous()=true, so record each one
@@ -282,7 +279,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 command.length() > 200 ? command.substring(0, 200) + "…" : command,
                 why.isEmpty() ? "" : " — why: " + why));
 
-        // Execute
         return executeCommand(command, workdir, timeout, maxOutputBytes, env, startTime, agent);
     }
 
@@ -440,7 +436,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
         // Start with the shared secret-filtered host environment (JCLAW-779).
         var env = SubprocessEnv.filteredHostEnv();
 
-        // Merge custom env vars (blocking sensitive names)
         if (args.has("env") && args.get("env").isJsonObject()) {
             var customEnv = args.getAsJsonObject("env");
             for (var key : customEnv.keySet()) {

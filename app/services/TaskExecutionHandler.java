@@ -65,8 +65,7 @@ public final class TaskExecutionHandler {
      * JClaw task fire. Stable identifier — operator-visible in the
      * scheduled_tasks table for diagnostics, and the lookup key both
      * scheduling (TaskSchedulingService) and dead-execution recovery
-     * (BootConsistencyCheck — both subsequent JCLAW-21 commits) use to
-     * find this Task definition.
+     * (BootConsistencyCheck) use to find this Task definition.
      */
     public static final String TASK_NAME = "jclaw-task-fire";
 
@@ -157,10 +156,8 @@ public final class TaskExecutionHandler {
                 return scheduleNextIfRecurring(jclawTask);
             }
             try {
-                // Drive the fire. Any RuntimeException propagates to
-                // JClawFailureHandler (wired in via .onFailure above)
-                // which decides retry-with-backoff vs permanent fail
-                // based on TransientErrorClassifier.
+                // Any RuntimeException propagates to JClawFailureHandler (.onFailure above),
+                // which picks retry-with-backoff vs permanent fail via TransientErrorClassifier.
                 TaskExecutor.runTask(jclawTask);
 
                 return scheduleNextIfRecurring(jclawTask);
@@ -223,7 +220,6 @@ public final class TaskExecutionHandler {
         for (int i = 0; i < FIND_TASK_ATTEMPTS; i++) {
             Task t = Tx.run(() -> (Task) Task.findById(taskId));
             if (t != null) return t;
-            // Skip the wait after the last attempt; we've done all we can.
             if (i < FIND_TASK_ATTEMPTS - 1 && !backoffWait()) {
                 return null;
             }

@@ -19,10 +19,8 @@ public class EventLogger {
     /** Category for rejected webhooks that failed platform signature verification (JCLAW-16). */
     public static final String WEBHOOK_SIGNATURE_FAILURE = "WEBHOOK_SIGNATURE_FAILURE";
 
-    // JCLAW-272: Subagent lifecycle event taxonomy. Emission lands later
-    // (JCLAW-265 spawn, JCLAW-266 limit exceeded, JCLAW-270/273 completion);
-    // this story only establishes the categories and typed signatures so
-    // those call sites have a clean target.
+    // JCLAW-272: subagent lifecycle event taxonomy, emitted by JCLAW-265 (spawn),
+    // JCLAW-266 (limit exceeded) and JCLAW-270/273 (completion).
     public static final String SUBAGENT_SPAWN = "SUBAGENT_SPAWN";
     public static final String SUBAGENT_COMPLETE = "SUBAGENT_COMPLETE";
     public static final String SUBAGENT_ERROR = "SUBAGENT_ERROR";

@@ -103,11 +103,9 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     @Override
     public void init() throws IOException {
         LuceneIndexer.open();
-        // Pre-v1 wipe path: an empty index after open() means either
-        // first boot OR an operator wiped data/jclaw-lucene/ explicitly.
-        // Either way, the right move is to backfill from the JPA store
-        // — slow on a huge transcript history, but JClaw at pre-v1 has
-        // hundreds-to-low-thousands of rows.
+        // An empty or short index (first boot, or an operator wiped data/jclaw-lucene/) is
+        // backfilled from the JPA store — slow on a huge transcript history, but pre-v1 JClaw
+        // has hundreds-to-low-thousands of rows.
         // JCLAW-1052: an analyzer change re-tokenizes every document, and the count
         // comparison below does not move. Without this the old index keeps answering
         // with the previous tokenization, so the new query terms match nothing and search
@@ -440,8 +438,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     }
 
     private static List<TaskRunMessage> hydrateTaskRunMessagesInOrder(List<Long> ids) {
-        // Bulk-fetch JPA rows, then re-order to match Lucene's relevance
-        // ranking. Same pattern as the prior H2-backed impl.
+        // Bulk-fetch JPA rows, then re-order to match Lucene's relevance ranking.
         var rows = Tx.run(() -> {
             @SuppressWarnings("unchecked")
             var raw = JPA.em()

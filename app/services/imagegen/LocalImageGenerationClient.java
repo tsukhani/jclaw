@@ -64,7 +64,6 @@ public class LocalImageGenerationClient implements ImageGenerationService {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
-        // In prod, ensure the daemon is up and get its base URL; in tests, use the override.
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : LocalImageSidecarManager.ensureRunning();
 
         var root = new JsonObject();

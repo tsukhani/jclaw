@@ -287,11 +287,8 @@ public class Task extends TimestampedModel {
      * {@link #script} (if set) or delivers {@link #description}
      * verbatim. Default false: tasks go through the agent like JCLAW-21.
      *
-     * <p>{@code @ColumnDefault("false")} is load-bearing: without it,
-     * Hibernate's hbm2ddl=update on existing DBs fails to add this NOT
-     * NULL column (existing rows have nothing to populate it with).
-     * The DEFAULT clause lets the ALTER succeed by backfilling
-     * existing rows before the constraint is enforced.
+     * <p>{@code @ColumnDefault} is load-bearing for the same reason as
+     * {@link #autoDeleteOnComplete}: the ALTER must backfill existing rows.
      */
     @Column(name = "no_agent", nullable = false)
     @ColumnDefault("false")

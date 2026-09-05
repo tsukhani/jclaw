@@ -257,8 +257,6 @@ public class DocumentsTool implements ToolRegistry.Tool {
         // renderDocument flow drafts into a .md file, then renders it with an
         // explicit format; without this a PDF/DOCX would be written to a path
         // still named ".md" — a file whose name misreports its contents.
-        // Retarget to the format's canonical extension whenever the path
-        // extension denotes a different format (or none).
         if (!resolved.equals(resolveFormat(null, relativePath))) {
             var corrected = withFormatExtension(target.getFileName().toString(), resolved);
             relativePath = replaceFinalSegment(relativePath, corrected);

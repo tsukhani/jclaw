@@ -1060,8 +1060,7 @@ public final class MemoryAutoCapture {
      * contract: non-object entries, missing/mis-typed fields, and
      * out-of-range indices are dropped; duplicate old-indices collapse. A
      * parse throw propagates to {@code parseSupersessions}' catch, which
-     * discards the whole batch — same fail-open behavior as before the
-     * extraction.
+     * discards the whole batch (fail-open).
      */
     private static void addSupersessionIfValid(JsonElement el, int newCount, int existingCount,
             Map<Integer, List<Integer>> out) {

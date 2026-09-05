@@ -70,15 +70,10 @@ public final class LoadTestHarness {
     }
 
     private static final Object lock = new Object();
-    // AtomicReference rather than `volatile HttpServer` so the type signature
-    // unambiguously says "atomic reference, not atomic state" — Sonar's
-    // S3077 fires on volatile non-primitive fields because volatile only
-    // protects the reference read/write, not operations on the object
-    // itself, and a future maintainer reading `volatile HttpServer` could
-    // plausibly assume thread-safe access to the server's internal state.
-    // All writes still happen inside synchronized(lock); the atomic wrapper
-    // is the fast-path for unsynchronized readers (isRunning(), port(),
-    // and the scheduler.get().schedule() call inside handle()).
+    // AtomicReference rather than `volatile HttpServer`: Sonar S3077 flags volatile
+    // non-primitive fields because volatile guards only the reference, not the object's
+    // state. All writes happen inside synchronized(lock); the atomic wrapper is the fast
+    // path for unsynchronized readers (isRunning(), port(), scheduler.get() in handle()).
     private static final AtomicReference<HttpServer> server =
             new AtomicReference<>();
     private static final AtomicReference<ScheduledExecutorService> scheduler =
@@ -143,11 +138,9 @@ public final class LoadTestHarness {
     private static int bindAndStart(int requestedPort) throws IOException {
         var s = HttpServer.create(new InetSocketAddress("127.0.0.1", requestedPort), 0);
         s.createContext("/v1/chat/completions", LoadTestHarness::handle);
-        // Handlers run on VTs to mirror the production agent-stream path —
-        // this lets a future codebase-side regression that affects VT
-        // scheduling surface in mock loadtests as well, instead of being
-        // hidden by a platform-thread mock harness. Per-chunk timing comes
-        // from the shared scheduler below, NOT from Thread.sleep on the VT.
+        // VTs mirror the production agent-stream path so a VT-scheduling regression surfaces
+        // in mock loadtests too. Per-chunk timing comes from the shared scheduler below, NOT
+        // from Thread.sleep on the VT.
         s.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         // Tiny platform-thread pool whose only job is to fire scheduled
         // chunk writes at their absolute deadlines. 2 threads is plenty
@@ -315,16 +308,10 @@ public final class LoadTestHarness {
                 : 20.0 * n;
         int frames = Math.max(1, Math.min(n, (int) Math.floor(totalMs)));
         double spacingMs = totalMs / frames;
-        // Per-call dedicated lock for serializing the per-stream write+flush
-        // pairs below. Replaces the prior `synchronized(out)` which Sonar
-        // flags as S2445 (synchronizing on a method parameter is a frequent
-        // source of bugs — caller could share the object, reentry could
-        // surprise, parameter could be null). Allocating a fresh Object per
-        // streamResponse call gives us per-stream serialization (the
-        // closure captures writeLock so all scheduled tasks for THIS
-        // stream share one mutex) without depending on the parameter's
-        // identity. Different streams get different writeLock instances
-        // and continue to write in parallel.
+        // Per-call lock for the write+flush pairs below rather than `synchronized(out)`,
+        // which Sonar flags as S2445 (synchronizing on a method parameter). The closure
+        // captures writeLock, so every scheduled task for THIS stream shares one mutex
+        // while different streams keep writing in parallel.
         final var writeLock = new Object();
         // One future per scheduled frame; the terminator goes out only once every one of
         // them has written. JCLAW-1141: it used to be written by whichever task carried the
@@ -362,14 +349,10 @@ public final class LoadTestHarness {
                     var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
                             + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\""
                             + content + "\"}}]}\n\n";
-                    // Serialize per-stream writes — out is the per-request
-                    // ChunkedOutputStream from HttpServer, and a write+flush
-                    // pair is the unit of HTTP chunk encoding. Without this
-                    // sync, two concurrently-firing scheduled tasks for the
-                    // same stream interleave bytes inside chunk-size headers
-                    // and the receiver throws "Illegal character in chunk
-                    // size: N". writeLock is per-call (allocated above), so
-                    // different streams' writes still proceed in parallel.
+                    // A write+flush pair is one HTTP chunk on HttpServer's ChunkedOutputStream;
+                    // without the lock two scheduled tasks for the same stream interleave bytes
+                    // inside chunk-size headers and the receiver throws "Illegal character in
+                    // chunk size: N".
                     synchronized (writeLock) {
                         out.write(chunk.getBytes(StandardCharsets.UTF_8));
                         out.flush();

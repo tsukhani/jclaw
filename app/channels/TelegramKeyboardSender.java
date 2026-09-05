@@ -32,9 +32,7 @@ final class TelegramKeyboardSender {
     /**
      * Send an HTML-formatted message with an inline keyboard attached
      * (JCLAW-109). Returns the new message id on success (so the caller
-     * can later {@code editMessageText} it), or null on failure. Single
-     * Bot API call — no chunking or planner pass, because keyboard
-     * messages stay well under the 4096-char limit by construction.
+     * can later {@code editMessageText} it), or null on failure.
      */
     Integer sendMessageWithKeyboard(String chatId,
                                     String htmlText, InlineKeyboardMarkup keyboard) {
@@ -49,10 +47,9 @@ final class TelegramKeyboardSender {
      * (null to omit) is General-stripped before being set. The shorter overload
      * preserves the legacy call sites.
      *
-     * <p>JCLAW-141: was a static {@code sendMessageWithKeyboard(botToken, ...)}
-     * entry point; now an instance method on the per-binding channel (token bound
-     * at construction). The inline-keyboard markup itself is Telegram-specific and
-     * out of scope for the generic {@link Channel} contract.
+     * <p>JCLAW-141: an instance method on the per-binding channel (token bound at
+     * construction) rather than part of the generic {@link Channel} contract — the
+     * inline-keyboard markup is Telegram-specific.
      */
     Integer sendMessageWithKeyboard(String chatId,
                                     String htmlText, InlineKeyboardMarkup keyboard,

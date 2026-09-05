@@ -103,9 +103,7 @@ public final class TaskExecutor {
         }
         final TaskRun run = runOpt.get();
 
-        // Cap persisted run history to the most recent MAX_RUNS_PER_TASK fires.
-        // Best-effort and in its own transaction (the run above is already
-        // committed), so a prune hiccup never fails the fire that just opened.
+        // After the run commits, so a prune hiccup never fails the fire that just opened.
         pruneRunHistory(task.id);
 
         // JCLAW-414: register the in-flight run so an operator cancel
@@ -167,7 +165,7 @@ public final class TaskExecutor {
 
     /**
      * JCLAW-260: resolve the user prompt for an agent fire. A blank
-     * description falls back to the task name (unchanged from before).
+     * description falls back to the task name.
      * For a genuine agent task an ordered step list in {@code description}
      * is flattened into a numbered prompt via
      * {@link TaskSteps#flattenForPrompt}. {@code noAgent} tasks (a shell
@@ -271,7 +269,6 @@ public final class TaskExecutor {
                         .setParameter("tid", taskId)
                         .setMaxResults(MAX_RUNS_PER_TASK)
                         .getResultList();
-                // Fewer rows than the cap means there is nothing to prune.
                 if (keepIds.size() < MAX_RUNS_PER_TASK) return null;
                 // JCLAW-673: collect the pruned transcript ids first so their
                 // TASK_RUN_MESSAGE full-text docs can be evicted — the bulk JPQL
@@ -400,8 +397,7 @@ public final class TaskExecutor {
             var c = (TaskRun) TaskRun.findById(run.id);
             if (c == null) return new Resolved(null, false);
             // Only when we'll actually dispatch delivery below — keeps the
-            // LIKE count off the no-delivery / non-COMPLETED paths exactly
-            // as before, when it lived inside dispatchDelivery.
+            // LIKE count off the no-delivery / non-COMPLETED paths.
             boolean dedup = deliveryConfigured
                     && c.status == TaskRun.Status.COMPLETED
                     && deliveredViaMessageTool(c.id);
@@ -476,16 +472,10 @@ public final class TaskExecutor {
         // Dedup: if the fire-time agent already pushed via the `message` tool
         // (e.g. a Radarr-monitor-style progress update), the assistant's final
         // reply was a follow-up to that push, not the user-facing payload —
-        // auto-delivering it would land a duplicate in the chat. Detection is
-        // a substring scan of TaskRunMessage.tool_calls JSON because the JSON
-        // shape (`{"function":{"name":"message"…}}`) is stable across providers
-        // (see {@link llm.LlmTypes.ToolCall}). False positives would need
-        // another tool literally named "message", which the registry disallows
-        // since tool names are uniqued. Reminders skip the dedup — their
-        // fire path doesn't invoke the message tool, so the scan can't
-        // produce a meaningful signal. The signal is precomputed in
-        // finalizeRun's re-read Tx (see {@link Resolved}) so the read
-        // shares that transaction rather than opening its own.
+        // auto-delivering it would land a duplicate in the chat. Reminders skip
+        // the dedup — their fire path doesn't invoke the message tool. The
+        // signal is precomputed in finalizeRun's re-read Tx (see {@link Resolved})
+        // so the read shares that transaction rather than opening its own.
         //
         // JCLAW-1017: the tool being *called* was never the right test, and both
         // false positives lost the run's output entirely. A call that errored —

@@ -200,6 +200,4 @@ public final class ProviderRegistry {
             return BigDecimal.ZERO;
         }
     }
-
-    // Provider instantiation delegated to LlmProvider.forConfig() — see Fix 4 (OCP).
 }

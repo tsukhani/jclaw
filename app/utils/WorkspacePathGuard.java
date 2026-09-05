@@ -70,12 +70,8 @@ public final class WorkspacePathGuard {
             var target = rootAbs.resolve(relativePath).normalize();
             if (!target.startsWith(rootAbs)) return null;
 
-            // Layer 2: canonical with missing-suffix walk-up. Read-only — never
-            // creates the root or any parent. Both the root and the target are
-            // canonicalized by realpath'ing their deepest existing ancestor
-            // (which resolves symlinks in the existing prefix) and re-attaching
-            // the not-yet-created tail; a symlink inside the root that points to
-            // /etc passes step 1 but fails the containment check here.
+            // Layer 2: canonical with missing-suffix walk-up (see canonicalize). Read-only —
+            // never creates the root or any parent.
             var rootReal = canonicalize(rootAbs);
             var canonical = canonicalize(target);
             if (rootReal == null || canonical == null) return null;

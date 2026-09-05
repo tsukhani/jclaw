@@ -20,9 +20,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * the qualified names {@code LlmProvider.StreamAccumulator} and
  * {@code LlmProvider.TurnUsage} keep resolving (as inherited member types)
  * across {@code app/agents} (StreamingAgentRunner, ToolCallLoopRunner,
- * UsageMetricsBuilder, CancellationManager). Those call sites are outside this
- * change's editable scope, so the public surface stays byte-for-byte identical
- * to the former nested types.
+ * UsageMetricsBuilder, CancellationManager).
  */
 interface LlmStreamCarriers {
 

@@ -132,9 +132,6 @@ public final class MessageSearch {
         // The direct Lucene-10 backend works against any JDBC dialect —
         // it owns its own filesystem index and stays in sync via
         // TaskRunMessage's JPA lifecycle hooks rather than DB triggers.
-        // Postgres operators who specifically want tsvector + GIN still
-        // get the Postgres-native skeleton; everyone else gets the
-        // direct Lucene path.
         try {
             String productName;
             try (var conn = DB.getDataSource().getConnection()) {

@@ -285,7 +285,6 @@ public class DocumentWriter {
             currentParagraph = p;
             var markerRun = p.createRun();
             markerRun.setText(marker);
-            // Render the item's inline content.
             for (Node child = item.getFirstChild(); child != null; child = child.getNext()) {
                 if (child instanceof Paragraph para) {
                     emitInline(para, false, false, false, false, BODY_FONT_SIZE, null);

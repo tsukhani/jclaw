@@ -96,7 +96,6 @@ public class WebhookWhatsAppController extends Controller {
             return;
         }
 
-        // Route to the binding by the payload's phone_number_id.
         var phoneNumberId = WhatsAppCloudApiParser.extractPhoneNumberId(payload);
         var binding = WhatsAppBinding.findByPhoneNumberId(phoneNumberId);
         if (binding == null || !binding.enabled

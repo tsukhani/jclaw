@@ -165,12 +165,10 @@ public class DateTimeTool implements ToolRegistry.Tool {
     private String calculate(JsonObject args) {
         var zone = resolveZone(args, ARG_TIMEZONE);
 
-        // Difference between two timestamps
         if (args.has(ARG_END_TIMESTAMP)) {
             return computeDifference(args, zone);
         }
 
-        // Add/subtract duration
         if (!args.has(ARG_AMOUNT) || !args.has("unit")) {
             return "Error: 'amount' and 'unit' are required for calculate (or provide 'endTimestamp' for difference)";
         }

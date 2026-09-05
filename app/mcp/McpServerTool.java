@@ -154,9 +154,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
                     "Error parsing arguments for MCP server '" + serverName + "': " + e.getMessage());
         }
 
-        // Empty-args / no `tool` field → discovery catalog of available actions.
-        // This is the bootstrap call: the model uses the returned schemas to
-        // construct subsequent populated invocations.
+        // No `tool` → discovery catalog; the model builds its populated calls from the schemas.
         if (!args.has("tool") || args.get("tool").isJsonNull()
                 || args.get("tool").getAsString().isBlank()) {
             return enumerateActions();
@@ -173,14 +171,10 @@ public final class McpServerTool implements ToolRegistry.Tool {
         // guarantees as legacy direct-action invocations.
         var adapter = ToolRegistry.lookupTool(McpServer.toolName(serverName, actionName));
         if (adapter == null) {
-            // Tool not registered: server may not be connected, action may
-            // be misspelled, or the server's tool list may have changed
-            // since the model last enumerated. Return a compact name list
-            // (no schemas) so the model can self-correct on the next turn
-            // without re-ingesting the full action catalog — a server with
-            // many actions can otherwise push the corrected-turn prompt
-            // tens of thousands of tokens past what's needed for a typo
-            // fix, dragging time-to-first-token into the minute range.
+            // Server down, action misspelled, or tool list changed since the model last
+            // enumerated. Names only (no schemas) so the model can self-correct next turn
+            // without re-ingesting the full catalog, which on a large server pushes the prompt
+            // tens of thousands of tokens and time-to-first-token into the minute range.
             return ToolRegistry.ToolResult.text(
                     "MCP server '" + serverName + "' has no action named '" + actionName + "'. "
                             + envelopeHint(actionName, args)

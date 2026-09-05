@@ -15,7 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class TelegramClientCache {
 
-    /** Per-token instances. */
     private static final ConcurrentHashMap<String, TelegramChannel> INSTANCES = new ConcurrentHashMap<>();
 
     private TelegramClientCache() {}

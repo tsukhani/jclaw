@@ -35,10 +35,8 @@ public class ConfigService {
 
     // The cache stores Optional<String> rather than String so we can distinguish
     // "key absent in DB" (empty Optional, cached) from "key not yet fetched"
-    // (cache miss, triggers a DB lookup). The previous hand-rolled cache
-    // achieved the same by storing String|null in CachedValue, but the typed
-    // Caches.get(key, loader) returns null for a null loader result instead
-    // of caching the absence — wrapping in Optional preserves negative caching.
+    // (cache miss, triggers a DB lookup): the typed Caches.get(key, loader) returns
+    // null for a null loader result instead of caching the absence.
     private static final Cache<String, Optional<String>> cache = Caches.named(
             "config",
             CacheConfig.newBuilder()
@@ -47,8 +45,7 @@ public class ConfigService {
 
     public static String get(String key) {
         // get(key, loader) provides single-flight semantics — concurrent misses
-        // for the same key invoke the loader at most once, replacing the prior
-        // hand-rolled merge()-based reconciliation.
+        // for the same key invoke the loader at most once.
         return cache.get(key, k -> {
             var config = Tx.run(() -> Config.findByKey(k));
             // JCLAW-1022: privileged keys are capped by application.conf, which the config table
@@ -186,8 +183,7 @@ public class ConfigService {
 
     /**
      * Validate, persist, and trigger side effects for a config key/value.
-     * Encapsulates the shell-privilege guard, provider sync, and tool re-registration
-     * that were previously spread across the controller.
+     * Encapsulates the shell-privilege guard, provider sync, and tool re-registration.
      *
      * @return an error message if the key is rejected, or {@code null} on success
      */

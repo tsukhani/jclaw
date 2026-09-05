@@ -160,14 +160,8 @@ final class SubagentAcpRunner {
                                                  Conversation childConv, String task, boolean inlineMode) {
         var acpCommand = ACP_RUNS.remove(runId);
         if (acpCommand != null) {
-            // JCLAW-669: a coding-harness run whose ORIGIN is an unsafe channel
-            // (anything but the operator's web chat) must be operator-approved
-            // before the process launches — an inbound Telegram/Slack message
-            // can prompt-inject an agent into spawning arbitrary code
-            // execution. Web spawns pass untouched (the pi -p / claude -p
-            // uninterrupted contract); Telegram/Slack route through the
-            // existing DangerousActionGate approval prompt; other channels
-            // follow tool.approval.offChannelPolicy.
+            // JCLAW-669: gate an unsafe-origin run before the process launches (see
+            // enforceChannelApproval for the per-channel policy).
             enforceChannelApproval(runId, childAgent, task);
             // JCLAW-657 (finding A): scope the harness's cwd to a configured
             // workdir or the child agent's workspace instead of the backend's

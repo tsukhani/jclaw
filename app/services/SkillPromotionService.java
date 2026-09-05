@@ -32,7 +32,7 @@ import static java.util.stream.Collectors.joining;
  *
  * <p>This service owns the multi-step workflows (hash comparison, version
  * checks, malware scanning, directory structure enforcement, LLM sanitization,
- * atomic staging) that were previously inlined in the controller.
+ * atomic staging).
  */
 public class SkillPromotionService {
 
@@ -44,7 +44,6 @@ public class SkillPromotionService {
     private static final String TOOLS_DIR_PREFIX = "tools/";
     private static final String CREDENTIALS_DIR_PREFIX = "credentials/";
 
-    // Event-log category for all skill-related entries emitted by this service.
     private static final String EVENT_CATEGORY_SKILLS = "skills";
 
     // Notification keys used when publishing promotion failures.
@@ -122,11 +121,8 @@ public class SkillPromotionService {
                             Files.copy(source, staged, StandardCopyOption.REPLACE_EXISTING);
                         }
                     } catch (IOException ex) {
-                        // Append the cause's message so the eventual log/banner
-                        // shows the actual reason (Permission denied, file not
-                        // found, target read-only filesystem, etc.) rather than
-                        // just the source path. The cause itself is preserved
-                        // for stack-trace diagnostics.
+                        // Append the cause's message so the log/banner shows the actual
+                        // reason (Permission denied, read-only fs, …) rather than just the path.
                         throw new UncheckedIOException(
                                 "Failed to copy " + source.toAbsolutePath() + ": " + ex,
                                 ex);
@@ -134,8 +130,8 @@ public class SkillPromotionService {
                 });
             }
         });
-        // Refresh the skill cache now the swap is visible — used to live inside the
-        // (now generic) stageAndSwap; the orchestrator owns this policy post-swap.
+        // Refresh the skill cache now the swap is visible — stageAndSwap is generic,
+        // so the orchestrator owns this policy.
         SkillLoader.clearCache();
 
         // ── Snapshot per-agent allowlist contribution from the registry ──
@@ -221,10 +217,8 @@ public class SkillPromotionService {
     public static void promoteInBackground(Path skillDir, String skillName, Long agentId) {
         EventLogger.info(EVENT_CATEGORY_SKILLS, "Starting background promotion of '%s'".formatted(skillName));
 
-        // ── Capability gate: only agents with skill-creator installed + enabled may promote ──
         if (!checkCapabilityGate(skillName, agentId)) return;
 
-        // ── Hash-based noop check ──
         if (skipForGlobalCheck(skillDir, skillName)) return;
 
         publishToGlobal(skillDir, skillName);
@@ -241,31 +235,23 @@ public class SkillPromotionService {
      * the refusal is already logged + notified.
      */
     public static boolean publishToGlobal(Path skillDir, String skillName) {
-        // ── Malware scan ──
         if (!checkMalwareScan(skillDir, skillName)) return false;
 
-        // ── Read source files ──
         var sourceTextFiles = new LinkedHashMap<String, String>();
         var sourceBinaryFiles = new ArrayList<String>();
         if (!readSourceFiles(skillDir, sourceTextFiles, sourceBinaryFiles)) return false;
 
-        // ── Enforce directory structure ──
         var textFiles = enforceTextFileStructure(sourceTextFiles);
         var binaryFiles = enforceBinaryFileStructure(sourceBinaryFiles);
 
-        // ── Strip credentials ──
         stripCredentialFiles(textFiles);
 
-        // ── Preserve SKILL.md frontmatter ──
         SkillLoader.FrontmatterSplit originalSplit = stashFrontmatter(textFiles);
 
-        // ── LLM sanitization ──
         var sanitized = sanitizeWithLlm(textFiles);
 
-        // ── Reinject frontmatter ──
         reinjectFrontmatter(originalSplit, sanitized);
 
-        // ── Atomic write to global registry ──
         writeToGlobalRegistry(skillDir, skillName, sanitized, binaryFiles);
         return true;
     }
@@ -472,11 +458,8 @@ public class SkillPromotionService {
         var backupDir = globalDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
         var replacingExisting = Files.isDirectory(targetDir);
 
-        // Stamp the system-managed version onto SKILL.md before staging: 1.0.0
-        // for a brand-new skill, an auto patch-bump for a materially-changed
-        // re-publish. Conformance + promotion deliberately leave version: out of
-        // frontmatter, so this write path is where it's assigned — without it an
-        // imported skill reads back as 0.0.0.
+        // The system-managed version is assigned on this write path — without it
+        // an imported skill reads back as 0.0.0.
         stampSkillVersion(sanitized, targetDir);
 
         try {
@@ -489,11 +472,7 @@ public class SkillPromotionService {
             });
             SkillLoader.clearCache();
 
-            // ── Update registry allowlist blessings ──
-            // Rewrite SkillRegistryTool rows from the just-promoted SKILL.md's
-            // {@code commands:} frontmatter list. Idempotent: clear prior rows
-            // for this skill, insert new ones. Un-promotion (future delete
-            // endpoint) must mirror the delete.
+            // Un-promotion (future delete endpoint) must mirror this row rewrite.
             syncRegistryToolRows(skillName, targetDir);
 
             var action = replacingExisting ? "replaced" : "created";

@@ -68,12 +68,9 @@ import java.util.concurrent.TimeUnit;
  * {@link OkHttpClient} via {@link SsrfGuard#buildGuardedClient} with the full
  * private-range block; that lives separately because its constraint differs.
  *
- * <p>This class replaces the prior {@code LlmOkHttpClient} +
- * {@code OkHttpClients} static-field holders, which exposed mutable
- * shared resources as public constants — anti-OO, hard to substitute in
- * tests, low cohesion across two near-identical files. The factory-method
- * shape gives a single Information Expert, declared intent at every call
- * site, and a single place to evolve tuning.
+ * <p>The factory-method shape (never public static client fields) gives a
+ * single Information Expert, declared intent at every call site, and a
+ * single place to evolve tuning.
  *
  * <p><b>Per-call timeouts.</b> Use {@link okhttp3.Call#timeout()
  * Call.timeout()} on the returned call, not a derived client. That sets

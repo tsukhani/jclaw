@@ -509,7 +509,7 @@ public final class ContextWindowManager {
             chars += contentChars(msg.content());
             chars += toolCallChars(msg.toolCalls());
         }
-        return chars / 4; // rough approximation: ~4 chars per token
+        return chars / 4;
     }
 
     /**

@@ -152,9 +152,7 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
             if (run == null) {
                 return "Error: no SubagentRun found for runId " + runId + ".";
             }
-            // Parent-ownership gate: a subagent transcript is readable only by the
-            // parent agent that spawned it. Single-operator Personal Edition has no
-            // operator/RBAC concept, so this strict parentAgent equality is the whole gate.
+            // Parent-ownership gate — the whole permission model (see class doc) is this equality.
             if (run.parentAgent == null || !callingAgentId.equals(run.parentAgent.id)) {
                 return "Error: runId " + runId + " is not owned by the calling agent.";
             }

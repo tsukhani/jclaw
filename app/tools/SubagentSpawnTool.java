@@ -259,9 +259,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     @Override
     public String description() {
-        // The optional-argument roll-call that used to live here duplicated every parameter's
-        // own description verbatim (context, async and runTimeoutSeconds were word-for-word).
-        // Only the Task-vs-subagent routing rule has no parameter to live on, so it stays.
+        // Only the Task-vs-subagent routing rule has no parameter of its own to live on;
+        // every optional argument is described on its parameter, not repeated here.
         return """
                 Spawn a child subagent to carry out a task on your behalf. The child runs \
                 in its own fresh conversation and you receive its final assistant reply. \

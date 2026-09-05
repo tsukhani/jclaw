@@ -182,12 +182,8 @@ public final class TelegramReactionNotifier {
                                       ReactionDelta reaction) {
         if (agent == null || reaction == null || reaction.chatId() == null) return;
         String mode = reactionNotifyMode();
-        // JCLAW-383: under mode=own in a group, the message_reaction update
-        // doesn't carry the reacted message's author — so we can't tell from the
-        // update alone whether it was a bot message. Consult the bot-sent-id
-        // cache: a hit means the reacted message is one we sent, so own should
-        // notify; a miss (or cold cache after restart) keeps own group-silent.
-        // Only own consults the cache — off/all ignore it, so skip the lookup.
+        // JCLAW-383: only own consults the bot-sent-id cache (a group message_reaction
+        // update omits the reacted message's author) — off/all ignore it, so skip the lookup.
         boolean botSent = NOTIFY_OWN.equals(mode)
                 && TelegramChannel.wasSentByBot(botToken, reaction.chatId(), reaction.messageId());
         if (!shouldNotifyReaction(mode, reaction.chatType(), botSent)) return;

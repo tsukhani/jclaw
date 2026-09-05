@@ -29,9 +29,8 @@ public final class TaskService {
      * JCLAW-153: recurring-task name conflicts for the create path. Returns the
      * tasks sharing {@code name} + {@code agent} whose type is CRON or INTERVAL
      * and status is not CANCELED — the set {@code ApiTasksController.create}
-     * inspects to 409 a duplicate recurring task. Exposes the inline
-     * {@code Task.find(...)} at that create site so the controller no longer
-     * calls a raw JPA finder. Relies on the caller's ambient transaction.
+     * inspects to 409 a duplicate recurring task. Relies on the caller's
+     * ambient transaction.
      *
      * <p>Ordered by {@code id} so callers taking {@code getFirst()} report a
      * deterministic conflict (the oldest matching task) rather than an arbitrary

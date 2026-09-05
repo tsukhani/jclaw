@@ -70,16 +70,11 @@ public final class PostgresMessageSearchRepository implements MessageSearchRepos
 
     @Override
     public List<Long> searchIds(LuceneIndexer.Scope scope, String query, int limit) {
-        // JCLAW-304: same skeleton stance as search(String, int). The
-        // multi-scope id-only path will land in the same migration
-        // story that wires up the search_vector column + GIN index per
-        // indexed table. Until then, every caller getting an empty list
-        // (the no-op contract) is more useful than an exception — the
-        // list endpoints fall back to their equality-only filtering and
-        // the operator sees "no FTS results" rather than a stack trace.
-        // The single-arg search() throws because the legacy
-        // /api/task-runs/search endpoint has no equality fallback and
-        // a silent empty result would mask the missing migration.
+        // JCLAW-304: empty rather than throw — the list endpoints fall back to
+        // equality-only filtering, so "no FTS results" beats a stack trace.
+        // search(String, int) throws because the legacy /api/task-runs/search
+        // endpoint has no such fallback and a silent empty result would mask
+        // the missing migration.
         return List.of();
     }
 

@@ -54,7 +54,6 @@ public final class SkillSanitizer {
             """;
 
     public static LinkedHashMap<String, String> sanitize(LinkedHashMap<String, String> fileContents) {
-        // Resolve provider and model — prefer dedicated sanitization config, fall back to main agent
         var configProvider = ConfigService.get("skillsPromotion.provider");
         var configModel = ConfigService.get("skillsPromotion.model");
         int batchKb = ConfigService.getInt("skillsPromotion.batchSizeKb", DEFAULT_BATCH_KB);
@@ -68,7 +67,6 @@ public final class SkillSanitizer {
             modelId = configModel;
         }
 
-        // Fall back to main agent's provider/model if not explicitly configured
         if (provider == null || modelId == null || modelId.isBlank()) {
             Agent mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
             if (mainAgent == null) {

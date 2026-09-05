@@ -39,10 +39,8 @@ import java.util.List;
  *
  * <p>The composite index on {@code (task_run_id, turn_index)} matches the
  * PeekPanel's expected "load all messages for this TaskRun in order"
- * query. The content column will additionally be registered with H2's
- * FullTextLucene (FTL_*) index from {@code FullTextSearchInitJob} in a
- * subsequent JCLAW-21 commit; no JPA-level {@code @Index} is declared
- * for it because Hibernate doesn't manage the FTL_* index.
+ * query. {@code content} carries no JPA {@code @Index}: full-text search on
+ * it is served by the Lucene index the lifecycle hooks below maintain.
  *
  * <p>Part of JCLAW-21's Tasks foundation. Schema is managed by Hibernate
  * auto-DDL ({@code jpa.ddl=update}); no separate migration file required.
@@ -115,8 +113,7 @@ public class TaskRunMessage extends Model {
      * Mirror this row into the Lucene full-text index. Fires after each
      * persist or update of the JPA row; the indexer catches and logs
      * failures internally so a transient FS issue never aborts the
-     * parent transaction. Replaces the H2 FullTextLucene trigger that
-     * lived inside the H2 database file pre Lucene-10 migration.
+     * parent transaction.
      */
     @PostPersist
     @PostUpdate
@@ -127,10 +124,7 @@ public class TaskRunMessage extends Model {
         }
     }
 
-    /**
-     * Drop this row from the Lucene index. Mirror of the H2 DELETE
-     * trigger; same no-throw contract as the upsert hook.
-     */
+    /** Drop this row from the Lucene index; same no-throw contract as the upsert hook. */
     @PostRemove
     void onIndexRemove() {
         if (id != null) {

@@ -641,14 +641,6 @@ public final class TelegramPollingRunner {
         });
     }
 
-    // ===== JCLAW-831: reaction / forward / error-classification moved out =====
-    //
-    // The transport-agnostic reaction parsing + notification gating, forwarded-
-    // message detection, and polling-error classification now live on
-    // TelegramReactionNotifier. The poll loop above delegates to it (dispatch /
-    // registerInternal / tokenRejectedByTelegram) so a webhook-only deployment no
-    // longer has to depend on this POLLING class for that logic.
-
     /**
      * JCLAW-831: reaction handling moved to {@link TelegramReactionNotifier}. This
      * delegating shim is retained because {@link TelegramChannel}'s

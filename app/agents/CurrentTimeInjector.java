@@ -104,13 +104,9 @@ public final class CurrentTimeInjector {
      * Return a copy of {@code messages} with the clock appended as its own
      * trailing message. Returns the input unchanged for an empty list.
      *
-     * <p>JCLAW-900: this used to merge the block into the last user message.
-     * That mutated a message which, one turn later, ships as history WITHOUT the
-     * block — so the message's content differed depending on whether it happened
-     * to be newest, and a block-caching provider's prefix broke there every turn.
-     * Measured on the shipped path: {@code cached} froze at the system-message
-     * size while the re-written tail grew 500, 595, 689 tokens over three turns,
-     * each re-write paying Anthropic's 1.25x cache-write premium.
+     * <p>JCLAW-900: this used to merge the block into the last user message, which
+     * broke a breakpoint-caching provider's prefix every turn (measurements in the
+     * class Javadoc).
      *
      * <p>As a separate message the clock is never merged into anything, so every
      * history message is byte-stable and the cacheable prefix grows with the

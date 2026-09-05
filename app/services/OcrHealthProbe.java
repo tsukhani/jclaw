@@ -63,7 +63,7 @@ public class OcrHealthProbe {
      * probe ({@link jobs.TesseractProbeJob}) forever — the shared helper caps
      * the wait and {@code destroyForcibly()}'s a hung child, yielding an
      * unavailable result instead of hanging. On success the printed version's
-     * first line is surfaced as before.
+     * first line is surfaced.
      */
     public static ProbeResult probe() {
         var r = ExecutableProbeSupport.probeCapturing(tesseractCommand(), "--version", "");

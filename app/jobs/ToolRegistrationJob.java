@@ -68,8 +68,6 @@ public class ToolRegistrationJob extends Job<Void> {
         // (per-agent disable still applies); only useful once content
         // compression is enabled and has left a retrieval marker.
         toolList.add(new CcrRetrieveTool());
-        // JClaw user-guide lookup: answers chat questions about JClaw's own
-        // features/usage by searching the bundled docs/user-guide/ markdown.
         toolList.add(new UserGuideTool());
         toolList.add(new CheckListTool());
         // JCLAW-919: recall is why this exists — prompt assembly queries memory once per
@@ -90,12 +88,8 @@ public class ToolRegistrationJob extends Job<Void> {
         // page; per-agent disable still applies, and printing is physical and
         // irreversible, so most agents should leave it off.
         toolList.add(new PrinterTool());
-        // JCLAW-172: PlaywrightBrowserTool and ShellExecTool used to be gated
-        // on global `playwright.enabled` / `shell.enabled` config keys, but
-        // that duplicated the per-agent enable that already lives on the
-        // Tools page (each agent's AgentToolConfig row decides binding).
-        // Both register unconditionally now; per-agent disable still hides
-        // them from any agent that doesn't want them.
+        // JCLAW-172: registered unconditionally — the old global `playwright.enabled` / `shell.enabled`
+        // gates duplicated the per-agent enable on the Tools page (each agent's AgentToolConfig row decides).
         toolList.add(new PlaywrightBrowserTool());
         toolList.add(new ShellExecTool());
         // JCLAW-282: in-process JClaw API tool. Registered globally so the
@@ -103,8 +97,7 @@ public class ToolRegistrationJob extends Job<Void> {
         // every non-main agent so only main can actually invoke it
         // (defense in depth alongside the skill-not-installed gate).
         toolList.add(new JClawApiTool());
-        // JCLAW-265: subagent_spawn. Recursion limits and async path land
-        // later (JCLAW-266, JCLAW-270) — this is the synchronous primitive.
+        // JCLAW-265: subagent_spawn — the synchronous primitive; recursion limits and the async path are JCLAW-266 / JCLAW-270.
         toolList.add(new SubagentSpawnTool());
         // JCLAW-273: subagent_yield. Companion tool to async spawn —
         // flips SubagentRun.yielded so the announce VT posts a USER-role
@@ -131,10 +124,7 @@ public class ToolRegistrationJob extends Job<Void> {
         // subagents spawned inside a channel-bound thread can reply
         // upstream without hardcoding credentials.
         toolList.add(new MessageTool());
-        // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
-        // MCP server's own surface — the model calls mcp_<server> with
-        // empty args to enumerate that server's actions, registered by
-        // McpConnectionManager.republishTools.
+        // JCLAW-281: no list_mcp_tools — discovery is each server's own mcp_<server> call with empty args (McpConnectionManager.republishTools).
         if ("true".equals(ConfigService.get("provider.loadtest-mock.enabled"))) {
             toolList.add(new LoadTestSleepTool());
         }

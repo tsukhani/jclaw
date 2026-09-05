@@ -19,11 +19,9 @@ public final class LocalProviderProbeSupport {
     private LocalProviderProbeSupport() {}
 
     /**
-     * Probe a local LLM provider's {@code /models} endpoint. JCLAW-186: the
-     * old {@code HttpClient.Version} parameter is gone — OkHttp does not
-     * attempt h2c upgrade on plain HTTP, so the LM Studio Express/Node
-     * upgrade-event hang that the JDK driver had to dodge is structurally
-     * absent here. Both probes share one client, no special-casing.
+     * Probe a local LLM provider's {@code /models} endpoint. Both probes share one client with
+     * no HTTP-version pin (JCLAW-186): OkHttp does not attempt h2c upgrade on plain HTTP, so the
+     * LM Studio Express/Node upgrade-event hang the JDK driver had to dodge is structurally absent.
      */
     public static Result probeModels(String baseUrl, String notRunningLabel) {
         var req = new Request.Builder()

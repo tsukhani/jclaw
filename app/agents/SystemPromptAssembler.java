@@ -211,15 +211,6 @@ public class SystemPromptAssembler {
         // they travel separately as the `tools` array on the API request — but they are
         // counted as input tokens by every provider, so the breakdown surfaces them
         // alongside the prompt sections for a realistic total-token picture.
-        //
-        // We deliberately compute the FRESH-CONVERSATION baseline (empty
-        // discovered-MCP-servers set), not the worst-case "all servers
-        // discovered" view. Phase 2 lazy discovery means MCP tool schemas
-        // only ship to the LLM after the model has called list_mcp_tools
-        // for that server; counting them in the breakdown total when no
-        // conversation has happened would double-count cost the operator
-        // never pays. Native tools + the discovery tool itself ship every
-        // turn and are correctly included.
         var toolEntries = new ArrayList<PromptBreakdown.Entry>();
         var toolDefs = ToolRegistry.getToolDefsForAgent(agent, Set.<String>of());
         for (var tool : toolDefs) {
@@ -416,11 +407,9 @@ public class SystemPromptAssembler {
             appendChannelGuidanceSection(b.sb, channelType, guidance);
         });
 
-        // 9. Environment info — only JVM-stable, per-agent values. The current
-        // date/time used to live here, but it is per-turn-variable and was
-        // moved below the cache boundary (appendCurrentTimeSection) so this
-        // whole section stays byte-identical within an agent's lifetime and
-        // never busts the LLM prompt-prefix cache.
+        // 9. Environment info — only JVM-stable, per-agent values, so the section
+        // stays byte-identical within an agent's lifetime and never busts the LLM
+        // prompt-prefix cache (the clock lives in CurrentTimeInjector; see 10 below).
         b.startSection("Environment");
         appendEnvironmentSection(b.sb, agent);
 

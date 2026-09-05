@@ -345,17 +345,14 @@ public final class WebExtraction {
         var contentType = fetched.contentType();
         var body = fetched.body();
 
-        // 1. HTML → Readability main-content pass → Markdown.
         if (isHtml(contentType, body)) {
             return extractText(new String(body, charsetFor(contentType)), fetched.finalUrl());
         }
 
-        // 2. Textual (JSON / XML / CSV / plain text) → pass through unchanged.
         if (isTextual(contentType) || (contentType.isBlank() && !looksBinary(body))) {
             return truncate(new String(body, charsetFor(contentType)), "content");
         }
 
-        // 3. Binary document (PDF / Office / …) → Tika text extraction.
         return extractWithTika(body, contentType, fetched.finalUrl());
     }
 
@@ -411,7 +408,6 @@ public final class WebExtraction {
         String contentHtml = null;
         String title = null;
 
-        // 1. Readability main-content pass.
         try {
             var article = new Readability4J(url, html).parse();
             var articleText = article.getTextContent();
@@ -423,7 +419,6 @@ public final class WebExtraction {
             // fall through to the Jsoup boilerplate-strip fallback
         }
 
-        // 2. Fallback: strip non-content elements and keep the body HTML.
         if (contentHtml == null || contentHtml.isBlank()) {
             var doc = Jsoup.parse(html, url);
             doc.select("script, style, noscript, iframe, svg, canvas, nav, footer, " +
@@ -435,10 +430,8 @@ public final class WebExtraction {
             contentHtml = doc.body().html();
         }
 
-        // 3. HTML → Markdown.
         var markdown = HTML_TO_MARKDOWN.convert(contentHtml).strip();
 
-        // 4. Assemble with an optional title heading.
         var result = new StringBuilder();
         if (title != null && !title.isBlank()) {
             result.append("# ").append(title.strip()).append("\n\n");

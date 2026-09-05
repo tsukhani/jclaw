@@ -59,12 +59,9 @@ public final class ConversationDeletionCascade {
         var em = JPA.em();
         // Subagent-tree cascade: a Conversation can be the parent of one or
         // more child Conversations (subagent runs), and SubagentRun audit
-        // rows hold FKs to both ends. Pre-fix, bulk-delete-by-filter
-        // happened to include the children in the same SQL statement so
-        // the FKs were satisfied at statement-end. Now that the listing
-        // filter excludes children (so /conversations doesn't double-show
-        // them), explicit cascade-cleanup keeps deleteByIds working when
-        // a parent has subagent children.
+        // rows hold FKs to both ends. The listing filter excludes children
+        // (so /conversations doesn't double-show them), so a parent's id list
+        // never carries them and they need this explicit cascade.
         // 1. Recursive deleteByIds for child conversations (depth-first —
         //    handles grandchildren / SubagentRuns / Messages / etc).
         List<Long> childIds = em.createQuery(
@@ -113,8 +110,7 @@ public final class ConversationDeletionCascade {
         // 3b. JCLAW-135: collect the message ids so their CONVERSATION_MESSAGE
         // Lucene docs can be evicted after the delete. The DB cascades
         // chat_message_attachment / message / session_compaction off the
-        // Conversation delete below (ON DELETE CASCADE, JCLAW-542), so the old
-        // hand-ordered JPQL sweep of those three tables is gone — but a bulk /
+        // Conversation delete below (ON DELETE CASCADE, JCLAW-542) — but a bulk /
         // cascade delete never fires Message.@PostRemove, so the full-text docs
         // would orphan without this explicit cleanup. (Child-conversation
         // messages are handled by the recursive call in step 1.)

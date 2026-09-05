@@ -23,11 +23,7 @@ public final class ToolCallChunkMerger {
 
     private ToolCallChunkMerger() {}
 
-    /**
-     * Mutable, per-slot accumulator for one streaming tool call. Fields are
-     * fully encapsulated (no public mutable state): the merge logic in this
-     * class and the unit tests both go through the fluent mutators.
-     */
+    /** Mutable, per-slot accumulator for one streaming tool call. */
     public static final class ToolCallBuilder {
         private String id;
         private String type = TYPE_FUNCTION;

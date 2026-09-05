@@ -132,12 +132,9 @@ public final class ToolCallLoopRunner {
                                          List<VisionAudioAssembler.AudioBearer> audioBearers,
                                          List<VisionAudioAssembler.ImageBearer> imageBearers,
                                          AgentExecutionSink sink, Long taskRunId) {
-        // Helpers like effectiveModelId / effectiveMaxTokens accept a nullable
-        // conversation for use elsewhere, but this loop dereferences
-        // conversation.channelType when handing off to the LLM provider —
-        // the channel type is a required field on the call. Assert the
-        // precondition explicitly so a future caller passing null gets a
-        // clear failure here instead of an opaque NPE deeper in the stack.
+        // Sibling helpers accept a null conversation, but this loop dereferences
+        // conversation.channelType for the provider call — fail here rather than
+        // with an opaque NPE deeper in the stack.
         Objects.requireNonNull(conversation, "conversation");
         var currentMessages = new ArrayList<>(messages);
         var thinkingMode = ModelResolver.resolveThinkingMode(agent, conversation, primary);
@@ -163,7 +160,6 @@ public final class ToolCallLoopRunner {
             }
             if (attempt.terminal() != null) return attempt.terminal();
 
-            // Successful response. Fire the audio/image passthrough-outcome logs (JCLAW-165/216).
             logRoundZeroPassthroughOutcomes(round, agent, conversation, primary,
                     audioBearers, imageBearers, audioState, visionState);
 
@@ -388,12 +384,6 @@ public final class ToolCallLoopRunner {
         AgentRunner.checkSubagentCancel(conversation);
         AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
 
-        // JCLAW-273: detect a successful subagent_yield call and bail
-        // out of the tool-call loop without continuing to the next LLM
-        // round. The runner returns YIELDED_RESPONSE so the caller skips
-        // its final-assistant-message persist; the parent's logical
-        // turn resumes later from tools.SubagentSpawnTool#runAsyncAndAnnounce
-        // once the child terminates.
         // JCLAW-273: detect a successful subagent_yield call and bail out of the
         // tool-call loop without continuing to the next LLM round. The runner
         // returns YIELDED_RESPONSE so the caller skips its final-assistant-message

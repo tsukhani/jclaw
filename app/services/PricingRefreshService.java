@@ -338,7 +338,6 @@ public final class PricingRefreshService {
      * <p>Returns the matching entry's JsonObject, or {@code null} on miss.
      */
     public static JsonObject lookupCatalog(JsonObject catalog, String id) {
-        // Try the id as-is, then progressively looser forms.
         var candidates = new ArrayList<String>();
         candidates.add(id);
         // Strip provider prefix (e.g. "openai/gpt-4o" → "gpt-4o").

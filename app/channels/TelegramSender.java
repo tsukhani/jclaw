@@ -38,7 +38,6 @@ import java.util.List;
  */
 class TelegramSender {
 
-    /** Channel identifier used as logging source and returned by {@link #channelName()}. */
     private static final String CHANNEL_NAME = "telegram";
 
     private final String botToken;
@@ -74,7 +73,6 @@ class TelegramSender {
     String botToken() { return botToken; }
     TelegramClient client() { return client; }
 
-    /** Channel identifier (the "telegram" constant). */
     public String channelName() { return CHANNEL_NAME; }
 
     // ── JCLAW-383: bot-sent-message-id cache query ───────────────────────

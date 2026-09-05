@@ -98,10 +98,9 @@ public class ConversationQueue {
 
             if (!state.processing) {
                 state.processing = true;
-                return true; // Caller should process this message
+                return true;
             }
 
-            // Agent is busy -- handle based on mode
             interrupted = "interrupt".equals(mode);
             if (interrupted) {
                 // Signal the in-flight processor to cancel, then queue this message
@@ -135,7 +134,7 @@ public class ConversationQueue {
                 "Message queued for conversation %d (position: %d)"
                         .formatted(conversationId, getQueueSize(conversationId)));
 
-        return false; // Message was queued, caller should NOT process
+        return false;
     }
 
     /**
@@ -223,9 +222,6 @@ public class ConversationQueue {
      * their {@code finally} block calls this to guarantee {@code processing}
      * flips back to false even when the run throws an exception that
      * short-circuits the normal re-drain.
-     *
-     * @param conversationId the conversation whose queue ownership is being
-     *                       released
      */
     public static void releaseOwnership(Long conversationId) {
         var state = queues.get(conversationId);
@@ -253,13 +249,7 @@ public class ConversationQueue {
         return sb.toString();
     }
 
-    /**
-     * Get queue position for a conversation (0 if not queued).
-     *
-     * @param conversationId the conversation whose pending-queue size is
-     *                       requested
-     * @return number of pending messages waiting in the queue
-     */
+    /** Number of pending messages waiting in a conversation's queue (0 when it has no state). */
     public static int getQueueSize(Long conversationId) {
         var state = queues.get(conversationId);
         if (state == null) return 0;
@@ -268,13 +258,7 @@ public class ConversationQueue {
         }
     }
 
-    /**
-     * Check if a conversation is currently being processed.
-     *
-     * @param conversationId the conversation to check
-     * @return true when the conversation has an owner currently running
-     *         a turn against it
-     */
+    /** True when the conversation has an owner currently running a turn against it. */
     public static boolean isBusy(Long conversationId) {
         var state = queues.get(conversationId);
         return state != null && state.isProcessing();

@@ -57,10 +57,6 @@ import java.util.function.Supplier;
  *       create silent inversions where the {@code scheduled_tasks}
  *       row exists but the {@link Task} thinks it's CANCELED, or
  *       vice versa.</li>
- *   <li>Does not handle {@code pause} / {@code resume} — those
- *       methods are deferred until the Task entity gains the
- *       {@code paused} boolean column (separate JCLAW-21 commit,
- *       part of the entity refactor section of the spec).</li>
  * </ul>
  *
  * <p>{@link SchedulerClient} is sourced from

@@ -73,7 +73,6 @@ public final class TaskWriteService {
         // until the column is dropped.
         t.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
 
-        // Plumbing-ahead fields (consumed by JCLAW-295/296/297/298).
         t.delivery = readOptionalString(body, KEY_DELIVERY);
         t.payloadType = readOptionalString(body, KEY_PAYLOAD_TYPE);
         t.modelProvider = readOptionalString(body, KEY_MODEL_PROVIDER);
@@ -172,10 +171,8 @@ public final class TaskWriteService {
         if (body.has(KEY_PRE_CHECK))           { task.preCheck          = readOptionalString(body, KEY_PRE_CHECK);           changed = true; }
         if (body.has(KEY_SCRIPT))              { task.script            = readOptionalString(body, KEY_SCRIPT);              changed = true; }
         if (body.has(KEY_CONTEXT_FROM_TASK_IDS)){ task.contextFromTaskIds= readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);changed = true; }
-        // JCLAW-1106: a per-task zone was settable at create but silently dropped on
-        // PATCH, so a timezone-only patch answered "No patchable fields in body".
-        // An explicit null clears the override and returns the task to the default
-        // chain. The controller's rejectInvalidTimezone guard covers this path too.
+        // JCLAW-1106: an explicit null clears the override and returns the task to the
+        // default chain. The controller's rejectInvalidTimezone guard covers this path too.
         if (body.has(KEY_TIMEZONE)) {
             var tz = readOptionalString(body, KEY_TIMEZONE);
             task.timezone = tz != null ? tz.trim() : null;
@@ -237,12 +234,7 @@ public final class TaskWriteService {
                 .setParameter(taskIdParam, taskId).executeUpdate();
         em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
                 .setParameter(taskIdParam, taskId).executeUpdate();
-        // Cascade-delete user-visible notifications that originated from this
-        // task. Reminder tasks (payloadType="reminder") emit one Notification
-        // per fire; when the operator deletes the task the toast/Reminders
-        // surface should clear in lockstep so the row doesn't reappear after
-        // the next poll. Safe for non-reminder tasks too — they don't write
-        // Notifications, so this is a no-op.
+        // Safe for non-reminder tasks too — they don't write Notifications, so this is a no-op.
         em.createQuery("DELETE FROM Notification n WHERE n.sourceTaskId = :taskId")
                 .setParameter(taskIdParam, taskId).executeUpdate();
         em.flush();

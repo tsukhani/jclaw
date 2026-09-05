@@ -108,10 +108,7 @@ public class ApiTranscriptionController extends Controller {
      *  download for the model with the given id. Returns 202-style
      *  {@code {"status":"downloading"}} immediately on success, 400 on
      *  unknown id. */
-    // S3655 (Optional.get without isPresent): error(400) above halts via a
-    // Result that Sonar can't see across the framework boundary, so the
-    // analyzer thinks model.get() can be reached when model.isEmpty(). It
-    // can't. Same Play-1.x-vs-Sonar gap that S2259 papers over.
+    // S3655: error(400) halts via a Result Sonar can't see, so it thinks model.get() is reachable when empty — same Play-1.x gap as S2259.
     @SuppressWarnings({"java:S2259", "java:S3655"})
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
     @ChatHidden("triggers a Whisper model download -- disk/network resource action")

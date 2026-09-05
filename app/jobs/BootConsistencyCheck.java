@@ -28,8 +28,7 @@ import java.util.Set;
  *   <li><b>Migration:</b> Tasks created before the db-scheduler
  *   cutover exist as PENDING rows with {@link Task#nextRunAt} set
  *   but no {@code scheduled_tasks} row. They'd sit forever without
- *   this sweep. (TaskPollerJob's deletion in this same commit
- *   means no other code path picks them up.)</li>
+ *   this sweep — no other code path picks them up.</li>
  *
  *   <li><b>Crash recovery:</b> a JVM crash between an IMMEDIATE
  *   Task being persisted and {@link TaskSchedulingService#register}

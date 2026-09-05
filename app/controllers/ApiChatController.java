@@ -134,12 +134,6 @@ public class ApiChatController extends Controller {
                 ? body.get(KEY_CONVERSATION_ID).getAsLong() : null;
 
         var attachments = parseAttachments(body);
-        // JCLAW-165 / JCLAW-215: audio and image attachments are universally
-        // accepted now. Text-only models receive a transcript / caption text
-        // part (via the transcription + captioning pipelines + capability
-        // routing in AgentRunner.userMessageFor); audio-/vision-capable models
-        // receive native input_audio / image_url parts. No model-side gate; the
-        // rest of the pipeline handles the format.
 
         return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments);
     }

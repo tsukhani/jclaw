@@ -42,8 +42,6 @@ public class ApiAgentsController extends Controller {
 
     private static final Gson gson = GSON;
 
-    // JCLAW-682: canonical error codes for the ApiResponses envelope.
-
     // JSON body keys reused across create/update/serve paths.
     private static final String KEY_MODEL_PROVIDER = "modelProvider";
     private static final String KEY_MODEL_ID = "modelId";
@@ -211,8 +209,6 @@ public class ApiAgentsController extends Controller {
      * on its next turn. Feeds the Settings UI introspection dialog. Memory recall is
      * skipped (null user message) so the breakdown is deterministic for a given
      * agent state and doesn't depend on a hypothetical user query.
-     *
-     * @param id the agent id to break down
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptBreakdown.class)))
@@ -233,8 +229,6 @@ public class ApiAgentsController extends Controller {
      * <p>Memory recall is skipped (null user message) for the same reason as the
      * breakdown: a deterministic snapshot of the agent's standing prompt, not one
      * conditioned on a hypothetical query.
-     *
-     * @param id the agent id whose assembled prompt is requested
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Full assembled system prompt text this agent would receive next turn")
@@ -274,8 +268,6 @@ public class ApiAgentsController extends Controller {
      * global is edited via Settings; per-skill contributions are set at skill
      * install time. Operators who need to remove a per-skill grant do so by
      * disabling or removing the skill.
-     *
-     * @param id the agent id whose effective allowlist is requested
      */
     @Operation(summary = "Effective shell allowlist for an agent: global config unioned with enabled-skill commands")
     public static void effectiveShellAllowlist(Long id) {
@@ -414,8 +406,6 @@ public class ApiAgentsController extends Controller {
                 ? readOptionalString(body, KEY_DESCRIPTION)
                 : agent.description;
 
-        // JCLAW-463/464/465: apply the per-agent compression fields present in the
-        // body. Absent keys leave the stored value untouched.
         applyCompressionSettings(agent, body);
 
         // JCLAW-500: per-agent acp-runtime grant. Absent/null key leaves it
@@ -424,7 +414,6 @@ public class ApiAgentsController extends Controller {
             agent.acpAllowed = body.get(KEY_ACP_ALLOWED).getAsBoolean();
         }
 
-        // JCLAW-534: per-agent memory auto-capture enable + model override.
         applyMemorySettings(agent, body);
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
@@ -542,7 +531,6 @@ public class ApiAgentsController extends Controller {
      * GET /api/agents/{id}/files/{filePath} — Serve a workspace file with proper content type.
      * Supports images, PDFs, and other binary files for inline rendering or download.
      *
-     * @param id       the agent id whose workspace to serve from
      * @param filePath path inside the agent's workspace
      */
     @SuppressWarnings("java:S2259")
@@ -550,12 +538,9 @@ public class ApiAgentsController extends Controller {
     public static void serveWorkspaceFile(Long id, String filePath) {
         var agent = requireAgent(id);
 
-        // Two-layer (lexical + canonical) path validation with double-resolve.
-        // The previous substring check (`filePath.contains("..")`) didn't
-        // normalize the path before checking, and never compared against the
-        // workspace root. acquireWorkspacePath does both, plus realpath
-        // resolution so a symlink inside the workspace pointing outside is
-        // also rejected.
+        // acquireWorkspacePath normalizes, compares against the workspace root, and
+        // realpath-resolves, so a `..` segment or an in-workspace symlink pointing
+        // outside is rejected — a substring check for ".." caught neither.
         Path path;
         try {
             path = AgentService.acquireWorkspacePath(agent.name, filePath);

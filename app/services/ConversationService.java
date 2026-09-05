@@ -42,11 +42,6 @@ public class ConversationService {
      * {@code runId} so every {@link #appendMessage} call made on the current
      * thread stamps that id on the persisted Message. Always clears in a
      * finally — never leak the marker back to the caller.
-     *
-     * @param runId the subagent run id to stamp on persisted messages
-     * @param body  work to run with the marker bound
-     * @param <T>   {@code body}'s return type
-     * @return the value returned by {@code body}
      */
     public static <T> T withSubagentRunIdMarker(Long runId, Supplier<T> body) {
         var prev = INLINE_SUBAGENT_RUN_ID.get();
@@ -113,11 +108,7 @@ public class ConversationService {
         conversation.save();
     }
 
-    /**
-     * Clear the conversation-scoped override. See {@link #setModelOverride}.
-     *
-     * @param conversation the conversation whose override columns to clear
-     */
+    /** Clear the conversation-scoped override. See {@link #setModelOverride}. */
     public static void clearModelOverride(Conversation conversation) {
         conversation.modelProviderOverride = null;
         conversation.modelIdOverride = null;
@@ -131,7 +122,7 @@ public class ConversationService {
     /**
      * Chat-type-aware {@link #create}. Sets {@link Conversation#chatType} only
      * when {@code chatType} is non-null, so non-Telegram channels and callers
-     * without a chat type leave the column null (the pre-existing behavior).
+     * without a chat type leave the column null.
      *
      * @param agent       the owning agent
      * @param channelType the channel identifier
@@ -433,8 +424,7 @@ public class ConversationService {
      * <p>The global {@code chat.maxContextMessages} (default 50) is the baseline.
      * A GROUP-chat conversation may override it via {@code groupChat.historyLimit};
      * a DM / private conversation via {@code dmHistoryLimit}. Each per-type key
-     * defaults to the resolved global value when its own key isn't set, so a
-     * deployment that sets neither per-type key behaves exactly as before.
+     * defaults to the resolved global value when its own key isn't set.
      *
      * <p><b>Chat-type resolution.</b> The persisted {@link Conversation} now
      * carries the inbound Telegram {@code chat.type} on {@link Conversation#chatType}
@@ -442,7 +432,7 @@ public class ConversationService {
      * plain group are distinguishable on the row:
      * <ul>
      *   <li><b>Non-Telegram channels</b> (web, slack, …) → global. No per-type
-     *       notion applies; behavior unchanged.</li>
+     *       notion applies.</li>
      *   <li><b>Telegram, stored {@code chatType="private"}</b> → the DM limit.</li>
      *   <li><b>Telegram, stored {@code chatType="group"}/"supergroup"</b> → the
      *       GROUP limit.</li>
@@ -521,13 +511,9 @@ public class ConversationService {
 
     /**
      * JCLAW-153: load and delete a single message inside its own transaction.
-     * Replaces the inline {@code Tx.run((Runnable) message::delete)} at the
-     * {@code DELETE /api/conversations/{id}/messages/{mid}} controller site.
      * The controller still loads the message (via {@link #findMessageById}) to
      * validate it belongs to the addressed conversation; this method owns the
      * delete transaction. A no-op when the id no longer resolves.
-     *
-     * @param messageId the message primary key to delete
      */
     public static void deleteMessage(Long messageId) {
         Tx.run(() -> {
@@ -563,8 +549,6 @@ public class ConversationService {
      * filtered-DELETE because the cascade has to delete attachments and
      * messages first, and JPQL DELETE statements don't support sub-selects
      * across the conversation/message join in every dialect we run on.
-     * Building the id list once and reusing {@link #deleteByIds} keeps the
-     * exact ordering this service has shipped with since launch.
      *
      * @param channel  channel constraint, or null/blank for any channel
      * @param agentId  agent constraint, or null for any agent

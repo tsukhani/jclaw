@@ -191,17 +191,11 @@ public final class MessageDeduplicator {
                                              String content,
                                              String channelType) {
         if (collectedImages == null || collectedImages.isEmpty()) return "";
-        // Only the web frontend renders relative markdown links as clickable.
-        // Telegram / Slack / WhatsApp / etc. need absolute URLs for <a href>,
-        // and our workspace-file URLs are relative by design — rendering a
-        // non-clickable "download" caption would be confusing noise.
+        // Only the web frontend renders relative links as clickable (see Javadoc).
         if (!"web".equalsIgnoreCase(channelType)) return "";
         var safeContent = content != null ? content : "";
 
-        // Filenames already linked in the reply (covers both markdown forms
-        // — image and plain link — plus HTML <img> and <a href>). If the
-        // LLM already wrote a link to a file, we leave that as the user's
-        // download affordance and skip our suffix entry for that file.
+        // A file the reply already links (markdown image/link, HTML <img>/<a>) keeps the LLM's link as its download affordance.
         var linkedFilenames = collectMatchedFilenames(safeContent,
                 List.of(MARKDOWN_LINK_OR_IMAGE, HTML_IMG_EMBED, HTML_ANCHOR));
 
@@ -225,10 +219,7 @@ public final class MessageDeduplicator {
         var filename = extractFilename(url);
         if (!filename.isEmpty() && linkedFilenames.contains(filename)) return Optional.empty();
 
-        // Pull alt text out of the leading "![alt]" portion; fall back
-        // to an empty alt (= just "download" as the link label) if the
-        // pattern doesn't match (shouldn't happen for well-formed
-        // collected entries but guarded for safety).
+        // Alt text from the leading "![alt]"; a malformed collected entry falls back to a bare "download" label.
         var altMatcher = ALT_TEXT_PATTERN.matcher(img);
         var alt = altMatcher.find() ? altMatcher.group(1).trim() : "";
         var label = alt.isEmpty() ? "download" : "download " + alt;
