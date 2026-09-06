@@ -1,4 +1,5 @@
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaCall;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaMethod;
@@ -106,6 +107,56 @@ class ArchitectureTest extends UnitTest {
                 .because("outbound OkHttp clients must come from HttpFactories (JCLAW-185..188); "
                         + "SsrfGuard and the Telegram SDK are the documented exceptions");
         rule.check(APP_CLASSES);
+    }
+
+    /** Packages and classes allowed to open a raw socket; see {@link #rawSocketsAreConfinedToThePrintingStack}. */
+    private static final String PRINTING_PACKAGE = "services.printing..";
+    private static final String PORT_PROBE_CLASS = "services.LocalSidecarDaemon";
+
+    /** Matches {@code new java.net.Socket(...)}, {@code new java.net.ServerSocket(...)} and
+     *  {@code URL.openConnection()} — constructor and method calls together, hence {@code JavaCall}. */
+    private static final DescribedPredicate<JavaCall<?>> RAW_SOCKET_CALL = DescribedPredicate.describe(
+            "a call to new java.net.Socket(...), new java.net.ServerSocket(...) or URL.openConnection()",
+            call -> {
+                String owner = call.getTargetOwner().getName();
+                String name = call.getTarget().getName();
+                boolean socketCtor = ("java.net.Socket".equals(owner) || "java.net.ServerSocket".equals(owner))
+                        && "<init>".equals(name);
+                return socketCtor || ("java.net.URL".equals(owner) && "openConnection".equals(name));
+            });
+
+    /**
+     * Outbound network access is {@code HttpFactories}' OkHttp clients and nothing else
+     * (JCLAW-1151). A raw {@code java.net} socket or a {@code URL.openConnection()} is a
+     * second stack that bypasses the shared pools, the timeout policy, the SSRF DNS — and
+     * the {@code HttpFactories.runWith} transport override, so anything built on one cannot
+     * be tested without a live listener. The self-built OkHttp clients ({@code SsrfGuard},
+     * {@code TelegramBotApiHttpClients}) are named in
+     * {@link #okHttpClientsAreProvisionedThroughHttpFactories}, not here — they are still
+     * OkHttp and still substitutable.
+     *
+     * <p>{@code services.printing} is the standing exception: LPD and JetDirect 9100 are
+     * socket protocols, not HTTP, and discovery probes reachability by connecting.
+     * {@code LocalSidecarDaemon} binds a loopback {@code ServerSocket} to learn whether a
+     * port is already held — a probe that sends nothing, not traffic.
+     */
+    @Test
+    void rawSocketsAreConfinedToThePrintingStack() {
+        ArchRule rule = noClasses()
+                .that().resideOutsideOfPackage(PRINTING_PACKAGE)
+                .and().doNotHaveFullyQualifiedName(PORT_PROBE_CLASS)
+                .should().callCodeUnitWhere(RAW_SOCKET_CALL)
+                .because("outbound network access goes through HttpFactories' OkHttp clients "
+                        + "(JCLAW-1151); services.printing speaks LPD/9100 and LocalSidecarDaemon "
+                        + "binds a loopback port probe");
+        rule.check(APP_CLASSES);
+
+        assertTrue(APP_CLASSES.stream()
+                        .filter(c -> c.getPackageName().startsWith("services.printing"))
+                        .flatMap(c -> c.getCodeUnitCallsFromSelf().stream())
+                        .anyMatch(RAW_SOCKET_CALL),
+                "no socket call found inside " + PRINTING_PACKAGE + " — the exclusion is carrying "
+                        + "nothing, so the predicate has stopped matching and the rule passes vacuously");
     }
 
     /**

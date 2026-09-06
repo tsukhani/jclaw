@@ -64,6 +64,10 @@ public final class WhatsAppCloudApiProbe {
      * (mirrors {@code TelegramChannel.installForTest}). Set via
      * {@link #installForTest}/cleared via {@link #clearForTest}. The
      * {@code apiBase} overload is unaffected (HTTP-level probe tests use it directly).
+     *
+     * <p>Not replaceable by {@code HttpFactories.runWith}: the callers are
+     * {@code FunctionalTest}s driving a controller, and a {@code ScopedValue}
+     * binding does not reach Play's request thread.
      */
     private static volatile BiFunction<String, String, Result> testOverride;
 
@@ -91,9 +95,11 @@ public final class WhatsAppCloudApiProbe {
     }
 
     /**
-     * Overload exposing the API base URL for tests (mock HTTP server). Production
-     * callers use {@link #probe(String, String)}. Public because jclaw tests live
-     * in the default package and can't see package-private channel methods.
+     * Overload exposing the API base URL. Production callers use
+     * {@link #probe(String, String)}; tests call this one to bypass the
+     * {@link #installForTest} field, which a concurrently running test class may
+     * have set. Public because jclaw tests live in the default package and can't
+     * see package-private channel methods.
      */
     public static Result probe(String phoneNumberId, String accessToken, String apiBase) {
         if (phoneNumberId == null || phoneNumberId.isBlank()) {
