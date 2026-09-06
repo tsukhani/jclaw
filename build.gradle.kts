@@ -8,9 +8,9 @@ plugins {
     id("net.ltgt.errorprone") version "5.1.1"
 }
 
-// JCLAW-1149: nullness enforcement. Play's dev mode and `play autotest` compile with
-// ECJ inside the fork, where a javac plugin cannot load — so the checker rides the Gradle
-// compileJava that Sonar and pre-push already depend on, the same layering Spotless uses.
+// JCLAW-1149: nullness enforcement. Play's own ECJ compile inside the fork cannot host a
+// javac plugin, so the checker rides the Gradle compileJava — which Sonar, pre-push and, via
+// the play CLI's task graph, `play run`/`play autotest` all pass through first.
 tasks.withType<JavaCompile>().configureEach {
     options.errorprone {
         // compileTestJava stays out of this block: test/ is 500+ default-package classes with

@@ -225,7 +225,7 @@ JClaw uses **OkHttp 5.x** (with `okhttp-sse` for streaming) as its single outbou
 
 All HTTP-client provisioning lives in `app/utils/HttpFactories.java` — a single class that exposes named factory methods (`llmStreaming()`, `llmSingleShot()`, `general()`) so call sites declare *intent* rather than reach into named static fields. Internally it shares two connection pools (LLM/64-slot, general/32-slot) and two dispatchers (LLM uses a virtual-thread executor, general uses OkHttp's default cached pool — request volume on the non-LLM path doesn't justify VT scheduling). The Telegram SDK and `WebFetchTool`/`SsrfGuard` build their own clients with stack-specific tuning that doesn't fit any of the three `HttpFactories` tiers (the SDK has its own internal usage; `SsrfGuard` plugs in a per-request DNS allow-list against tool-fetch SSRF).
 
-Because every call site reaches the transport through those factory methods, it is substitutable in one place: `HttpFactories.runWith(client, body)` — and its value-returning twin `callWith` — binds a `ScopedValue` that all six accessors (the three tiers plus their SSRF-guarded variants) honour for the dynamic extent of `body`, so a test installs a canned-response OkHttp interceptor instead of standing up a mock server on a port. Nothing binds it in production, and a `ScopedValue` does not follow an unrelated thread, so one test class cannot leak a transport into another that play1 is running concurrently — but for that same reason the binding does not reach Play's own request threads, and a `FunctionalTest` driving a controller still needs a per-collaborator seam such as `WhatsAppCloudApiProbe.installForTest`.
+Because call sites reach the transport through those factory methods, it is substitutable in one place: `HttpFactories.runWith(client, body)` — and its value-returning twin `callWith` — binds a `ScopedValue` that all six accessors (the three tiers plus their SSRF-guarded variants) honour for the dynamic extent of `body`, so a test installs a canned-response OkHttp interceptor instead of standing up a mock server on a port. Nothing binds it in production, and a `ScopedValue` does not follow an unrelated thread, so one test class cannot leak a transport into another that play1 is running concurrently — but for that same reason the binding does not reach Play's own request threads, and a `FunctionalTest` driving a controller still needs a per-collaborator seam such as `WhatsAppCloudApiProbe.installForTest`. The seam also stops at the accessor: ten classes derive a tuned client from `general().newBuilder()` into a static field at class-init (the rendered and impersonated fetchers, the Telegram/Slack/WhatsApp file downloaders, the sidecar clients), and a binding made later cannot reach a reference captured that early.
 
 ### Wall clock — AppClock
 
@@ -250,19 +250,25 @@ behaviour so the boundary is a tested fact rather than a comment. The same bound
 
 **The gate.** `test/WallClockDisciplineTest` is an ArchUnit rule banning `Instant.now()`,
 `LocalDate.now()`, `LocalDateTime.now()`, `OffsetDateTime.now()`, `ZonedDateTime.now()` and
-`System.currentTimeMillis()` anywhere in `app/` outside `AppClock` itself. It is a `FreezingArchRule`,
-because the `System.currentTimeMillis()` sites are not all wall-clock reads: 50 of them are interval
-baselines for a throttle, a rate-limit window or a duration, where rewriting them would change
-throttle behaviour for no gain. Those 50 are recorded in the committed `archunit_store/`, so the
-exception list is explicit and shrinkable while a *new* read of either kind still fails the build.
-`System.nanoTime()` is not matched at all — it has no relation to wall-clock time and is the correct
-primitive for the interval measurement in `utils.LatencyStats`.
+`System.currentTimeMillis()` anywhere in `app/` outside `AppClock` itself, along with `LocalTime`,
+`Year` and `YearMonth.now()`, `new Date()`, `Calendar.getInstance()` and the `Clock.system*`
+factories. It matches accesses rather than calls, so a method reference such as `Instant::now`
+fails it too. It is a `FreezingArchRule`, because the `System.currentTimeMillis()` sites are not
+all wall-clock reads: 42 of them are interval baselines for a throttle, a rate-limit window or a
+duration, where rewriting them would change throttle behaviour for no gain. Those 42 are recorded
+in the committed `archunit_store/wall-clock-interval-baselines`, so the exception list is explicit
+and shrinkable while a *new* read of either kind still fails the build. `System.nanoTime()` is not
+matched at all — it has no relation to wall-clock time and is the correct primitive for the
+interval measurement in `utils.LatencyStats`.
 
-`conf/archunit.properties` pins `freeze.store.default.allowStoreCreation=false` so a run can never
-silently mint a fresh baseline and turn the rule into a no-op. To regenerate deliberately, flip that
-one line for a single run and flip it back — `playAutotest` does not forward `-D` to the Play JVM, so
-the properties file is the only lever. The store key is the rule's description, so editing the
-rule's `because(...)` text orphans the baseline.
+`conf/archunit.properties` pins both `freeze.store.default.allowStoreCreation=false` and
+`freeze.store.default.allowStoreUpdate=false`, so a run can neither mint a fresh baseline nor
+rewrite the committed one. That cuts both ways: a new read fails, and a listed read that migrates
+to `AppClock` also fails (`Updating frozen violations is disabled`) until its line is deleted from
+the store by hand. To regenerate deliberately, flip both lines for a single run and flip them
+back — `playAutotest` does not forward `-D` to the Play JVM, so the properties file is the only
+lever. The store key is the rule's description, so editing the rule's `because(...)` text fails
+the next run loudly rather than orphaning the baseline silently.
 
 **Writing a time-dependent test.** Bind a fixed clock instead of sleeping or asserting on a ±1s
 window: `TaskSchedulingServiceTest` and `TaskSchedulingTest.cronEveryMinute` are the worked examples.
@@ -308,11 +314,14 @@ than kept beside it.
 annotated packages a type with no annotation means *not null*, and NullAway fails the build on
 any dereference, return, assignment or argument that contradicts that.
 
-**Where it runs.** `./gradlew compileJava` only — which is what `.githooks/pre-push` invokes
-before the test suite, and what Sonar already depends on. It does **not** run under `play run`
-or `play autotest`: Play 1.x compiles with ECJ inside the fork, and a javac plugin cannot load
-there. That split is structural, not a gap to close — the Gradle compile is the single place a
-javac plugin can see this codebase, the same layering Spotless uses.
+**Where it runs.** On the Gradle `compileJava` task, which `.githooks/pre-push` invokes before
+the test suite and which Sonar already depends on. The `play` CLI is a Gradle wrapper whose
+`playRun` and `playAutotest` tasks depend on `compileJava`, so a violation fails `play run` and
+`play autotest` as well — before Play's own compile starts. What the checker cannot see is that
+second compile: Play 1.x recompiles `app/` with ECJ inside the fork for dev-mode reload and for
+the test runner, and a javac plugin cannot load there. That split is structural, not a gap to
+close — the Gradle compile is the single place a javac plugin can see this codebase, the same
+layering Spotless uses.
 
 **What is in scope.** The `NullAway:AnnotatedPackages` option in `build.gradle.kts` lists
 `utils`, `llm`, `agents`, `tools` and `services`; every package and subpackage under those roots
@@ -356,11 +365,13 @@ method. Anything else fails the build.
 
 **What carries the annotation.** Every concrete `AutoCloseable` in `app/`: `McpClient`,
 `McpStdioTransport`, `McpStreamableHttpTransport`, `DirectLuceneMessageSearchRepository`'s
-`LeasedSearcher`, `VoiceVad`, `VoiceSession`, and `LatencyTrace.bind`. The `McpTransport` and
-`LatencyTrace.Binding` interfaces carry nothing — the annotation belongs on the thing that
-hands out an instance, which is the implementations' constructors and `bind` respectively.
-`ResourceLeakGateConformanceTest` fails if a new `AutoCloseable` class appears in `app/` with no
-`@MustBeClosed` anywhere in its file, or if either compile task drops the check below `ERROR`.
+`LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, and `LatencyTrace.bind`. The
+`McpTransport` and `LatencyTrace.Binding` interfaces carry nothing — the annotation belongs on
+the thing that hands out an instance, which is the implementations' constructors and `bind`
+respectively. `ResourceLeakGateConformanceTest` walks the imported bytecode for every concrete
+class assignable to `AutoCloseable` (so `implements McpTransport` counts) and fails if one appears
+in `app/` with no `@MustBeClosed` outside a comment in its file, or if either compile task drops
+the check below `ERROR`.
 
 `HttpFactories` is deliberately untouched: its methods hand back the three shared
 `OkHttpClient` singletons, not per-call resources. The resource on that path is the `Response`,
@@ -379,11 +390,12 @@ are covered instead by a source scan in `ResourceLeakGateConformanceTest` that f
 acquire with no release in the same file. **Prefer the lease** for any new Lucene test whose
 window fits in one method.
 
-**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a one-line reason, and rare — three
-exist today. `McpConnectionManager.doConnect` and `McpServerService.testConnection` build a
+**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — five
+sites today. `McpConnectionManager.doConnect` and `McpServerService.testConnection` build a
 transport that a longer-lived owner closes; `VoiceController.initSession` hands its `VoiceVad`
 to a `VoiceSession` that outlives the method, with a local `handedOff` flag closing it on every
-path that never gets there. A fourth shape appears on the two `buildTransport` methods, which
+path that never gets there and a repeated init closing the session it displaces. A fourth shape
+appears on the two `buildTransport` methods, which
 are annotated `@MustBeClosed` *and* suppressed: the checker does not treat a `yield` from a
 switch block arm as a return position (a plain `->` arm it does), so the suppression silences
 the body while the contract still binds every caller.
@@ -413,10 +425,14 @@ naming the capability.
 
 Shell and filesystem carry pre-existing holders, so they run as `FreezingArchRule`s
 and the checked-in store under `archunit_store/` *is* the allowlist: a listed site
-passes, a new one fails, and fixing one prunes it from the store on the next run.
-Deleting an entry is how the list shrinks; editing a rule is not. Each frozen rule is
-paired with a floor on its live match count, because a predicate that silently stopped
-matching would otherwise let the store prune itself to empty and pass forever.
+passes and a new one fails. Both store switches are pinned off in
+`conf/archunit.properties`, so a listed site that stops matching fails too, until its
+line is deleted by hand — deleting an entry is how the list shrinks; editing a rule is
+not. The predicates match accesses, so a method reference such as `ProcessBuilder::start`
+or `Path::of` counts the same as a call. Each frozen rule is paired with a floor on its
+live match count, which guards the deliberate regeneration run: with the switches on, a
+predicate that had silently stopped matching would prune the store to empty and pass
+forever.
 
 The filesystem authority is deliberately the narrow one: it covers paths resolved from
 tool arguments, since those are the only ones an operator does not control.
@@ -434,7 +450,11 @@ coding-harness boundary and the native-tool boundary cannot drift apart:
   then grant back the one write root plus `/private/tmp`, `/private/var/folders` and `/dev`;
   deny reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, `~/.netrc`.
 - **Linux** — `bwrap --ro-bind / / --tmpfs $HOME --bind <writeRoot> <writeRoot>`: the visible
-  filesystem is built from nothing, so secrets are *absent* rather than merely denied.
+  filesystem is built from nothing, so secrets are *absent* rather than merely denied. Mount
+  order is load-bearing: bwrap applies mounts in argument order and a tmpfs over an ancestor
+  hides every earlier bind beneath it, so the `$HOME` tmpfs must precede the write-root bind
+  (the workspace lives under `$HOME` on every non-container install).
+  `HarnessSandboxTest.linuxBindsTheWriteRootAfterTheHomeTmpfs` pins that order on every host.
 
 Two independent tri-state keys drive it, both `false` by default, both accepting
 `true` (confine every run) or `untrusted` (confine only runs whose origin channel is not the
@@ -443,16 +463,18 @@ operator's own web chat):
 | Key | Covers | Write root |
 | --- | --- | --- |
 | `subagent.acp.sandbox` | ACP coding-harness processes | the run's session directory |
-| `shell.sandbox` | `exec` (`/bin/sh -c`) and `diarize_audio`'s ffmpeg extraction | the agent's resolved workspace |
+| `shell.sandbox` | `exec` (`/bin/sh -c`), `diarize_audio`'s ffmpeg extraction, and `LlmAudio`'s ffmpeg transcode of an audio attachment | the agent's resolved workspace for `exec`; the temp directory for the two ffmpeg runs |
 
 They are separate on purpose: confining a coding harness is not the same operator decision as
 confining every shell command. Neither key is seeded into the Config DB — an absent key already
 means "off", so both are documented in `conf/application.conf` and left unset.
 
-**Both fail closed.** With a key on and no usable mechanism (native Windows; a host missing
-`sandbox-exec`/`bwrap`; a WSL2 kernel with unprivileged user namespaces disabled),
-`HarnessSandbox.wrap` throws `SandboxUnavailableException` and the caller aborts the run rather
-than launching unconfined. Never add a fallback that launches anyway.
+**Both fail closed.** With a key on and no mechanism (native Windows; a host missing
+`sandbox-exec`/`bwrap`), `HarnessSandbox.wrap` throws `SandboxUnavailableException` and the caller
+aborts the run rather than launching unconfined. A `bwrap` that is present but cannot create its
+namespaces (a WSL2 kernel with unprivileged user namespaces disabled) fails inside `bwrap`
+instead, which surfaces as the command's non-zero exit — still no unconfined launch. Never add
+a fallback that launches anyway.
 
 **What the shell sandbox does and does not change.** It bounds *reach*, not grammar. `exec`'s
 first-token allowlist is still a UX guardrail rather than a metacharacter defence — `echo hi;
