@@ -1,0 +1,3 @@
+#
+#Sun Sep 06 08:47:20 GMT+08:00 2026
+no\ classes\ that\ do\ not\ have\ fully\ qualified\ name\ 'utils.AppClock'\ should\ call\ method\ where\ a\ wall-clock\ read\ (Instant/LocalDate/LocalDateTime/OffsetDateTime/ZonedDateTime.now\ or\ System.currentTimeMillis),\ because\ wall-clock\ reads\ go\ through\ utils.AppClock\ (JCLAW-1150)\ so\ tests\ can\ bind\ a\ fixed\ clock;\ the\ frozen\ entries\ are\ System.currentTimeMillis\ interval\ baselines,\ not\ reads\ of\ the\ calendar=6275f969-0091-46e4-a152-58ef95ac8080

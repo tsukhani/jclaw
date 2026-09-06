@@ -28,10 +28,10 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * owns a committed violation store, and keeping the store's rule key tied to a class
  * whose other rules churn would make every unrelated edit a candidate for a stale store.
  *
- * <p>The store lives in {@code archunit_store/} and is committed. {@code allowStoreCreation}
- * defaults to false, so a run in a checkout without the store fails loudly instead of
- * silently re-freezing whatever it finds; regenerate deliberately with
- * {@code -Darchunit.freeze.store.default.allowStoreCreation=true}. The store key is the
+ * <p>The store lives in {@code archunit_store/} and is committed; {@code conf/archunit.properties}
+ * pins {@code allowStoreCreation=false} so a run can never silently re-freeze whatever it finds.
+ * Regenerate by flipping that one line for a single run — {@code playAutotest} does not forward
+ * {@code -D} to the Play JVM, so the properties file is the only lever. The store key is the
  * rule's description, so editing the {@code because(...)} text orphans the baseline.
  */
 class WallClockDisciplineTest extends UnitTest {
