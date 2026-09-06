@@ -2984,6 +2984,15 @@ do_start_prod() {
     [[ -n "${JCLAW_JVM_OPTS:-}" ]] && echo "    Extra JVM opts: ${JCLAW_JVM_OPTS}"
     play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
 
+    # `play start` forks, so this banner used to announce a server that was not
+    # reachable yet, and every "restart, then do X" sequence inherited the gap:
+    # `${INVOKE} e2e` straight after a restart found no listener and refused.
+    if ! wait_for_backend_ready; then
+        echo "Error: the backend was launched but never answered on port $BACKEND_PORT." >&2
+        echo "       Check logs/system.out — it may have failed during startup." >&2
+        return 1
+    fi
+
     echo ""
     echo "JClaw is running (production):"
     echo "  App: http://localhost:$BACKEND_PORT  (pid: $(cat "$SCRIPT_DIR/server.pid"))"
@@ -3876,6 +3885,32 @@ do_diagnostics() {
 # typecheck). Streams each check's output and prints a consolidated summary
 # at the end. Continues past failures so the user sees every result in one
 # round-trip — the whole point of this subcommand. Exits non-zero if any
+# Block until the backend answers /api/status, so a caller can treat a returned
+# start/restart as "reachable" rather than "process launched". Bounded, because a
+# server that dies during startup must surface as an error rather than a hang.
+wait_for_backend_ready() {
+    echo "==> Waiting for the backend to answer on port ${BACKEND_PORT}..."
+    curl -fs -m 120 --retry 60 --retry-delay 2 --retry-all-errors \
+         --retry-connrefused -o /dev/null "http://localhost:${BACKEND_PORT}/api/status"
+}
+
+# Confirm the resolved target answers before handing the suite a base URL.
+#
+# Separate from wait_for_backend_ready because this one follows whichever base
+# URL was detected, including the dev server on :3000, and because holding the
+# port is not the same as answering on it (JCLAW-1139).
+wait_for_e2e_target() {
+    local base="$1"
+    echo "==> Waiting for $base to answer..."
+    if ! curl -fs -m 120 --retry 40 --retry-delay 3 --retry-all-errors \
+              --retry-connrefused -o /dev/null "$base/api/status"; then
+        echo "Error: $base holds the port but never answered /api/status." >&2
+        echo "       Refusing to run — a booting server fails every spec the same way," >&2
+        echo "       which is indistinguishable from a real regression." >&2
+        return 1
+    fi
+}
+
 # Run the Playwright e2e suite against an already-running server. Kept out of
 # `test` and out of Jenkins deliberately (see frontend/playwright.config.ts):
 # it needs a live server and a real admin credential, so it is a local UAT
@@ -3918,6 +3953,8 @@ do_e2e() {
     # all. Idempotent and near-instant once the matching build is present.
     echo "==> Reconciling the Playwright browser build..."
     (cd "$SCRIPT_DIR/frontend" && pnpm exec playwright install chromium) || return 1
+
+    wait_for_e2e_target "$base" || return 1
 
     echo ""
     echo "==> Running e2e against $base"
