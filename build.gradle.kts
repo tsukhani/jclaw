@@ -330,6 +330,21 @@ dependencies {
     // test class references it), so its presence in the dist is inert.
     implementation("com.tngtech.archunit:archunit:1.5.0")
 
+    // JCLAW-1154: jqwik — property-based testing for the pure parsers and planners
+    // (test/PropertyBasedTest). `implementation` for the same reason as ArchUnit above:
+    // playAutotest builds its classpath from sourceSets.main.runtimeClasspath, so a
+    // testImplementation dep is invisible to the fork's runner; never loaded at runtime,
+    // so its presence in the dist is inert. The junit-platform exclusions are
+    // load-bearing: jqwik 1.10 asks for platform 1.14.4, the fork ships 6.1.3, and
+    // Gradle's deps precede framework/lib on the classpath — without these the 1.x
+    // commons would shadow 6.1.3 and break every existing test.
+    implementation("net.jqwik:jqwik-api:1.10.1") {
+        exclude(group = "org.junit.platform")
+    }
+    runtimeOnly("net.jqwik:jqwik-engine:1.10.1") {
+        exclude(group = "org.junit.platform")
+    }
+
     // JCLAW-911: printer discovery over mDNS/Bonjour. Pure Java, Apache-2.0, no
     // native deps — which is the whole point of the printer tool: it works on a
     // box with no CUPS and no OS print subsystem. 3.6.3 rather than the 3.5.9 the

@@ -108,6 +108,8 @@ nbproject/private/
 dist/
 test-result/
 frontend/test-report/
+# jqwik's failure database, rewritten by every play autotest run (JCLAW-1154).
+.jqwik-database
 *.war
 *.ear
 *.zip
