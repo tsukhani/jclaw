@@ -2,16 +2,15 @@ package services.evals;
 
 import com.google.gson.JsonParseException;
 import utils.GsonHolder;
+import utils.TaskScope;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.function.Function;
@@ -84,17 +83,20 @@ public final class EvalRunner {
     /**
      * Apply {@code fn} to every case on its own virtual thread, with at most
      * {@code maxConcurrency} running at once, preserving suite order in the result.
+     * A case whose {@code fn} throws cancels the cases still in flight: the sweep is
+     * already lost at that point, and the survivors would only spend model calls on a
+     * report nobody receives.
      *
      * <p>Shared with {@link EvalCapture} so the ceiling is defined once: capture and
      * live scoring are the two paths that put a model behind {@code fn}, and a bound
-     * that only one of them honored would be no bound at all.
+     * that only one of them honored would be no bound at all. Public because Play's
+     * tests live in the default package.
      */
-    static <T> List<T> mapCasesBounded(List<EvalCase> cases, int maxConcurrency, Function<EvalCase, T> fn) {
+    public static <T> List<T> mapCasesBounded(List<EvalCase> cases, int maxConcurrency, Function<EvalCase, T> fn) {
         var permits = new Semaphore(Math.max(1, maxConcurrency));
-        List<Future<T>> futures;
-        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
-            futures = cases.stream()
-                    .map(testCase -> pool.submit(() -> {
+        try (var scope = new TaskScope<T>()) {
+            var futures = cases.stream()
+                    .map(testCase -> scope.fork(() -> {
                         permits.acquire();
                         try {
                             return fn.apply(testCase);
@@ -103,19 +105,14 @@ public final class EvalRunner {
                         }
                     }))
                     .toList();
+            scope.join();
+            return futures.stream().map(Future::resultNow).toList();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Eval run interrupted", e);
+        } catch (ExecutionException e) {
+            throw new IllegalStateException("Eval case failed outside scoring", e.getCause());
         }
-        var results = new ArrayList<T>(futures.size());
-        for (var future : futures) {
-            try {
-                results.add(future.get());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Eval run interrupted", e);
-            } catch (ExecutionException e) {
-                throw new IllegalStateException("Eval case failed outside scoring", e.getCause());
-            }
-        }
-        return results;
     }
 
     private static EvalReport.CaseResult score(EvalCase testCase, Responder responder) {
