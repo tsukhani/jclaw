@@ -487,6 +487,9 @@ public class ApiProvidersController extends Controller {
         return m;
     }
 
+    /** Wire key for a model's advertised reasoning-effort ladder. */
+    private static final String KEY_THINKING_LEVELS = "thinkingLevels";
+
     /**
      * Carry an explicit reasoning-effort ladder onto the saved model.
      *
@@ -498,9 +501,6 @@ public class ApiProvidersController extends Controller {
      *
      * <p>Omitted when empty so the shared default keeps applying.
      */
-    /** Wire key for a model's advertised reasoning-effort ladder. */
-    private static final String KEY_THINKING_LEVELS = "thinkingLevels";
-
     private static void addThinkingLevelsIfSet(JsonObject out, JsonObject body) {
         if (!body.has(KEY_THINKING_LEVELS) || !body.get(KEY_THINKING_LEVELS).isJsonArray()) return;
         var levels = new JsonArray();

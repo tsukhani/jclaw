@@ -70,6 +70,9 @@ public class ApiTasksController extends Controller {
                               List<Long> contextFromTaskIds, Integer repeatLimit,
                               Boolean paused, String timezone) {}
 
+    /** Asserted after a mutation re-reads the row it just wrote. */
+    private static final String TASK_DELETED_MID_REQUEST = "task deleted mid-request";
+
     private record TaskView(Long id, String name, String description, String type, String status,
                             String cronExpression, Long intervalSeconds, String scheduleDisplay,
                             int retryCount, int maxRetries, String lastError,
@@ -588,7 +591,7 @@ public class ApiTasksController extends Controller {
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) paused via API".formatted(task.name, task.id));
         // Re-read so the response reflects the flipped flag.
-        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), "task deleted mid-request"))));
+        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), TASK_DELETED_MID_REQUEST))));
     }
 
     @SuppressWarnings("java:S2259")
@@ -607,7 +610,7 @@ public class ApiTasksController extends Controller {
         EventLogger.info("TASK_MGMT_RESUME",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) resumed via API".formatted(task.name, task.id));
-        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), "task deleted mid-request"))));
+        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), TASK_DELETED_MID_REQUEST))));
     }
 
     /**
@@ -645,7 +648,7 @@ public class ApiTasksController extends Controller {
         EventLogger.info("TASK_MGMT_REENABLE",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) re-enabled via API".formatted(task.name, task.id));
-        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), "task deleted mid-request"))));
+        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), TASK_DELETED_MID_REQUEST))));
     }
 
     /**
