@@ -95,6 +95,33 @@ class HarnessSandboxTest extends UnitTest {
         assertTrue(e.getMessage().contains("session working directory"), e.getMessage());
     }
 
+    /**
+     * bwrap applies mounts in argument order and a tmpfs over an ancestor hides every earlier
+     * bind beneath it, so a write root under $HOME is reachable only if it is bound after the
+     * $HOME tmpfs. Pinned on every host because no Linux test can run the real thing here.
+     */
+    @Test
+    void linuxBindsTheWriteRootAfterTheHomeTmpfs() {
+        var home = System.getProperty("user.home");
+        var writeRoot = Path.of(home, "workspace", "agent").toFile();
+        var argv = HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), writeRoot, List.of("/opt/state"));
+
+        int homeTmpfs = indexOfPair(argv, "--tmpfs", home);
+        assertTrue(homeTmpfs >= 0, "the $HOME tmpfs is missing, argv=" + argv);
+        assertTrue(indexOfPair(argv, "--bind", writeRoot.getAbsolutePath()) > homeTmpfs,
+                "the write-root bind must follow the $HOME tmpfs, argv=" + argv);
+        assertTrue(indexOfPair(argv, "--ro-bind-try", "/opt/state") > homeTmpfs,
+                "allowances must follow the $HOME tmpfs, argv=" + argv);
+        assertEquals(List.of("/bin/sh", "-c", "true"), argv.subList(argv.size() - 3, argv.size()));
+    }
+
+    private static int indexOfPair(List<String> argv, String flag, String value) {
+        for (int i = 0; i + 1 < argv.size(); i++) {
+            if (flag.equals(argv.get(i)) && value.equals(argv.get(i + 1))) return i;
+        }
+        return -1;
+    }
+
     @Test
     @EnabledOnOs(OS.MAC)
     void macProfileWrapsAndConfinesWrites() throws Exception {

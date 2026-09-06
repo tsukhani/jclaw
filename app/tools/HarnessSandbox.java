@@ -28,10 +28,11 @@ import java.util.Locale;
  *       Seatbelt profile (no temp file): allow-default, deny all writes except
  *       the session dir + {@code /private/tmp} + {@code /private/var/folders} +
  *       {@code /dev}, deny reads of the enumerated secret paths.</li>
- *   <li><b>Linux</b> — {@code bwrap --ro-bind / / --dev /dev --tmpfs /tmp
- *       --bind <session> <session> [--ro-bind <allowance> <allowance>]* <argv>}:
- *       the visible filesystem is built from nothing, so secrets are ABSENT
- *       rather than merely denied (allowlist-by-construction).</li>
+ *   <li><b>Linux</b> — {@code bwrap --ro-bind / / --dev /dev --tmpfs /tmp --proc /proc
+ *       --tmpfs $HOME --bind <writeRoot> <writeRoot> [--ro-bind-try <allowance> <allowance>]*
+ *       <argv>}: the visible filesystem is built from nothing, so secrets are ABSENT
+ *       rather than merely denied (allowlist-by-construction). Mount order is
+ *       load-bearing — see {@link #linuxArgv}.</li>
  * </ul>
  *
  * <p><b>Fails closed.</b> When the sandbox is enabled but this platform has no
@@ -188,7 +189,7 @@ public final class HarnessSandbox {
         }
         if (os.contains("linux")) {
             requireBinary(BWRAP, configKey);
-            return linux(argv, writeRoot, allowances);
+            return linuxArgv(argv, writeRoot, allowances);
         }
         throw new SandboxUnavailableException(
                 ("%s is enabled but this platform (%s) has no supported sandbox "
@@ -235,7 +236,13 @@ public final class HarnessSandbox {
         return List.copyOf(out);
     }
 
-    private static List<String> linux(List<String> argv, File session, List<String> allowances) {
+    /**
+     * The Linux argv, public so a test can pin the mount order on any host. bwrap applies
+     * mounts in argument order and a tmpfs over an ancestor hides every earlier bind beneath
+     * it, so the {@code $HOME} tmpfs must precede the write-root bind: the workspace lives
+     * under {@code $HOME} on every non-container install.
+     */
+    public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances) {
         var home = System.getProperty("user.home", "");
         var out = new ArrayList<String>(List.of(
                 BWRAP,
@@ -243,12 +250,11 @@ public final class HarnessSandbox {
                 "--dev", "/dev",
                 "--tmpfs", "/tmp",
                 "--proc", "/proc",
-                // rebind the session dir read-write over the read-only root
-                "--bind", session.getAbsolutePath(), session.getAbsolutePath()));
-        // an empty HOME by default; the harness's own state paths are bound back
-        // read-only one file/dir at a time (secrets not listed stay absent).
-        out.add("--tmpfs");
-        out.add(home);
+                // an empty HOME by default; the write root and the harness's own state
+                // paths are bound back below (secrets not listed stay absent).
+                "--tmpfs", home,
+                // rebind the write root read-write over the read-only root
+                "--bind", writeRoot.getAbsolutePath(), writeRoot.getAbsolutePath()));
         for (var a : allowances) {
             var abs = absHome(home, a);
             out.add("--ro-bind-try");

@@ -4,12 +4,15 @@ import models.MessageAttachment;
 import play.Logger;
 import services.AgentService;
 import services.MimeExtensions;
+import tools.HarnessSandbox;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Base64;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Prepares an audio attachment for an OpenAI-compatible {@code input_audio}
@@ -70,12 +73,29 @@ public final class LlmAudio {
         return new Prepared(Base64.getEncoder().encodeToString(Files.readAllBytes(cached)), "mp3");
     }
 
+    /**
+     * JCLAW-1153: the same {@code shell.sandbox} boundary as the diarize tool's ffmpeg — the
+     * input is model-visible media from any channel. Write grant is the temp directory only;
+     * the source's directory rides along so bwrap's {@code $HOME} tmpfs does not hide it.
+     */
+    private static List<String> confined(List<String> argv, Path src, Path tmp) throws IOException {
+        try {
+            return HarnessSandbox.wrap(argv,
+                    Objects.requireNonNull(tmp.toRealPath().getParent()).toFile(),
+                    List.of(Objects.requireNonNull(src.toRealPath().getParent()).toString()),
+                    HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.nativeToolTrustedOrigin());
+        } catch (HarnessSandbox.SandboxUnavailableException e) {
+            // Still fail closed, but as the IOException callers already handle per attachment.
+            throw new IOException(e.getMessage(), e);
+        }
+    }
+
     private static void transcode(Path src, Path dest) throws IOException {
         var tmp = Files.createTempFile("jclaw-llm-audio-", ".mp3");
         try {
-            var proc = new ProcessBuilder("ffmpeg", "-y", "-i", src.toString(),
-                    "-ac", "1", "-b:a", "128k", tmp.toString())
-                    .redirectErrorStream(true).start();
+            var argv = confined(List.of("ffmpeg", "-y", "-i", src.toString(),
+                    "-ac", "1", "-b:a", "128k", tmp.toString()), src, tmp);
+            var proc = new ProcessBuilder(argv).redirectErrorStream(true).start();
             String output = new String(proc.getInputStream().readAllBytes());
             int exit;
             try {
