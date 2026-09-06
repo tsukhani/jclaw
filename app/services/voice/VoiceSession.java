@@ -1,5 +1,6 @@
 package services.voice;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import org.jspecify.annotations.Nullable;
 
 import java.io.ByteArrayOutputStream;
@@ -56,10 +57,13 @@ public final class VoiceSession implements AutoCloseable {
     private long lastPartialMs;
     private boolean buffering;
 
+    @MustBeClosed
     public VoiceSession(VoiceVad vad, TurnEndpointer endpointer, int prerollWindows, Listener listener) {
         this(vad, endpointer, prerollWindows, listener, null, 0);
     }
 
+    /** Takes ownership of {@code vad}: {@link #close()} closes it. */
+    @MustBeClosed
     public VoiceSession(VoiceVad vad, TurnEndpointer endpointer, int prerollWindows, Listener listener,
                         @Nullable Partial partial, long partialIntervalMs) {
         this.vad = vad;

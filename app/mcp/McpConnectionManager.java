@@ -1,6 +1,7 @@
 package mcp;
 
 import agents.ToolRegistry;
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -366,6 +367,9 @@ public final class McpConnectionManager {
         Thread.ofVirtual().name("mcp-connect-" + server.name).start(() -> doConnect(entry, server, attempt));
     }
 
+    // MustBeClosed: the transport and the client it wraps outlive this method by design —
+    // entry.client owns them until stop()/handleDisconnect/onTransportError closes them.
+    @SuppressWarnings("MustBeClosed")
     private static void doConnect(Entry entry, McpServer server, int attempt) {
         entry.status = McpServer.Status.CONNECTING;
         persistStatus(server.id, McpServer.Status.CONNECTING, null);
@@ -583,6 +587,11 @@ public final class McpConnectionManager {
         return Math.min(delay, backoffCeilingMillis);
     }
 
+    // Suppressed in the body only: MustBeClosed does not treat a `yield` from a switch
+    // block arm as a return position (a plain `->` arm it does). Callers stay checked —
+    // the @MustBeClosed contract on this method is what the suppression does not touch.
+    @MustBeClosed
+    @SuppressWarnings("MustBeClosed")
     private static McpTransport buildTransport(McpServer server) {
         var cfg = JsonParser.parseString(server.configJson).getAsJsonObject();
         return switch (server.transport) {

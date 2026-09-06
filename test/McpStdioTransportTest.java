@@ -1,3 +1,4 @@
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonObject;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpStdioTransport;
@@ -63,7 +64,6 @@ class McpStdioTransportTest extends UnitTest {
             """;
 
     private Path fixturePath;
-    private McpStdioTransport transport;
     private final List<JsonRpc.Message> received = new CopyOnWriteArrayList<>();
     private final AtomicReference<Throwable> error = new AtomicReference<>();
 
@@ -72,102 +72,111 @@ class McpStdioTransportTest extends UnitTest {
         Assumptions.assumeTrue(nodeAvailable(), "node not on PATH; skipping stdio transport test");
         fixturePath = Files.createTempFile("mcp-fixture-", ".js");
         Files.writeString(fixturePath, FIXTURE_SCRIPT);
-        transport = new McpStdioTransport("fixture",
-                List.of("node", fixturePath.toString()), Map.of());
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        if (transport != null) transport.close();
         if (fixturePath != null) Files.deleteIfExists(fixturePath);
+    }
+
+    /** Annotated so the constructor call is legal here; it propagates to every caller. */
+    @MustBeClosed
+    private McpStdioTransport newTransport() {
+        return new McpStdioTransport("fixture", List.of("node", fixturePath.toString()), Map.of());
     }
 
     @Test
     void initializeAndCallToolRoundTrip() throws Exception {
-        var initLatch = new CountDownLatch(1);
-        var callLatch = new CountDownLatch(1);
-        var tools = new AtomicReference<JsonRpc.Response>();
-        var call = new AtomicReference<JsonRpc.Response>();
+        try (var transport = newTransport()) {
+            var initLatch = new CountDownLatch(1);
+            var callLatch = new CountDownLatch(1);
+            var tools = new AtomicReference<JsonRpc.Response>();
+            var call = new AtomicReference<JsonRpc.Response>();
 
-        transport.start(msg -> {
-            received.add(msg);
-            if (msg instanceof JsonRpc.Response r) {
-                if (r.id().equals(1L)) initLatch.countDown();
-                else if (r.id().equals(2L)) tools.set(r);
-                else if (r.id().equals(3L)) { call.set(r); callLatch.countDown(); }
+            transport.start(msg -> {
+                received.add(msg);
+                if (msg instanceof JsonRpc.Response r) {
+                    if (r.id().equals(1L)) initLatch.countDown();
+                    else if (r.id().equals(2L)) tools.set(r);
+                    else if (r.id().equals(3L)) { call.set(r); callLatch.countDown(); }
+                }
+            }, error::set);
+
+            transport.send(new JsonRpc.Request(1L, "initialize", initParams()));
+            assertTrue(initLatch.await(5, TimeUnit.SECONDS), "initialize response");
+
+            transport.send(new JsonRpc.Notification("notifications/initialized", null));
+            transport.send(new JsonRpc.Request(2L, "tools/list", new JsonObject()));
+
+            var deadline = System.currentTimeMillis() + 3000;
+            while (tools.get() == null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
             }
-        }, error::set);
+            assertNotNull(tools.get(), "tools/list response");
+            var toolArr = tools.get().result().getAsJsonObject().getAsJsonArray("tools");
+            assertEquals(1, toolArr.size());
+            assertEquals("echo", toolArr.get(0).getAsJsonObject().get("name").getAsString());
 
-        transport.send(new JsonRpc.Request(1L, "initialize", initParams()));
-        assertTrue(initLatch.await(5, TimeUnit.SECONDS), "initialize response");
-
-        transport.send(new JsonRpc.Notification("notifications/initialized", null));
-        transport.send(new JsonRpc.Request(2L, "tools/list", new JsonObject()));
-
-        var deadline = System.currentTimeMillis() + 3000;
-        while (tools.get() == null && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20);
+            var callParams = new JsonObject();
+            callParams.addProperty("name", "echo");
+            var args = new JsonObject();
+            args.addProperty("text", "hi");
+            callParams.add("arguments", args);
+            transport.send(new JsonRpc.Request(3L, "tools/call", callParams));
+            assertTrue(callLatch.await(5, TimeUnit.SECONDS), "tools/call response");
+            var content = call.get().result().getAsJsonObject().getAsJsonArray("content");
+            assertEquals("echo:hi", content.get(0).getAsJsonObject().get("text").getAsString());
+            assertNull(error.get(), "no transport error during round-trip");
         }
-        assertNotNull(tools.get(), "tools/list response");
-        var toolArr = tools.get().result().getAsJsonObject().getAsJsonArray("tools");
-        assertEquals(1, toolArr.size());
-        assertEquals("echo", toolArr.get(0).getAsJsonObject().get("name").getAsString());
-
-        var callParams = new JsonObject();
-        callParams.addProperty("name", "echo");
-        var args = new JsonObject();
-        args.addProperty("text", "hi");
-        callParams.add("arguments", args);
-        transport.send(new JsonRpc.Request(3L, "tools/call", callParams));
-        assertTrue(callLatch.await(5, TimeUnit.SECONDS), "tools/call response");
-        var content = call.get().result().getAsJsonObject().getAsJsonArray("content");
-        assertEquals("echo:hi", content.get(0).getAsJsonObject().get("text").getAsString());
-        assertNull(error.get(), "no transport error during round-trip");
     }
 
     @Test
     void closeTerminatesProcessAndStopsReader() throws Exception {
-        transport.start(received::add, error::set);
-        transport.send(new JsonRpc.Request(1L, "ping", null));
-        // Wait for the response to come back so we know the process is alive.
-        var deadline = System.currentTimeMillis() + 3000;
-        while (received.isEmpty() && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20);
+        try (var transport = newTransport()) {
+            transport.start(received::add, error::set);
+            transport.send(new JsonRpc.Request(1L, "ping", null));
+            // Wait for the response to come back so we know the process is alive.
+            var deadline = System.currentTimeMillis() + 3000;
+            while (received.isEmpty() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+            assertFalse(received.isEmpty(), "ping response should arrive");
+            transport.close();
+            // close() must not throw and must not surface a spurious onError for the EOF.
+            Thread.sleep(100);
+            assertNull(error.get(), "EOF after explicit close must not surface as error");
         }
-        assertFalse(received.isEmpty(), "ping response should arrive");
-        transport.close();
-        // close() must not throw and must not surface a spurious onError for the EOF.
-        Thread.sleep(100);
-        assertNull(error.get(), "EOF after explicit close must not surface as error");
     }
 
     @Test
     void closeDoesNotInterruptTheReaderMidDispatch() throws Exception {
-        // JCLAW-752: destroying the process and closing the streams is what
-        // unblocks the reader — an interrupt cannot. Interrupting it only lands
-        // the flag on whatever the dispatch is doing at the time, and an
-        // onMessage handler mid-DB-write takes that as an NIO channel close.
-        var entered = new CountDownLatch(1);
-        var release = new CountDownLatch(1);
-        var interrupted = new AtomicBoolean(false);
-        transport.start(msg -> {
-            received.add(msg);
-            entered.countDown();
-            try {
-                release.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException _) {
-                interrupted.set(true);
-                Thread.currentThread().interrupt();
-            }
-        }, error::set);
+        try (var transport = newTransport()) {
+            // JCLAW-752: destroying the process and closing the streams is what
+            // unblocks the reader — an interrupt cannot. Interrupting it only lands
+            // the flag on whatever the dispatch is doing at the time, and an
+            // onMessage handler mid-DB-write takes that as an NIO channel close.
+            var entered = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            var interrupted = new AtomicBoolean(false);
+            transport.start(msg -> {
+                received.add(msg);
+                entered.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException _) {
+                    interrupted.set(true);
+                    Thread.currentThread().interrupt();
+                }
+            }, error::set);
 
-        transport.send(new JsonRpc.Request(1L, "ping", null));
-        assertTrue(entered.await(5, TimeUnit.SECONDS), "ping response must reach the handler");
+            transport.send(new JsonRpc.Request(1L, "ping", null));
+            assertTrue(entered.await(5, TimeUnit.SECONDS), "ping response must reach the handler");
 
-        transport.close();
-        Thread.sleep(200);  // an interrupt fired by close() would have landed by now
-        release.countDown();
-        assertFalse(interrupted.get(), "close() must not interrupt the reader mid-dispatch");
+            transport.close();
+            Thread.sleep(200);  // an interrupt fired by close() would have landed by now
+            release.countDown();
+            assertFalse(interrupted.get(), "close() must not interrupt the reader mid-dispatch");
+        }
     }
 
     @Test
@@ -181,11 +190,14 @@ class McpStdioTransportTest extends UnitTest {
         // on stdin EOF, so the old close()-stdout-first order would hang here.
         Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase().startsWith("windows"),
                 "no POSIX 'sleep'; skipping");
-        var idle = new McpStdioTransport("idle", List.of("sleep", "30"), Map.of());
-        idle.start(received::add, error::set);
-        Thread.sleep(150); // let the reader loop enter the blocking readLine()
-        assertTimeoutPreemptively(Duration.ofSeconds(5), idle::close,
-                "close() must not deadlock on the stdout reader lock");
+        try (var idle = new McpStdioTransport("idle", List.of("sleep", "30"), Map.of())) {
+            idle.start(received::add, error::set);
+            Thread.sleep(150); // let the reader loop enter the blocking readLine()
+            // close() is the assertion here; the resource block only covers the paths
+            // that never reach it. McpStdioTransport.close() is idempotent.
+            assertTimeoutPreemptively(Duration.ofSeconds(5), idle::close,
+                    "close() must not deadlock on the stdout reader lock");
+        }
     }
 
     private static JsonObject initParams() {

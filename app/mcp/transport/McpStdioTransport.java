@@ -1,5 +1,6 @@
 package mcp.transport;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import mcp.jsonrpc.JsonRpc;
 import play.Logger;
 import utils.SubprocessEnv;
@@ -45,6 +46,7 @@ public final class McpStdioTransport implements McpTransport {
     private volatile boolean closed;
     private final ReentrantLock sendLock = new ReentrantLock();
 
+    @MustBeClosed
     public McpStdioTransport(String name, List<String> command, Map<String, String> env) {
         if (command == null || command.isEmpty()) {
             throw new IllegalArgumentException("command required");

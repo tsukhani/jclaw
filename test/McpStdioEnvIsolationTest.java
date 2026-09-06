@@ -45,7 +45,6 @@ class McpStdioEnvIsolationTest extends UnitTest {
             """;
 
     private Path fixturePath;
-    private McpStdioTransport transport;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -56,45 +55,44 @@ class McpStdioEnvIsolationTest extends UnitTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        if (transport != null) transport.close();
         if (fixturePath != null) Files.deleteIfExists(fixturePath);
     }
 
     @Test
     void childGetsFilteredHostEnvPlusConfigNeverHostSecrets() throws Exception {
         // Operator-supplied MCP config env — must survive to the child.
-        transport = new McpStdioTransport("envdump",
+        try (var transport = new McpStdioTransport("envdump",
                 List.of("node", fixturePath.toString()),
-                Map.of("MCP_CONFIG_VAR", "cfg-value"));
+                Map.of("MCP_CONFIG_VAR", "cfg-value"))) {
+            var dump = new AtomicReference<JsonRpc.Response>();
+            transport.start(msg -> {
+                if (msg instanceof JsonRpc.Response r && r.id().equals(1L)) dump.set(r);
+            }, err -> { });
 
-        var dump = new AtomicReference<JsonRpc.Response>();
-        transport.start(msg -> {
-            if (msg instanceof JsonRpc.Response r && r.id().equals(1L)) dump.set(r);
-        }, err -> { });
+            transport.send(new JsonRpc.Request(1L, "env/dump", null));
 
-        transport.send(new JsonRpc.Request(1L, "env/dump", null));
+            var deadline = System.currentTimeMillis() + 5000;
+            while (dump.get() == null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+            assertNotNull(dump.get(), "env/dump response should arrive");
 
-        var deadline = System.currentTimeMillis() + 5000;
-        while (dump.get() == null && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20);
+            var childEnv = dump.get().result().getAsJsonObject().getAsJsonObject("env");
+
+            // (1) No sensitive host var leaked into the child.
+            for (var key : childEnv.keySet()) {
+                assertFalse(SubprocessEnv.isSensitive(key),
+                        "host secret leaked to MCP stdio child: " + key);
+            }
+
+            // (2) Non-sensitive host env still flows through (PATH).
+            Assumptions.assumeTrue(System.getenv("PATH") != null, "no PATH in this environment");
+            assertTrue(childEnv.has("PATH"), "non-sensitive host PATH must reach the child");
+
+            // (3) Operator-supplied config env is delivered.
+            assertEquals("cfg-value", childEnv.get("MCP_CONFIG_VAR").getAsString(),
+                    "operator MCP config env must reach the child");
         }
-        assertNotNull(dump.get(), "env/dump response should arrive");
-
-        var childEnv = dump.get().result().getAsJsonObject().getAsJsonObject("env");
-
-        // (1) No sensitive host var leaked into the child.
-        for (var key : childEnv.keySet()) {
-            assertFalse(SubprocessEnv.isSensitive(key),
-                    "host secret leaked to MCP stdio child: " + key);
-        }
-
-        // (2) Non-sensitive host env still flows through (PATH).
-        Assumptions.assumeTrue(System.getenv("PATH") != null, "no PATH in this environment");
-        assertTrue(childEnv.has("PATH"), "non-sensitive host PATH must reach the child");
-
-        // (3) Operator-supplied config env is delivered.
-        assertEquals("cfg-value", childEnv.get("MCP_CONFIG_VAR").getAsString(),
-                "operator MCP config env must reach the child");
     }
 
     private static boolean nodeAvailable() {

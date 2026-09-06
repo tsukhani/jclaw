@@ -13,17 +13,35 @@ plugins {
 // compileJava that Sonar and pre-push already depend on, the same layering Spotless uses.
 tasks.withType<JavaCompile>().configureEach {
     options.errorprone {
-        // compileTestJava stays out: test/ is 500+ default-package classes with no nullness
-        // annotations, and the contracts being enforced are production ones.
+        // compileTestJava stays out of this block: test/ is 500+ default-package classes with
+        // no nullness annotations, and the contracts being enforced are production ones. It is
+        // re-enabled below for MustBeClosed alone.
         enabled.set(name == "compileJava")
-        // Nullness only. Adopting the rest of Error Prone's catalogue is its own decision.
+        // Two named checks only. Adopting the rest of Error Prone's catalogue is its own decision.
         disableAllChecks.set(true)
         check("NullAway", CheckSeverity.ERROR)
+        // JCLAW-1156: an @MustBeClosed AutoCloseable whose result escapes without a
+        // try-with-resources (or a @MustBeClosed caller that returns it on) fails the build.
+        check("MustBeClosed", CheckSeverity.ERROR)
         // Packages whose unannotated types default to non-null. `models` is deliberately
         // absent: JPA populates entity fields reflectively after construction, so every
         // non-null column would report as uninitialised. Widening to another package is a
         // name here plus a @NullMarked package-info per (sub)package it contains.
         option("NullAway:AnnotatedPackages", "utils,llm,agents,tools,services")
+    }
+}
+
+// JCLAW-1156: MustBeClosed also runs on test/, which the block above deliberately excludes.
+// LuceneTestSync's lock is the leak that actually hurts here — a missing release starves
+// every later Lucene test — and it is held only by test code, so an enforcement that stops
+// at app/ cannot reach it. NullAway stays off: test/ is the default package, outside its
+// AnnotatedPackages scope, so switching it on would check nothing and only add risk.
+tasks.named<JavaCompile>("compileTestJava") {
+    options.errorprone {
+        enabled.set(true)
+        disableAllChecks.set(true)
+        check("NullAway", CheckSeverity.OFF)
+        check("MustBeClosed", CheckSeverity.ERROR)
     }
 }
 
@@ -283,6 +301,11 @@ dependencies {
     // Both are compile-only tool dependencies — nothing here reaches the dist.
     errorprone("com.google.errorprone:error_prone_core:2.50.0")
     errorprone("com.uber.nullaway:nullaway:0.14.1")
+
+    // JCLAW-1156: @MustBeClosed itself. Unlike the two above this one is referenced by
+    // app/ and test/ sources, so it has to be a real compile dependency rather than a
+    // tool-only one — CLASS retention, nothing loads it at runtime.
+    implementation("com.google.errorprone:error_prone_annotations:2.50.0")
 
     // Agent Client Protocol (ACP) SDK — the official Java client for driving a
     // coding harness over ACP (JSON-RPC/stdio). Used by the runtime=acp subagent
