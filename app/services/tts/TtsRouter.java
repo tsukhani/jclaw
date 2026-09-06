@@ -1,5 +1,6 @@
 package services.tts;
 
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.ConfigService;
 import services.UvProbe;
@@ -28,13 +29,15 @@ public final class TtsRouter {
      *  unset, blank, or pointing at a model that belongs to a different engine. */
     public static String modelFor(TtsEngine engine) {
         var configured = ConfigService.get("tts." + engine.id() + ".model");
-        boolean valid = configured != null && !configured.isBlank()
-                && TtsModel.byId(configured).map(m -> m.engine() == engine).orElse(false);
-        return valid ? configured : TtsModel.defaultFor(engine).id();
+        if (configured != null && !configured.isBlank()
+                && TtsModel.byId(configured).map(m -> m.engine() == engine).orElse(false)) {
+            return configured;
+        }
+        return TtsModel.defaultFor(engine).id();
     }
 
     /** Optional per-engine voice/speaker ({@code tts.<engine>.voice}). */
-    public static String voiceFor(TtsEngine engine) {
+    public static @Nullable String voiceFor(TtsEngine engine) {
         return ConfigService.get("tts." + engine.id() + ".voice");
     }
 
@@ -47,7 +50,7 @@ public final class TtsRouter {
      * configured from a previous model cannot leak into Kokoro, which selects its
      * speaker by name and would be confused by both.
      */
-    public static String refAudioFor(TtsEngine engine) {
+    public static @Nullable String refAudioFor(TtsEngine engine) {
         if (!TtsModel.cloningById(modelFor(engine))) return null;
         return TtsReferenceVoice.activePath(engine);
     }
@@ -124,7 +127,7 @@ public final class TtsRouter {
      * megabytes on demand, and stalling a live turn on a cold download is worse
      * than failing it promptly.
      */
-    private static TtsEngine fallbackFor(TtsEngine primary) {
+    private static @Nullable TtsEngine fallbackFor(TtsEngine primary) {
         if (primary != TtsEngine.SIDECAR) return null;
         return TtsJvmEngine.isModelPresent(modelFor(TtsEngine.JVM)) ? TtsEngine.JVM : null;
     }

@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.ConfigService;
 import utils.HttpFactories;
@@ -37,7 +38,7 @@ public final class ReplicateImageModelCatalog {
     /** One selectable Replicate model. {@code slug} is the {@code owner/name} for
      *  imagegen.replicate.model. {@code imageToImage} true means it accepts an uploaded reference
      *  (Kontext / style transfer) — the Settings dropdown groups by this flag (JCLAW-700). */
-    public record ImageModel(String slug, String name, String description, boolean imageToImage) {}
+    public record ImageModel(String slug, String name, @Nullable String description, boolean imageToImage) {}
 
     /**
      * JCLAW-700: curated image-to-image (Kontext) models. These live in Replicate's image-editing
@@ -99,7 +100,7 @@ public final class ReplicateImageModelCatalog {
     public List<ImageModel> fetch() {
         var apiKey = ConfigService.get("provider.replicate.apiKey");
         if (apiKey == null || apiKey.isBlank()) return List.of();
-        var base = Strings.firstNonBlank(ConfigService.get("provider.replicate.baseUrl"), DEFAULT_BASE);
+        var base = Strings.firstNonBlankOr(DEFAULT_BASE, ConfigService.get("provider.replicate.baseUrl"));
         var url = Strings.trimTrailingSlash(base) + "/collections/" + COLLECTION;
         var req = new Request.Builder()
                 .url(url)
@@ -134,7 +135,7 @@ public final class ReplicateImageModelCatalog {
         return out;
     }
 
-    private static String asString(JsonObject o, String key) {
+    private static @Nullable String asString(JsonObject o, String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
     }
 }

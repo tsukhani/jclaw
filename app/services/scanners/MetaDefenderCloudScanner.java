@@ -3,6 +3,7 @@ package services.scanners;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import utils.HttpKeys;
 
 import java.util.List;
@@ -132,7 +133,7 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
     }
 
     /** Returns "engine: threat" when the engine reported a non-blank threat, null otherwise. */
-    private static String extractThreatLabel(String engineName, JsonElement engineResult) {
+    private static @Nullable String extractThreatLabel(String engineName, JsonElement engineResult) {
         if (!engineResult.isJsonObject()) return null;
         var engineObj = engineResult.getAsJsonObject();
         var threat = optString(engineObj, FIELD_THREAT_FOUND, "");

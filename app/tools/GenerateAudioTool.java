@@ -6,6 +6,7 @@ import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.ConfigService;
 import services.ConversationService;
@@ -117,7 +118,7 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
      * the encoder treats as "assume nothing" and takes the broadly-playable path.
      * Own transaction: tool execution runs off the request path.
      */
-    private static String deliveringChannel() {
+    private static @Nullable String deliveringChannel() {
         var conversationId = ToolContext.conversationId();
         if (conversationId == null) return null;
         return Tx.run(() -> {
@@ -133,7 +134,7 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
         try {
             var args = JsonParser.parseString(argsJson).getAsJsonObject();
             text = JsonArgs.optString(args, ARG_TEXT, "");
-            saveTo = JsonArgs.optString(args, ARG_SAVE_TO, null);
+            saveTo = JsonArgs.optString(args, ARG_SAVE_TO);
         } catch (RuntimeException e) {
             return ToolRegistry.ToolResult.text("Error: could not parse arguments: " + e.getMessage());
         }

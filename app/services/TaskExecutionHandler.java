@@ -7,6 +7,7 @@ import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.helper.CustomTask;
 import com.github.kagkarlsson.scheduler.task.helper.Tasks;
 import models.Task;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
@@ -81,7 +82,7 @@ public final class TaskExecutionHandler {
     // is a pure publish-once-read-many handoff — JMM happens-before via
     // the volatile read/write is sufficient.
     @SuppressWarnings("java:S3077")
-    private static volatile SchedulerClient schedulerClient;
+    private static volatile @Nullable SchedulerClient schedulerClient;
 
     private TaskExecutionHandler() {}
 
@@ -216,7 +217,7 @@ public final class TaskExecutionHandler {
      * <p>Returns {@code null} if the Task is still not found after all
      * attempts. Visible for tests in the {@code services} package.
      */
-    static Task findTaskWithRaceBackoff(long taskId) {
+    static @Nullable Task findTaskWithRaceBackoff(long taskId) {
         for (int i = 0; i < FIND_TASK_ATTEMPTS; i++) {
             Task t = Tx.run(() -> (Task) Task.findById(taskId));
             if (t != null) return t;
@@ -269,7 +270,7 @@ public final class TaskExecutionHandler {
      * row from a prior schema or hand-tampered DB shouldn't crash the
      * scheduler thread.
      */
-    private static Long parseTaskId(String instanceId) {
+    private static @Nullable Long parseTaskId(String instanceId) {
         if (instanceId == null || instanceId.isBlank()) return null;
         try {
             return Long.parseLong(instanceId.trim());

@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.ConfigService;
 import utils.HttpFactories;
@@ -32,7 +33,7 @@ import java.util.List;
 public final class ReplicateVideoModelCatalog {
 
     /** One curated text-to-video model. {@code slug} is the {@code owner/name} for videogen.cloud.model. */
-    public record VideoModel(String slug, String name, String description) {}
+    public record VideoModel(String slug, String name, @Nullable String description) {}
 
     private static final String DEFAULT_BASE = "https://api.replicate.com/v1";
     private static final String COLLECTION = "text-to-video";
@@ -74,7 +75,7 @@ public final class ReplicateVideoModelCatalog {
     public List<VideoModel> fetch() {
         var apiKey = ConfigService.get("provider.replicate.apiKey");
         if (apiKey == null || apiKey.isBlank()) return List.of();
-        var base = Strings.firstNonBlank(ConfigService.get("provider.replicate.baseUrl"), DEFAULT_BASE);
+        var base = Strings.firstNonBlankOr(DEFAULT_BASE, ConfigService.get("provider.replicate.baseUrl"));
         var url = Strings.trimTrailingSlash(base) + "/collections/" + COLLECTION;
         var req = new Request.Builder()
                 .url(url)
@@ -108,7 +109,7 @@ public final class ReplicateVideoModelCatalog {
         return out;
     }
 
-    private static String asString(JsonObject o, String key) {
+    private static @Nullable String asString(JsonObject o, String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
     }
 }

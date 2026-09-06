@@ -653,7 +653,7 @@ public class ToolRegistry {
      * opt-in by toggling them on per-(agent, MCP server) in the agent detail page,
      * which writes an explicit AgentToolConfig row with {@code enabled=true}.
      */
-    public static Set<String> loadDisabledTools(Agent agent) {
+    public static Set<String> loadDisabledTools(@Nullable Agent agent) {
         if (agent == null || agent.id == null) {
             // Unsaved agents have no configs; treat as "nothing disabled."
             return Set.of();
@@ -778,7 +778,7 @@ public class ToolRegistry {
      * for a child whose next turn must see them, so deferring either to an unrelated
      * transaction's commit would leave a durable write behind a stale cache.
      */
-    public static void invalidateDisabledToolsCache(Agent agent) {
+    public static void invalidateDisabledToolsCache(@Nullable Agent agent) {
         if (agent != null && agent.id != null) {
             DISABLED_TOOLS_CACHE.invalidate(agent.id);
         }

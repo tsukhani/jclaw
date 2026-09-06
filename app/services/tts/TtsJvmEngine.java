@@ -7,6 +7,7 @@ import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig;
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig;
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.Play;
 import services.ConfigService;
@@ -112,7 +113,7 @@ public final class TtsJvmEngine {
      * {@code OfflineTts}. {@code voice} is an optional speaker index (numeric
      * string; blank/invalid → 0); {@code speed} defaults to 1.0.
      */
-    public static byte[] synthesize(String text, String modelId, String voice, Float speed) {
+    public static byte[] synthesize(String text, String modelId, @Nullable String voice, @Nullable Float speed) {
         LOCK.lock();
         try {
             var tts = ensureLoaded(modelId);
@@ -124,7 +125,7 @@ public final class TtsJvmEngine {
         }
     }
 
-    private static int speakerId(String voice) {
+    private static int speakerId(@Nullable String voice) {
         if (voice == null || voice.isBlank()) return 0;
         try {
             return Math.max(0, Integer.parseInt(voice.trim()));

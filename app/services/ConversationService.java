@@ -6,6 +6,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.transcription.PendingTranscripts;
 import services.transcription.TranscriptionRouter;
@@ -73,7 +74,7 @@ public class ConversationService {
      *                    unknown
      * @return the existing or newly-created conversation
      */
-    public static Conversation findOrCreate(Agent agent, String channelType, String peerId, String chatType) {
+    public static Conversation findOrCreate(Agent agent, String channelType, String peerId, @Nullable String chatType) {
         var existing = Conversation.findByAgentChannelPeer(agent, channelType, peerId);
         if (existing != null) return existing;
         return create(agent, channelType, peerId, chatType);
@@ -115,7 +116,7 @@ public class ConversationService {
         conversation.save();
     }
 
-    public static Conversation create(Agent agent, String channelType, String peerId) {
+    public static Conversation create(@Nullable Agent agent, String channelType, String peerId) {
         return create(agent, channelType, peerId, null);
     }
 
@@ -130,7 +131,7 @@ public class ConversationService {
      * @param chatType    Telegram {@code chat.type}, or null
      * @return the newly-created conversation
      */
-    public static Conversation create(Agent agent, String channelType, String peerId, String chatType) {
+    public static Conversation create(@Nullable Agent agent, String channelType, String peerId, @Nullable String chatType) {
         var convo = new Conversation();
         convo.agent = agent;
         convo.channelType = channelType;
@@ -138,19 +139,20 @@ public class ConversationService {
         if (chatType != null) convo.chatType = chatType;
         convo.save();
 
-        EventLogger.info("agent", agent.name, channelType,
-                "New conversation created (agent: %s, peer: %s)".formatted(agent.name, peerId != null ? peerId : "none"));
+        EventLogger.info("agent", Agent.nameOf(agent), channelType,
+                "New conversation created (agent: %s, peer: %s)"
+                        .formatted(Agent.nameOf(agent), peerId != null ? peerId : "none"));
         return convo;
     }
 
     public static Message appendMessage(Conversation conversation, MessageRole role, String content,
-                                         String toolCalls, String toolResults, String usageJson) {
+                                         @Nullable String toolCalls, @Nullable String toolResults, @Nullable String usageJson) {
         return appendMessage(conversation, role, content, toolCalls, toolResults, usageJson, null);
     }
 
-    public static Message appendMessage(Conversation conversation, MessageRole role, String content,
-                                         String toolCalls, String toolResults, String usageJson,
-                                         String reasoning) {
+    public static Message appendMessage(Conversation conversation, MessageRole role, @Nullable String content,
+                                         @Nullable String toolCalls, @Nullable String toolResults, @Nullable String usageJson,
+                                         @Nullable String reasoning) {
         var msg = new Message();
         msg.conversation = conversation;
         msg.role = role.value;
@@ -206,7 +208,7 @@ public class ConversationService {
      * @return the persisted user message
      */
     public static Message appendUserMessage(Conversation conversation, String content,
-                                             List<AttachmentService.Input> attachments) {
+                                             @Nullable List<AttachmentService.Input> attachments) {
         var msg = appendMessage(conversation, MessageRole.USER, content, null, null, null);
         if (attachments != null && !attachments.isEmpty()) {
             for (var input : attachments) {
@@ -233,8 +235,8 @@ public class ConversationService {
         return msg;
     }
 
-    public static Message appendAssistantMessage(Conversation conversation, String content,
-                                                   String toolCalls) {
+    public static Message appendAssistantMessage(Conversation conversation, @Nullable String content,
+                                                   @Nullable String toolCalls) {
         return appendAssistantMessage(conversation, content, toolCalls, null, null);
     }
 
@@ -243,8 +245,8 @@ public class ConversationService {
         return appendAssistantMessage(conversation, content, toolCalls, usageJson, null);
     }
 
-    public static Message appendAssistantMessage(Conversation conversation, String content,
-                                                   String toolCalls, String usageJson, String reasoning) {
+    public static Message appendAssistantMessage(Conversation conversation, @Nullable String content,
+                                                   @Nullable String toolCalls, @Nullable String usageJson, @Nullable String reasoning) {
         return appendAssistantMessage(conversation, content, toolCalls, usageJson, reasoning, false);
     }
 
@@ -263,8 +265,8 @@ public class ConversationService {
      * @param truncated    true when the model hit {@code finish_reason=length}
      * @return the persisted assistant message
      */
-    public static Message appendAssistantMessage(Conversation conversation, String content,
-                                                   String toolCalls, String usageJson, String reasoning,
+    public static Message appendAssistantMessage(Conversation conversation, @Nullable String content,
+                                                   @Nullable String toolCalls, @Nullable String usageJson, @Nullable String reasoning,
                                                    boolean truncated) {
         var msg = appendMessage(conversation, MessageRole.ASSISTANT, content, toolCalls, null, usageJson, reasoning);
         if (truncated) {
@@ -291,8 +293,8 @@ public class ConversationService {
      *                       tools that don't produce structured output
      * @return the persisted tool-result message
      */
-    public static Message appendToolResult(Conversation conversation, String toolCallId,
-                                            String result, String structuredJson) {
+    public static Message appendToolResult(Conversation conversation, @Nullable String toolCallId,
+                                            String result, @Nullable String structuredJson) {
         var msg = appendMessage(conversation, MessageRole.TOOL, result, null, toolCallId, null);
         if (structuredJson != null) {
             msg.toolResultStructured = structuredJson;
@@ -464,7 +466,7 @@ public class ConversationService {
      * caller falls back to the global cap). See {@link #effectiveHistoryLimit}
      * for the full resolution contract.
      */
-    private static String perTypeHistoryKey(Conversation conversation) {
+    private static @Nullable String perTypeHistoryKey(Conversation conversation) {
         if (!ChannelType.TELEGRAM.value.equals(conversation.channelType)) {
             return null; // non-Telegram: no per-type notion, use global
         }

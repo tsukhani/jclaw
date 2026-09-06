@@ -1,6 +1,7 @@
 package services.transcription;
 
 import com.google.gson.JsonObject;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 
 import java.util.Map;
@@ -62,7 +63,7 @@ public abstract class ModelPrefetchStore<S> {
     }
 
     /** A string field on a JSON object, or null when absent/JSON-null. */
-    private static String strOrNull(JsonObject o, String field) {
+    private static @Nullable String strOrNull(JsonObject o, String field) {
         return o.has(field) && !o.get(field).isJsonNull() ? o.get(field).getAsString() : null;
     }
 
@@ -97,7 +98,7 @@ public abstract class ModelPrefetchStore<S> {
      * subclass adds only its own shape (e.g. the ASR size denominator).
      */
     protected abstract S buildStatus(String key, State state, long bytesDownloaded,
-                                     String engine, String error);
+                                     @Nullable String engine, @Nullable String error);
 
     /**
      * Kick a background prefetch of a model's weights; single-flight per key,

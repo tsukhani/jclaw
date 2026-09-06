@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -97,7 +99,7 @@ public final class TaskRunRegistry {
      * has been flipped by {@link #requestCancel}. Cheap — one hash lookup, one
      * volatile read.
      */
-    public static boolean isCancelled(Long taskRunId) {
+    public static boolean isCancelled(@Nullable Long taskRunId) {
         if (taskRunId == null) return false;
         var flag = ACTIVE.get(taskRunId);
         return flag != null && flag.get();

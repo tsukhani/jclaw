@@ -2,6 +2,7 @@ package tools;
 
 import models.Agent;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 
 /**
@@ -31,14 +32,14 @@ final class SubagentLimits {
      * advisory limit for now. A {@code SELECT ... FOR UPDATE} on the parent
      * Agent row would close the window if/when it matters.
      */
-    static String enforceRecursionLimits(Agent parentAgent) {
+    static @Nullable String enforceRecursionLimits(Agent parentAgent) {
         return enforceRecursionLimits(parentAgent, 1);
     }
 
     /** JCLAW-498: as above, but for spawning {@code additionalChildren} at once
      *  (batch fan-out) — the breadth check refuses when the running count plus the
      *  requested count would exceed the cap, so a single fan-out can't blow it. */
-    static String enforceRecursionLimits(Agent parentAgent, int additionalChildren) {
+    static @Nullable String enforceRecursionLimits(Agent parentAgent, int additionalChildren) {
         // Read from the runtime Config table so the Settings page can edit
         // these without a restart. ConfigService.getInt falls back to the
         // hard-coded default when the row is absent or unparseable; values

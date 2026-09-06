@@ -1,5 +1,6 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.io.IOException;
@@ -68,8 +69,8 @@ public final class PrintDispatcher {
      *                 only finds out when the fallback stops working too
      * @param detail   human-readable summary for the model and the operator
      */
-    public record Outcome(PrintProtocol protocol, Integer jobId, String state,
-                          boolean verified, String droppedAttributes,
+    public record Outcome(PrintProtocol protocol, @Nullable Integer jobId, @Nullable String state,
+                          boolean verified, @Nullable String droppedAttributes,
                           List<String> skipped, String detail) {
 
         public Outcome {
@@ -171,7 +172,7 @@ public final class PrintDispatcher {
     }
 
     /** Everything a byte-stream backend cannot carry, for the warning. */
-    private static String describeDropped(JobAttributes job, Map<String, String> options) {
+    private static @Nullable String describeDropped(JobAttributes job, Map<String, String> options) {
         var parts = new ArrayList<String>();
         if (!job.isEmpty()) {
             parts.add(job.describe());
@@ -199,7 +200,7 @@ public final class PrintDispatcher {
     }
 
     /** One backend attempt. Returns null when the backend ran but the printer refused. */
-    private static Outcome attempt(PrintProtocol protocol, DiscoveredPrinter printer,
+    private static @Nullable Outcome attempt(PrintProtocol protocol, DiscoveredPrinter printer,
                                    String jobName, String user, String documentFormat,
                                    byte[] document, JobAttributes job,
                                    Map<String, String> options) throws IOException {
@@ -265,7 +266,7 @@ public final class PrintDispatcher {
     }
 
     /** Printer state, plus the job's own state when {@code jobId} is supplied. */
-    public static String status(DiscoveredPrinter printer, Integer jobId) throws IOException {
+    public static String status(DiscoveredPrinter printer, @Nullable Integer jobId) throws IOException {
         var printerState = IppClient.printerState(printer.ippUri());
         if (jobId == null) {
             return "printer " + printer.name() + ": " + printerState;
@@ -280,7 +281,7 @@ public final class PrintDispatcher {
      *
      * @throws IOException if the job is unknown and no printer was supplied
      */
-    public static String cancel(int jobId, String printerUri, String user) throws IOException {
+    public static String cancel(int jobId, @Nullable String printerUri, String user) throws IOException {
         var uri = printerUri != null && !printerUri.isBlank() ? printerUri : RECENT_JOBS.get(jobId);
         if (uri == null) {
             throw new IOException("Job " + jobId + " was not submitted by this instance — "

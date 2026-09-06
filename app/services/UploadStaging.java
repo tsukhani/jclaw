@@ -2,6 +2,7 @@ package services;
 
 import models.Agent;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import play.data.Upload;
 import utils.ApiResponses;
 import utils.WorkspacePathGuard;
@@ -90,7 +91,7 @@ public final class UploadStaging {
             return AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
         } catch (SecurityException _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid upload target");
-            return null; // unreachable — ApiResponses.error() throws
+            throw ApiResponses.unreachable();
         }
     }
 
@@ -134,7 +135,7 @@ public final class UploadStaging {
         }
     }
 
-    private static Path acquireContainedOr400(Path stagingDir, String leaf, String originalName) {
+    private static @Nullable Path acquireContainedOr400(Path stagingDir, String leaf, String originalName) {
         try {
             return WorkspacePathGuard.acquireContained(stagingDir, leaf);
         } catch (SecurityException _) {

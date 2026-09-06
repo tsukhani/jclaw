@@ -8,6 +8,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.RequestBody;
 import okhttp3.ResponseBody;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.Play;
 import play.db.jpa.JPA;
@@ -162,8 +163,8 @@ public final class LoadTestRunner {
      * undo it. Carried as a value rather than a static because a static would
      * be process-global, and this project runs test classes concurrently.
      */
-    public record AgentSetup(long agentId, String namedAgent,
-                             String savedProvider, String savedModel) {}
+    public record AgentSetup(long agentId, @Nullable String namedAgent,
+                             @Nullable String savedProvider, @Nullable String savedModel) {}
 
     /**
      * Aggregated outcome of a single load-test run, returned to the API caller.
@@ -229,7 +230,7 @@ public final class LoadTestRunner {
             long promptTokens,
             long completionTokens,
             double costUsd,
-            List<TurnBucket> turnBuckets,
+            @Nullable List<TurnBucket> turnBuckets,
             List<SegmentBreakdown> serverSegments) {}
 
     /**
@@ -522,13 +523,13 @@ public final class LoadTestRunner {
     private static ArrayList<SegmentBreakdown> computeSegmentDeltas(
             LinkedHashMap<String, long[]> segmentsBefore) {
         var serverSegments = new ArrayList<SegmentBreakdown>(TRACKED_SEGMENTS.length);
-        for (var seg : TRACKED_SEGMENTS) {
-            var before = segmentsBefore.get(seg);
-            var after = readSegmentSnapshot("web", seg);
+        for (var entry : segmentsBefore.entrySet()) {
+            var before = entry.getValue();
+            var after = readSegmentSnapshot("web", entry.getKey());
             long countDelta = after[0] - before[0];
             long sumDelta = after[1] - before[1];
             long meanMs = countDelta > 0 ? sumDelta / countDelta : 0;
-            serverSegments.add(new SegmentBreakdown(seg, countDelta, sumDelta, meanMs));
+            serverSegments.add(new SegmentBreakdown(entry.getKey(), countDelta, sumDelta, meanMs));
         }
         return serverSegments;
     }
@@ -606,7 +607,7 @@ public final class LoadTestRunner {
      * Send one turn for a worker; updates metrics + returns the (possibly
      * newly-discovered) conversationId for the next turn.
      */
-    private static Long runTurn(int workerIdx, int t, WorkerCtx ctx, Long conversationId) {
+    private static @Nullable Long runTurn(int workerIdx, int t, WorkerCtx ctx, @Nullable Long conversationId) {
         // conversationId is set from turn 2 onward so the server resumes the same row.
         var turnBodyObj = new JsonObject();
         turnBodyObj.addProperty("agentId", ctx.agentId());
@@ -648,7 +649,7 @@ public final class LoadTestRunner {
      * the SSE result on 200, null on any non-200 status (caller increments
      * error counter). Throws on socket errors / timeouts (caller catches).
      */
-    private static SseConsumeResult executeChatRequest(OkHttpClient client, String baseUrl,
+    private static @Nullable SseConsumeResult executeChatRequest(OkHttpClient client, String baseUrl,
                                                         String sessionCookie, String turnBody,
                                                         boolean compress, long t0) throws IOException {
         var builder = new okhttp3.Request.Builder()
@@ -681,7 +682,7 @@ public final class LoadTestRunner {
      * error response, or an empty completion). Distinct from the server-side
      * {@code web/ttft} histogram, which excludes the network round-trip.
      */
-    private record SseConsumeResult(Long conversationId, long ttftMs) {}
+    private record SseConsumeResult(@Nullable Long conversationId, long ttftMs) {}
 
     /**
      * Read the SSE response body line-by-line, capturing the conversationId
@@ -714,7 +715,7 @@ public final class LoadTestRunner {
     }
 
     /** Parse the conversationId out of an init frame; null on any parse error. */
-    private static Long tryParseConversationId(String jsonStr) {
+    private static @Nullable Long tryParseConversationId(String jsonStr) {
         try {
             var json = JsonParser.parseString(jsonStr).getAsJsonObject();
             if (json.has(FIELD_CONVERSATION_ID)) {
@@ -889,7 +890,7 @@ public final class LoadTestRunner {
     private record RowTokenStats(long visible, long internal, double rate,
                                  long prompt, long completion, double costUsd) {}
 
-    private static RowTokenStats parseTokenRow(Object[] row) {
+    private static @Nullable RowTokenStats parseTokenRow(Object[] row) {
         try {
             var content = (String) row[0];
             var json = (String) row[1];

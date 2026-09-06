@@ -8,6 +8,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.ConversationService;
 import services.Tx;
 import utils.GsonHolder;
@@ -210,7 +211,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
      *  inference: a calling agent that is a currently-RUNNING child defaults
      *  to {@code "parent"}; otherwise defaults to {@code "child"}. Must run
      *  inside an active Tx. */
-    private static String dispatch(Long callingAgentId, String explicitTarget, Long explicitRunId,
+    private static String dispatch(Long callingAgentId, @Nullable String explicitTarget, @Nullable Long explicitRunId,
                                     String message, String payloadType) {
         SubagentRun callerAsChildRun = findCallerActiveChildRun(callingAgentId);
         String resolvedTarget;

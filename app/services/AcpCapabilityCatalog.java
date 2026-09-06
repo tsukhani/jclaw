@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Map;
 
 /**
@@ -31,8 +33,8 @@ public final class AcpCapabilityCatalog {
      *  {@code note} is an optional caveat appended to the tooltip. {@code
      *  transport} is how the runtime speaks ACP to it — {@link #STDIO}
      *  (subprocess) or {@link #WEBSOCKET} (a listening server, e.g. opencode). */
-    private record Cap(String base, String acpCommand, String adapterBinary, String installHint,
-                       String note, String transport) {}
+    private record Cap(String base, String acpCommand, @Nullable String adapterBinary, @Nullable String installHint,
+                       @Nullable String note, String transport) {}
 
     /** ACP transports (how the runtime connects for Stage 2). */
     public static final String STDIO = "stdio";
@@ -64,7 +66,7 @@ public final class AcpCapabilityCatalog {
     private AcpCapabilityCatalog() {}
 
     /** The ACP launch command for a harness id, or {@code null} if it has none. */
-    public static String acpCommand(String id) {
+    public static @Nullable String acpCommand(String id) {
         var cap = CATALOG.get(id);
         return cap == null ? null : cap.acpCommand();
     }
@@ -76,7 +78,7 @@ public final class AcpCapabilityCatalog {
      * This is the runtime's Stage-2 gate — a non-null result means "speak real
      * ACP via this command instead of the stdin/stdout wrapper."
      */
-    public static String stdioAcpLaunchCommand(String id) {
+    public static @Nullable String stdioAcpLaunchCommand(String id) {
         var cap = CATALOG.get(id);
         if (cap == null || !STDIO.equals(cap.transport())) return null;
         var binary = cap.acpCommand().strip().split("\\s+")[0];

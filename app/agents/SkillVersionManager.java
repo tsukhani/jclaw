@@ -117,7 +117,7 @@ public final class SkillVersionManager {
      * auto-bump patch on material change, preserve on no-op, inject version
      * if missing. See {@link SkillLoader#finalizeSkillMdWrite} for full contract.
      */
-    public static String finalizeSkillMdWrite(Path targetPath, String newContent) {
+    public static String finalizeSkillMdWrite(Path targetPath, @Nullable String newContent) {
         if (newContent == null) newContent = "";
         try {
             var llmVersion = extractExplicitVersion(newContent);

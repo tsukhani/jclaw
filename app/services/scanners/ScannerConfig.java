@@ -1,5 +1,7 @@
 package services.scanners;
 
+import org.jspecify.annotations.Nullable;
+
 public interface ScannerConfig {
     /**
      * Look up a config value with no default.
@@ -7,7 +9,7 @@ public interface ScannerConfig {
      * @return the value for {@code key}, or {@code null} when unset. Callers
      *         doing credential lookups branch on {@code == null || isBlank()}.
      */
-    String get(String key);
+    @Nullable String get(String key);
 
     /** Look up a config value, returning {@code fallback} when {@code key} is unset. */
     String get(String key, String fallback);

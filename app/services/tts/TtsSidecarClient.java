@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.LocalSidecarDaemon;
 import services.sidecar.SidecarHttpClient;
@@ -33,7 +34,7 @@ public class TtsSidecarClient extends SidecarHttpClient {
     }
 
     /** Test seam: fixed base URL (no sidecar spawn) + injected client. */
-    public TtsSidecarClient(String baseUrlOverride, OkHttpClient client) {
+    public TtsSidecarClient(@Nullable String baseUrlOverride, OkHttpClient client) {
         super(baseUrlOverride, client);
     }
 
@@ -48,7 +49,7 @@ public class TtsSidecarClient extends SidecarHttpClient {
      * engine (Qwen3-TTS / Kokoro); {@code voice} and {@code format} are
      * optional (null/blank omitted, letting the sidecar default).
      */
-    public byte[] synthesize(String text, String model, String voice, String format) {
+    public byte[] synthesize(String text, String model, @Nullable String voice, String format) {
         return synthesize(text, model, voice, format, null);
     }
 
@@ -73,13 +74,13 @@ public class TtsSidecarClient extends SidecarHttpClient {
      * degenerating. Sending a transcript is the only thing that selects ICL, so
      * not having one to send is what keeps the cheap path.
      */
-    public byte[] synthesize(String text, String model, String voice, String format,
-                             String refAudio) {
+    public byte[] synthesize(String text, String model, @Nullable String voice, String format,
+                             @Nullable String refAudio) {
         return withSidecarLock(() -> synthesizeLocked(text, model, voice, format, refAudio));
     }
 
-    private byte[] synthesizeLocked(String text, String model, String voice, String format,
-                                    String refAudio) {
+    private byte[] synthesizeLocked(String text, String model, @Nullable String voice, String format,
+                                    @Nullable String refAudio) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : TtsSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("text", text);

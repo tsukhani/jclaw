@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.HttpUrl;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -93,7 +94,7 @@ public final class ClawhubSkillFetcher {
     // --- parsing (public for tests) ---
 
     /** Latest published version string from a {@code /skills/{slug}} detail response. */
-    public static String latestVersion(JsonObject detail) {
+    public static @Nullable String latestVersion(JsonObject detail) {
         if (detail == null || !detail.has(KEY_LATEST_VERSION) || !detail.get(KEY_LATEST_VERSION).isJsonObject()) return null;
         var lv = detail.getAsJsonObject(KEY_LATEST_VERSION);
         return lv.has(KEY_VERSION) && !lv.get(KEY_VERSION).isJsonNull() ? lv.get(KEY_VERSION).getAsString() : null;

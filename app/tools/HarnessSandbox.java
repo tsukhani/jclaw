@@ -1,5 +1,6 @@
 package tools;
 
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.ExecutableProbeSupport;
 
@@ -118,7 +119,7 @@ public final class HarnessSandbox {
      *                       configured {@link Scope} is {@link Scope#UNTRUSTED},
      *                       where only {@code false} (untrusted origin) confines.
      */
-    public static List<String> wrap(List<String> argv, File session, HarnessAdapter adapter,
+    public static List<String> wrap(List<String> argv, @Nullable File session, HarnessAdapter adapter,
                                     boolean trustedOrigin) {
         if (!appliesTo(trustedOrigin)) return argv;
         if (session == null) {

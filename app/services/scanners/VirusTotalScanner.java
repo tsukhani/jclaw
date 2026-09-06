@@ -3,6 +3,7 @@ package services.scanners;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import utils.HttpKeys;
 
 import java.util.List;
@@ -116,7 +117,7 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
                 threats.isEmpty() ? prefix : prefix + " — " + String.join(", ", threats));
     }
 
-    private static JsonObject extractAttributes(JsonObject json) {
+    private static @Nullable JsonObject extractAttributes(JsonObject json) {
         if (!json.has("data") || !json.get("data").isJsonObject()) return null;
         var data = json.getAsJsonObject("data");
         if (!data.has(FIELD_ATTRIBUTES) || !data.get(FIELD_ATTRIBUTES).isJsonObject()) return null;
@@ -153,7 +154,7 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
     }
 
     /** Returns "engine: threat" only when the engine reported category=malicious + a non-blank result. */
-    private static String extractMaliciousLabel(String engineName, JsonElement engineResult) {
+    private static @Nullable String extractMaliciousLabel(String engineName, JsonElement engineResult) {
         if (!engineResult.isJsonObject()) return null;
         var engineObj = engineResult.getAsJsonObject();
         if (!"malicious".equals(optString(engineObj, FIELD_CATEGORY, ""))) return null;

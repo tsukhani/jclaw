@@ -4,6 +4,7 @@ import agents.DangerousActionGate;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.SubagentRegistry;
 import utils.GsonHolder;
@@ -41,7 +42,7 @@ final class SubagentHarnessPermissions {
     private SubagentHarnessPermissions() {}
 
     /** JCLAW-665: a permission request parsed out of an rpc harness event. */
-    record HarnessPermission(String id, String toolName, String argsJson) {}
+    record HarnessPermission(@Nullable String id, String toolName, String argsJson) {}
 
     /**
      * JCLAW-665: handle one streamed rpc event. Non-permission events are ignored
@@ -53,7 +54,7 @@ final class SubagentHarnessPermissions {
      * caught and fails CLOSED (deny) rather than propagating.
      */
     static void arbitratePermission(HarnessEvent ev, OutputStream stdin, Long runId,
-                                    Agent childAgent, Long conversationId) {
+                                    Agent childAgent, @Nullable Long conversationId) {
         var perm = detectPermission(ev);
         if (perm == null) return;
         // Operator deliberation is not harness inactivity — reset the idle clock so
@@ -81,7 +82,7 @@ final class SubagentHarnessPermissions {
      * output. Best-effort and tolerant: the on-the-wire shape varies by harness, so
      * we probe a handful of conventional field names and never throw.
      */
-    static HarnessPermission detectPermission(HarnessEvent ev) {
+    static @Nullable HarnessPermission detectPermission(HarnessEvent ev) {
         var raw = ev == null ? null : ev.raw();
         if (raw == null) return null;
         var discriminator = firstJsonString(raw, "type", "kind", "event", "method", "subtype");
@@ -148,7 +149,7 @@ final class SubagentHarnessPermissions {
 
     /** JCLAW-665: close the harness stdin, swallowing any error — the run's terminal
      *  outcome is already decided by the time we tear the pipe down. */
-    static void closeQuietly(OutputStream stream) {
+    static void closeQuietly(@Nullable OutputStream stream) {
         if (stream == null) return;
         try {
             stream.close();
@@ -158,7 +159,7 @@ final class SubagentHarnessPermissions {
     }
 
     /** First present, non-null primitive field among {@code keys}, as a string. */
-    private static String firstJsonString(JsonObject obj, String... keys) {
+    private static @Nullable String firstJsonString(JsonObject obj, String... keys) {
         for (var key : keys) {
             JsonElement el = obj.get(key);
             if (el != null && el.isJsonPrimitive()) {
@@ -169,7 +170,7 @@ final class SubagentHarnessPermissions {
     }
 
     /** First present object/array member among {@code keys}, or null. */
-    private static JsonElement firstJsonMember(JsonObject obj, String... keys) {
+    private static @Nullable JsonElement firstJsonMember(JsonObject obj, String... keys) {
         for (var key : keys) {
             JsonElement el = obj.get(key);
             if (el != null && (el.isJsonObject() || el.isJsonArray())) {

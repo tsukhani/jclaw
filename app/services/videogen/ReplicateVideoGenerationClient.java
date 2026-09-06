@@ -49,7 +49,7 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
             throw new VideoGenerationException("video generation: prompt is required");
         }
         var apiKey = requireConfig("provider.replicate.apiKey");
-        var model = Strings.firstNonBlank(request.model(), ConfigService.get("videogen.cloud.model"), DEFAULT_MODEL);
+        var model = Strings.firstNonBlankOr(DEFAULT_MODEL, request.model(), ConfigService.get("videogen.cloud.model"));
 
         var input = new JsonObject();
         input.addProperty("prompt", request.prompt());
@@ -58,9 +58,9 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
             prediction = predictions.create(baseUrl(), model, apiKey, input, false); // async — no Prefer: wait
         } catch (ReplicatePredictions.ReplicateException e) {
             if (e.isTransport()) {
-                throw new VideoGenerationException("replicate submit transport failed: " + e.getCause().getMessage(), e.getCause());
+                throw new VideoGenerationException("replicate submit transport failed: " + e.resolvedCause().getMessage(), e.resolvedCause());
             }
-            var body = e.body();
+            var body = e.body() == null ? "" : e.body();
             throw new VideoGenerationException("replicate submit failed: HTTP %d%s".formatted(
                     e.code(), body.isEmpty() ? "" : " — " + Strings.truncate(body, Strings.ERROR_SNIPPET_MAX_CHARS)));
         }
@@ -79,7 +79,7 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
             pred = predictions.get(baseUrl() + "/predictions/" + providerJobId, apiKey);
         } catch (ReplicatePredictions.ReplicateException e) {
             if (e.isTransport()) {
-                throw new VideoGenerationException("replicate poll transport failed: " + e.getCause().getMessage(), e.getCause());
+                throw new VideoGenerationException("replicate poll transport failed: " + e.resolvedCause().getMessage(), e.resolvedCause());
             }
             throw new VideoGenerationException("replicate poll failed: HTTP " + e.code());
         }
@@ -98,7 +98,8 @@ public class ReplicateVideoGenerationClient implements VideoGenerationService {
     }
 
     private static String baseUrl() {
-        return Strings.trimTrailingSlash(Strings.firstNonBlank(ConfigService.get("provider.replicate.baseUrl"), DEFAULT_BASE));
+        return Strings.trimTrailingSlash(
+                Strings.firstNonBlankOr(DEFAULT_BASE, ConfigService.get("provider.replicate.baseUrl")));
     }
 
     private static String requireConfig(String key) {

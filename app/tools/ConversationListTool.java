@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.Tx;
 import utils.GsonHolder;
 import utils.JsonArgs;
@@ -142,12 +143,12 @@ public class ConversationListTool implements ToolRegistry.Tool {
         return Tx.run(() -> renderListJson(callingAgentId, parsed));
     }
 
-    private record ParsedArgs(String error, SubagentRun.Status status, String labelLike,
-                              Long agentId, int limit, int offset) {
+    private record ParsedArgs(@Nullable String error, SubagentRun.@Nullable Status status, @Nullable String labelLike,
+                              @Nullable Long agentId, int limit, int offset) {
         static ParsedArgs fail(String msg) {
             return new ParsedArgs(msg, null, null, null, 0, 0);
         }
-        static ParsedArgs ok(SubagentRun.Status s, String labelLike, Long agentId,
+        static ParsedArgs ok(SubagentRun.@Nullable Status s, @Nullable String labelLike, @Nullable Long agentId,
                              int limit, int offset) {
             return new ParsedArgs(null, s, labelLike, agentId, limit, offset);
         }
@@ -254,7 +255,7 @@ public class ConversationListTool implements ToolRegistry.Tool {
     /** Truncate {@link SubagentRun#outcome} to {@link #OUTCOME_PREVIEW_MAX_CHARS}
      *  with a trailing ellipsis so a 10kb error stack-trace doesn't blow up
      *  the list payload. Null outcomes (RUNNING rows) stay null. */
-    public static String truncatePreview(String outcome) {
+    public static @Nullable String truncatePreview(String outcome) {
         if (outcome == null) return null;
         if (outcome.length() <= OUTCOME_PREVIEW_MAX_CHARS) return outcome;
         return outcome.substring(0, OUTCOME_PREVIEW_MAX_CHARS - 3) + "...";

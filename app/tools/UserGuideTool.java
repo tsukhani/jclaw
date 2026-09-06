@@ -4,6 +4,7 @@ import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 
 import java.io.IOException;
@@ -53,7 +54,7 @@ public class UserGuideTool implements ToolRegistry.Tool {
             "if", "from", "jclaw");
 
     /** Non-null only in tests/overrides; production reads the bundled guide. */
-    private final Path docsDirOverride;
+    private final @Nullable Path docsDirOverride;
 
     /** Production constructor — reads {@code Play.applicationPath/docs/user-guide}. */
     public UserGuideTool() {
@@ -249,7 +250,7 @@ public class UserGuideTool implements ToolRegistry.Tool {
     }
 
     private void flush(List<Section> out, String page, String pageTitle, String link,
-                       String heading, StringBuilder body) {
+                       @Nullable String heading, StringBuilder body) {
         var text = body.toString().strip();
         if (heading == null && text.isEmpty()) {
             return;

@@ -1,6 +1,7 @@
 package services;
 
 import models.Task;
+import org.jspecify.annotations.Nullable;
 import play.db.DB;
 
 import java.sql.SQLException;
@@ -105,7 +106,7 @@ public final class LostTaskDetector {
      * @param lastHeartbeat last heartbeat timestamp read from the
      *                      {@code scheduled_tasks} row
      */
-    public record StaleRow(Long taskId, Instant lastHeartbeat) {}
+    public record StaleRow(Long taskId, @Nullable Instant lastHeartbeat) {}
 
     /**
      * Pure-logic test seam. Flip the given Tasks from RUNNING to LOST,
@@ -143,7 +144,7 @@ public final class LostTaskDetector {
      * and skipped (return null) so one bad row doesn't blow up the whole
      * detector pass.
      */
-    private static Long parseTaskInstance(String raw) {
+    private static @Nullable Long parseTaskInstance(String raw) {
         try {
             return Long.parseLong(raw.trim());
         } catch (NumberFormatException _) {

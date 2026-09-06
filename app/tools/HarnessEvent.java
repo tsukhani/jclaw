@@ -1,6 +1,7 @@
 package tools;
 
 import com.google.gson.JsonObject;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JCLAW-659: one normalized event produced by a {@link HarnessAdapter} while
@@ -20,7 +21,7 @@ import com.google.gson.JsonObject;
  * @param raw  the JSON object the line parsed to, or {@code null} when the line
  *             was not JSON (a tolerant {@code step} event carrying the raw line)
  */
-public record HarnessEvent(String kind, String text, JsonObject raw) {
+public record HarnessEvent(String kind, String text, @Nullable JsonObject raw) {
 
     /** An incremental output chunk (streaming token). */
     public static final String TOKEN = "token";

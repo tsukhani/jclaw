@@ -1,5 +1,7 @@
 package services.catalog;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 
 /**
@@ -20,8 +22,8 @@ import java.util.List;
  * than an empty "no matches").
  */
 public record CatalogPage(boolean ready, List<CatalogSkill> results, int total, int page,
-                          int pageSize, String nextCursor, List<CategoryFacet> facets,
-                          int catalogSize, String scrapedAt) {
+                          int pageSize, @Nullable String nextCursor, List<CategoryFacet> facets,
+                          int catalogSize, @Nullable String scrapedAt) {
 
     /** Empty failure page, preserving the requested paging echo. */
     public static CatalogPage notReady(int page, int pageSize) {

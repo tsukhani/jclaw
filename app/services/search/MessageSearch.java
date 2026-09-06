@@ -1,6 +1,7 @@
 package services.search;
 
 import models.TaskRunMessage;
+import org.jspecify.annotations.Nullable;
 import play.db.DB;
 import services.EventLogger;
 
@@ -47,7 +48,7 @@ public final class MessageSearch {
     // a pure reference handoff is the textbook valid use of volatile
     // (JMM happens-before through the volatile read/write is sufficient).
     @SuppressWarnings("java:S3077")
-    private static volatile MessageSearchRepository repo;
+    private static volatile @Nullable MessageSearchRepository repo;
 
     private MessageSearch() {}
 

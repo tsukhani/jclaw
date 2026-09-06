@@ -2,6 +2,7 @@ package tools;
 
 import com.google.gson.JsonObject;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import utils.WorkspacePathGuard;
 
@@ -16,9 +17,20 @@ final class FsPaths {
 
     private FsPaths() {}
 
-    record TargetPath(Path workspace, Path target, String error) {
+    record TargetPath(@Nullable Path workspace, @Nullable Path target, @Nullable String error) {
         static TargetPath ok(Path workspace, Path target) { return new TargetPath(workspace, target, null); }
         static TargetPath err(String error) { return new TargetPath(null, null, error); }
+
+        /** Valid only once {@link #error()} has been checked null — {@code err()} carries no paths. */
+        Path resolvedWorkspace() { return require(workspace); }
+
+        /** Valid only once {@link #error()} has been checked null — {@code err()} carries no paths. */
+        Path resolvedTarget() { return require(target); }
+
+        private Path require(@Nullable Path p) {
+            if (p == null) throw new IllegalStateException("path unresolved: " + error);
+            return p;
+        }
     }
 
     static TargetPath resolveTargetPath(JsonObject args, Agent agent, String action) {
@@ -46,7 +58,7 @@ final class FsPaths {
      * OTHER skills but cannot alter skill-creator. Returns an error string if blocked, or
      * null if the path is OK to mutate.
      */
-    static String checkSkillCreatorReadOnly(Agent agent, Path workspace, Path target) {
+    static @Nullable String checkSkillCreatorReadOnly(Agent agent, Path workspace, Path target) {
         if ("main".equalsIgnoreCase(agent.name)) return null;
         var skillCreatorDir = WorkspacePathGuard.resolveContained(workspace, "skills/skill-creator");
         if (skillCreatorDir != null && target.startsWith(skillCreatorDir)) {

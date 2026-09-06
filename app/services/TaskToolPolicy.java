@@ -2,6 +2,7 @@ package services;
 
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ToolDef;
+import org.jspecify.annotations.Nullable;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -45,7 +46,7 @@ public final class TaskToolPolicy {
      * @param json the raw {@code enabledToolNames} column value
      * @return allowed tool names, or {@code null} for unrestricted
      */
-    public static Set<String> parse(String json) {
+    public static @Nullable Set<String> parse(String json) {
         if (json == null || json.isBlank()) return null;
         var parsed = tryParseArray(json);
         if (parsed == null) parsed = tryParseDelimited(json);
@@ -61,7 +62,7 @@ public final class TaskToolPolicy {
     }
 
     /** @return the names, or {@code null} when {@code json} is not a JSON string array. */
-    private static Set<String> tryParseArray(String json) {
+    private static @Nullable Set<String> tryParseArray(String json) {
         try {
             var el = JsonParser.parseString(json);
             if (!el.isJsonArray()) return null;
@@ -89,7 +90,7 @@ public final class TaskToolPolicy {
      *
      * @return the names, or {@code null} when this is not a plain delimited name list
      */
-    private static Set<String> tryParseDelimited(String raw) {
+    private static @Nullable Set<String> tryParseDelimited(String raw) {
         if (raw.chars().anyMatch(c -> c == '[' || c == ']' || c == '{' || c == '}' || c == '"')) {
             return null;
         }
@@ -113,8 +114,8 @@ public final class TaskToolPolicy {
      *
      * @param allowed {@code null} to leave {@code defs} untouched
      */
-    public static List<ToolDef> restrict(List<ToolDef> defs, Set<String> allowed,
-                                         String taskName, String agentName) {
+    public static List<ToolDef> restrict(List<ToolDef> defs, @Nullable Set<String> allowed,
+                                         @Nullable String taskName, String agentName) {
         if (allowed == null || defs == null) return defs;
 
         var available = defs.stream().map(d -> d.function().name()).collect(Collectors.toSet());

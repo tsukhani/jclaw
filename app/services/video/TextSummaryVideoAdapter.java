@@ -4,6 +4,7 @@ import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.SessionCompactor;
@@ -118,7 +119,7 @@ public final class TextSummaryVideoAdapter {
     }
 
     /** One-shot single-sentence overview via the agent's current chat model; null on any failure. */
-    static String overviewLine(List<String> captions, Agent agent) {
+    static @Nullable String overviewLine(List<String> captions, Agent agent) {
         if (captions.isEmpty() || agent == null || agent.modelProvider == null) return null;
         try {
             var provider = ProviderRegistry.get(agent.modelProvider);

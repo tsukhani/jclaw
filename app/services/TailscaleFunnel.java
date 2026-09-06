@@ -2,6 +2,7 @@ package services;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import utils.JsonArgs;
 
@@ -66,10 +67,10 @@ public final class TailscaleFunnel {
     }
 
     /** Snapshot for the admin UI / API. */
-    public record Status(boolean available, String publicUrl, String error) {}
+    public record Status(boolean available, @Nullable String publicUrl, @Nullable String error) {}
 
     private static final Runner PROCESS_RUNNER = TailscaleFunnel::execProcess;
-    private static volatile String cachedBinary;
+    private static volatile @Nullable String cachedBinary;
 
     /** Short-TTL cache for the real-process {@link #status()} read path: the probe
      *  shells out to {@code tailscale status --json} (~400ms) and the channel pages
@@ -77,7 +78,7 @@ public final class TailscaleFunnel {
      *  cache ({@link #invalidateStatusCache()} on enable/disable), so the TTL only
      *  bounds staleness from out-of-band changes (daemon down, manual CLI). */
     private static final Duration STATUS_CACHE_TTL = Duration.ofSeconds(10);
-    private static volatile CachedStatus statusCache;
+    private static volatile @Nullable CachedStatus statusCache;
     private record CachedStatus(Status status, long atNanos) {}
 
     // ===================== public API (real process runner) =====================
@@ -96,7 +97,7 @@ public final class TailscaleFunnel {
     }
 
     /** The node's public HTTPS base URL (e.g. {@code https://host.tailnet.ts.net}), or null. */
-    public static String publicBaseUrl() { return publicBaseUrl(PROCESS_RUNNER); }
+    public static @Nullable String publicBaseUrl() { return publicBaseUrl(PROCESS_RUNNER); }
 
     /** True once this JVM has started a funnel. Teardown consults this instead of the config
      *  table so shutdown needs no database (JCLAW-1143), and it is also the question teardown
@@ -191,7 +192,7 @@ public final class TailscaleFunnel {
      * MagicDNS name ({@code Self.DNSName}, trailing dot stripped), or the first
      * Tailscale IP as a fallback. Null when neither is present.
      */
-    public static String publicBaseUrlFrom(String statusJson) {
+    public static @Nullable String publicBaseUrlFrom(String statusJson) {
         var self = selfObject(statusJson);
         if (self == null) return null;
         var dns = JsonArgs.optString(self, "DNSName");
@@ -205,12 +206,12 @@ public final class TailscaleFunnel {
         return null;
     }
 
-    public static String backendStateFrom(String statusJson) {
+    public static @Nullable String backendStateFrom(String statusJson) {
         var obj = parseNoisyJson(statusJson);
         return obj != null ? JsonArgs.optString(obj, "BackendState") : null;
     }
 
-    private static JsonObject selfObject(String statusJson) {
+    private static @Nullable JsonObject selfObject(String statusJson) {
         var obj = parseNoisyJson(statusJson);
         if (obj != null && obj.has("Self") && obj.get("Self").isJsonObject()) {
             return obj.getAsJsonObject("Self");
@@ -219,7 +220,7 @@ public final class TailscaleFunnel {
     }
 
     /** Parse a JSON object out of stdout that may carry leading/trailing noise. */
-    static JsonObject parseNoisyJson(String stdout) {
+    static @Nullable JsonObject parseNoisyJson(String stdout) {
         if (stdout == null) return null;
         var s = stdout.strip();
         int start = s.indexOf('{');
@@ -273,7 +274,7 @@ public final class TailscaleFunnel {
         return new Status(true, publicBaseUrlFrom(res.stdout()), null);
     }
 
-    static String publicBaseUrl(Runner runner) {
+    static @Nullable String publicBaseUrl(Runner runner) {
         var bin = detectBinary(runner);
         var res = runner.run(statusCmd(bin), STATUS_TIMEOUT);
         return res.ok() ? publicBaseUrlFrom(res.stdout()) : null;

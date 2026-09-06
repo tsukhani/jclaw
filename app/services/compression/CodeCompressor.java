@@ -6,6 +6,7 @@ import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.stmt.BlockStmt;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -102,7 +103,7 @@ public final class CodeCompressor implements ContentCompressor {
     /** One method/constructor body, as absolute char offsets into the source. */
     private record BodyRange(int begin, int end, int chars) {}
 
-    private static String compressJava(String code) {
+    private static @Nullable String compressJava(String code) {
         var cu = StaticJavaParser.parse(code);
         int[] lineStarts = lineStarts(code);
         var ranges = new ArrayList<BodyRange>();
@@ -169,7 +170,7 @@ public final class CodeCompressor implements ContentCompressor {
                     + "|func\\b|fn\\b|def\\b|function\\b)"
                     + ")");
 
-    private static String compressByRegex(String code, Language language) {
+    private static @Nullable String compressByRegex(String code, Language language) {
         String marker = (language == Language.PYTHON ? "# [...]" : "// [...]");
         var sb = new StringBuilder(code.length());
         boolean eliding = false;

@@ -1,5 +1,6 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 
 import java.util.Arrays;
@@ -65,7 +66,7 @@ public final class PrivilegedConfig {
     private PrivilegedConfig() {}
 
     /** The tightening rule for {@code key}, or null when the key carries no privilege. */
-    public static Tightening ruleFor(String key) {
+    public static @Nullable Tightening ruleFor(String key) {
         if (key == null) return null;
         return RULES.stream().filter(r -> r.matches().test(key)).map(Rule::how).findFirst().orElse(null);
     }
@@ -77,14 +78,14 @@ public final class PrivilegedConfig {
      * ceiling. When the row is absent the conf value stands on its own, so declaring a ceiling
      * also sets the value — otherwise a caller's code default would quietly outrank it.
      */
-    public static String reconcile(String key, String dbValue) {
+    public static @Nullable String reconcile(String key, @Nullable String dbValue) {
         return reconcile(key, dbValue, ceilingFor(key));
     }
 
     /** {@link #reconcile(String, String)} against an explicit {@code ceiling}. Pure: play1 runs
      *  test classes concurrently, so the ceiling is passed in rather than read from the
      *  process-global {@code Play.configuration} that a test would otherwise have to mutate. */
-    public static String reconcile(String key, String dbValue, String ceiling) {
+    public static @Nullable String reconcile(String key, @Nullable String dbValue, @Nullable String ceiling) {
         var rule = ruleFor(key);
         if (rule == null) return dbValue;
         if (ceiling == null || ceiling.isBlank()) return dbValue;
@@ -105,13 +106,13 @@ public final class PrivilegedConfig {
      * operator rather than for the attacker: without it a save that cannot take effect still
      * answers 200, and the setting silently reads back as something else.
      */
-    public static String rejectionFor(String key, String candidate) {
+    public static @Nullable String rejectionFor(String key, String candidate) {
         return rejectionFor(key, candidate, ceilingFor(key));
     }
 
     /** {@link #rejectionFor(String, String)} against an explicit {@code ceiling}; pure, for the
      *  same reason as {@link #reconcile(String, String, String)}. */
-    public static String rejectionFor(String key, String candidate, String ceiling) {
+    public static @Nullable String rejectionFor(String key, String candidate, @Nullable String ceiling) {
         var rule = ruleFor(key);
         if (rule == null || candidate == null) return null;
         if (ceiling == null || ceiling.isBlank()) return null;
@@ -124,11 +125,11 @@ public final class PrivilegedConfig {
                 + "to widen it.").formatted(key, ceiling, candidate, effective);
     }
 
-    private static String ceilingFor(String key) {
+    private static @Nullable String ceilingFor(String key) {
         return Play.configuration == null ? null : Play.configuration.getProperty(key);
     }
 
-    private static boolean sameValue(Tightening rule, String a, String b) {
+    private static boolean sameValue(Tightening rule, @Nullable String a, String b) {
         if (rule == Tightening.SET_INTERSECTION) return parseSet(a).equals(parseSet(b));
         return a != null && a.strip().equalsIgnoreCase(b.strip());
     }
@@ -139,7 +140,7 @@ public final class PrivilegedConfig {
     }
 
     /** Order-preserving so the intersection reads back in the order the operator wrote it. */
-    private static Set<String> parseSet(String raw) {
+    private static Set<String> parseSet(@Nullable String raw) {
         if (raw == null) return Set.of();
         return Arrays.stream(raw.split(","))
                 .map(String::strip)

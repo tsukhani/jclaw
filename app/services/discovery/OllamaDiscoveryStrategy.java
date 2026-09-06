@@ -5,6 +5,7 @@ import com.google.gson.JsonSyntaxException;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
@@ -40,7 +41,7 @@ public final class OllamaDiscoveryStrategy implements DiscoveryStrategy {
             var nativeBase = ModelDiscoveryService.stripV1Suffix(baseUrl);
             var tagsResult = fetchTags(nativeBase, apiKey);
             if (tagsResult.error() != null) return tagsResult.error();
-            var modelIds = tagsResult.modelIds();
+            var modelIds = tagsResult.resolvedModelIds();
             if (modelIds.isEmpty()) return new DiscoveryResult.Ok(List.of());
 
             var results = fanOutShow(nativeBase + "/api/show", apiKey, modelIds);
@@ -73,7 +74,14 @@ public final class OllamaDiscoveryStrategy implements DiscoveryStrategy {
      * Internal carrier for the /api/tags step: either an {@code error} (non-200
      * upstream) or a {@code modelIds} list. Exactly one is non-null.
      */
-    private record TagsResult(DiscoveryResult.Error error, List<String> modelIds) {}
+    private record TagsResult(DiscoveryResult.@Nullable Error error, @Nullable List<String> modelIds) {
+
+        /** Valid only once {@link #error()} has been checked null — exactly one side is set. */
+        List<String> resolvedModelIds() {
+            if (modelIds == null) throw new IllegalStateException("tags fetch failed: " + error);
+            return modelIds;
+        }
+    }
 
     /**
      * GET {@code <nativeBase>/api/tags} and extract the model id list. On
@@ -148,7 +156,7 @@ public final class OllamaDiscoveryStrategy implements DiscoveryStrategy {
     }
 
     @SuppressWarnings("java:S1168") // null means "drop this model from discovery"; empty map would be misread as a successful but empty result
-    private static Map<String, Object> fetchShow(String url, String apiKey, String id) {
+    private static @Nullable Map<String, Object> fetchShow(String url, String apiKey, String id) {
         try {
             var body = "{\"name\":\"" + id.replace("\"", "\\\"") + "\"}";
             var jsonMediaType = MediaType.get(HttpKeys.APPLICATION_JSON);

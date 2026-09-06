@@ -1,5 +1,6 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 
 import java.io.IOException;
@@ -32,7 +33,14 @@ public final class ExecutableProbeSupport {
      * callers that need the printed output (e.g. a version line) rather than just
      * a boolean. See {@link #probeCapturing}.
      */
-    public record CapturedResult(boolean available, String reason, String output) {}
+    public record CapturedResult(boolean available, String reason, @Nullable String output) {
+
+        /** Valid only when {@link #available()} — an unavailable probe captured nothing. */
+        public String resolvedOutput() {
+            if (output == null) throw new IllegalStateException("probe unavailable: " + reason);
+            return output;
+        }
+    }
 
     private ExecutableProbeSupport() {}
 

@@ -10,6 +10,7 @@ import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import models.SkillRegistryTool;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 
 import java.io.IOException;
@@ -61,7 +62,7 @@ public class SkillPromotionService {
      * @param message human-readable explanation; empty when {@code ok} is
      *                true, otherwise names the missing tool(s)
      */
-    public record ToolValidationResult(boolean ok, String message) {}
+    public record ToolValidationResult(boolean ok, @Nullable String message) {}
 
     // --- Copy: global skill → agent workspace ---
 
@@ -234,7 +235,7 @@ public class SkillPromotionService {
      * completed write, false when a gate (malware scan, unreadable files) refused;
      * the refusal is already logged + notified.
      */
-    public static boolean publishToGlobal(Path skillDir, String skillName) {
+    public static boolean publishToGlobal(Path skillDir, @Nullable String skillName) {
         if (!checkMalwareScan(skillDir, skillName)) return false;
 
         var sourceTextFiles = new LinkedHashMap<String, String>();
@@ -299,7 +300,7 @@ public class SkillPromotionService {
     }
 
     /** Returns true when no malware was found; false (with notification emitted) when violations exist. */
-    private static boolean checkMalwareScan(Path skillDir, String skillName) {
+    private static boolean checkMalwareScan(Path skillDir, @Nullable String skillName) {
         var violations = SkillBinaryScanner.scan(skillDir);
         if (violations.isEmpty()) return true;
         EventLogger.warn(EVENT_CATEGORY_SKILLS, "Promotion of '%s' refused: malware detected in %d file(s)"
@@ -376,7 +377,7 @@ public class SkillPromotionService {
      * can put it back after LLM sanitization. Returns null when SKILL.md is
      * absent (no frontmatter to preserve).
      */
-    private static SkillLoader.FrontmatterSplit stashFrontmatter(LinkedHashMap<String, String> textFiles) {
+    private static SkillLoader.@Nullable FrontmatterSplit stashFrontmatter(LinkedHashMap<String, String> textFiles) {
         if (!textFiles.containsKey(SKILL_FILE_NAME)) return null;
         var originalSplit = SkillLoader.splitFrontmatter(textFiles.get(SKILL_FILE_NAME));
         if (originalSplit.frontmatter() != null) {
@@ -385,7 +386,7 @@ public class SkillPromotionService {
         return originalSplit;
     }
 
-    private static void reinjectFrontmatter(SkillLoader.FrontmatterSplit originalSplit,
+    private static void reinjectFrontmatter(SkillLoader.@Nullable FrontmatterSplit originalSplit,
                                              LinkedHashMap<String, String> sanitized) {
         if (originalSplit == null || originalSplit.frontmatter() == null
                 || !sanitized.containsKey(SKILL_FILE_NAME)) {
@@ -449,7 +450,7 @@ public class SkillPromotionService {
         return false;
     }
 
-    private static void writeToGlobalRegistry(Path skillDir, String skillName,
+    private static void writeToGlobalRegistry(Path skillDir, @Nullable String skillName,
                                                LinkedHashMap<String, String> sanitized,
                                                List<String> binaryFiles) {
         var globalDir = SkillLoader.globalSkillsPath();
@@ -568,7 +569,7 @@ public class SkillPromotionService {
      * (skill declares no shell-allowlist contribution — the legitimate case
      * for skills that only ship prompt instructions).
      */
-    private static void syncRegistryToolRows(String skillName, Path globalSkillDir) {
+    private static void syncRegistryToolRows(@Nullable String skillName, Path globalSkillDir) {
         var skillMd = globalSkillDir.resolve(SKILL_FILE_NAME);
         var info = Files.exists(skillMd) ? SkillLoader.parseSkillFile(skillMd) : null;
         var declared = (info != null && info.commands() != null) ? info.commands() : List.<String>of();
@@ -628,7 +629,7 @@ public class SkillPromotionService {
         return path;
     }
 
-    public static String stripCredentialsJson(String content) {
+    public static String stripCredentialsJson(@Nullable String content) {
         try {
             var json = JsonParser.parseString(content).getAsJsonObject();
             var stripped = new JsonObject();

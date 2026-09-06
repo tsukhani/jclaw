@@ -22,6 +22,13 @@ import java.util.Optional;
  */
 public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schema, int limit) {
 
+    /** Valid for JSON_SCHEMA and TOOL_ARGS_INCLUDE — EvalDatasetLoader rejects either without one. */
+    public JsonObject requiredSchema() {
+        if (schema == null) throw new IllegalStateException(kind + " check carries no schema");
+        return schema;
+    }
+
+
     /** Wire {@code kind} values, lowercased ({@code CONTAINS_ALL} → {@code contains_all}). */
     public enum Kind {
         /** Every arg appears in the response text (case-insensitive). */

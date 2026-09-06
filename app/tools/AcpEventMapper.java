@@ -14,6 +14,7 @@ import com.agentclientprotocol.sdk.spec.AcpSchema.RequestPermissionResponse;
 import com.agentclientprotocol.sdk.spec.AcpSchema.SessionUpdate;
 import com.agentclientprotocol.sdk.spec.AcpSchema.TextContent;
 import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCall;
+import org.jspecify.annotations.Nullable;
 import utils.GsonHolder;
 
 import java.util.LinkedHashMap;
@@ -39,7 +40,7 @@ public final class AcpEventMapper {
      * TOOL_CALL}. Bookkeeping updates (usage, available-commands, mode,
      * user-echo) aren't run steps and are dropped.
      */
-    public static HarnessEvent toHarnessEvent(SessionUpdate update) {
+    public static @Nullable HarnessEvent toHarnessEvent(SessionUpdate update) {
         return switch (update) {
             case AgentMessageChunk c -> new HarnessEvent(HarnessEvent.TOKEN, text(c.content()), null);
             case AgentThoughtChunk c -> new HarnessEvent(HarnessEvent.STEP, text(c.content()), null);

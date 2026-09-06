@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Config;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import utils.GsonHolder;
 import utils.HttpFactories;
@@ -127,7 +128,7 @@ public final class PricingRefreshService {
      * network or parse failure — caller treats null as "skip this run, try
      * again next schedule."
      */
-    public static JsonObject fetchLiteLlmCatalog() {
+    public static @Nullable JsonObject fetchLiteLlmCatalog() {
         try {
             var req = new Request.Builder()
                     .url(LITELLM_URL)
@@ -213,7 +214,7 @@ public final class PricingRefreshService {
         return modelsUpdated;
     }
 
-    private static JsonArray parseModelsArray(String raw) {
+    private static @Nullable JsonArray parseModelsArray(String raw) {
         try {
             return JsonParser.parseString(raw).getAsJsonArray();
         } catch (Exception _) {
@@ -307,7 +308,7 @@ public final class PricingRefreshService {
      * over a few dozen configured models, so a map would cost more to build
      * than the scans it saves.
      */
-    static JsonObject lookupCatalogByBareName(JsonObject catalog, String id) {
+    static @Nullable JsonObject lookupCatalogByBareName(JsonObject catalog, String id) {
         var bare = bareName(id);
         if (bare.isBlank()) return null;
         for (var e : catalog.entrySet()) {
@@ -322,7 +323,7 @@ public final class PricingRefreshService {
         return last.toLowerCase();
     }
 
-    private static String extractModelId(JsonObject model) {
+    private static @Nullable String extractModelId(JsonObject model) {
         if (!model.has("id") || model.get("id").isJsonNull()) return null;
         var id = model.get("id").getAsString();
         return (id == null || id.isBlank()) ? null : id;
@@ -337,7 +338,7 @@ public final class PricingRefreshService {
      *
      * <p>Returns the matching entry's JsonObject, or {@code null} on miss.
      */
-    public static JsonObject lookupCatalog(JsonObject catalog, String id) {
+    public static @Nullable JsonObject lookupCatalog(JsonObject catalog, String id) {
         var candidates = new ArrayList<String>();
         candidates.add(id);
         // Strip provider prefix (e.g. "openai/gpt-4o" → "gpt-4o").

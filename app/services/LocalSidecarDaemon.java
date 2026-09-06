@@ -3,6 +3,7 @@ package services;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.Play;
 import utils.HttpFactories;
@@ -120,11 +121,11 @@ public final class LocalSidecarDaemon {
     public static final String AUTH_HEADER = "X-Sidecar-Token";
 
     /** Derived once per daemon; see {@link #authTokenFor()} for why it is not random. */
-    private volatile String authToken;
+    private volatile @Nullable String authToken;
 
-    private volatile Process process;
-    private volatile Thread outDrain;
-    private volatile Thread errDrain;
+    private volatile @Nullable Process process;
+    private volatile @Nullable Thread outDrain;
+    private volatile @Nullable Thread errDrain;
 
     public LocalSidecarDaemon(Config cfg) {
         this.cfg = cfg;
@@ -215,12 +216,12 @@ public final class LocalSidecarDaemon {
      *  Cleared by a successful spawn or config change won't rescue it —
      *  the memo simply expires. */
     private volatile long spawnFailedUntil = 0;
-    private volatile String spawnFailureMessage = null;
+    private volatile @Nullable String spawnFailureMessage = null;
     private static final long SPAWN_FAILURE_COOLDOWN_MS = 60_000;
 
     /** As {@link #spawn(String, String)}, reading the HF token from the
      *  domain's own {@code <prefix>.hfToken} config key. */
-    public void spawn(String model) {
+    public void spawn(@Nullable String model) {
         spawn(model, ConfigService.get(cfg.configPrefix() + ".hfToken"));
     }
 
@@ -232,7 +233,7 @@ public final class LocalSidecarDaemon {
      * {@link #singleFlight(Supplier)} (or, for the diarization facade, while
      * holding {@link #lock()}) so only one spawn runs on the fixed port at a time.
      */
-    public void spawn(String model, String hfToken) {
+    public void spawn(@Nullable String model, @Nullable String hfToken) {
         if (System.currentTimeMillis() < spawnFailedUntil) {
             throw cfg.fail().apply(
                     "%s recently failed to start (%s) — retrying automatically in under a minute"
@@ -263,7 +264,7 @@ public final class LocalSidecarDaemon {
         }
     }
 
-    private void spawnNow(String model, String hfToken) {
+    private void spawnNow(@Nullable String model, @Nullable String hfToken) {
         var sidecarDir = new File(Play.applicationPath, cfg.sidecarSubdir());
         var serve = new File(sidecarDir, SERVE_SCRIPT);
         if (!serve.isFile()) {
@@ -516,7 +517,7 @@ public final class LocalSidecarDaemon {
      * for an adopted process) and this reports unhealthy so the caller
      * respawns with the right model.
      */
-    public boolean isHealthy(String expectedModel) {
+    public boolean isHealthy(@Nullable String expectedModel) {
         var call = HttpFactories.general().newCall(
                 new Request.Builder().url(baseUrl() + "/health").header(AUTH_HEADER, authToken()).get().build());
         call.timeout().timeout(5, TimeUnit.SECONDS);
@@ -539,7 +540,7 @@ public final class LocalSidecarDaemon {
     }
 
     /** The "model" field of a /health JSON body, or null if unparseable. */
-    public static String healthModel(String healthJson) {
+    public static @Nullable String healthModel(String healthJson) {
         try {
             var root = JsonParser.parseString(healthJson).getAsJsonObject();
             return root.has("model") ? root.get("model").getAsString() : null;

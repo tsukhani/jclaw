@@ -6,6 +6,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -47,7 +48,8 @@ public class BflImageGenerationClient implements ImageGenerationService {
     }
 
     @Override
-    public GeneratedImage generate(String prompt, String model, Integer width, Integer height) {
+    public GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                   @Nullable Integer height) {
         return generate(prompt, model, width, height, null);
     }
 
@@ -58,8 +60,9 @@ public class BflImageGenerationClient implements ImageGenerationService {
      * style transfer) restyles/uses it for consistency; when null this is plain text-to-image.
      */
     @Override
-    public GeneratedImage generate(String prompt, String model, Integer width, Integer height,
-                                   ReferenceImage referenceImage) {
+    public GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                   @Nullable Integer height,
+                                   @Nullable ReferenceImage referenceImage) {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
@@ -80,8 +83,8 @@ public class BflImageGenerationClient implements ImageGenerationService {
         return new GeneratedImage(fetchBytes(sampleUrl), "image/png", "bfl:" + effModel);
     }
 
-    private String submit(String baseUrl, String model, String apiKey, String prompt, int w, int h,
-                          ReferenceImage referenceImage) {
+    private String submit(String baseUrl, @Nullable String model, String apiKey, String prompt, int w, int h,
+                          @Nullable ReferenceImage referenceImage) {
         var root = new JsonObject();
         root.addProperty("prompt", prompt);
         root.addProperty("width", w);
@@ -131,7 +134,7 @@ public class BflImageGenerationClient implements ImageGenerationService {
     }
 
     /** One poll: the sample URL once the job is Ready, or {@code null} while it is still pending. Throws on Error/HTTP failure. */
-    private String pollOnce(String pollingUrl, String apiKey) {
+    private @Nullable String pollOnce(String pollingUrl, String apiKey) {
         var request = new Request.Builder().url(pollingUrl).header(KEY_HEADER, apiKey).get().build();
         try (var response = client.newCall(request).execute()) {
             var body = response.body().string();

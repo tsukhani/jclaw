@@ -1,5 +1,6 @@
 package services;
 
+
 /**
  * Detect whether {@code uv} (the Astral Python package/venv manager) is on PATH.
  * jclaw's local image and video sidecars are both launched with {@code uv run

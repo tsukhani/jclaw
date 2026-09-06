@@ -154,15 +154,15 @@ public final class ContextWindowManager {
                                                  @Nullable String modelId) {
         if (providerName != null && modelId != null) {
             var specific = parseMultiplier(ConfigService.get(
-                    SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId, null));
+                    SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId));
             if (specific != null) return specific;
         }
         if (providerName != null) {
             var perProvider = parseMultiplier(ConfigService.get(
-                    SAFETY_MULTIPLIER_PREFIX + providerName, null));
+                    SAFETY_MULTIPLIER_PREFIX + providerName));
             if (perProvider != null) return perProvider;
         }
-        var global = parseMultiplier(ConfigService.get(SAFETY_MULTIPLIER_KEY, null));
+        var global = parseMultiplier(ConfigService.get(SAFETY_MULTIPLIER_KEY));
         return global != null ? global : DEFAULT_SAFETY_MULTIPLIER;
     }
 

@@ -128,7 +128,7 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
         // Validate containment NOW, in front of the agent that asked. The write itself
         // happens minutes later on a background poller, where a rejection would go
         // unseen and the caller would wait for a file that is never coming.
-        var saveTo = JsonArgs.optString(args, ARG_SAVE_TO, null);
+        var saveTo = JsonArgs.optString(args, ARG_SAVE_TO);
         String savedPath = null;
         if (saveTo != null && !saveTo.isBlank()) {
             try {

@@ -553,7 +553,7 @@ public class SkillLoader {
     }
 
     /** Delegates to {@link SkillVersionManager}. */
-    public static String finalizeSkillMdWrite(Path targetPath, String newContent) {
+    public static String finalizeSkillMdWrite(Path targetPath, @Nullable String newContent) {
         return SkillVersionManager.finalizeSkillMdWrite(targetPath, newContent);
     }
 

@@ -6,6 +6,7 @@ import mcp.McpAllowlist;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Config;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 
 import java.nio.file.Path;
@@ -107,7 +108,7 @@ public class AgentService {
      * @return the persisted Agent
      */
     public static Agent create(String name, String modelProvider, String modelId,
-                                String thinkingMode, String description,
+                                @Nullable String thinkingMode, @Nullable String description,
                                 boolean createWorkspace) {
         return create(name, modelProvider, modelId, thinkingMode, description, createWorkspace, null);
     }
@@ -125,8 +126,8 @@ public class AgentService {
      * @param parentAgent spawning agent for a subagent, null for a top-level one
      */
     public static Agent create(String name, String modelProvider, String modelId,
-                                String thinkingMode, String description,
-                                boolean createWorkspace, Agent parentAgent) {
+                                @Nullable String thinkingMode, @Nullable String description,
+                                boolean createWorkspace, @Nullable Agent parentAgent) {
         var agent = new Agent();
         agent.parentAgent = parentAgent;
         agent.name = name;
@@ -260,7 +261,7 @@ public class AgentService {
      * longer than 255 chars is truncated. The server mirrors the client-side
      * {@code maxlength="255"} so a direct API caller can't sneak past.
      */
-    private static String normalizeDescription(String description) {
+    private static @Nullable String normalizeDescription(@Nullable String description) {
         if (description == null) return null;
         var trimmed = description.strip();
         if (trimmed.isEmpty()) return null;
@@ -274,7 +275,7 @@ public class AgentService {
      * levels for a thinking model also collapse to null rather than 500-ing,
      * which protects against stale frontend state after a model swap.
      */
-    private static String normalizeThinkingMode(String requested, String modelProvider, String modelId) {
+    private static @Nullable String normalizeThinkingMode(@Nullable String requested, String modelProvider, String modelId) {
         if (requested == null || requested.isBlank()) return null;
         var model = findModel(modelProvider, modelId).orElse(null);
         if (model == null) return null;
@@ -387,7 +388,7 @@ public class AgentService {
         return WorkspaceFiles.workspacePath(agentName);
     }
 
-    public static Path resolveContained(Path root, String relativePath) {
+    public static @Nullable Path resolveContained(Path root, String relativePath) {
         return WorkspaceFiles.resolveContained(root, relativePath);
     }
 
@@ -395,7 +396,7 @@ public class AgentService {
         return WorkspaceFiles.acquireContained(root, relativePath);
     }
 
-    public static Path resolveWorkspacePath(String agentName, String relativePath) {
+    public static @Nullable Path resolveWorkspacePath(String agentName, String relativePath) {
         return WorkspaceFiles.resolveWorkspacePath(agentName, relativePath);
     }
 
@@ -411,7 +412,7 @@ public class AgentService {
         WorkspaceFiles.resetWorkspace(agentName);
     }
 
-    public static String readWorkspaceFile(String agentName, String filename) {
+    public static @Nullable String readWorkspaceFile(String agentName, String filename) {
         return WorkspaceFiles.readWorkspaceFile(agentName, filename);
     }
 

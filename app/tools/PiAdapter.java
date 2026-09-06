@@ -3,6 +3,7 @@ package tools;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,7 +56,7 @@ public final class PiAdapter implements HarnessAdapter {
      * unrecognized type degrades to a {@link HarnessEvent#STEP}, never throws.
      */
     @Override
-    public HarnessEvent parse(String line) {
+    public @Nullable HarnessEvent parse(String line) {
         JsonObject obj;
         try {
             var parsed = JsonParser.parseString(line);
@@ -116,7 +117,7 @@ public final class PiAdapter implements HarnessAdapter {
      * (text_start/end, toolcall_start/delta/end) is framing or duplicates an
      * already-surfaced event, so drop it.
      */
-    private static HarnessEvent fromMessageUpdate(JsonObject obj) {
+    private static @Nullable HarnessEvent fromMessageUpdate(JsonObject obj) {
         JsonElement ame = obj.get("assistantMessageEvent");
         if (ame == null || !ame.isJsonObject()) return null;
         var event = ame.getAsJsonObject();
@@ -140,7 +141,7 @@ public final class PiAdapter implements HarnessAdapter {
     }
 
     /** Concatenate the {@code text} of a Pi tool result's {@code content[]} blocks. */
-    private static String toolResultText(JsonElement result) {
+    private static @Nullable String toolResultText(JsonElement result) {
         if (result == null || !result.isJsonObject()) return null;
         JsonElement content = result.getAsJsonObject().get("content");
         if (content == null || !content.isJsonArray()) return null;
@@ -160,7 +161,7 @@ public final class PiAdapter implements HarnessAdapter {
      * ended without a final assistant text (the reply then falls back to the
      * streamed tokens).
      */
-    private static HarnessEvent fromAgentEnd(JsonObject obj) {
+    private static @Nullable HarnessEvent fromAgentEnd(JsonObject obj) {
         JsonElement messages = obj.get("messages");
         if (messages == null || !messages.isJsonArray()) return null;
         var arr = messages.getAsJsonArray();
@@ -175,7 +176,7 @@ public final class PiAdapter implements HarnessAdapter {
     }
 
     /** Concatenate the {@code text} blocks of an assistant message's {@code content[]}. */
-    private static String assistantText(JsonElement content) {
+    private static @Nullable String assistantText(JsonElement content) {
         if (content == null || !content.isJsonArray()) return null;
         var sb = new StringBuilder();
         for (JsonElement el : content.getAsJsonArray()) {
@@ -190,12 +191,12 @@ public final class PiAdapter implements HarnessAdapter {
     }
 
     /** The value if non-null, else the raw line (tolerant fallback). */
-    private static String orLine(String value, String line) {
+    private static String orLine(@Nullable String value, String line) {
         return value == null ? line : value;
     }
 
     /** First present, non-null primitive field among {@code keys}, as a string. */
-    private static String firstString(JsonObject obj, String... keys) {
+    private static @Nullable String firstString(JsonObject obj, String... keys) {
         for (var key : keys) {
             JsonElement el = obj.get(key);
             if (el != null && el.isJsonPrimitive()) {

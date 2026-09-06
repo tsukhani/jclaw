@@ -1,6 +1,7 @@
 package services;
 
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import utils.GsonHolder;
 
 import java.util.ArrayList;
@@ -57,7 +58,7 @@ public final class AcpHarnessProbe {
             // (agy -p), no native ACP — so it falls in the stdin/stdout catalog.
             new Harness("antigravity", "agy", "agy -p", "Antigravity"));
 
-    private static volatile List<Detected> forced;
+    private static volatile @Nullable List<Detected> forced;
 
     private AcpHarnessProbe() {}
 
@@ -131,7 +132,7 @@ public final class AcpHarnessProbe {
     }
 
     private static List<String> customCommands() {
-        var json = ConfigService.get(CUSTOM_COMMANDS_KEY, null);
+        var json = ConfigService.get(CUSTOM_COMMANDS_KEY);
         if (json == null || json.isBlank()) return List.of();
         try {
             var out = new ArrayList<String>();

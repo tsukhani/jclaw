@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.HttpUrl;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.EventLogger;
 import services.SkillCategoryClassifier;
@@ -186,16 +187,16 @@ public final class ClawhubCatalog implements Catalog {
      * {@code matches[].url}. When the owner is unknown (browse listings omit it),
      * fall back to the slug-filtered search, which still lands on the right skill.
      */
-    private static String skillPageUrl(String base, String owner, String slug) {
+    private static String skillPageUrl(String base, String owner, @Nullable String slug) {
         return owner.isBlank() ? searchLink(base, slug) : base + "/" + owner + "/skills/" + nz(slug);
     }
 
-    private static String searchLink(String base, String slug) {
+    private static String searchLink(String base, @Nullable String slug) {
         return base + "/skills?q=" + URLEncoder.encode(nz(slug), StandardCharsets.UTF_8);
     }
 
     /** Display subtitle: the owner-qualified path when known, else just the slug. */
-    private static String sourceLabel(String owner, String slug) {
+    private static String sourceLabel(String owner, @Nullable String slug) {
         return owner.isBlank() ? CLAWHUB_HOST + nz(slug) : CLAWHUB_HOST + owner + "/" + nz(slug);
     }
 
@@ -233,7 +234,7 @@ public final class ClawhubCatalog implements Catalog {
         return (configured != null && !configured.isBlank()) ? configured.trim() : DEFAULT_BASE_URL;
     }
 
-    private static String str(JsonObject o, String key) {
+    private static @Nullable String str(JsonObject o, String key) {
         return o == null ? null : JsonArgs.optString(o, key);
     }
 
@@ -241,13 +242,13 @@ public final class ClawhubCatalog implements Catalog {
         return o != null && o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsLong() : dflt;
     }
 
-    private static String join(String... parts) {
+    private static String join(@Nullable String... parts) {
         var sb = new StringBuilder();
         for (var p : parts) if (p != null) sb.append(p).append(' ');
         return sb.toString();
     }
 
-    private static String nz(String s) {
+    private static String nz(@Nullable String s) {
         return s != null ? s : "";
     }
 }

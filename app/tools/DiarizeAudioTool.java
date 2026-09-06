@@ -13,6 +13,7 @@ import models.MessageAttachment;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.AgentService;
 import services.ConfigService;
@@ -229,7 +230,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
         var attachment = Tx.run(() -> resolveAttachment(JsonArgs.optString(args, ARG_UUID)));
         if (attachment.error() != null) return attachment.error();
-        var att = attachment.value();
+        var att = attachment.resolvedValue();
         var path = AgentService.workspaceRoot().resolve(att.storagePath);
         if (!Files.isRegularFile(path)) {
             return "Error: the audio file for attachment %s is missing from storage.".formatted(att.uuid);
@@ -268,7 +269,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     /** Error string for an unrecognized action arg, or null when valid (blank/
      *  absent defaults to diarize). Lifted from execute to shed complexity (S3776). */
-    private static String unknownActionError(String action) {
+    private static @Nullable String unknownActionError(@Nullable String action) {
         if (action != null && !action.isBlank()
                 && !ACTION_DIARIZE.equals(action) && !ACTION_ENROLL.equals(action)) {
             return "Error: unknown action '%s' (expected %s or %s).".formatted(
@@ -281,7 +282,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      *  missing base URL, or a model the registry knows isn't audio-capable (which
      *  would otherwise fail upstream with a cryptic 400). Null when OK. Lifted
      *  from execute to shed complexity (S3776). */
-    private static String cloudProviderError(String provider, String model, String baseUrl) {
+    private static @Nullable String cloudProviderError(String provider, String model, String baseUrl) {
         if (baseUrl.isBlank()) {
             return "Error: provider '%s' has no base URL configured.".formatted(provider);
         }
@@ -300,8 +301,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      * No audio leaves the host — the privacy/cost path. Per-turn emotion is
      * opt-in, from a separate SER pass in the diarize sidecar.
      */
-    private String diarizeLocal(Path path, String filename, String language,
-                                Integer numSpeakers, boolean emotions) {
+    private String diarizeLocal(Path path, String filename, @Nullable String language,
+                                @Nullable Integer numSpeakers, boolean emotions) {
         try {
             var model = AsrModel.byId(ConfigService.get("transcription.localModel"))
                     .orElse(AsrModel.DEFAULT);
@@ -328,7 +329,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     // ------------------------------------------------------------------ //
 
-    private static String buildPrompt(String speakerNames, String language, boolean emotions,
+    private static String buildPrompt(@Nullable String speakerNames, @Nullable String language, boolean emotions,
                                       Set<String> referenceNames) {
         var sb = new StringBuilder("""
                 Listen to the attached audio and produce a complete diarized transcript. \
@@ -471,7 +472,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
     }
 
     /** Save a short mono MP3 sample of the attachment as <name>'s voice. */
-    private static String enrollVoice(Path audio, String name) {
+    private static String enrollVoice(Path audio, @Nullable String name) {
         if (name == null || name.isBlank() || !NAME_PATTERN.matcher(name.strip()).matches()) {
             return "Error: enroll_voice needs a plain 'speaker_name' (letters, digits, spaces, "
                     + "dots, dashes; up to 60 characters).";
@@ -525,12 +526,18 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
     // ------------------------------------------------------------------ //
 
-    private record Resolved(MessageAttachment value, String error) {
+    private record Resolved(@Nullable MessageAttachment value, @Nullable String error) {
         static Resolved of(MessageAttachment a) { return new Resolved(a, null); }
         static Resolved fail(String message) { return new Resolved(null, message); }
+
+        /** Valid only once {@link #error()} has been checked null — {@code fail()} resolves nothing. */
+        MessageAttachment resolvedValue() {
+            if (value == null) throw new IllegalStateException("attachment unresolved: " + error);
+            return value;
+        }
     }
 
-    private static Resolved resolveAttachment(String uuid) {
+    private static Resolved resolveAttachment(@Nullable String uuid) {
         // Both paths are scoped to the active conversation. The uuid argument
         // is model-controlled and agents can be group-reachable through
         // channel bindings, so an unscoped uuid lookup would let a crafted

@@ -5,6 +5,7 @@ import com.github.kagkarlsson.scheduler.task.ExecutionOperations;
 import com.github.kagkarlsson.scheduler.task.FailureHandler;
 import models.Task;
 import models.TaskRun;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import utils.TransientErrorClassifier;
 
@@ -132,7 +133,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * Task row can't be loaded (rare — implies someone deleted the
      * Task between the fire start and the failure surface).
      */
-    public static Decision decide(Long jclawTaskId, Throwable throwable) {
+    public static Decision decide(Long jclawTaskId, @Nullable Throwable throwable) {
         boolean isTransient = TransientErrorClassifier.isTransient(throwable);
         String errorMessage = describeError(throwable);
 
@@ -173,8 +174,8 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * {@code backoffSecs}, and {@code attempts} carry the precomputed values
      * the log lines need so the post-commit code doesn't re-read the row.
      */
-    private record DecideOutcome(Decision decision, Task task, TaskRun runForLifecycle,
-                                 String taskName, String agentName,
+    private record DecideOutcome(Decision decision, Task task, @Nullable TaskRun runForLifecycle,
+                                 String taskName, @Nullable String agentName,
                                  int budget, long backoffSecs, int attempts) {}
 
     /**
@@ -184,7 +185,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * event — all against the same persistence context. Returns {@code null}
      * when the Task row is gone.
      */
-    private static DecideOutcome mutateAndDecide(Long jclawTaskId, boolean isTransient, String errorMessage) {
+    private static @Nullable DecideOutcome mutateAndDecide(Long jclawTaskId, boolean isTransient, String errorMessage) {
         var task = (Task) Task.findById(jclawTaskId);
         if (task == null) return null;
 
@@ -224,7 +225,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                 task.name, agentName, budget, 0L, currentRetry + 1);
     }
 
-    private static String describeError(Throwable throwable) {
+    private static String describeError(@Nullable Throwable throwable) {
         if (throwable == null) return "Unknown error";
         var msg = throwable.getMessage();
         return msg != null ? msg : throwable.getClass().getSimpleName();
@@ -238,7 +239,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * layer (db-scheduler integration) and a shared helper would
      * create coupling for a 4-line method.
      */
-    private static Long parseTaskId(String instanceId) {
+    private static @Nullable Long parseTaskId(String instanceId) {
         if (instanceId == null || instanceId.isBlank()) return null;
         try {
             return Long.parseLong(instanceId.trim());

@@ -1,5 +1,7 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -28,7 +30,7 @@ public final class RawSocketClient {
      *
      * @throws IOException if the socket cannot be opened or the write fails
      */
-    public static void print(String host, int port, byte[] document, int timeoutMs)
+    public static void print(@Nullable String host, int port, byte[] document, int timeoutMs)
             throws IOException {
         try (var socket = new Socket()) {
             socket.connect(new InetSocketAddress(host, port), timeoutMs);

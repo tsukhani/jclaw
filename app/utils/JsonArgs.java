@@ -35,9 +35,10 @@ public final class JsonArgs {
     /**
      * As {@link #optString(JsonObject, String)} but returns {@code def} when the
      * key is absent or JSON-null. A blank value is returned verbatim (it is not
-     * collapsed to {@code def}).
+     * collapsed to {@code def}). Callers that need "absent" to stay distinguishable
+     * use the two-argument {@link #optString(JsonObject, String)}.
      */
-    public static @Nullable String optString(@NonNull JsonObject obj, @NonNull String key, @Nullable String def) {
+    public static @NonNull String optString(@NonNull JsonObject obj, @NonNull String key, @NonNull String def) {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return def;
         return el.getAsString();

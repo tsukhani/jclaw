@@ -1,5 +1,7 @@
 package services.catalog;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 
 /**
@@ -13,5 +15,5 @@ public interface DumpParser {
     ParsedDump parse(String raw, String provider);
 
     /** The parsed dump: its skills plus an optional snapshot timestamp. */
-    record ParsedDump(List<CatalogSkill> skills, String scrapedAt) {}
+    record ParsedDump(List<CatalogSkill> skills, @Nullable String scrapedAt) {}
 }

@@ -1,5 +1,7 @@
 package services.voice;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -45,7 +47,7 @@ public final class VoiceSession implements AutoCloseable {
     private final TurnEndpointer endpointer;
     private final PcmWindower windower;
     private final Listener listener;
-    private final Partial partial;         // nullable — interim transcript hook
+    private final @Nullable Partial partial;         // nullable — interim transcript hook
     private final long partialIntervalMs;  // min gap between interim emits
     private final int prerollWindows;
     private final ArrayDeque<float[]> preroll = new ArrayDeque<>();
@@ -59,7 +61,7 @@ public final class VoiceSession implements AutoCloseable {
     }
 
     public VoiceSession(VoiceVad vad, TurnEndpointer endpointer, int prerollWindows, Listener listener,
-                        Partial partial, long partialIntervalMs) {
+                        @Nullable Partial partial, long partialIntervalMs) {
         this.vad = vad;
         this.endpointer = endpointer;
         this.windower = new PcmWindower(VoiceVad.WINDOW);

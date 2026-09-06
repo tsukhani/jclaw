@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.scrape.BlockClassifier;
@@ -196,11 +197,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     /** {@code servedBy} is the rung that produced this text. PLAIN for the ordinary
      *  case; anything higher means the ladder was climbed for this page. */
-    private record Page(String url, String text, ScrapeRung servedBy) {}
+    private record Page(String url, @Nullable String text, ScrapeRung servedBy) {}
 
     /** A frontier URL the guard declined, kept apart from {@link Page} so a refusal
      *  never spends a slot in the page budget. */
-    private record Refusal(String url, String why) {}
+    private record Refusal(String url, @Nullable String why) {}
 
     @Override
     public String execute(String argsJson, Agent agent) {
@@ -288,7 +289,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
          *  locale roots, e.g. "/ar/". Learned, never guessed — see suppressLocaleVariants. */
         final LinkedHashSet<String> suppressedLocalePrefixes = new LinkedHashSet<>();
         int unvisited;
-        String stoppedBecause;
+        @Nullable String stoppedBecause;
         /** {@code System.nanoTime()} at which the crawl's declared timeout expires. */
         long deadline;
         /** Remaining escalation budget, and what refusing it cost — reported rather
@@ -443,10 +444,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                     : "; needs " + outcome.nextRung()), outcome.servedBy()));
             return;
         }
-        state.pages.add(new Page(outcome.fetched().finalUrl(), outcome.text(),
-                outcome.servedBy()));
-        state.totalChars += outcome.text().length();
-        fetched.add(outcome.fetched());
+        var page = outcome.resolvedFetched();
+        var text = outcome.resolvedText();
+        state.pages.add(new Page(page.finalUrl(), text, outcome.servedBy()));
+        state.totalChars += text.length();
+        fetched.add(page);
     }
 
     /** True when the time or content budget is spent; records which one. */
@@ -627,11 +629,23 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     /** One page's work, as it runs on the pool. Pacing happens here so the wait for a
      *  host's next slot overlaps other hosts' fetches instead of blocking the crawl. */
-    private record Outcome(WebExtraction.FetchResult fetched, String text,
-                           ScrapeReason reason, ScrapeRung nextRung, String detail,
+    private record Outcome(WebExtraction.@Nullable FetchResult fetched, @Nullable String text,
+                           ScrapeReason reason, ScrapeRung nextRung, @Nullable String detail,
                            ScrapeRung servedBy) {
         boolean usable() {
             return reason == ScrapeReason.OK;
+        }
+
+        /** Valid only when {@link #usable()} — a non-OK outcome retrieved no page. */
+        WebExtraction.FetchResult resolvedFetched() {
+            if (fetched == null) throw new IllegalStateException("outcome not usable: " + reason);
+            return fetched;
+        }
+
+        /** Valid only when {@link #usable()} — a non-OK outcome extracted no text. */
+        String resolvedText() {
+            if (text == null) throw new IllegalStateException("outcome not usable: " + reason);
+            return text;
         }
     }
 
@@ -707,7 +721,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     /** Runs the shared classifier and records the outcome, so a live install produces
      *  the same telemetry the offline harness does. */
-    private static Outcome classified(URI uri, WebExtraction.FetchResult fetched,
+    private static Outcome classified(URI uri, WebExtraction.@Nullable FetchResult fetched,
                                       ScrapeObservation obs) {
         var reason = BlockClassifier.classify(obs);
         var next = BlockClassifier.nextRung(reason);

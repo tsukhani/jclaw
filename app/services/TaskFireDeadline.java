@@ -1,5 +1,6 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 
 import java.time.Duration;
@@ -67,7 +68,7 @@ public final class TaskFireDeadline {
      * completion, or {@code null} when the watchdog is disabled (non-positive
      * configured duration) or the id is null.
      */
-    public static ScheduledFuture<?> arm(Long taskRunId) {
+    public static @Nullable ScheduledFuture<?> arm(Long taskRunId) {
         return arm(taskRunId, maxDurationSeconds(), TimeUnit.SECONDS);
     }
 
@@ -75,7 +76,7 @@ public final class TaskFireDeadline {
      * Test seam: arm with an explicit delay/unit, bypassing the config read (so
      * a unit test doesn't mutate the process-global {@code Play.configuration}).
      */
-    static ScheduledFuture<?> arm(Long taskRunId, long delay, TimeUnit unit) {
+    static @Nullable ScheduledFuture<?> arm(Long taskRunId, long delay, TimeUnit unit) {
         if (taskRunId == null || delay <= 0) return null;
         return SCHEDULER.schedule(() -> fire(taskRunId, delay, unit), delay, unit);
     }
@@ -113,7 +114,7 @@ public final class TaskFireDeadline {
      * and clears the {@code TIMED_OUT} slot. Safe to call with a {@code null}
      * future (watchdog disabled) or a {@code null} id.
      */
-    public static void disarm(ScheduledFuture<?> future, Long taskRunId) {
+    public static void disarm(@Nullable ScheduledFuture<?> future, Long taskRunId) {
         if (future != null) future.cancel(false);
         if (taskRunId != null) TIMED_OUT.remove(taskRunId);
     }

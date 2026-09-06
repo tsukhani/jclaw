@@ -1,5 +1,7 @@
 package services.scrape;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The fetch sidecar could not be started or reached (JCLAW-1087).
  *
@@ -9,7 +11,7 @@ package services.scrape;
  */
 public class ScrapeSidecarException extends RuntimeException {
 
-    public ScrapeSidecarException(String message, Throwable cause) {
+    public ScrapeSidecarException(String message, @Nullable Throwable cause) {
         super(message, cause);
     }
 }

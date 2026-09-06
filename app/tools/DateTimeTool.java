@@ -14,6 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Provides accurate date/time information and calculations.
@@ -247,6 +248,12 @@ public class DateTimeTool implements ToolRegistry.Tool {
         UnknownTimezoneException(String tz) {
             super("Error: Unknown timezone '%s'. Use an IANA name like 'Asia/Kuala_Lumpur' or 'America/New_York'."
                     .formatted(tz));
+        }
+
+        /** The only constructor always supplies a message, so this narrows Throwable's @Nullable. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
         }
     }
 

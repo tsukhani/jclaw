@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.discovery.DiscoveryStrategy;
 import utils.HttpFactories;
@@ -20,6 +21,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -275,8 +277,8 @@ public class ModelDiscoveryService {
         if (rankA != null && rankB != null) return Integer.compare((int) rankA, (int) rankB);
         if (rankA != null) return -1;
         if (rankB != null) return 1;
-        var nameA = a.get(KEY_NAME) != null ? a.get(KEY_NAME).toString() : a.get(KEY_ID).toString();
-        var nameB = b.get(KEY_NAME) != null ? b.get(KEY_NAME).toString() : b.get(KEY_ID).toString();
+        var nameA = Objects.toString(a.get(KEY_NAME), Objects.toString(a.get(KEY_ID), ""));
+        var nameB = Objects.toString(b.get(KEY_NAME), Objects.toString(b.get(KEY_ID), ""));
         return nameA.compareToIgnoreCase(nameB);
     }
 
@@ -609,7 +611,7 @@ public class ModelDiscoveryService {
      * Returns non-null only when the provider explicitly reports modality
      * metadata — caller should fall through to other signals otherwise.
      */
-    private static CapabilityDetection extractModalities(JsonObject obj, String modality) {
+    private static @Nullable CapabilityDetection extractModalities(JsonObject obj, String modality) {
         if (!obj.has(FIELD_ARCHITECTURE) || !obj.get(FIELD_ARCHITECTURE).isJsonObject()) return null;
         var arch = obj.getAsJsonObject(FIELD_ARCHITECTURE);
 
@@ -667,7 +669,7 @@ public class ModelDiscoveryService {
      * unparseable; a {@code NaN} value parses without throwing but fails the
      * {@code >= 0} guard in {@link #inferPrice}, so it too resolves to -1.
      */
-    private static double readPriceField(JsonObject pricing, String key) {
+    private static double readPriceField(JsonObject pricing, @Nullable String key) {
         if (key == null || !pricing.has(key) || pricing.get(key).isJsonNull()) return -1;
         try {
             return Double.parseDouble(pricing.get(key).getAsString());
@@ -681,7 +683,7 @@ public class ModelDiscoveryService {
      * key. Returns {@code null} for types Together doesn't expose (it has no
      * cache-write price), which {@link #readPriceField} treats as absent.
      */
-    private static String togetherPricingKey(String type) {
+    private static @Nullable String togetherPricingKey(String type) {
         return switch (type) {
             case FIELD_PROMPT -> FIELD_TOGETHER_INPUT;
             case FIELD_COMPLETION -> FIELD_TOGETHER_OUTPUT;
@@ -703,7 +705,7 @@ public class ModelDiscoveryService {
     // --- Leaderboard ---
 
     @SuppressWarnings("java:S1141") // Inner try isolates JSON-parse fallback to HTML; refactor would require returning a sentinel from a helper
-    static List<String> fetchLeaderboard(String leaderboardUrl) {
+    static List<String> fetchLeaderboard(@Nullable String leaderboardUrl) {
         if (leaderboardUrl == null || leaderboardUrl.isBlank()) return List.of();
 
         // JCLAW-778: the leaderboard URL is config-set (provider.<name>.leaderboardUrl).
@@ -807,7 +809,7 @@ public class ModelDiscoveryService {
         // model iterations, so precompute it once rather than per model×ranking.
         var strippedRankings = rankings.stream().map(ModelDiscoveryService::stripVersionSuffix).toList();
         for (var model : models) {
-            var modelId = model.get(KEY_ID).toString().toLowerCase();
+            var modelId = Objects.toString(model.get(KEY_ID), "").toLowerCase();
             var modelBase = stripVariant(modelId);
             var modelBaseStripped = stripVersionSuffix(modelBase);
             int bestRank = Integer.MAX_VALUE;
@@ -972,7 +974,7 @@ public class ModelDiscoveryService {
      * the OpenRouter/Anthropic logic.
      */
     @SuppressWarnings("java:S1168") // null means "drop this model from discovery"; empty map would be misread as a successful but empty result
-    public static Map<String, Object> parseOllamaShow(String id, JsonObject show) {
+    public static @Nullable Map<String, Object> parseOllamaShow(String id, JsonObject show) {
         // JCLAW-183 Tier 1: drop embedding-only models. Ollama's
         // /api/show capabilities array distinguishes "completion"
         // (chat-capable) from "embedding" (vector-only). When the array

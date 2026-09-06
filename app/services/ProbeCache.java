@@ -1,5 +1,8 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -28,7 +31,8 @@ public final class ProbeCache<T> {
 
     /** Current cached result; the unrun sentinel until {@link #set} has run. */
     public T get() {
-        return ref.get();
+        // Seeded with the unrun sentinel and only ever set() to a non-null result.
+        return Objects.requireNonNull(ref.get());
     }
 
     /** True when {@code value} is still the unrun sentinel (identity compare). */
@@ -43,7 +47,7 @@ public final class ProbeCache<T> {
     }
 
     /** Test seam: force a cached result, or reset to the unrun sentinel when {@code null}. */
-    public void setForTest(T forced) {
+    public void setForTest(@Nullable T forced) {
         ref.set(forced == null ? unrun : forced);
     }
 }

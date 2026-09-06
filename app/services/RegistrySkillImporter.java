@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,8 +33,8 @@ public final class RegistrySkillImporter {
 
     private RegistrySkillImporter() {}
 
-    public record ImportResult(boolean ok, String skillName, String message) {
-        static ImportResult fail(String message) { return new ImportResult(false, null, message); }
+    public record ImportResult(boolean ok, @Nullable String skillName, @Nullable String message) {
+        static ImportResult fail(@Nullable String message) { return new ImportResult(false, null, message); }
     }
 
     /**

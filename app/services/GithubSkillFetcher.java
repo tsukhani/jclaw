@@ -146,7 +146,7 @@ public final class GithubSkillFetcher {
             if (basename(dir).equals(skillId)) return Optional.of(dir);
             onlySkillMd = dir;
         }
-        return skillMdCount == 1 ? Optional.of(onlySkillMd) : Optional.empty();
+        return skillMdCount == 1 && onlySkillMd != null ? Optional.of(onlySkillMd) : Optional.empty();
     }
 
     private static boolean isSkillMd(String path) {

@@ -7,6 +7,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.SubagentRegistry;
@@ -70,13 +71,13 @@ final class SubagentAsyncRunner {
 
     /** Launch the async-spawn background VT and return the immediate JSON
      *  acknowledgment payload. */
-    static String launchAsyncSpawn(Long runId, Long childAgentId, Long childConvId,
+    static String launchAsyncSpawn(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                    Long parentConvId, String parentAgentName,
                                    SubagentSpawnArgs parsed, String runIdStr) {
         Thread.ofVirtual().name("subagent-async-" + runId).start(() ->
                 runAsyncAndAnnounce(runId, childAgentId, childConvId, parentConvId,
                         parentAgentName, parsed.mode(), parsed.context(), parsed.label(),
-                        parsed.timeoutSeconds(), parsed.task()));
+                        parsed.timeoutSeconds(), parsed.resolvedTask()));
         var asyncPayload = new LinkedHashMap<String, Object>();
         asyncPayload.put(SubagentSpawnTool.FIELD_RUN_ID, runIdStr);
         asyncPayload.put(SubagentSpawnTool.FIELD_CONVERSATION_ID, String.valueOf(childConvId));
@@ -86,7 +87,7 @@ final class SubagentAsyncRunner {
 
     /** JCLAW-498: the current tool-dispatch scope key — {@code task:<id>} in a task
      *  fire, {@code conv:<id>} in a chat turn, or null when neither is bound. */
-    static String currentScopeKey() {
+    static @Nullable String currentScopeKey() {
         var t = ToolContext.taskRunId();
         if (t != null) return "task:" + t;
         var c = ToolContext.conversationId();
@@ -118,9 +119,9 @@ final class SubagentAsyncRunner {
      * No announce / parent-resume — the parent collects via a blocking yield. Used
      * by the single async-in-task path and by batch fan-out (chat or task).
      */
-    static void dispatchDetachedAsync(Long runId, Long childAgentId, Long childConvId,
-                                      String parentAgentName, String mode, String context,
-                                      int timeoutSeconds, String task, String scopeKey) {
+    static void dispatchDetachedAsync(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
+                                      String parentAgentName, @Nullable String mode, @Nullable String context,
+                                      int timeoutSeconds, String task, @Nullable String scopeKey) {
         var outcomeFuture = new CompletableFuture<SyncRunOutcome>();
         ASYNC_OUTCOMES.put(runId, outcomeFuture);
         if (scopeKey != null) {
@@ -133,10 +134,10 @@ final class SubagentAsyncRunner {
     }
 
     /** JCLAW-497: single async spawn inside a task fire. Returns run_id immediately. */
-    static String launchAsyncSpawnForTask(Long runId, Long childAgentId, Long childConvId,
+    static String launchAsyncSpawnForTask(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                           String parentAgentName, SubagentSpawnArgs parsed, String runIdStr) {
         dispatchDetachedAsync(runId, childAgentId, childConvId, parentAgentName,
-                parsed.mode(), parsed.context(), parsed.timeoutSeconds(), parsed.task(), currentScopeKey());
+                parsed.resolvedMode(), parsed.resolvedContext(), parsed.timeoutSeconds(), parsed.resolvedTask(), currentScopeKey());
         var payload = new LinkedHashMap<String, Object>();
         payload.put(SubagentSpawnTool.FIELD_RUN_ID, runIdStr);
         payload.put(SubagentSpawnTool.FIELD_CONVERSATION_ID, String.valueOf(childConvId));
@@ -151,8 +152,8 @@ final class SubagentAsyncRunner {
      * lifecycle bookkeeping, then complete {@code outcomeFuture}.
      */
     @SuppressWarnings("java:S1181")
-    private static void runAsyncDetached(Long runId, Long childAgentId, Long childConvId,
-                                         String parentAgentName, String mode, String context,
+    private static void runAsyncDetached(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
+                                         String parentAgentName, @Nullable String mode, @Nullable String context,
                                          int timeoutSeconds, String task,
                                          CompletableFuture<SyncRunOutcome> outcomeFuture) {
         try {
@@ -294,9 +295,9 @@ final class SubagentAsyncRunner {
      *                        agent processes
      */
     @SuppressWarnings("java:S1181")
-    static void runAsyncAndAnnounce(Long runId, Long childAgentId, Long childConvId,
+    static void runAsyncAndAnnounce(Long runId, @Nullable Long childAgentId, @Nullable Long childConvId,
                                     Long parentConvId, String parentAgentName,
-                                    String mode, String context, String label,
+                                    @Nullable String mode, @Nullable String context, @Nullable String label,
                                     int timeoutSeconds, String task) {
         var future = startAsyncChild(runId, childAgentId, childConvId, task);
         SyncRunOutcome outcome;
@@ -356,7 +357,7 @@ final class SubagentAsyncRunner {
      */
     @SuppressWarnings("java:S1181")
     private static CompletableFuture<AgentRunner.RunResult> startAsyncChild(
-            Long runId, Long childAgentId, Long childConvId, String task) {
+            Long runId, @Nullable Long childAgentId, @Nullable Long childConvId, String task) {
         var future = new CompletableFuture<AgentRunner.RunResult>();
         SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-async-runner-" + runId).start(() -> {

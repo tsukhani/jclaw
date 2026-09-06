@@ -11,6 +11,7 @@ import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -62,14 +63,14 @@ public final class SkillConformanceService {
     private SkillConformanceService() {}
 
     /** Terminal outcome of conforming a staged skill. */
-    public record ConformanceResult(boolean ok, String skillName, String message) {
-        static ConformanceResult fail(String message) { return new ConformanceResult(false, null, message); }
+    public record ConformanceResult(boolean ok, @Nullable String skillName, @Nullable String message) {
+        static ConformanceResult fail(@Nullable String message) { return new ConformanceResult(false, null, message); }
         static ConformanceResult ok(String skillName) { return new ConformanceResult(true, skillName, "conformed"); }
     }
 
     /** The LLM's proposed normalization (generation half) — frontmatter only;
      *  the body is preserved verbatim, so the model never re-emits it. */
-    public record ProposedSkill(String name, String description, String icon, List<String> tools) {}
+    public record ProposedSkill(@Nullable String name, @Nullable String description, @Nullable String icon, List<String> tools) {}
 
     /** A skill that passed the deterministic gate, ready to render as SKILL.md. */
     public record ConformedSkill(String name, String description, String version, String icon,
@@ -103,9 +104,15 @@ public final class SkillConformanceService {
     }
 
     /** Accept ({@code skill} set) or reject ({@code reason} set) decision from the gate. */
-    public record GateOutcome(boolean ok, String reason, ConformedSkill skill) {
+    public record GateOutcome(boolean ok, @Nullable String reason, @Nullable ConformedSkill skill) {
         static GateOutcome reject(String reason) { return new GateOutcome(false, reason, null); }
         static GateOutcome accept(ConformedSkill skill) { return new GateOutcome(true, null, skill); }
+
+        /** Valid only when {@link #ok()} — a rejected gate produces no skill. */
+        public ConformedSkill resolvedSkill() {
+            if (skill == null) throw new IllegalStateException("gate rejected: " + reason);
+            return skill;
+        }
     }
 
     /**
@@ -155,11 +162,11 @@ public final class SkillConformanceService {
         if (!gate.ok()) return ConformanceResult.fail(gate.reason());
 
         try {
-            Files.writeString(skillFile, gate.skill().toSkillMd());
+            Files.writeString(skillFile, gate.resolvedSkill().toSkillMd());
         } catch (IOException e) {
             return ConformanceResult.fail("could not write conformed SKILL.md: " + e.getMessage());
         }
-        return ConformanceResult.ok(gate.skill().name());
+        return ConformanceResult.ok(gate.resolvedSkill().name());
     }
 
     /**
@@ -192,7 +199,7 @@ public final class SkillConformanceService {
      */
     public static GateOutcome applyHardGates(ProposedSkill proposed, String fallbackName,
                                              Set<String> stagedBinaries, String author, String body,
-                                             String declaredVersion) {
+                                             @Nullable String declaredVersion) {
         if (proposed == null) return GateOutcome.reject("empty conformance proposal");
 
         var name = kebabOrNull(proposed.name());
@@ -244,7 +251,8 @@ public final class SkillConformanceService {
                 ChatMessage.user("Skill id (fallback name): %s\n\nCurrent SKILL.md:\n%s".formatted(fallbackName, rawSkillMd)));
         try {
             var response = provider.chat(modelId, messages, null, null, null, LLM_TIMEOUT_SECONDS, null);
-            var text = response.choices().getFirst().message().content().toString();
+            var content = response.choices().getFirst().message().content();
+            var text = content == null ? "" : content.toString();
             return Optional.of(parseProposed(parseJsonObjectLenient(text)));
         } catch (Exception e) {
             EventLogger.warn(CATEGORY, "Conformance LLM pass failed: " + e.getMessage());
@@ -341,7 +349,7 @@ public final class SkillConformanceService {
      * write the absence rather than fix it. Normalizing through the parser also repairs
      * near-misses: {@code v2.1} renders as {@code 2.1.0}.
      */
-    public static String resolveVersion(String declaredVersion) {
+    public static String resolveVersion(@Nullable String declaredVersion) {
         if (declaredVersion == null || declaredVersion.isBlank()) {
             return SkillVersionManager.INITIAL_VERSION;
         }
@@ -356,7 +364,7 @@ public final class SkillConformanceService {
         return "%d.%d.%d".formatted(p[0], p[1], p[2]);
     }
 
-    static String kebabCase(String s) {
+    static @Nullable String kebabCase(String s) {
         if (s == null) return null;
         var kebab = s.strip().toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
@@ -365,7 +373,7 @@ public final class SkillConformanceService {
         return kebab.isBlank() ? null : kebab;
     }
 
-    static String kebabOrNull(String s) {
+    static @Nullable String kebabOrNull(@Nullable String s) {
         if (s == null) return null;
         var t = s.strip();
         return KEBAB.matcher(t).matches() ? t : null;
@@ -382,7 +390,7 @@ public final class SkillConformanceService {
         return out;
     }
 
-    private static String str(JsonObject o, String key) {
+    private static @Nullable String str(JsonObject o, String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
     }
 

@@ -1,6 +1,7 @@
 package tools;
 
 import models.Task;
+import org.jspecify.annotations.Nullable;
 import services.ScheduleShorthandParser;
 import services.TimezoneResolver;
 
@@ -28,7 +29,7 @@ final class TaskScheduleSupport {
      * saved with. Throws {@link IllegalArgumentException} on a malformed
      * schedule (the caller maps it to a tool error).
      */
-    static ScheduleShorthandParser.ScheduleSpec parse(String scheduleShorthand, String timezone) {
+    static ScheduleShorthandParser.ScheduleSpec parse(String scheduleShorthand, @Nullable String timezone) {
         var zone = TimezoneResolver.resolve(timezone);
         return ScheduleShorthandParser.parse(scheduleShorthand, zone);
     }
@@ -38,7 +39,7 @@ final class TaskScheduleSupport {
      * valid, null when absent or blank. Throws {@link IllegalArgumentException}
      * on an invalid value so the caller can surface a clear tool error.
      */
-    static String parseTimezone(String raw) {
+    static @Nullable String parseTimezone(@Nullable String raw) {
         if (raw == null || raw.isBlank()) return null;
         var trimmed = raw.trim();
         try {

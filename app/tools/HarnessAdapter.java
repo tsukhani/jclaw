@@ -1,5 +1,7 @@
 package tools;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 
 /**
@@ -42,7 +44,7 @@ public interface HarnessAdapter {
      * whose {@code text} is the raw line — the parser never throws on unexpected
      * input.
      */
-    HarnessEvent parse(String line);
+    @Nullable HarnessEvent parse(String line);
 
     /** What this harness's output stream supports. */
     Capabilities capabilities();

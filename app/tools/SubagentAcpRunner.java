@@ -12,6 +12,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.AcpCapabilityCatalog;
 import services.AgentService;
 import services.ConfigService;
@@ -90,7 +91,7 @@ final class SubagentAcpRunner {
     private static final class ReplyAccumulator {
         private final StringBuilder tokens = new StringBuilder();
         private final StringBuilder steps = new StringBuilder();
-        private String resultText;
+        private @Nullable String resultText;
 
         void fold(HarnessEvent ev) {
             switch (ev.kind()) {
@@ -220,8 +221,8 @@ final class SubagentAcpRunner {
      * backend's CWD. Returns {@code null} — inherit the server CWD — only when
      * neither is resolvable or the directory can't be created.
      */
-    private static File resolveAcpWorkdir(Agent childAgent, String task) {
-        var configured = ConfigService.get(SubagentSpawnTool.ACP_WORKDIR_KEY, null);
+    private static @Nullable File resolveAcpWorkdir(Agent childAgent, String task) {
+        var configured = ConfigService.get(SubagentSpawnTool.ACP_WORKDIR_KEY);
         Path dir;
         if (configured != null && !configured.isBlank()) {
             dir = Path.of(configured.strip());
@@ -254,7 +255,7 @@ final class SubagentAcpRunner {
     /** JCLAW-666: persist the resolved session directory on the run row so the
      *  operator and the CodingRunMonitor can find the coding artifacts (they
      *  live in the workspace, not in MessageAttachment). Best-effort. */
-    private static void recordWorkdir(Long runId, File workdir) {
+    private static void recordWorkdir(Long runId, @Nullable File workdir) {
         if (runId == null || workdir == null) return;
         try {
             Tx.run(() -> {
@@ -280,7 +281,7 @@ final class SubagentAcpRunner {
      * records a FAILED outcome.
      */
     private static AgentRunner.RunResult runAcpBatch(Long runId, List<String> command, String task,
-                                                     File workdir) {
+                                                     @Nullable File workdir) {
         Process proc = null;
         try {
             // JCLAW-672: batch mode has no streaming adapter; sandbox with the
@@ -343,7 +344,7 @@ final class SubagentAcpRunner {
      * harness's stderr so the spawn records a FAILED outcome.
      */
     private static AgentRunner.RunResult runAcpStreaming(List<String> command, String task,
-                                                         Long runId, HarnessAdapter adapter, File workdir) {
+                                                         Long runId, HarnessAdapter adapter, @Nullable File workdir) {
         var argv = SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task));
         // The adapter delivers the task on stdin unless it placed it in the argv.
         boolean taskOnStdin = !argv.contains(task);
@@ -403,7 +404,7 @@ final class SubagentAcpRunner {
      * {@link #runAcpStreaming}.
      */
     private static AgentRunner.RunResult runAcpRpc(Long runId, List<String> command, String task,
-                                                   HarnessAdapter adapter, Agent childAgent, File workdir) {
+                                                   HarnessAdapter adapter, Agent childAgent, @Nullable File workdir) {
         var argv = SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task));
         boolean taskOnStdin = !argv.contains(task);
         // Route approval prompts to the PARENT conversation — the child's own
@@ -466,14 +467,18 @@ final class SubagentAcpRunner {
      * subprocess and unblocking the blocking {@code prompt()}.
      */
     private static AgentRunner.RunResult runAcpSdk(Long runId, String acpCommand, String task,
-                                                   Agent childAgent, File workdir) {
+                                                   Agent childAgent, @Nullable File workdir) {
         var conversationId = parentConversationId(runId);
         var acc = new ReplyAccumulator();
         var seq = new AtomicInteger(1);   // seq 0 is the channel-approval step (when gated)
 
         // Sandbox the launch command, then hand it to the SDK's stdio transport.
+        // No adapter registered for the configured harness: sandbox with the generic
+        // (no HOME allowances) profile, as the batch path does.
+        var sandboxAdapter = resolveAdapter();
         var argv = HarnessSandbox.wrap(List.of(acpCommand.strip().split("\\s+")),
-                workdir, resolveAdapter(), sandboxTrustedOrigin(runId));
+                workdir, sandboxAdapter != null ? sandboxAdapter : new GenericAdapter(),
+                sandboxTrustedOrigin(runId));
         var params = AgentParameters.builder(argv.get(0)).args(argv.subList(1, argv.size())).build();
 
         // The acp-core SDK applies its per-request timeout (default 30s) to EVERY
@@ -583,7 +588,7 @@ final class SubagentAcpRunner {
         return new AgentRunner.RunResult(out.strip(), null);
     }
 
-    private static Long parentConversationId(Long runId) {
+    private static @Nullable Long parentConversationId(Long runId) {
         if (runId == null) return null;
         return Tx.run(() -> {
             var run = (SubagentRun) SubagentRun.findById(runId);
@@ -612,7 +617,7 @@ final class SubagentAcpRunner {
      */
     private static CompletableFuture<String> streamStdout(Process proc, Long runId,
                                                           HarnessAdapter adapter,
-                                                          Consumer<HarnessEvent> permissionArbiter) {
+                                                          @Nullable Consumer<HarnessEvent> permissionArbiter) {
         var f = new CompletableFuture<String>();
         Thread.ofVirtual().start(() -> {
             var acc = new ReplyAccumulator();
@@ -762,7 +767,7 @@ final class SubagentAcpRunner {
      * cannot break out via acp — and a subagent of main is itself non-main, so
      * it cannot escalate either.
      */
-    static String acpRuntimeError(JsonObject args, Agent spawningAgent) {
+    static @Nullable String acpRuntimeError(JsonObject args, Agent spawningAgent) {
         var runtime = SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_RUNTIME);
         if (runtime == null || runtime.isBlank() || "native".equalsIgnoreCase(runtime)) {
             return null;
@@ -803,7 +808,7 @@ final class SubagentAcpRunner {
 
     /** Operator-configured ACP harness command, whitespace-split. Empty when unset. */
     static List<String> resolveAcpCommand() {
-        var configured = ConfigService.get(SubagentSpawnTool.ACP_COMMAND_KEY, null);
+        var configured = ConfigService.get(SubagentSpawnTool.ACP_COMMAND_KEY);
         if (configured == null || configured.isBlank()) return List.of();
         return List.of(configured.strip().split("\\s+"));
     }
@@ -830,7 +835,7 @@ final class SubagentAcpRunner {
      *  back to the {@link SubagentSpawnTool#DEFAULT_ACP_HARNESS} adapter. JCLAW-660
      *  wires this into {@link #runAcpStreaming} for the json/rpc modes; returns
      *  {@code null} only if no adapter is registered for the configured harness. */
-    static HarnessAdapter resolveAdapter() {
+    static @Nullable HarnessAdapter resolveAdapter() {
         var adapter = HARNESS_ADAPTERS.get(resolveHarnessId());
         if (adapter == null) {
             adapter = HARNESS_ADAPTERS.get(SubagentSpawnTool.DEFAULT_ACP_HARNESS);

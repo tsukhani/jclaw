@@ -2,6 +2,7 @@ package services.scrape;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 
 import java.io.IOException;
@@ -47,14 +48,14 @@ public final class ScrapeCorpus {
      * @param outcome  what the origin did: served / denied / challenge / interactive
      * @param rendering {@code ssr} or {@code spa}; null unless the origin served us
      */
-    public record Entry(String url, String stratum, String vendor, String outcome,
-                        String rendering, int rank, GroundTruth groundTruth) {}
+    public record Entry(String url, @Nullable String stratum, @Nullable String vendor, @Nullable String outcome,
+                        @Nullable String rendering, int rank, GroundTruth groundTruth) {}
 
-    public record Identity(String trancoListId, String probedOn, String reclassifiedOn,
+    public record Identity(@Nullable String trancoListId, @Nullable String probedOn, @Nullable String reclassifiedOn,
                            String fingerprint, Map<String, Integer> realisedStrata,
                            int allocationSpread) {}
 
-    public record Corpus(Identity identity, String allocation, List<String> strata,
+    public record Corpus(Identity identity, @Nullable String allocation, List<String> strata,
                          List<Entry> entries) {
 
         /** The counts the entries realise, which is what the gate is scored against; the
@@ -92,7 +93,7 @@ public final class ScrapeCorpus {
         for (var el : root.getAsJsonArray("entries")) {
             var o = el.getAsJsonObject();
             entries.add(new Entry(
-                    str(o, "url"), str(o, "stratum"), str(o, "vendor"),
+                    requireStr(o, "url"), str(o, "stratum"), str(o, "vendor"),
                     str(o, "outcome"), str(o, "rendering"),
                     o.has("rank") ? o.get("rank").getAsInt() : 0,
                     groundTruth(o.getAsJsonObject("ground_truth"))));
@@ -155,7 +156,16 @@ public final class ScrapeCorpus {
                 gt.has("expect_title") ? gt.get("expect_title").getAsString() : null);
     }
 
-    private static String str(JsonObject o, String key) {
+    /** A corpus entry is identified by its url; an entry without one is malformed. */
+    private static String requireStr(JsonObject o, String key) {
+        var v = str(o, key);
+        if (v == null || v.isBlank()) {
+            throw new IllegalArgumentException("corpus entry is missing '" + key + "'");
+        }
+        return v;
+    }
+
+    private static @Nullable String str(JsonObject o, String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
     }
 }

@@ -1,5 +1,7 @@
 package services.transcription;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Optional;
 
 /**
@@ -58,7 +60,7 @@ public enum AsrModel {
      *  download begins. Q5_1 sizes don't drift between releases. */
     public int approxSizeMb() { return approxSizeMb; }
 
-    public static Optional<AsrModel> byId(String id) {
+    public static Optional<AsrModel> byId(@Nullable String id) {
         if (id == null) return Optional.empty();
         for (var m : values()) {
             if (m.id.equals(id)) return Optional.of(m);

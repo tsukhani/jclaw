@@ -83,9 +83,9 @@ public class AgentRunner {
      * @param truncated    true when the final non-tool-call assistant turn
      *                     came back with {@code finish_reason=length}
      */
-    public record RunResult(String response, Conversation conversation, boolean truncated) {
+    public record RunResult(String response, @Nullable Conversation conversation, boolean truncated) {
         /** 2-arg compatibility: legacy paths that don't track truncation. */
-        public RunResult(String response, Conversation conversation) {
+        public RunResult(String response, @Nullable Conversation conversation) {
             this(response, conversation, false);
         }
     }

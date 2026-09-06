@@ -5,6 +5,7 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.config.Configurator;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -59,7 +60,7 @@ public final class LoggerLevelService {
      * once before the first root override is applied so {@link #revert} can
      * restore it (root has no parent to inherit from). Null until captured.
      */
-    private static volatile Level baselineRootLevel;
+    private static volatile @Nullable Level baselineRootLevel;
 
     public record LoggerLevel(String logger, String level) {}
 
@@ -74,7 +75,7 @@ public final class LoggerLevelService {
      * {@code controlers.Foo} is accepted and simply never matches anything; the
      * Settings UI surfaces a soft hint for names not among {@link #knownLoggers}.
      */
-    public static String validate(String logger, String level) {
+    public static @Nullable String validate(String logger, String level) {
         if (logger == null || logger.isBlank()) {
             return "Logger name is required.";
         }

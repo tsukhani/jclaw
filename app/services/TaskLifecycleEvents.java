@@ -2,6 +2,7 @@ package services;
 
 import models.Task;
 import models.TaskRun;
+import org.jspecify.annotations.Nullable;
 import utils.GsonHolder;
 
 import java.time.Duration;
@@ -155,7 +156,7 @@ public final class TaskLifecycleEvents {
      *        carried so the dashboard can show "what actually
      *        happened" without joining to the TaskRun row.
      */
-    public static void recordFailed(Task task, TaskRun run,
+    public static void recordFailed(Task task, @Nullable TaskRun run,
                                     String classification, String errorMessage) {
         var agentName = task.agent != null ? task.agent.name : null;
         long durationMs = run != null && run.startedAt != null
@@ -226,7 +227,7 @@ public final class TaskLifecycleEvents {
      * no-op when no SSE client is subscribed. {@code runId} is omitted for
      * out-of-band points like LOST that aren't tied to a single run.
      */
-    private static void publishBus(String type, Long taskId, Long runId) {
+    private static void publishBus(String type, Long taskId, @Nullable Long runId) {
         var data = new HashMap<String, Object>();
         data.put("taskId", taskId);
         if (runId != null) data.put("runId", runId);
@@ -241,7 +242,7 @@ public final class TaskLifecycleEvents {
      * Gson's {@code serializeNulls()} emits {@code null} values as JSON
      * {@code null} rather than skipping them, keeping the schema consistent.
      */
-    private static String detailsJson(Object... kvPairs) {
+    private static String detailsJson(@Nullable Object... kvPairs) {
         if (kvPairs == null || kvPairs.length == 0) return "{}";
         if (kvPairs.length % 2 != 0) {
             throw new IllegalArgumentException("kvPairs must have even length");

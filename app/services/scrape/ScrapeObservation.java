@@ -1,5 +1,6 @@
 package services.scrape;
 
+import org.jspecify.annotations.Nullable;
 import utils.WebExtraction;
 
 import java.nio.charset.StandardCharsets;
@@ -16,26 +17,32 @@ import java.util.Locale;
  *
  * @param error non-null when the fetch itself failed; the other fields are then empty
  */
-public record ScrapeObservation(String url, String contentType, String rawBody,
-                                String extractedText, String error) {
+public record ScrapeObservation(@Nullable String url, String contentType, String rawBody,
+                                String extractedText, @Nullable String error) {
 
     /** Cap on the raw markup scanned for markers. Gate pages are small and put their
      *  markers near the top; scanning megabytes of a large article buys nothing. */
     private static final int SCAN_LIMIT = 64 * 1024;
 
-    public static ScrapeObservation of(WebExtraction.FetchResult fetched, String text) {
+    public static ScrapeObservation of(WebExtraction.FetchResult fetched, @Nullable String text) {
         var body = new String(fetched.body(), 0,
                 Math.min(fetched.body().length, SCAN_LIMIT), StandardCharsets.UTF_8);
         return new ScrapeObservation(fetched.finalUrl(), fetched.contentType(),
                 body.toLowerCase(Locale.ROOT), text == null ? "" : text, null);
     }
 
-    public static ScrapeObservation failed(String url, String error) {
+    public static ScrapeObservation failed(@Nullable String url, @Nullable String error) {
         return new ScrapeObservation(url, "", "", "", error);
     }
 
     public boolean failed() {
         return error != null;
+    }
+
+    /** Valid only when {@link #failed()} — a successful observation carries no error. */
+    public String resolvedError() {
+        if (error == null) throw new IllegalStateException("observation did not fail");
+        return error;
     }
 
     public int textLength() {

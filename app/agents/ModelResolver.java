@@ -56,12 +56,16 @@ public final class ModelResolver {
      * {@link ModelOverrideResolver#modelId}.
      */
     public static String effectiveModelId(Agent agent, Conversation conv) {
-        return ModelOverrideResolver.modelId(conv, agent);
+        // ModelOverrideResolver is null-safe on a null agent; this wrapper's agent is not null.
+        var id = ModelOverrideResolver.modelId(conv, agent);
+        return id != null ? id : agent.modelId;
     }
 
     /** Companion to {@link #effectiveModelId} — returns the effective provider name. */
     public static String effectiveModelProvider(Agent agent, Conversation conv) {
-        return ModelOverrideResolver.provider(conv, agent);
+        // ModelOverrideResolver is null-safe on a null agent; this wrapper's agent is not null.
+        var provider = ModelOverrideResolver.provider(conv, agent);
+        return provider != null ? provider : agent.modelProvider;
     }
 
     /**

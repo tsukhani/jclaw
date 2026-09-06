@@ -5,6 +5,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
@@ -32,7 +33,7 @@ final class SubagentResponses {
      * marker's content becomes the header label on the collapsed block.
      */
     static void writeInlineStartMarker(Long parentConvId, Long runId,
-                                       String label, String task) {
+                                       @Nullable String label, @Nullable String task) {
         Tx.run(() -> {
             var conv = Conversation.<Conversation>findById(parentConvId);
             ConversationService.withSubagentRunIdMarker(runId, () -> {
@@ -76,9 +77,9 @@ final class SubagentResponses {
         });
     }
 
-    static void emitTerminalEvent(String parentAgentName, String childName,
-                                  String runIdStr, String mode, String context,
-                                  SubagentRun.Status status, String errorReason) {
+    static void emitTerminalEvent(String parentAgentName, @Nullable String childName,
+                                  String runIdStr, @Nullable String mode, @Nullable String context,
+                                  SubagentRun.Status status, @Nullable String errorReason) {
         switch (status) {
             case COMPLETED -> EventLogger.recordSubagentComplete(
                     parentAgentName, childName, runIdStr, mode, context, "ok");
@@ -104,8 +105,8 @@ final class SubagentResponses {
      * parameters.
      */
     @SuppressWarnings("java:S1181")
-    static Boolean postAnnounceAndReadYieldFlag(Long runId, Long childConvId,
-                                                Long parentConvId, String label,
+    static Boolean postAnnounceAndReadYieldFlag(Long runId, @Nullable Long childConvId,
+                                                Long parentConvId, @Nullable String label,
                                                 SyncRunOutcome outcome) {
         var status = outcome.terminalStatus();
         var failureBody = outcome.errorReason() != null ? outcome.errorReason() : "";
@@ -205,9 +206,9 @@ final class SubagentResponses {
      * (status + reply) so a model that doesn't understand the metadata
      * still gets a coherent user turn.
      */
-    private static void postAnnounceMessage(Long parentConvId, Long runId, String label,
+    private static void postAnnounceMessage(Long parentConvId, Long runId, @Nullable String label,
                                             SubagentRun.Status status, String truncatedReply,
-                                            Long childConvId, boolean yielded,
+                                            @Nullable Long childConvId, boolean yielded,
                                             boolean modelOutputTruncated) {
         var parentConv = (Conversation) Conversation.findById(parentConvId);
         if (parentConv == null) return;

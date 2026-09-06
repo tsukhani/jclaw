@@ -8,6 +8,7 @@ import models.Agent;
 import models.Message;
 import models.MessageRole;
 import models.TaskRunMessage;
+import org.jspecify.annotations.Nullable;
 import services.CompressionMetrics;
 import services.ConversationService;
 import services.Tx;
@@ -116,7 +117,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
      * {@link TaskRunMessage} rows (JCLAW-462) when in a task fire. Returns the content,
      * or an explanatory "Error:"/"No original found" string.
      */
-    private static String findOriginal(Long conversationId, Long taskRunId, String handle) {
+    private static String findOriginal(@Nullable Long conversationId, @Nullable Long taskRunId, String handle) {
         // Newest-first: a just-compressed result is usually the one wanted.
         if (conversationId != null) {
             var conv = ConversationService.findById(conversationId);
@@ -141,7 +142,7 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
     }
 
     /** First row (in iteration order) whose content SHA-256 starts with {@code handle}, or null. */
-    private static <T> String matchByHash(List<T> rows, Function<T, String> content, String handle) {
+    private static <T> @Nullable String matchByHash(List<T> rows, Function<T, String> content, String handle) {
         for (var r : rows) {
             var c = content.apply(r);
             if (c != null && ContentHash.sha256Hex(c).startsWith(handle)) {

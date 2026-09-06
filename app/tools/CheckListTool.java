@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import utils.JsonArgs;
 
 import java.util.List;
@@ -98,7 +99,7 @@ public class CheckListTool implements ToolRegistry.Tool {
     }
 
     /** Per-item validation result. {@code error} non-null short-circuits the loop. */
-    private record ItemValidation(String error, boolean inProgress) {
+    private record ItemValidation(@Nullable String error, boolean inProgress) {
         static ItemValidation fail(String msg) { return new ItemValidation(msg, false); }
         static ItemValidation ok(boolean inProgress) { return new ItemValidation(null, inProgress); }
     }

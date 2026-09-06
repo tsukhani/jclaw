@@ -1,5 +1,6 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 
 import java.io.IOException;
@@ -32,7 +33,7 @@ public final class GitCheckout {
      * request, so a boot-time value would drift out of step with the code actually
      * serving the page.
      */
-    public static String describe() {
+    public static @Nullable String describe() {
         var head = run("rev-parse", "--short=8", "HEAD");
         if (head == null || head.isBlank()) return null;
         var status = run("status", "--porcelain");
@@ -45,7 +46,7 @@ public final class GitCheckout {
      * Run {@code git -C <appPath> <args>} and return trimmed stdout, or null when git
      * is absent, the directory is not a repository, or the call outlives its timeout.
      */
-    private static String run(String... args) {
+    private static @Nullable String run(String... args) {
         var cmd = new ArrayList<>(List.of("git", "-C", Play.applicationPath.getAbsolutePath()));
         cmd.addAll(List.of(args));
         var pb = new ProcessBuilder(cmd);
@@ -72,7 +73,8 @@ public final class GitCheckout {
                 return null;
             }
             drainer.join();
-            return p.exitValue() == 0 ? out.get().trim() : null;
+            var captured = out.get();
+            return p.exitValue() == 0 && captured != null ? captured.trim() : null;
         } catch (IOException _) {
             return null;
         } catch (InterruptedException _) {

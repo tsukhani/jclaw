@@ -2,6 +2,7 @@ package services;
 
 import com.google.gson.JsonParser;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -14,7 +15,7 @@ public final class LocalProviderProbeSupport {
     /** Boot probes don't need the LLM single-shot's 180s default — 7s is plenty. */
     private static final long PROBE_TIMEOUT_SECONDS = 7;
 
-    public record Result(boolean available, int modelCount, String reason, boolean connectionRefused) { }
+    public record Result(boolean available, int modelCount, @Nullable String reason, boolean connectionRefused) { }
 
     private LocalProviderProbeSupport() {}
 

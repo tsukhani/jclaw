@@ -61,6 +61,16 @@ public final class Strings {
         return null;
     }
 
+    /**
+     * The first non-blank value, or {@code fallback} when every candidate is blank.
+     * The non-null counterpart to {@link #firstNonBlank(String...)}, for the common
+     * "config, else built-in default" shape where the default is a literal.
+     */
+    public static @NonNull String firstNonBlankOr(@NonNull String fallback, @Nullable String... values) {
+        var found = firstNonBlank(values);
+        return found != null ? found : fallback;
+    }
+
     /** Strip a single trailing '/', if present. Assumes non-null input. */
     public static @NonNull String trimTrailingSlash(@NonNull String s) {
         return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;

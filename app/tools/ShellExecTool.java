@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
@@ -24,6 +25,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -122,7 +124,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
     private static Set<String> parsedAllowlist() {
         var raw = ConfigService.get("shell.allowlist", DEFAULT_ALLOWLIST);
-        var current = cachedAllowlist.get();
+        // Seeded non-null at construction and only ever set to a fresh cache.
+        var current = Objects.requireNonNull(cachedAllowlist.get());
         if (raw.equals(current.raw())) return current.set();
         var newSet = Arrays.stream(raw.split(","))
                 .map(String::strip)
@@ -288,7 +291,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * through {@link #validateAllowlist(String, Agent)} so the agent's enabled
      * skills can contribute commands.
      */
-    public String validateAllowlist(String command) {
+    public @Nullable String validateAllowlist(String command) {
         return validateAllowlist(command, null);
     }
 
@@ -301,7 +304,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * {@code ./wacli}, or {@code ./path/to/wacli}). When {@code agent} is
      * null, only the global allowlist is consulted.
      */
-    public String validateAllowlist(String command, Agent agent) {
+    public @Nullable String validateAllowlist(String command, @Nullable Agent agent) {
         var firstToken = extractFirstToken(command);
         if (firstToken.isEmpty()) {
             return "Error: command is required and must not be empty.";
@@ -338,7 +341,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * add a per-agent cache with explicit invalidation hooks in
      * {@code SkillPromotionService}.
      */
-    public static Set<String> effectiveAllowlistFor(Agent agent) {
+    public static Set<String> effectiveAllowlistFor(@Nullable Agent agent) {
         var global = parsedAllowlist();
         if (agent == null) return global;
 
@@ -520,7 +523,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
     /** Output read result. {@code earlyReturn} non-null short-circuits the
      *  caller — used by the terminal-image early-return path. */
-    private record ReadResult(StringBuilder output, int totalRead, boolean truncated, String earlyReturn) {}
+    private record ReadResult(StringBuilder output, int totalRead, boolean truncated, @Nullable String earlyReturn) {}
 
     /**
      * Blocking-read loop. Reads the process's combined stdout/stderr through

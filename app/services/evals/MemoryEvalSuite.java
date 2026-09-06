@@ -1,5 +1,7 @@
 package services.evals;
 
+import org.jspecify.annotations.Nullable;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -19,7 +21,7 @@ import java.util.List;
  * <p>Keeps {@link EvalSuite}'s fingerprint idea, for the same reason: two runs are only
  * comparable if the stick did not move between them.
  */
-public record MemoryEvalSuite(String id, String description, String corpusFingerprint,
+public record MemoryEvalSuite(String id, String description, @Nullable String corpusFingerprint,
                               List<MemoryEvalCase> cases) {
 
     private static final char FIELD_SEP = (char) 0x1F;

@@ -66,7 +66,7 @@ public final class BlockClassifier {
 
     public static ScrapeReason classify(ScrapeObservation obs, int minChars) {
         if (obs == null) return ScrapeReason.ERROR;
-        if (obs.failed()) return classifyError(obs.error().toLowerCase(Locale.ROOT));
+        if (obs.failed()) return classifyError(obs.resolvedError().toLowerCase(Locale.ROOT));
 
         var raw = obs.rawBody() == null ? "" : obs.rawBody();
 

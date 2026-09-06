@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.Tx;
 import services.imagegen.ImageGenerationException;
@@ -17,6 +18,7 @@ import utils.JsonArgs;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * {@code generate_image} (JCLAW-228): generate an image from a text prompt via the configured
@@ -149,7 +151,7 @@ public class GenerateImageTool implements ToolRegistry.Tool {
             // Optional workspace copy, for callers that need the file afterwards — a
             // scheduled task has no chat surface to render the inline attachment into.
             String savedPath = null;
-            var saveTo = JsonArgs.optString(args, ARG_SAVE_TO, null);
+            var saveTo = JsonArgs.optString(args, ARG_SAVE_TO);
             if (saveTo != null && !saveTo.isBlank()) {
                 try {
                     savedPath = GeneratedMediaFile.write(agent, saveTo.trim(), image.bytes());
@@ -186,6 +188,12 @@ public class GenerateImageTool implements ToolRegistry.Tool {
      *  agent as a tool-visible message so it can ask the user to attach one. */
     private static final class ReferenceUnavailable extends RuntimeException {
         ReferenceUnavailable(String message) { super(message); }
+
+        /** The only constructor always supplies a message, so this narrows Throwable's @Nullable. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
+        }
     }
 
     /**
@@ -193,7 +201,7 @@ public class GenerateImageTool implements ToolRegistry.Tool {
      * Returns null (text-to-image) when the flag is absent/false. Uses the current conversation
      * (via {@link ToolContext}) to find the most recent uploaded image and reads its bytes.
      */
-    private static ImageGenerationService.ReferenceImage resolveReferenceImage(JsonObject args) {
+    private static ImageGenerationService.@Nullable ReferenceImage resolveReferenceImage(JsonObject args) {
         if (!JsonArgs.optBool(args, ARG_USE_REFERENCE)) return null;
         var conversationId = ToolContext.conversationId();
         // Tools execute on the dispatcher's virtual threads with no ambient EntityManager, so the

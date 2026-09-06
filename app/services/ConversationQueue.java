@@ -1,6 +1,7 @@
 package services;
 
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -41,7 +42,7 @@ public class ConversationQueue {
     static class QueueState {
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();
         boolean processing = false; // all reads/writes guarded by synchronized(this)
-        String mode = QUEUE;
+        @Nullable String mode = QUEUE;
         /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain. */
         final AtomicBoolean cancelled = new AtomicBoolean(false);
         /**

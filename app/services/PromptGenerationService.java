@@ -6,6 +6,7 @@ import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Prompt;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -32,7 +33,7 @@ public final class PromptGenerationService {
     public interface Generator {
         // Production lambda calls LlmProvider.chat, which surfaces provider-specific checked exceptions.
         @SuppressWarnings("java:S112")
-        String generate(List<ChatMessage> messages) throws Exception;
+        @Nullable String generate(List<ChatMessage> messages) throws Exception;
     }
 
     /** Generated fields that pre-fill the create form (nothing is saved here). */
@@ -59,7 +60,7 @@ public final class PromptGenerationService {
      * and parse. Returns {@code null} when no provider/model is configured or the
      * call fails — the controller maps that to an error response.
      */
-    public static Generated generate(String description) {
+    public static @Nullable Generated generate(String description) {
         var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
         var provider = main != null ? ProviderRegistry.get(main.modelProvider) : null;
         var model = main != null ? main.modelId : null;
@@ -90,7 +91,7 @@ public final class PromptGenerationService {
      * sensible defaults so the operator always gets an editable form rather than
      * an empty one. Public for unit testing.
      */
-    public static Generated parse(String raw) {
+    public static Generated parse(@Nullable String raw) {
         var text = raw == null ? "" : raw.strip();
         String title = "";
         String content = "";

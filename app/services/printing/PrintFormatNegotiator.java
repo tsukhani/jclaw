@@ -1,5 +1,6 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import utils.HttpKeys;
 
@@ -49,11 +50,11 @@ public final class PrintFormatNegotiator {
      * @param converted   whether the source was rasterised rather than passed through
      * @param explanation one line for the operator; null when the source went as-is
      */
-    public record Prepared(byte[] document, String format, boolean converted, String explanation,
-                           String media) {
+    public record Prepared(byte[] document, String format, boolean converted, @Nullable String explanation,
+                           @Nullable String media) {
 
         /** Pass-through, still declaring the media the printer says is loaded. */
-        static Prepared asIs(byte[] document, String format, String explanation, String media) {
+        static Prepared asIs(byte[] document, String format, @Nullable String explanation, @Nullable String media) {
             return new Prepared(document, format, false, explanation, media);
         }
     }

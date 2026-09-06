@@ -1,5 +1,6 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import javax.jmdns.JmDNS;
@@ -163,7 +164,7 @@ public final class PrinterDiscovery {
     }
 
     /** Map one JmDNS record to a printer, or null when it carries no usable address. */
-    private static DiscoveredPrinter toPrinter(ServiceInfo info, PrintProtocol protocol) {
+    private static @Nullable DiscoveredPrinter toPrinter(ServiceInfo info, PrintProtocol protocol) {
         var addresses = info.getHostAddresses();
         if (addresses == null || addresses.length == 0) {
             // Advertised but unresolvable — nothing to print to.
@@ -187,7 +188,7 @@ public final class PrinterDiscovery {
      * where mDNS is blocked but the address is known. Capabilities are empty
      * because nothing advertised them.
      */
-    public static DiscoveredPrinter direct(String host, Integer port, PrintProtocol protocol) {
+    public static DiscoveredPrinter direct(@Nullable String host, @Nullable Integer port, @Nullable PrintProtocol protocol) {
         var resolved = protocol == null ? PrintProtocol.IPP : protocol;
         return new DiscoveredPrinter(host, host,
                 port == null || port <= 0 ? resolved.defaultPort() : port,
@@ -207,7 +208,7 @@ public final class PrinterDiscovery {
      * address. Deliberately a bare TCP connect: it is protocol-agnostic, so RAW and
      * LPD defaults get the same answer as IPP, and it cannot itself queue a job.
      */
-    public static boolean reachable(String host, int port) {
+    public static boolean reachable(@Nullable String host, int port) {
         if (host == null || host.isBlank() || port <= 0) {
             return false;
         }
@@ -227,7 +228,9 @@ public final class PrinterDiscovery {
         var needle = query.trim().toLowerCase();
         var hits = new ArrayList<DiscoveredPrinter>();
         for (var p : printers) {
-            if (p.name().toLowerCase().contains(needle) || p.host().toLowerCase().contains(needle)) {
+            var name = p.name() == null ? "" : p.name().toLowerCase();
+            var host = p.host() == null ? "" : p.host().toLowerCase();
+            if (name.contains(needle) || host.contains(needle)) {
                 hits.add(p);
             }
         }

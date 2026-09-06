@@ -150,7 +150,8 @@ public final class SkillSanitizer {
             // Skill promotion is a programmatic operation with no chat-channel
             // context; dispatcher_wait records under "unknown".
             var response = provider.chat(modelId, messages, null, null, null, timeoutSeconds, null);
-            var text = response.choices().getFirst().message().content().toString().strip();
+            var content = response.choices().getFirst().message().content();
+            var text = content == null ? "" : content.toString().strip();
 
             EventLogger.info(EVENT_CATEGORY_SKILLS,
                     "LLM sanitization batch response (%d chars)".formatted(text.length()));

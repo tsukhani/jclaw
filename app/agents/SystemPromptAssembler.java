@@ -674,7 +674,7 @@ public class SystemPromptAssembler {
                 """);
     }
 
-    private static void appendSection(StringBuilder sb, String content) {
+    private static void appendSection(StringBuilder sb, @Nullable String content) {
         if (content != null && !content.isBlank()) {
             sb.append(content.strip());
             sb.append("\n\n");

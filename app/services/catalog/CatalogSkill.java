@@ -1,5 +1,7 @@
 package services.catalog;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * One catalog entry, normalized across catalog sources so the UI renders any
  * source uniformly. {@code provider} is the originating catalog's id (for the
@@ -9,6 +11,6 @@ package services.catalog;
  * non-GitHub sources. {@code category} is the derived topical bucket
  * ({@link services.SkillCategoryClassifier}).
  */
-public record CatalogSkill(String skillId, String displayName, String source,
-                           String owner, String repo, String url, long installs,
+public record CatalogSkill(@Nullable String skillId, @Nullable String displayName, @Nullable String source,
+                           @Nullable String owner, @Nullable String repo, @Nullable String url, long installs,
                            String category, String provider) {}

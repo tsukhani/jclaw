@@ -3,6 +3,7 @@ package services;
 import models.Agent;
 import models.Message;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.transcription.LlmAudio;
 import utils.TikaHolder;
@@ -154,7 +155,7 @@ public final class AttachmentService {
      * meaningful attachment names.
      */
     public static MessageAttachment persistGeneratedAttachment(Agent agent, Message message, byte[] bytes,
-            String mimeType, String generationMetadata, String displayFilename) {
+            String mimeType, @Nullable String generationMetadata, @Nullable String displayFilename) {
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("generated attachment bytes are required");
         }
@@ -200,7 +201,7 @@ public final class AttachmentService {
      * fill. Caller must be inside a JPA transaction.
      */
     public static MessageAttachment createGeneratedVideoPlaceholder(Agent agent, Message message,
-            Long generationJobId, String generationMetadata) {
+            Long generationJobId, @Nullable String generationMetadata) {
         var uuid = UUID.randomUUID().toString();
         var leaf = uuid + ".mp4";
         var att = new MessageAttachment();
@@ -380,7 +381,7 @@ public final class AttachmentService {
      * job is still running. Caller must be inside a JPA transaction, since this walks
      * {@code message.conversation.agent} to locate the workspace.
      */
-    public static ResolvedGeneratedFile resolveGeneratedForSend(String uuid) {
+    public static @Nullable ResolvedGeneratedFile resolveGeneratedForSend(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
         if (att == null || !att.generated) return null;
         var file = resolveOnDisk(att).toFile();

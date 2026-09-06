@@ -6,6 +6,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 import tools.SubagentSpawnTool.SyncRunOutcome;
@@ -25,8 +26,8 @@ final class SubagentRunStore {
      *  generated id. JCLAW-326: persist the spawn-time {@code label} on the
      *  row so {@code conversation_list} can filter / display without re-parsing
      *  per-run announce-message metadata JSON. */
-    static Long insertSubagentRun(Long parentAgentId, Long childAgentId,
-                                  Long parentConvId, Long childConvId, String label) {
+    static Long insertSubagentRun(Long parentAgentId, @Nullable Long childAgentId,
+                                  Long parentConvId, @Nullable Long childConvId, @Nullable String label) {
         return Tx.run(() -> {
             var run = new SubagentRun();
             run.parentAgent = Agent.findById(parentAgentId);
@@ -91,7 +92,7 @@ final class SubagentRunStore {
         }
     }
 
-    static String lookupAgentName(Long id) {
+    static @Nullable String lookupAgentName(@Nullable Long id) {
         if (id == null) return null;
         return Tx.run(() -> {
             var a = (Agent) Agent.findById(id);

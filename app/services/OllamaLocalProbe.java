@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * One-shot health check for a local Ollama instance reachable at
  * {@code provider.ollama-local.baseUrl}. Mirrors the shape of {@link OcrHealthProbe}:
@@ -16,7 +18,7 @@ package services;
  */
 public class OllamaLocalProbe {
 
-    public record ProbeResult(boolean available, int modelCount, String reason, boolean connectionRefused) { }
+    public record ProbeResult(boolean available, int modelCount, @Nullable String reason, boolean connectionRefused) { }
 
     private static final ProbeCache<ProbeResult> CACHE = new ProbeCache<>(
             new ProbeResult(false, 0, "ollama-local probe has not run yet", false));

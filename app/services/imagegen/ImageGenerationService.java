@@ -1,5 +1,7 @@
 package services.imagegen;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Single contract for any image-generation backend in jclaw (JCLAW-225) — the cloud OpenAI / BFL
  * clients (and the local image sidecar in the JCLAW-226 phase) all implement this so the
@@ -22,7 +24,7 @@ public interface ImageGenerationService {
      *
      * @throws ImageGenerationException on any failure
      */
-    GeneratedImage generate(String prompt, String model, Integer width, Integer height);
+    GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width, @Nullable Integer height);
 
     /**
      * JCLAW-694: generate with an optional reference image for image-to-image / style transfer /
@@ -34,8 +36,8 @@ public interface ImageGenerationService {
      *
      * @throws ImageGenerationException on any failure
      */
-    default GeneratedImage generate(String prompt, String model, Integer width, Integer height,
-                                    ReferenceImage referenceImage) {
+    default GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                    @Nullable Integer height, @Nullable ReferenceImage referenceImage) {
         return generate(prompt, model, width, height);
     }
 

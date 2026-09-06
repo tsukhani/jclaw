@@ -2,6 +2,7 @@ package tools;
 
 import agents.AgentRunner;
 import agents.ToolContext;
+import org.jspecify.annotations.Nullable;
 
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -52,7 +53,7 @@ final class SubagentChatBridge {
 
     /** JCLAW-661: the live streaming callbacks bound to {@code runId}, or null when
      *  no chat turn is watching it (Rail A off; Rail B still fires). */
-    static AgentRunner.StreamingCallbacks callbacksFor(Long runId) {
+    static AgentRunner.@Nullable StreamingCallbacks callbacksFor(Long runId) {
         return runId == null ? null : RUN_CALLBACKS.get(runId);
     }
 

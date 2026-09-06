@@ -21,10 +21,9 @@ tasks.withType<JavaCompile>().configureEach {
         check("NullAway", CheckSeverity.ERROR)
         // Packages whose unannotated types default to non-null. `models` is deliberately
         // absent: JPA populates entity fields reflectively after construction, so every
-        // non-null column would report as uninitialised. `tools` and `services` are the
-        // next increments — adding a name here plus a @NullMarked package-info is the
-        // whole widening step.
-        option("NullAway:AnnotatedPackages", "utils,llm,agents")
+        // non-null column would report as uninitialised. Widening to another package is a
+        // name here plus a @NullMarked package-info per (sub)package it contains.
+        option("NullAway:AnnotatedPackages", "utils,llm,agents,tools,services")
     }
 }
 

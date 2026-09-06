@@ -1,5 +1,6 @@
 package services.scanners;
 
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import utils.HttpFactories;
@@ -15,7 +16,7 @@ public record ScannerDependencies(
     private static final ScannerDependencies PRODUCTION = new ScannerDependencies(
             new ScannerConfig() {
                 @Override
-                public String get(String key) {
+                public @Nullable String get(String key) {
                     return ConfigService.get(key);
                 }
 

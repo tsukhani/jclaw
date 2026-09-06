@@ -242,8 +242,8 @@ public final class DangerousActionGate {
      * @param toolName        the action the harness wants to run
      * @param argsJson        the harness's request payload, surfaced in the prompt
      */
-    public static Decision guardHarnessPermission(Agent agent, Long conversationId,
-                                                  String toolName, String argsJson) {
+    public static Decision guardHarnessPermission(Agent agent, @Nullable Long conversationId,
+                                                  String toolName, @Nullable String argsJson) {
         if (agent == null) {
             return Decision.PROCEED;
         }
@@ -258,7 +258,7 @@ public final class DangerousActionGate {
      * arbitration decides how it is resolved.
      */
     private static Decision arbitrate(Agent agent, @Nullable Long conversationId,
-                                      @Nullable String toolName, String argsJson) {
+                                      @Nullable String toolName, @Nullable String argsJson) {
         // A standing grant (in-process session set or the JCLAW-385 persisted
         // always-store) is an explicit operator approval for this (agent, tool)
         // — honor it on ANY channel without prompting.
@@ -329,7 +329,7 @@ public final class DangerousActionGate {
      * {@code ask} routes a confirmation to the agent's bound Telegram DM (fail-closed
      * if there is none).
      */
-    private static Decision offChannelDecision(Agent agent, @Nullable String toolName, String argsJson,
+    private static Decision offChannelDecision(Agent agent, @Nullable String toolName, @Nullable String argsJson,
                                               @Nullable String channelType,
                                               ChannelOriginTrust.Trust trust) {
         var chan = channelType == null ? "none" : channelType;
@@ -374,7 +374,7 @@ public final class DangerousActionGate {
      * binding there is nobody who can confirm, so it fails closed (ABORT) rather
      * than run ungated. Reuses the same blocking prompt/await as the Telegram path.
      */
-    private static Decision askViaTelegram(Agent agent, @Nullable String toolName, String argsJson,
+    private static Decision askViaTelegram(Agent agent, @Nullable String toolName, @Nullable String argsJson,
                                            String chan) {
         var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
         if (binding != null && binding.enabled) {
@@ -446,7 +446,7 @@ public final class DangerousActionGate {
         });
     }
 
-    private static Decision promptAndAwait(Agent agent, @Nullable String toolName, String argsJson,
+    private static Decision promptAndAwait(Agent agent, @Nullable String toolName, @Nullable String argsJson,
                                            TelegramBinding binding) {
         // The bound user's private chat: in a Telegram private chat
         // chat.id == user.id, so the binding's telegramUserId is both the
@@ -485,7 +485,7 @@ public final class DangerousActionGate {
      * user id, and block until the owner taps a button (or it times out). Shares the
      * standing-grant recording and {@link #timeout()} with the Telegram path.
      */
-    private static Decision promptAndAwaitSlack(Agent agent, @Nullable String toolName, String argsJson,
+    private static Decision promptAndAwaitSlack(Agent agent, @Nullable String toolName, @Nullable String argsJson,
                                                 SlackBinding binding, String channelId) {
         var prompt = buildSlackPrompt(toolName, argsJson);
 
@@ -554,7 +554,7 @@ public final class DangerousActionGate {
      * length-capped so an oversized payload can't blow the 4096-char message
      * budget the keyboard send assumes.
      */
-    private static String buildPrompt(@Nullable String toolName, String argsJson) {
+    private static String buildPrompt(@Nullable String toolName, @Nullable String argsJson) {
         var args = argsJson == null ? "" : argsJson;
         if (args.length() > 600) {
             args = args.substring(0, 600) + "… (truncated)";
@@ -572,7 +572,7 @@ public final class DangerousActionGate {
      * a fenced code block so backticks/asterisks in them don't format, and are
      * length-capped like {@link #buildPrompt}.
      */
-    private static String buildSlackPrompt(@Nullable String toolName, String argsJson) {
+    private static String buildSlackPrompt(@Nullable String toolName, @Nullable String argsJson) {
         var args = argsJson == null ? "" : argsJson;
         if (args.length() > 600) {
             args = args.substring(0, 600) + "… (truncated)";

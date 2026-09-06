@@ -1,6 +1,7 @@
 package tools;
 
 import com.google.gson.JsonObject;
+import org.jspecify.annotations.Nullable;
 import utils.JsonArgs;
 
 import java.util.Locale;
@@ -12,13 +13,27 @@ import java.util.Locale;
  * short-circuits {@link SubagentSpawnTool#execute}.
  */
 record SubagentSpawnArgs(
-        String error,
-        String task, String label, Long requestedAgentId,
-        String modelProvider, String modelId,
-        String mode, String context, int timeoutSeconds, boolean asyncRequested) {
+        @Nullable String error,
+        @Nullable String task, @Nullable String label, @Nullable Long requestedAgentId,
+        @Nullable String modelProvider, @Nullable String modelId,
+        @Nullable String mode, @Nullable String context, int timeoutSeconds, boolean asyncRequested) {
 
     static SubagentSpawnArgs fail(String msg) {
         return new SubagentSpawnArgs(msg, null, null, null, null, null, null, null, 0, false);
+    }
+
+    /** Valid only once {@link #error()} has been checked null — {@code fail()} carries no request. */
+    String resolvedTask() { return require(task, "task"); }
+
+    /** Valid only once {@link #error()} has been checked null — {@code fail()} carries no request. */
+    String resolvedMode() { return require(mode, "mode"); }
+
+    /** Valid only once {@link #error()} has been checked null — {@code fail()} carries no request. */
+    String resolvedContext() { return require(context, "context"); }
+
+    private String require(@Nullable String v, String field) {
+        if (v == null) throw new IllegalStateException("spawn args rejected before '" + field + "': " + error);
+        return v;
     }
 
     static SubagentSpawnArgs parse(JsonObject args) {
@@ -84,11 +99,11 @@ record SubagentSpawnArgs(
 
     // Thin forwarders to the shared {@link JsonArgs} accessors (JCLAW-729). Kept
     // package-visible because SubagentSpawnTool / SubagentAcpRunner call them.
-    static String optString(JsonObject obj, String key) {
+    static @Nullable String optString(JsonObject obj, String key) {
         return JsonArgs.optString(obj, key);
     }
 
-    static Long optLong(JsonObject obj, String key) {
+    static @Nullable Long optLong(JsonObject obj, String key) {
         return JsonArgs.optLong(obj, key);
     }
 

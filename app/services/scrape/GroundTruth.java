@@ -1,5 +1,7 @@
 package services.scrape;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 import java.util.Locale;
 
@@ -17,7 +19,7 @@ import java.util.Locale;
  * manufacture failures that say nothing about access. Reported as a secondary
  * signal instead.
  */
-public record GroundTruth(int minChars, List<String> rejectMarkers, String expectTitle) {
+public record GroundTruth(int minChars, List<String> rejectMarkers, @Nullable String expectTitle) {
 
     public boolean rejected(String text) {
         var lower = text.toLowerCase(Locale.ROOT);
