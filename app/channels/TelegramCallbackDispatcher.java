@@ -3,6 +3,7 @@ package channels;
 import channels.TelegramModelCallback.Payload;
 import models.Agent;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.ModelOverrideResolver;
 import services.Tx;
@@ -112,7 +113,7 @@ public final class TelegramCallbackDispatcher {
      * (TelegramModelSelector / approval services) can suppress offering a
      * keyboard up front; the dispatcher uses it as the inbound gate.
      */
-    public static boolean keyboardScopeAllows(String chatType) {
+    public static boolean keyboardScopeAllows(@Nullable String chatType) {
         String scope = Play.configuration
                 .getProperty("telegram.keyboardScope", "all")
                 .trim().toLowerCase(Locale.ROOT);

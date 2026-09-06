@@ -2,6 +2,7 @@ package channels;
 
 import agents.AgentRunner;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
@@ -56,8 +57,8 @@ public final class TelegramReactionNotifier {
      * @param added     newly-added reaction emoji (new minus old); may be empty
      * @param removed   removed reaction emoji (old minus new); may be empty
      */
-    public record ReactionDelta(String chatId, String chatType, Integer messageId,
-                                String reactorId, String reactor,
+    public record ReactionDelta(@Nullable String chatId, String chatType, Integer messageId,
+                                @Nullable String reactorId, @Nullable String reactor,
                                 List<String> added, List<String> removed) {}
 
     /**
@@ -83,7 +84,7 @@ public final class TelegramReactionNotifier {
      * ({@code ReactionTypeEmoji}) contribute (custom/paid reactions have no emoji
      * string to render). Never throws.
      */
-    public static ReactionDelta parseReaction(Update update) {
+    public static @Nullable ReactionDelta parseReaction(Update update) {
         if (update == null) return null;
         var mr = update.getMessageReaction();
         if (mr == null || mr.getMessageId() == null || mr.getChat() == null) return null;
@@ -180,24 +181,26 @@ public final class TelegramReactionNotifier {
      */
     public static void handleReaction(Agent agent, String botToken, String ownerTelegramUserId,
                                       ReactionDelta reaction) {
-        if (agent == null || reaction == null || reaction.chatId() == null) return;
+        if (agent == null || reaction == null) return;
+        final String chatId = reaction.chatId();
+        if (chatId == null) return;
         String mode = reactionNotifyMode();
         // JCLAW-383: only own consults the bot-sent-id cache (a group message_reaction
         // update omits the reacted message's author) — off/all ignore it, so skip the lookup.
         boolean botSent = NOTIFY_OWN.equals(mode)
-                && TelegramChannel.wasSentByBot(botToken, reaction.chatId(), reaction.messageId());
+                && TelegramChannel.wasSentByBot(botToken, chatId, reaction.messageId());
         if (!shouldNotifyReaction(mode, reaction.chatType(), botSent)) return;
 
         final String eventText = reactionEventText(reaction);
         final String peerId = AgentRunner.telegramConversationPeerId(
-                ownerTelegramUserId, reaction.chatType(), reaction.chatId(), null);
+                ownerTelegramUserId, reaction.chatType(), chatId, null);
         EventLogger.info(LOG_CATEGORY, agent.name, LOG_SOURCE,
                 "Reaction notification (mode=%s): %s".formatted(mode, eventText));
         Thread.ofVirtual().name("telegram-reaction").start(() -> {
             try {
                 AgentRunner.processInboundForAgent(agent, LOG_SOURCE, peerId, eventText,
                         (pid, response) -> TelegramChannel.forToken(botToken).sendText(
-                                reaction.chatId(), response, agent));
+                                chatId, response, agent));
             } catch (Exception e) {
                 EventLogger.error(LOG_CATEGORY, agent.name, LOG_SOURCE,
                         "Reaction dispatch error: %s".formatted(e.getMessage()));
@@ -301,7 +304,7 @@ public final class TelegramReactionNotifier {
      * or null when none is present. Walks the cause chain because the SDK may wrap
      * a {@code TelegramApiRequestException} inside a registration failure.
      */
-    private static Integer telegramErrorCode(Throwable t) {
+    private static @Nullable Integer telegramErrorCode(Throwable t) {
         for (Throwable c = t; c != null; c = c.getCause()) {
             if (c instanceof TelegramApiRequestException req) {
                 return req.getErrorCode();

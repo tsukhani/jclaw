@@ -3,6 +3,7 @@ package channels;
 import models.Agent;
 import models.Conversation;
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
@@ -17,6 +18,7 @@ import services.Tx;
 import utils.VirtualThreads;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -149,13 +151,18 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      */
     private static final AtomicReference<ScheduledExecutorService> SCHEDULER_REF = new AtomicReference<>();
 
-    private static ScheduledExecutorService scheduler() {
+    private static @Nullable ScheduledExecutorService scheduler() {
         var s = SCHEDULER_REF.get();
         if (s != null && !s.isShutdown()) return s;
         var fresh = VirtualThreads.newSingleThreadScheduledExecutor();
         if (SCHEDULER_REF.compareAndSet(s, fresh)) return fresh;
         fresh.shutdown();
         return SCHEDULER_REF.get();
+    }
+
+    /** {@link #scheduler()} yields null only when {@link #shutdown} races a losing compare-and-set. */
+    private static ScheduledExecutorService requireScheduler() {
+        return Objects.requireNonNull(scheduler(), "scheduler shut down while a task was being scheduled");
     }
 
     /**
@@ -183,15 +190,15 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * thread id is set on the placeholder send, the planner send, and the
      * typing heartbeat (General topic included for typing, omitted on sends).
      */
-    private final Integer replyToMessageId;
-    private final Integer messageThreadId;
+    private final @Nullable Integer replyToMessageId;
+    private final @Nullable Integer messageThreadId;
     /**
      * Conversation the sink is streaming into. Kept as a nullable field so
      * tests and admin paths that construct a sink without a conversation
      * (e.g. pure-logic unit tests) still compile; checkpoint persistence
      * is a no-op when null.
      */
-    private final Long conversationId;
+    private final @Nullable Long conversationId;
 
     /**
      * Uuids of the tool-produced generated attachments seen this turn (fed by
@@ -212,11 +219,11 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     private final ReentrantLock stateLock = new ReentrantLock();
 
     private final StringBuilder pending = new StringBuilder();
-    private Integer messageId = null;
+    private @Nullable Integer messageId = null;
     private long lastSentAt = 0;
     private String lastSentText = "";
     private boolean streamCapReached = false;
-    private ScheduledFuture<?> scheduledFlush;
+    private @Nullable ScheduledFuture<?> scheduledFlush;
     private final AtomicBoolean sealed = new AtomicBoolean(false);
 
     /**
@@ -227,7 +234,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * can wait on it directly instead of polling. Keeps re-entrance guarding
      * simple — {@code flushInFlight != null} means "someone else is busy".
      */
-    private volatile CompletableFuture<Void> flushInFlight = null;
+    private volatile @Nullable CompletableFuture<Void> flushInFlight = null;
 
     /**
      * Bounded await cap for {@link #seal(String)} observing
@@ -261,7 +268,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     public static final int TYPING_AUTH_FAILURE_LIMIT = 3;
 
     /** Scheduled handle for the typing-heartbeat task, or null if not running. */
-    private ScheduledFuture<?> typingHeartbeat;
+    private @Nullable ScheduledFuture<?> typingHeartbeat;
 
     /** JCLAW-342: per-sink heartbeat TTL; defaults to {@link #TYPING_HEARTBEAT_MAX_MS},
      *  lowered by tests via {@link #setTypingHeartbeatMaxMsForTest(long)}. */
@@ -306,8 +313,9 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      *                         sends + typing into; null = no topic
      */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent,
-                                 Long conversationId, String chatType,
-                                 Integer replyToMessageId, Integer messageThreadId) {
+                                 @Nullable Long conversationId, @Nullable String chatType,
+                                 @Nullable Integer replyToMessageId,
+                                 @Nullable Integer messageThreadId) {
         this.botToken = botToken;
         this.chatId = chatId;
         this.agent = agent;
@@ -332,7 +340,8 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * @param conversationId persisted Conversation id used for checkpoint
      *                       persistence; null disables it (test path)
      */
-    public TelegramStreamingSink(String botToken, String chatId, Agent agent, Long conversationId) {
+    public TelegramStreamingSink(String botToken, String chatId, Agent agent,
+                                 @Nullable Long conversationId) {
         this(botToken, chatId, agent, conversationId, null);
     }
 
@@ -360,7 +369,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      *                       to {@code "unknown"} in logs.
      */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent,
-                                 Long conversationId, String chatType) {
+                                 @Nullable Long conversationId, @Nullable String chatType) {
         this(botToken, chatId, agent, conversationId, chatType, null, null);
     }
 
@@ -531,7 +540,8 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /** Dispatch one resolved generated file to the native send matching its extension. */
     private void sendGeneratedMedia(TelegramChannel channel,
-                                    AttachmentService.ResolvedGeneratedFile media, Integer threadId) {
+                                    AttachmentService.ResolvedGeneratedFile media,
+                                    @Nullable Integer threadId) {
         var name = media.displayName();
         switch (TelegramOutboundPlanner.classify(name)) {
             case PHOTO -> channel.trySendPhoto(chatId, media.file(), name, null, threadId);
@@ -631,10 +641,10 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     // JCLAW-771: package-private, reached from the default-package tests through
     // TelegramStreamingSinkTestHooks. Public accessors on the production type let
     // any caller read streaming internals the sink guards under stateLock.
-    Integer messageIdForTest() { return messageId; }
+    @Nullable Integer messageIdForTest() { return messageId; }
     /** JCLAW-369: round-trip accessors for the inbound reply target / topic thread. */
-    Integer replyToMessageIdForTest() { return replyToMessageId; }
-    Integer messageThreadIdForTest() { return messageThreadId; }
+    @Nullable Integer replyToMessageIdForTest() { return replyToMessageId; }
+    @Nullable Integer messageThreadIdForTest() { return messageThreadId; }
     boolean streamCapReachedForTest() { return streamCapReached; }
     boolean sealedForTest() { return sealed.get(); }
     String lastSentTextForTest() { return lastSentText; }
@@ -698,7 +708,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
             // from seal() / update() can suppress the first pulse if it
             // hasn't landed yet. Each tick spawns a VT so the scheduler
             // thread stays free for other sinks' flushes.
-            typingHeartbeat = scheduler().scheduleAtFixedRate(
+            typingHeartbeat = requireScheduler().scheduleAtFixedRate(
                     () -> {
                         if (System.nanoTime() >= deadlineNanos) {
                             cancelTypingHeartbeat(); // JCLAW-342: TTL reached
@@ -795,7 +805,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         long wait = Math.max(0, currentThrottleMs - (System.currentTimeMillis() - lastSentAt));
         // Scheduler thread only spawns the flush; the flush itself runs on a
         // fresh virtual thread so cross-sink flushes don't serialize (JCLAW-95).
-        scheduledFlush = scheduler().schedule(
+        scheduledFlush = requireScheduler().schedule(
                 () -> Thread.ofVirtual().name("telegram-stream-flush").start(this::flush),
                 wait, TimeUnit.MILLISECONDS);
     }
@@ -846,7 +856,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
                 // If more tokens arrived during the call, schedule the next flush
                 // on a fresh virtual thread (same pattern as scheduleFlushLocked).
                 if (pending.length() > lastSentText.length() && !sealed.get() && !streamCapReached) {
-                    scheduledFlush = scheduler().schedule(
+                    scheduledFlush = requireScheduler().schedule(
                             () -> Thread.ofVirtual().name("telegram-stream-flush").start(this::flush),
                             currentThrottleMs, TimeUnit.MILLISECONDS);
                 }
@@ -946,7 +956,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * default-package test can assert the config-read contract, mirroring
      * {@link TelegramChannel#suppressLinkPreview()}'s own public-for-tests scope.
      */
-    public static LinkPreviewOptions streamingLinkPreviewOptions() {
+    public static @Nullable LinkPreviewOptions streamingLinkPreviewOptions() {
         if (!TelegramChannel.suppressLinkPreview()) return null;
         return LinkPreviewOptions.builder()
                 .isDisabled(true)
@@ -1118,7 +1128,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      *                       against.
      * @return true when the caller is allowed to fire the notifier now
      */
-    public static boolean tryFireNotifier(Long conversationId) {
+    public static boolean tryFireNotifier(@Nullable Long conversationId) {
         return tryFireNotifier(conversationId, notifierCooldownMs());
     }
 
@@ -1130,7 +1140,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * config default. Null conversationIds always return false (no key to rate-
      * limit against). Public for the test seam.
      */
-    public static boolean tryFireNotifier(Long conversationId, long cooldownMs) {
+    public static boolean tryFireNotifier(@Nullable Long conversationId, long cooldownMs) {
         if (conversationId == null) return false;
         long now = System.currentTimeMillis();
         var prev = LAST_NOTIFIER_FIRE_MS.get(conversationId);

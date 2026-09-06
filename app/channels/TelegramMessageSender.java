@@ -2,6 +2,7 @@ package channels;
 
 import channels.Channel.SendResult;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
@@ -49,7 +50,8 @@ final class TelegramMessageSender {
      * streaming-recovery job). Exceptions propagate so callers can decide
      * whether to retry or log-and-continue.
      */
-    void editMessageText(String chatId, Integer messageId, String text) throws TelegramApiException {
+    void editMessageText(@Nullable String chatId, @Nullable Integer messageId,
+                         @Nullable String text) throws TelegramApiException {
         var builder = EditMessageText.builder()
                 .chatId(chatId)
                 .messageId(messageId)
@@ -79,8 +81,9 @@ final class TelegramMessageSender {
      * <p>Returns true when the message landed (with or without the quote),
      * false when even the plain-reply fallback failed. Never throws.
      */
-    boolean sendReplyWithQuote(String chatId, String text,
-                               Agent agent, Integer replyToMessageId, String quote) {
+    boolean sendReplyWithQuote(@Nullable String chatId, @Nullable String text,
+                               Agent agent, @Nullable Integer replyToMessageId,
+                               @Nullable String quote) {
         if (ctx.botToken() == null || chatId == null || text == null || replyToMessageId == null) {
             return false;
         }
@@ -145,8 +148,8 @@ final class TelegramMessageSender {
      * the per-chunk boolean the streaming-sink / planner callers expect. Returns
      * true when the whole turn landed.
      */
-    boolean sendTurn(String chatId, String text, Agent agent,
-                     Integer replyToMessageId, Integer messageThreadId) {
+    boolean sendTurn(String chatId, String text, @Nullable Agent agent,
+                     @Nullable Integer replyToMessageId, @Nullable Integer messageThreadId) {
         if (chatId == null || text == null) {
             EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
                     "sendTurn called with null argument");
@@ -174,7 +177,7 @@ final class TelegramMessageSender {
     /** Dispatch one planner segment; returns false only when a foreground send actually fails. */
     private boolean dispatchSegment(String chatId,
                                     TelegramOutboundPlanner.Segment segment,
-                                    Integer replyToMessageId, Integer threadId,
+                                    @Nullable Integer replyToMessageId, @Nullable Integer threadId,
                                     AtomicBoolean firstChunk,
                                     String mode) {
         if (segment instanceof TelegramOutboundPlanner.TextSegment(String markdown)) {
@@ -217,7 +220,7 @@ final class TelegramMessageSender {
     @SuppressWarnings("java:S1181")
     private void backgroundSendFile(String chatId,
                                     TelegramOutboundPlanner.FileSegment fs,
-                                    Integer replyToMessageId, Integer threadId,
+                                    @Nullable Integer replyToMessageId, @Nullable Integer threadId,
                                     boolean firstChunk, String mode) {
         try {
             if (!sendFileSegment(chatId, fs, replyToMessageId, threadId, firstChunk, mode)) {
@@ -251,7 +254,7 @@ final class TelegramMessageSender {
      * for the few extra characters.
      */
     private boolean sendTextSegment(String chatId, String markdown,
-                                    Integer replyToMessageId, Integer threadId,
+                                    @Nullable Integer replyToMessageId, @Nullable Integer threadId,
                                     AtomicBoolean firstChunk,
                                     String mode) {
         if (markdown == null || markdown.isBlank()) return true;
@@ -303,7 +306,7 @@ final class TelegramMessageSender {
      */
     private boolean sendFileSegment(String chatId,
                                     TelegramOutboundPlanner.FileSegment fs,
-                                    Integer replyToMessageId, Integer threadId,
+                                    @Nullable Integer replyToMessageId, @Nullable Integer threadId,
                                     boolean firstChunk, String mode) {
         var reply = TelegramSendPolicy.replyParamsFor(replyToMessageId, firstChunk, mode);
         var file = fs.file();
@@ -335,7 +338,7 @@ final class TelegramMessageSender {
      */
     private boolean sendMediaGroupSegment(String chatId,
                                           TelegramOutboundPlanner.MediaGroupSegment mg,
-                                          Integer replyToMessageId, Integer threadId,
+                                          @Nullable Integer replyToMessageId, @Nullable Integer threadId,
                                           AtomicBoolean firstChunk,
                                           String mode) {
         boolean ownsFirst = firstChunk.getAndSet(false);
@@ -398,7 +401,7 @@ final class TelegramMessageSender {
      * here with both null so the interface contract is unchanged.
      */
     SendResult trySend(String peerId, String text,
-                       ReplyParameters replyParams, Integer messageThreadId) {
+                       @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         try {
             executeTextSend(peerId, text, replyParams, messageThreadId, "HTML");
             EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
@@ -441,8 +444,9 @@ final class TelegramMessageSender {
      * ride along uniformly so the plain-text fallback retry is otherwise identical
      * to the rejected HTML send. Throws on any API failure for the caller to map.
      */
-    private void executeTextSend(String peerId, String text, ReplyParameters replyParams,
-                                 Integer messageThreadId, String parseMode) throws TelegramApiException {
+    private void executeTextSend(String peerId, String text, @Nullable ReplyParameters replyParams,
+                                 @Nullable Integer messageThreadId,
+                                 @Nullable String parseMode) throws TelegramApiException {
         var builder = SendMessage.builder()
                 .chatId(peerId)
                 .text(text);
@@ -464,7 +468,8 @@ final class TelegramMessageSender {
      * error is impossible without {@code parse_mode}).
      */
     private SendResult retryPlainText(String peerId, String text,
-                                      ReplyParameters replyParams, Integer messageThreadId) {
+                                      @Nullable ReplyParameters replyParams,
+                                      @Nullable Integer messageThreadId) {
         try {
             executeTextSend(peerId, text, replyParams, messageThreadId, null);
             EventLogger.info(LOG_CATEGORY, null, CHANNEL_NAME,
@@ -488,7 +493,8 @@ final class TelegramMessageSender {
      * are null this is behaviorally identical to the inherited default.
      */
     boolean sendTextWithRetry(String chatId, String text,
-                              ReplyParameters replyParams, Integer messageThreadId) {
+                              @Nullable ReplyParameters replyParams,
+                              @Nullable Integer messageThreadId) {
         SendResult result = trySend(chatId, text, replyParams, messageThreadId);
         if (result.ok()) return true;
         long delayMs = Math.min(result.retryAfterMs() > 0 ? result.retryAfterMs() : 1000L, 60_000L);

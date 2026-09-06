@@ -2,6 +2,7 @@ package channels;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.jspecify.annotations.Nullable;
 import utils.JsonArgs;
 
 import java.util.List;
@@ -57,8 +58,8 @@ public final class WhatsAppCloudApiParser {
      * sender/routing identity carried unchanged onto the normalized record.
      * Grouped so each builder stays under the 7-param limit.
      */
-    private record Envelope(String messageId, String from, String phoneNumberId,
-                            String senderName, String quotedId) {}
+    private record Envelope(String messageId, String from, @Nullable String phoneNumberId,
+                            @Nullable String senderName, @Nullable String quotedId) {}
 
     /**
      * Parse the first user message out of a Cloud-API webhook payload, or
@@ -66,7 +67,7 @@ public final class WhatsAppCloudApiParser {
      * updates, empty changes, unsupported types). Never throws on a malformed
      * payload — a missing/odd field yields {@code null} rather than an exception.
      */
-    public static WhatsAppInboundMessage parse(JsonObject payload) {
+    public static @Nullable WhatsAppInboundMessage parse(JsonObject payload) {
         try {
             return parseInternal(payload);
         } catch (RuntimeException _) {
@@ -76,7 +77,7 @@ public final class WhatsAppCloudApiParser {
         }
     }
 
-    private static WhatsAppInboundMessage parseInternal(JsonObject payload) {
+    private static @Nullable WhatsAppInboundMessage parseInternal(JsonObject payload) {
         var value = firstValue(payload);
         if (value == null) return null;
 
@@ -114,7 +115,7 @@ public final class WhatsAppCloudApiParser {
 
     // ── per-type builders ──
 
-    private static WhatsAppInboundMessage text(JsonObject msg, Envelope envelope) {
+    private static @Nullable WhatsAppInboundMessage text(JsonObject msg, Envelope envelope) {
         var body = msg.has("text") ? JsonArgs.optNonBlankString(msg.getAsJsonObject("text"), "body") : null;
         if (body == null) return null;
         return base(MessageType.TEXT, body, null, null, List.of(), envelope);
@@ -125,7 +126,7 @@ public final class WhatsAppCloudApiParser {
      * {@code id} + {@code mime_type} (+ {@code filename} for documents). A
      * {@code caption} becomes the message text.
      */
-    private static WhatsAppInboundMessage media(JsonObject msg, String key, MessageType type,
+    private static @Nullable WhatsAppInboundMessage media(JsonObject msg, String key, MessageType type,
                                                 boolean voiceNote, Envelope envelope) {
         if (!msg.has(key)) return null;
         var obj = msg.getAsJsonObject(key);
@@ -140,7 +141,7 @@ public final class WhatsAppCloudApiParser {
 
     /** audio — same as {@link #media} but flags voice/PTT clips
      *  ({@code audio.voice == true}). Audio carries no caption. */
-    private static WhatsAppInboundMessage audio(JsonObject msg, Envelope envelope) {
+    private static @Nullable WhatsAppInboundMessage audio(JsonObject msg, Envelope envelope) {
         if (!msg.has(TYPE_AUDIO)) return null;
         var obj = msg.getAsJsonObject(TYPE_AUDIO);
         var mediaId = JsonArgs.optNonBlankString(obj, "id");
@@ -151,7 +152,7 @@ public final class WhatsAppCloudApiParser {
         return base(MessageType.AUDIO, null, null, null, List.of(pending), envelope);
     }
 
-    private static WhatsAppInboundMessage location(JsonObject msg, Envelope envelope) {
+    private static @Nullable WhatsAppInboundMessage location(JsonObject msg, Envelope envelope) {
         if (!msg.has(TYPE_LOCATION)) return null;
         var obj = msg.getAsJsonObject(TYPE_LOCATION);
         if (!obj.has("latitude") || !obj.has("longitude")) return null;
@@ -163,7 +164,7 @@ public final class WhatsAppCloudApiParser {
         return base(MessageType.LOCATION, null, loc, null, List.of(), envelope);
     }
 
-    private static WhatsAppInboundMessage reaction(JsonObject msg, Envelope envelope) {
+    private static @Nullable WhatsAppInboundMessage reaction(JsonObject msg, Envelope envelope) {
         if (!msg.has(TYPE_REACTION)) return null;
         var obj = msg.getAsJsonObject(TYPE_REACTION);
         var targetId = JsonArgs.optNonBlankString(obj, "message_id");
@@ -180,7 +181,7 @@ public final class WhatsAppCloudApiParser {
      * reply {@code id} is the developer-defined payload; the title is what the user
      * read, so it's the natural text. Falls back to the id when no title is present.
      */
-    private static WhatsAppInboundMessage interactive(JsonObject msg, Envelope envelope) {
+    private static @Nullable WhatsAppInboundMessage interactive(JsonObject msg, Envelope envelope) {
         if (!msg.has(TYPE_INTERACTIVE)) return null;
         var obj = msg.getAsJsonObject(TYPE_INTERACTIVE);
         JsonObject reply = null;
@@ -204,9 +205,9 @@ public final class WhatsAppCloudApiParser {
      * {@code chatId == from} (no groups), {@code chatType == direct},
      * {@code botMentioned == true}.
      */
-    private static WhatsAppInboundMessage base(MessageType type, String text,
-                                               WhatsAppInboundMessage.Location location,
-                                               WhatsAppInboundMessage.Reaction reaction,
+    private static WhatsAppInboundMessage base(MessageType type, @Nullable String text,
+                                               WhatsAppInboundMessage.@Nullable Location location,
+                                               WhatsAppInboundMessage.@Nullable Reaction reaction,
                                                List<WhatsAppInboundMessage.PendingMedia> media,
                                                Envelope envelope) {
         return new WhatsAppInboundMessage(
@@ -228,7 +229,7 @@ public final class WhatsAppCloudApiParser {
     // ── payload navigation helpers ──
 
     /** {@code entry[0].changes[0].value}, or null when absent. */
-    private static JsonObject firstValue(JsonObject payload) {
+    private static @Nullable JsonObject firstValue(JsonObject payload) {
         if (payload == null || !payload.has("entry")) return null;
         JsonArray entries = payload.getAsJsonArray("entry");
         if (entries.isEmpty()) return null;
@@ -241,13 +242,13 @@ public final class WhatsAppCloudApiParser {
     }
 
     /** {@code value.metadata.phone_number_id}, used to route to a binding. */
-    static String metadataPhoneNumberId(JsonObject value) {
+    static @Nullable String metadataPhoneNumberId(JsonObject value) {
         if (!value.has("metadata")) return null;
         return JsonArgs.optNonBlankString(value.getAsJsonObject("metadata"), "phone_number_id");
     }
 
     /** {@code value.contacts[0].profile.name} — the sender's display name. */
-    private static String contactName(JsonObject value) {
+    private static @Nullable String contactName(JsonObject value) {
         if (!value.has("contacts")) return null;
         var contacts = value.getAsJsonArray("contacts");
         if (contacts.isEmpty()) return null;
@@ -257,7 +258,7 @@ public final class WhatsAppCloudApiParser {
     }
 
     /** {@code message.context.id} — the quoted message id when this is a reply. */
-    private static String quotedMessageId(JsonObject msg) {
+    private static @Nullable String quotedMessageId(JsonObject msg) {
         if (!msg.has("context")) return null;
         return JsonArgs.optNonBlankString(msg.getAsJsonObject("context"), "id");
     }
@@ -268,7 +269,7 @@ public final class WhatsAppCloudApiParser {
      * full parse. Returns null when the payload has no metadata. Public because
      * the controller lives in a different package.
      */
-    public static String extractPhoneNumberId(JsonObject payload) {
+    public static @Nullable String extractPhoneNumberId(JsonObject payload) {
         var value = firstValue(payload);
         return value == null ? null : metadataPhoneNumberId(value);
     }

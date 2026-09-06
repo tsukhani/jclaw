@@ -6,6 +6,7 @@ import models.Conversation;
 import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JCLAW-141: resolves a {@link Channel} instance for a conversation so dispatch
@@ -36,7 +37,7 @@ public final class ChannelRegistry {
      *                     transport; its {@code agent} is used (with {@code peerId})
      *                     to find the Telegram bot token
      */
-    public static Channel forConversation(Conversation conversation) {
+    public static @Nullable Channel forConversation(Conversation conversation) {
         if (conversation == null) return null;
         return forChannel(conversation.channelType, conversation.agent, conversation.peerId);
     }
@@ -47,7 +48,7 @@ public final class ChannelRegistry {
      * row. {@code agent}/{@code peerId} are only consulted for Telegram (per-binding
      * token lookup); the other channels ignore them.
      */
-    public static Channel forChannel(String channelType, Agent agent, String peerId) {
+    public static @Nullable Channel forChannel(String channelType, Agent agent, String peerId) {
         var type = ChannelType.fromValue(channelType);
         if (type == null) return null;
         return switch (type) {

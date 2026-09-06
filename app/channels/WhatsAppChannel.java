@@ -10,6 +10,7 @@ import okhttp3.MediaType;
 import okhttp3.MultipartBody;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 import utils.AppClock;
@@ -53,8 +54,9 @@ public class WhatsAppChannel implements Channel {
     private static final String KEY_MESSAGES = "messages";
     private static final String KEY_TIMESTAMP = "timestamp";
 
-    public record WhatsAppConfig(String phoneNumberId, String accessToken, String appSecret, String verifyToken) {
-        public static WhatsAppConfig load() {
+    public record WhatsAppConfig(String phoneNumberId, String accessToken,
+                                 @Nullable String appSecret, @Nullable String verifyToken) {
+        public static @Nullable WhatsAppConfig load() {
             var cc = ChannelConfig.findByType(WHATSAPP);
             if (cc == null || !cc.enabled) return null;
             var json = JsonParser.parseString(cc.configJson).getAsJsonObject();
@@ -70,15 +72,15 @@ public class WhatsAppChannel implements Channel {
     // Per-binding credentials (JCLAW-446). Null on the stateless instance, which
     // falls back to the app-global config — the pre-444 path, retired once
     // JCLAW-446/447 migrate their last callers off WhatsAppConfig.load().
-    private final String phoneNumberId;
-    private final String accessToken;
-    private final String appSecret;
+    private final @Nullable String phoneNumberId;
+    private final @Nullable String accessToken;
+    private final @Nullable String appSecret;
 
     // Per-binding 24h-window context (JCLAW-447). Null on the stateless instance
     // (no window enforcement on the backward-compat path).
-    private final Long bindingId;
-    private final String templateName;
-    private final String templateLanguage;
+    private final @Nullable Long bindingId;
+    private final @Nullable String templateName;
+    private final @Nullable String templateLanguage;
 
     /** WhatsApp's per-text-message body cap. Longer replies are chunked. Public for
      *  the default-package test seam. */
@@ -91,8 +93,9 @@ public class WhatsAppChannel implements Channel {
         this(null, null, null, null, null, null);
     }
 
-    private WhatsAppChannel(String phoneNumberId, String accessToken, String appSecret,
-                            Long bindingId, String templateName, String templateLanguage) {
+    private WhatsAppChannel(@Nullable String phoneNumberId, @Nullable String accessToken,
+                            @Nullable String appSecret, @Nullable Long bindingId,
+                            @Nullable String templateName, @Nullable String templateLanguage) {
         this.phoneNumberId = phoneNumberId;
         this.accessToken = accessToken;
         this.appSecret = appSecret;
@@ -110,7 +113,7 @@ public class WhatsAppChannel implements Channel {
 
     /** The credentials this instance should use: its own per-binding fields when set,
      *  else the app-global config (the pre-444 path). */
-    private WhatsAppConfig effectiveConfig() {
+    private @Nullable WhatsAppConfig effectiveConfig() {
         if (phoneNumberId != null && accessToken != null) {
             return new WhatsAppConfig(phoneNumberId, accessToken, appSecret, null);
         }
@@ -179,7 +182,7 @@ public class WhatsAppChannel implements Channel {
      * {@code document}). {@code caption} rides with image/video/document (audio
      * carries none). Returns {@link SendResult#OK} on a 200 from the message send.
      */
-    public SendResult sendMedia(String peerId, File file, String mimeType, String caption) {
+    public SendResult sendMedia(String peerId, File file, @Nullable String mimeType, String caption) {
         if (file == null || !file.isFile()) {
             EventLogger.warn(CHANNEL, null, WHATSAPP, "sendMedia: file missing or unreadable");
             return SendResult.FAILED;
@@ -377,7 +380,7 @@ public class WhatsAppChannel implements Channel {
      * {@code /{phoneNumberId}/media} as multipart and return the resulting media
      * id, or null on failure.
      */
-    private String uploadMedia(WhatsAppConfig config, File file, String mime) {
+    private @Nullable String uploadMedia(WhatsAppConfig config, File file, String mime) {
         var url = API_BASE + config.phoneNumberId() + "/media";
         var fileBody = RequestBody.create(file, MediaType.parse(mime));
         var multipart = new MultipartBody.Builder()
@@ -408,7 +411,7 @@ public class WhatsAppChannel implements Channel {
 
     /** Resolve the upload MIME: caller-supplied value wins, else probe the file,
      *  else a generic binary type. */
-    private static String resolveMime(File file, String mimeType) {
+    private static String resolveMime(File file, @Nullable String mimeType) {
         if (mimeType != null && !mimeType.isBlank()) return mimeType;
         try {
             var probed = Files.probeContentType(file.toPath());
@@ -460,7 +463,7 @@ public class WhatsAppChannel implements Channel {
     /** {@code entry[0].changes[0].value.messages[0].timestamp}, or null when absent.
      *  Defensive against any missing hop so a malformed payload yields null (stale)
      *  rather than throwing. */
-    private static String extractMessageTimestamp(JsonObject payload) {
+    private static @Nullable String extractMessageTimestamp(JsonObject payload) {
         if (payload == null || !payload.has(KEY_ENTRY)) return null;
         var entries = payload.getAsJsonArray(KEY_ENTRY);
         if (entries.isEmpty()) return null;
@@ -494,9 +497,10 @@ public class WhatsAppChannel implements Channel {
 
     // --- Parse inbound webhook ---
 
-    public record InboundMessage(String from, String text, String messageId, String phoneNumberId) {}
+    public record InboundMessage(String from, String text, String messageId,
+                                 @Nullable String phoneNumberId) {}
 
-    public static InboundMessage parseWebhook(JsonObject payload) {
+    public static @Nullable InboundMessage parseWebhook(JsonObject payload) {
         if (!payload.has(KEY_ENTRY)) return null;
         var entries = payload.getAsJsonArray(KEY_ENTRY);
         if (entries.isEmpty()) return null;

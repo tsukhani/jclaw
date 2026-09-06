@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.util.ArrayList;
@@ -33,9 +34,9 @@ public final class TelegramMediaGroupBuffer {
 
     private static final class Bucket {
         final List<PendingAttachment> attachments = new ArrayList<>();
-        String mediaGroupId;
+        @Nullable String mediaGroupId;
         String text = "";
-        InboundMessage firstMessage;
+        @Nullable InboundMessage firstMessage;
     }
 
     private static final IdleDebounceBuffer<Bucket> BUFFER = new IdleDebounceBuffer<>(
@@ -79,7 +80,7 @@ public final class TelegramMediaGroupBuffer {
         return true;
     }
 
-    private static InboundMessage merge(Bucket bucket) {
+    private static @Nullable InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
         if (first == null) return null;
         var merged = first.coalesced(bucket.text, List.copyOf(bucket.attachments));

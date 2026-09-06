@@ -1,5 +1,8 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
+
+
 /**
  * Inbound file attachment extracted from a Telegram Update before the actual
  * bytes are downloaded (JCLAW-136). The webhook handler returns the 200 fast;
@@ -24,7 +27,7 @@ package channels;
  *                          {@code finalizeAttachment}.
  */
 public record PendingAttachment(String telegramFileId,
-                                String suggestedFilename,
-                                String mimeType,
+                                @Nullable String suggestedFilename,
+                                @Nullable String mimeType,
                                 long sizeBytes,
                                 String kind) {}

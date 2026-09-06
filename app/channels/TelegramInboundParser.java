@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
 import models.Agent;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.MessageEntity;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -59,7 +60,7 @@ public final class TelegramInboundParser {
     // turn. An empty list, by contrast, means "no attachments to process,
     // continue with text only" — they are semantically distinct outcomes.
     @SuppressWarnings("java:S1168")
-    public static List<AttachmentService.Input> prepareInboundAttachments(
+    public static @Nullable List<AttachmentService.Input> prepareInboundAttachments(
             String sendToken, String sendChatId, Agent sendAgent, InboundMessage message) {
         if (message.attachments().isEmpty()) return List.of();
 
@@ -102,13 +103,13 @@ public final class TelegramInboundParser {
      * URLs embed the bot token ({@code .../bot<token>/...}). Mirrors the redaction
      * {@link TelegramWebhookRegistrar} applies on its probe-failure path.
      */
-    private static String redact(String s, String token) {
+    private static String redact(@Nullable String s, @Nullable String token) {
         if (s == null) return "";
         return (token == null || token.isEmpty()) ? s : s.replace(token, "<token>");
     }
 
     /** Parse a Gson {@link JsonObject} update (webhook payload) into {@link InboundMessage}. */
-    public static InboundMessage parseUpdate(JsonObject update) {
+    public static @Nullable InboundMessage parseUpdate(JsonObject update) {
         try {
             Update sdk = JACKSON.readValue(update.toString(), Update.class);
             return parseUpdate(sdk);
@@ -139,7 +140,7 @@ public final class TelegramInboundParser {
      * caller knows the bot's username/id; the kept single-arg overload exists
      * so existing call sites compile unchanged.
      */
-    public static InboundMessage parseUpdate(Update update) {
+    public static @Nullable InboundMessage parseUpdate(Update update) {
         return parseUpdate(update, null, null);
     }
 
@@ -157,7 +158,8 @@ public final class TelegramInboundParser {
      * a {@code getMe} call. When neither is supplied this degrades exactly to
      * {@link #parseUpdate(Update)}'s best-effort behavior.
      */
-    public static InboundMessage parseUpdate(Update update, String botUsername, Long botUserId) {
+    public static @Nullable InboundMessage parseUpdate(Update update, @Nullable String botUsername,
+                                                       @Nullable Long botUserId) {
         if (update == null || update.getMessage() == null) return null;
         Message msg = update.getMessage();
 
@@ -229,7 +231,7 @@ public final class TelegramInboundParser {
      * non-blank first name on real users, but a defensive trim keeps the
      * result clean for edge shapes.
      */
-    private static String displayNameOf(User user) {
+    private static @Nullable String displayNameOf(User user) {
         var sb = new StringBuilder();
         if (user.getFirstName() != null && !user.getFirstName().isBlank()) {
             sb.append(user.getFirstName().strip());
@@ -260,7 +262,8 @@ public final class TelegramInboundParser {
      *       target being authored by any bot, the best-effort fallback).</li>
      * </ul>
      */
-    private static boolean detectBotAddressed(Message msg, String botUsername, Long botUserId) {
+    private static boolean detectBotAddressed(Message msg, @Nullable String botUsername,
+                                              @Nullable Long botUserId) {
         if (entitiesAddressBot(msg.getText(), safeEntities(msg::getEntities), botUsername, botUserId)
                 || entitiesAddressBot(msg.getCaption(), safeEntities(msg::getCaptionEntities), botUsername, botUserId)) {
             return true;
@@ -311,7 +314,7 @@ public final class TelegramInboundParser {
      * <p>Public so default-package tests can assert the match / off / invalid-skip
      * contract directly, matching the {@link TelegramChannel#replyToMode()} convention.
      */
-    public static boolean matchesWakeWord(String body) {
+    public static boolean matchesWakeWord(@Nullable String body) {
         if (body == null || body.isBlank()) return false;
         var compiled = compiledWakeWords();
         for (var p : compiled) {
@@ -376,8 +379,8 @@ public final class TelegramInboundParser {
     }
 
     /** Scan each text/entity pair for a mention, text_mention, or bot_command suffix addressing the bot. */
-    private static boolean entitiesAddressBot(String body, List<MessageEntity> entities,
-                                              String botUsername, Long botUserId) {
+    private static boolean entitiesAddressBot(@Nullable String body, List<MessageEntity> entities,
+                                              @Nullable String botUsername, @Nullable Long botUserId) {
         if (body == null || entities == null) return false;
         for (var entity : entities) {
             if (entityAddressesBot(body, entity, botUsername, botUserId)) return true;
@@ -386,7 +389,7 @@ public final class TelegramInboundParser {
     }
 
     private static boolean entityAddressesBot(String body, MessageEntity entity,
-                                              String botUsername, Long botUserId) {
+                                              @Nullable String botUsername, @Nullable Long botUserId) {
         var type = entity.getType();
         if (type == null) return false;
         return switch (type) {
@@ -423,7 +426,7 @@ public final class TelegramInboundParser {
      * own username — a bare {@code /cmd} (no suffix) is not a direct address in
      * a group, so it does not fire the signal here.
      */
-    private static boolean commandSuffixMatchesBot(String slice, String botUsername) {
+    private static boolean commandSuffixMatchesBot(String slice, @Nullable String botUsername) {
         if (botUsername == null) return false;
         int at = slice.indexOf('@');
         if (at < 0) return false;
@@ -437,7 +440,7 @@ public final class TelegramInboundParser {
      * by a bot" — best-effort, since in a 1:1 binding the only bot in the chat
      * is ours.
      */
-    private static boolean isReplyToBot(Message msg, Long botUserId) {
+    private static boolean isReplyToBot(Message msg, @Nullable Long botUserId) {
         var replyTo = msg.getReplyToMessage();
         if (replyTo == null || replyTo.getFrom() == null) return false;
         var author = replyTo.getFrom();
@@ -606,7 +609,7 @@ public final class TelegramInboundParser {
      * but the replied-to message is media, notes the media type instead so the
      * agent still knows what was referenced.
      */
-    private static String buildReplyContext(Message msg) {
+    private static @Nullable String buildReplyContext(Message msg) {
         var quote = msg.getQuote();
         if (quote != null && quote.getText() != null && !quote.getText().isBlank()) {
             return "in reply to (quoted): " + quote.getText().strip();
@@ -632,7 +635,7 @@ public final class TelegramInboundParser {
      * it isn't one of the recognized media shapes. Used only when the replied-to
      * message has no text/caption of its own.
      */
-    private static String replyToMediaType(Message replyTo) {
+    private static @Nullable String replyToMediaType(Message replyTo) {
         if (replyTo.hasPhoto()) return "photo";
         if (replyTo.hasSticker()) return "sticker";
         if (replyTo.hasVoice()) return "voice";
@@ -654,7 +657,7 @@ public final class TelegramInboundParser {
      * {@link #parseUpdate(Update)} so callers can cleanly distinguish
      * "text message arrived" from "keyboard tap arrived."
      */
-    public static InboundCallback parseCallback(Update update) {
+    public static @Nullable InboundCallback parseCallback(Update update) {
         if (update == null || update.getCallbackQuery() == null) return null;
         CallbackQuery cq = update.getCallbackQuery();
         if (cq.getData() == null || cq.getData().isBlank()) return null;
@@ -677,7 +680,7 @@ public final class TelegramInboundParser {
     }
 
     /** Parse a Gson {@link JsonObject} update (webhook payload) into an {@link InboundCallback}. */
-    public static InboundCallback parseCallback(JsonObject update) {
+    public static @Nullable InboundCallback parseCallback(JsonObject update) {
         try {
             Update sdk = JACKSON.readValue(update.toString(), Update.class);
             return parseCallback(sdk);

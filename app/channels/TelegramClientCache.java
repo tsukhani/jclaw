@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.TelegramUrl;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -56,7 +57,7 @@ public final class TelegramClientCache {
      * unknown/garbled token would contradict the "false on a never-seen token"
      * contract.
      */
-    static TelegramChannel peek(String botToken) {
+    static @Nullable TelegramChannel peek(String botToken) {
         return botToken == null ? null : INSTANCES.get(botToken);
     }
 }

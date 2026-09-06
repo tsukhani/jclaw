@@ -4,6 +4,7 @@ import agents.AgentRunner;
 import agents.DangerousActionGate;
 import com.google.gson.JsonObject;
 import models.SlackBinding;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
@@ -122,7 +123,7 @@ public final class SlackInbound {
      * {@code event_id} (carried verbatim on Events API retries) when the inner event has no
      * channel/ts. Null when neither is present — {@link InboundEventDedup#firstSeen} then processes.
      */
-    private static String dedupKey(JsonObject eventCallbackPayload) {
+    private static @Nullable String dedupKey(JsonObject eventCallbackPayload) {
         if (eventCallbackPayload.has(KEY_EVENT) && eventCallbackPayload.get(KEY_EVENT).isJsonObject()) {
             var event = eventCallbackPayload.getAsJsonObject(KEY_EVENT);
             if (event.has(CATEGORY_CHANNEL) && event.has("ts")) {

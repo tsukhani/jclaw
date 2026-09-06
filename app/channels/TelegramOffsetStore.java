@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.longpolling.BotSession;
 import play.Play;
 import services.EventLogger;
@@ -74,7 +75,7 @@ public final class TelegramOffsetStore {
      * Returns the whole trimmed token if there is no colon (defensive — real
      * tokens always carry one). {@code null}/blank tokens yield {@code null}.
      */
-    public static String botId(String token) {
+    public static @Nullable String botId(String token) {
         if (token == null) return null;
         String trimmed = token.trim();
         if (trimmed.isEmpty()) return null;

@@ -6,6 +6,7 @@ import models.MessageAttachment;
 import models.WhatsAppBinding;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.AttachmentService;
 import services.EventLogger;
@@ -124,7 +125,7 @@ public final class WhatsAppMediaDownloader {
      * caller skips it). Public (with the {@code apiBase} param) as the test seam —
      * jclaw tests live in the default package and can't see package-private methods.
      */
-    public static AttachmentService.Input downloadOne(String token,
+    public static AttachmentService.@Nullable Input downloadOne(String token,
                                                       WhatsAppInboundMessage.PendingMedia pending,
                                                       String agentName, String apiBase) {
         var mediaId = pending.mediaId();
@@ -170,7 +171,7 @@ public final class WhatsAppMediaDownloader {
      * the general (non-SSRF) client because the Graph host is a fixed, trusted
      * operator endpoint. Returns null on any error.
      */
-    private static String resolveCdnUrl(String token, String mediaId, String apiBase, String agentName) {
+    private static @Nullable String resolveCdnUrl(String token, String mediaId, String apiBase, String agentName) {
         try {
             var url = apiBase + mediaId;
             var req = new Request.Builder()
@@ -317,7 +318,7 @@ public final class WhatsAppMediaDownloader {
     }
 
     /** Download + stage one media part, or null on miss / oversize / error. */
-    private static AttachmentService.Input downloadOne(
+    private static AttachmentService.@Nullable Input downloadOne(
             WhatsAppCobaltSession session, WhatsAppInboundMessage.PendingMedia part, String agentName) {
         var info = session.recentMessage(part.mediaId());
         if (info == null) {
@@ -325,9 +326,18 @@ public final class WhatsAppMediaDownloader {
                     "Inbound media message %s no longer cached; skipping".formatted(part.mediaId()));
             return null;
         }
+        // Read the session once. downloadCobalt checked it, but disconnect() nulls this
+        // volatile field, so an unlink racing an inbound media message used to NPE into the
+        // catch below and log "failed: null" instead of naming the cause (JCLAW-1161).
+        var whatsapp = session.whatsapp();
+        if (whatsapp == null) {
+            EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
+                    "WhatsApp-Web session closed mid-download for %s; skipping".formatted(part.mediaId()));
+            return null;
+        }
         byte[] bytes;
         try {
-            bytes = session.whatsapp().downloadMedia(info).get(DOWNLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            bytes = whatsapp.downloadMedia(info).get(DOWNLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return null;
@@ -347,7 +357,7 @@ public final class WhatsAppMediaDownloader {
 
     /** Write the decrypted bytes into the agent's staging dir under a fresh UUID
      *  leaf and return the {@link AttachmentService.Input} the runner finalizes. */
-    private static AttachmentService.Input stage(
+    private static AttachmentService.@Nullable Input stage(
             byte[] bytes, WhatsAppInboundMessage.PendingMedia part, String agentName) {
         var uuid = UUID.randomUUID().toString();
         var extension = extensionFor(part);
@@ -377,7 +387,7 @@ public final class WhatsAppMediaDownloader {
         return mime != null ? MIME_EXT.getOrDefault(mime.toLowerCase(Locale.ROOT), "") : "";
     }
 
-    private static String kindFor(String mime) {
+    private static String kindFor(@Nullable String mime) {
         return MessageAttachment.kindForMime(mime);
     }
 }

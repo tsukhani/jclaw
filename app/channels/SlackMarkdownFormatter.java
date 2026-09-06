@@ -27,6 +27,7 @@ import com.vladsch.flexmark.ext.tables.TablesExtension;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -207,7 +208,7 @@ public final class SlackMarkdownFormatter {
             out.append('\n');
         }
 
-        List<String> collectHeaderLabels(TableHead head) {
+        List<String> collectHeaderLabels(@Nullable TableHead head) {
             List<String> labels = new ArrayList<>();
             if (head == null) return labels;
             for (Node row = head.getFirstChild(); row != null; row = row.getNext()) {

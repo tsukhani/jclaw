@@ -6,6 +6,7 @@ import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
@@ -113,7 +114,7 @@ public final class TelegramModelSelector {
      * by the providers keyboard to render the {@code ✓} checkmark on the
      * matching row.
      */
-    public static String currentProviderName(Agent agent, Conversation conversation) {
+    public static @Nullable String currentProviderName(Agent agent, Conversation conversation) {
         return ModelOverrideResolver.provider(conversation, agent);
     }
 
@@ -128,7 +129,7 @@ public final class TelegramModelSelector {
      * case {@link slash.Commands#executeModel} wouldn't route here at all,
      * but the guard makes the API robust to unexpected callers).
      */
-    public static String botTokenForAgent(Agent agent) {
+    public static @Nullable String botTokenForAgent(Agent agent) {
         if (agent == null) return null;
         return Tx.run(() -> {
             var binding = TelegramBinding.findByAgentOrAncestor(agent);

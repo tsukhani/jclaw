@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.EventLogger;
 
@@ -59,7 +60,7 @@ public final class TelegramForwardCoalesceBuffer {
     private static final class Bucket {
         final StringBuilder text = new StringBuilder();
         final List<PendingAttachment> attachments = new ArrayList<>();
-        InboundMessage firstMessage;
+        @Nullable InboundMessage firstMessage;
     }
 
     private static final IdleDebounceBuffer<Bucket> BUFFER = new IdleDebounceBuffer<>(
@@ -100,7 +101,7 @@ public final class TelegramForwardCoalesceBuffer {
         return true;
     }
 
-    private static InboundMessage merge(Bucket bucket) {
+    private static @Nullable InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
         if (first == null) return null;
         // A forwarded album arrives here, not on the media-group lane, so the

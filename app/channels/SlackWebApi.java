@@ -73,7 +73,7 @@ public final class SlackWebApi {
      *  list call failed), and the Slack API {@code error} code (e.g. {@code missing_scope}) when the
      *  {@code conversations.list} call itself failed, else null. Lets the delivery + advisory paths
      *  tell "no such channel / bot not in it" apart from "the bot can't even list channels". */
-    public record ChannelLookup(ChannelInfo channel, String error) {
+    public record ChannelLookup(@Nullable ChannelInfo channel, @Nullable String error) {
         static final ChannelLookup NOT_FOUND = new ChannelLookup(null, null);
         static ChannelLookup found(ChannelInfo c) { return new ChannelLookup(c, null); }
         static ChannelLookup failed(String error) { return new ChannelLookup(null, error); }
@@ -92,7 +92,7 @@ public final class SlackWebApi {
     /** Resolution of a Slack delivery target (JCLAW-458): the {@code channelId} (null when it
      *  couldn't be resolved) plus the Slack {@code error} code on failure ({@code missing_scope}
      *  when the bot can't list channels, else {@code channel_not_found}). */
-    public record ChannelResolution(String channelId, String error) {}
+    public record ChannelResolution(@Nullable String channelId, @Nullable String error) {}
 
     /** Test seam (JCLAW-1018): the {@code conversations.open} user→DM lookup, swappable so unit tests
      *  resolve DMs without the network — mirrors {@link ChannelLister}. */
@@ -132,7 +132,7 @@ public final class SlackWebApi {
     }
 
     /** JCLAW-454: id-only convenience over {@link #resolveChannel} — the channel id, or null. */
-    public static String resolveChannelId(String botToken, String target) {
+    public static @Nullable String resolveChannelId(String botToken, String target) {
         return resolveChannel(botToken, target).channelId();
     }
 
@@ -203,7 +203,7 @@ public final class SlackWebApi {
     /** Find a channel by case-insensitive name in one {@code conversations.list} page; null if not
      *  present in this page. Extracted from {@link #lookupChannelByNameLive} to keep it under the
      *  cognitive-complexity bound (Sonar S3776). */
-    private static ChannelInfo matchByName(List<Conversation> channels, String name) {
+    private static @Nullable ChannelInfo matchByName(List<Conversation> channels, String name) {
         if (channels == null) return null;
         for (var ch : channels) {
             if (name.equalsIgnoreCase(ch.getName())) {
@@ -220,12 +220,12 @@ public final class SlackWebApi {
      *  {@code groups:read} is absent) or null when the list call succeeds. */
     @FunctionalInterface
     public interface ScopeProber {
-        String listError(String botToken);
+        @Nullable String listError(String botToken);
     }
 
     static ScopeProber scopeProber = SlackWebApi::probeListScopeLive;
 
-    private static String probeListScopeLive(String botToken) {
+    private static @Nullable String probeListScopeLive(String botToken) {
         try {
             var resp = slack.methods(botToken).conversationsList(r -> r
                     .types(List.of(ConversationType.PUBLIC_CHANNEL, ConversationType.PRIVATE_CHANNEL))
@@ -242,7 +242,7 @@ public final class SlackWebApi {
      * to a channel the bot is already a member of is unaffected, so this is advisory only. Surfaced at
      * binding create/update time because {@code auth.test} validates the token but not its scopes.
      */
-    public static String deliveryScopeWarning(String botToken) {
+    public static @Nullable String deliveryScopeWarning(String botToken) {
         if (botToken == null || botToken.isBlank()) return null;
         String err;
         try {
@@ -276,7 +276,7 @@ public final class SlackWebApi {
     }
 
     /** A reachability verdict plus the human advisory to surface (null when no action is needed). */
-    public record SlackReachability(SlackReach status, String channel, String advisory) {
+    public record SlackReachability(SlackReach status, String channel, @Nullable String advisory) {
         public boolean needsAttention() {
             return status == SlackReach.PUBLIC_NOT_MEMBER || status == SlackReach.UNRESOLVED
                     || status == SlackReach.MISSING_SCOPE;
@@ -355,8 +355,8 @@ public final class SlackWebApi {
      * interactive surface. Used by {@link SlackApprovalService} (JCLAW-350) to post
      * the exec-approval prompt with approve/deny buttons.
      */
-    public static String postMessageWithBlocks(String botToken, String channelId, @Nullable String threadTs,
-                                               String fallbackText, List<LayoutBlock> blocks) {
+    public static @Nullable String postMessageWithBlocks(String botToken, String channelId, @Nullable String threadTs,
+                                                         String fallbackText, List<LayoutBlock> blocks) {
         if (botToken == null || botToken.isBlank()) return null;
         try {
             var resp = slack.methods(botToken).chatPostMessage(r -> r
@@ -389,8 +389,8 @@ public final class SlackWebApi {
      * bot-loop guard, JCLAW-357, and surfaced in the Channels UI), or the Slack
      * error string when the token is bad/revoked.
      */
-    public record AuthTestResult(boolean ok, String botUserId, String teamId,
-                                 String teamName, String error) {}
+    public record AuthTestResult(boolean ok, @Nullable String botUserId, @Nullable String teamId,
+                                 @Nullable String teamName, @Nullable String error) {}
 
     /**
      * Validate a bot token against Slack's {@code auth.test}. A bad or revoked

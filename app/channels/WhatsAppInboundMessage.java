@@ -1,5 +1,7 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 
 /**
@@ -36,15 +38,15 @@ public record WhatsAppInboundMessage(
         String from,
         String chatId,
         String chatType,
-        String phoneNumberId,
+        @Nullable String phoneNumberId,
         MessageType type,
-        String text,
-        Location location,
-        Reaction reaction,
+        @Nullable String text,
+        @Nullable Location location,
+        @Nullable Reaction reaction,
         List<PendingMedia> media,
         boolean botMentioned,
-        String quotedMessageId,
-        String senderDisplayName
+        @Nullable String quotedMessageId,
+        @Nullable String senderDisplayName
 ) {
 
     /** A one-on-one chat. */
@@ -55,11 +57,12 @@ public record WhatsAppInboundMessage(
     public enum MessageType { TEXT, IMAGE, AUDIO, VIDEO, DOCUMENT, STICKER, LOCATION, REACTION }
 
     /** A shared location pin. */
-    public record Location(double latitude, double longitude, String name, String address) {}
+    public record Location(double latitude, double longitude,
+                           @Nullable String name, @Nullable String address) {}
 
     /** An emoji reaction on an earlier message; {@code emoji} is blank when the
      *  reaction was removed. */
-    public record Reaction(String targetMessageId, String emoji) {}
+    public record Reaction(@Nullable String targetMessageId, String emoji) {}
 
     /**
      * Media metadata only — the bytes are NOT loaded here. Download is deferred to
@@ -72,8 +75,8 @@ public record WhatsAppInboundMessage(
      * @param filename  document filename; null for images/audio
      * @param voiceNote true for a push-to-talk audio note
      */
-    public record PendingMedia(String mediaId, String mimeType, long sizeBytes,
-                               String filename, boolean voiceNote) {}
+    public record PendingMedia(String mediaId, @Nullable String mimeType, long sizeBytes,
+                               @Nullable String filename, boolean voiceNote) {}
 
     /** True when this message originated in a group context. */
     public boolean isGroup() {

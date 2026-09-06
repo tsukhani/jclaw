@@ -3,6 +3,7 @@ package channels;
 import models.MessageAttachment;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
@@ -127,7 +128,7 @@ public final class SlackFileDownloader {
 
     /** Sealed result of a single fetch leg (recursed once for a CDN redirect). */
     private sealed interface FetchResult permits FetchOk, FetchFailed, FetchSize {}
-    private record FetchOk(String contentType, long sizeBytes) implements FetchResult {}
+    private record FetchOk(@Nullable String contentType, long sizeBytes) implements FetchResult {}
     private record FetchFailed(String reason) implements FetchResult {}
     private record FetchSize(long actualBytes) implements FetchResult {}
 
@@ -198,7 +199,8 @@ public final class SlackFileDownloader {
      * (an mp4 container); remap the prefix to {@code audio/} so the transcription
      * path picks them up.
      */
-    static String effectiveMime(String subtype, String declaredMime, String fetchedContentType) {
+    static String effectiveMime(String subtype, String declaredMime,
+                                @Nullable String fetchedContentType) {
         String mime = (fetchedContentType != null && !fetchedContentType.isBlank())
                 ? stripParams(fetchedContentType)
                 : declaredMime;

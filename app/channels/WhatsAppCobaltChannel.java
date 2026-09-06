@@ -9,6 +9,7 @@ import it.auties.whatsapp.model.message.standard.DocumentMessageSimpleBuilder;
 import it.auties.whatsapp.model.message.standard.ImageMessage;
 import it.auties.whatsapp.model.message.standard.ImageMessageSimpleBuilder;
 import models.WhatsAppBinding;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import utils.HttpKeys;
 import utils.TikaHolder;
@@ -61,7 +62,7 @@ public final class WhatsAppCobaltChannel implements Channel {
 
     /** The channel for {@code binding}'s live WhatsApp-Web session. Resolution of
      *  the actual socket is deferred to call time via the runner. */
-    public static WhatsAppCobaltChannel forBinding(WhatsAppBinding binding) {
+    public static @Nullable WhatsAppCobaltChannel forBinding(WhatsAppBinding binding) {
         return binding == null ? null : new WhatsAppCobaltChannel(binding.id);
     }
 
@@ -135,8 +136,8 @@ public final class WhatsAppCobaltChannel implements Channel {
      *  the {@code com.aspose.words} shim (JCLAW-451) ever absent, Cobalt's media builder
      *  would fail to link, and we degrade to a logged null ({@link SendResult#FAILED})
      *  rather than let an {@link Error} escape the send. */
-    private static ImageMessage buildImage(
-            byte[] bytes, String mime, String caption) {
+    private static @Nullable ImageMessage buildImage(
+            byte[] bytes, String mime, @Nullable String caption) {
         try {
             return new ImageMessageSimpleBuilder()
                     .media(bytes).mimeType(mime).caption(caption).build();
@@ -148,8 +149,8 @@ public final class WhatsAppCobaltChannel implements Channel {
 
     /** Build an outbound document message; same shim-backed media path + defensive
      *  linkage guard as {@link #buildImage}. */
-    private static DocumentMessage buildDocument(
-            byte[] bytes, String fileName, String mime, String title) {
+    private static @Nullable DocumentMessage buildDocument(
+            byte[] bytes, String fileName, String mime, @Nullable String title) {
         try {
             return new DocumentMessageSimpleBuilder()
                     .media(bytes).fileName(fileName).mimeType(mime).title(title).build();
@@ -214,13 +215,13 @@ public final class WhatsAppCobaltChannel implements Channel {
 
     /** The connected Cobalt handle for this binding, or null when no live,
      *  connected session exists. */
-    private Whatsapp liveSession() {
+    private @Nullable Whatsapp liveSession() {
         var session = WhatsAppCobaltRunner.session(bindingId);
         if (session == null || !session.isConnected()) return null;
         return session.whatsapp();
     }
 
-    private static Jid toJid(String peerId) {
+    private static @Nullable Jid toJid(String peerId) {
         if (peerId == null || peerId.isBlank()) return null;
         try {
             return Jid.of(peerId);
@@ -237,7 +238,7 @@ public final class WhatsAppCobaltChannel implements Channel {
         }
     }
 
-    private static String blankToNull(String s) {
+    private static @Nullable String blankToNull(String s) {
         return s == null || s.isBlank() ? null : s;
     }
 }

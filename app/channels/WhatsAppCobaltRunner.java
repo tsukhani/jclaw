@@ -2,6 +2,7 @@ package channels;
 
 import models.WhatsAppBinding;
 import models.WhatsAppTransport;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 
@@ -82,7 +83,7 @@ public final class WhatsAppCobaltRunner {
 
     /** The latest pending QR string for a binding (awaiting a scan), or null when
      *  none is pending (not yet generated, or already paired). */
-    public static String pendingQr(Long bindingId) {
+    public static @Nullable String pendingQr(Long bindingId) {
         return PENDING_QR.get(bindingId);
     }
 
@@ -98,7 +99,7 @@ public final class WhatsAppCobaltRunner {
      * {@link WhatsAppCobaltChannel} to resolve the Cobalt handle for outbound send
      * and by {@link WhatsAppMediaDownloader} to pull inbound media bytes.
      */
-    public static WhatsAppCobaltSession session(Long bindingId) {
+    public static @Nullable WhatsAppCobaltSession session(Long bindingId) {
         return bindingId == null ? null : HANDLES.get(bindingId);
     }
 
@@ -146,7 +147,7 @@ public final class WhatsAppCobaltRunner {
         }
     }
 
-    private static String agentName(WhatsAppBinding binding) {
+    private static @Nullable String agentName(WhatsAppBinding binding) {
         return binding != null && binding.agent != null ? binding.agent.name : null;
     }
 }

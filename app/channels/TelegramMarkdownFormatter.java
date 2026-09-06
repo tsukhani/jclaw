@@ -352,7 +352,7 @@ public final class TelegramMarkdownFormatter {
             return (long) rows * perRow <= HEADER_REPEAT_BUDGET_CHARS;
         }
 
-        private List<String> collectHeaderLabels(TableHead head) {
+        private List<String> collectHeaderLabels(@Nullable TableHead head) {
             List<String> labels = new ArrayList<>();
             if (head == null) return labels;
             // Only the first TableRow matters.

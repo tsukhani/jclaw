@@ -118,7 +118,8 @@ public final class SlackApprovalService {
      * @param fromId     Slack user id of the tapper
      * @return a {@link Resolution} describing what happened
      */
-    public static Resolution resolve(String approvalId, SlackApprovalCallback.Decision decision, String fromId) {
+    public static Resolution resolve(String approvalId, SlackApprovalCallback.Decision decision,
+                                     @Nullable String fromId) {
         var r = REGISTRY.resolve(approvalId, decision, fromId);
         return new Resolution(r.resolved(), r.outcome(), r.userMessage());
     }
@@ -195,7 +196,7 @@ public final class SlackApprovalService {
                 .build();
     }
 
-    private static ButtonElement button(String label, String actionId, String style) {
+    private static ButtonElement button(String label, String actionId, @Nullable String style) {
         var b = ButtonElement.builder()
                 .text(PlainTextObject.builder().text(label).emoji(true).build())
                 .actionId(actionId);

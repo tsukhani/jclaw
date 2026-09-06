@@ -18,6 +18,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import models.Agent;
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import play.Play;
 import play.mvc.Controller;
@@ -409,7 +410,8 @@ public class WebhookTelegramController extends Controller {
      * Falls back to {@code defaultAgent} if the binding can't be found (e.g.
      * removed between receive and dispatch).
      */
-    private static Agent resolveTopicAgent(String botToken, String chatId, Integer threadId, Agent defaultAgent) {
+    private static Agent resolveTopicAgent(String botToken, String chatId, @Nullable Integer threadId,
+                                           Agent defaultAgent) {
         return Tx.run(() -> {
             TelegramBinding binding = TelegramBinding.findByBotToken(botToken);
             if (binding == null) return defaultAgent;

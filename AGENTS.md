@@ -324,28 +324,44 @@ close — the Gradle compile is the single place a javac plugin can see this cod
 layering Spotless uses.
 
 **What is in scope.** The `NullAway:AnnotatedPackages` option in `build.gradle.kts` lists
-`utils`, `llm`, `agents`, `tools`, `services`, `controllers`, `jobs` and `slash`; every package
-and subpackage under those roots carries a `package-info.java` with `@NullMarked`.
+`utils`, `llm`, `agents`, `tools`, `services`, `controllers`, `channels`, `jobs` and `slash` —
+every package under `app/` except one. Each carries a `package-info.java` with `@NullMarked`, and
+so must every subpackage, since the annotation does not inherit.
 
-Two packages are out, for different reasons. `models` is excluded permanently: JPA populates
-entity fields reflectively after construction, so every non-null column would report as
-uninitialised. `channels` is excluded for now, and that is a measured deferral rather than an
-omission — see below.
+**`models` is the only exclusion, and it is permanent.** JPA populates entity fields reflectively
+after construction, so every non-null column would report as uninitialised. Nothing else in
+`app/` is exempt, which is what stops a null contract going unchecked simply because the caller
+sat in an unannotated package.
 
-JCLAW-1149 originally stopped at the first five, and JCLAW-1160 widened it to `controllers`,
-`jobs` and `slash` because that gap was itself the defect. A parameter whose only null-passing
-caller lived in one of them was left non-null and nothing objected, so the declaration was a lie
-no gate could catch; one of them, a null printer protocol reaching `defaultPort()`, had been
-500ing the settings page for two months.
+Getting there took three stories. JCLAW-1149 covered the first five. JCLAW-1160 added
+`controllers`, `jobs` and `slash`, because that gap was itself the defect: a parameter whose only
+null-passing caller lived in one of them was declared non-null and nothing objected, so the
+declaration was a lie no gate could catch. One of those, a null printer protocol reaching
+`defaultPort()`, had been 500ing the settings page for two months. JCLAW-1161 finished the job
+with `channels`.
 
-**Measure the widening before you attempt it, and raise javac's error cap first.** `-Xmaxerrs`
+**Measure a widening before attempting it, and raise javac's error cap first.** `-Xmaxerrs`
 defaults to 100, so an unmodified `./gradlew compileJava` reports exactly 100 and stops — a count
-that looks like a total and is not. Measured properly (`-Xmaxerrs 5000` via an init script), the
-four candidate packages hold **581** violations: `channels` 414, `controllers` 164, `agents` 3.
-The truncated run showed `channels` contributing zero, the precise opposite of the truth, because
-javac stopped before reaching it. JCLAW-1160 took `controllers`, `jobs` and `slash`; `channels`
-is deferred because 414 violations concentrated in the WhatsApp, Slack and Telegram parsers is
-its own piece of work, and it is the most externally-coupled code in the tree.
+that looks like a total and is not. The truncation is in compilation order, so whole packages can
+read as clean: the first measurement for JCLAW-1160 showed `channels` contributing **zero** when
+it in fact held **414** of the 581 violations across the four candidate packages. The tell was
+that the count sat at exactly 100 across three fix-and-recompile rounds. Measure with an init
+script instead:
+
+```kotlin
+allprojects { tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.addAll(listOf("-Xmaxerrs", "5000")) } }
+```
+```bash
+./gradlew compileJava --console=plain -I <path-to-that-script>
+```
+
+**What the `channels` widening taught (JCLAW-1161).** In the wire layer a null almost always
+means "the provider omitted this field", so annotate for the **provider's documented message
+shape**, not for what the current happy path produces. A Telegram `Message` carries no `text`
+when it is a photo; a Slack event has no `thread_ts` outside a thread; a Meta Cloud API webhook
+makes `messages[]`, `caption` and `context` all conditional. A false `@Nullable` costs one guard;
+a false non-null costs a production NPE on the first unusual payload.
 
 **To widen it.** Add the package name to the `AnnotatedPackages` option, add a
 `package-info.java` carrying `@NullMarked` to that package *and to each of its subpackages*

@@ -3,6 +3,7 @@ package channels;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.JsonArgs;
@@ -50,7 +51,7 @@ public final class WhatsAppCloudApiProbe {
      * @param displayNumber the human-readable {@code display_phone_number} (may
      *                      be null if Meta omitted it)
      */
-    public record Verified(String verifiedName, String displayNumber) implements Result {}
+    public record Verified(String verifiedName, @Nullable String displayNumber) implements Result {}
 
     /** The probe failed — bad token, wrong number id, unverified number, or a
      *  network error. {@code reason} is the Graph error message (or a transport
@@ -69,7 +70,7 @@ public final class WhatsAppCloudApiProbe {
      * {@code FunctionalTest}s driving a controller, and a {@code ScopedValue}
      * binding does not reach Play's request thread.
      */
-    private static volatile BiFunction<String, String, Result> testOverride;
+    private static volatile @Nullable BiFunction<String, String, Result> testOverride;
 
     /** Install a canned probe result for tests. */
     public static void installForTest(BiFunction<String, String, Result> override) {

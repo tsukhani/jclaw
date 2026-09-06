@@ -7,6 +7,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -62,10 +63,11 @@ public final class SlackFileUploader {
     /** The three Slack ops, injectable so tests avoid the API + network. Public so
      *  the default-package test can supply a fake; swapped via the {@code IMPL} seam. */
     public interface Uploader {
-        UploadUrl getUploadUrl(String botToken, String filename, long length);
+        @Nullable UploadUrl getUploadUrl(String botToken, String filename, long length);
         boolean postBytes(String uploadUrl, File file, String contentType);
-        boolean completeUpload(String botToken, String fileId, String title,
-                               String channelId, String initialComment, String threadTs);
+        boolean completeUpload(@Nullable String botToken, String fileId, String title,
+                               String channelId, @Nullable String initialComment,
+                               @Nullable String threadTs);
     }
 
     static Uploader IMPL = liveUploader();
@@ -76,8 +78,8 @@ public final class SlackFileUploader {
      * optional {@code caption} into the optional {@code threadTs}. Best-effort: every
      * failure is logged and returns false; never throws.
      */
-    public static boolean upload(String botToken, String peerId, String threadTs,
-                                 File file, String displayName, String caption) {
+    public static boolean upload(@Nullable String botToken, String peerId, @Nullable String threadTs,
+                                 @Nullable File file, String displayName, @Nullable String caption) {
         if (botToken == null || botToken.isBlank() || file == null || !file.isFile()) {
             return false;
         }
@@ -130,7 +132,7 @@ public final class SlackFileUploader {
     private static Uploader liveUploader() {
         return new Uploader() {
             @Override
-            public UploadUrl getUploadUrl(String botToken, String filename, long length) {
+            public @Nullable UploadUrl getUploadUrl(String botToken, String filename, long length) {
                 try {
                     var resp = slack.methods(botToken)
                             .filesGetUploadURLExternal(r -> r.filename(filename).length((int) length));
@@ -163,8 +165,9 @@ public final class SlackFileUploader {
             }
 
             @Override
-            public boolean completeUpload(String botToken, String fileId, String title,
-                                          String channelId, String initialComment, String threadTs) {
+            public boolean completeUpload(@Nullable String botToken, String fileId, String title,
+                                          String channelId, @Nullable String initialComment,
+                                          @Nullable String threadTs) {
                 try {
                     var detail = FilesCompleteUploadExternalRequest.FileDetails.builder()
                             .id(fileId).title(title).build();

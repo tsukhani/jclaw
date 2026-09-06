@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
 
@@ -116,7 +117,7 @@ public final class TelegramOutboundPlanner {
      * @param items   2–10 foreground PHOTO/VIDEO segments, in order
      * @param caption prose to attach to the album (first item); null when none
      */
-    public record MediaGroupSegment(List<FileSegment> items, String caption) implements Segment {}
+    public record MediaGroupSegment(List<FileSegment> items, @Nullable String caption) implements Segment {}
 
     /**
      * File segment dispatched via the matching {@code trySend*} method per
@@ -144,7 +145,7 @@ public final class TelegramOutboundPlanner {
      *                     sent as a separate message; {@code null} when none.
      */
     public record FileSegment(String displayName, File file, boolean isImage, boolean isBackground,
-                              MediaKind kind, String caption) implements Segment {
+                              MediaKind kind, @Nullable String caption) implements Segment {
 
         /** Convenience constructor for the no-caption case. */
         public FileSegment(String displayName, File file, boolean isImage, boolean isBackground, MediaKind kind) {
@@ -152,7 +153,7 @@ public final class TelegramOutboundPlanner {
         }
 
         /** Return a copy of this segment with {@code newCaption} attached. */
-        public FileSegment withCaption(String newCaption) {
+        public FileSegment withCaption(@Nullable String newCaption) {
             return new FileSegment(displayName, file, isImage, isBackground, kind, newCaption);
         }
     }
@@ -319,7 +320,7 @@ public final class TelegramOutboundPlanner {
      * consumed, or {@code null} when the match should be left in the
      * surrounding text. Mutates {@code segments} and {@code seenFiles}.
      */
-    private static Integer processMatch(Matcher matcher, String markdown, String agentName,
+    private static @Nullable Integer processMatch(Matcher matcher, String markdown, String agentName,
                                          List<Segment> segments, int cursor,
                                          Set<String> seenFiles) {
         // Either the angle-bracket branch or the plain-form branch fired;
@@ -370,7 +371,7 @@ public final class TelegramOutboundPlanner {
      * if the target can't be delivered (external URL, anchor, foreign absolute
      * path). Returns the same string for already-relative paths.
      */
-    private static String extractWorkspaceRelative(String path) {
+    private static @Nullable String extractWorkspaceRelative(String path) {
         // External URLs and in-page anchors aren't workspace files — leave
         // them inside the surrounding text so the formatter renders them
         // as normal links.
@@ -405,7 +406,7 @@ public final class TelegramOutboundPlanner {
      * any reason the path can't be delivered — not found, rejected, or resolution
      * threw. The caller falls back to emitting the original markdown text.
      */
-    private static File resolveWorkspaceFile(String agentName, String relativePath) {
+    private static @Nullable File resolveWorkspaceFile(String agentName, String relativePath) {
         try {
             var path = AgentService.acquireWorkspacePath(agentName, relativePath);
             var file = path.toFile();

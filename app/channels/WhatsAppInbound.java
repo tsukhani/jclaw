@@ -3,8 +3,11 @@ package channels;
 import agents.AgentRunner;
 import models.Agent;
 import models.WhatsAppBinding;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
+
+import java.util.Objects;
 
 /**
  * Shared WhatsApp inbound dispatch (JCLAW-446/450), independent of how the message
@@ -104,7 +107,10 @@ public final class WhatsAppInbound {
 
             var attachments = WhatsAppMediaDownloader.downloadAll(binding, msg, agent.name);
             var peerId = conversationPeerId(msg);
-            var text = senderAttributed(msg);
+            // A caption-less media message carries no text. Telegram's parser already
+            // normalises that to "" before dispatch; WhatsApp was the only transport
+            // handing the agent pipeline a null (JCLAW-1161).
+            var text = Objects.requireNonNullElse(senderAttributed(msg), "");
             AgentRunner.processInboundForAgentStreaming(
                     agent, CHANNEL_WHATSAPP, peerId, text,
                     _ -> new WhatsAppStreamingSink(channel, peerId, agent),
@@ -131,7 +137,7 @@ public final class WhatsAppInbound {
      * in a shared group conversation. No-op for a DM or blank text. The local
      * analog of {@link AgentRunner#telegramSenderAttributed}.
      */
-    public static String senderAttributed(WhatsAppInboundMessage msg) {
+    public static @Nullable String senderAttributed(WhatsAppInboundMessage msg) {
         var text = msg.text();
         if (!msg.isGroup() || text == null || text.isEmpty()) {
             return text;

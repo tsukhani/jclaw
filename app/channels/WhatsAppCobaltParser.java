@@ -14,6 +14,7 @@ import it.auties.whatsapp.model.message.standard.ReactionMessage;
 import it.auties.whatsapp.model.message.standard.StickerMessage;
 import it.auties.whatsapp.model.message.standard.TextMessage;
 import it.auties.whatsapp.model.message.standard.VideoOrGifMessage;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.Optional;
@@ -62,7 +63,8 @@ public final class WhatsAppCobaltParser {
      *  independent of its content type — bundled so the per-type builders stay
      *  under the parameter limit (Sonar S107). */
     private record Envelope(String messageId, String from, String chatId, String chatType,
-            boolean botMentioned, String quotedMessageId, String senderDisplayName) {}
+            boolean botMentioned, @Nullable String quotedMessageId,
+            @Nullable String senderDisplayName) {}
 
     /**
      * Translate one Cobalt {@link ChatMessageInfo} into a normalized
@@ -72,7 +74,7 @@ public final class WhatsAppCobaltParser {
      * when unknown (group mentions then never match, which is the safe default —
      * the access gate simply ignores the message rather than over-serving it).
      */
-    public static WhatsAppInboundMessage parse(ChatMessageInfo info, Jid botJid) {
+    public static @Nullable WhatsAppInboundMessage parse(ChatMessageInfo info, @Nullable Jid botJid) {
         if (info == null) return null;
         var container = info.message();
         if (container == null || container.isEmpty()) return null;
@@ -124,7 +126,7 @@ public final class WhatsAppCobaltParser {
      *  Returns null for everything we don't handle (protocol, payment, poll,
      *  buttons, …) so the parser drops them. Public for the default-package test
      *  seam. */
-    public static MessageType mapType(Message.Type type) {
+    public static @Nullable MessageType mapType(Message.Type type) {
         if (type == null) return null;
         return switch (type) {
             case TEXT -> MessageType.TEXT;
@@ -160,7 +162,7 @@ public final class WhatsAppCobaltParser {
 
     private static WhatsAppInboundMessage reactionMessage(
             String messageId, String from, String chatId, String chatType,
-            Message content, String senderDisplayName) {
+            Message content, @Nullable String senderDisplayName) {
         WhatsAppInboundMessage.Reaction reaction = null;
         if (content instanceof ReactionMessage rm) {
             var targetId = rm.key() != null ? rm.key().id() : null;
@@ -183,7 +185,7 @@ public final class WhatsAppCobaltParser {
 
     /** The caption that rides with a media message (image/video/document), or
      *  null for audio/sticker which carry none. */
-    static String mediaCaption(Message content) {
+    static @Nullable String mediaCaption(Message content) {
         return switch (content) {
             case ImageMessage im -> im.caption().orElse(null);
             case VideoOrGifMessage vm -> vm.caption().orElse(null);
@@ -209,7 +211,7 @@ public final class WhatsAppCobaltParser {
                 messageId, mime, 0L, filename, voiceNote));
     }
 
-    private static String mediaMime(Message content) {
+    private static @Nullable String mediaMime(Message content) {
         return switch (content) {
             case ImageMessage im -> im.mimetype().orElse(null);
             case VideoOrGifMessage vm -> vm.mimetype().orElse(null);
@@ -222,7 +224,7 @@ public final class WhatsAppCobaltParser {
 
     /** Sender display name for group attribution: prefer the per-message push
      *  name, fall back to the resolved store contact's name, else null. */
-    static String displayName(ChatMessageInfo info) {
+    static @Nullable String displayName(ChatMessageInfo info) {
         var push = info.pushName().filter(s -> !s.isBlank()).orElse(null);
         if (push != null) return push;
         var name = info.senderName();
@@ -230,7 +232,7 @@ public final class WhatsAppCobaltParser {
     }
 
     /** The quoted/replied-to message id when this message is a reply, else null. */
-    static String quotedId(Message content) {
+    static @Nullable String quotedId(Message content) {
         return contextInfo(content)
                 .flatMap(ContextInfo::quotedMessageId)
                 .orElse(null);
@@ -238,7 +240,7 @@ public final class WhatsAppCobaltParser {
 
     /** True when {@code botJid} appears in the message's mentioned JIDs. The bot
      *  is "addressed" in a group only by an explicit @-mention. */
-    static boolean mentionsBot(Message content, Jid botJid) {
+    static boolean mentionsBot(Message content, @Nullable Jid botJid) {
         if (botJid == null) return false;
         return contextInfo(content)
                 .map(ctx -> mentionsContain(ctx, botJid))

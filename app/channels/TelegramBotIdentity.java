@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
@@ -46,7 +47,7 @@ public final class TelegramBotIdentity {
      * @param username the bot's {@code @}-handle (without the leading {@code @}),
      *                 or null when {@code getMe} failed or returned no username
      */
-    public record Identity(Long userId, String username) {}
+    public record Identity(@Nullable Long userId, @Nullable String username) {}
 
     private TelegramBotIdentity() {}
 
@@ -91,7 +92,7 @@ public final class TelegramBotIdentity {
     }
 
     /** Numeric prefix before the first {@code ':'} in a {@code <bot_id>:<hash>} token, or null. */
-    private static Long userIdFromToken(String botToken) {
+    private static @Nullable Long userIdFromToken(String botToken) {
         int colon = botToken.indexOf(':');
         if (colon <= 0) return null;
         try {
@@ -102,7 +103,7 @@ public final class TelegramBotIdentity {
     }
 
     /** {@code getMe} the bot's username; null on any failure (logged at warn). */
-    private static String fetchUsername(String botToken) {
+    private static @Nullable String fetchUsername(String botToken) {
         try {
             User me = TelegramChannel.forToken(botToken).client()
                     .execute(GetMe.builder().build());

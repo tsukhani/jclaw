@@ -1,6 +1,7 @@
 package channels;
 
 import channels.Channel.SendResult;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.methods.send.SendAudio;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMediaGroup;
@@ -48,7 +49,7 @@ final class TelegramMediaSender {
      * Integer, String)} (no reply/topic context) so a caller routing through the
      * uniform interface still uploads via the dedicated upload client.
      */
-    SendResult sendPhoto(String peerId, File file, String caption) {
+    SendResult sendPhoto(String peerId, File file, @Nullable String caption) {
         if (file == null) return SendResult.FAILED;
         return trySendPhoto(peerId, file, file.getName(), null, null, caption)
                 ? SendResult.OK : SendResult.FAILED;
@@ -59,7 +60,7 @@ final class TelegramMediaSender {
      * Delegates to {@link #trySendDocument(String, java.io.File, String,
      * ReplyParameters, Integer, String)} (no reply/topic context).
      */
-    SendResult sendDocument(String peerId, File file, String caption) {
+    SendResult sendDocument(String peerId, File file, @Nullable String caption) {
         if (file == null) return SendResult.FAILED;
         return trySendDocument(peerId, file, file.getName(), null, null, caption)
                 ? SendResult.OK : SendResult.FAILED;
@@ -86,7 +87,7 @@ final class TelegramMediaSender {
      * overload with a null caption.
      */
     boolean trySendPhoto(String peerId, File file, String displayName,
-                         ReplyParameters replyParams, Integer messageThreadId) {
+                         @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return trySendPhoto(peerId, file, displayName, replyParams, messageThreadId, null);
     }
 
@@ -98,7 +99,8 @@ final class TelegramMediaSender {
      * {@link #trySendPhoto(String, java.io.File, String, ReplyParameters, Integer)}.
      */
     boolean trySendPhoto(String peerId, File file, String displayName,
-                         ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                         @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId,
+                         @Nullable String caption) {
         var builder = SendPhoto.builder()
                 .chatId(peerId)
                 .photo(new InputFile(file, displayName != null ? displayName : file.getName()));
@@ -128,7 +130,7 @@ final class TelegramMediaSender {
      * overload with a null caption.
      */
     boolean trySendDocument(String peerId, File file, String displayName,
-                            ReplyParameters replyParams, Integer messageThreadId) {
+                            @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return trySendDocument(peerId, file, displayName, replyParams, messageThreadId, null);
     }
 
@@ -138,7 +140,8 @@ final class TelegramMediaSender {
      * {@link #trySendDocument(String, java.io.File, String, ReplyParameters, Integer)}.
      */
     boolean trySendDocument(String peerId, File file, String displayName,
-                            ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                            @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId,
+                            @Nullable String caption) {
         var builder = SendDocument.builder()
                 .chatId(peerId)
                 .document(new InputFile(file, displayName != null ? displayName : file.getName()));
@@ -168,13 +171,14 @@ final class TelegramMediaSender {
 
     /** Reply/topic-aware voice upload; delegates with a null caption. */
     boolean trySendVoice(String peerId, File file, String displayName,
-                         ReplyParameters replyParams, Integer messageThreadId) {
+                         @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return trySendVoice(peerId, file, displayName, replyParams, messageThreadId, null);
     }
 
     /** Caption-aware voice upload. {@code caption} null/blank to omit. */
     boolean trySendVoice(String peerId, File file, String displayName,
-                         ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                         @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId,
+                         @Nullable String caption) {
         var builder = SendVoice.builder()
                 .chatId(peerId)
                 .voice(new InputFile(file, displayName != null ? displayName : file.getName()));
@@ -192,13 +196,14 @@ final class TelegramMediaSender {
 
     /** Reply/topic-aware audio upload; delegates with a null caption. */
     boolean trySendAudio(String peerId, File file, String displayName,
-                         ReplyParameters replyParams, Integer messageThreadId) {
+                         @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return trySendAudio(peerId, file, displayName, replyParams, messageThreadId, null);
     }
 
     /** Caption-aware audio upload. {@code caption} null/blank to omit. */
     boolean trySendAudio(String peerId, File file, String displayName,
-                         ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                         @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId,
+                         @Nullable String caption) {
         var builder = SendAudio.builder()
                 .chatId(peerId)
                 .audio(new InputFile(file, displayName != null ? displayName : file.getName()));
@@ -216,13 +221,14 @@ final class TelegramMediaSender {
 
     /** Reply/topic-aware video upload; delegates with a null caption. */
     boolean trySendVideo(String peerId, File file, String displayName,
-                         ReplyParameters replyParams, Integer messageThreadId) {
+                         @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return trySendVideo(peerId, file, displayName, replyParams, messageThreadId, null);
     }
 
     /** Caption-aware video upload. {@code caption} null/blank to omit. */
     boolean trySendVideo(String peerId, File file, String displayName,
-                         ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                         @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId,
+                         @Nullable String caption) {
         var builder = SendVideo.builder()
                 .chatId(peerId)
                 .video(new InputFile(file, displayName != null ? displayName : file.getName()));
@@ -251,7 +257,8 @@ final class TelegramMediaSender {
      */
     boolean sendMediaGroup(String peerId,
                            List<TelegramOutboundPlanner.FileSegment> items,
-                           String caption, ReplyParameters replyParams, Integer messageThreadId) {
+                           @Nullable String caption, @Nullable ReplyParameters replyParams,
+                           @Nullable Integer messageThreadId) {
         if (items == null || items.size() < 2 || items.size() > 10) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
                     "sendMediaGroup requires 2-10 items; got %d"
@@ -291,7 +298,8 @@ final class TelegramMediaSender {
     /** Build the album's per-item {@link InputMedia} list. The caption rides the
      *  first item only — Telegram surfaces it as the album caption; subsequent
      *  items carry none. */
-    private List<InputMedia> buildMediaGroupItems(List<TelegramOutboundPlanner.FileSegment> items, String caption) {
+    private List<InputMedia> buildMediaGroupItems(List<TelegramOutboundPlanner.FileSegment> items,
+                                                 @Nullable String caption) {
         var medias = new ArrayList<InputMedia>(items.size());
         for (int i = 0; i < items.size(); i++) {
             var fs = items.get(i);
@@ -311,7 +319,7 @@ final class TelegramMediaSender {
      * multipart body. {@code caption} null to omit.
      */
     private static InputMedia buildInputMedia(
-            TelegramOutboundPlanner.MediaKind kind, File file, String name, String caption) {
+            TelegramOutboundPlanner.MediaKind kind, File file, String name, @Nullable String caption) {
         if (kind == TelegramOutboundPlanner.MediaKind.PHOTO) {
             var b = InputMediaPhoto.builder()
                     .media(file, name);

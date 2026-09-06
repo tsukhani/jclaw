@@ -2,6 +2,7 @@ package channels;
 
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
@@ -54,7 +55,7 @@ public final class TelegramModelKeyboard {
 
     /** Public so {@link TelegramModelSelector} can reuse the same labeling
      *  in body text (Provider line, switch confirmations, etc.). */
-    public static String providerLabel(String registryName) {
+    public static String providerLabel(@Nullable String registryName) {
         if (registryName == null) return "";
         var label = PROVIDER_LABELS.get(registryName);
         return label != null ? label : registryName;
@@ -70,7 +71,8 @@ public final class TelegramModelKeyboard {
      * <p>{@code × Cancel} sits in its own full-width final row — large
      * tap-target away from the provider buttons reduces accidental dismiss.
      */
-    public static InlineKeyboardMarkup providersKeyboard(long conversationId, String currentProviderName) {
+    public static InlineKeyboardMarkup providersKeyboard(long conversationId,
+                                                         @Nullable String currentProviderName) {
         var providers = TelegramModelSelector.userVisibleProviders();
         var builder = InlineKeyboardMarkup.builder();
         var row = new ArrayList<InlineKeyboardButton>();
@@ -165,7 +167,7 @@ public final class TelegramModelKeyboard {
      * button is marked.
      */
     public static InlineKeyboardMarkup modelsKeyboard(long conversationId, int providerIdx, int page,
-                                                      String currentModelId) {
+                                                      @Nullable String currentModelId) {
         var providers = TelegramModelSelector.userVisibleProviders();
         if (providerIdx < 0 || providerIdx >= providers.size()) {
             // Defensive: stale index. Return an empty keyboard so the

@@ -2,6 +2,7 @@ package channels;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import utils.HttpFactories;
 import utils.SsrfGuard;
 
@@ -72,13 +73,13 @@ final class StagedDownload {
     record TooBig(long actualBytes) implements Result {}
 
     /** A 3xx was returned (redirects are not auto-followed); {@code location} may be null. */
-    record Redirect(int code, String location) implements Result {}
+    record Redirect(int code, @Nullable String location) implements Result {}
 
     /** A non-200, non-3xx status. */
     record HttpError(int code) implements Result {}
 
     /** An IO/transport error (the exception message); the partial file was deleted. */
-    record Failed(String message) implements Result {}
+    record Failed(@Nullable String message) implements Result {}
 
     /**
      * Execute {@code request} on {@code client} (the caller's swappable SSRF client)

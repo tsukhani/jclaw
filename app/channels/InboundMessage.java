@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.Update;
 
 import java.util.List;
@@ -15,7 +16,9 @@ import java.util.List;
  *                     {@code "channel"}), recorded for structured logging
  *                     and possible future routing. Nullable when an
  *                     update arrives without chat context.
- * @param text         message body text; may be null for media-only updates
+ * @param text         message body text; empty (never null) for media-only
+ *                     updates — {@code TelegramInboundParser} falls back to
+ *                     the caption and then to {@code ""}
  * @param fromId          sender's Telegram user id (used for binding
  *                        authorization)
  * @param fromUsername    sender's Telegram @-handle if set
@@ -60,15 +63,15 @@ import java.util.List;
  *                        the turn the agent sees; it is NOT part of
  *                        {@code text} so callers can render it distinctly.
  */
-public record InboundMessage(String chatId, String chatType, String text,
-                             String fromId, String fromUsername,
-                             String fromDisplayName, boolean botMentioned,
+public record InboundMessage(String chatId, @Nullable String chatType, String text,
+                             @Nullable String fromId, @Nullable String fromUsername,
+                             @Nullable String fromDisplayName, boolean botMentioned,
                              List<PendingAttachment> attachments,
-                             String mediaGroupId,
-                             Integer messageId, Integer messageThreadId,
-                             String replyContext) {
-    public InboundMessage(String chatId, String chatType, String text,
-                          String fromId, String fromUsername) {
+                             @Nullable String mediaGroupId,
+                             @Nullable Integer messageId, @Nullable Integer messageThreadId,
+                             @Nullable String replyContext) {
+    public InboundMessage(String chatId, @Nullable String chatType, String text,
+                          @Nullable String fromId, @Nullable String fromUsername) {
         this(chatId, chatType, text, fromId, fromUsername, null, false,
                 List.of(), null, null, null, null);
     }
@@ -84,10 +87,10 @@ public record InboundMessage(String chatId, String chatType, String text,
      * message id / thread id to attribute. JCLAW-366: {@code replyContext}
      * defaults to null for the same reason.
      */
-    public InboundMessage(String chatId, String chatType, String text,
-                          String fromId, String fromUsername,
+    public InboundMessage(String chatId, @Nullable String chatType, String text,
+                          @Nullable String fromId, @Nullable String fromUsername,
                           List<PendingAttachment> attachments,
-                          String mediaGroupId) {
+                          @Nullable String mediaGroupId) {
         this(chatId, chatType, text, fromId, fromUsername, null, false,
                 attachments, mediaGroupId, null, null, null);
     }
@@ -98,12 +101,12 @@ public record InboundMessage(String chatId, String chatType, String text,
      * field (JCLAW-366) — defaults it to null so those call sites compile
      * unchanged.
      */
-    public InboundMessage(String chatId, String chatType, String text,
-                          String fromId, String fromUsername,
-                          String fromDisplayName, boolean botMentioned,
+    public InboundMessage(String chatId, @Nullable String chatType, String text,
+                          @Nullable String fromId, @Nullable String fromUsername,
+                          @Nullable String fromDisplayName, boolean botMentioned,
                           List<PendingAttachment> attachments,
-                          String mediaGroupId,
-                          Integer messageId, Integer messageThreadId) {
+                          @Nullable String mediaGroupId,
+                          @Nullable Integer messageId, @Nullable Integer messageThreadId) {
         this(chatId, chatType, text, fromId, fromUsername, fromDisplayName,
                 botMentioned, attachments, mediaGroupId, messageId,
                 messageThreadId, null);

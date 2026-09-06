@@ -1,5 +1,7 @@
 package agents;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * JCLAW-370: pure, side-effect-free Telegram conversation-keying and
  * sender-attribution helpers. Extracted from {@link AgentRunner} (JCLAW-678);
@@ -31,8 +33,8 @@ final class TelegramMessageAddressing {
      * @param messageThreadId forum-topic thread id, or null for a non-topic message
      * @return the composite conversation peer key
      */
-    static String telegramConversationPeerId(String ownerKey, String chatType, String chatId,
-                                             Integer messageThreadId) {
+    static String telegramConversationPeerId(String ownerKey, @Nullable String chatType, String chatId,
+                                             @Nullable Integer messageThreadId) {
         if (TELEGRAM_CHAT_TYPE_PRIVATE.equals(chatType)) {
             return ownerKey;
         }
@@ -55,8 +57,8 @@ final class TelegramMessageAddressing {
      * @param fromId          sender's Telegram user id
      * @return the (possibly attributed) message text
      */
-    static String telegramSenderAttributed(String text, String chatType,
-                                           String fromDisplayName, String fromId) {
+    static String telegramSenderAttributed(String text, @Nullable String chatType,
+                                           @Nullable String fromDisplayName, @Nullable String fromId) {
         if (TELEGRAM_CHAT_TYPE_PRIVATE.equals(chatType) || text == null || text.isEmpty()) {
             return text;
         }

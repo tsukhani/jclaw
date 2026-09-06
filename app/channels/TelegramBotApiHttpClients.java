@@ -1,6 +1,7 @@
 package channels;
 
 import okhttp3.OkHttpClient;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.TelegramUrl;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
@@ -58,7 +59,7 @@ final class TelegramBotApiHttpClients {
      * callback answers, etc. Tight timeouts fail fast into the
      * streaming-sink retry tick (JCLAW-98).
      */
-    static TelegramClient textClient(String botToken, TelegramUrl urlOverride) {
+    static TelegramClient textClient(String botToken, @Nullable TelegramUrl urlOverride) {
         var http = new OkHttpClient.Builder()
                 .connectTimeout(BOT_API_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .readTimeout(BOT_API_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
@@ -83,7 +84,7 @@ final class TelegramBotApiHttpClients {
      * outbound-planner retry at a higher level where we control the
      * policy.
      */
-    static TelegramClient uploadClient(String botToken, TelegramUrl urlOverride) {
+    static TelegramClient uploadClient(String botToken, @Nullable TelegramUrl urlOverride) {
         var http = new OkHttpClient.Builder()
                 .connectTimeout(BOT_API_UPLOAD_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .readTimeout(BOT_API_UPLOAD_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
@@ -98,7 +99,8 @@ final class TelegramBotApiHttpClients {
      * bound to {@code botToken}. A non-null {@code urlOverride} redirects the
      * SDK at a mock server (JCLAW-96); null uses the SDK's default Bot-API URL.
      */
-    private static TelegramClient wrap(OkHttpClient http, String botToken, TelegramUrl urlOverride) {
+    private static TelegramClient wrap(OkHttpClient http, String botToken,
+                                       @Nullable TelegramUrl urlOverride) {
         return urlOverride != null
                 ? new OkHttpTelegramClient(http, botToken, urlOverride)
                 : new OkHttpTelegramClient(http, botToken);

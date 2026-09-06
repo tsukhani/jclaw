@@ -53,7 +53,7 @@ public class TelegramChannel implements Channel {
      * in the {@code channels} package can reach it; other test packages
      * use {@link #installForTest}.
      */
-    TelegramChannel(String botToken, TelegramUrl urlOverride) {
+    TelegramChannel(String botToken, @Nullable TelegramUrl urlOverride) {
         this.sender = new TelegramSender(botToken, urlOverride);
     }
 
@@ -148,8 +148,9 @@ public class TelegramChannel implements Channel {
      * streaming-recovery job). Exceptions propagate so callers can decide
      * whether to retry or log-and-continue.
      */
-    public static void editMessageText(String botToken, String chatId,
-                                       Integer messageId, String text) throws TelegramApiException {
+    public static void editMessageText(String botToken, @Nullable String chatId,
+                                       @Nullable Integer messageId,
+                                       @Nullable String text) throws TelegramApiException {
         forToken(botToken).sender.editMessageText(chatId, messageId, text);
     }
 
@@ -278,12 +279,13 @@ public class TelegramChannel implements Channel {
      * sink always evaluates the reply policy as the first chunk. Returns null
      * when no badge should be applied ({@code off}, or a null target).
      */
-    static ReplyParameters replyParamsForSink(String botToken, Integer replyToMessageId) {
+    static @Nullable ReplyParameters replyParamsForSink(String botToken,
+                                                        @Nullable Integer replyToMessageId) {
         return TelegramSendPolicy.replyParamsForSink(botToken, replyToMessageId);
     }
 
     /** JCLAW-369: package-private bridge so the sink shares the General-topic strip rule. */
-    static Integer sendThreadIdForSink(Integer messageThreadId) {
+    static @Nullable Integer sendThreadIdForSink(@Nullable Integer messageThreadId) {
         return TelegramSendPolicy.sendThreadIdForSink(messageThreadId);
     }
 
@@ -308,7 +310,8 @@ public class TelegramChannel implements Channel {
      * thread id. Null preserves the non-topic behavior. Existing callers route
      * through {@link #sendTypingAction(String, String)} (thread id null).
      */
-    public static TypingActionOutcome sendTypingAction(String botToken, String chatId, Integer messageThreadId) {
+    public static TypingActionOutcome sendTypingAction(String botToken, String chatId,
+                                                       @Nullable Integer messageThreadId) {
         if (botToken == null || chatId == null) return TypingActionOutcome.SKIPPED;
         return forToken(botToken).sender.sendTypingAction(chatId, messageThreadId);
     }
@@ -369,7 +372,7 @@ public class TelegramChannel implements Channel {
      * true when the whole turn landed.
      */
     public boolean sendTurn(String chatId, String text, Agent agent,
-                            Integer replyToMessageId, Integer messageThreadId) {
+                            @Nullable Integer replyToMessageId, @Nullable Integer messageThreadId) {
         return sender.sendTurn(chatId, text, agent, replyToMessageId, messageThreadId);
     }
 
@@ -380,7 +383,7 @@ public class TelegramChannel implements Channel {
      * uniform interface still uploads via the dedicated upload client.
      */
     @Override
-    public SendResult sendPhoto(String peerId, File file, String caption) {
+    public SendResult sendPhoto(String peerId, File file, @Nullable String caption) {
         return sender.sendPhoto(peerId, file, caption);
     }
 
@@ -390,7 +393,7 @@ public class TelegramChannel implements Channel {
      * ReplyParameters, Integer, String)} (no reply/topic context).
      */
     @Override
-    public SendResult sendDocument(String peerId, File file, String caption) {
+    public SendResult sendDocument(String peerId, File file, @Nullable String caption) {
         return sender.sendDocument(peerId, file, caption);
     }
 
@@ -443,23 +446,24 @@ public class TelegramChannel implements Channel {
     // ── Inbound parsing — delegates to TelegramInboundParser (JCLAW-151) ──
 
     /** @see TelegramInboundParser#prepareInboundAttachments */
-    public static List<AttachmentService.Input> prepareInboundAttachments(
+    public static @Nullable List<AttachmentService.Input> prepareInboundAttachments(
             String sendToken, String sendChatId, Agent sendAgent, InboundMessage message) {
         return TelegramInboundParser.prepareInboundAttachments(sendToken, sendChatId, sendAgent, message);
     }
 
     /** @see TelegramInboundParser#parseUpdate(JsonObject) */
-    public static InboundMessage parseUpdate(JsonObject update) {
+    public static @Nullable InboundMessage parseUpdate(JsonObject update) {
         return TelegramInboundParser.parseUpdate(update);
     }
 
     /** @see TelegramInboundParser#parseUpdate(Update) */
-    public static InboundMessage parseUpdate(Update update) {
+    public static @Nullable InboundMessage parseUpdate(Update update) {
         return TelegramInboundParser.parseUpdate(update);
     }
 
     /** @see TelegramInboundParser#parseUpdate(Update, String, Long) */
-    public static InboundMessage parseUpdate(Update update, String botUsername, Long botUserId) {
+    public static @Nullable InboundMessage parseUpdate(Update update, @Nullable String botUsername,
+                                                       @Nullable Long botUserId) {
         return TelegramInboundParser.parseUpdate(update, botUsername, botUserId);
     }
 
@@ -469,12 +473,12 @@ public class TelegramChannel implements Channel {
     }
 
     /** @see TelegramInboundParser#parseCallback(Update) */
-    public static InboundCallback parseCallback(Update update) {
+    public static @Nullable InboundCallback parseCallback(Update update) {
         return TelegramInboundParser.parseCallback(update);
     }
 
     /** @see TelegramInboundParser#parseCallback(JsonObject) */
-    public static InboundCallback parseCallback(JsonObject update) {
+    public static @Nullable InboundCallback parseCallback(JsonObject update) {
         return TelegramInboundParser.parseCallback(update);
     }
 
@@ -499,7 +503,8 @@ public class TelegramChannel implements Channel {
      * overload with a null caption.
      */
     public boolean trySendPhoto(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId) {
         return sender.trySendPhoto(peerId, file, displayName, replyParams, messageThreadId);
     }
 
@@ -511,7 +516,8 @@ public class TelegramChannel implements Channel {
      * {@link #trySendPhoto(String, java.io.File, String, ReplyParameters, Integer)}.
      */
     public boolean trySendPhoto(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId, @Nullable String caption) {
         return sender.trySendPhoto(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -532,7 +538,8 @@ public class TelegramChannel implements Channel {
      * overload with a null caption.
      */
     public boolean trySendDocument(String peerId, File file, String displayName,
-                                   ReplyParameters replyParams, Integer messageThreadId) {
+                                   @Nullable ReplyParameters replyParams,
+                                   @Nullable Integer messageThreadId) {
         return sender.trySendDocument(peerId, file, displayName, replyParams, messageThreadId);
     }
 
@@ -542,7 +549,8 @@ public class TelegramChannel implements Channel {
      * {@link #trySendDocument(String, java.io.File, String, ReplyParameters, Integer)}.
      */
     public boolean trySendDocument(String peerId, File file, String displayName,
-                                   ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                   @Nullable ReplyParameters replyParams,
+                                   @Nullable Integer messageThreadId, @Nullable String caption) {
         return sender.trySendDocument(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -555,13 +563,15 @@ public class TelegramChannel implements Channel {
 
     /** Reply/topic-aware voice upload; delegates with a null caption. */
     public boolean trySendVoice(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId) {
         return sender.trySendVoice(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware voice upload. {@code caption} null/blank to omit. */
     public boolean trySendVoice(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId, @Nullable String caption) {
         return sender.trySendVoice(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -572,13 +582,15 @@ public class TelegramChannel implements Channel {
 
     /** Reply/topic-aware audio upload; delegates with a null caption. */
     public boolean trySendAudio(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId) {
         return sender.trySendAudio(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware audio upload. {@code caption} null/blank to omit. */
     public boolean trySendAudio(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId, @Nullable String caption) {
         return sender.trySendAudio(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -589,13 +601,15 @@ public class TelegramChannel implements Channel {
 
     /** Reply/topic-aware video upload; delegates with a null caption. */
     public boolean trySendVideo(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId) {
         return sender.trySendVideo(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware video upload. {@code caption} null/blank to omit. */
     public boolean trySendVideo(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId, @Nullable String caption) {
         return sender.trySendVideo(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -611,7 +625,7 @@ public class TelegramChannel implements Channel {
      */
     public boolean sendMediaGroup(String peerId,
                                   List<TelegramOutboundPlanner.FileSegment> items,
-                                  String caption, ReplyParameters replyParams, Integer messageThreadId) {
+                                  @Nullable String caption, @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return sender.sendMediaGroup(peerId, items, caption, replyParams, messageThreadId);
     }
 
@@ -628,7 +642,7 @@ public class TelegramChannel implements Channel {
      * here with both null so the interface contract is unchanged.
      */
     public SendResult trySend(String peerId, String text,
-                              ReplyParameters replyParams, Integer messageThreadId) {
+                              @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return sender.trySend(peerId, text, replyParams, messageThreadId);
     }
 
@@ -641,8 +655,8 @@ public class TelegramChannel implements Channel {
      * Bot API call — no chunking or planner pass, because keyboard
      * messages stay well under the 4096-char limit by construction.
      */
-    public Integer sendMessageWithKeyboard(String chatId,
-                                            String htmlText, InlineKeyboardMarkup keyboard) {
+    public @Nullable Integer sendMessageWithKeyboard(String chatId,
+                                                     String htmlText, InlineKeyboardMarkup keyboard) {
         return sender.sendMessageWithKeyboard(chatId, htmlText, keyboard);
     }
 
@@ -658,9 +672,9 @@ public class TelegramChannel implements Channel {
      * construction) rather than part of the generic {@link Channel} contract — the
      * inline-keyboard markup is Telegram-specific.
      */
-    public Integer sendMessageWithKeyboard(String chatId,
-                                           String htmlText, InlineKeyboardMarkup keyboard,
-                                           Integer replyToMessageId, Integer messageThreadId) {
+    public @Nullable Integer sendMessageWithKeyboard(String chatId,
+                                                     String htmlText, InlineKeyboardMarkup keyboard,
+                                                     Integer replyToMessageId, @Nullable Integer messageThreadId) {
         return sender.sendMessageWithKeyboard(chatId, htmlText, keyboard, replyToMessageId, messageThreadId);
     }
 
@@ -670,7 +684,8 @@ public class TelegramChannel implements Channel {
      * dispatcher to drill down / return without cluttering the chat
      * with a new message per tap.
      */
-    public static boolean editMessageText(String botToken, String chatId, Integer messageId,
+    public static boolean editMessageText(String botToken, @Nullable String chatId,
+                                           @Nullable Integer messageId,
                                            @Nullable String htmlText,
                                            @Nullable InlineKeyboardMarkup keyboard) {
         return forToken(botToken).sender.editMessageText(chatId, messageId, htmlText, keyboard);
@@ -684,7 +699,7 @@ public class TelegramChannel implements Channel {
      * text for routine taps.
      */
     public static boolean answerCallbackQuery(String botToken, String callbackId,
-                                               String text, boolean showAlert) {
+                                               @Nullable String text, boolean showAlert) {
         return forToken(botToken).sender.answerCallbackQuery(callbackId, text, showAlert);
     }
 }

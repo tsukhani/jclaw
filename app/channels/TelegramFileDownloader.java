@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
@@ -199,7 +200,7 @@ public final class TelegramFileDownloader {
      * on {@link #DOWNLOAD_CLIENT}); the byte transfer, 20 MiB cap, and cleanup are
      * owned by {@link StagedDownload#fetch}.
      */
-    private static Result streamFileToStaging(String fileBaseUrl, String filePath, Path stagedPath) {
+    private static @Nullable Result streamFileToStaging(String fileBaseUrl, String filePath, Path stagedPath) {
         var downloadUrl = fileBaseUrl + "/" + filePath;
         // Reject non-http(s) schemes and literal-IP hosts in a blocked range
         // before opening a socket; SAFE_DNS on DOWNLOAD_CLIENT gates the

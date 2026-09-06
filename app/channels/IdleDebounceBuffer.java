@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -62,13 +63,13 @@ final class IdleDebounceBuffer<B> {
     interface Merger<B> {
         /** The merged inbound, or {@code null} if the bucket has nothing to
          *  dispatch (no first message yet). Implementations may log. */
-        InboundMessage merge(B bucket);
+        @Nullable InboundMessage merge(B bucket);
     }
 
     private static final class Holder<B> {
         final B bucket;
-        ScheduledFuture<?> flushTask;
-        Consumer<InboundMessage> dispatcher;
+        @Nullable ScheduledFuture<?> flushTask;
+        @Nullable Consumer<InboundMessage> dispatcher;
         Holder(B bucket) { this.bucket = bucket; }
     }
 

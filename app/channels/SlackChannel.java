@@ -9,6 +9,7 @@ import com.slack.api.methods.SlackApiException;
 import com.slack.api.methods.request.chat.ChatPostMessageRequest;
 import com.slack.api.model.event.MessageEvent;
 import com.slack.api.util.json.GsonFactory;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import utils.RetryScheduler;
 
@@ -50,15 +51,15 @@ public class SlackChannel implements Channel {
     /** This instance's per-agent bot token (JCLAW-441), or null for instances
      *  used only for inbound/metadata ({@link #channelName}, file-send no-ops).
      *  The generic {@link Channel} send path requires it. */
-    private final String botToken;
+    private final @Nullable String botToken;
 
     /** Optional Slack {@code thread_ts} this instance replies into (JCLAW-83);
      *  null = post at channel level. */
-    private final String outboundThreadTs;
+    private final @Nullable String outboundThreadTs;
 
     public SlackChannel() { this(null, null); }
 
-    private SlackChannel(String botToken, String outboundThreadTs) {
+    private SlackChannel(@Nullable String botToken, @Nullable String outboundThreadTs) {
         this.botToken = botToken;
         this.outboundThreadTs = outboundThreadTs;
     }
@@ -96,7 +97,7 @@ public class SlackChannel implements Channel {
      * optionally replying into {@code threadTs}. Agents emit CommonMark; convert to
      * Slack mrkdwn so it renders formatted.
      */
-    public static boolean sendMessage(String channelId, String text, String threadTs, String botToken) {
+    public static boolean sendMessage(String channelId, String text, @Nullable String threadTs, String botToken) {
         if (botToken == null || botToken.isBlank()) {
             EventLogger.error(CHANNEL, null, CHANNEL_NAME, "Slack send: no bot token");
             return false;
@@ -116,7 +117,7 @@ public class SlackChannel implements Channel {
      * {@code mrkdwn:true} and the optional {@code thread_ts} (null omitted, so
      * the reply posts at channel level).
      */
-    public static ChatPostMessageRequest postRequest(String channelId, String text, String threadTs) {
+    public static ChatPostMessageRequest postRequest(String channelId, String text, @Nullable String threadTs) {
         return ChatPostMessageRequest.builder()
                 .channel(channelId)
                 .text(text)
@@ -125,7 +126,7 @@ public class SlackChannel implements Channel {
                 .build();
     }
 
-    private SendResult trySend(String botToken, String channelId, String text, String threadTs) {
+    private SendResult trySend(String botToken, String channelId, String text, @Nullable String threadTs) {
         var a = postOnce(botToken, channelId, text, threadTs);
         if (a.ok()) return SendResult.OK;
         if (ERR_RATELIMITED.equals(a.error())) return SendResult.rateLimited(a.retryAfterMs());
@@ -135,9 +136,10 @@ public class SlackChannel implements Channel {
     /** A single {@code chat.postMessage} attempt, surfacing Slack's error code and any
      *  rate-limit hint (JCLAW-454) so both the {@link SendResult} path and the
      *  error-reporting delivery path can build on one wire call. Never throws. */
-    private record PostAttempt(boolean ok, String error, long retryAfterMs) {}
+    private record PostAttempt(boolean ok, @Nullable String error, long retryAfterMs) {}
 
-    private static PostAttempt postOnce(String botToken, String channelId, String text, String threadTs) {
+    private static PostAttempt postOnce(String botToken, String channelId, String text,
+                                        @Nullable String threadTs) {
         try {
             var resp = slack.methods(botToken)
                     .chatPostMessage(postRequest(channelId, text, threadTs));
@@ -177,9 +179,9 @@ public class SlackChannel implements Channel {
      * {@link services.DeliveryDispatcher} can record the real cause on a
      * {@code TaskRun}'s {@code delivery_error} instead of a generic message.
      */
-    public record DeliveryOutcome(boolean ok, String error) {
+    public record DeliveryOutcome(boolean ok, @Nullable String error) {
         public static DeliveryOutcome delivered() { return new DeliveryOutcome(true, null); }
-        public static DeliveryOutcome failed(String error) { return new DeliveryOutcome(false, error); }
+        public static DeliveryOutcome failed(@Nullable String error) { return new DeliveryOutcome(false, error); }
     }
 
     /** Test seam (JCLAW-454): the resolve+post delivery primitive, swappable so unit tests
@@ -239,7 +241,8 @@ public class SlackChannel implements Channel {
      * fields render standard markdown natively (no mrkdwn conversion). Requires the
      * app to be a Slack AI Assistant with {@code assistant:write}.
      */
-    public static String startStream(String channelId, String threadTs, String recipientUserId,
+    public static @Nullable String startStream(String channelId, @Nullable String threadTs,
+                                     @Nullable String recipientUserId,
                                      String initialMarkdown, String botToken) {
         if (botToken == null || botToken.isBlank()) return null;
         try {
@@ -284,7 +287,8 @@ public class SlackChannel implements Channel {
      * line as the bot identified by {@code botToken}. Requires the AI Assistant
      * feature + {@code assistant:write} + a {@code thread_ts}. Best-effort.
      */
-    public static void setAssistantStatus(String channelId, String threadTs, String status, String botToken) {
+    public static void setAssistantStatus(String channelId, @Nullable String threadTs, String status,
+                                          String botToken) {
         if (botToken == null || botToken.isBlank()) return;
         try {
             slack.methods(botToken).assistantThreadsSetStatus(r -> r
@@ -300,7 +304,8 @@ public class SlackChannel implements Channel {
      * {@link #editMessage} then progressively edits. The text is posted verbatim —
      * the live preview shows raw deltas; the formatted text lands on the final edit.
      */
-    public static String postText(String channelId, String text, String threadTs, String botToken) {
+    public static @Nullable String postText(String channelId, String text, @Nullable String threadTs,
+                                            String botToken) {
         if (botToken == null || botToken.isBlank()) return null;
         try {
             var resp = slack.methods(botToken).chatPostMessage(postRequest(channelId, text, threadTs));
@@ -355,7 +360,7 @@ public class SlackChannel implements Channel {
 
     // --- Inbound event parsing (SDK model) ---
 
-    public record InboundMessage(String channelId, String userId, String text, String threadTs,
+    public record InboundMessage(String channelId, String userId, String text, @Nullable String threadTs,
                                  List<SlackPendingFile> files, String channelType,
                                  boolean botMentioned) {}
 
@@ -368,7 +373,7 @@ public class SlackChannel implements Channel {
      * JCLAW-344); other subtypes (edits/joins/etc.) stay ignored pending
      * JCLAW-352/353.
      */
-    public static InboundMessage parseEvent(JsonObject payload, String botUserId) {
+    public static @Nullable InboundMessage parseEvent(JsonObject payload, String botUserId) {
         if (!"event_callback".equals(str(payload, "type"))) {
             return null;
         }

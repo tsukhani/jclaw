@@ -1,6 +1,7 @@
 package channels;
 
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.updates.GetWebhookInfo;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
@@ -176,9 +177,10 @@ public final class TelegramWebhookRegistrar {
      *                             or null when none
      * @param error                failure reason when {@code ok} is false, else null
      */
-    public record ProbeResult(boolean ok, String transport, String botUsername,
-                              Long botId, String webhookUrl, Integer webhookPendingUpdates,
-                              String webhookLastError, String error) {}
+    public record ProbeResult(boolean ok, String transport, @Nullable String botUsername,
+                              @Nullable Long botId, @Nullable String webhookUrl,
+                              @Nullable Integer webhookPendingUpdates,
+                              @Nullable String webhookLastError, @Nullable String error) {}
 
     /**
      * Telegram-facing health probe, injectable so tests don't hit the API.
@@ -259,7 +261,7 @@ public final class TelegramWebhookRegistrar {
     }
 
     /** Strip the bot token from a message before it is logged or returned. */
-    private static String redact(String s, String token) {
+    private static String redact(@Nullable String s, String token) {
         if (s == null) return "";
         return token == null || token.isEmpty() ? s : s.replace(token, "<token>");
     }

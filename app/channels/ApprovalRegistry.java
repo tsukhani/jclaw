@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.time.Duration;
@@ -141,7 +142,7 @@ final class ApprovalRegistry<D, O> {
      * entry is removed before completion so a double-tap can't resolve twice, and
      * the {@link LivePrompt} retires the message.
      */
-    Resolution<O> resolve(String approvalId, D decision, String fromId) {
+    Resolution<O> resolve(String approvalId, D decision, @Nullable String fromId) {
         var p = pending.get(approvalId);
         if (p == null) {
             return new Resolution<>(false, Optional.empty(), NOT_PENDING);

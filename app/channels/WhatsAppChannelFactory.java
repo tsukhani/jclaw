@@ -1,6 +1,7 @@
 package channels;
 
 import models.WhatsAppBinding;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Resolves the outbound {@link Channel} for a {@link WhatsAppBinding} by its
@@ -17,7 +18,7 @@ public final class WhatsAppChannelFactory {
      * The {@link Channel} that delivers outbound messages for {@code binding}, or
      * {@code null} when none is available yet. Caller checks {@code binding.enabled}.
      */
-    public static Channel forBinding(WhatsAppBinding binding) {
+    public static @Nullable Channel forBinding(WhatsAppBinding binding) {
         if (binding == null) return null;
         return switch (binding.transport) {
             case CLOUD_API -> WhatsAppChannel.forBinding(binding);

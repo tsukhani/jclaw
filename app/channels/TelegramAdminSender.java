@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.PinChatMessage;
 import org.telegram.telegrambots.meta.api.methods.pinnedmessages.UnpinChatMessage;
@@ -75,7 +76,8 @@ final class TelegramAdminSender {
      * reaction the bot previously placed. Returns false (logged) on any API
      * failure — never throws.
      */
-    boolean setMessageReaction(String chatId, Integer messageId, String emoji) {
+    boolean setMessageReaction(@Nullable String chatId, @Nullable Integer messageId,
+                               @Nullable String emoji) {
         if (ctx.botToken() == null || chatId == null || messageId == null) return false;
         var builder = SetMessageReaction.builder()
                 .chatId(chatId)
@@ -174,9 +176,9 @@ final class TelegramAdminSender {
      * (logged at warn) on any API failure or out-of-range option count — never
      * throws — so a poll that Telegram rejects can't abort the agent's turn.
      */
-    boolean sendPoll(String chatId, String question,
-                     List<String> options, Boolean isAnonymous,
-                     Boolean allowsMultipleAnswers, Integer openPeriod) {
+    boolean sendPoll(@Nullable String chatId, @Nullable String question,
+                     @Nullable List<String> options, @Nullable Boolean isAnonymous,
+                     @Nullable Boolean allowsMultipleAnswers, @Nullable Integer openPeriod) {
         if (ctx.botToken() == null || chatId == null || question == null || question.isBlank()
                 || options == null || options.size() < 2 || options.size() > 12) {
             EventLogger.warn(LOG_CATEGORY, null, CHANNEL_NAME,
@@ -215,7 +217,8 @@ final class TelegramAdminSender {
      * thread id. Null preserves the non-topic behavior. Existing callers route
      * through {@link TelegramChannel#sendTypingAction(String, String)} (thread id null).
      */
-    TelegramChannel.TypingActionOutcome sendTypingAction(String chatId, Integer messageThreadId) {
+    TelegramChannel.TypingActionOutcome sendTypingAction(@Nullable String chatId,
+                                                        @Nullable Integer messageThreadId) {
         if (ctx.botToken() == null || chatId == null) return TelegramChannel.TypingActionOutcome.SKIPPED;
         try {
             var builder = SendChatAction.builder()

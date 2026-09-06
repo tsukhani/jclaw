@@ -1,4 +1,5 @@
 package channels;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.Update;
 
 /**
@@ -21,5 +22,5 @@ import org.telegram.telegrambots.meta.api.objects.Update;
  * @param data       opaque data string parsed by the kind-specific
  *                   dispatcher
  */
-public record InboundCallback(String callbackId, String chatId, String chatType,
-                              String fromId, Integer messageId, String data) {}
+public record InboundCallback(String callbackId, @Nullable String chatId, @Nullable String chatType,
+                              String fromId, @Nullable Integer messageId, String data) {}

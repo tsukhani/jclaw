@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import play.Play;
 import services.EventLogger;
@@ -68,7 +69,7 @@ public final class TelegramCommandsHashStore {
      * Delegates to {@link TelegramOffsetStore#botId} so both stores key on the
      * identical derivation. {@code null}/blank tokens yield {@code null}.
      */
-    public static String botId(String token) {
+    public static @Nullable String botId(String token) {
         return TelegramOffsetStore.botId(token);
     }
 
@@ -101,7 +102,7 @@ public final class TelegramCommandsHashStore {
 
     /** Per-JVM-run isolated dir used in test mode when no explicit override is
      *  set, so the suite never reads/writes the real data/ store. */
-    private static Path testHashDir;
+    private static @Nullable Path testHashDir;
 
     /** Directory holding the per-bot command-hash files. */
     private static Path hashDir() {
@@ -141,7 +142,7 @@ public final class TelegramCommandsHashStore {
      * stored (or the token has no derivable bot id, or the file is missing or
      * unreadable). {@code null} feeds back as "no recorded state → don't skip".
      */
-    public static String load(String token) {
+    public static @Nullable String load(String token) {
         String botId = botId(token);
         if (botId == null) return null;
         Path file = hashFile(botId);

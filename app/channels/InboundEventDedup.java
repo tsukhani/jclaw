@@ -2,6 +2,7 @@ package channels;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Duration;
 
@@ -41,7 +42,7 @@ public final class InboundEventDedup {
      *         returns true (process), since dropping an unidentifiable event is worse than
      *         occasionally double-processing one.
      */
-    public static boolean firstSeen(String key) {
+    public static boolean firstSeen(@Nullable String key) {
         if (key == null || key.isBlank()) {
             return true;
         }

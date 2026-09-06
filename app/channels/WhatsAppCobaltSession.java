@@ -8,6 +8,7 @@ import it.auties.whatsapp.controller.ControllerSerializer;
 import it.auties.whatsapp.model.info.ChatMessageInfo;
 import it.auties.whatsapp.model.jid.Jid;
 import models.WhatsAppBinding;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.EventLogger;
 import services.Tx;
@@ -71,8 +72,8 @@ public final class WhatsAppCobaltSession {
     static final int RECENT_MESSAGE_CACHE_SIZE = 256;
 
     private final Long bindingId;
-    private volatile Whatsapp whatsapp;
-    private volatile Jid ownerJid;
+    private volatile @Nullable Whatsapp whatsapp;
+    private volatile @Nullable Jid ownerJid;
 
     /** message id → live Cobalt object, LRU-bounded, access-synchronized. */
     private final Map<String, ChatMessageInfo> recentMessages =
@@ -98,7 +99,7 @@ public final class WhatsAppCobaltSession {
     }
 
     /** The paired user's JID (the binding owner), or null before pairing. */
-    public Jid ownerJid() {
+    public @Nullable Jid ownerJid() {
         return ownerJid;
     }
 
@@ -106,7 +107,7 @@ public final class WhatsAppCobaltSession {
      *  — on a resumed session whose logged-in event hasn't (re)fired — the JID the
      *  Cobalt store already holds. Null when neither is available (pre-pairing);
      *  the parser then treats group mentions as non-matching, the safe default. */
-    private Jid botJid() {
+    private @Nullable Jid botJid() {
         if (ownerJid != null) return ownerJid;
         var wa = whatsapp;
         return wa != null ? wa.store().jid().orElse(null) : null;
@@ -114,13 +115,13 @@ public final class WhatsAppCobaltSession {
 
     /** The underlying Cobalt handle (for outbound send / media download). Null
      *  until connect/resume has built it. */
-    public Whatsapp whatsapp() {
+    public @Nullable Whatsapp whatsapp() {
         return whatsapp;
     }
 
     /** Resolve a previously-seen inbound message id back to its live Cobalt
      *  object, or null if it has aged out of the cache. */
-    public ChatMessageInfo recentMessage(String messageId) {
+    public @Nullable ChatMessageInfo recentMessage(String messageId) {
         if (messageId == null) return null;
         return recentMessages.get(messageId);
     }
@@ -290,7 +291,7 @@ public final class WhatsAppCobaltSession {
         }
     }
 
-    private void persistOwnerJid(String jid) {
+    private void persistOwnerJid(@Nullable String jid) {
         try {
             Tx.run(() -> {
                 WhatsAppBinding b = WhatsAppBinding.findById(bindingId);
@@ -341,7 +342,7 @@ public final class WhatsAppCobaltSession {
         return agent != null ? "JClaw-" + agent : "JClaw-" + bindingId;
     }
 
-    private static String agentName(WhatsAppBinding binding) {
+    private static @Nullable String agentName(WhatsAppBinding binding) {
         return binding != null && binding.agent != null ? binding.agent.name : null;
     }
 }

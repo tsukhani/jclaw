@@ -221,7 +221,7 @@ public final class DeliveryDispatcher {
 
     /** JCLAW-454: turn Slack's error code into an actionable {@code delivery_error}
      *  message that names the channel and the likeliest fix. */
-    private static String slackFailureReason(String target, String error) {
+    private static String slackFailureReason(String target, @Nullable String error) {
         if (error == null || error.isBlank()) {
             return "Slack rejected delivery to '" + target + "' (see logs for details).";
         }

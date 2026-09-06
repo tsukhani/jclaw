@@ -1,5 +1,7 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Public bridge into {@link TelegramStreamingSink}'s package-private test accessors
  * (JCLAW-771). JClaw's tests live in the default package, so they cannot call
@@ -21,11 +23,11 @@ public final class TelegramStreamingSinkTestHooks {
 
     private TelegramStreamingSinkTestHooks() {}
 
-    public static Integer messageId(TelegramStreamingSink sink) { return sink.messageIdForTest(); }
+    public static @Nullable Integer messageId(TelegramStreamingSink sink) { return sink.messageIdForTest(); }
 
-    public static Integer replyToMessageId(TelegramStreamingSink sink) { return sink.replyToMessageIdForTest(); }
+    public static @Nullable Integer replyToMessageId(TelegramStreamingSink sink) { return sink.replyToMessageIdForTest(); }
 
-    public static Integer messageThreadId(TelegramStreamingSink sink) { return sink.messageThreadIdForTest(); }
+    public static @Nullable Integer messageThreadId(TelegramStreamingSink sink) { return sink.messageThreadIdForTest(); }
 
     public static boolean streamCapReached(TelegramStreamingSink sink) { return sink.streamCapReachedForTest(); }
 

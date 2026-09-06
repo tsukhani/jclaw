@@ -1,5 +1,7 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * JCLAW-371 inbound access policy for Telegram message updates, shared by the
  * polling runner ({@link TelegramPollingRunner}) and the webhook controller so
@@ -35,7 +37,7 @@ public final class TelegramAccessPolicy {
      * @param botMentioned  whether the bot was directly addressed in this message
      * @return true when the message should be served, false to silently ignore
      */
-    public static boolean isAllowed(boolean ownerMatches, String chatType, boolean botMentioned) {
+    public static boolean isAllowed(boolean ownerMatches, @Nullable String chatType, boolean botMentioned) {
         if (CHAT_TYPE_PRIVATE.equals(chatType)) {
             return ownerMatches;
         }

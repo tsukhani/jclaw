@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import utils.PlayConfig;
 
@@ -59,7 +60,7 @@ public final class TelegramInboundTextBuffer {
 
     private static final class Bucket {
         final StringBuilder text = new StringBuilder();
-        InboundMessage firstMessage;
+        @Nullable InboundMessage firstMessage;
     }
 
     private static final IdleDebounceBuffer<Bucket> BUFFER = new IdleDebounceBuffer<>(
@@ -118,7 +119,7 @@ public final class TelegramInboundTextBuffer {
         return true;
     }
 
-    private static InboundMessage merge(Bucket bucket) {
+    private static @Nullable InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
         if (first == null) return null;
         // Attachments are empty rather than accumulated: isEligible admits only

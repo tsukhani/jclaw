@@ -4,6 +4,7 @@ import agents.AgentRunner;
 import agents.DangerousActionGate;
 import models.Agent;
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.longpolling.BotSession;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
@@ -467,7 +468,9 @@ public final class TelegramPollingRunner {
             // JCLAW-387 B1: detect a forward off the RAW update (the parsed
             // InboundMessage drops the forward fields) so handleMessage can route
             // a forward burst through the coalesce lane.
-            handleMessage(bindingId, ctx, msg, TelegramReactionNotifier.isForward(update));
+            handleMessage(bindingId, ctx,
+                    Objects.requireNonNull(msg, "callback and reaction are both null, so msg was parsed above"),
+                    TelegramReactionNotifier.isForward(update));
         } catch (Exception e) {
             EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
                     "Polling update processing error for binding %d: %s".formatted(
@@ -626,7 +629,8 @@ public final class TelegramPollingRunner {
      * {@code defaultAgent} if the binding can't be found (e.g. removed between
      * receive and dispatch).
      */
-    private static Agent resolveTopicAgent(String botToken, String chatId, Integer threadId, Agent defaultAgent) {
+    private static Agent resolveTopicAgent(String botToken, String chatId, @Nullable Integer threadId,
+                                           Agent defaultAgent) {
         return Tx.run(() -> {
             TelegramBinding binding = TelegramBinding.findByBotToken(botToken);
             if (binding == null) return defaultAgent;

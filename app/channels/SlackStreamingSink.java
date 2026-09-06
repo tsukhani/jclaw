@@ -8,6 +8,7 @@ import services.Tx;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * JCLAW-341: streams an LLM response into Slack using the native streaming API
@@ -48,21 +49,23 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     /** Slack streaming + fallback operations, injectable so tests don't hit the API. */
     public interface Slacker {
         /** Start a native stream carrying the first content; return its ts, or null. */
-        String startStream(String channelId, String threadTs, String recipientUserId, String initialMarkdown);
+        @Nullable String startStream(String channelId, @Nullable String threadTs,
+                                     @Nullable String recipientUserId, String initialMarkdown);
         /** Append a markdown delta to the stream; return true on success. */
         boolean appendStream(String channelId, String ts, String markdownDelta);
         /** Finalize the stream; return true on success. */
         boolean stopStream(String channelId, String ts);
         /** Set (or clear, with "") the assistant-thread "is typing…" status line. */
-        void setStatus(String channelId, String threadTs, String status);
+        void setStatus(String channelId, @Nullable String threadTs, String status);
         /** Off-thread fallback: post the reply once (text is mrkdwn-formatted by the sender). */
-        void postFallback(String channelId, String text, String threadTs);
+        void postFallback(String channelId, String text, @Nullable String threadTs);
         /** JCLAW-346: post the draft-preview placeholder; return its ts, or null. */
-        String postMessage(String channelId, String text, String threadTs);
+        @Nullable String postMessage(String channelId, String text, @Nullable String threadTs);
         /** JCLAW-346: edit a message's text (chat.update); return true on success. */
         boolean editMessage(String channelId, String ts, String text);
         /** Upload a file (the bot token is bound at construction); return true on success. */
-        boolean uploadFile(String peerId, String threadTs, File file, String displayName, String caption);
+        boolean uploadFile(String peerId, @Nullable String threadTs, File file, String displayName,
+                           @Nullable String caption);
     }
 
     /** JCLAW-441: a live Slacker bound to one agent's bot token. The streaming +
@@ -70,28 +73,40 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
      *  binding's bot, not the legacy app-global identity. */
     private static Slacker live(String botToken) {
         return new Slacker() {
-            @Override public String startStream(String c, String th, String u, String init) { return SlackChannel.startStream(c, th, u, init, botToken); }
+            @Override public @Nullable String startStream(String c, @Nullable String th,
+                                                          @Nullable String u, String init) {
+                return SlackChannel.startStream(c, th, u, init, botToken);
+            }
             @Override public boolean appendStream(String c, String ts, String d) { return SlackChannel.appendStream(c, ts, d, botToken); }
             @Override public boolean stopStream(String c, String ts) { return SlackChannel.stopStream(c, ts, botToken); }
-            @Override public void setStatus(String c, String th, String s) { SlackChannel.setAssistantStatus(c, th, s, botToken); }
-            @Override public void postFallback(String c, String text, String th) { SlackChannel.sendMessage(c, text, th, botToken); }
-            @Override public String postMessage(String c, String text, String th) { return SlackChannel.postText(c, text, th, botToken); }
+            @Override public void setStatus(String c, @Nullable String th, String s) {
+                SlackChannel.setAssistantStatus(c, th, s, botToken);
+            }
+            @Override public void postFallback(String c, String text, @Nullable String th) {
+                SlackChannel.sendMessage(c, text, th, botToken);
+            }
+            @Override public @Nullable String postMessage(String c, String text, @Nullable String th) {
+                return SlackChannel.postText(c, text, th, botToken);
+            }
             @Override public boolean editMessage(String c, String ts, String text) { return SlackChannel.editMessage(c, ts, text, botToken); }
-            @Override public boolean uploadFile(String peer, String th, File f, String name, String cap) { return SlackFileUploader.upload(botToken, peer, th, f, name, cap); }
+            @Override public boolean uploadFile(String peer, @Nullable String th, File f, String name,
+                                                @Nullable String cap) {
+                return SlackFileUploader.upload(botToken, peer, th, f, name, cap);
+            }
         };
     }
 
     private final String channelId;
-    private final String threadTs;
-    private final String recipientUserId;
+    private final @Nullable String threadTs;
+    private final @Nullable String recipientUserId;
     private final Slacker slacker;
     private final long throttleMs;
     // JCLAW-345: seal-time outbound file upload. Null on the test-injected path
     // (those tests don't exercise uploads), which disables the dispatch.
-    private final String botToken;
-    private final String agentName;
+    private final @Nullable String botToken;
+    private final @Nullable String agentName;
     private final StringBuilder pending = new StringBuilder();
-    private String streamTs;     // native stream ts; null until first token (lazy start)
+    private @Nullable String streamTs;  // native stream ts; null until first token (lazy start)
     private boolean canStream;   // assistant thread + recipient present
     private boolean startAttempted;
     private boolean nativeMode;
@@ -99,8 +114,8 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     private long lastFlushMs;
     // JCLAW-346: off-thread draft-preview state (used when native streaming is
     // unavailable — channel messages / threads without a recipient).
-    private String draftTs;        // chat.update message ts; null until the first post
-    private String lastDraftText;  // dedup consecutive identical edits
+    private @Nullable String draftTs;        // chat.update message ts; null until the first post
+    private @Nullable String lastDraftText;  // dedup consecutive identical edits
     private boolean draftStopped;  // stop the live loop (length cap / post-or-edit failure)
     private final List<String> toolLines = new ArrayList<>();
     // Uuids of this turn's tool-produced generated attachments (generate_image's image,
@@ -111,19 +126,20 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
 
     /** Production: stream as the binding's bot; {@code agentName} drives the
      *  seal-time upload of any files the agent linked in its reply (JCLAW-345). */
-    public SlackStreamingSink(String channelId, String threadTs, String recipientUserId,
+    public SlackStreamingSink(String channelId, @Nullable String threadTs, @Nullable String recipientUserId,
                               String botToken, String agentName) {
         this(channelId, threadTs, recipientUserId, live(botToken), APPEND_THROTTLE_MS, botToken, agentName);
     }
 
     /** Test seam: inject the Slacker and append throttle (0 = flush every update). */
-    public SlackStreamingSink(String channelId, String threadTs, String recipientUserId,
+    public SlackStreamingSink(String channelId, @Nullable String threadTs, @Nullable String recipientUserId,
                               Slacker slacker, long throttleMs) {
         this(channelId, threadTs, recipientUserId, slacker, throttleMs, null, null);
     }
 
-    private SlackStreamingSink(String channelId, String threadTs, String recipientUserId,
-                               Slacker slacker, long throttleMs, String botToken, String agentName) {
+    private SlackStreamingSink(String channelId, @Nullable String threadTs, @Nullable String recipientUserId,
+                               Slacker slacker, long throttleMs,
+                               @Nullable String botToken, @Nullable String agentName) {
         this.channelId = channelId;
         this.threadTs = threadTs;
         this.recipientUserId = recipientUserId;
@@ -333,7 +349,8 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
 
     private void flush() {
         if (pending.isEmpty()) return;
-        if (slacker.appendStream(channelId, streamTs, pending.toString())) {
+        var ts = Objects.requireNonNull(streamTs, "flush() runs only after the stream started");
+        if (slacker.appendStream(channelId, ts, pending.toString())) {
             pending.setLength(0);
         }
     }

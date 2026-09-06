@@ -1,5 +1,7 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -31,8 +33,9 @@ public final class SlackOutboundPlanner {
      * upload never blocks the reply thread. No-op when there's no agent/token
      * context or no file links.
      */
-    public static void dispatchFiles(String peerId, String threadTs, String agentName,
-                                     String replyText, String botToken) {
+    public static void dispatchFiles(String peerId, @Nullable String threadTs,
+                                     @Nullable String agentName, @Nullable String replyText,
+                                     @Nullable String botToken) {
         if (agentName == null || botToken == null || replyText == null || replyText.isBlank()) {
             return;
         }
@@ -74,7 +77,7 @@ public final class SlackOutboundPlanner {
         }
     }
 
-    private static String caption(TelegramOutboundPlanner.FileSegment fs) {
+    private static @Nullable String caption(TelegramOutboundPlanner.FileSegment fs) {
         var c = fs.caption();
         if (c == null) return null;
         return c.length() > CAPTION_MAX ? c.substring(0, CAPTION_MAX) : c;

@@ -19,6 +19,7 @@ import com.vladsch.flexmark.ast.ThematicBreak;
 import com.vladsch.flexmark.ext.gfm.strikethrough.Strikethrough;
 import com.vladsch.flexmark.ext.tables.TableBlock;
 import com.vladsch.flexmark.util.ast.Node;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Shared flexmark AST walker for the channel markdown formatters (JCLAW-720):
@@ -150,7 +151,7 @@ abstract class FlexmarkChannelEmitter {
     }
 
     /** First child of {@code parent} assignable to {@code type}, or {@code null}. */
-    protected static <T extends Node> T findChild(Node parent, Class<T> type) {
+    protected static <T extends Node> @Nullable T findChild(Node parent, Class<T> type) {
         for (Node child = parent.getFirstChild(); child != null; child = child.getNext()) {
             if (type.isInstance(child)) return type.cast(child);
         }

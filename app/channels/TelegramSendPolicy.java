@@ -1,6 +1,7 @@
 package channels;
 
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
@@ -96,7 +97,7 @@ final class TelegramSendPolicy {
      * behavior. Returns a disabled-preview options object only when
      * {@link #suppressLinkPreview()} is true.
      */
-    static LinkPreviewOptions linkPreviewOptions() {
+    static @Nullable LinkPreviewOptions linkPreviewOptions() {
         if (!suppressLinkPreview()) return null;
         return LinkPreviewOptions.builder()
                 .isDisabled(true)
@@ -159,7 +160,7 @@ final class TelegramSendPolicy {
      * → always (given a non-null target). {@code allow_sending_without_reply=true}
      * so a since-deleted target degrades to a plain send instead of a 400.
      */
-    static ReplyParameters replyParamsFor(Integer replyToMessageId, boolean firstChunk, String mode) {
+    static @Nullable ReplyParameters replyParamsFor(@Nullable Integer replyToMessageId, boolean firstChunk, String mode) {
         if (replyToMessageId == null) return null;
         boolean apply = switch (mode) {
             case REPLY_MODE_ALL -> true;
@@ -179,7 +180,7 @@ final class TelegramSendPolicy {
      * topic ({@link #GENERAL_TOPIC_THREAD_ID}) — a bare send already lands in
      * General, and naming it explicitly is rejected by the Bot API.
      */
-    static Integer sendThreadId(Integer messageThreadId) {
+    static @Nullable Integer sendThreadId(@Nullable Integer messageThreadId) {
         if (messageThreadId == null || messageThreadId == GENERAL_TOPIC_THREAD_ID) return null;
         return messageThreadId;
     }
@@ -190,12 +191,12 @@ final class TelegramSendPolicy {
      * sink always evaluates the reply policy as the first chunk. Returns null
      * when no badge should be applied ({@code off}, or a null target).
      */
-    static ReplyParameters replyParamsForSink(String botToken, Integer replyToMessageId) {
+    static @Nullable ReplyParameters replyParamsForSink(String botToken, @Nullable Integer replyToMessageId) {
         return replyParamsFor(replyToMessageId, true, effectiveReplyToMode(botToken));
     }
 
     /** JCLAW-369: package-private bridge so the sink shares the General-topic strip rule. */
-    static Integer sendThreadIdForSink(Integer messageThreadId) {
+    static @Nullable Integer sendThreadIdForSink(@Nullable Integer messageThreadId) {
         return sendThreadId(messageThreadId);
     }
 }

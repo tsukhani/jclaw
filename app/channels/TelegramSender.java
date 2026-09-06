@@ -2,6 +2,7 @@ package channels;
 
 import channels.Channel.SendResult;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.TelegramUrl;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
@@ -59,7 +60,7 @@ class TelegramSender {
         this(botToken, null);
     }
 
-    TelegramSender(String botToken, TelegramUrl urlOverride) {
+    TelegramSender(String botToken, @Nullable TelegramUrl urlOverride) {
         this.botToken = botToken;
         this.client = TelegramBotApiHttpClients.textClient(botToken, urlOverride);
         var uploadClient = TelegramBotApiHttpClients.uploadClient(botToken, urlOverride);
@@ -107,14 +108,16 @@ class TelegramSender {
      * streaming-recovery job). Exceptions propagate so callers can decide
      * whether to retry or log-and-continue.
      */
-    public void editMessageText(String chatId,
-                                Integer messageId, String text) throws TelegramApiException {
+    public void editMessageText(@Nullable String chatId,
+                                @Nullable Integer messageId,
+                                @Nullable String text) throws TelegramApiException {
         messageSender.editMessageText(chatId, messageId, text);
     }
 
     /** JCLAW-387 (A3): reply to {@code replyToMessageId} natively quoting {@code quote}. */
-    public boolean sendReplyWithQuote(String chatId, String text,
-                                      Agent agent, Integer replyToMessageId, String quote) {
+    public boolean sendReplyWithQuote(@Nullable String chatId, @Nullable String text,
+                                      Agent agent, @Nullable Integer replyToMessageId,
+                                      @Nullable String quote) {
         return messageSender.sendReplyWithQuote(chatId, text, agent, replyToMessageId, quote);
     }
 
@@ -130,7 +133,7 @@ class TelegramSender {
 
     /** JCLAW-369: reply-targeting + topic-aware outbound dispatch. */
     public boolean sendTurn(String chatId, String text, Agent agent,
-                            Integer replyToMessageId, Integer messageThreadId) {
+                            @Nullable Integer replyToMessageId, @Nullable Integer messageThreadId) {
         return messageSender.sendTurn(chatId, text, agent, replyToMessageId, messageThreadId);
     }
 
@@ -141,19 +144,19 @@ class TelegramSender {
 
     /** JCLAW-369: reply-targeting + topic-aware single text send. */
     public SendResult trySend(String peerId, String text,
-                              ReplyParameters replyParams, Integer messageThreadId) {
+                              @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return messageSender.trySend(peerId, text, replyParams, messageThreadId);
     }
 
     // ── Media sender delegation (native file + album uploads) ──
 
     /** JCLAW-141: generic cross-channel photo send (the {@link Channel} contract). */
-    public SendResult sendPhoto(String peerId, File file, String caption) {
+    public SendResult sendPhoto(String peerId, File file, @Nullable String caption) {
         return mediaSender.sendPhoto(peerId, file, caption);
     }
 
     /** JCLAW-141: generic cross-channel document send (the {@link Channel} contract). */
-    public SendResult sendDocument(String peerId, File file, String caption) {
+    public SendResult sendDocument(String peerId, File file, @Nullable String caption) {
         return mediaSender.sendDocument(peerId, file, caption);
     }
 
@@ -164,13 +167,14 @@ class TelegramSender {
 
     /** JCLAW-369: reply-targeting + topic-aware photo upload. */
     public boolean trySendPhoto(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId) {
+                                @Nullable ReplyParameters replyParams,
+                                @Nullable Integer messageThreadId) {
         return mediaSender.trySendPhoto(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** JCLAW-364: caption-aware photo upload. */
     public boolean trySendPhoto(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId, @Nullable String caption) {
         return mediaSender.trySendPhoto(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -181,13 +185,13 @@ class TelegramSender {
 
     /** JCLAW-369: reply-targeting + topic-aware document upload. */
     public boolean trySendDocument(String peerId, File file, String displayName,
-                                   ReplyParameters replyParams, Integer messageThreadId) {
+                                   @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return mediaSender.trySendDocument(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** JCLAW-364: caption-aware document upload. */
     public boolean trySendDocument(String peerId, File file, String displayName,
-                                   ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                   @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId, @Nullable String caption) {
         return mediaSender.trySendDocument(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -198,13 +202,13 @@ class TelegramSender {
 
     /** Reply/topic-aware voice upload. */
     public boolean trySendVoice(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId) {
+                                @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return mediaSender.trySendVoice(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware voice upload. */
     public boolean trySendVoice(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId, @Nullable String caption) {
         return mediaSender.trySendVoice(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -215,13 +219,13 @@ class TelegramSender {
 
     /** Reply/topic-aware audio upload. */
     public boolean trySendAudio(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId) {
+                                @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return mediaSender.trySendAudio(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware audio upload. */
     public boolean trySendAudio(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId, @Nullable String caption) {
         return mediaSender.trySendAudio(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
@@ -232,20 +236,20 @@ class TelegramSender {
 
     /** Reply/topic-aware video upload. */
     public boolean trySendVideo(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId) {
+                                @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return mediaSender.trySendVideo(peerId, file, displayName, replyParams, messageThreadId);
     }
 
     /** Caption-aware video upload. */
     public boolean trySendVideo(String peerId, File file, String displayName,
-                                ReplyParameters replyParams, Integer messageThreadId, String caption) {
+                                @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId, @Nullable String caption) {
         return mediaSender.trySendVideo(peerId, file, displayName, replyParams, messageThreadId, caption);
     }
 
     /** JCLAW-365: bundle 2–10 photos/videos into a single Telegram album. */
     public boolean sendMediaGroup(String peerId,
                                   List<TelegramOutboundPlanner.FileSegment> items,
-                                  String caption, ReplyParameters replyParams, Integer messageThreadId) {
+                                  @Nullable String caption, @Nullable ReplyParameters replyParams, @Nullable Integer messageThreadId) {
         return mediaSender.sendMediaGroup(peerId, items, caption, replyParams, messageThreadId);
     }
 
@@ -257,7 +261,8 @@ class TelegramSender {
     }
 
     /** JCLAW-364: set (or clear) the bot's reaction on a message. */
-    public boolean setMessageReaction(String chatId, Integer messageId, String emoji) {
+    public boolean setMessageReaction(@Nullable String chatId, @Nullable Integer messageId,
+                                      @Nullable String emoji) {
         return adminSender.setMessageReaction(chatId, messageId, emoji);
     }
 
@@ -277,14 +282,15 @@ class TelegramSender {
     }
 
     /** JCLAW-387 (C1): send a native Telegram poll to {@code chatId}. */
-    public boolean sendPoll(String chatId, String question,
-                            List<String> options, Boolean isAnonymous,
-                            Boolean allowsMultipleAnswers, Integer openPeriod) {
+    public boolean sendPoll(@Nullable String chatId, @Nullable String question,
+                            @Nullable List<String> options, @Nullable Boolean isAnonymous,
+                            @Nullable Boolean allowsMultipleAnswers, @Nullable Integer openPeriod) {
         return adminSender.sendPoll(chatId, question, options, isAnonymous, allowsMultipleAnswers, openPeriod);
     }
 
     /** JCLAW-369: topic-aware typing action. */
-    public TelegramChannel.TypingActionOutcome sendTypingAction(String chatId, Integer messageThreadId) {
+    public TelegramChannel.TypingActionOutcome sendTypingAction(@Nullable String chatId,
+                                                                @Nullable Integer messageThreadId) {
         return adminSender.sendTypingAction(chatId, messageThreadId);
     }
 
@@ -301,27 +307,28 @@ class TelegramSender {
     // ── Keyboard sender delegation (inline keyboards + callback plumbing) ──
 
     /** JCLAW-109: send an HTML message with an inline keyboard; returns the new message id or null. */
-    public Integer sendMessageWithKeyboard(String chatId,
-                                           String htmlText, InlineKeyboardMarkup keyboard) {
+    public @Nullable Integer sendMessageWithKeyboard(String chatId,
+                                                     String htmlText, InlineKeyboardMarkup keyboard) {
         return keyboardSender.sendMessageWithKeyboard(chatId, htmlText, keyboard);
     }
 
     /** JCLAW-369: reply-targeting + topic-aware keyboard send. */
-    public Integer sendMessageWithKeyboard(String chatId,
-                                           String htmlText, InlineKeyboardMarkup keyboard,
-                                           Integer replyToMessageId, Integer messageThreadId) {
+    public @Nullable Integer sendMessageWithKeyboard(String chatId,
+                                                     String htmlText, InlineKeyboardMarkup keyboard,
+                                                     Integer replyToMessageId, @Nullable Integer messageThreadId) {
         return keyboardSender.sendMessageWithKeyboard(chatId, htmlText, keyboard, replyToMessageId, messageThreadId);
     }
 
     /** Edit an existing message in-place, optionally attaching a new inline keyboard (null clears it). */
-    public boolean editMessageText(String chatId, Integer messageId,
-                                   String htmlText, InlineKeyboardMarkup keyboard) {
+    public boolean editMessageText(@Nullable String chatId, @Nullable Integer messageId,
+                                   @Nullable String htmlText,
+                                   @Nullable InlineKeyboardMarkup keyboard) {
         return keyboardSender.editMessageText(chatId, messageId, htmlText, keyboard);
     }
 
     /** Acknowledge a callback query (Telegram requires this within three seconds). */
     public boolean answerCallbackQuery(String callbackId,
-                                       String text, boolean showAlert) {
+                                       @Nullable String text, boolean showAlert) {
         return keyboardSender.answerCallbackQuery(callbackId, text, showAlert);
     }
 

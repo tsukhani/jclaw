@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
@@ -34,7 +35,7 @@ final class TelegramKeyboardSender {
      * (JCLAW-109). Returns the new message id on success (so the caller
      * can later {@code editMessageText} it), or null on failure.
      */
-    Integer sendMessageWithKeyboard(String chatId,
+    @Nullable Integer sendMessageWithKeyboard(String chatId,
                                     String htmlText, InlineKeyboardMarkup keyboard) {
         return sendMessageWithKeyboard(chatId, htmlText, keyboard, null, null);
     }
@@ -51,9 +52,10 @@ final class TelegramKeyboardSender {
      * construction) rather than part of the generic {@link Channel} contract — the
      * inline-keyboard markup is Telegram-specific.
      */
-    Integer sendMessageWithKeyboard(String chatId,
+    @Nullable Integer sendMessageWithKeyboard(String chatId,
                                     String htmlText, InlineKeyboardMarkup keyboard,
-                                    Integer replyToMessageId, Integer messageThreadId) {
+                                    @Nullable Integer replyToMessageId,
+                                    @Nullable Integer messageThreadId) {
         var builder = SendMessage.builder()
                 .chatId(chatId)
                 .text(htmlText)
@@ -82,8 +84,9 @@ final class TelegramKeyboardSender {
      * dispatcher to drill down / return without cluttering the chat
      * with a new message per tap.
      */
-    boolean editMessageText(String chatId, Integer messageId,
-                            String htmlText, InlineKeyboardMarkup keyboard) {
+    boolean editMessageText(@Nullable String chatId, @Nullable Integer messageId,
+                            @Nullable String htmlText,
+                            @Nullable InlineKeyboardMarkup keyboard) {
         var builder = EditMessageText.builder()
                 .chatId(chatId)
                 .messageId(messageId)
@@ -110,7 +113,7 @@ final class TelegramKeyboardSender {
      * text for routine taps.
      */
     boolean answerCallbackQuery(String callbackId,
-                                String text, boolean showAlert) {
+                                @Nullable String text, boolean showAlert) {
         var builder = AnswerCallbackQuery.builder()
                 .callbackQueryId(callbackId)
                 .showAlert(showAlert);

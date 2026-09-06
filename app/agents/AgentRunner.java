@@ -812,7 +812,7 @@ public class AgentRunner {
             Agent agent, String channelType, String peerId, String text,
             Function<Long, ChannelStreamingSink> sinkFactory,
             List<AttachmentService.Input> attachments,
-            String chatType) {
+            @Nullable String chatType) {
         ChannelInboundDispatcher.processInboundForAgentStreaming(agent, channelType, peerId, text,
                 sinkFactory, attachments, chatType);
     }
@@ -827,8 +827,8 @@ public class AgentRunner {
      * @param messageThreadId forum-topic thread id, or null for a non-topic message
      * @return the composite conversation peer key
      */
-    public static String telegramConversationPeerId(String ownerKey, String chatType, String chatId,
-                                                    Integer messageThreadId) {
+    public static String telegramConversationPeerId(String ownerKey, @Nullable String chatType, String chatId,
+                                                    @Nullable Integer messageThreadId) {
         return TelegramMessageAddressing.telegramConversationPeerId(ownerKey, chatType, chatId, messageThreadId);
     }
 
@@ -843,8 +843,9 @@ public class AgentRunner {
      * @param fromId          sender's Telegram user id
      * @return the (possibly attributed) message text
      */
-    public static String telegramSenderAttributed(String text, String chatType,
-                                                  String fromDisplayName, String fromId) {
+    public static String telegramSenderAttributed(String text, @Nullable String chatType,
+                                                  @Nullable String fromDisplayName,
+                                                  @Nullable String fromId) {
         return TelegramMessageAddressing.telegramSenderAttributed(text, chatType, fromDisplayName, fromId);
     }
 
