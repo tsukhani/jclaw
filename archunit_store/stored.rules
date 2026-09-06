@@ -1,3 +1,5 @@
 #
-#Sun Sep 06 08:47:20 GMT+08:00 2026
+#Sun Sep 06 09:31:36 GMT+08:00 2026
 no\ classes\ that\ do\ not\ have\ fully\ qualified\ name\ 'utils.AppClock'\ should\ call\ method\ where\ a\ wall-clock\ read\ (Instant/LocalDate/LocalDateTime/OffsetDateTime/ZonedDateTime.now\ or\ System.currentTimeMillis),\ because\ wall-clock\ reads\ go\ through\ utils.AppClock\ (JCLAW-1150)\ so\ tests\ can\ bind\ a\ fixed\ clock;\ the\ frozen\ entries\ are\ System.currentTimeMillis\ interval\ baselines,\ not\ reads\ of\ the\ calendar=6275f969-0091-46e4-a152-58ef95ac8080
+no\ classes\ should\ call\ code\ unit\ where\ a\ call\ that\ starts\ an\ OS\ process,\ because\ spawning\ an\ OS\ process\ is\ an\ unconfined\ authority\ \u2014\ JEP\ 486\ removed\ the\ SecurityManager,\ so\ the\ child\ is\ bounded\ only\ by\ the\ JVM's\ own\ user\ (JCLAW-1152);\ the\ classes\ granted\ it\ are\ enumerated\ in\ archunit_store/=shell-process-spawners
+no\ classes\ that\ reside\ in\ a\ package\ 'tools..'\ should\ call\ code\ unit\ where\ a\ call\ that\ builds\ a\ filesystem\ path\ directly,\ because\ a\ path\ resolved\ from\ a\ tool\ argument\ must\ be\ contained\ by\ WorkspacePathGuard,\ which\ tools.FsPaths\ reaches\ on\ the\ model-facing\ side\ (JCLAW-1152);\ the\ sites\ predating\ that\ seam\ are\ listed\ in\ archunit_store/=filesystem-tool-paths
