@@ -243,26 +243,20 @@ public final class HttpFactories {
     private HttpFactories() { }
 
     /**
-     * Test-installed transport, bound only for the dynamic extent of
-     * {@link #runWith}/{@link #callWith} (JCLAW-1151). A {@link ScopedValue}
-     * rather than a static field so a leaked binding is impossible: the value
-     * is unreachable once the body returns, and one test class cannot leak a
-     * transport into another running concurrently (play1 runs test classes in
-     * parallel).
+     * Test-installed transport. A {@link ScopedValue} rather than a static field
+     * because play1 runs test classes concurrently: a binding is unreachable once
+     * its body returns, so no class can leak a transport into another.
      */
     private static final ScopedValue<OkHttpClient> TRANSPORT = ScopedValue.newInstance();
 
     /**
-     * Run {@code body} with every accessor on this class — guarded variants
-     * included — returning {@code transport} instead of its production client,
-     * so code under test reaches a canned-response interceptor rather than a
-     * socket. The guarded accessors are rebound too: leaving them live would
-     * let a guarded call path still hit the network from a test.
+     * Run {@code body} with every accessor on this class — SSRF-guarded variants
+     * included — returning {@code transport} instead of its production client, so
+     * code under test reaches a canned-response interceptor rather than a socket.
      *
-     * <p>The binding follows the calling thread and threads it forks
-     * structurally, so it covers code invoked directly. It does <em>not</em>
-     * reach Play's own request threads — a {@code FunctionalTest} driving a
-     * controller needs a different seam.
+     * <p>The binding covers only the calling thread's own execution. It does
+     * <em>not</em> reach Play's request threads, so a {@code FunctionalTest}
+     * driving a controller needs a per-collaborator seam instead.
      */
     public static void runWith(@NonNull OkHttpClient transport, @NonNull Runnable body) {
         ScopedValue.where(TRANSPORT, transport).run(body);
