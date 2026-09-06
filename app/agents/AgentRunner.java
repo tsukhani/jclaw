@@ -464,7 +464,8 @@ public class AgentRunner {
         // the last user message, not in the system prompt (see CurrentTimeInjector).
         messages = new ArrayList<>(CurrentTimeInjector.inject(messages));
 
-        var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, stubConv));
+        var providerName = ModelResolver.effectiveModelProvider(agent, stubConv);
+        var agentProvider = providerName != null ? ProviderRegistry.get(providerName) : null;
         var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
         if (primary == null) {
             var error = NO_LLM_PROVIDER_ERROR;

@@ -19,6 +19,7 @@ import utils.LatencyTrace;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -294,7 +295,8 @@ final class StreamingAgentRunner {
         // JCLAW-108: route the actual LLM call through the effective modelId,
         // so conversation overrides take effect on the wire. Failover and
         // tool-loop continuations use the same effective id.
-        var effectiveModelIdForCall = ModelResolver.effectiveModelId(agent, conversation);
+        var effectiveModelIdForCall = Objects.requireNonNull(
+                ModelResolver.effectiveModelId(agent, conversation), "agent has no model configured");
         // Round-1 stream, with a transient-5xx retry and (JCLAW) an audio-format-rejection →
         // Whisper-transcript re-stream. When the audio fallback fires it rewrites the message to the
         // transcript and returns it, so the tool-call continuation loop below reuses the rewritten
@@ -357,7 +359,8 @@ final class StreamingAgentRunner {
     private static @Nullable LlmProvider resolveStreamingProvider(Agent agent, Conversation conversation,
                                                          @Nullable String channelType,
                                                          AgentRunner.StreamingCallbacks cb) {
-        var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conversation));
+        var providerName = ModelResolver.effectiveModelProvider(agent, conversation);
+        var agentProvider = providerName != null ? ProviderRegistry.get(providerName) : null;
         var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
         if (primary == null) {
             EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");

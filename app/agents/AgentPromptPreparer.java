@@ -119,7 +119,8 @@ final class AgentPromptPreparer {
             // (conversation override when set, agent default otherwise), not
             // from agent.modelProvider directly. Downstream helpers that take
             // (agent, conv, provider) compute their own effective model id.
-            var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conv));
+            var providerName = ModelResolver.effectiveModelProvider(agent, conv);
+            var agentProvider = providerName != null ? ProviderRegistry.get(providerName) : null;
             var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
             if (primary == null) {
                 var error = AgentRunner.NO_LLM_PROVIDER_ERROR;

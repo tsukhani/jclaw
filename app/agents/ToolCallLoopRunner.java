@@ -140,7 +140,8 @@ public final class ToolCallLoopRunner {
         Objects.requireNonNull(conversation, "conversation");
         var currentMessages = new ArrayList<>(messages);
         var thinkingMode = ModelResolver.resolveThinkingMode(agent, conversation, primary);
-        var effectiveModelId = ModelResolver.effectiveModelId(agent, conversation);
+        var effectiveModelId = Objects.requireNonNull(
+                ModelResolver.effectiveModelId(agent, conversation), "agent has no model configured");
         var modelInfoForOutcome = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioInitially = modelInfoForOutcome != null && modelInfoForOutcome.supportsAudio();
         var audioState = new AudioRetryState(!supportsAudioInitially && !audioBearers.isEmpty());
@@ -524,7 +525,8 @@ public final class ToolCallLoopRunner {
 
         // Continue with streaming after tool results. JCLAW-108: effective
         // model id honors conversation override, same as the round-1 call.
-        var effectiveModelIdForCall = ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation());
+        var effectiveModelIdForCall = Objects.requireNonNull(
+                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), "agent has no model configured");
         // JCLAW-465: compress tool outputs (incl. this turn's) before the
         // continuation call. Ephemeral — currentMessages keeps the originals.
         var sendMessages = CompressionPipeline.compress(currentMessages, ctx.agent(), ctx.conversation());

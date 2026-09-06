@@ -1,5 +1,7 @@
 package utils;
 
+import com.google.errorprone.annotations.MustBeClosed;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -37,6 +39,10 @@ public final class TaskScope<T> implements AutoCloseable {
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
     private final CompletionService<T> completion = new ExecutorCompletionService<>(pool);
     private final List<Future<T>> forked = new ArrayList<>();
+
+    /** Leaking one leaks its virtual-thread pool, so the compiler requires the caller to close it. */
+    @MustBeClosed
+    public TaskScope() {}
 
     /** Start {@code task} on its own virtual thread. */
     public Future<T> fork(Callable<T> task) {

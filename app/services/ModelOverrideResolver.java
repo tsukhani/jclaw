@@ -54,7 +54,7 @@ public final class ModelOverrideResolver {
     }
 
     /** Effective provider name. See {@link #resolve} for precedence. */
-    public static @Nullable String provider(Conversation conversation, Agent agent) {
+    public static @Nullable String provider(Conversation conversation, @Nullable Agent agent) {
         if (hasOverride(conversation)) {
             return conversation.modelProviderOverride;
         }
@@ -62,7 +62,7 @@ public final class ModelOverrideResolver {
     }
 
     /** Effective model id. See {@link #resolve} for precedence. */
-    public static @Nullable String modelId(Conversation conversation, Agent agent) {
+    public static @Nullable String modelId(Conversation conversation, @Nullable Agent agent) {
         if (hasOverride(conversation)) {
             return conversation.modelIdOverride;
         }

@@ -44,7 +44,7 @@ Method <tools.PlaywrightBrowserTool.ensureSession(tools.PlaywrightBrowserTool$Se
 Method <tools.PlaywrightBrowserTool.screenshot(com.microsoft.playwright.Page, java.lang.String, java.lang.Long)> calls method <java.lang.System.currentTimeMillis()> in (PlaywrightBrowserTool.java:264)
 Method <tools.ShellExecTool.buildTerminalImageEarlyReturn(java.lang.String, models.Agent, int, long, boolean)> calls method <java.lang.System.currentTimeMillis()> in (ShellExecTool.java:655)
 Method <tools.ShellExecTool.execute(java.lang.String, models.Agent)> calls method <java.lang.System.currentTimeMillis()> in (ShellExecTool.java:230)
-Method <tools.ShellExecTool.executeCommand(java.lang.String, java.nio.file.Path, int, int, java.util.Map, long, models.Agent)> calls method <java.lang.System.currentTimeMillis()> in (ShellExecTool.java:492)
 Method <tools.TerminalImageRenderer.renderBlockArtToPng(java.util.List, models.Agent)> calls method <java.lang.System.currentTimeMillis()> in (TerminalImageRenderer.java:151)
 Method <tools.WebFetchTool.claimEscalation(models.Agent)> calls method <java.lang.System.currentTimeMillis()> in (WebFetchTool.java:137)
 Method <utils.ProcessRss.bytes()> calls method <java.lang.System.currentTimeMillis()> in (ProcessRss.java:40)
+Method <tools.ShellExecTool.executeCommand(java.lang.String, java.nio.file.Path, java.nio.file.Path, int, int, java.util.Map, long, models.Agent)> calls method <java.lang.System.currentTimeMillis()> in (ShellExecTool.java:519)
