@@ -7,8 +7,11 @@ import services.evals.EvalRunner;
 import services.evals.EvalScorer;
 import services.evals.EvalSuite;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
@@ -186,6 +189,39 @@ class EvalRunnerTest extends UnitTest {
                 "per-case latency should reflect the responder, got " + report.results().getFirst().latencyMs());
     }
 
+    @Test
+    void aCaseFailingOutsideScoringCancelsTheCasesStillInFlight() {
+        // score() swallows responder exceptions, so this failure mode is only
+        // reachable through the shared fan-out — which is the seam EvalCapture uses.
+        var blocked = new CountDownLatch(1);
+        var interrupted = new AtomicBoolean();
+        var cases = List.of(caseSaying("blocker", "ok"), caseSaying("bomb", "ok"));
+
+        // Preemptive: a fan-out that failed to cancel would park forever rather than
+        // fail, and a hung test in a 7-minute suite tells nobody anything.
+        var thrown = assertTimeoutPreemptively(Duration.ofSeconds(15), () ->
+                assertThrows(IllegalStateException.class, () ->
+                    EvalRunner.mapCasesBounded(cases, 2, testCase -> {
+                        if ("bomb".equals(testCase.id())) {
+                            // Let the blocker reach its park first, so there is something
+                            // running for the failure to cancel.
+                            await(blocked);
+                            throw new IllegalStateException("boom");
+                        }
+                        blocked.countDown();
+                        try {
+                            new CountDownLatch(1).await();
+                        } catch (InterruptedException e) {
+                            interrupted.set(true);
+                            Thread.currentThread().interrupt();
+                        }
+                        return "unreachable";
+                    })));
+
+        assertEquals("boom", thrown.getCause().getMessage());
+        assertTrue(interrupted.get(), "the blocked case must be cancelled, not left running");
+    }
+
     // ==================== Report persistence and regressions ====================
 
     @Test
@@ -240,5 +276,14 @@ class EvalRunnerTest extends UnitTest {
         assertTrue(summary.contains("missing \"beta\""), summary);
         assertTrue(summary.contains("1/2 passed (50%)"), summary);
         assertFalse(summary.contains("errored"), "no case errored, so the totals line stays clean: " + summary);
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 }
