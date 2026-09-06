@@ -36,9 +36,9 @@ import java.util.stream.Collectors;
 /**
  * Shell execution tool for agent-invoked commands.
  *
- * <h2>Security posture (JCLAW-146)</h2>
+ * <h2>Security posture (JCLAW-146, JCLAW-1153)</h2>
  *
- * <p>This tool is <strong>not</strong> a sandbox. It invokes commands via
+ * <p><strong>By default this tool is not a sandbox.</strong> It invokes commands via
  * {@code /bin/sh -c}, which means the full shell grammar is available:
  * composition ({@code ;}, {@code &&}, {@code ||}), pipes ({@code |}), command
  * substitution ({@code $(...)}, backticks), redirection ({@code > < >>}),
@@ -47,7 +47,7 @@ import java.util.stream.Collectors;
  * {@code shell.allowlist}. A command like {@code echo hi; rm -rf foo} passes
  * the allowlist (first token is {@code echo}) and runs both the echo and the rm.
  *
- * <p>This is <strong>intentional</strong>, not a gap. The rationale:
+ * <p>That default is <strong>intentional</strong>, not a gap. The rationale:
  * <ul>
  *   <li>The agent runs with the same OS privileges as the Play process. A
  *       hostile prompt that reaches this tool at all has already breached the
@@ -60,7 +60,9 @@ import java.util.stream.Collectors;
  *       the working directory to the agent's workspace unless
  *       {@code agent.main.shell.allowGlobalPaths=true} is explicitly set for
  *       the main agent; and (2) the environment-variable filter that strips
- *       sensitive keys before handing the map to {@link ProcessBuilder}.</li>
+ *       sensitive keys before handing the map to {@link ProcessBuilder}.
+ *       Both bound where the command <em>starts</em>, not where it can write —
+ *       that is what {@code shell.sandbox} below adds.</li>
  *   <li>The {@link #validateAllowlist(String, Agent)} check exists for <em>UX
  *       guardrails</em> — catching accidental LLM misfires on obvious bad
  *       commands ({@code rm -rf /}, {@code curl | sh}) — not as a
@@ -73,6 +75,25 @@ import java.util.stream.Collectors;
  * {@code commandCompositionRunsBothCommands} specifically asserts that
  * {@code echo hi; echo world} executes both statements, so any future attempt
  * to harden the allowlist into per-token gating will fail loudly.
+ *
+ * <h3>The opt-in OS sandbox: {@code shell.sandbox}</h3>
+ *
+ * <p>JCLAW-1153: the tri-state {@code shell.sandbox} — {@code false} (shipped
+ * default) | {@code true} (confine every run) | {@code untrusted} (confine only
+ * runs whose origin channel is not the operator's own web chat) — launches the
+ * command through {@link HarnessSandbox}, the same macOS Seatbelt / Linux bwrap
+ * profile builders the coding harness uses, granting writes to the agent's
+ * resolved workspace root and nothing else.
+ *
+ * <p>It bounds <em>reach</em>, not grammar. {@code echo hi; rm -rf ~/Documents}
+ * still passes the allowlist and still runs both statements; the {@code rm} now
+ * fails on every path outside the workspace. Metacharacter gating remains
+ * explicitly not the defence — filesystem confinement is.
+ *
+ * <p>It fails closed: with the flag on and no usable sandbox mechanism (native
+ * Windows, or a host missing {@code sandbox-exec}/{@code bwrap}), the launch
+ * throws {@link HarnessSandbox.SandboxUnavailableException} and the run aborts
+ * rather than falling back to an unconfined process.
  *
  * <h3>The configuration to avoid: {@code exec} alongside a web-reading tool</h3>
  *
@@ -88,10 +109,13 @@ import java.util.stream.Collectors;
  * <p>There is no in-process fix, which is precisely why this is documented rather than
  * gated: any guard that could distinguish "content the model read" from "instruction the
  * operator gave" would be the prompt-injection solution itself. The mitigations are
- * operator-side and both are real: keep {@code exec} on agents that do not read the open
- * web (a build agent and a research agent, not one agent doing both), or run the whole
- * process inside an external sandbox (firejail, a container) so the blast radius is
- * bounded no matter what reaches the shell.
+ * operator-side and all real: keep {@code exec} on agents that do not read the open
+ * web (a build agent and a research agent, not one agent doing both), turn on
+ * {@code shell.sandbox} so a shell reached by injection can only write inside the
+ * workspace, or run the whole process inside an external sandbox (firejail, a
+ * container) so the blast radius is bounded no matter what reaches the shell. The
+ * first two leave the Play process itself unconfined; only the third bounds a tool
+ * other than {@code exec}.
  */
 public class ShellExecTool implements ToolRegistry.Tool {
 
@@ -282,7 +306,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 command.length() > 200 ? command.substring(0, 200) + "…" : command,
                 why.isEmpty() ? "" : " — why: " + why));
 
-        return executeCommand(command, workdir, timeout, maxOutputBytes, env, startTime, agent);
+        return executeCommand(command, workdir, workspace, timeout, maxOutputBytes, env, startTime, agent);
     }
 
     /**
@@ -455,11 +479,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return SubprocessEnv.isSensitive(name);
     }
 
-    private String executeCommand(String command, Path workdir, int timeoutSec,
+    private String executeCommand(String command, Path workdir, Path workspace, int timeoutSec,
                                   int maxOutputBytes, Map<String, String> env, long startTime,
                                   Agent agent) {
         try {
-            var process = startProcess(command, workdir, env);
+            var process = startProcess(command, workdir, workspace, env);
 
             // Watchdog: destroy the process after the configured timeout.
             // When destroyed, is.read() in the main loop returns -1 or throws,
@@ -511,9 +535,19 @@ public class ShellExecTool implements ToolRegistry.Tool {
         }
     }
 
-    private static Process startProcess(String command, Path workdir, Map<String, String> env)
-            throws IOException {
-        var pb = new ProcessBuilder("/bin/sh", "-c", command);
+    /**
+     * JCLAW-1153: {@code workspace} is the sandbox's single write grant, not
+     * {@code workdir} — the main agent's {@code allowGlobalPaths} can point
+     * {@code workdir} anywhere, and granting writes to wherever the model asked to
+     * run would make the confinement self-defeating. A
+     * {@link HarnessSandbox.SandboxUnavailableException} from the wrap is left to
+     * propagate: the run must abort, never launch unconfined.
+     */
+    private static Process startProcess(String command, Path workdir, Path workspace,
+                                        Map<String, String> env) throws IOException {
+        var argv = HarnessSandbox.wrap(List.of("/bin/sh", "-c", command), workspace.toFile(),
+                List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.nativeToolTrustedOrigin());
+        var pb = new ProcessBuilder(argv);
         pb.directory(workdir.toFile());
         pb.redirectErrorStream(true);
         pb.environment().clear();

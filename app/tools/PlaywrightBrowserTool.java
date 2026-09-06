@@ -28,6 +28,17 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Headless Chromium browser automation for JS-heavy pages.
  * Each agent gets an isolated browser session with lazy initialization and idle cleanup.
+ *
+ * <p><b>Outside the {@code shell.sandbox} boundary (JCLAW-1153).</b> Two independent
+ * reasons, either sufficient: Playwright's Java client spawns the driver itself, so
+ * there is no argv for {@link HarnessSandbox#wrap} to prefix; and under a macOS
+ * Seatbelt profile Chromium's own child-process sandbox cannot initialize
+ * ("sandbox initialization failed: Operation not permitted") and the browser aborts
+ * with "GPU process isn't usable. Goodbye." — it launches only with
+ * {@code --no-sandbox}, trading per-renderer confinement against a hostile page for
+ * a coarse filesystem jail. Under Linux bwrap it does launch. Confining this tool
+ * means confining the whole JVM, which is the operator-side mitigation
+ * {@link ShellExecTool}'s posture Javadoc already names.
  */
 public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 

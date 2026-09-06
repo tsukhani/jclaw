@@ -1,8 +1,11 @@
 package tools;
 
+import agents.DangerousActionGate;
+import agents.ToolContext;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.ExecutableProbeSupport;
+import utils.ChannelOriginTrust;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -38,6 +41,12 @@ import java.util.Locale;
  *
  * <p>Network egress stays open (the harness needs its API); a deny+allowlist
  * variant is future work, noted in the JCLAW-671 spike.
+ *
+ * <p>JCLAW-1153: the same two profile builders also confine native tools that
+ * spawn processes, under their own tri-state key — see {@link #SHELL_SANDBOX_KEY}
+ * and the {@code allowances}-taking {@link #wrap} overload. Those callers pass an
+ * explicit allowance list instead of a {@link HarnessAdapter}; everything below
+ * the key is shared, so the two boundaries cannot drift apart.
  */
 public final class HarnessSandbox {
 
@@ -53,6 +62,16 @@ public final class HarnessSandbox {
      * </ul>
      */
     public static final String ACP_SANDBOX_KEY = "subagent.acp.sandbox";
+
+    /**
+     * {@code shell.sandbox} — JCLAW-1153: the same tri-state, same {@code false}
+     * default, for native tools that spawn processes ({@code exec}, and
+     * {@code diarize_audio}'s ffmpeg extraction). Deliberately a SECOND key rather
+     * than a reuse of {@link #ACP_SANDBOX_KEY}: an operator confining a coding
+     * harness has not thereby asked to confine every shell command, and a shell run
+     * writes to the agent workspace where a harness run writes to a session dir.
+     */
+    public static final String SHELL_SANDBOX_KEY = "shell.sandbox";
 
     private static final String BWRAP = "bwrap";
 
@@ -72,9 +91,14 @@ public final class HarnessSandbox {
         UNTRUSTED
     }
 
-    /** Resolve the configured {@link Scope}. Unknown/empty/{@code false} → {@link Scope#OFF}. */
+    /** Resolve {@link #ACP_SANDBOX_KEY}'s {@link Scope}. Unknown/empty/{@code false} → {@link Scope#OFF}. */
     public static Scope scope() {
-        var raw = ConfigService.get(ACP_SANDBOX_KEY, "").strip();
+        return scope(ACP_SANDBOX_KEY);
+    }
+
+    /** Resolve the {@link Scope} configured under {@code configKey}. Unknown/empty/{@code false} → {@link Scope#OFF}. */
+    public static Scope scope(String configKey) {
+        var raw = ConfigService.get(configKey, "").strip();
         if ("untrusted".equalsIgnoreCase(raw)) {
             return Scope.UNTRUSTED;
         }
@@ -87,9 +111,22 @@ public final class HarnessSandbox {
         return scope() == Scope.ALL;
     }
 
-    /** Whether the configured {@link #scope()} confines a run with this origin trust. */
-    private static boolean appliesTo(boolean trustedOrigin) {
-        return switch (scope()) {
+    /**
+     * JCLAW-1153: the origin trust of the tool call running on this thread, for native
+     * tools that have no run id to resolve one from. Reuses the dangerous-tool gate's
+     * verdict rather than defining "the operator" a second time — {@code untrusted} mode
+     * must confine exactly the turns {@code tool.approval.offChannelPolicy} treats as
+     * off-channel, or the two knobs disagree about the same turn. An unrecorded origin
+     * classifies as untrusted, so a caller with no provenance is confined, not exempted.
+     */
+    public static boolean nativeToolTrustedOrigin() {
+        return ChannelOriginTrust.isOperatorOrigin(
+                DangerousActionGate.effectiveOrigin(ToolContext.conversationId()));
+    }
+
+    /** Whether {@code configKey}'s {@link #scope(String)} confines a run with this origin trust. */
+    private static boolean appliesTo(String configKey, boolean trustedOrigin) {
+        return switch (scope(configKey)) {
             case OFF -> false;
             case ALL -> true;
             case UNTRUSTED -> !trustedOrigin;
@@ -121,39 +158,56 @@ public final class HarnessSandbox {
      */
     public static List<String> wrap(List<String> argv, @Nullable File session, HarnessAdapter adapter,
                                     boolean trustedOrigin) {
-        if (!appliesTo(trustedOrigin)) return argv;
-        if (session == null) {
+        return wrap(argv, session, adapter.sandboxAllowances(), ACP_SANDBOX_KEY, trustedOrigin);
+    }
+
+    /**
+     * JCLAW-1153: wrap {@code argv} for a caller that has no {@link HarnessAdapter} —
+     * a native tool that spawns a process. Identical to the adapter overload except
+     * that the extra write grants come from {@code allowances} directly and the
+     * tri-state is read from {@code configKey}.
+     *
+     * @param writeRoot   the one directory the process may write to (plus the
+     *                    profile's fixed temp/dev grants). For a shell run this is
+     *                    the agent's resolved workspace root.
+     * @param allowances  extra paths to grant, absolute or {@code $HOME}-relative,
+     *                    the way {@link HarnessAdapter#sandboxAllowances} declares
+     *                    a harness's own state.
+     */
+    public static List<String> wrap(List<String> argv, File writeRoot, List<String> allowances,
+                                    String configKey, boolean trustedOrigin) {
+        if (!appliesTo(configKey, trustedOrigin)) return argv;
+        if (writeRoot == null) {
             throw new SandboxUnavailableException(
                     "sandboxing requires a session working directory, but none was resolved");
         }
         var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        var allowances = adapter.sandboxAllowances();
         if (os.contains("mac") || os.contains("darwin")) {
-            requireBinary("sandbox-exec");
-            return macos(argv, session, allowances);
+            requireBinary("sandbox-exec", configKey);
+            return macos(argv, writeRoot, allowances);
         }
         if (os.contains("linux")) {
-            requireBinary(BWRAP);
-            return linux(argv, session, allowances);
+            requireBinary(BWRAP, configKey);
+            return linux(argv, writeRoot, allowances);
         }
         throw new SandboxUnavailableException(
-                ("subagent.acp.sandbox is enabled but this platform (%s) has no supported sandbox "
+                ("%s is enabled but this platform (%s) has no supported sandbox "
                         + "— native Windows needs AppContainer/Job Objects (unimplemented); on Windows "
                         + "run JClaw under WSL2. Disable the sandbox or move to a supported host.")
-                        .formatted(System.getProperty("os.name")));
+                        .formatted(configKey, System.getProperty("os.name")));
     }
 
-    private static void requireBinary(String binary) {
+    private static void requireBinary(String binary, String configKey) {
         var probe = ExecutableProbeSupport.probeOnPath(
                 binary, binary.equals(BWRAP) ? "--version" : "-p", "harness-sandbox", "");
         // sandbox-exec has no --version and exits non-zero on a bare -p; treat a
         // clean "not found on PATH" as the only fatal signal for it.
         if (!probe.available() && probe.reason().contains("not found on PATH")) {
             throw new SandboxUnavailableException(
-                    ("subagent.acp.sandbox is enabled but '%s' is not available (%s). On WSL2 this often "
+                    ("%s is enabled but '%s' is not available (%s). On WSL2 this often "
                             + "means unprivileged user namespaces are disabled (kernel.unprivileged_userns_clone). "
                             + "Install/enable it or disable the sandbox — the run is aborted rather than launched "
-                            + "unsandboxed.").formatted(binary, probe.reason()));
+                            + "unsandboxed.").formatted(configKey, binary, probe.reason()));
         }
     }
 

@@ -483,9 +483,21 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
             var dest = voiceRefsDir().resolve(clean + ".mp3");
             var tmp = Files.createTempFile("jclaw-voice-ref-", ".mp3");
             try {
-                var proc = new ProcessBuilder("ffmpeg", "-y", "-i", audio.toString(),
-                        "-t", String.valueOf(REFERENCE_SECONDS), "-ac", "1", "-b:a", "96k",
-                        tmp.toString()).redirectErrorStream(true).start();
+                // JCLAW-1153: ffmpeg writes only the temp file, so that directory is the
+                // sole write grant — data/voice-refs is written by the JVM's Files.move
+                // below, outside the sandbox. The workspace root rides along as an
+                // allowance because bwrap masks $HOME with a tmpfs, which would otherwise
+                // hide the input recording from the confined process. toRealPath is
+                // load-bearing: Seatbelt matches subpaths after symlink resolution, so a
+                // grant for the /var/folders TMPDIR alias would never match /private/var.
+                var argv = HarnessSandbox.wrap(
+                        List.of("ffmpeg", "-y", "-i", audio.toString(),
+                                "-t", String.valueOf(REFERENCE_SECONDS), "-ac", "1", "-b:a", "96k",
+                                tmp.toString()),
+                        tmp.toRealPath().getParent().toFile(),
+                        List.of(AgentService.workspaceRoot().toAbsolutePath().toString()),
+                        HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.nativeToolTrustedOrigin());
+                var proc = new ProcessBuilder(argv).redirectErrorStream(true).start();
                 String output = new String(proc.getInputStream().readAllBytes());
                 if (proc.waitFor() != 0) {
                     return "Error: could not extract a voice sample (%s).".formatted(
