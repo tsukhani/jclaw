@@ -45,7 +45,8 @@ public final class RegistrySkillImporter {
      * parses {@code source} as {@code owner/repo}. Never throws — failures return
      * {@code ok=false} with a human-readable message.
      */
-    public static ImportResult importToGlobal(String provider, String source, String skillId, String owner) {
+    public static ImportResult importToGlobal(@Nullable String provider, String source,
+                                             String skillId, @Nullable String owner) {
         if (skillId == null || skillId.isBlank()) {
             return ImportResult.fail("missing skill id");
         }

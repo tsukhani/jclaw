@@ -1,6 +1,7 @@
 package controllers;
 
 import models.ApiToken;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Before;
 import play.mvc.Controller;
 import play.mvc.Http;
@@ -126,7 +127,7 @@ public class AuthCheck extends Controller {
      *  Bearer headers still return null — the bearer path is opt-in
      *  per request, and a malformed header should be treated as "no
      *  bearer credential supplied" rather than rejected outright. */
-    private static String readBearerToken() {
+    private static @Nullable String readBearerToken() {
         var header = Http.Request.current().headers.get("authorization");
         if (header == null) return null;
         var value = header.value();

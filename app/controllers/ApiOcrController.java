@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
@@ -33,7 +34,7 @@ public class ApiOcrController extends Controller {
     private static final Gson gson = GSON;
 
     public record OcrProvider(String name, String displayName, boolean available,
-                              String version, String reason, boolean enabled,
+                              @Nullable String version, @Nullable String reason, boolean enabled,
                               String configKey, String description, String installHint) {}
 
     public record OcrStatusResponse(List<OcrProvider> providers) {}

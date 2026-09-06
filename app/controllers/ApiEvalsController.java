@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import memory.MemoryAutoCapture;
 import models.Agent;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.NoTransaction;
 import play.mvc.Before;
 import play.mvc.Controller;
@@ -76,6 +77,10 @@ public class ApiEvalsController extends Controller {
      */
     public static void capture() {
         var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var suiteId = JsonBodyReader.requiredOr400(body, "suite");
         var agentName = JsonBodyReader.requiredOr400(body, "agent");
 
@@ -148,6 +153,10 @@ public class ApiEvalsController extends Controller {
     @NoTransaction
     public static void memoryIngest() {
         var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var agentName = JsonBodyReader.requiredOr400(body, "agent");
         var agent = Tx.run(() -> Agent.findByName(agentName));
         if (agent == null) {
@@ -199,7 +208,7 @@ public class ApiEvalsController extends Controller {
             // artifact and does not ship, so say that rather than 500 on a missing dir.
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Cannot read the eval dataset at %s: %s".formatted(dir, e.getMessage()));
-            return null;  // unreachable: error() throws
+            throw ApiResponses.unreachable();
         }
         var match = suites.stream()
                 .filter(s -> s.id().equals(suiteId))
@@ -208,11 +217,12 @@ public class ApiEvalsController extends Controller {
         if (match == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND,
                     "No suite '%s' in %s".formatted(suiteId, dir));
+            throw ApiResponses.unreachable();
         }
         return match;
     }
 
-    private static int readInt(JsonObject body, String key, int defaultValue) {
+    private static int readInt(@Nullable JsonObject body, String key, int defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
             return body.get(key).getAsInt();

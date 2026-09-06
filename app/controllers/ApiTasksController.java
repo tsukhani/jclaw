@@ -12,6 +12,7 @@ import models.Agent;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
@@ -72,8 +73,8 @@ public class ApiTasksController extends Controller {
     private record TaskView(Long id, String name, String description, String type, String status,
                             String cronExpression, Long intervalSeconds, String scheduleDisplay,
                             int retryCount, int maxRetries, String lastError,
-                            String nextRunAt, String lastFiredAt, String createdAt,
-                            Long agentId, String agentName,
+                            @Nullable String nextRunAt, @Nullable String lastFiredAt, String createdAt,
+                            @Nullable Long agentId, @Nullable String agentName,
                             boolean paused,
                             String delivery, String payloadType,
                             String modelProvider, String modelId,
@@ -82,7 +83,7 @@ public class ApiTasksController extends Controller {
                             boolean autoDeleteOnComplete,
                             String contextFromTaskIds, Integer repeatLimit,
                             String timezone, String effectiveTimezone,
-                            Long runningRunId,
+                            @Nullable Long runningRunId,
                             // JCLAW-1062: the recorded provenance of this task. Read-only —
                             // it decides fire-time trust, and a null reads as UNKNOWN and
                             // fails closed, which the Tasks page surfaces rather than hides.
@@ -109,7 +110,7 @@ public class ApiTasksController extends Controller {
          *       the row is collapsed or expanded.</li>
          * </ul>
          */
-        static TaskView of(Task t, Instant lastFiredAt, Long runningRunId) {
+        static TaskView of(Task t, @Nullable Instant lastFiredAt, @Nullable Long runningRunId) {
             return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
                     t.cronExpression, t.intervalSeconds, t.scheduleDisplay,
                     t.retryCount, t.maxRetries, t.lastError,
@@ -162,7 +163,7 @@ public class ApiTasksController extends Controller {
      *     task (from {@link #list}'s bulk pass), or null when it has never
      *     completed a run.
      */
-    public static String nextRunAtForDisplay(Task t, Instant lastFiredAt) {
+    public static @Nullable String nextRunAtForDisplay(Task t, @Nullable Instant lastFiredAt) {
         if (t.paused) return null;
         // Only live tasks (PENDING one-shot / ACTIVE recurring) have a
         // meaningful "next fire" — terminal-state tasks fall through to the
@@ -231,7 +232,10 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Create a task from a JSON body (agentId, name, schedule + optional fields) and register it with the scheduler")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var agent = requireAgentFromBody(body);
         var name = requireTaskName(body);
@@ -261,7 +265,7 @@ public class ApiTasksController extends Controller {
      * would hand every agent-created task operator trust at fire time — the same hole one
      * door over; an unrecorded origin classifies as UNKNOWN and fails closed.
      */
-    private static String creationOrigin() {
+    private static @Nullable String creationOrigin() {
         return RequestPrincipal.isAgentOriginated() ? null : ChannelOriginTrust.WEB;
     }
 
@@ -395,10 +399,16 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Patch a task by id from a JSON body of changed fields, re-registering the scheduler when the schedule changes")
     public static void update(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         rejectInvalidDelivery(body);
         rejectInvalidTimezone(body);
@@ -505,7 +515,10 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Cancel a PENDING or ACTIVE task by id (sets status CANCELLED and unschedules)")
     public static void cancel(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
@@ -539,7 +552,10 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Hard-delete a task by id along with its runs, messages, notifications, and scheduler row")
     public static void delete(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var agentName = task.agent != null ? task.agent.name : null;
         var taskName = task.name;
@@ -557,7 +573,10 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Pause a PENDING or ACTIVE task by id so it won't fire until resumed")
     public static void pause(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         // Pause only applies to live tasks (PENDING one-shot waiting / ACTIVE
         // recurring ongoing); pausing a terminal Task has no effect since the
         // scheduler row is already gone.
@@ -569,7 +588,7 @@ public class ApiTasksController extends Controller {
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) paused via API".formatted(task.name, task.id));
         // Re-read so the response reflects the flipped flag.
-        renderJSON(gson.toJson(TaskView.of(TaskService.findById(task.id))));
+        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), "task deleted mid-request"))));
     }
 
     @SuppressWarnings("java:S2259")
@@ -577,7 +596,10 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Resume a paused PENDING or ACTIVE task by id so it fires on schedule again")
     public static void resume(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         if (task.status != Task.Status.PENDING && task.status != Task.Status.ACTIVE) {
             badRequest();
         }
@@ -585,7 +607,7 @@ public class ApiTasksController extends Controller {
         EventLogger.info("TASK_MGMT_RESUME",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) resumed via API".formatted(task.name, task.id));
-        renderJSON(gson.toJson(TaskView.of(TaskService.findById(task.id))));
+        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), "task deleted mid-request"))));
     }
 
     /**
@@ -606,7 +628,10 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Re-arm a CANCELLED task's schedule at its next natural fire without firing immediately")
     public static void reenable(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         // Re-enable only applies to a CANCELED task: reviving a live Task
         // would double-schedule, and reviving a COMPLETED/FAILED one would
         // resurrect a finished fire. Anything else is a client error.
@@ -620,7 +645,7 @@ public class ApiTasksController extends Controller {
         EventLogger.info("TASK_MGMT_REENABLE",
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) re-enabled via API".formatted(task.name, task.id));
-        renderJSON(gson.toJson(TaskView.of(TaskService.findById(task.id))));
+        renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), "task deleted mid-request"))));
     }
 
     /**
@@ -638,7 +663,10 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Fire a task immediately by id, reviving a CANCELLED task first so the run isn't skipped")
     public static void run(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         boolean revivedFromCancel = false;
         if (task.status == Task.Status.CANCELLED) {
@@ -663,7 +691,10 @@ public class ApiTasksController extends Controller {
     @Operation(summary = "Retry a FAILED or LOST task by id (reset retryCount/lastError and re-register to fire now)")
     public static void retry(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         // JCLAW-258 extends retry to accept LOST in addition to FAILED.
         // FAILED: no scheduled_tasks row (it was removed when the failure
         // terminated the previous fire) — register() inserts a fresh row.

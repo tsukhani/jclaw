@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.mvc.Before;
 import play.mvc.Controller;
@@ -55,7 +56,7 @@ public class ApiController extends Controller {
      */
     public record StatusResponse(String status, String application, String mode,
                                   String applicationVersion, String frameworkVersion,
-                                  String expectedFrameworkVersion, String spaBuildId) {}
+                                  @Nullable String expectedFrameworkVersion, @Nullable String spaBuildId) {}
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Report service health, app name/version, run mode, and Play framework version vs. expected")
@@ -79,7 +80,7 @@ public class ApiController extends Controller {
      * endpoint is health check infrastructure and must not 500 on a
      * missing optional file.
      */
-    private static String readExpectedFrameworkVersion() {
+    private static @Nullable String readExpectedFrameworkVersion() {
         try {
             var path = Path.of(Play.applicationPath.getAbsolutePath(), ".play-version");
             if (!Files.isRegularFile(path)) return null;
@@ -103,7 +104,7 @@ public class ApiController extends Controller {
      * for the same reason as {@link #readExpectedFrameworkVersion()} — a
      * health check must not 500 over an optional file.
      */
-    private static String readSpaBuildId() {
+    private static @Nullable String readSpaBuildId() {
         try {
             var path = Play.getFile("public/spa/_nuxt/builds/latest.json").toPath();
             if (!Files.isRegularFile(path)) return null;

@@ -1,5 +1,6 @@
 package jobs;
 
+import org.jspecify.annotations.Nullable;
 import play.db.DB;
 import services.EventLogger;
 
@@ -169,7 +170,7 @@ public final class CascadeFkMigrator {
      * {@code CASCADE}, or {@code null} when it already cascades or the catalog
      * has no such FK.
      */
-    private static String findNonCascadeConstraint(PreparedStatement lookup, ForeignKey fk)
+    private static @Nullable String findNonCascadeConstraint(PreparedStatement lookup, ForeignKey fk)
             throws SQLException {
         lookup.setString(1, fk.childTable().toUpperCase(Locale.ROOT));
         lookup.setString(2, fk.childColumn().toUpperCase(Locale.ROOT));

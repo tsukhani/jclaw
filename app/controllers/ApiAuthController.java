@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.libs.Codec;
 import play.libs.Time;
@@ -127,7 +128,7 @@ public class ApiAuthController extends Controller {
      * that cannot sit behind it did not. Callers render their own body; only the decision is
      * shared, because the three surfaces answer with different codes.
      */
-    static SessionRejection sessionRejection() {
+    static @Nullable SessionRejection sessionRejection() {
         if (!"true".equals(session.get("authenticated"))) {
             return SessionRejection.NOT_AUTHENTICATED;
         }
@@ -269,9 +270,15 @@ public class ApiAuthController extends Controller {
         // ConfigService.set / PasswordHasher.hash stay outside any catch so a
         // genuine infra failure surfaces as Play's 500, not a misleading 400.
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var password = JsonBodyReader.optString(body, "password", false);
-        if (password == null) badRequest();
+        if (password == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         if (password.length() < MIN_PASSWORD_LENGTH) {
             ApiResponses.error(400, ApiResponses.PASSWORD_TOO_SHORT,
                     "Password must be at least %d characters".formatted(MIN_PASSWORD_LENGTH));
@@ -323,10 +330,16 @@ public class ApiAuthController extends Controller {
         // any catch so a genuine infra failure surfaces as 500, not a
         // misleading 400.
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var username = JsonBodyReader.optString(body, "username", false);
         var password = JsonBodyReader.optString(body, "password", false);
-        if (username == null || password == null) badRequest();
+        if (username == null || password == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var expectedUser = Play.configuration.getProperty("jclaw.admin.username", "admin");
         var storedHash = ConfigService.get(PASSWORD_HASH_KEY);

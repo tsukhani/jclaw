@@ -10,6 +10,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
+import utils.ApiResponses;
 
 import static utils.GsonHolder.GSON;
 
@@ -62,7 +63,10 @@ public class ApiOnboardingController extends Controller {
     @Operation(summary = "Record guided-tour progress, upserting the max step reached (clamped to [1, totalSteps])")
     public static void recordProgress() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("step")) badRequest();
+        if (body == null || !body.has("step")) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         int step;
         try {
             step = body.get("step").getAsInt();

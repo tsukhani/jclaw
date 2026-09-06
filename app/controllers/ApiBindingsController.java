@@ -134,6 +134,7 @@ public class ApiBindingsController extends Controller {
         if (el == null || el.isJsonNull() || !el.isJsonPrimitive()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Field '%s' is required and must be a number".formatted(key));
+            throw ApiResponses.unreachable();
         }
         try {
             return el.getAsLong();

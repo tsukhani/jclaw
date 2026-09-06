@@ -40,13 +40,13 @@ final class SubagentChatBridge {
     /** JCLAW-661: register the open chat turn's streaming callbacks under its
      *  conversation id so a coding run spawned during the turn can pick them up.
      *  Null-safe on both args — a closed tab simply never registers. */
-    static void registerChatCallbacks(Long conversationId, AgentRunner.StreamingCallbacks cb) {
+    static void registerChatCallbacks(@Nullable Long conversationId, AgentRunner.@Nullable StreamingCallbacks cb) {
         if (conversationId == null || cb == null) return;
         CHAT_CALLBACKS.put(conversationId, cb);
     }
 
     /** JCLAW-661: drop the chat-turn callbacks for a conversation (turn closed). */
-    static void unregisterChatCallbacks(Long conversationId) {
+    static void unregisterChatCallbacks(@Nullable Long conversationId) {
         if (conversationId == null) return;
         CHAT_CALLBACKS.remove(conversationId);
     }

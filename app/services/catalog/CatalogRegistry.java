@@ -1,5 +1,6 @@
 package services.catalog;
 
+import org.jspecify.annotations.Nullable;
 import services.search.LuceneIndexer;
 
 import java.util.List;
@@ -35,7 +36,7 @@ public final class CatalogRegistry {
 
     /** Resolve a catalog by id, defaulting to the first (static) catalog when the
      *  id is null/unknown. */
-    public static Catalog byId(String id) {
+    public static Catalog byId(@Nullable String id) {
         if (id != null && !id.isBlank()) {
             for (var c : CATALOGS) {
                 if (c.id().equals(id)) return c;

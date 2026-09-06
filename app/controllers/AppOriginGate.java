@@ -1,5 +1,6 @@
 package controllers;
 
+import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
 
 import java.net.URI;
@@ -41,7 +42,7 @@ public final class AppOriginGate {
      * is directly unit-tested. A malformed {@code Referer} is treated as
      * not-app-originated (a well-formed one is what accidental over-reach carries).
      */
-    public static String appOriginSlug(String secFetchSite, String referer) {
+    public static @Nullable String appOriginSlug(@Nullable String secFetchSite, @Nullable String referer) {
         if (secFetchSite == null || !secFetchSite.trim().equalsIgnoreCase("same-origin")) {
             return null;
         }
@@ -62,7 +63,7 @@ public final class AppOriginGate {
     }
 
     /** The current request's owning-app slug, or {@code null} when it is not app-originated. */
-    public static String currentSlug() {
+    public static @Nullable String currentSlug() {
         var req = Http.Request.current();
         if (req == null) {
             return null;
@@ -98,7 +99,7 @@ public final class AppOriginGate {
         return !(ownInvoke || ownFile);
     }
 
-    private static String header(Http.Request req, String name) {
+    private static @Nullable String header(Http.Request req, String name) {
         var h = req.headers.get(name);
         return h == null ? null : h.value();
     }

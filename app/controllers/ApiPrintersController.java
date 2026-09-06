@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
@@ -42,8 +43,8 @@ public class ApiPrintersController extends Controller {
      * @param formats      the {@code pdl} TXT record (supported document formats), or null
      * @param isDefault    whether this printer is the saved default
      */
-    public record PrinterEntry(String name, String host, int port, String protocol,
-                               String formats, boolean isDefault) {}
+    public record PrinterEntry(@Nullable String name, @Nullable String host, int port, String protocol,
+                               @Nullable String formats, boolean isDefault) {}
 
     /** GET /api/printers — live mDNS browse, with the saved default flagged. */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = PrinterEntry.class))))
@@ -69,7 +70,7 @@ public class ApiPrintersController extends Controller {
      * @param configured false when no default is saved, which is not a fault
      * @param reachable  whether anything answered at the saved address
      */
-    public record DefaultStatus(boolean configured, boolean reachable, String host, int port) {}
+    public record DefaultStatus(boolean configured, boolean reachable, @Nullable String host, int port) {}
 
     /** GET /api/printers/default/status — is the saved default still answering? */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DefaultStatus.class)))
@@ -99,7 +100,10 @@ public class ApiPrintersController extends Controller {
     @SuppressWarnings("java:S2259")
     public static void saveDefault() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var host = str(body, "host");
         if (host == null) {
@@ -149,7 +153,7 @@ public class ApiPrintersController extends Controller {
      * @param fromPrinter true when {@code options} came from the device
      */
     public record JobOptionsResponse(List<IppClient.JobOption> options, List<String> protocols,
-                                     String mediaReady, boolean fromPrinter) {}
+                                     @Nullable String mediaReady, boolean fromPrinter) {}
 
     /**
      * GET /api/printers/options — the job options this printer offers.
@@ -188,7 +192,7 @@ public class ApiPrintersController extends Controller {
                 !discovered.isEmpty())));
     }
 
-    private static String str(JsonObject body, String key) {
+    private static @Nullable String str(JsonObject body, String key) {
         if (!body.has(key) || body.get(key).isJsonNull()) {
             return null;
         }

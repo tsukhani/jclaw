@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import mcp.McpGrants;
 import models.Agent;
 import models.AgentToolConfig;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
@@ -35,9 +36,10 @@ public class ApiToolsController extends Controller {
     public record ToolListEntry(String name, String description) {}
 
     public record ToolMetaEntry(String name, String category, String icon, String shortDescription,
-                                String requiresConfig, String group, List<ToolAction> actions) {}
+                                @Nullable String requiresConfig, @Nullable String group,
+                                List<ToolAction> actions) {}
 
-    public record AgentToolEntry(String name, String description, String group, boolean enabled) {}
+    public record AgentToolEntry(String name, String description, @Nullable String group, boolean enabled) {}
 
     public record ToolToggleRequest(boolean enabled) {}
 
@@ -91,7 +93,10 @@ public class ApiToolsController extends Controller {
     @Operation(summary = "List an agent's tools and their enabled state")
     public static void listForAgent(Long id) {
         Agent agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         // Ask the agent loop what it will actually do rather than re-deriving the policy here:
         // a local copy ("native tools on, MCP on for main") silently drifted once tools began
@@ -208,10 +213,16 @@ public class ApiToolsController extends Controller {
         requireOperator();
 
         Agent agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_ENABLED)) badRequest();
+        if (body == null || !body.has(KEY_ENABLED)) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         // Find the server-level handle for this group. Every MCP server
@@ -221,7 +232,10 @@ public class ApiToolsController extends Controller {
                 .filter(t -> group.equals(t.group()) && t.isServerLevel())
                 .findFirst()
                 .orElse(null);
-        if (serverLevel == null) notFound();
+        if (serverLevel == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var config = McpGrants.find(agent, serverLevel.name());
         if (config == null) config = McpGrants.newRow(agent, serverLevel.name());

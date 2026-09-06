@@ -16,6 +16,7 @@ import services.Tx;
 import utils.LatencyTrace;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -92,7 +93,10 @@ final class AgentPromptPreparer {
         var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
         LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
         return Tx.run(() -> {
-            var conv = ConversationService.findById(conversationId);
+            // Re-read inside the transaction; the caller resolved this id moments ago, so a
+            // miss means the row vanished mid-turn rather than a bad id.
+            var conv = Objects.requireNonNull(ConversationService.findById(conversationId),
+                    "conversation disappeared mid-turn");
             // JCLAW-273: skipUserAppend=true comes from runYieldResume — the
             // yield-resume announce was already persisted as a USER-role
             // Message before this call, so re-appending would duplicate the
@@ -213,7 +217,8 @@ final class AgentPromptPreparer {
         LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
         return Tx.run(() -> {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
-            var convo = ConversationService.findById(conversation.id);
+            var convo = Objects.requireNonNull(ConversationService.findById(conversation.id),
+                    "conversation disappeared mid-turn");
             var promptChannel = channelType != null ? channelType : convo.channelType;
             var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, promptChannel,
                     queryEmbedding);

@@ -75,7 +75,7 @@ public final class PrinterDefaults {
         }
 
         /** True when this default points at the given discovered printer. */
-        public boolean matches(String otherHost, int otherPort) {
+        public boolean matches(@Nullable String otherHost, int otherPort) {
             if (isUnset()) {
                 return false;
             }

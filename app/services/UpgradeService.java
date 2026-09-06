@@ -217,7 +217,7 @@ public final class UpgradeService {
     }
 
     /** True when {@code candidate} is a strictly newer release than {@code current}. */
-    public static boolean isNewer(String candidate, String current) {
+    public static boolean isNewer(@Nullable String candidate, String current) {
         if (candidate == null || current == null) return false;
         var a = stripV(candidate).split("\\.");
         var b = stripV(current).split("\\.");

@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -47,8 +48,9 @@ public class ApiAppsController extends Controller {
      *  is the designated agent id the app may invoke (JCLAW-763; null when the
      *  manifest omits it — the app is non-invoking). */
     public record AppEntry(String id, String url, String name, String version,
-                           String creator, String icon, String price, String description,
-                           String agent) {}
+                           @Nullable String creator, @Nullable String icon,
+                           @Nullable String price, @Nullable String description,
+                           @Nullable String agent) {}
 
     public record AppsResponse(List<AppEntry> apps) {}
 
@@ -116,7 +118,7 @@ public class ApiAppsController extends Controller {
 
     /** Parse one app directory into an entry, or null when it isn't a valid,
      *  launchable app (missing app.json/index.html, or unparseable manifest). */
-    private static AppEntry readApp(Path dir) {
+    private static @Nullable AppEntry readApp(Path dir) {
         if (!Files.isRegularFile(dir.resolve(APP_JSON))
                 || !Files.isRegularFile(dir.resolve("index.html"))) {
             return null;
@@ -142,7 +144,7 @@ public class ApiAppsController extends Controller {
         }
     }
 
-    private static String str(JsonObject o, String key) {
+    private static @Nullable String str(JsonObject o, String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
     }
 }

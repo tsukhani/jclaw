@@ -44,7 +44,7 @@ public final class VideoGenerationRouter {
      *
      * @return the effective model id, or null when the provider is unknown or unset
      */
-    public static @Nullable String effectiveModel(String provider) {
+    public static @Nullable String effectiveModel(@Nullable String provider) {
         if (provider == null || provider.isBlank()) return null;
         return switch (provider) {
             case "replicate" -> Strings.firstNonBlank(ConfigService.get("videogen.cloud.model"));

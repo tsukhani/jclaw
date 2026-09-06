@@ -3,6 +3,7 @@ package services;
 import models.Agent;
 import models.Task;
 import models.TaskRun;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -17,7 +18,9 @@ public final class TaskService {
 
     private TaskService() {}
 
-    public static Task findById(Long id) {
+    /** Play's {@code Model.findById} returns null for a missing row, so this can too
+     *  (JCLAW-1160). */
+    public static @Nullable Task findById(Long id) {
         return Task.findById(id);
     }
 

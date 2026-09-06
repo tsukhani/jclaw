@@ -9,6 +9,7 @@ import memory.MemoryStoreFactory;
 import memory.MemoryVectorSettings;
 import models.CompressionMetric;
 import models.LatencyMetric;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.libs.F;
 import play.mvc.Before;
@@ -385,9 +386,9 @@ public class ApiMetricsController extends Controller {
     /** Parsed loadtest request — collapses the body-parsing branch tower into one record carrier. */
     private record LoadtestInput(int concurrency, int turns, int ttftMs, int tokensPerSecond,
                                  int responseTokens, int simulatedToolCalls, int toolSleepMs,
-                                 boolean compress, String provider, String model, boolean real,
-                                 boolean toolAgent, String userMessage, List<String> prompts,
-                                 String agentName) {}
+                                 boolean compress, @Nullable String provider, @Nullable String model,
+                                 boolean real, boolean toolAgent, @Nullable String userMessage,
+                                 List<String> prompts, @Nullable String agentName) {}
 
     /**
      * POST /api/metrics/loadtest — run a synchronous load test against
@@ -584,7 +585,7 @@ public class ApiMetricsController extends Controller {
      * strategies.
      */
     @SuppressWarnings("java:S2259")
-    private static List<String> parsePromptsField(JsonObject body, String userMessage) {
+    private static List<String> parsePromptsField(@Nullable JsonObject body, @Nullable String userMessage) {
         // LoadTestRunner treats null and empty identically (`!= null && !isEmpty()` guard
         // at the consumer); returning an empty list rather than null keeps the contract
         // predictable for any caller that doesn't replicate that guard.
@@ -727,7 +728,7 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static int readInt(JsonObject body, String key, int defaultValue) {
+    private static int readInt(@Nullable JsonObject body, String key, int defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
             return body.get(key).getAsInt();
@@ -738,7 +739,7 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static boolean readBool(JsonObject body, String key, boolean defaultValue) {
+    private static boolean readBool(@Nullable JsonObject body, String key, boolean defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
             return body.get(key).getAsBoolean();
@@ -749,7 +750,7 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static String readString(JsonObject body, String key, String defaultValue) {
+    private static @Nullable String readString(@Nullable JsonObject body, String key, @Nullable String defaultValue) {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
             return body.get(key).getAsString();
@@ -765,7 +766,7 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static Instant parseSinceParam(String sinceParam) {
+    private static Instant parseSinceParam(@Nullable String sinceParam) {
         if (sinceParam == null || sinceParam.isBlank()) {
             return AppClock.now().minus(30, ChronoUnit.DAYS);
         }
@@ -778,13 +779,13 @@ public class ApiMetricsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static Long parseAgentIdParam(String agentIdParam) {
+    private static @Nullable Long parseAgentIdParam(@Nullable String agentIdParam) {
         if (agentIdParam == null || agentIdParam.isBlank()) return null;
         try {
             return Long.parseLong(agentIdParam);
         } catch (NumberFormatException _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid 'agentId' — must be numeric");
-            return null; // unreachable — error() throws
+            throw ApiResponses.unreachable();
         }
     }
 }

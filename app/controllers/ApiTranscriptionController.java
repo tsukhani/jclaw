@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
@@ -18,6 +19,7 @@ import utils.ApiResponses;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static utils.GsonHolder.GSON;
 
@@ -45,10 +47,11 @@ public class ApiTranscriptionController extends Controller {
 
     private static final Gson gson = GSON;
 
-    public record AsrModelEntry(String id, String displayName, int approxSizeMb, String status, long bytesDownloaded, long totalBytes, String engine, String error) {}
+    public record AsrModelEntry(String id, String displayName, int approxSizeMb, String status, long bytesDownloaded, long totalBytes,
+                                @Nullable String engine, @Nullable String error) {}
 
-    public record TranscriptionStateResponse(String provider, String localModel,
-                                             boolean ffmpegAvailable, String ffmpegReason,
+    public record TranscriptionStateResponse(@Nullable String provider, @Nullable String localModel,
+                                             boolean ffmpegAvailable, @Nullable String ffmpegReason,
                                              List<AsrModelEntry> models) {}
 
     public record DownloadStartedResponse(String status, String modelId) {}
@@ -58,7 +61,7 @@ public class ApiTranscriptionController extends Controller {
      *  renders each next to its control. No {@code totalBytes} — repo sizes are
      *  unknown/free-text, so the UI shows a downloaded-MB counter. */
     public record DiarizeModelEntry(String repo, String displayName, String role,
-                                    String status, long bytesDownloaded, String engine, String error) {}
+                                    String status, long bytesDownloaded, @Nullable String engine, @Nullable String error) {}
 
     public record DiarizationModelsResponse(List<DiarizeModelEntry> models,
                                             List<DiarizeModelStore.SerOption> serOptions) {}
@@ -83,7 +86,8 @@ public class ApiTranscriptionController extends Controller {
         var statuses = AsrModelStore.statusAll();
         var models = new ArrayList<AsrModelEntry>();
         for (var m : AsrModel.values()) {
-            var status = statuses.get(m.id());
+            // statusAll() drops ids the sidecar omitted; NPE here rather than silently list fewer models.
+            var status = Objects.requireNonNull(statuses.get(m.id()), m.id());
             models.add(new AsrModelEntry(
                     m.id(),
                     m.displayName(),

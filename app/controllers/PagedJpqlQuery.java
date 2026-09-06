@@ -1,6 +1,7 @@
 package controllers;
 
 import jakarta.persistence.Query;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import utils.JpqlFilter;
 
@@ -102,7 +103,7 @@ public final class PagedJpqlQuery<T> {
     }
 
     /** Bind a named parameter to BOTH queries, or skip it entirely when {@code value} is null. */
-    public PagedJpqlQuery<T> namedParam(String name, Object value) {
+    public PagedJpqlQuery<T> namedParam(String name, @Nullable Object value) {
         if (value != null) named.put(name, value);
         return this;
     }

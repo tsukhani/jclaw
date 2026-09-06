@@ -8,6 +8,7 @@ import play.mvc.With;
 import services.DeliveryAdvisor;
 import services.TaskService;
 import services.TimezoneResolver;
+import utils.ApiResponses;
 
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -64,7 +65,10 @@ public class ApiSchedulingMetaController extends Controller {
     @Operation(summary = "Preflight Slack delivery reachability advisory for one task (null when reachable / N/A)")
     public static void deliveryAdvisory(Long id) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         var advisory = DeliveryAdvisor.advisoryFor(task.agent, task.delivery);
         var payload = new LinkedHashMap<String, Object>();
         payload.put("advisory", advisory);

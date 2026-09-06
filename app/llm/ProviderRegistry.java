@@ -54,7 +54,11 @@ public final class ProviderRegistry {
     private static final Object refreshLock = new Object();
     private static final AtomicBoolean refreshing = new AtomicBoolean(false);
 
-    public static @Nullable LlmProvider get(String name) {
+    public static @Nullable LlmProvider get(@Nullable String name) {
+        // Map.of() is the initial cache and its get(null) throws, so the guard is not
+        // merely defensive — an unconfigured provider name reaches here before the
+        // first refresh (JCLAW-1160).
+        if (name == null) return null;
         refreshIfNeeded();
         return cache.get(name);
     }

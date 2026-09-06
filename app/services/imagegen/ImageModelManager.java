@@ -122,7 +122,8 @@ public final class ImageModelManager {
      * the pull thread as ndjson progress lines arrive (only the first caller's
      * callback is wired up — others poll {@link #status}).
      */
-    public static CompletableFuture<Void> ensureAvailable(String model, Consumer<DownloadProgress> onProgress) {
+    public static CompletableFuture<Void> ensureAvailable(String model,
+                                                          @Nullable Consumer<DownloadProgress> onProgress) {
         if (availableLocally(model)) {
             return CompletableFuture.completedFuture(null);
         }
@@ -158,7 +159,7 @@ public final class ImageModelManager {
      * read timeout (a continuously-streaming body the way WhisperModelManager's
      * direct GET does would otherwise let general()'s 30s readTimeout trip).
      */
-    private static void doPull(String model, Consumer<DownloadProgress> onProgress) throws IOException {
+    private static void doPull(String model, @Nullable Consumer<DownloadProgress> onProgress) throws IOException {
         var baseUrl = LocalImageSidecarManager.ensureRunning();
         statuses.put(model, new ModelStatus(State.DOWNLOADING, 0, 0, null));
         var client = HttpFactories.general().newBuilder()
@@ -186,7 +187,7 @@ public final class ImageModelManager {
     /** Parse one ndjson progress line from the sidecar /pull stream and update
      *  {@link #statuses} (and the optional callback). Split out of {@link #doPull}
      *  to keep that method's cognitive complexity within bounds (S3776). */
-    private static void handlePullLine(String model, String line, Consumer<DownloadProgress> onProgress)
+    private static void handlePullLine(String model, String line, @Nullable Consumer<DownloadProgress> onProgress)
             throws IOException {
         if (line.isBlank()) return;
         var json = JsonParser.parseString(line).getAsJsonObject();

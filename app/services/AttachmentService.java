@@ -55,8 +55,8 @@ public final class AttachmentService {
      */
     public record Input(
             String attachmentId,
-            String originalFilename,
-            String mimeType,
+            @Nullable String originalFilename,
+            @Nullable String mimeType,
             long sizeBytes,
             String kind) {}
 
@@ -66,7 +66,7 @@ public final class AttachmentService {
      * {@code MessageAttachment.findById(...)} raw. Thin passthrough relying on
      * the caller's ambient JPA transaction.
      */
-    public static MessageAttachment findById(Long id) {
+    public static @Nullable MessageAttachment findById(Long id) {
         return MessageAttachment.findById(id);
     }
 

@@ -15,6 +15,7 @@ import llm.ProviderLocality;
 import llm.ProviderRegistry;
 import memory.JpaMemoryStore;
 import memory.MemoryVectorSettings;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import play.mvc.results.Result;
@@ -73,13 +74,15 @@ public class ApiProvidersController extends Controller {
     public record AddModelResponse(String provider, ModelRef model, int count) {}
 
     /** Live reachability of a (typically local) provider's OpenAI-compatible endpoint. */
-    public record ReachableResponse(String provider, boolean reachable, int modelCount, String reason) {}
+    public record ReachableResponse(String provider, boolean reachable, int modelCount,
+                                    @Nullable String reason) {}
 
     /**
      * Result of embedding-probing one model (JCLAW-931). {@code dimensions} is the length
      * of the vector the model actually returned, and is 0 when {@code ok} is false.
      */
-    public record EmbeddingProbeResponse(String provider, String model, boolean ok, int dimensions, String error) {}
+    public record EmbeddingProbeResponse(String provider, String model, boolean ok, int dimensions,
+                                        @Nullable String error) {}
 
     /**
      * GET /api/providers — billing-shape projection of each configured
@@ -124,9 +127,11 @@ public class ApiProvidersController extends Controller {
 
         if (baseUrl == null || baseUrl.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
+            throw ApiResponses.unreachable();
         }
         if (apiKey == null || apiKey.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no API key configured".formatted(name));
+            throw ApiResponses.unreachable();
         }
 
         var result = ModelDiscoveryService.discover(name, baseUrl, apiKey);
@@ -153,6 +158,7 @@ public class ApiProvidersController extends Controller {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             renderJSON(gson.toJson(new ReachableResponse(name, false, 0, "not configured")));
+            throw ApiResponses.unreachable();
         }
         var r = LocalProviderProbeSupport.probeModels(Strings.trimTrailingSlash(baseUrl), name);
         renderJSON(gson.toJson(new ReachableResponse(name, r.available(), r.modelCount(), r.reason())));
@@ -178,6 +184,7 @@ public class ApiProvidersController extends Controller {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
+            throw ApiResponses.unreachable();
         }
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
         // Page-load read (Settings video-model dropdown) — cached; the explicit
@@ -256,6 +263,7 @@ public class ApiProvidersController extends Controller {
         if (body == null || !body.has("id") || body.get("id").isJsonNull()
                 || body.get("id").getAsString().isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field 'id' is required");
+            throw ApiResponses.unreachable();
         }
         var id = body.get("id").getAsString().trim();
 
@@ -314,6 +322,8 @@ public class ApiProvidersController extends Controller {
     public static void embeddingModels(String name) {
         requireConfiguredProvider(name);
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
+        // requireConfiguredProvider above 404s on a blank base URL, so this cannot be null.
+        if (baseUrl == null) throw ApiResponses.unreachable();
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
         var refs = ModelDiscoveryService.listAllModelIds(Strings.trimTrailingSlash(baseUrl), apiKey).stream()
                 .map(id -> new ModelRef(id, deriveName(id)))
@@ -356,6 +366,7 @@ public class ApiProvidersController extends Controller {
         if (provider == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND,
                     "Provider '%s' is not available".formatted(name));
+            throw ApiResponses.unreachable();
         }
         try {
             var result = provider.embeddingsDetailed(model, EMBEDDING_PROBE_INPUT, null);
@@ -441,7 +452,7 @@ public class ApiProvidersController extends Controller {
         }
     }
 
-    private static JsonArray parseModelsArray(String raw) {
+    private static JsonArray parseModelsArray(@Nullable String raw) {
         if (raw == null || raw.isBlank()) return new JsonArray();
         try {
             var el = JsonParser.parseString(raw);

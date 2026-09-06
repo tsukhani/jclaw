@@ -148,10 +148,10 @@ public final class LoadTestRunner {
     public record Request(int concurrency, int turns, boolean compress,
                           LoadTestHarness.Scenario scenario,
                           boolean realProvider, boolean toolAgent,
-                          String provider, String model,
-                          String userMessage,
+                          @Nullable String provider, @Nullable String model,
+                          @Nullable String userMessage,
                           List<String> prompts,
-                          String agentName) {
+                          @Nullable String agentName) {
 
         /** True when this run drives an existing agent rather than a benchmark twin. */
         public boolean hasNamedAgent() {
@@ -431,7 +431,7 @@ public final class LoadTestRunner {
      *
      * <p>Caller owns the transaction.
      */
-    public static AgentSetup applyBinding(Agent agent, String provider, String model) {
+    public static AgentSetup applyBinding(Agent agent, String provider, @Nullable String model) {
         var setup = new AgentSetup(agent.id, agent.name, agent.modelProvider, agent.modelId);
         agent.modelProvider = provider;
         agent.modelId = model;
@@ -1002,7 +1002,7 @@ public final class LoadTestRunner {
      * provider's own clear error rather than a duplicated up-front check
      * here that could rot out of sync with the registry.
      */
-    private static long ensureLoadtestAgentRealInner(String providerName, String model, String agentName) {
+    private static long ensureLoadtestAgentRealInner(String providerName, @Nullable String model, String agentName) {
         if (model == null || model.isBlank()) {
             throw new IllegalArgumentException(
                     "model is required when realProvider=true");

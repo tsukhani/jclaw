@@ -118,6 +118,7 @@ public class WebhookSlackController extends Controller {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     "Missing signature headers");
             unauthorized("Missing signature");
+            throw ApiResponses.unreachable();
         }
         if (!SlackChannel.verifySignature(binding.signingSecret,
                 timestamp.value(), rawBody, signature.value())) {
@@ -134,7 +135,7 @@ public class WebhookSlackController extends Controller {
         } catch (Exception _) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK, "Failed to read request body");
             error();
-            return null; // unreachable: error() halts the request; satisfies javac definite-assignment
+            throw ApiResponses.unreachable();
         }
     }
 

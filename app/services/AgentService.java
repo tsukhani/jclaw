@@ -81,7 +81,7 @@ public class AgentService {
     }
 
     public static Agent create(String name, String modelProvider, String modelId,
-                                String thinkingMode, String description) {
+                                @Nullable String thinkingMode, @Nullable String description) {
         return create(name, modelProvider, modelId, thinkingMode, description, true);
     }
 
@@ -195,7 +195,8 @@ public class AgentService {
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
-                                boolean enabled, String thinkingMode, String description) {
+                                boolean enabled, @Nullable String thinkingMode,
+                                @Nullable String description) {
         // JCLAW-533: an agent's workspace directory and its agent.<name>.* config
         // keys are partitioned by the mutable name, so a rename must migrate them
         // (mirroring what delete() cleans up) or they orphan — and a reused name
@@ -368,11 +369,15 @@ public class AgentService {
         return Agent.findEnabled();
     }
 
-    public static Agent findById(Long id) {
+    /** Play's {@code Model.findById} returns null for a missing row, so this can too
+     *  (JCLAW-1160). */
+    public static @Nullable Agent findById(Long id) {
         return Agent.findById(id);
     }
 
-    public static Agent findByName(String name) {
+    /** Play's {@code Model.findById} returns null for a missing row, so this can too
+     *  (JCLAW-1160). */
+    public static @Nullable Agent findByName(String name) {
         return Agent.findByName(name);
     }
 

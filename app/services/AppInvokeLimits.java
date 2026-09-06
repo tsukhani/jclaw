@@ -1,5 +1,6 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -68,13 +69,13 @@ public final class AppInvokeLimits {
      * never raise (AD-5). Pure — pass live config via {@link #defaultLimit()} /
      * {@link #ceiling()}.
      */
-    public static int effectiveLimit(Integer override, int defaultLimit, int ceiling) {
+    public static int effectiveLimit(@Nullable Integer override, int defaultLimit, int ceiling) {
         int base = (override != null && override >= 0) ? override : defaultLimit;
         return Math.min(base, ceiling);
     }
 
     /** {@link #effectiveLimit(Integer, int, int)} resolved against live {@code application.conf}. */
-    public static int effectiveLimit(Integer override) {
+    public static int effectiveLimit(@Nullable Integer override) {
         return effectiveLimit(override, defaultLimit(), ceiling());
     }
 

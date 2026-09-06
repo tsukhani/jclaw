@@ -324,10 +324,28 @@ close — the Gradle compile is the single place a javac plugin can see this cod
 layering Spotless uses.
 
 **What is in scope.** The `NullAway:AnnotatedPackages` option in `build.gradle.kts` lists
-`utils`, `llm`, `agents`, `tools` and `services`; every package and subpackage under those roots
-carries a `package-info.java` with `@NullMarked`. `models` is excluded deliberately: JPA
-populates entity fields reflectively after construction, so every non-null column would report as
-uninitialised. `controllers`, `channels` and `jobs` are simply not annotated yet.
+`utils`, `llm`, `agents`, `tools`, `services`, `controllers`, `jobs` and `slash`; every package
+and subpackage under those roots carries a `package-info.java` with `@NullMarked`.
+
+Two packages are out, for different reasons. `models` is excluded permanently: JPA populates
+entity fields reflectively after construction, so every non-null column would report as
+uninitialised. `channels` is excluded for now, and that is a measured deferral rather than an
+omission — see below.
+
+JCLAW-1149 originally stopped at the first five, and JCLAW-1160 widened it to `controllers`,
+`jobs` and `slash` because that gap was itself the defect. A parameter whose only null-passing
+caller lived in one of them was left non-null and nothing objected, so the declaration was a lie
+no gate could catch; one of them, a null printer protocol reaching `defaultPort()`, had been
+500ing the settings page for two months.
+
+**Measure the widening before you attempt it, and raise javac's error cap first.** `-Xmaxerrs`
+defaults to 100, so an unmodified `./gradlew compileJava` reports exactly 100 and stops — a count
+that looks like a total and is not. Measured properly (`-Xmaxerrs 5000` via an init script), the
+four candidate packages hold **581** violations: `channels` 414, `controllers` 164, `agents` 3.
+The truncated run showed `channels` contributing zero, the precise opposite of the truth, because
+javac stopped before reaching it. JCLAW-1160 took `controllers`, `jobs` and `slash`; `channels`
+is deferred because 414 violations concentrated in the WhatsApp, Slack and Telegram parsers is
+its own piece of work, and it is the most externally-coupled code in the tree.
 
 **To widen it.** Add the package name to the `AnnotatedPackages` option, add a
 `package-info.java` carrying `@NullMarked` to that package *and to each of its subpackages*

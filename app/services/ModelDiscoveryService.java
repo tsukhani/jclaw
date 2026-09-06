@@ -218,7 +218,7 @@ public class ModelDiscoveryService {
      * @return the ids, or an empty list on any failure — the caller falls back to the
      *         stored catalog rather than surfacing an error for a picker aid.
      */
-    public static List<String> listAllModelIds(String baseUrl, String apiKey) {
+    public static List<String> listAllModelIds(String baseUrl, @Nullable String apiKey) {
         if (baseUrl == null || baseUrl.isBlank()) return List.of();
         try {
             var url = baseUrl.endsWith("/") ? baseUrl + FIELD_MODELS : baseUrl + "/" + FIELD_MODELS;

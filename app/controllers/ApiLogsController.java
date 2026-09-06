@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.EventLog;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import utils.ApiResponses;
@@ -72,14 +73,14 @@ public class ApiLogsController extends Controller {
      * than letting {@link Instant#parse}'s {@code DateTimeParseException} bubble
      * out as a 500 — mirroring {@code ApiSubagentRunsController.parseSinceFilter}.
      */
-    private static Instant parseInstantFilter(String name, String value) {
+    private static @Nullable Instant parseInstantFilter(String name, String value) {
         if (value == null || value.isBlank()) return null;
         try {
             return Instant.parse(value);
         } catch (Exception _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Invalid '" + name + "' value '" + value + "' — expected ISO-8601 instant.");
-            return null;
+            throw ApiResponses.unreachable();
         }
     }
 }

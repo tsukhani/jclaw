@@ -27,7 +27,7 @@ tasks.withType<JavaCompile>().configureEach {
         // absent: JPA populates entity fields reflectively after construction, so every
         // non-null column would report as uninitialised. Widening to another package is a
         // name here plus a @NullMarked package-info per (sub)package it contains.
-        option("NullAway:AnnotatedPackages", "utils,llm,agents,tools,services")
+        option("NullAway:AnnotatedPackages", "utils,llm,agents,tools,services,controllers,jobs,slash")
     }
 }
 

@@ -1,6 +1,7 @@
 package services;
 
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JCLAW-153: entity-lookup accessor for Memory rows so controllers route their
@@ -13,7 +14,9 @@ public final class MemoryService {
 
     private MemoryService() {}
 
-    public static Memory findById(Long id) {
+    /** Play's {@code Model.findById} returns null for a missing row, so this can too
+     *  (JCLAW-1160). */
+    public static @Nullable Memory findById(Long id) {
         return Memory.findById(id);
     }
 }

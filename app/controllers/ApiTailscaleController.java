@@ -1,11 +1,13 @@
 package controllers;
 
 import com.google.gson.Gson;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
 import services.TailscaleFunnel;
+import utils.ApiResponses;
 
 import static utils.GsonHolder.GSON;
 
@@ -31,7 +33,8 @@ public class ApiTailscaleController extends Controller {
      * @param publicUrl the instance's public HTTPS base URL, or null
      * @param error     why it's unavailable, or null
      */
-    public record StatusResponse(boolean enabled, boolean available, String publicUrl, String error) {}
+    public record StatusResponse(boolean enabled, boolean available, @Nullable String publicUrl,
+                                 @Nullable String error) {}
 
     /** GET /api/tailscale — funnel toggle state + live availability / public URL. */
     public static void status() {
@@ -45,7 +48,10 @@ public class ApiTailscaleController extends Controller {
     @SuppressWarnings("java:S2259")
     public static void toggle() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(FIELD_ENABLED)) badRequest();
+        if (body == null || !body.has(FIELD_ENABLED)) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         boolean enabled = body.get(FIELD_ENABLED).getAsBoolean();
         if (body.has("port") && !body.get("port").isJsonNull()) {
             ConfigService.set(TailscaleFunnel.CFG_PORT, String.valueOf(body.get("port").getAsInt()));

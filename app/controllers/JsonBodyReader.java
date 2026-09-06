@@ -2,6 +2,7 @@ package controllers;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
 import utils.ApiResponses;
 import utils.JsonArgs;
@@ -19,7 +20,7 @@ public final class JsonBodyReader {
      * {@code null} on any parse failure — callers should follow with
      * {@code badRequest()} when null.
      */
-    public static JsonObject readJsonBody() {
+    public static @Nullable JsonObject readJsonBody() {
         try (var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8)) {
             return JsonParser.parseReader(reader).getAsJsonObject();
         } catch (Exception _) {
@@ -33,7 +34,7 @@ public final class JsonBodyReader {
      * true the returned value is trimmed (blank-after-trim still collapses to
      * {@code null}); when false the raw value is returned verbatim.
      */
-    public static String optString(JsonObject body, String key, boolean trim) {
+    public static @Nullable String optString(JsonObject body, String key, boolean trim) {
         var s = JsonArgs.optNonBlankString(body, key);
         return (s == null || !trim) ? s : s.trim();
     }
@@ -43,7 +44,7 @@ public final class JsonBodyReader {
      * JSON-null, or blank; the value is trimmed otherwise. Callers follow a {@code null} with their own
      * aggregated {@code error()} so a single response can name every missing field.
      */
-    public static String requiredString(JsonObject body, String key) {
+    public static @Nullable String requiredString(JsonObject body, String key) {
         return optString(body, key, true);
     }
 

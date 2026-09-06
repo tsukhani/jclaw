@@ -3,10 +3,12 @@ package controllers;
 import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.Operation;
 import models.Notification;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
 import services.NotificationService;
+import utils.ApiResponses;
 import utils.AppClock;
 
 import java.util.List;
@@ -36,9 +38,9 @@ public class ApiNotificationsController extends Controller {
 
     /** Wire DTO returned by {@link #list}. Keeps the column set stable
      *  even if we add internal columns to {@link Notification} later. */
-    public record NotificationView(Long id, Long agentId, String agentName, String content,
+    public record NotificationView(Long id, @Nullable Long agentId, @Nullable String agentName, String content,
                                     Long sourceTaskRunId, Long sourceTaskId,
-                                    String createdAt, String acknowledgedAt) {
+                                    @Nullable String createdAt, @Nullable String acknowledgedAt) {
 
         public static NotificationView of(Notification n) {
             return new NotificationView(
@@ -88,7 +90,10 @@ public class ApiNotificationsController extends Controller {
     @Operation(summary = "Mark a notification acknowledged (idempotent), without deleting it")
     public static void ack(Long id) {
         var n = NotificationService.findById(id);
-        if (n == null) notFound();
+        if (n == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         if (n.acknowledgedAt == null) {
             n.acknowledgedAt = AppClock.now();
             n.save();
@@ -110,7 +115,10 @@ public class ApiNotificationsController extends Controller {
     @Operation(summary = "Hard-delete a notification by id")
     public static void delete(Long id) {
         var n = NotificationService.findById(id);
-        if (n == null) notFound();
+        if (n == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         var agentName = n.agent != null ? n.agent.name : null;
         n.delete();
         EventLogger.info("notification", agentName, null,

@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.WhatsAppBinding;
 import models.WhatsAppTransport;
+import org.jspecify.annotations.Nullable;
 import play.mvc.With;
 import services.EventLogger;
 import utils.ApiResponses;
@@ -60,14 +61,14 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
      *  are surfaced. {@code phoneNumberId} and {@code defaultTarget} are
      *  identifiers (not secrets) so they are returned for display, like Slack's
      *  {@code teamId}. */
-    private record BindingView(Long id, Long agentId, String agentName,
+    private record BindingView(Long id, @Nullable Long agentId, @Nullable String agentName,
                                 String transport, String phoneNumberId,
                                 boolean hasAccessToken, boolean hasAppSecret,
                                 boolean hasVerifyToken,
                                 String verifiedName, String displayPhoneNumber,
                                 String templateName, String templateLanguage,
                                 String defaultTarget,
-                                boolean enabled, String createdAt, String updatedAt) {
+                                boolean enabled, @Nullable String createdAt, @Nullable String updatedAt) {
         static BindingView of(WhatsAppBinding b) {
             return new BindingView(b.id,
                     b.agent != null ? b.agent.id : null,
@@ -101,7 +102,10 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WhatsAppBinding.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var transport = BindingKeys.parseTransport(body, WhatsAppTransport.CLOUD_API, WhatsAppTransport::parse);
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
@@ -170,7 +174,10 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
         if (binding == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         // Capture the credential identity before mutation so we only re-probe when
         // phoneNumberId or accessToken actually changes (JCLAW-445) — an unrelated
@@ -231,8 +238,8 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     private static boolean verifyCloudApiCredentials(WhatsAppBinding binding,
                                                      WhatsAppTransport transport,
-                                                     String phoneNumberId,
-                                                     String accessToken) {
+                                                     @Nullable String phoneNumberId,
+                                                     @Nullable String accessToken) {
         if (transport != WhatsAppTransport.CLOUD_API
                 || phoneNumberId == null || accessToken == null) {
             return true;

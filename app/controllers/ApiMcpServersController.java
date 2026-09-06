@@ -79,7 +79,10 @@ public class ApiMcpServersController extends Controller {
     @Operation(summary = "Add an MCP server (STDIO or HTTP)")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var name = JsonBodyReader.requiredOr400(body, "name");
         if (McpServer.findByName(name) != null) {
@@ -102,7 +105,7 @@ public class ApiMcpServersController extends Controller {
         try {
             McpServerService.validate(row);
         } catch (IllegalArgumentException e) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ApiResponses.messageOf(e));
         }
         row.save();
 
@@ -117,7 +120,10 @@ public class ApiMcpServersController extends Controller {
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         // Renaming is allowed; if it happens we tear down the prior connection
         // (under the OLD name) before re-syncing under the new one. Otherwise
@@ -143,7 +149,7 @@ public class ApiMcpServersController extends Controller {
         try {
             McpServerService.validate(row);
         } catch (IllegalArgumentException e) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ApiResponses.messageOf(e));
         }
         row.save();
 
@@ -208,7 +214,7 @@ public class ApiMcpServersController extends Controller {
             return McpServer.Transport.valueOf(raw.toUpperCase());
         } catch (IllegalArgumentException _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown transport '%s' (expected STDIO or HTTP)".formatted(raw));
-            return null;  // unreachable; ApiResponses.error() throws
+            throw ApiResponses.unreachable();
         }
     }
 

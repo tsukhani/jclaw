@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AcpHarnessProbe;
+import utils.ApiResponses;
 
 import java.util.List;
 
@@ -60,6 +61,7 @@ public class ApiAcpHarnessController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(COMMAND_FIELD) || body.get(COMMAND_FIELD).isJsonNull()) {
             badRequest();
+            throw ApiResponses.unreachable();
         }
         var probed = AcpHarnessProbe.addCustom(body.get(COMMAND_FIELD).getAsString());
         renderJSON(gson.toJson(toEntry(probed)));

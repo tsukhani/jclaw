@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.data.Upload;
 import play.db.jpa.NoTransaction;
@@ -201,9 +202,9 @@ public class ApiAppInvokeController extends Controller {
         var manifest = manifestPath(slug);
         if (manifest == null || !Files.isRegularFile(manifest)) {
             ApiResponses.error(404, ApiResponses.NO_SUCH_APP, "No such app: " + slug);
+            throw ApiResponses.unreachable();
         }
         var agentIdStr = readAgentId(manifest, slug); // throws 4xx if manifest unreadable / no agent
-        assert agentIdStr != null;
         var agentId = parseAgentId(agentIdStr, slug);  // throws 400 if non-numeric
         var agent = Tx.run(() -> AgentService.findById(agentId));
         if (agent == null) {
@@ -219,7 +220,7 @@ public class ApiAppInvokeController extends Controller {
      * the file to exist. Single source of the traversal-safe path shared by
      * {@link #resolveDesignatedAgent} and {@link #readLimitOverride}.
      */
-    private static Path manifestPath(String slug) {
+    private static @Nullable Path manifestPath(String slug) {
         if (slug == null || !SLUG.matcher(slug).matches()) {
             return null;
         }
@@ -234,7 +235,7 @@ public class ApiAppInvokeController extends Controller {
      * {@link AppInvokeLimits} then applies the global default. The value only ever
      * tightens the effective limit; it can never raise it above the ceiling.
      */
-    private static Integer readLimitOverride(String slug) {
+    private static @Nullable Integer readLimitOverride(String slug) {
         var manifest = manifestPath(slug);
         if (manifest == null || !Files.isRegularFile(manifest)) {
             return null;
@@ -257,11 +258,12 @@ public class ApiAppInvokeController extends Controller {
             m = JsonParser.parseString(Files.readString(manifest)).getAsJsonObject();
         } catch (Exception _) {
             ApiResponses.error(404, ApiResponses.NO_SUCH_APP, "App manifest unreadable: " + slug);
-            return null; // unreachable — error() threw
+            throw ApiResponses.unreachable();
         }
         var v = (m.has(AGENT_FIELD) && !m.get(AGENT_FIELD).isJsonNull()) ? m.get(AGENT_FIELD).getAsString() : null;
         if (v == null || v.isBlank()) {
             ApiResponses.error(400, ApiResponses.NO_AGENT, APP_PREFIX + slug + "' has no designated agent");
+            throw ApiResponses.unreachable();
         }
         return v;
     }

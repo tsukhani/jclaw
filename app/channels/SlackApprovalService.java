@@ -7,6 +7,7 @@ import com.slack.api.model.block.composition.MarkdownTextObject;
 import com.slack.api.model.block.composition.PlainTextObject;
 import com.slack.api.model.block.element.BlockElement;
 import com.slack.api.model.block.element.ButtonElement;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.time.Duration;
@@ -70,7 +71,7 @@ public final class SlackApprovalService {
      * @return a future for the {@link Outcome}; completed as {@link Outcome#EXPIRED}
      *         immediately if the prompt could not be posted
      */
-    public static CompletableFuture<Outcome> request(String botToken, String channelId, String threadTs,
+    public static CompletableFuture<Outcome> request(String botToken, String channelId, @Nullable String threadTs,
                                                      String authorizedUserId, String prompt,
                                                      boolean allowScopes) {
         var approvalId = ApprovalRegistry.newId();

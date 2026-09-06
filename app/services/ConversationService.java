@@ -497,7 +497,9 @@ public class ConversationService {
         return a.isAfter(b) ? a : b;
     }
 
-    public static Conversation findById(Long id) {
+    /** Play's {@code Model.findById} returns null for a missing row, so this can too
+     *  (JCLAW-1160). */
+    public static @Nullable Conversation findById(Long id) {
         return Conversation.findById(id);
     }
 
@@ -560,12 +562,12 @@ public class ConversationService {
      *                 null/blank for any peer
      * @return the number of conversations deleted
      */
-    public static int deleteByFilter(String channel, Long agentId, String name, String peer) {
-        boolean hasNameFilter = name != null && !name.isBlank();
+    public static int deleteByFilter(@Nullable String channel, @Nullable Long agentId,
+                                     @Nullable String name, @Nullable String peer) {
         var filter = new JpqlFilter()
                 .eq("channelType", channel)
                 .eq("agent.id", agentId)
-                .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
+                .like("LOWER(preview)", name != null && !name.isBlank() ? "%" + name.toLowerCase() + "%" : null)
                 .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null);
 
         // Bulk-delete must mirror the listing endpoint's exclusion of

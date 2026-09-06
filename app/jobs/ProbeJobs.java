@@ -1,5 +1,6 @@
 package jobs;
 
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.ConfigService;
 import services.Tx;
@@ -22,7 +23,7 @@ final class ProbeJobs {
 
     /** Adapter over the per-provider {@code ProbeResult} records, which are
      *  structurally identical but distinct types. */
-    record Outcome(boolean available, int modelCount, String reason, boolean connectionRefused) { }
+    record Outcome(boolean available, int modelCount, @Nullable String reason, boolean connectionRefused) { }
 
     /**
      * Read {@code baseUrlConfigKey} in its own short tx (releasing the JPA

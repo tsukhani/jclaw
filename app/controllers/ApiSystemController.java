@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.TaskRun;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.GitCheckout;
@@ -44,7 +45,7 @@ public class ApiSystemController extends Controller {
      * @param activeSubagentRuns subagent runs live in THIS JVM, which a restart
      *                           interrupts
      */
-    public record RestartPreflight(boolean available, String unavailableReason, String mode,
+    public record RestartPreflight(boolean available, @Nullable String unavailableReason, String mode,
                                    boolean backendOnly, boolean rebuildExpected,
                                    long runningTasks, int activeSubagentRuns) {}
 
@@ -82,7 +83,7 @@ public class ApiSystemController extends Controller {
         } catch (IllegalStateException e) {
             // Install can't be restarted (no jclaw.sh) — the app is still up,
             // so this is a plain refusal rather than a half-completed reboot.
-            ApiResponses.error(409, ApiResponses.CONFLICT, e.getMessage());
+            ApiResponses.error(409, ApiResponses.CONFLICT, ApiResponses.messageOf(e));
             return;
         } catch (Exception e) {
             ApiResponses.errorAndLog(e, 500, ApiResponses.INTERNAL_ERROR,
@@ -113,11 +114,11 @@ public class ApiSystemController extends Controller {
      * @param commit             short commit id of the checkout, {@code -dirty} when
      *                           the tree is modified, or null on a packaged install
      */
-    public record UpgradePreflight(boolean available, String unavailableReason,
-                                   String currentVersion, String latestVersion,
+    public record UpgradePreflight(boolean available, @Nullable String unavailableReason,
+                                   String currentVersion, @Nullable String latestVersion,
                                    boolean upgradeAvailable, String installKind,
                                    long runningTasks, int activeSubagentRuns,
-                                   String commit) {}
+                                   @Nullable String commit) {}
 
     /**
      * GET /api/system/upgrade — what an upgrade would install and what it would
@@ -162,13 +163,13 @@ public class ApiSystemController extends Controller {
         try {
             plan = UpgradeService.requestUpgrade(version);
         } catch (IllegalStateException e) {
-            ApiResponses.error(409, ApiResponses.CONFLICT, e.getMessage());
+            ApiResponses.error(409, ApiResponses.CONFLICT, ApiResponses.messageOf(e));
             return;
         } catch (IllegalArgumentException e) {
             // A refused version never reaches the helper, so reporting it as a launch
             // failure would be untrue and would let any authenticated caller drive
             // ERROR-level log writes with a value they chose (JCLAW-1020).
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ApiResponses.messageOf(e));
             return;
         } catch (Exception e) {
             ApiResponses.errorAndLog(e, 500, ApiResponses.INTERNAL_ERROR,

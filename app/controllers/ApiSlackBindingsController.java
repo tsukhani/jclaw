@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.SlackBinding;
+import org.jspecify.annotations.Nullable;
 import play.mvc.With;
 import services.EventLogger;
 import utils.ApiResponses;
@@ -56,14 +57,14 @@ public class ApiSlackBindingsController extends ApiBindingController {
      *  {@code signingSecret}, {@code appToken}) are elided; only presence flags
      *  are surfaced. {@code effectiveRequestUrl} is the full Events API Request
      *  URL to paste into the Slack app (base + path + id), shown in the Edit UI. */
-    private record BindingView(Long id, Long agentId, String agentName,
+    private record BindingView(Long id, @Nullable Long agentId, @Nullable String agentName,
                                 String ownerUserId, String transport,
-                                String webhookBaseUrl, String effectiveRequestUrl,
+                                String webhookBaseUrl, @Nullable String effectiveRequestUrl,
                                 boolean hasSigningSecret, boolean hasAppToken,
                                 String botUserId, String teamId,
                                 boolean enabled, String replyToMode,
-                                String createdAt, String updatedAt,
-                                String deliveryScopeWarning) {
+                                @Nullable String createdAt, @Nullable String updatedAt,
+                                @Nullable String deliveryScopeWarning) {
         static BindingView of(SlackBinding b) {
             return of(b, null);
         }
@@ -71,7 +72,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
         /** JCLAW-458: {@code deliveryScopeWarning} is populated only on create/update (a one-off
          *  {@code conversations.list} scope probe), null on list — so listing N bindings never fans
          *  out N Slack calls. */
-        static BindingView of(SlackBinding b, String deliveryScopeWarning) {
+        static BindingView of(SlackBinding b, @Nullable String deliveryScopeWarning) {
             return new BindingView(b.id,
                     b.agent != null ? b.agent.id : null,
                     b.agent != null ? b.agent.name : null,
@@ -91,7 +92,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
         /** The Events API Request URL to register in the Slack app dashboard:
          *  {@code base + /api/webhooks/slack/{id}}. Null unless this is an HTTP
          *  binding with a public base (SOCKET bindings need no public URL). */
-        private static String effectiveRequestUrl(SlackBinding b) {
+        private static @Nullable String effectiveRequestUrl(SlackBinding b) {
             if (b.transport != ChannelTransport.HTTP
                     || b.webhookBaseUrl == null || b.webhookBaseUrl.isBlank() || b.id == null) {
                 return null;
@@ -116,7 +117,10 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         String botToken = JsonBodyReader.requiredString(body, KEY_BOT_TOKEN);
         var transport = BindingKeys.parseTransport(body, ChannelTransport.HTTP, ChannelTransport::parse);
@@ -183,7 +187,10 @@ public class ApiSlackBindingsController extends ApiBindingController {
         if (binding == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         boolean tokenChanged = applyBotTokenUpdate(binding, body);
         applyAgentUpdate(binding, body, SlackBinding::findByAgent, "Slack", ApiResponses.CONFLICT);

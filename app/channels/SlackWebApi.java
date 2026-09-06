@@ -7,6 +7,7 @@ import com.slack.api.methods.SlackApiException;
 import com.slack.api.model.Conversation;
 import com.slack.api.model.ConversationType;
 import com.slack.api.model.block.LayoutBlock;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.io.IOException;
@@ -354,7 +355,7 @@ public final class SlackWebApi {
      * interactive surface. Used by {@link SlackApprovalService} (JCLAW-350) to post
      * the exec-approval prompt with approve/deny buttons.
      */
-    public static String postMessageWithBlocks(String botToken, String channelId, String threadTs,
+    public static String postMessageWithBlocks(String botToken, String channelId, @Nullable String threadTs,
                                                String fallbackText, List<LayoutBlock> blocks) {
         if (botToken == null || botToken.isBlank()) return null;
         try {

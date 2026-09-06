@@ -6,6 +6,7 @@ import memory.MemoryStore;
 import memory.MemoryStoreFactory;
 import memory.MemoryVectorSettings;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
@@ -67,7 +68,7 @@ public class MemoryRecallFloorCheckJob extends Job<Void> {
      * empty index — which is a different condition with different causes, so it is not
      * reported here rather than being reported as a floor problem.
      */
-    public static String diagnose(MemoryStore store, String agentId, String probeText, double floor) {
+    public static @Nullable String diagnose(MemoryStore store, String agentId, String probeText, double floor) {
         double best = store.bestQueryCosine(agentId, probeText);
         if (Double.isNaN(best) || best >= floor) return null;
         return ("Semantic recall is disabled by configuration: the best cosine any stored memory "

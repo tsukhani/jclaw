@@ -3,6 +3,7 @@ package controllers;
 import com.google.gson.JsonObject;
 import models.Agent;
 import models.AgentBoundBinding;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import services.AgentService;
 import utils.ApiResponses;
@@ -79,6 +80,7 @@ public abstract class ApiBindingController extends Controller {
         Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
+            throw ApiResponses.unreachable();
         }
         if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
             var other = findByAgent.apply(agent);
@@ -91,7 +93,7 @@ public abstract class ApiBindingController extends Controller {
     }
 
     /** Optional trimmed string from the JSON body (blank collapses to null). */
-    protected static String readOptionalString(JsonObject body, String key) {
+    protected static @Nullable String readOptionalString(JsonObject body, String key) {
         return JsonBodyReader.optString(body, key, true);
     }
 }

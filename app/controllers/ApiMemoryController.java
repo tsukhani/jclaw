@@ -17,6 +17,7 @@ import memory.MemoryReembedService;
 import memory.MemoryVectorSettings;
 import models.Agent;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import play.mvc.results.Result;
@@ -66,8 +67,8 @@ public class ApiMemoryController extends Controller {
     private static final String NO_SUCH_AGENT = "No agent with id ";
 
     public record MemoryDto(String id, String agentName, String text, String category,
-                            double importance, String createdAt,
-                            String supersededAt, String supersededById) {}
+                            double importance, @Nullable String createdAt,
+                            @Nullable String supersededAt, @Nullable String supersededById) {}
 
     public record MemoryUpdateRequest(Double importance, String category) {}
 
@@ -115,9 +116,9 @@ public class ApiMemoryController extends Controller {
      * set, newest first. Returns an empty list where list() used to
      * short-circuit (unknown agent name, empty FTS hit set).
      */
-    private static List<Memory> selectMemories(String q, String agent, String category,
-                                               String importance, String status,
-                                               int limit, int offset) {
+    private static List<Memory> selectMemories(@Nullable String q, @Nullable String agent,
+                                               @Nullable String category, @Nullable String importance,
+                                               @Nullable String status, int limit, int offset) {
         var resolved = resolveQuery(q, agent, category, importance);
         // bulkDelete doesn't care about order — pass null sort → server default.
         return resolved.empty() ? List.of()
@@ -130,9 +131,17 @@ public class ApiMemoryController extends Controller {
      * that ran but hit nothing — so callers short-circuit to zero rows/count
      * rather than issue a query that would return everything.
      */
-    private record ResolvedQuery(JpqlFilter filter, List<Long> ftsIds, boolean empty) {}
+    private record ResolvedQuery(@Nullable JpqlFilter filter, @Nullable List<Long> ftsIds, boolean empty) {
 
-    private static ResolvedQuery resolveQuery(String q, String agent, String category, String importance) {
+        /** Valid only once {@link #empty()} has been checked false — an empty result carries no filter. */
+        JpqlFilter resolvedFilter() {
+            if (filter == null) throw new IllegalStateException("filter unresolved: the query matches nothing");
+            return filter;
+        }
+    }
+
+    private static ResolvedQuery resolveQuery(@Nullable String q, @Nullable String agent,
+                                              @Nullable String category, @Nullable String importance) {
         Long agentIdFilter = null;
         if (agent != null && !agent.isBlank()) {
             agentIdFilter = agentIdForName(agent.strip());
@@ -154,10 +163,11 @@ public class ApiMemoryController extends Controller {
      * and the COUNT off the one WHERE body and parameter set, so the page and the
      * X-Total-Count total can't drift apart.
      */
-    private static PagedJpqlQuery<Memory> pagedQuery(ResolvedQuery r, String status, String sort, String dir) {
+    private static PagedJpqlQuery<Memory> pagedQuery(ResolvedQuery r, @Nullable String status,
+                                                    @Nullable String sort, @Nullable String dir) {
         return PagedJpqlQuery.of(Memory.class, "Memory m", "m")
-                .where(whereClause(r.filter(), r.ftsIds() != null, status))
-                .positionalParams(r.filter().paramList())
+                .where(whereClause(r.resolvedFilter(), r.ftsIds() != null, status))
+                .positionalParams(r.resolvedFilter().paramList())
                 .namedParam("fts", r.ftsIds())
                 .orderBy(orderByClause(sort, dir));
     }
@@ -167,7 +177,7 @@ public class ApiMemoryController extends Controller {
      * backend path (Optional.empty() = no id constraint), or the Lucene hit ids
      * (present-but-empty = ran-but-matched-nothing, so the caller returns empty).
      */
-    private static Optional<List<Long>> resolveFtsIds(JpqlFilter filter, String q) {
+    private static Optional<List<Long>> resolveFtsIds(JpqlFilter filter, @Nullable String q) {
         if (q == null || q.isBlank()) return Optional.empty();
         if ("none".equals(MessageSearch.activeDialect())) {
             filter.like("LOWER(m.text)", "%" + q.strip().toLowerCase() + "%");
@@ -199,7 +209,7 @@ public class ApiMemoryController extends Controller {
     /** The shared WHERE body: the filter clause, the optional FTS id
      *  constraint, and the status condition, AND-ed together. Empty string
      *  when nothing narrows. */
-    private static String whereClause(JpqlFilter filter, boolean hasFts, String status) {
+    private static String whereClause(JpqlFilter filter, boolean hasFts, @Nullable String status) {
         var where = filter.toWhereClause();
         if (hasFts) {
             where = where.isEmpty() ? "m.id IN (:fts)" : where + " AND m.id IN (:fts)";
@@ -219,7 +229,7 @@ public class ApiMemoryController extends Controller {
      * matching the pre-sort behavior. A stable id tiebreak keeps paging
      * deterministic when the sort key has ties.
      */
-    private static String orderByClause(String sort, String dir) {
+    private static String orderByClause(@Nullable String sort, @Nullable String dir) {
         String col = switch (sort == null ? "" : sort) {
             case "agent" -> "m.agent.name";
             case "text" -> "m.text";
@@ -328,6 +338,7 @@ public class ApiMemoryController extends Controller {
         if (writer == null) {
             ApiResponses.error(409, ApiResponses.CONFLICT,
                     "Agent '%s' has no usable provider for question generation".formatted(agent.name));
+            throw ApiResponses.unreachable();
         }
         // "coverage" builds broad questions needing several distinct facts — the only
         // mode that can measure how well a block covers a question, since a single-fact
@@ -354,7 +365,7 @@ public class ApiMemoryController extends Controller {
         } catch (Result r) {
             throw r;
         } catch (IllegalArgumentException e) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ApiResponses.messageOf(e));
         } catch (IOException e) {
             ApiResponses.error(500, ApiResponses.IO_ERROR, "Could not write suite: " + e.getMessage());
         }
@@ -383,7 +394,7 @@ public class ApiMemoryController extends Controller {
             suite = gson.fromJson(
                     Files.readString(MemoryEvalPaths.suiteFile(suiteId)), MemoryEvalSuite.class);
         } catch (IllegalArgumentException e) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, ApiResponses.messageOf(e));
             throw ApiResponses.unreachable();
         } catch (IOException _) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND,
@@ -627,7 +638,10 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Bulk-delete memories by ids or by the list filter set")
     public static void bulkDelete() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         int deleted = 0;
         if (body.has("ids")) {
@@ -665,7 +679,7 @@ public class ApiMemoryController extends Controller {
         badRequest();
     }
 
-    private static String stringField(JsonObject obj, String key) {
+    private static @Nullable String stringField(JsonObject obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         var v = obj.get(key).getAsString();
         return (v == null || v.isBlank()) ? null : v;
@@ -690,7 +704,7 @@ public class ApiMemoryController extends Controller {
      * sees; the JCLAW-525 supersession trail is opt-in via
      * {@code status:superseded} or {@code status:all}.
      */
-    private static String statusCondition(String status) {
+    private static @Nullable String statusCondition(@Nullable String status) {
         var s = status == null ? "" : status.strip().toLowerCase(Locale.ROOT);
         return switch (s) {
             case "all" -> null;
@@ -706,12 +720,12 @@ public class ApiMemoryController extends Controller {
     }
 
     /** Resolve an agent name to its immutable id, or null when unknown. */
-    private static Long agentIdForName(String name) {
+    private static @Nullable Long agentIdForName(String name) {
         Agent a = Agent.find("name = ?1", name).first();
         return a == null ? null : a.id;
     }
 
-    private static String normalizeCategory(String c) {
+    private static @Nullable String normalizeCategory(@Nullable String c) {
         return c == null || c.isBlank() ? null : MemoryCategory.normalize(c);
     }
 
@@ -720,7 +734,7 @@ public class ApiMemoryController extends Controller {
      * and {@code <} are strict, {@code >=} and {@code <=} inclusive — or a bare
      * number (treated as {@code >=}). A non-numeric value is ignored.
      */
-    private static void applyImportance(JpqlFilter filter, String importance) {
+    private static void applyImportance(JpqlFilter filter, @Nullable String importance) {
         if (importance == null || importance.isBlank()) return;
         var v = importance.strip();
         try {

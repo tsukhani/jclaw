@@ -134,7 +134,7 @@ public class SystemPromptAssembler {
      * also have passed a null channel — a null channel emits no guidance section,
      * where {@code "web"} emits one.
      */
-    public static AssembledPrompt assemble(Agent agent, String userMessage) {
+    public static AssembledPrompt assemble(Agent agent, @Nullable String userMessage) {
         return assemble(agent, userMessage, null, null);
     }
 
@@ -145,7 +145,7 @@ public class SystemPromptAssembler {
      * the tool schemas sent alongside the LLM request. Pass {@code null} for the
      * legacy behavior that loads the set internally.
      */
-    public static AssembledPrompt assemble(Agent agent, String userMessage,
+    public static AssembledPrompt assemble(Agent agent, @Nullable String userMessage,
                                            @Nullable Set<String> disabledTools) {
         return assemble(agent, userMessage, disabledTools, null);
     }
@@ -158,7 +158,7 @@ public class SystemPromptAssembler {
      * on Telegram"). Pass {@code null} when no channel context is available —
      * tests and administrative paths do this.
      */
-    public static AssembledPrompt assemble(Agent agent, String userMessage,
+    public static AssembledPrompt assemble(Agent agent, @Nullable String userMessage,
                                             @Nullable Set<String> disabledTools,
                                             @Nullable String channelType) {
         return assemble(agent, userMessage, disabledTools, channelType, null);
@@ -175,7 +175,7 @@ public class SystemPromptAssembler {
      * no transaction boundary to hoist the call out of; recall then embeds inline, as
      * before.
      */
-    public static AssembledPrompt assemble(Agent agent, String userMessage,
+    public static AssembledPrompt assemble(Agent agent, @Nullable String userMessage,
                                             @Nullable Set<String> disabledTools,
                                             @Nullable String channelType,
                                             float @Nullable [] queryEmbedding) {
@@ -196,7 +196,7 @@ public class SystemPromptAssembler {
      * the full {@link models.ChannelType} set: {@code voice} has guidance but is not
      * accepted here, so adding it to this list would describe a request that 400s.
      */
-    public static PromptBreakdown breakdown(Agent agent, String userMessage, String channelType) {
+    public static PromptBreakdown breakdown(Agent agent, @Nullable String userMessage, String channelType) {
         var builder = new SectionedBuilder();
         var skills = buildPrompt(agent, userMessage, builder, null, channelType);
         var sectionEntries = builder.finish().stream()
@@ -269,13 +269,13 @@ public class SystemPromptAssembler {
      * canonical description of the prompt's composition lives here so the two public
      * entry points cannot drift.
      */
-    private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b,
+    private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
                                                            @Nullable Set<String> disabledTools,
                                                            @Nullable String channelType) {
         return buildPrompt(agent, userMessage, b, disabledTools, channelType, null);
     }
 
-    private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b,
+    private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
                                                            @Nullable Set<String> disabledTools,
                                                            @Nullable String channelType,
                                                            float @Nullable [] queryEmbedding) {
@@ -866,7 +866,7 @@ public class SystemPromptAssembler {
                 + PromptFenceScrubber.scrubForInjection(mem.text(), "memory " + mem.id()) + "\n";
     }
 
-    private static void appendMemories(StringBuilder sb, Agent agent, String userMessage,
+    private static void appendMemories(StringBuilder sb, Agent agent, @Nullable String userMessage,
                                        Set<String> excludeIds, float @Nullable [] queryEmbedding) {
         if (userMessage == null || userMessage.isBlank()) return;
 

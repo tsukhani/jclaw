@@ -3,6 +3,7 @@ package services;
 import jakarta.persistence.Query;
 import models.Task;
 import models.TaskRun;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 
@@ -35,7 +36,7 @@ public final class TaskStatsService {
     private static final String RUN_TASK_ALIAS = "r.task";
     private static final String PARAM_RSTATUS = "rstatus";
 
-    public static long countRunsSince(Instant since, TaskRun.Status status,
+    public static long countRunsSince(Instant since, TaskRun.@Nullable Status status,
                                       String payloadType, String excludePayloadType) {
         var jpql = "SELECT COUNT(r) FROM TaskRun r WHERE r.startedAt >= :since"
                 + (status != null ? " AND r.status = :rstatus" : "")

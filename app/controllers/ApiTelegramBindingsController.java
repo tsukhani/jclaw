@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jobs.TelegramCommandsRegistrationJob;
 import models.Agent;
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 import play.mvc.With;
 import services.EventLogger;
 import utils.ApiResponses;
@@ -59,14 +60,14 @@ public class ApiTelegramBindingsController extends ApiBindingController {
      *  JCLAW-784: the secret is sent to Telegram in the
      *  {@code X-Telegram-Bot-Api-Secret-Token} header, never as a URL segment, so
      *  it cannot enter this serialized body. */
-    private record BindingView(Long id, Long agentId, String agentName,
+    private record BindingView(Long id, @Nullable Long agentId, @Nullable String agentName,
                                 String telegramUserId, String transport,
                                 String webhookBaseUrl, boolean hasWebhookSecret,
-                                String effectiveWebhookUrl,
+                                @Nullable String effectiveWebhookUrl,
                                 boolean enabled,
                                 String replyToMode, String errorReplyPolicy,
                                 Long notifierCooldownMs,
-                                String createdAt, String updatedAt) {
+                                @Nullable String createdAt, @Nullable String updatedAt) {
         static BindingView of(TelegramBinding b) {
             return new BindingView(b.id,
                     b.agent != null ? b.agent.id : null,
@@ -88,7 +89,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
          *  keys the route on the binding id and authenticates the secret via the
          *  {@code X-Telegram-Bot-Api-Secret-Token} header). Null unless this is a
          *  WEBHOOK binding with both a public base and a secret (unchanged). */
-        private static String effectiveWebhookUrl(TelegramBinding b) {
+        private static @Nullable String effectiveWebhookUrl(TelegramBinding b) {
             if (b.transport != ChannelTransport.WEBHOOK
                     || b.webhookBaseUrl == null || b.webhookBaseUrl.isBlank()
                     || b.webhookSecret == null || b.webhookSecret.isBlank()) {
@@ -111,7 +112,10 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         String botToken = JsonBodyReader.requiredString(body, KEY_BOT_TOKEN);
         Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
@@ -164,7 +168,10 @@ public class ApiTelegramBindingsController extends ApiBindingController {
         if (binding == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         applyBotTokenUpdate(binding, body);
         applyAgentUpdate(binding, body, TelegramBinding::findByAgent, "Telegram", "agent_already_bound");

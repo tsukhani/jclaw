@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Prompt;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.PromptGenerationService;
@@ -44,7 +45,7 @@ public class ApiPromptsController extends Controller {
      *  concern (value → Heroicon), so no icon travels on the wire. */
     public record PromptView(Long id, String title, String content, String tags,
                              String category, String categoryLabel,
-                             String createdAt, String updatedAt) {
+                             @Nullable String createdAt, @Nullable String updatedAt) {
         static PromptView of(Prompt p) {
             return new PromptView(p.id, p.title, p.content, p.tags,
                     p.category.name(), p.category.label,
@@ -78,7 +79,10 @@ public class ApiPromptsController extends Controller {
     @Operation(summary = "Generate a prompt (title, category, content, tags) from a description; does not save")
     public static void generate() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var description = JsonBodyReader.requiredOr400(body, "description");
         var generated = PromptGenerationService.generate(description);
         if (generated == null) {
@@ -94,7 +98,10 @@ public class ApiPromptsController extends Controller {
     @Operation(summary = "Create a prompt")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var row = new Prompt();
         row.title = JsonBodyReader.requiredOr400(body, KEY_TITLE);
@@ -112,7 +119,10 @@ public class ApiPromptsController extends Controller {
     public static void update(Long id) {
         var row = requirePrompt(id);
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         if (present(body, KEY_TITLE)) row.title = JsonBodyReader.requiredOr400(body, KEY_TITLE);
         if (present(body, KEY_CONTENT)) row.content = JsonBodyReader.requiredOr400(body, KEY_CONTENT);
@@ -139,7 +149,10 @@ public class ApiPromptsController extends Controller {
     @Operation(summary = "Import prompts from a JSON document (mode: merge | replace)")
     public static void importPrompts() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var mode = JsonBodyReader.optString(body, "mode", true);
         if (mode == null) mode = PromptImportExportService.MODE_MERGE;
         if (!PromptImportExportService.MODE_MERGE.equals(mode)

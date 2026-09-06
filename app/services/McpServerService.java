@@ -171,7 +171,7 @@ public final class McpServerService {
      * service layer instead of calling {@code McpServer.findById(...)} raw.
      * Thin passthrough relying on the caller's ambient JPA transaction.
      */
-    public static McpServer findById(Long id) {
+    public static @Nullable McpServer findById(Long id) {
         return McpServer.findById(id);
     }
 

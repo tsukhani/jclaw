@@ -17,6 +17,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageAttachment;
 import models.SessionCompaction;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -263,7 +264,7 @@ public class ApiConversationsController extends Controller {
      * full Message rows just to read their FK.
      */
     @SuppressWarnings("java:S1168") // null vs empty-list is a deliberate tri-state: null = "no q filter"; empty = "matched nothing, render zero rows"; non-empty = "narrow" (see listConversations)
-    private static List<Long> ftsConversationIds(String q) {
+    private static @Nullable List<Long> ftsConversationIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
             // A term matching more than 500 messages truncates silently, so a common
@@ -301,7 +302,10 @@ public class ApiConversationsController extends Controller {
     @Operation(summary = "Get a single conversation by id, in the same shape as one list row")
     public static void getConversation(Long id) {
         Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) notFound();
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         renderJSON(gson.toJson(conversationToMap(conversation,
                 SessionCompaction.count("conversation = ?1", conversation))));
     }
@@ -314,7 +318,10 @@ public class ApiConversationsController extends Controller {
     @Operation(summary = "List a conversation's messages in ascending order, paginated")
     public static void getMessages(Long id, Integer limit, Integer offset) {
         Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) notFound();
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
@@ -461,9 +468,15 @@ public class ApiConversationsController extends Controller {
     @ChatHidden("destructive history deletion")
     public static void deleteMessage(Long id, Long mid) {
         Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) notFound();
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         Message message = ConversationService.findMessageById(mid);
-        if (message == null) notFound();
+        if (message == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         if (message.conversation == null || !message.conversation.id.equals(id)) {
             badRequest();
         }
@@ -479,7 +492,10 @@ public class ApiConversationsController extends Controller {
     @ChatHidden("destructive history deletion")
     public static void deleteConversation(Long id) {
         Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) notFound();
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         ConversationService.deleteByIds(List.of(id));
         renderJSON(gson.toJson(new StatusResponse("deleted")));
     }
@@ -506,7 +522,10 @@ public class ApiConversationsController extends Controller {
     @ChatHidden("destructive bulk history deletion -- wipes conversations")
     public static void deleteConversations() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         if (body.has("ids")) {
             var ids = body.getAsJsonArray("ids");
@@ -535,13 +554,13 @@ public class ApiConversationsController extends Controller {
         badRequest();
     }
 
-    private static String stringField(JsonObject obj, String key) {
+    private static @Nullable String stringField(JsonObject obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         var s = obj.get(key).getAsString();
         return (s == null || s.isBlank()) ? null : s;
     }
 
-    private static Long longField(JsonObject obj, String key) {
+    private static @Nullable Long longField(JsonObject obj, String key) {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         return obj.get(key).getAsLong();
     }
@@ -578,10 +597,16 @@ public class ApiConversationsController extends Controller {
     @Operation(summary = "Set a conversation-scoped model provider/model override, validated against the provider registry")
     public static void setModelOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) notFound();
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("modelProvider") || !body.has("modelId")) badRequest();
+        if (body == null || !body.has("modelProvider") || !body.has("modelId")) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var newProvider = body.get("modelProvider").getAsString();
         var newModelId = body.get("modelId").getAsString();
         if (newProvider == null || newProvider.isBlank()
@@ -617,7 +642,10 @@ public class ApiConversationsController extends Controller {
     @Operation(summary = "Clear a conversation's model override, reverting to the agent default (idempotent)")
     public static void clearModelOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) notFound();
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         ConversationService.clearModelOverride(conversation);
         renderJSON(gson.toJson(new StatusResponse("cleared")));
     }
@@ -711,7 +739,7 @@ public class ApiConversationsController extends Controller {
      * malformed JSON so the UI's guard on missing tool-call columns still
      * works.
      */
-    private static JsonArray enrichToolCallsWithIcons(String toolCallsJson) {
+    private static @Nullable JsonArray enrichToolCallsWithIcons(String toolCallsJson) {
         if (toolCallsJson == null || toolCallsJson.isBlank()) return null;
         try {
             var parsed = JsonParser.parseString(toolCallsJson);

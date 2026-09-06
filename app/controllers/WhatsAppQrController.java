@@ -3,6 +3,7 @@ package controllers;
 import channels.WhatsAppCobaltRunner;
 import models.WhatsAppBinding;
 import models.WhatsAppTransport;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.BindingService;
@@ -27,7 +28,7 @@ public class WhatsAppQrController extends Controller {
     /** JSON shape the pairing UI polls. {@code qr} is the latest pending QR
      *  string (null once paired or before the first QR is emitted); {@code paired}
      *  is true once the session is connected with an owner JID. */
-    private record QrStatus(Long bindingId, String transport, boolean paired, String qr) {}
+    private record QrStatus(Long bindingId, String transport, boolean paired, @Nullable String qr) {}
 
     /**
      * GET the pairing status for one binding. 404 when the binding doesn't exist;

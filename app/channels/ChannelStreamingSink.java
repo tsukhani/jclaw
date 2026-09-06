@@ -1,5 +1,7 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 
 /**
@@ -38,7 +40,7 @@ public interface ChannelStreamingSink {
     /** Optional (JCLAW-346): surface a completed tool call (by name) as live
      *  progress before the assistant's text turn begins. Default no-op —
      *  Slack's off-thread draft preview overrides it; Telegram ignores it. */
-    default void toolProgress(String toolName) {
+    default void toolProgress(@Nullable String toolName) {
         // no-op by default
     }
 

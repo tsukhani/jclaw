@@ -645,7 +645,7 @@ public class AgentRunner {
      *                       contributes to the performance histograms.
      */
     @SuppressWarnings("java:S107") // Streaming entrypoint signature retained for binary compat with channel callers
-    public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
+    public static void runStreaming(Agent agent, @Nullable Long conversationId, String channelType, String peerId,
                                     String userMessage,
                                     AtomicBoolean isCancelled,
                                     StreamingCallbacks cb,
@@ -673,7 +673,7 @@ public class AgentRunner {
      *                       response
      */
     @SuppressWarnings("java:S107") // Streaming entrypoint signature retained for binary compat with channel callers
-    public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
+    public static void runStreaming(Agent agent, @Nullable Long conversationId, String channelType, String peerId,
                                     String userMessage,
                                     AtomicBoolean isCancelled,
                                     StreamingCallbacks cb,

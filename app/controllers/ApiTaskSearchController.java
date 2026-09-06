@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.TaskRunMessage;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.search.MessageSearch;
@@ -32,10 +33,10 @@ public class ApiTaskSearchController extends Controller {
      * {@link TaskRunMessage} content + role plus enough parent context
      * (task id/name, taskRun id) for the UI to link back.
      */
-    private record TranscriptSearchHit(Long messageId, String role, String content,
-                                        String createdAt, Long taskRunId,
-                                        Long taskId, String taskName,
-                                        Long agentId, String agentName) {
+    private record TranscriptSearchHit(Long messageId, @Nullable String role, String content,
+                                        @Nullable String createdAt, @Nullable Long taskRunId,
+                                        @Nullable Long taskId, @Nullable String taskName,
+                                        @Nullable Long agentId, String agentName) {
         static TranscriptSearchHit of(TaskRunMessage m) {
             var run = m.taskRun;
             var task = run != null ? run.task : null;

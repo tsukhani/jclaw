@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.Operation;
 import models.MessageAttachment;
 import models.VideoGenerationJob;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AttachmentService;
@@ -44,7 +45,7 @@ public class ApiVideogenController extends Controller {
      *                   default applied — not the raw config value, which is blank when defaulted
      * @param configured whether {@code provider} resolves to a usable client
      */
-    public record VideogenStateResponse(String provider, String model, boolean configured) {}
+    public record VideogenStateResponse(@Nullable String provider, @Nullable String model, boolean configured) {}
 
     /**
      * GET /api/videogen/state — which provider and model video generation will use.
@@ -150,7 +151,7 @@ public class ApiVideogenController extends Controller {
         renderJSON(gson.toJson(out));
     }
 
-    private static Long parseId(String s) {
+    private static @Nullable Long parseId(String s) {
         try {
             return Long.valueOf(s.trim());
         } catch (NumberFormatException _) {

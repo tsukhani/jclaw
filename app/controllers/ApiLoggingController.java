@@ -59,6 +59,7 @@ public class ApiLoggingController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("logger") || !body.has("level")) {
             badRequest();
+            throw ApiResponses.unreachable();
         }
         var logger = body.get("logger").getAsString().trim();
         var level = body.get("level").getAsString().trim().toUpperCase();

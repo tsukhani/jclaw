@@ -711,7 +711,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * different embedding model answers 200 with a perfectly good vector, so the vector
      * alone cannot tell an operator whether the model they picked is the one being used.
      */
-    public EmbeddingResult embeddingsDetailed(String model, String input, String channel) {
+    public EmbeddingResult embeddingsDetailed(String model, String input, @Nullable String channel) {
         var request = new EmbeddingRequest(model, input);
         var json = gson.toJson(request);
         var responseBody = executeWithRetry("/embeddings", json, null, channel);

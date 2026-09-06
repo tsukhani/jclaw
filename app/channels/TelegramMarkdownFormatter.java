@@ -34,6 +34,7 @@ import com.vladsch.flexmark.ext.typographic.TypographicSmarts;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
 import com.vladsch.flexmark.util.data.MutableDataSet;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -425,7 +426,7 @@ public final class TelegramMarkdownFormatter {
      * HTML-escape text so Telegram's HTML parser doesn't mistake literal {@code &},
      * {@code <}, or {@code >} in the source for tag markup.
      */
-    public static String escapeHtml(String s) {
+    public static String escapeHtml(@Nullable String s) {
         if (s == null) return "";
         var sb = new StringBuilder(s.length());
         for (int i = 0; i < s.length(); i++) {

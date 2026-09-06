@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.EventLog;
 import models.Message;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -65,18 +66,18 @@ public class ApiSubagentRunsController extends Controller {
     private static final String COL_STARTED_AT = "r.startedAt";
 
     @SuppressWarnings("java:S107") // each query param is its own filter axis; bundling into a DTO would hide them from OpenAPI generation
-    public record SubagentRunView(Long id, Long parentAgentId, String parentAgentName,
-                                  Long childAgentId, String childAgentName,
-                                  Long parentConversationId, Long childConversationId,
-                                  String mode, String status, String startedAt,
-                                  String endedAt, String outcome, String workdir) {}
+    public record SubagentRunView(Long id, @Nullable Long parentAgentId, @Nullable String parentAgentName,
+                                  @Nullable Long childAgentId, @Nullable String childAgentName,
+                                  @Nullable Long parentConversationId, @Nullable Long childConversationId,
+                                  @Nullable String mode, @Nullable String status, @Nullable String startedAt,
+                                  @Nullable String endedAt, String outcome, String workdir) {}
 
     public record KillRequest(String reason) {}
 
-    public record KillResponse(boolean killed, String status, String message) {}
+    public record KillResponse(boolean killed, @Nullable String status, String message) {}
 
     /** JCLAW-662: one persisted coding-harness step in the replay transcript. */
-    public record StepView(int seq, String kind, String text, String createdAt) {}
+    public record StepView(int seq, @Nullable String kind, String text, @Nullable String createdAt) {}
 
     /**
      * GET /api/subagent-runs — list runs with optional filters.
@@ -180,7 +181,7 @@ public class ApiSubagentRunsController extends Controller {
      * remember what went wrong inside the run.
      */
     @SuppressWarnings("java:S1168") // null vs empty-list is a deliberate tri-state: null = "no q filter, return all rows"; empty = "matched nothing, render zero rows"; non-empty = "narrow" (see callers in list())
-    private static List<Long> ftsSubagentRunIds(String q) {
+    private static @Nullable List<Long> ftsSubagentRunIds(@Nullable String q) {
         if (q == null || q.isBlank()) return null;
         try {
             var directIds = MessageSearch.searchIds(
@@ -207,18 +208,18 @@ public class ApiSubagentRunsController extends Controller {
         }
     }
 
-    private static Instant parseSinceFilter(String since) {
+    private static @Nullable Instant parseSinceFilter(@Nullable String since) {
         if (since == null || since.isBlank()) return null;
         try {
             return Instant.parse(since);
         } catch (Exception _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Invalid 'since' value '" + since + "' — expected ISO-8601 instant.");
-            return null;
+            throw ApiResponses.unreachable();
         }
     }
 
-    private static SubagentRun.Status parseStatusFilter(String status) {
+    private static SubagentRun.@Nullable Status parseStatusFilter(@Nullable String status) {
         if (status == null || status.isBlank()) return null;
         try {
             return SubagentRun.Status.valueOf(status.toUpperCase());
@@ -226,7 +227,7 @@ public class ApiSubagentRunsController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Invalid 'status' value '" + status
                             + "' — expected one of RUNNING / COMPLETED / FAILED / KILLED / TIMEOUT.");
-            return null;
+            throw ApiResponses.unreachable();
         }
     }
 
@@ -393,8 +394,9 @@ public class ApiSubagentRunsController extends Controller {
      * memory. The {@code r.} qualification matches {@link #list}'s JCLAW-806
      * aliasing.
      */
-    private static List<Long> findMatchingRunIds(Long parentAgentId, Long parentConversationId,
-                                                 SubagentRun.Status status, Instant since, String q) {
+    private static List<Long> findMatchingRunIds(@Nullable Long parentAgentId, @Nullable Long parentConversationId,
+                                                 SubagentRun.@Nullable Status status, @Nullable Instant since,
+                                                 @Nullable String q) {
         var filter = new JpqlFilter()
                 .eq("r.parentAgent.id", parentAgentId)
                 .eq("r.parentConversation.id", parentConversationId)
@@ -466,13 +468,13 @@ public class ApiSubagentRunsController extends Controller {
         return "ORDER BY " + col + " " + direction + ", r.id ASC";
     }
 
-    private static String stringField(JsonObject obj, String key) {
+    private static @Nullable String stringField(JsonObject obj, String key) {
         return JsonArgs.optString(obj, key);
     }
 
     // Deliberately not JsonArgs.optLong: that collapses a non-numeric id to null, which here
     // would drop the filter and widen a bulk delete from one parent's runs to every run.
-    private static Long longField(JsonObject obj, String key) {
+    private static @Nullable Long longField(JsonObject obj, String key) {
         return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsLong() : null;
     }
 
@@ -616,7 +618,7 @@ public class ApiSubagentRunsController extends Controller {
     }
 
     /** Long.parseLong wrapped to return null on malformed input — keeps applySpawnEventMode free of nested try blocks. */
-    private static Long parseLongOrNull(String raw) {
+    private static @Nullable Long parseLongOrNull(String raw) {
         try {
             return Long.parseLong(raw);
         } catch (NumberFormatException _) {

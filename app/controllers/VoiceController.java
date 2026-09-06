@@ -10,6 +10,7 @@ import models.Agent;
 import models.ChannelType;
 import models.Conversation;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.db.jpa.NoTransaction;
 import play.mvc.Http;
@@ -603,7 +604,7 @@ public class VoiceController extends WebSocketController {
     /** Pure Origin-vs-host comparison, extracted for unit testing. The browser
      *  sets the handshake Origin and JS cannot override it, so an Origin whose
      *  authority doesn't equal our host — or is missing/malformed — is rejected. */
-    public static boolean originMatchesHost(String origin, String host) {
+    public static boolean originMatchesHost(@Nullable String origin, String host) {
         if (origin == null || origin.isBlank() || host == null || host.isBlank()) return false;
         try {
             var authority = URI.create(origin.trim()).getAuthority();
@@ -626,7 +627,7 @@ public class VoiceController extends WebSocketController {
         return hash != null && !hash.isBlank();
     }
 
-    private static Agent resolveAgent(JsonObject msg) {
+    private static @Nullable Agent resolveAgent(JsonObject msg) {
         if (!msg.has(KEY_AGENT_ID) || msg.get(KEY_AGENT_ID).isJsonNull()) return null;
         var agentId = msg.get(KEY_AGENT_ID).getAsLong();
         return Tx.run(() -> AgentService.findById(agentId));

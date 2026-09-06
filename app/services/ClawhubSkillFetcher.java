@@ -57,7 +57,7 @@ public final class ClawhubSkillFetcher {
      * disambiguate same-slug skills. Never throws — failures return
      * {@code ok=false}.
      */
-    public static FetchResult fetch(String slug, String owner, Path stagedDir) {
+    public static FetchResult fetch(String slug, @Nullable String owner, Path stagedDir) {
         if (slug == null || slug.isBlank()) return new FetchResult(false, 0, "missing clawhub slug");
 
         String version;
@@ -140,7 +140,7 @@ public final class ClawhubSkillFetcher {
      * pairs, owner-qualifying it via {@code ?owner=} when {@code owner} is set
      * (clawhub slugs are owner-scoped; the param disambiguates same-slug skills).
      */
-    private static HttpUrl skillApi(String owner, String segments, String... queryKv) {
+    private static HttpUrl skillApi(@Nullable String owner, String segments, String... queryKv) {
         var b = base().addPathSegments(segments);
         for (int i = 0; i + 1 < queryKv.length; i += 2) b.addQueryParameter(queryKv[i], queryKv[i + 1]);
         if (owner != null && !owner.isBlank()) b.addQueryParameter("owner", owner);

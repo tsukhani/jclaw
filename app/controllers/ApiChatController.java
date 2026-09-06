@@ -9,6 +9,7 @@ import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import play.data.Upload;
 import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
@@ -93,7 +94,7 @@ public class ApiChatController extends Controller {
     }
 
     /** Validated prologue shared by send() and streamChat(). */
-    private record ChatContext(Agent agent, String message, Long conversationId, String username,
+    private record ChatContext(Agent agent, String message, @Nullable Long conversationId, String username,
                                 List<AttachmentService.Input> attachments) {}
 
     /**
@@ -113,7 +114,7 @@ public class ApiChatController extends Controller {
      * model-side gate; the rest of the pipeline handles the downgrade.
      */
     @SuppressWarnings("java:S2259")
-    private static ChatContext resolveChatContext(JsonObject body) {
+    private static ChatContext resolveChatContext(@Nullable JsonObject body) {
         if (body == null || !body.has("message") || !body.has(KEY_AGENT_ID)) {
             badRequest();
             throw ApiResponses.unreachable();
@@ -156,6 +157,7 @@ public class ApiChatController extends Controller {
         var id = o.has(KEY_ATTACHMENT_ID) ? o.get(KEY_ATTACHMENT_ID).getAsString() : null;
         if (id == null || id.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "attachment missing attachmentId");
+            throw ApiResponses.unreachable();
         }
         var originalFilename = o.has(KEY_ORIGINAL_FILENAME) ? o.get(KEY_ORIGINAL_FILENAME).getAsString() : null;
         var mimeType = o.has(KEY_MIME_TYPE) ? o.get(KEY_MIME_TYPE).getAsString() : null;
@@ -181,7 +183,10 @@ public class ApiChatController extends Controller {
                 current = null;
             } else if (ctx.conversationId() != null) {
                 current = ConversationService.findById(ctx.conversationId());
-                if (current == null) notFound();
+                if (current == null) {
+                    notFound();
+                    throw ApiResponses.unreachable();
+                }
             } else {
                 current = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
             }
@@ -206,7 +211,10 @@ public class ApiChatController extends Controller {
         Conversation conversation;
         if (ctx.conversationId() != null) {
             conversation = ConversationService.findById(ctx.conversationId());
-            if (conversation == null) notFound();
+            if (conversation == null) {
+                notFound();
+                throw ApiResponses.unreachable();
+            }
         } else {
             conversation = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
         }
@@ -231,9 +239,15 @@ public class ApiChatController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     public static void uploadChatFiles(Long agentId, Upload[] files) {
-        if (agentId == null) badRequest();
+        if (agentId == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         Agent agent = AgentService.findById(agentId);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         // JCLAW-765: chat and the App->Agent invoke endpoint share ONE staging path
         // (utils/services.UploadStaging) so the same size/type limits + containment
@@ -325,11 +339,11 @@ public class ApiChatController extends Controller {
      *         should proceed.
      */
     private static boolean handleStreamingSlashCommand(SseStream sse, Agent agent, String messageText,
-                                                       Long conversationId, String username) {
+                                                       @Nullable Long conversationId, String username) {
         var slashCmd = Commands.parse(messageText);
         if (slashCmd.isEmpty()) return false;
 
-        Conversation slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
+        var slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
         // JCLAW-111: args-aware execute so /model status etc. work via SSE.
         var slashResult = Commands.execute(
                 slashCmd.get(), agent, "web", username, slashConv,
@@ -346,8 +360,8 @@ public class ApiChatController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    private static Conversation resolveSlashConversation(Commands.Command cmd, Agent agent,
-                                                          Long conversationId, String username) {
+    private static @Nullable Conversation resolveSlashConversation(Commands.Command cmd, Agent agent,
+                                                          @Nullable Long conversationId, String username) {
         if (cmd == Commands.Command.NEW) return null;
         if (conversationId != null) {
             // JCLAW-199: streamChat is @NoTransaction; explicit Tx.run for
@@ -355,7 +369,10 @@ public class ApiChatController extends Controller {
             // caller owns the tx.
             final Long capturedConvId = conversationId;
             var conv = Tx.run(() -> ConversationService.findById(capturedConvId));
-            if (conv == null) notFound();
+            if (conv == null) {
+                notFound();
+                throw ApiResponses.unreachable();
+            }
             return conv;
         }
         return Tx.run(() -> ConversationService.findOrCreate(agent, "web", username));

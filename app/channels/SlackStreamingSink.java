@@ -1,5 +1,6 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
@@ -277,7 +278,7 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
      *  last few completed tool calls into the draft message, until the assistant's
      *  text turn begins (pending non-empty). No-op in native mode / once text flows. */
     @Override
-    public void toolProgress(String toolName) {
+    public void toolProgress(@Nullable String toolName) {
         if (canStream || draftStopped || toolName == null || toolName.isBlank()) return;
         if (!pending.isEmpty()) return; // the real reply has started → it owns the draft
         toolLines.add(toolName);

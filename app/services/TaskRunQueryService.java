@@ -59,7 +59,7 @@ public final class TaskRunQueryService {
      * bounds the window ({@code since <= startedAt < until}); a null
      * {@code until} is the rolling-window case (no upper bound).
      */
-    public static List<TaskRun> recentRuns(Instant since, Instant until, int limit) {
+    public static List<TaskRun> recentRuns(Instant since, @Nullable Instant until, int limit) {
         var query = (until != null)
                 ? TaskRun.find("startedAt >= ?1 AND startedAt < ?2 ORDER BY startedAt DESC", since, until)
                 : TaskRun.find("startedAt >= ?1 ORDER BY startedAt DESC", since);

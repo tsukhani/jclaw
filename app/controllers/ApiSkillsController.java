@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.AgentSkillConfig;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -102,7 +103,7 @@ public class ApiSkillsController extends Controller {
 
     public record SkillImportRequest(String source, String skillId, String provider, String owner) {}
 
-    public record SkillImportResponse(String status, String skillName, String message) {}
+    public record SkillImportResponse(String status, @Nullable String skillName, @Nullable String message) {}
 
     public record CatalogRefreshResponse(String catalog, String type, boolean refreshed) {}
 
@@ -189,7 +190,10 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Import a catalog skill from GitHub into the global registry")
     public static void catalogImport() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("source") || !body.has("skillId")) badRequest();
+        if (body == null || !body.has("source") || !body.has("skillId")) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var source = body.get("source").getAsString();
         var skillId = body.get("skillId").getAsString();
@@ -217,7 +221,10 @@ public class ApiSkillsController extends Controller {
             // Null means the file we just found is unreadable — parseSkillFile
             // swallows that IOException. Without this the NPE from skillToMap
             // pre-empts the clean 500 the catch below exists to render.
-            if (info == null) ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read skill: " + name);
+            if (info == null) {
+                ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read skill: " + name);
+                throw ApiResponses.unreachable();
+            }
             var map = skillToMap(info, true);
             map.put("content", Files.readString(path));
             renderJSON(gson.toJson(map));
@@ -328,7 +335,7 @@ public class ApiSkillsController extends Controller {
                 tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
     }
 
-    private static ToolRegistry.Tool lookupToolByName(String name) {
+    private static ToolRegistry.@Nullable Tool lookupToolByName(String name) {
         return ToolRegistry.lookupTool(name);
     }
 
@@ -360,7 +367,10 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "List an agent's installed skills and their enabled state")
     public static void listForAgent(Long id) {
         Agent agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var agentDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
         var skills = new ArrayList<SkillLoader.SkillInfo>();
@@ -418,10 +428,16 @@ public class ApiSkillsController extends Controller {
         requireOperator();
 
         Agent agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_ENABLED)) badRequest();
+        if (body == null || !body.has(KEY_ENABLED)) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         // Guard against the orphan-config failure mode: a caller (LLM,
@@ -468,7 +484,10 @@ public class ApiSkillsController extends Controller {
         requireOperator();
 
         Agent agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var globalDir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(globalDir)) {
@@ -518,7 +537,10 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "List files in an agent workspace skill folder with metadata and detected tool dependencies")
     public static void listAgentSkillFiles(Long id, String name) {
         Agent agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
         listSkillFilesFrom(dir);
@@ -530,7 +552,10 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Read a text file from an agent workspace skill")
     public static void readAgentSkillFile(Long id, String name, String filePath) {
         Agent agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         readSkillFileFrom(dir, filePath);
     }
@@ -541,7 +566,10 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Delete a skill from an agent's workspace and revoke its shell-allowlist grants")
     public static void deleteAgentSkill(Long id, String name) {
         Agent agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
         // Revoke the skill's shell-allowlist grants for this agent BEFORE deleting
@@ -563,13 +591,19 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Promote an agent workspace skill to the global registry (sanitizes asynchronously)")
     public static void promote() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("agentId") || !body.has(KEY_SKILL_NAME)) badRequest();
+        if (body == null || !body.has("agentId") || !body.has(KEY_SKILL_NAME)) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var agentId = body.get("agentId").getAsLong();
         var skillName = body.get(KEY_SKILL_NAME).getAsString();
 
         Agent agent = AgentService.findById(agentId);
-        if (agent == null) notFound();
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         var agentName = agent.name;
         // Route the body-supplied skillName through the same containment guard
@@ -608,7 +642,10 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Rename a global skill folder")
     public static void rename(String name) {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has(KEY_NEW_NAME)) badRequest();
+        if (body == null || !body.has(KEY_NEW_NAME)) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var newName = body.get(KEY_NEW_NAME).getAsString().strip();
         if (newName.isEmpty()) badRequest();

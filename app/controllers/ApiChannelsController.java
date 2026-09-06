@@ -17,6 +17,7 @@ import play.mvc.With;
 import services.ChannelStatusService;
 import services.ConfigService;
 import services.EventLogger;
+import utils.ApiResponses;
 
 import java.util.List;
 import java.util.Set;
@@ -102,7 +103,10 @@ public class ApiChannelsController extends Controller {
     @ChatHidden("writes channel config -- secrets / comms routing")
     public static void save(String channelType) {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         // Evict cache before lookup so we get a managed (attached) entity for write
         ChannelConfig.evictCache(channelType);

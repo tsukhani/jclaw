@@ -11,6 +11,7 @@ import models.EventLog;
 import models.Message;
 import models.Prompt;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
@@ -24,6 +25,7 @@ import utils.AppClock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -151,7 +153,7 @@ public final class Commands {
      *                      transport should render
      * @param command       which {@link Command} the input parsed as
      */
-    public record Result(Conversation conversation, String responseText, Command command) {}
+    public record Result(@Nullable Conversation conversation, String responseText, Command command) {}
 
     /**
      * Parse the first token of {@code text} as a recognized command.
@@ -204,7 +206,7 @@ public final class Commands {
      *                will be treated as no-ops in that case.
      */
     public static Optional<Result> handle(String text, Agent agent, String channelType,
-                                           String peerId, Conversation current) {
+                                           String peerId, @Nullable Conversation current) {
         return parse(text).map(cmd -> execute(cmd, agent, channelType, peerId, current, extractArgs(text)));
     }
 
@@ -218,7 +220,7 @@ public final class Commands {
      * user text through the args-carrying {@link #execute} overload
      * without re-running the parser.
      */
-    public static String extractArgs(String text) {
+    public static @Nullable String extractArgs(String text) {
         if (text == null) return null;
         var trimmed = text.strip();
         var firstSpace = indexOfWhitespace(trimmed);
@@ -266,7 +268,7 @@ public final class Commands {
 
     /** Execute a previously-parsed command. See class javadoc for side effects. */
     public static Result execute(Command cmd, Agent agent, String channelType,
-                                  String peerId, Conversation current) {
+                                  String peerId, @Nullable Conversation current) {
         return execute(cmd, agent, channelType, peerId, current, null);
     }
 
@@ -278,7 +280,7 @@ public final class Commands {
      * {@code /model reset} clears it.
      */
     public static Result execute(Command cmd, Agent agent, String channelType,
-                                  String peerId, Conversation current, String args) {
+                                  String peerId, @Nullable Conversation current, @Nullable String args) {
         return switch (cmd) {
             case NEW -> executeNew(agent, channelType, peerId);
             case RESET -> executeReset(agent, channelType, current);
@@ -328,7 +330,7 @@ public final class Commands {
                 Keep it concise and friendly.""";
     }
 
-    private static Result executeReset(Agent agent, String channelType, Conversation current) {
+    private static Result executeReset(Agent agent, String channelType, @Nullable Conversation current) {
         if (current == null) {
             var fallback = "No active conversation to reset.";
             EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
@@ -383,7 +385,7 @@ public final class Commands {
      * content the canceled stream left behind would clutter history and
      * skew {@code /usage} accounting.
      */
-    private static Result executeStop(Agent agent, String channelType, Conversation current) {
+    private static Result executeStop(Agent agent, String channelType, @Nullable Conversation current) {
         if (current == null) {
             EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                     "/stop with no current conversation");
@@ -420,7 +422,8 @@ public final class Commands {
      * summarizer returns. This matches {@code /model NAME}'s validation
      * latency and is acceptable for an explicit user-requested action.
      */
-    private static Result executeCompact(Agent agent, String channelType, Conversation current, String args) {
+    private static Result executeCompact(Agent agent, String channelType, @Nullable Conversation current,
+                                          @Nullable String args) {
         if (current == null) {
             var fallback = "No active conversation to compact.";
             EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
@@ -449,7 +452,9 @@ public final class Commands {
             // Slash-command-triggered compaction has no inbound chat-channel
             // context (it runs on a programmatic invocation), so dispatcher_wait
             // for this call records under "unknown".
-            var resp = capturedPrimary.chat(capturedModelId, sumMsgs, List.of(), maxOutput, null, null);
+            var resp = capturedPrimary.chat(
+                    Objects.requireNonNull(capturedModelId, "no model configured for compaction"),
+                    sumMsgs, List.of(), maxOutput, null, null);
             return SessionCompactor.firstChoiceText(resp);
         };
 
@@ -468,7 +473,7 @@ public final class Commands {
      * web both render the leading {@code >} as a blockquote for a clear
      * visual boundary.
      */
-    private static String buildCompactResponseText(SessionCompactor.CompactionResult result, String args) {
+    private static String buildCompactResponseText(SessionCompactor.CompactionResult result, @Nullable String args) {
         if (!result.compacted()) {
             var reason = result.skipReason();
             if ("no safe boundary or below min-turns".equals(reason)) {
@@ -518,7 +523,8 @@ public final class Commands {
      * <p>Ambiguity is reported, never guessed: running the wrong 2000-character
      * prompt costs a model call and a confusing answer.
      */
-    private static Result executePrompt(Agent agent, String channelType, Conversation current, String args) {
+    private static Result executePrompt(Agent agent, String channelType, @Nullable Conversation current,
+                                         @Nullable String args) {
         // Prompt.findAllOrdered issues a JPQL query and needs an active
         // EntityManager, so the whole handler is wrapped exactly as /usage is:
         // the Telegram polling thread has no request-scoped transaction, and
@@ -573,7 +579,7 @@ public final class Commands {
         return "**" + p.title + "**\n\n```\n" + p.content + "\n```";
     }
 
-    private static Result executeHelp(Agent agent, String channelType, Conversation current) {
+    private static Result executeHelp(Agent agent, String channelType, @Nullable Conversation current) {
         var helpText = helpTextFor(channelType);
         if (current != null) {
             final Long convId = current.id;
@@ -625,7 +631,8 @@ public final class Commands {
      * </ul>
      * Validation failures render a helpful response; no state is mutated.
      */
-    private static Result executeModel(Agent agent, String channelType, Conversation current, String args) {
+    private static Result executeModel(Agent agent, String channelType, @Nullable Conversation current,
+                                        @Nullable String args) {
         if (args == null || args.isBlank()) {
             return executeModelSummary(agent, channelType, current);
         }
@@ -645,7 +652,7 @@ public final class Commands {
      * so we return an empty responseText — processInboundForAgentStreaming skips the default
      * sink.seal when the text is empty. Web/tests/no-conversation fall back to full detail.
      */
-    private static Result executeModelSummary(Agent agent, String channelType, Conversation current) {
+    private static Result executeModelSummary(Agent agent, String channelType, @Nullable Conversation current) {
         if ("telegram".equals(channelType) && current != null && agent != null) {
             var delivered = TelegramModelSelector.sendSummary(agent, current);
             EventLogger.info(EVENT_CATEGORY_SLASH, agent.name, channelType,
@@ -657,23 +664,24 @@ public final class Commands {
                 () -> buildModelResponse(agent, current));
     }
 
-    private static Result executeModelStatus(Agent agent, String channelType, Conversation current) {
+    private static Result executeModelStatus(Agent agent, String channelType, @Nullable Conversation current) {
         return persistAndLogModel(agent, channelType, current, "/model status",
                 () -> buildModelResponse(agent, current));
     }
 
-    private static Result executeModelReset(Agent agent, String channelType, Conversation current) {
+    private static Result executeModelReset(Agent agent, String channelType, @Nullable Conversation current) {
         return persistAndLogModel(agent, channelType, current, "/model reset",
                 () -> performModelReset(agent, current));
     }
 
-    private static Result executeModelSwitch(Agent agent, String channelType, Conversation current, String args) {
+    private static Result executeModelSwitch(Agent agent, String channelType, @Nullable Conversation current,
+                                              String args) {
         return persistAndLogModel(agent, channelType, current, "/model " + args,
                 () -> performModelSwitch(agent, current, args));
     }
 
     /** Tx-wrap response build, persist a canned assistant message, and emit the SLASH_COMMAND event log. */
-    private static Result persistAndLogModel(Agent agent, String channelType, Conversation current,
+    private static Result persistAndLogModel(Agent agent, String channelType, @Nullable Conversation current,
                                              String logPrefix, Supplier<String> build) {
         var responseText = Tx.run(() -> {
             var text = build.get();
@@ -694,7 +702,7 @@ public final class Commands {
      * discovered model has no context window, the percentage is rendered as
      * "unknown (model metadata incomplete)".
      */
-    private static Result executeUsage(Agent agent, String channelType, Conversation current) {
+    private static Result executeUsage(Agent agent, String channelType, @Nullable Conversation current) {
         // buildUsageResponse calls ConversationService.loadRecentMessages,
         // which issues a JPQL query and needs an active EntityManager. Wrap
         // the full handler in Tx.run so the polling-thread entry point
@@ -717,7 +725,7 @@ public final class Commands {
      * the handler body is itself wrapped in one (the {@code /usage} case,
      * which reads message history).
      */
-    private static void persistCannedResponseInTx(Conversation current, String responseText) {
+    private static void persistCannedResponseInTx(@Nullable Conversation current, String responseText) {
         if (current == null) return;
         var conv = (Conversation) Conversation.findById(current.id);
         if (conv != null) {
@@ -730,7 +738,7 @@ public final class Commands {
      * Honors the conversation-scoped override (JCLAW-108) when present;
      * otherwise falls back to the agent's default model.
      */
-    private static Optional<ModelInfo> resolveModel(Agent agent, Conversation current) {
+    private static Optional<ModelInfo> resolveModel(Agent agent, @Nullable Conversation current) {
         var providerName = effectiveProviderName(agent, current);
         var modelId = effectiveModelIdFor(agent, current);
         if (providerName == null || modelId == null) return Optional.empty();
@@ -742,16 +750,16 @@ public final class Commands {
     }
 
     /** Resolve the effective provider name — override when present, else agent default. */
-    private static String effectiveProviderName(Agent agent, Conversation current) {
+    private static @Nullable String effectiveProviderName(Agent agent, @Nullable Conversation current) {
         return ModelOverrideResolver.provider(current, agent);
     }
 
     /** Resolve the effective model id — override when present, else agent default. */
-    private static String effectiveModelIdFor(Agent agent, Conversation current) {
+    private static @Nullable String effectiveModelIdFor(Agent agent, @Nullable Conversation current) {
         return ModelOverrideResolver.modelId(current, agent);
     }
 
-    public static String buildModelResponse(Agent agent, Conversation current) {
+    public static String buildModelResponse(Agent agent, @Nullable Conversation current) {
         if (agent == null) return "No agent bound to this conversation.";
         var providerName = effectiveProviderName(agent, current);
         var modelId = effectiveModelIdFor(agent, current);
@@ -796,7 +804,7 @@ public final class Commands {
      * a shrinkage warning). Validation failures return an explanatory message
      * without mutating state. Caller is responsible for opening the transaction.
      */
-    public static String performModelSwitch(Agent agent, Conversation current, String args) {
+    public static String performModelSwitch(Agent agent, @Nullable Conversation current, String args) {
         if (current == null) {
             return "No active conversation — cannot switch models without a target.";
         }
@@ -854,7 +862,7 @@ public final class Commands {
      * Execute {@code /model reset} — clear both override columns, revert to the
      * agent default, and return a confirmation. Caller owns the transaction.
      */
-    static String performModelReset(Agent agent, Conversation current) {
+    static String performModelReset(Agent agent, @Nullable Conversation current) {
         if (current == null) {
             return "No active conversation — nothing to reset.";
         }
@@ -882,7 +890,7 @@ public final class Commands {
      * what was actually in the model's view on the last turn, same signal
      * JCLAW-107's {@code /usage} uses. Returns null when no warning applies.
      */
-    private static String computeShrinkageWarning(ModelInfo newModel, Conversation current) {
+    private static @Nullable String computeShrinkageWarning(ModelInfo newModel, Conversation current) {
         int newWindow = newModel.contextWindow();
         if (newWindow <= 0) return null;
         var messages = ConversationService.loadRecentMessages(current);
@@ -927,7 +935,7 @@ public final class Commands {
                 : "$%.2f".formatted(perMillion);
     }
 
-    static String buildUsageResponse(Agent agent, Conversation current) {
+    static String buildUsageResponse(Agent agent, @Nullable Conversation current) {
         if (current == null) return "No active conversation — no usage to report.";
         // JCLAW-108: resolveModel honors the conversation override; the Model
         // line below also reflects the effective id so switching mid-chat
@@ -1051,7 +1059,7 @@ public final class Commands {
     private static final int SUBAGENT_HISTORY_CONTENT_CAP = 500;
 
     private static Result executeSubagent(Agent agent, String channelType,
-                                           Conversation current, String args) {
+                                           @Nullable Conversation current, @Nullable String args) {
         var sub = parseSubagentArgs(args);
         var responseText = Tx.run(() -> {
             var text = buildSubagentResponse(agent, current, sub);
@@ -1066,9 +1074,17 @@ public final class Commands {
     }
 
     /** Outcome of parsing the subcommand portion of {@code /subagent ARGS}. */
-    private record SubagentArgs(String kind, Long id, String error) {}
+    private record SubagentArgs(@Nullable String kind, @Nullable Long id, @Nullable String error) {
 
-    private static SubagentArgs parseSubagentArgs(String args) {
+        /** The subcommand, non-null whenever {@link #error()} is null — every branch
+         *  that leaves {@code kind} unset sets {@code error}. */
+        String resolvedKind() {
+            if (kind == null) throw new IllegalStateException("SubagentArgs.kind is null; check error() first");
+            return kind;
+        }
+    }
+
+    private static SubagentArgs parseSubagentArgs(@Nullable String args) {
         if (args == null || args.isBlank()) {
             return new SubagentArgs("list", null, null);
         }
@@ -1098,11 +1114,12 @@ public final class Commands {
 
     /** Build the response text for a parsed {@code /subagent} call. Must run
      *  inside a Tx so the DB lookups have an active EntityManager. */
-    private static String buildSubagentResponse(Agent agent, Conversation current, SubagentArgs sub) {
-        if (sub.error() != null) {
-            return sub.error();
+    private static String buildSubagentResponse(Agent agent, @Nullable Conversation current, SubagentArgs sub) {
+        var error = sub.error();
+        if (error != null) {
+            return error;
         }
-        return switch (sub.kind()) {
+        return switch (sub.resolvedKind()) {
             case "list" -> renderSubagentList(current);
             case "info" -> renderSubagentInfo(sub.id());
             case "log" -> renderSubagentLog(sub.id());
@@ -1112,7 +1129,7 @@ public final class Commands {
         };
     }
 
-    private static String renderSubagentList(Conversation current) {
+    private static String renderSubagentList(@Nullable Conversation current) {
         if (current == null) {
             return "No active conversation — /subagent list requires a parent conversation.";
         }
@@ -1144,7 +1161,7 @@ public final class Commands {
         return sb.toString();
     }
 
-    private static String renderSubagentInfo(Long runId) {
+    private static String renderSubagentInfo(@Nullable Long runId) {
         if (runId == null) return MISSING_RUN_ID_MSG;
         var run = (SubagentRun) SubagentRun.findById(runId);
         if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
@@ -1180,7 +1197,7 @@ public final class Commands {
         return outcome.length() > 500 ? outcome.substring(0, 497) + "..." : outcome;
     }
 
-    private static String renderSubagentLog(Long runId) {
+    private static String renderSubagentLog(@Nullable Long runId) {
         if (runId == null) return MISSING_RUN_ID_MSG;
         // The run must exist before we promise log rows for it; surface a
         // clear 404 rather than an empty list (which an operator would
@@ -1210,7 +1227,7 @@ public final class Commands {
         return sb.toString();
     }
 
-    private static String renderSubagentKill(Agent agent, Long runId) {
+    private static String renderSubagentKill(Agent agent, @Nullable Long runId) {
         if (runId == null) return MISSING_RUN_ID_MSG;
         var reason = agent != null
                 ? "Killed by operator via /subagent kill (agent " + agent.name + ")"
@@ -1232,7 +1249,7 @@ public final class Commands {
      * "View transcript" link so the operator gets the full thing in the
      * standard conversation viewer.
      */
-    private static String renderSubagentHistory(Agent agent, Long runId) {
+    private static String renderSubagentHistory(Agent agent, @Nullable Long runId) {
         if (runId == null) return MISSING_RUN_ID_MSG;
         var run = (SubagentRun) SubagentRun.findById(runId);
         if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
@@ -1336,7 +1353,7 @@ public final class Commands {
 
     /** Find the most recent SUBAGENT_SPAWN event for a given run id and
      *  return its {@code details} JSON, or null when no event exists yet. */
-    private static String findSpawnEventDetails(Long runId) {
+    private static @Nullable String findSpawnEventDetails(Long runId) {
         List<EventLog> rows = EventLog.<EventLog>find(
                 "category = ?1 AND details LIKE ?2 ORDER BY timestamp DESC",
                 "SUBAGENT_SPAWN", runIdLikePattern(runId)).fetch(1);
@@ -1346,7 +1363,7 @@ public final class Commands {
     /** Tiny JSON-field extractor — Gson is heavy for a single-key lookup
      *  in a known-shape payload. Returns null on missing key or unparseable
      *  input (the SUBAGENT_* details payload is always a flat object). */
-    private static String extractJsonField(String json, String key) {
+    private static @Nullable String extractJsonField(String json, String key) {
         if (json == null || json.isBlank()) return null;
         try {
             var obj = JsonParser.parseString(json).getAsJsonObject();

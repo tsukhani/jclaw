@@ -4,6 +4,7 @@ import com.github.kagkarlsson.scheduler.Scheduler;
 import com.github.kagkarlsson.scheduler.SchedulerBuilder;
 import com.github.kagkarlsson.scheduler.jdbc.DefaultJdbcCustomization;
 import mcp.McpConnectionManager;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.db.DB;
 import play.jobs.Job;
@@ -81,9 +82,9 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
      */
     // S3077 targets compound mutation on volatile non-primitives; a pure reference handoff is the canonical valid use.
     @SuppressWarnings("java:S3077")
-    private static volatile Scheduler scheduler;
+    private static volatile @Nullable Scheduler scheduler;
 
-    public static Scheduler scheduler() {
+    public static @Nullable Scheduler scheduler() {
         return scheduler;
     }
 

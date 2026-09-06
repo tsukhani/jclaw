@@ -3,6 +3,7 @@ package services;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import org.hibernate.Session;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.db.jpa.JPA;
 import play.libs.F;
@@ -49,9 +50,14 @@ public class Tx {
 
     /**
      * Run a block that returns a value, ensuring a JPA transaction is active.
+     *
+     * <p>{@code T} is explicitly allowed to be nullable: a lookup block that returns
+     * null for "no such row" is the common case, and an unbounded {@code <T>} under
+     * {@code @NullMarked} would launder that null into a non-null-typed variable at
+     * every call site (JCLAW-1160).
      */
     @SuppressWarnings("java:S112") // Generic RuntimeException is the correct wrapper for the type-erased Throwable from F.Function0
-    public static <T> T run(F.Function0<T> block) {
+    public static <T extends @Nullable Object> T run(F.Function0<T> block) {
         warnIfTeardownTouchesDb();
         if (JPA.isInsideTransaction()) {
             try {

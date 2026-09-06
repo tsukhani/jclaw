@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
+import org.jspecify.annotations.Nullable;
 import play.libs.MimeTypes;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -309,7 +310,10 @@ public class ApiAgentsController extends Controller {
     @Operation(summary = "Create an agent")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         var name = requireString(body, "name");
         validateAgentName(name);
@@ -342,7 +346,7 @@ public class ApiAgentsController extends Controller {
      * {@code null} in all of those cases. Used for optional nullable fields
      * like {@code thinkingMode} where the frontend sends {@code null} to clear.
      */
-    private static String readOptionalString(JsonObject body, String key) {
+    private static @Nullable String readOptionalString(JsonObject body, String key) {
         return JsonArgs.optNonBlankString(body, key);
     }
 
@@ -374,7 +378,10 @@ public class ApiAgentsController extends Controller {
         var agent = requireAgent(id);
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
 
         // Checked before any field is applied: `agent` is managed, so a 403 thrown after a
         // partial apply would still flush the earlier fields on the request's commit.
@@ -585,7 +592,10 @@ public class ApiAgentsController extends Controller {
 
         var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
-        if (content == null) notFound();
+        if (content == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         renderJSON(gson.toJson(new WorkspaceFileResponse(filename, content)));
     }
 

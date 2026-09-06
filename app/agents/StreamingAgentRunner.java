@@ -59,7 +59,7 @@ final class StreamingAgentRunner {
      * @param attachments    per-file metadata the frontend roundtripped, or {@code null}
      */
     @SuppressWarnings("java:S107") // Streaming entrypoint signature retained for binary compat with channel callers
-    static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
+    static void runStreaming(Agent agent, @Nullable Long conversationId, String channelType, String peerId,
                              String userMessage,
                              AtomicBoolean isCancelled,
                              AgentRunner.StreamingCallbacks cb,
@@ -194,7 +194,7 @@ final class StreamingAgentRunner {
      * errored (in which case callbacks have already been invoked).
      */
     private static Optional<Conversation> resolveConversationAndAcquireQueue(
-            Agent agent, Long conversationId, String channelType, String peerId,
+            Agent agent, @Nullable Long conversationId, String channelType, String peerId,
             String userMessage, AgentRunner.StreamingCallbacks cb,
             @Nullable List<AttachmentService.Input> attachments) {
 

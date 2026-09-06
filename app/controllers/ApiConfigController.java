@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Config;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
@@ -47,13 +48,13 @@ public class ApiConfigController extends Controller {
     private static final String LOGGING_KEY_PREFIX = LoggerLevelService.PREFIX;
 
 
-    public record ConfigEntry(String key, String value, String updatedAt) {}
+    public record ConfigEntry(String key, @Nullable String value, String updatedAt) {}
 
     public record ConfigListResponse(List<ConfigEntry> entries) {}
 
     public record ConfigSaveRequest(String key, String value) {}
 
-    public record ConfigSaveResponse(String key, String value, String status) {}
+    public record ConfigSaveResponse(String key, @Nullable String value, String status) {}
 
     public record ConfigDeleteResponse(String status, String key) {}
 
@@ -122,6 +123,7 @@ public class ApiConfigController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("key") || !body.has("value")) {
             badRequest();
+            throw ApiResponses.unreachable();
         }
         var key = body.get("key").getAsString();
         var value = body.get("value").getAsString();

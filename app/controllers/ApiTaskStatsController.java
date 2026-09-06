@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jobs.TaskCleanupJob;
 import models.Task;
 import models.TaskRun;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
@@ -42,7 +43,7 @@ public class ApiTaskStatsController extends Controller {
      * when there's nothing to average yet (no terminal / completed runs
      * today) so the UI renders an em dash rather than 0.
      */
-    private record TaskStatsView(long runsToday, Double successRate, Double avgDurationMs,
+    private record TaskStatsView(long runsToday, @Nullable Double successRate, Double avgDurationMs,
                                  long pendingCount, long runningCount, long activeCount,
                                  long failedCount, int retentionDays) {}
 

@@ -49,21 +49,21 @@ public final class ModelOverrideResolver {
      * so legacy callers and test fixtures that don't thread a conversation
      * (or an agent) keep working.
      */
-    public static Resolved resolve(Conversation conversation, Agent agent) {
+    public static Resolved resolve(@Nullable Conversation conversation, @Nullable Agent agent) {
         return new Resolved(provider(conversation, agent), modelId(conversation, agent));
     }
 
     /** Effective provider name. See {@link #resolve} for precedence. */
-    public static @Nullable String provider(Conversation conversation, @Nullable Agent agent) {
-        if (hasOverride(conversation)) {
+    public static @Nullable String provider(@Nullable Conversation conversation, @Nullable Agent agent) {
+        if (conversation != null && hasOverride(conversation)) {
             return conversation.modelProviderOverride;
         }
         return agent != null ? agent.modelProvider : null;
     }
 
     /** Effective model id. See {@link #resolve} for precedence. */
-    public static @Nullable String modelId(Conversation conversation, @Nullable Agent agent) {
-        if (hasOverride(conversation)) {
+    public static @Nullable String modelId(@Nullable Conversation conversation, @Nullable Agent agent) {
+        if (conversation != null && hasOverride(conversation)) {
             return conversation.modelIdOverride;
         }
         return agent != null ? agent.modelId : null;
@@ -76,7 +76,7 @@ public final class ModelOverrideResolver {
      * from "inheriting from agent" — the resolved values alone don't
      * reveal which side won.
      */
-    public static boolean hasOverride(Conversation conversation) {
+    public static boolean hasOverride(@Nullable Conversation conversation) {
         return conversation != null
                 && conversation.modelProviderOverride != null
                 && conversation.modelIdOverride != null;

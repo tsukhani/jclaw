@@ -2,6 +2,7 @@ package channels;
 
 import com.google.gson.JsonObject;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.TelegramUrl;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -176,7 +177,8 @@ public class TelegramChannel implements Channel {
      * empty reaction list, which clears any reaction the bot previously placed.
      * Returns false (logged) on any API failure — never throws.
      */
-    public static boolean setMessageReaction(String botToken, String chatId, Integer messageId, String emoji) {
+    public static boolean setMessageReaction(@Nullable String botToken, @Nullable String chatId,
+                                             @Nullable Integer messageId, @Nullable String emoji) {
         if (botToken == null || chatId == null || messageId == null) return false;
         return forToken(botToken).sender.setMessageReaction(chatId, messageId, emoji);
     }
@@ -216,8 +218,9 @@ public class TelegramChannel implements Channel {
      * without the quote), false when even the plain-reply fallback failed. Never
      * throws.
      */
-    public static boolean sendReplyWithQuote(String botToken, String chatId, String text,
-                                             Agent agent, Integer replyToMessageId, String quote) {
+    public static boolean sendReplyWithQuote(@Nullable String botToken, @Nullable String chatId,
+                                             @Nullable String text, Agent agent,
+                                             @Nullable Integer replyToMessageId, @Nullable String quote) {
         if (botToken == null || chatId == null || text == null || replyToMessageId == null) {
             return false;
         }
@@ -230,9 +233,9 @@ public class TelegramChannel implements Channel {
      * (logged at warn) on any API failure or out-of-range option count — never
      * throws.
      */
-    public static boolean sendPoll(String botToken, String chatId, String question,
-                                   List<String> options, Boolean isAnonymous,
-                                   Boolean allowsMultipleAnswers, Integer openPeriod) {
+    public static boolean sendPoll(@Nullable String botToken, @Nullable String chatId, String question,
+                                   List<String> options, @Nullable Boolean isAnonymous,
+                                   @Nullable Boolean allowsMultipleAnswers, @Nullable Integer openPeriod) {
         if (botToken == null) return false;
         return forToken(botToken).sender.sendPoll(chatId, question, options, isAnonymous,
                 allowsMultipleAnswers, openPeriod);
@@ -668,7 +671,8 @@ public class TelegramChannel implements Channel {
      * with a new message per tap.
      */
     public static boolean editMessageText(String botToken, String chatId, Integer messageId,
-                                           String htmlText, InlineKeyboardMarkup keyboard) {
+                                           @Nullable String htmlText,
+                                           @Nullable InlineKeyboardMarkup keyboard) {
         return forToken(botToken).sender.editMessageText(chatId, messageId, htmlText, keyboard);
     }
 

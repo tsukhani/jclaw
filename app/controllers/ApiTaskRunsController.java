@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
@@ -49,11 +50,11 @@ public class ApiTaskRunsController extends Controller {
      * about what's there avoids a second round-trip for "show me the
      * full error" UX.
      */
-    private record TaskRunView(Long id, String status,
-                               String startedAt, String completedAt, Long durationMs,
-                               String error, String outputSummary, String latestTurnPreview,
-                               String deliveryStatus, String deliveryTarget, String deliveryError,
-                               String traceJson, String createdAt) {
+    private record TaskRunView(Long id, @Nullable String status,
+                               @Nullable String startedAt, @Nullable String completedAt, Long durationMs,
+                               String error, String outputSummary, @Nullable String latestTurnPreview,
+                               @Nullable String deliveryStatus, String deliveryTarget, String deliveryError,
+                               String traceJson, @Nullable String createdAt) {
         static TaskRunView of(TaskRun r) {
             return new TaskRunView(
                     r.id,
@@ -80,9 +81,9 @@ public class ApiTaskRunsController extends Controller {
      * The structured-only {@code toolResultStructured} column is omitted —
      * the agent never sees it and operators don't need it.
      */
-    private record TaskRunMessageView(Long id, int turnIndex, String role, String content,
+    private record TaskRunMessageView(Long id, int turnIndex, @Nullable String role, String content,
                                       String reasoning, String toolCalls, String toolResults,
-                                      boolean truncated, String createdAt) {
+                                      boolean truncated, @Nullable String createdAt) {
         static TaskRunMessageView of(TaskRunMessage m) {
             return new TaskRunMessageView(
                     m.id, m.turnIndex,
@@ -103,7 +104,10 @@ public class ApiTaskRunsController extends Controller {
     @Operation(summary = "Paginated TaskRun history for one task (startedAt DESC), 404 if task missing")
     public static void runs(Long id, Integer limit, Integer offset) {
         Task task = TaskService.findById(id);
-        if (task == null) notFound();
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
@@ -125,7 +129,10 @@ public class ApiTaskRunsController extends Controller {
     @Operation(summary = "Turn-by-turn message trace for one TaskRun (turnIndex order), 404 if run missing")
     public static void runMessages(Long id) {
         TaskRun run = TaskService.findRunById(id);
-        if (run == null) notFound();
+        if (run == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
 
         List<TaskRunMessage> rows = TaskRunQueryService.messagesForRun(run);
 
@@ -137,8 +144,9 @@ public class ApiTaskRunsController extends Controller {
      * parent task name — enough to plot a bar (startedAt position, duration
      * width, status color) and link to the run's trace.
      */
-    private record RecentRunView(Long id, Long taskId, String taskName, String status,
-                                 String startedAt, String completedAt, Long durationMs) {
+    private record RecentRunView(Long id, @Nullable Long taskId, @Nullable String taskName,
+                                 @Nullable String status, @Nullable String startedAt,
+                                 @Nullable String completedAt, Long durationMs) {
         static RecentRunView of(TaskRun r) {
             var task = r.task;
             return new RecentRunView(
@@ -183,7 +191,7 @@ public class ApiTaskRunsController extends Controller {
      * always set; {@code until} is null in rolling mode (no upper bound) and
      * set in range mode.
      */
-    private record RunWindow(Instant since, Instant until) {}
+    private record RunWindow(Instant since, @Nullable Instant until) {}
 
     /**
      * Resolve the {@link RunWindow} from the request: an ISO-8601 {@code from}
@@ -221,7 +229,10 @@ public class ApiTaskRunsController extends Controller {
     @Operation(summary = "Cancel an in-progress task run by runId (cooperative flag + stamp CANCELLED), 400 if not RUNNING")
     public static void cancelRun(Long runId) {
         TaskRun run = TaskService.findRunById(runId);
-        if (run == null) notFound();
+        if (run == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
         if (run.status != TaskRun.Status.RUNNING) {
             // Only an in-flight run can be canceled; a terminal run has nothing
             // to stop. (S2259: notFound() above halts on null, so run is non-null.)

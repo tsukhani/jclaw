@@ -15,6 +15,7 @@ import services.EventLogger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Token-estimation and context-window arithmetic for the agent loop.
@@ -432,15 +433,16 @@ public final class ContextWindowManager {
      * Otherwise mutates {@code working} in place and returns the deltas the
      * caller's running totals need.
      */
-    // collectCandidates only admits indices whose content is a String, so the cast and the
-    // length() below cannot see null — an invariant the checker has no way to follow.
-    @SuppressWarnings("NullAway")
     private static @Nullable TruncationSavings attemptTruncate(
             List<ChatMessage> working, Candidate cand,
             @Nullable String modelId, boolean modelMatched, @Nullable String providerName,
             int keepHead, int keepTail) {
         var original = working.get(cand.index());
-        var originalText = (String) original.content();
+        // collectCandidates only admits indices whose content is a String. Asserted here
+        // rather than suppressed for the whole method, which left the rest of the body
+        // unchecked by construction (JCLAW-1160).
+        var originalText = Objects.requireNonNull((String) original.content(),
+                "collectCandidates admitted a candidate whose content is not a String");
         var truncated = truncateToolResultContent(originalText, keepHead, keepTail);
         // Local delta: tokenize only the old and new versions of THIS
         // message. The framing tokens (TOKENS_PER_MESSAGE + role) cancel out

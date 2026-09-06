@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
@@ -43,10 +44,10 @@ public class ApiImagegenController extends Controller {
 
     private static final Gson gson = GSON;
 
-    public record ImagegenLocalStateResponse(String provider, String model,
+    public record ImagegenLocalStateResponse(@Nullable String provider, String model,
                                              boolean uvAvailable, String uvReason,
                                              String modelStatus, long bytesDownloaded,
-                                             long totalBytes, String error) {}
+                                             long totalBytes, @Nullable String error) {}
 
     public record DownloadStartedResponse(String status, String model) {}
 

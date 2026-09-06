@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import org.jspecify.annotations.Nullable;
 import play.data.Upload;
 import play.mvc.Controller;
 import play.mvc.SseStream;
@@ -80,9 +81,9 @@ public class ApiTtsController extends Controller {
      *                       basename is exposed — the absolute path is a local
      *                       filesystem detail the browser has no use for.
      */
-    public record TtsStateResponse(String engine, List<TtsEngineEntry> engines, String referenceVoice) {}
+    public record TtsStateResponse(String engine, List<TtsEngineEntry> engines, @Nullable String referenceVoice) {}
 
-    public record ReferenceVoiceResponse(String status, String filename) {}
+    public record ReferenceVoiceResponse(String status, @Nullable String filename) {}
 
     public record DownloadStartedResponse(String status, String modelId) {}
 
@@ -151,7 +152,10 @@ public class ApiTtsController extends Controller {
     @ChatHidden("synthesizes speech audio -- compute/disk resource action")
     public static void synthesize() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var text = JsonBodyReader.requiredOr400(body, "text");
         var speakable = TtsText.toSpeakable(text);
         if (speakable.isBlank()) {
@@ -174,7 +178,7 @@ public class ApiTtsController extends Controller {
             audio = TtsRouter.synthesize(speakable);
         } catch (TtsException e) {
             EventLogger.warn("tts", "read-aloud failed: " + e.getMessage());
-            ApiResponses.error(503, ApiResponses.TTS_UNAVAILABLE, e.getMessage());
+            ApiResponses.error(503, ApiResponses.TTS_UNAVAILABLE, ApiResponses.messageOf(e));
             return; // unreachable (error() halts) — documents intent for javac
         }
         response.setHeader("Content-Type", "audio/wav");
@@ -191,7 +195,10 @@ public class ApiTtsController extends Controller {
     @ChatHidden("streams synthesized speech audio -- compute/disk resource action")
     public static void stream() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
         var text = JsonBodyReader.requiredOr400(body, "text");
         // Deliberately uncapped (JCLAW-880). This endpoint already handles arbitrary
         // length by construction: the text is sentence-chunked below, each chunk is

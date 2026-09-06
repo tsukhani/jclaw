@@ -131,6 +131,17 @@ public final class ApiResponses {
     }
 
     /**
+     * A throwable's message, or its simple type name when it has none. {@code getMessage()}
+     * is null for an NPE and for several IO failures, and {@link #error} serialises its
+     * argument straight into the response body — so the alternative is shipping
+     * {@code "message": null} to the client (JCLAW-1160).
+     */
+    public static String messageOf(Throwable t) {
+        var m = t.getMessage();
+        return m == null || m.isBlank() ? t.getClass().getSimpleName() : m;
+    }
+
+    /**
      * Render the canonical error body
      * <code>{"type":"error","code":...,"message":...}</code> with {@code httpStatus}.
      *

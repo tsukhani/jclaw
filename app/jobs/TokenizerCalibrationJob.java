@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Message;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.jobs.Every;
 import play.jobs.Job;
@@ -168,7 +169,7 @@ public class TokenizerCalibrationJob extends Job<Void> {
      * the row is missing fields, the model matched its native encoding
      * (multiplier doesn't apply), or the ratio is degenerate.
      */
-    public static Sample parseSample(String usageJson) {
+    public static @Nullable Sample parseSample(String usageJson) {
         if (usageJson == null || usageJson.isBlank()) return null;
         try {
             var obj = JsonParser.parseString(usageJson).getAsJsonObject();
@@ -198,7 +199,7 @@ public class TokenizerCalibrationJob extends Job<Void> {
 
     public record Sample(String key, double ratio) {}
 
-    private static String asString(JsonObject obj, String key) {
+    private static @Nullable String asString(JsonObject obj, String key) {
         return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : null;
     }
 
@@ -210,7 +211,7 @@ public class TokenizerCalibrationJob extends Job<Void> {
         return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsBoolean() : fallback;
     }
 
-    private static double parseDouble(String raw, double fallback) {
+    private static double parseDouble(@Nullable String raw, double fallback) {
         if (raw == null || raw.isBlank()) return fallback;
         try { return Double.parseDouble(raw); }
         catch (NumberFormatException _) { return fallback; }

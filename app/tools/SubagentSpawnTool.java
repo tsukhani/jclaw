@@ -709,13 +709,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** JCLAW-661: register the open chat turn's streaming callbacks under its
      *  conversation id. Facade delegator for {@link controllers.ApiChatController}. */
-    public static void registerChatCallbacks(Long conversationId, AgentRunner.StreamingCallbacks cb) {
+    public static void registerChatCallbacks(@Nullable Long conversationId, AgentRunner.@Nullable StreamingCallbacks cb) {
         SubagentChatBridge.registerChatCallbacks(conversationId, cb);
     }
 
     /** JCLAW-661: drop the chat-turn callbacks for a conversation (turn closed).
      *  Facade delegator for {@link controllers.ApiChatController}. */
-    public static void unregisterChatCallbacks(Long conversationId) {
+    public static void unregisterChatCallbacks(@Nullable Long conversationId) {
         SubagentChatBridge.unregisterChatCallbacks(conversationId);
     }
 

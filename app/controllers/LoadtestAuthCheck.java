@@ -4,6 +4,7 @@ import play.Play;
 import play.mvc.Before;
 import play.mvc.Controller;
 import play.mvc.Http;
+import utils.ApiResponses;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -65,6 +66,7 @@ public class LoadtestAuthCheck extends Controller {
                 : null;
         if (headerVal == null) {
             denied();
+            throw ApiResponses.unreachable();
         }
 
         var expected = Play.configuration.getProperty("application.secret", "");

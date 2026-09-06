@@ -53,7 +53,8 @@ public final class TaskWriteService {
      *                      fails closed at fire time.
      */
     public static Task persistNewTask(JsonObject body, Agent agent, String name,
-                                      ScheduleShorthandParser.ScheduleSpec spec, String originChannel) {
+                                      ScheduleShorthandParser.ScheduleSpec spec,
+                                      @Nullable String originChannel) {
         var t = new Task();
         t.agent = agent;
         t.name = name;

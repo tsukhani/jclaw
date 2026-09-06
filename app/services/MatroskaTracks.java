@@ -55,7 +55,7 @@ public final class MatroskaTracks {
      * track codecs decide — no video codec but at least one audio codec means
      * audio-only, anything else keeps the sniff.
      */
-    public static String disambiguate(String sniffedMime, String hintMime, Path file) {
+    public static String disambiguate(String sniffedMime, @Nullable String hintMime, Path file) {
         String audioMime = audioVariantOf(sniffedMime);
         if (audioMime == null) return sniffedMime;
         if (hintMime != null && hintMime.startsWith("audio/")) return audioMime;
