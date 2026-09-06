@@ -258,7 +258,8 @@ public class VoiceController extends WebSocketController {
      *  flow one at a time to {@link #runTurn}; the mic stays open so a new utterance
      *  during an in-flight turn is a server-driven barge-in. */
     // MustBeClosed: the VAD is handed to the VoiceSession, which sessionRef publishes to
-    // socket()'s finally; the local `handedOff` flag closes it on every path that never gets there.
+    // socket()'s finally (a repeated init closes the session it displaces); the local
+    // `handedOff` flag closes it on every path that never gets there.
     @SuppressWarnings({"java:S107", "MustBeClosed"}) // S107: per-connection wiring — all captured by the session listener
     private static void initSession(JsonObject msg, String username, AsrSidecarClient asr,
                                     Http.Outbound out, Object writeLock,
@@ -363,7 +364,8 @@ public class VoiceController extends WebSocketController {
                 }
             }, partialSink, ConfigService.getInt("voice.partials.intervalMs", 1200));
             handedOff = true; // the session now owns the VAD; socket()'s finally closes it
-            sessionRef.set(voice);
+            var displaced = sessionRef.getAndSet(voice);
+            if (displaced != null) displaced.close(); // a repeated init frame must not leak the first VAD
             send(out, writeLock, Map.of("type", "ready", KEY_AGENT_ID, agent.id));
         } catch (RuntimeException e) {
             Logger.warn("voice: failed to start session: %s", e.getMessage());
