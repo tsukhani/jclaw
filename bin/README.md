@@ -54,7 +54,7 @@ consumer must handle null rather than assume a location.
 
 - **`compile`** — a javac error, from the Gradle compile of `app/` and `test/`. Warnings
   are not reported: a tree that compiles must produce an empty array, and that contract
-  is worth nothing if a green build fails it. `fix` carries javac's or Error Prone's
+  is worth nothing if a green build fails it. `fix` carries Error Prone's
   `Did you mean …?` suggestion when there is one.
 - **`test`** — a `<failure>` or `<error>` in a `test-result/TEST-*.xml` report. `file` and
   `line` point at the assertion that threw, not at the suite's declaration. `message` is

@@ -78,8 +78,13 @@ export function parseTestSuiteXml(xml, suite, locate = () => undefined) {
     // One ArchUnit assertion names every offending site; reporting it as a single test
     // failure would hand the loop a rule to read instead of places to edit.
     if (ARCH_RULE.test(message)) {
-      records.push(...parseArchViolations(message, { file, line }, locate));
-      continue;
+      const sites = parseArchViolations(message, { file, line }, locate);
+      // A rule-shaped message with no site lines (an assertion quoting a rule, a store
+      // failure) is still one failure; dropping it would report a red suite as clean.
+      if (sites.length > 0) {
+        records.push(...sites);
+        continue;
+      }
     }
     records.push({ kind: "test", file, line, message: `${suite}.${decodeXml(name)}: ${message}` });
   }

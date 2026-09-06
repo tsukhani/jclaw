@@ -119,6 +119,21 @@ test("an unresolvable site keeps ArchUnit's bare file name", () => {
   strictEqual(record.file, "Gone.java");
 });
 
+test("a rule-shaped failure with no site lines is still one test record", () => {
+  const xml = `<testsuite name="CapabilityRulesTest">
+  <testcase classname="CapabilityRulesTest" name="frozenStoreIsReadable()" time="0.1">
+    <failure type="" message="Failure, expected message to contain Rule &apos;x&apos; was violated but it did not"><![CDATA[
+          In /test/CapabilityRulesTest.java, line 9
+        ]]></failure>
+  </testcase>
+</testsuite>`;
+  const records = parseTestSuiteXml(xml, "CapabilityRulesTest");
+  strictEqual(records.length, 1);
+  strictEqual(records[0].kind, "test");
+  strictEqual(records[0].line, 9);
+  strictEqual(records[0].message.startsWith("CapabilityRulesTest.frozenStoreIsReadable()"), true);
+});
+
 test("an ArchUnit failure reports sites, not one test failure", () => {
   const xml = `<testsuite name="ArchitectureTest">
   <testcase classname="ArchitectureTest" name="noJdkHttpClientInApp()" time="0.3">

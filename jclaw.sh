@@ -1447,8 +1447,8 @@ while [[ $# -gt 0 ]]; do
         diagnostics)
             # Developer-only, flags forwarded verbatim — same reasoning as `evals` above.
             if ! is_developer_clone; then
-                echo "Error: 'diagnostics' is a developer-only command, not available in this distribution."
-                exit 1
+                echo "Error: 'diagnostics' is a developer-only command, not available in this distribution." >&2
+                exit 2
             fi
             COMMAND="$1"
             shift
@@ -3863,11 +3863,13 @@ do_evals() {
 # carried out by `set -e`: 1 means diagnostics were reported, not that the wrapper broke.
 do_diagnostics() {
     cd "$SCRIPT_DIR"
-    check_node
+    # check_node/check_play report on stdout and exit 1; this command reserves stdout for the
+    # JSON document and exit 1 for "diagnostics reported", so a missing toolchain is exit 2.
+    ( check_node ) >&2 || exit 2
     local arg
     for arg in ${DIAGNOSTICS_ARGS[@]+"${DIAGNOSTICS_ARGS[@]}"}; do
         if [[ "$arg" == "--tests" ]]; then
-            check_play
+            ( check_play ) >&2 || exit 2
             break
         fi
     done
