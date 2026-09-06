@@ -174,7 +174,7 @@ public final class HarnessSandbox {
      *                    the way {@link HarnessAdapter#sandboxAllowances} declares
      *                    a harness's own state.
      */
-    public static List<String> wrap(List<String> argv, File writeRoot, List<String> allowances,
+    public static List<String> wrap(List<String> argv, @Nullable File writeRoot, List<String> allowances,
                                     String configKey, boolean trustedOrigin) {
         if (!appliesTo(configKey, trustedOrigin)) return argv;
         if (writeRoot == null) {

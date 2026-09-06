@@ -37,6 +37,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -494,7 +495,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                         List.of("ffmpeg", "-y", "-i", audio.toString(),
                                 "-t", String.valueOf(REFERENCE_SECONDS), "-ac", "1", "-b:a", "96k",
                                 tmp.toString()),
-                        tmp.toRealPath().getParent().toFile(),
+                        Objects.requireNonNull(tmp.toRealPath().getParent()).toFile(),
                         List.of(AgentService.workspaceRoot().toAbsolutePath().toString()),
                         HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.nativeToolTrustedOrigin());
                 var proc = new ProcessBuilder(argv).redirectErrorStream(true).start();
