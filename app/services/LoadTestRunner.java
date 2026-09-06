@@ -1047,10 +1047,10 @@ public final class LoadTestRunner {
                     + Time.parseDuration(Scope.COOKIE_EXPIRE) * 1000L;
             data.put("___TS", Long.toString(expiry));
         }
-        // JCLAW-1034 rejects a cookie whose credential generation does not match the current
-        // one. Harmless today because no generation has been recorded and both sides default
-        // to "0", but the first password change would break the harness again.
-        controllers.ApiAuthController.stampCredentialVersion(data);
+        // JCLAW-1034 rejects a cookie whose credential generation does not match, and
+        // JCLAW-1159 rejects one with no session id at all — both are refused before any
+        // handler runs, so a hand-built cookie without them 401s with nothing logged.
+        controllers.ApiAuthController.stampSessionClaims(data);
         var sessionData = CookieDataCodec.encode(data);
         var sign = Crypto.sign(sessionData, Play.secretKey.getBytes());
         return "PLAY_SESSION=" + sign + "-" + sessionData;

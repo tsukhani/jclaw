@@ -50,6 +50,10 @@ public final class ErrorTemplates {
             e(ApiResponses.CREDENTIALS_CHANGED, "Your session was ended because the admin password changed.",
                     "This is expected after a password change or reset; every other session is signed out too.",
                     "Sign in with the new password."),
+            e(ApiResponses.SESSION_REVOKED, "This session was signed out.",
+                    "Expected if you signed out in another tab or window. Only that session is ended; "
+                            + "any other stays signed in.",
+                    "Sign in again."),
             e(ApiResponses.INVALID_CREDENTIALS, "That username and password were not accepted.",
                     "Check for caps lock and stray whitespace. Repeated failures are throttled per source.",
                     "Try again, or reset the password if you no longer have it."),

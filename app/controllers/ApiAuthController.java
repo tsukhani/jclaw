@@ -1,22 +1,31 @@
 package controllers;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonSyntaxException;
+import com.google.gson.reflect.TypeToken;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.Play;
+import play.libs.Codec;
+import play.libs.Time;
 import play.mvc.Controller;
+import play.mvc.Scope;
 import play.mvc.Util;
 import services.BreachedPasswordChecker;
 import services.ConfigService;
 import services.EventLogger;
 import utils.ApiResponses;
+import utils.AppClock;
 import utils.PasswordHasher;
 import utils.PlayConfig;
 
+import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 
 import static utils.GsonHolder.GSON;
@@ -52,20 +61,41 @@ public class ApiAuthController extends Controller {
     /** Session key holding the generation a cookie was minted under. */
     static final String SESSION_CREDENTIAL_VERSION = "cv";
 
+    /**
+     * Session ids revoked by an explicit sign-out (JCLAW-1159), as a JSON map of id to the
+     * epoch-millis after which the entry may be forgotten.
+     *
+     * <p>Play re-issues the session cookie on every authenticated response, so a dashboard
+     * request still in flight when the operator signs out restores the cookie the logout just
+     * cleared when it completes 100ms later — the operator lands on the login page still
+     * signed in. A stateless cookie cannot be recalled, but the id it was minted with can be
+     * refused. Per session rather than a bump of {@link #CREDENTIAL_VERSION_KEY}: that would
+     * sign out every session, right for a password change and wrong for one tab's sign-out.
+     * Same reserved {@code auth.} prefix, so the config API can neither read nor edit it.
+     */
+    static final String REVOKED_SESSIONS_KEY = "auth.revokedSessions";
+
+    /** Session key holding the id a cookie was minted with; what a sign-out revokes. */
+    static final String SESSION_ID = "sid";
+
+    private static final Type REVOKED_SESSIONS_TYPE = new TypeToken<Map<String, Long>>() {}.getType();
+
     /** The current credential generation; {@code "0"} before one has ever been recorded. */
     static String credentialVersion() {
         return ConfigService.get(CREDENTIAL_VERSION_KEY, "0");
     }
 
     /**
-     * Stamp the current credential generation into a hand-built session map, for the one
-     * caller that mints a cookie without going through {@link #login} — the load-test
-     * harness, which signs its own {@code PLAY_SESSION} with the application secret.
+     * Stamp the current credential generation and a fresh session id into a hand-built
+     * session map, for the one caller that mints a cookie without going through
+     * {@link #login} — the load-test harness, which signs its own {@code PLAY_SESSION} with
+     * the application secret.
      *
      * <p>JCLAW-1034 began rejecting cookies whose generation does not match, which silently
      * 401'd every harness request; the harness had no test coverage, so nothing caught it.
-     * Exposed as a stamping method rather than by widening the key and the accessor, so a
-     * caller cannot pair the wrong key with the wrong value.
+     * JCLAW-1159 added the id, which a cookie must carry to be admitted at all. Exposed as a
+     * stamping method rather than by widening the keys and accessors, so a caller cannot
+     * pair the wrong key with the wrong value.
      *
      * <p>{@code @Util} is load-bearing: Play enhances every public static method on a
      * Controller into an action, so without it a call from outside this class returns an
@@ -73,8 +103,9 @@ public class ApiAuthController extends Controller {
      * failing with "HTTP 302" and no other clue.
      */
     @Util
-    public static void stampCredentialVersion(Map<String, String> sessionData) {
+    public static void stampSessionClaims(Map<String, String> sessionData) {
         sessionData.put(SESSION_CREDENTIAL_VERSION, credentialVersion());
+        sessionData.put(SESSION_ID, Codec.UUID());
     }
 
     /** Why a session cookie is not a usable operator login. */
@@ -82,7 +113,9 @@ public class ApiAuthController extends Controller {
         /** No login at all, or a cookie that never carried the flag. */
         NOT_AUTHENTICATED,
         /** Signature still valid, but minted before the last password change or reset. */
-        CREDENTIALS_CHANGED
+        CREDENTIALS_CHANGED,
+        /** Signature and generation both current, but the operator signed this session out. */
+        REVOKED
     }
 
     /**
@@ -101,7 +134,45 @@ public class ApiAuthController extends Controller {
         if (!credentialVersion().equals(session.get(SESSION_CREDENTIAL_VERSION))) {
             return SessionRejection.CREDENTIALS_CHANGED;
         }
+        var sid = session.get(SESSION_ID);
+        // A cookie minted before ids existed never carried one; it is simply not a login.
+        if (sid == null) return SessionRejection.NOT_AUTHENTICATED;
+        if (revokedSessions().containsKey(sid)) return SessionRejection.REVOKED;
         return null;
+    }
+
+    /** The live revocation map — never null; empty when nothing is revoked or the row is unreadable. */
+    private static Map<String, Long> revokedSessions() {
+        var raw = ConfigService.get(REVOKED_SESSIONS_KEY);
+        if (raw == null || raw.isBlank()) return new HashMap<>();
+        try {
+            Map<String, Long> revoked = gson.fromJson(raw, REVOKED_SESSIONS_TYPE);
+            return revoked != null ? revoked : new HashMap<>();
+        }
+        catch (JsonSyntaxException e) {
+            // Failing closed would lock the operator out of a row the config API cannot reach.
+            EventLogger.warn("auth", "Ignoring unreadable " + REVOKED_SESSIONS_KEY + ": " + e.getMessage());
+            return new HashMap<>();
+        }
+    }
+
+    /**
+     * Refuse {@code sid} from now on. An entry lives exactly as long as a cookie can: one
+     * that outlived the session it names is dead weight, one that expired first is a hole.
+     */
+    private static synchronized void revokeSession(String sid) {
+        var revoked = revokedSessions();
+        long now = AppClock.now().toEpochMilli();
+        revoked.values().removeIf(expiry -> expiry < now);
+        revoked.put(sid, now + sessionLifetimeMillis());
+        ConfigService.set(REVOKED_SESSIONS_KEY, gson.toJson(revoked));
+    }
+
+    private static long sessionLifetimeMillis() {
+        // No maxAge means a browser-session cookie with no fixed lifetime; a day bounds the
+        // list without leaving a realistic window.
+        if (Scope.COOKIE_EXPIRE == null) return Duration.ofDays(1).toMillis();
+        return Time.parseDuration(Scope.COOKIE_EXPIRE) * 1000L;
     }
 
     /**
@@ -271,6 +342,7 @@ public class ApiAuthController extends Controller {
             session.put("authenticated", "true");
             session.put("username", username);
             session.put(SESSION_CREDENTIAL_VERSION, credentialVersion());
+            session.put(SESSION_ID, Codec.UUID());
             // JCLAW-731: transparent rehash-on-login. We hold the plaintext and
             // the verify just succeeded, so upgrade a hash written at an older,
             // weaker PBKDF2 work factor to the current one. Best-effort — a
@@ -309,6 +381,9 @@ public class ApiAuthController extends Controller {
         if (AppOriginGate.isBlocked()) {
             ApiResponses.error(403, ApiResponses.APP_SCOPE, "App-originated request may not log the operator out");
         }
+        // The clear below loses to any in-flight response that re-issues the cookie; the id does not.
+        var sid = session.get(SESSION_ID);
+        if (sid != null) revokeSession(sid);
         session.clear();
         EventLogger.info("auth", "Admin logged out");
         renderJSON(gson.toJson(new LogoutResponse("ok")));
@@ -341,6 +416,10 @@ public class ApiAuthController extends Controller {
             case CREDENTIALS_CHANGED -> {
                 session.clear();
                 ApiResponses.error(401, ApiResponses.CREDENTIALS_CHANGED, "Authentication required");
+            }
+            case REVOKED -> {
+                session.clear();
+                ApiResponses.error(401, ApiResponses.SESSION_REVOKED, "Authentication required");
             }
             case NOT_AUTHENTICATED ->
                     ApiResponses.error(401, ApiResponses.AUTHENTICATION_REQUIRED, "Authentication required");

@@ -59,6 +59,8 @@ public final class ApiResponses {
     public static final String AUTHENTICATION_REQUIRED = "authentication_required";
     public static final String INVALID_CREDENTIALS = "invalid_credentials";
     public static final String CREDENTIALS_CHANGED = "credentials_changed";
+    /** 401 — a cookie the operator signed out; valid signature, refused by id (JCLAW-1159). */
+    public static final String SESSION_REVOKED = "session_revoked";
     public static final String INVALID_TOKEN = "invalid_token";
     public static final String PASSWORD_UNSET = "password_unset";
     public static final String ALREADY_SET = "already_set";

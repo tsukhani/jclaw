@@ -81,6 +81,12 @@ public class AuthCheck extends Controller {
                 renderJSON("{\"error\":\"Authentication required\",\"code\":\"%s\"}"
                         .formatted(ApiResponses.CREDENTIALS_CHANGED));
             }
+            case REVOKED -> {
+                session.clear();
+                response.status = 401;
+                renderJSON("{\"error\":\"Authentication required\",\"code\":\"%s\"}"
+                        .formatted(ApiResponses.SESSION_REVOKED));
+            }
             case NOT_AUTHENTICATED -> {
                 response.status = 401;
                 renderJSON("{\"error\":\"Authentication required\"}");
