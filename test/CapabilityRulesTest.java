@@ -1,5 +1,5 @@
 import com.tngtech.archunit.base.DescribedPredicate;
-import com.tngtech.archunit.core.domain.JavaCall;
+import com.tngtech.archunit.core.domain.JavaAccess;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaMethod;
@@ -35,12 +35,18 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  *
  * <p>Shell and filesystem have pre-existing holders, so they run as {@link FreezingArchRule}s
  * and the checked-in store under {@code archunit_store/} <em>is</em> the allowlist: a listed
- * site passes, a new one fails, and fixing one prunes it from the store on the next run. Line
- * numbers are not part of the match, so editing a listed file does not red the build.
+ * site passes and a new one fails. {@code conf/archunit.properties} pins both store switches
+ * off, so a listed site that stops matching fails too ("Updating frozen violations is
+ * disabled") until its line is deleted by hand — the store changes only when a human edits
+ * it. Line numbers are not part of the match, so editing a listed file does not red the build.
  *
- * <p>Each frozen rule is paired with a floor on the live match count. Without it a predicate
- * that silently stopped matching — an ArchUnit upgrade, a renamed target — would let the store
- * prune itself to empty and pass forever.
+ * <p>The predicates match accesses rather than calls, so a method reference
+ * ({@code ProcessBuilder::start}, {@code Path::of}) counts the same as a call.
+ *
+ * <p>Each frozen rule is paired with a floor on the live match count. It guards the deliberate
+ * regeneration run, when the store switches are on: a predicate that had silently stopped
+ * matching — an ArchUnit upgrade, a renamed target — would then prune the store to empty and
+ * pass forever.
  *
  * <p>Network and database hold clean, so those stay strict rules. They live here rather than in
  * {@link ArchitectureTest} so the four capabilities read as one section.
@@ -57,12 +63,12 @@ class CapabilityRulesTest extends UnitTest {
 
     /** Constructing a {@code ProcessBuilder} counts: a class that assembles the command line holds
      *  the capability even when a collaborator makes the {@code start()} call. */
-    private static final DescribedPredicate<JavaCall<?>> PROCESS_SPAWN = DescribedPredicate.describe(
-            "a call that starts an OS process",
-            call -> switch (call.getTargetOwner().getName()) {
+    private static final DescribedPredicate<JavaAccess<?>> PROCESS_SPAWN = DescribedPredicate.describe(
+            "a call or method reference that starts an OS process",
+            access -> switch (access.getTargetOwner().getName()) {
                 case "java.lang.ProcessBuilder" ->
-                        Set.of("<init>", "start", "startPipeline").contains(call.getTarget().getName());
-                case "java.lang.Runtime" -> "exec".equals(call.getTarget().getName());
+                        Set.of("<init>", "start", "startPipeline").contains(access.getTarget().getName());
+                case "java.lang.Runtime" -> "exec".equals(access.getTarget().getName());
                 default -> false;
             });
 
@@ -75,11 +81,11 @@ class CapabilityRulesTest extends UnitTest {
      */
     @Test
     void onlyFrozenHoldersSpawnOsProcesses() {
-        assertFloor(sourceFilesCalling(PROCESS_SPAWN, javaClass -> true),
+        assertFloor(sourceFilesAccessing(PROCESS_SPAWN, javaClass -> true),
                 FROZEN_PROCESS_SPAWNER_FILES, "process-spawning");
 
         ArchRule rule = noClasses()
-                .should().callCodeUnitWhere(PROCESS_SPAWN)
+                .should().accessTargetWhere(PROCESS_SPAWN)
                 .because("spawning an OS process is an unconfined authority — JEP 486 removed the "
                         + "SecurityManager, so the child is bounded only by the JVM's own user "
                         + "(JCLAW-1152); the classes granted it are enumerated in archunit_store/");
@@ -91,12 +97,12 @@ class CapabilityRulesTest extends UnitTest {
     /** Files under {@code tools..} building a path directly when the baseline was frozen (JCLAW-1152). */
     private static final int FROZEN_DIRECT_PATH_FILES = 5;
 
-    private static final DescribedPredicate<JavaCall<?>> DIRECT_PATH_CONSTRUCTION = DescribedPredicate.describe(
-            "a call that builds a filesystem path directly",
-            call -> switch (call.getTargetOwner().getName()) {
-                case "java.nio.file.Path" -> "of".equals(call.getTarget().getName());
-                case "java.nio.file.Paths" -> "get".equals(call.getTarget().getName());
-                case "java.io.File" -> "<init>".equals(call.getTarget().getName());
+    private static final DescribedPredicate<JavaAccess<?>> DIRECT_PATH_CONSTRUCTION = DescribedPredicate.describe(
+            "a call or method reference that builds a filesystem path directly",
+            access -> switch (access.getTargetOwner().getName()) {
+                case "java.nio.file.Path" -> "of".equals(access.getTarget().getName());
+                case "java.nio.file.Paths" -> "get".equals(access.getTarget().getName());
+                case "java.io.File" -> "<init>".equals(access.getTarget().getName());
                 default -> false;
             });
 
@@ -116,12 +122,12 @@ class CapabilityRulesTest extends UnitTest {
      */
     @Test
     void toolPathsResolveThroughTheWorkspaceGuard() {
-        assertFloor(sourceFilesCalling(DIRECT_PATH_CONSTRUCTION, CapabilityRulesTest::isToolsClass),
+        assertFloor(sourceFilesAccessing(DIRECT_PATH_CONSTRUCTION, CapabilityRulesTest::isToolsClass),
                 FROZEN_DIRECT_PATH_FILES, "tools/ direct-path-building");
 
         ArchRule rule = noClasses()
                 .that().resideInAPackage("tools..")
-                .should().callCodeUnitWhere(DIRECT_PATH_CONSTRUCTION)
+                .should().accessTargetWhere(DIRECT_PATH_CONSTRUCTION)
                 .because("a path resolved from a tool argument must be contained by "
                         + "WorkspacePathGuard, which tools.FsPaths reaches on the model-facing side "
                         + "(JCLAW-1152); the sites predating that seam are listed in archunit_store/");
@@ -135,12 +141,12 @@ class CapabilityRulesTest extends UnitTest {
     private static final String PORT_PROBE_CLASS = "services.LocalSidecarDaemon";
 
     /** Matches {@code new java.net.Socket(...)}, {@code new java.net.ServerSocket(...)} and
-     *  {@code URL.openConnection()} — constructor and method calls together, hence {@code JavaCall}. */
-    private static final DescribedPredicate<JavaCall<?>> RAW_SOCKET_CALL = DescribedPredicate.describe(
-            "a call to new java.net.Socket(...), new java.net.ServerSocket(...) or URL.openConnection()",
-            call -> {
-                String owner = call.getTargetOwner().getName();
-                String name = call.getTarget().getName();
+     *  {@code URL.openConnection()} — constructors, methods and references to either, hence {@code JavaAccess}. */
+    private static final DescribedPredicate<JavaAccess<?>> RAW_SOCKET_ACCESS = DescribedPredicate.describe(
+            "a call or reference to new java.net.Socket(...), new java.net.ServerSocket(...) or URL.openConnection()",
+            access -> {
+                String owner = access.getTargetOwner().getName();
+                String name = access.getTarget().getName();
                 boolean socketCtor = ("java.net.Socket".equals(owner) || "java.net.ServerSocket".equals(owner))
                         && "<init>".equals(name);
                 return socketCtor || ("java.net.URL".equals(owner) && "openConnection".equals(name));
@@ -187,7 +193,7 @@ class CapabilityRulesTest extends UnitTest {
         ArchRule rule = noClasses()
                 .that().resideOutsideOfPackage(PRINTING_PACKAGE)
                 .and().doNotHaveFullyQualifiedName(PORT_PROBE_CLASS)
-                .should().callCodeUnitWhere(RAW_SOCKET_CALL)
+                .should().accessTargetWhere(RAW_SOCKET_ACCESS)
                 .because("outbound network access goes through HttpFactories' OkHttp clients "
                         + "(JCLAW-1151); services.printing speaks LPD/9100 and LocalSidecarDaemon "
                         + "binds a loopback port probe");
@@ -195,8 +201,8 @@ class CapabilityRulesTest extends UnitTest {
 
         assertTrue(APP_CLASSES.stream()
                         .filter(c -> c.getPackageName().startsWith("services.printing"))
-                        .flatMap(c -> c.getCodeUnitCallsFromSelf().stream())
-                        .anyMatch(RAW_SOCKET_CALL),
+                        .flatMap(c -> c.getAccessesFromSelf().stream())
+                        .anyMatch(RAW_SOCKET_ACCESS),
                 "no socket call found inside " + PRINTING_PACKAGE + " — the exclusion is carrying "
                         + "nothing, so the predicate has stopped matching and the rule passes vacuously");
     }
@@ -334,9 +340,10 @@ class CapabilityRulesTest extends UnitTest {
     }
 
     /**
-     * Fails when a predicate matches fewer holders than the baseline recorded. A frozen rule
-     * whose predicate stopped matching prunes its store to empty and then passes forever, so
-     * the count is asserted separately from the rule.
+     * Fails when a predicate matches fewer holders than the baseline recorded. With the store
+     * switches pinned off a stale entry already fails the rule; the floor is what protects the
+     * deliberate regeneration run, where a predicate that stopped matching would prune its
+     * store to empty and then pass forever.
      */
     private static void assertFloor(Set<String> matched, int floor, String what) {
         assertTrue(matched.size() >= floor,
@@ -351,12 +358,12 @@ class CapabilityRulesTest extends UnitTest {
         return "tools".equals(pkg) || pkg.startsWith("tools.");
     }
 
-    /** Distinct {@code .java} file names, within {@code scope}, whose compiled classes make a matching call. */
-    private static Set<String> sourceFilesCalling(DescribedPredicate<JavaCall<?>> predicate,
-                                                  Predicate<JavaClass> scope) {
+    /** Distinct {@code .java} file names, within {@code scope}, whose compiled classes make a matching access. */
+    private static Set<String> sourceFilesAccessing(DescribedPredicate<JavaAccess<?>> predicate,
+                                                    Predicate<JavaClass> scope) {
         var files = new TreeSet<String>();
         for (JavaClass javaClass : APP_CLASSES) {
-            if (scope.test(javaClass) && javaClass.getCodeUnitCallsFromSelf().stream().anyMatch(predicate)) {
+            if (scope.test(javaClass) && javaClass.getAccessesFromSelf().stream().anyMatch(predicate)) {
                 javaClass.getSource().flatMap(Source::getFileName).ifPresent(files::add);
             }
         }

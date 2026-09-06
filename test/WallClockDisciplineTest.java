@@ -1,9 +1,12 @@
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.AccessTarget.CodeUnitAccessTarget;
+import com.tngtech.archunit.core.domain.JavaAccess;
 import com.tngtech.archunit.core.domain.JavaClasses;
-import com.tngtech.archunit.core.domain.JavaMethodCall;
+import com.tngtech.archunit.core.domain.Source;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.library.freeze.FreezingArchRule;
+import com.tngtech.archunit.library.freeze.TextFileBasedViolationStore;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import utils.AppClock;
@@ -15,6 +18,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.Executors;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
@@ -24,20 +28,25 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * and nowhere else, so a test can bind a fixed clock instead of sleeping or asserting
  * on a ±1s window.
  *
- * <p>A sibling of {@code ArchitectureTest} rather than a rule inside it: this one rule
- * owns a committed violation store, and keeping the store's rule key tied to a class
- * whose other rules churn would make every unrelated edit a candidate for a stale store.
+ * <p>A sibling of {@code ArchitectureTest} rather than a rule inside it, so the frozen stores
+ * under {@code archunit_store/} read as one file per rule beside {@code CapabilityRulesTest}'s.
  *
- * <p>The store lives in {@code archunit_store/} and is committed; {@code conf/archunit.properties}
- * pins {@code allowStoreCreation=false} so a run can never silently re-freeze whatever it finds.
- * Regenerate by flipping that one line for a single run — {@code playAutotest} does not forward
- * {@code -D} to the Play JVM, so the properties file is the only lever. The store key is the
- * rule's description, so editing the {@code because(...)} text orphans the baseline.
+ * <p>The store is {@code archunit_store/wall-clock-interval-baselines}, committed;
+ * {@code conf/archunit.properties} pins both {@code allowStoreCreation} and
+ * {@code allowStoreUpdate} off, so a run can neither mint a baseline nor rewrite one: a new
+ * read fails, and a listed read that migrates also fails until its store line is deleted by
+ * hand. Regenerate by flipping both switches for a single run — {@code playAutotest} does not
+ * forward {@code -D} to the Play JVM, so the properties file is the only lever. The store key
+ * is the rule's description, so editing the {@code because(...)} text fails the next run
+ * loudly rather than silently re-freezing.
  */
 class WallClockDisciplineTest extends UnitTest {
 
     /** See {@code ArchitectureTest.importAppClasses} for why this is a fixed path, not the JVM's CodeSource. */
     private static final JavaClasses APP_CLASSES = importAppClasses();
+
+    /** Source files holding a frozen {@code System.currentTimeMillis()} interval baseline (JCLAW-1150). */
+    private static final int FROZEN_INTERVAL_FILES = 18;
 
     private static JavaClasses importAppClasses() {
         Path mainClasses = Paths.get("build/classes/java/main");
@@ -49,25 +58,41 @@ class WallClockDisciplineTest extends UnitTest {
         return new ClassFileImporter().importPath(mainClasses);
     }
 
-    /** The {@code java.time} types whose static {@code now(...)} reads the ambient system clock. */
+    /** The {@code java.time} types whose parameterless static {@code now()} reads the ambient system clock. */
     private static final Set<String> AMBIENT_NOW_OWNERS = Set.of(
             "java.time.Instant",
             "java.time.LocalDate",
             "java.time.LocalDateTime",
+            "java.time.LocalTime",
             "java.time.OffsetDateTime",
-            "java.time.ZonedDateTime");
+            "java.time.ZonedDateTime",
+            "java.time.Year",
+            "java.time.YearMonth");
 
-    private static DescribedPredicate<JavaMethodCall> wallClockRead() {
+    private static final Set<String> SYSTEM_CLOCK_FACTORIES = Set.of("systemUTC", "systemDefaultZone", "system");
+
+    /**
+     * Matches accesses rather than calls, so a method reference ({@code Instant::now}) counts
+     * the same as a call. {@code now(Clock)} reads the clock it is given, not the ambient one,
+     * and passes.
+     */
+    private static DescribedPredicate<JavaAccess<?>> wallClockRead() {
         return DescribedPredicate.describe(
-                "a wall-clock read (Instant/LocalDate/LocalDateTime/OffsetDateTime/ZonedDateTime.now "
-                        + "or System.currentTimeMillis)",
-                call -> {
-                    var target = call.getTarget();
+                "a wall-clock read (a parameterless java.time now(), System.currentTimeMillis(), "
+                        + "new Date(), Calendar.getInstance() or a Clock.system* factory)",
+                access -> {
+                    var target = access.getTarget();
                     var owner = target.getOwner().getName();
-                    if ("java.lang.System".equals(owner)) {
-                        return "currentTimeMillis".equals(target.getName());
-                    }
-                    return AMBIENT_NOW_OWNERS.contains(owner) && "now".equals(target.getName());
+                    var name = target.getName();
+                    boolean noArgs = target instanceof CodeUnitAccessTarget unit
+                            && unit.getRawParameterTypes().isEmpty();
+                    return switch (owner) {
+                        case "java.lang.System" -> "currentTimeMillis".equals(name);
+                        case "java.util.Date" -> "<init>".equals(name) && noArgs;
+                        case "java.util.Calendar" -> "getInstance".equals(name);
+                        case "java.time.Clock" -> SYSTEM_CLOCK_FACTORIES.contains(name);
+                        default -> AMBIENT_NOW_OWNERS.contains(owner) && "now".equals(name) && noArgs;
+                    };
                 });
     }
 
@@ -93,12 +118,27 @@ class WallClockDisciplineTest extends UnitTest {
                 "no call to utils.AppClock found in the imported classes — the scan is looking at "
                         + "the wrong bytecode and every rule below would pass vacuously");
 
+        // The floor guards the deliberate regeneration run, when the store switches are on: a
+        // predicate that had stopped matching would then prune the baseline to empty and pass.
+        var intervalFiles = new TreeSet<String>();
+        for (var javaClass : APP_CLASSES) {
+            if (!"utils.AppClock".equals(javaClass.getName())
+                    && javaClass.getAccessesFromSelf().stream().anyMatch(wallClockRead())) {
+                javaClass.getSource().flatMap(Source::getFileName).ifPresent(intervalFiles::add);
+            }
+        }
+        assertTrue(intervalFiles.size() >= FROZEN_INTERVAL_FILES,
+                "expected at least " + FROZEN_INTERVAL_FILES + " source files with a frozen interval "
+                        + "baseline, found " + intervalFiles.size() + " " + intervalFiles + " — the predicate "
+                        + "stopped matching. Lower the constant only once a holder was genuinely migrated");
+
         ArchRule rule = FreezingArchRule.freeze(noClasses()
                 .that().doNotHaveFullyQualifiedName("utils.AppClock")
-                .should().callMethodWhere(wallClockRead())
+                .should().accessTargetWhere(wallClockRead())
                 .because("wall-clock reads go through utils.AppClock (JCLAW-1150) so tests can bind "
                         + "a fixed clock; the frozen entries are System.currentTimeMillis interval "
-                        + "baselines, not reads of the calendar"));
+                        + "baselines, not reads of the calendar"))
+                .persistIn(new TextFileBasedViolationStore(description -> "wall-clock-interval-baselines"));
         rule.check(APP_CLASSES);
     }
 
