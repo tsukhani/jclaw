@@ -160,11 +160,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
         if (resolved.error() != null) return resolved.error();
 
         if (FsPaths.isMutatingAction(action)) {
-            var guardError = FsPaths.checkSkillCreatorReadOnly(agent, resolved.workspace(), resolved.target());
+            var guardError = FsPaths.checkSkillCreatorReadOnly(agent, resolved.resolvedWorkspace(), resolved.resolvedTarget());
             if (guardError != null) return guardError;
         }
 
-        return dispatchAction(action, args, agent, resolved.target());
+        return dispatchAction(action, args, agent, resolved.resolvedTarget());
     }
 
     private String dispatchAction(String action, JsonObject args, Agent agent, Path target) {

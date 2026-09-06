@@ -1,6 +1,7 @@
 package services;
 
 import models.EventLog;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import utils.GsonHolder;
 
@@ -87,13 +88,13 @@ public class EventLogger {
     }
 
     @SuppressWarnings("java:S6213") // 'record' as method name predates the restricted identifier; rename would churn callers/tests with no real ambiguity
-    public static void record(String level, String category, String message, String details) {
+    public static void record(String level, String category, String message, @Nullable String details) {
         record(level, category, null, null, message, details);
     }
 
     @SuppressWarnings("java:S6213") // 'record' as method name predates the restricted identifier; rename would churn callers/tests with no real ambiguity
-    public static void record(String level, String category, String agentId, String channel,
-                              String message, String details) {
+    public static void record(String level, String category, @Nullable String agentId, @Nullable String channel,
+                              String message, @Nullable String details) {
         // Log to SLF4J first (always safe)
         var logMessage = "[%s/%s] %s".formatted(category, level, message);
         switch (level) {
@@ -156,11 +157,11 @@ public class EventLogger {
         record("INFO", category, message, null);
     }
 
-    public static void info(String category, String message, String details) {
+    public static void info(String category, String message, @Nullable String details) {
         record("INFO", category, message, details);
     }
 
-    public static void info(String category, String agentId, String channel, String message) {
+    public static void info(String category, @Nullable String agentId, @Nullable String channel, String message) {
         record("INFO", category, agentId, channel, message, null);
     }
 
@@ -168,11 +169,11 @@ public class EventLogger {
         record("WARN", category, message, null);
     }
 
-    public static void warn(String category, String message, String details) {
+    public static void warn(String category, String message, @Nullable String details) {
         record("WARN", category, message, details);
     }
 
-    public static void warn(String category, String agentId, String channel, String message) {
+    public static void warn(String category, @Nullable String agentId, @Nullable String channel, String message) {
         record("WARN", category, agentId, channel, message, null);
     }
 
@@ -180,16 +181,16 @@ public class EventLogger {
         record(LEVEL_ERROR, category, message, null);
     }
 
-    public static void error(String category, String message, String details) {
+    public static void error(String category, String message, @Nullable String details) {
         record(LEVEL_ERROR, category, message, details);
     }
 
-    public static void error(String category, String agentId, String channel, String message) {
+    public static void error(String category, @Nullable String agentId, @Nullable String channel, String message) {
         record(LEVEL_ERROR, category, agentId, channel, message, null);
     }
 
-    public static void error(String category, String message, Throwable t) {
-        record(LEVEL_ERROR, category, message, t.toString());
+    public static void error(String category, String message, @Nullable Throwable t) {
+        record(LEVEL_ERROR, category, message, t != null ? t.toString() : null);
     }
 
     // ----- JCLAW-272: typed subagent lifecycle helpers ---------------------
@@ -203,16 +204,16 @@ public class EventLogger {
     // per-agent filter on /api/logs still works.
 
     /** SUBAGENT_SPAWN — parent dispatched a child agent. */
-    public static void recordSubagentSpawn(String parentAgentId, String childAgentId,
-                                           String runId, String mode, String context) {
+    public static void recordSubagentSpawn(String parentAgentId, @Nullable String childAgentId,
+                                           String runId, @Nullable String mode, @Nullable String context) {
         record("INFO", SUBAGENT_SPAWN, parentAgentId, null,
                 "Subagent spawned",
                 subagentDetails(parentAgentId, childAgentId, runId, mode, context, null, null));
     }
 
     /** SUBAGENT_COMPLETE — child finished successfully. {@code outcome} is a short tag (e.g. "ok"). */
-    public static void recordSubagentComplete(String parentAgentId, String childAgentId,
-                                              String runId, String mode, String context,
+    public static void recordSubagentComplete(String parentAgentId, @Nullable String childAgentId,
+                                              String runId, @Nullable String mode, @Nullable String context,
                                               String outcome) {
         record("INFO", SUBAGENT_COMPLETE, parentAgentId, null,
                 "Subagent completed",
@@ -220,17 +221,17 @@ public class EventLogger {
     }
 
     /** SUBAGENT_ERROR — child raised an unrecoverable error. */
-    public static void recordSubagentError(String parentAgentId, String childAgentId,
-                                           String runId, String mode, String context,
-                                           String reason) {
+    public static void recordSubagentError(String parentAgentId, @Nullable String childAgentId,
+                                           @Nullable String runId, @Nullable String mode, @Nullable String context,
+                                           @Nullable String reason) {
         record(LEVEL_ERROR, SUBAGENT_ERROR, parentAgentId, null,
                 "Subagent error",
                 subagentDetails(parentAgentId, childAgentId, runId, mode, context, null, reason));
     }
 
     /** SUBAGENT_KILL — operator or supervisor terminated a running child. */
-    public static void recordSubagentKill(String parentAgentId, String childAgentId,
-                                          String runId, String mode, String context,
+    public static void recordSubagentKill(@Nullable String parentAgentId, @Nullable String childAgentId,
+                                          String runId, @Nullable String mode, @Nullable String context,
                                           String reason) {
         record("WARN", SUBAGENT_KILL, parentAgentId, null,
                 "Subagent killed",
@@ -252,9 +253,9 @@ public class EventLogger {
     }
 
     @SuppressWarnings("java:S107") // intentional one-arg-per-payload-key; bundling into a DTO buys nothing here
-    private static String subagentDetails(String parentAgentId, String childAgentId,
-                                          String runId, String mode, String context,
-                                          String outcome, String reason) {
+    private static String subagentDetails(@Nullable String parentAgentId, @Nullable String childAgentId,
+                                          @Nullable String runId, @Nullable String mode, @Nullable String context,
+                                          @Nullable String outcome, @Nullable String reason) {
         // LinkedHashMap preserves field order in the rendered JSON, which keeps
         // tail -f tail of details readable when humans skim the events page.
         var payload = new LinkedHashMap<String, Object>();

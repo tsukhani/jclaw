@@ -8,6 +8,7 @@ import llm.LlmTypes.ChatRequest;
 import llm.LlmTypes.ChunkDelta;
 import llm.LlmTypes.ProviderConfig;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 
 /**
  * OpenRouter provider. Extends OpenAI-compatible behavior with:
@@ -66,7 +67,7 @@ public final class OpenRouterProvider extends LlmProvider {
     }
 
     @Override
-    protected String extractReasoningFromDelta(ChunkDelta delta) {
+    protected @Nullable String extractReasoningFromDelta(ChunkDelta delta) {
         // OpenRouter sends reasoning as reasoning_details array with type "reasoning.text"
         if (delta.reasoningDetails() != null) {
             var sb = new StringBuilder();
@@ -260,7 +261,7 @@ public final class OpenRouterProvider extends LlmProvider {
      * the new array form when conversion happens, so the caller can tag the
      * last block and have the change persist.
      */
-    private static JsonArray ensureBlockArrayContent(JsonObject msg) {
+    private static @Nullable JsonArray ensureBlockArrayContent(JsonObject msg) {
         var content = msg.get(FIELD_CONTENT);
         if (content == null || content.isJsonNull()) return null;
         if (content.isJsonArray()) return content.getAsJsonArray();

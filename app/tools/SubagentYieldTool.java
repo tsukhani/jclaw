@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.SubagentRegistry;
 import services.Tx;
@@ -268,7 +269,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
      *  outstanding async child this parent fanned out (current scope); {@code
      *  runIds:[...]} collects exactly those. Returns null when neither is present
      *  (the single-yield path takes over). */
-    private static List<Long> collectBatchRunIds(JsonObject args) {
+    private static @Nullable List<Long> collectBatchRunIds(JsonObject args) {
         if (args.has("all") && !args.get("all").isJsonNull() && args.get("all").getAsBoolean()) {
             return SubagentSpawnTool.outstandingForCurrentScope();
         }
@@ -289,9 +290,9 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
     /** Parsed-args bundle. {@code error} non-null short-circuits execute.
      *  Exactly one of {@code runId} / {@code conversationId} is populated; the
      *  other is null. */
-    private record ParsedArgs(String error, Long runId, Long conversationId, int timeoutSeconds) {
+    private record ParsedArgs(@Nullable String error, @Nullable Long runId, @Nullable Long conversationId, int timeoutSeconds) {
         static ParsedArgs fail(String msg) { return new ParsedArgs(msg, null, null, 0); }
-        static ParsedArgs ok(Long runId, Long convId, int timeoutSeconds) {
+        static ParsedArgs ok(@Nullable Long runId, @Nullable Long convId, int timeoutSeconds) {
             return new ParsedArgs(null, runId, convId, timeoutSeconds);
         }
     }
@@ -340,7 +341,7 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
      * receives the resolved run id on success so the caller can arm the
      * watchdog without a re-query. Must be called inside an active Tx.
      */
-    private static String installYield(ParsedArgs parsed, Long parentAgentId, long[] runIdOut) {
+    private static @Nullable String installYield(ParsedArgs parsed, Long parentAgentId, long[] runIdOut) {
         SubagentRun run;
         long resolvedRunId;
         if (parsed.runId() != null) {

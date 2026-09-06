@@ -1,6 +1,7 @@
 package services;
 
 import models.Task;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
@@ -102,7 +103,7 @@ public final class TaskListQueryService {
      * equality-only results rather than a 500 on a stray Lucene IO hiccup.
      */
     @SuppressWarnings("java:S1168") // null vs empty-list is a deliberate tri-state (see query())
-    private static List<Long> ftsTaskIds(String q) {
+    private static @Nullable List<Long> ftsTaskIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
             var ids = MessageSearch.searchIds(

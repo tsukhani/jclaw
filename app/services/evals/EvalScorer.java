@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import tools.SchemaKeys;
 
 import java.math.BigDecimal;
@@ -48,7 +49,7 @@ public final class EvalScorer {
      */
     public record Response(String output, List<String> toolsCalled, List<String> toolsAttempted,
                            Map<String, List<String>> toolArgs, Map<String, List<String>> toolResults,
-                           int llmCalls, String error) {
+                           int llmCalls, @Nullable String error) {
 
         public Response {
             output = output == null ? "" : output;
@@ -203,9 +204,9 @@ public final class EvalScorer {
             return;
         }
         for (var raw : calls) {
-            if (argsInclude(raw, check.schema())) return;
+            if (argsInclude(raw, check.requiredSchema())) return;
         }
-        failures.add("tool_args_include: no " + tool + " call carried " + check.schema()
+        failures.add("tool_args_include: no " + tool + " call carried " + check.requiredSchema()
                 + " (saw " + calls + ")");
     }
 
@@ -236,7 +237,7 @@ public final class EvalScorer {
     }
 
     /** Every key in {@code expected} present in {@code rawArgs} with an equal value. */
-    private static boolean argsInclude(String rawArgs, JsonObject expected) {
+    private static boolean argsInclude(@Nullable String rawArgs, JsonObject expected) {
         JsonObject actual;
         try {
             var parsed = JsonParser.parseString(rawArgs == null || rawArgs.isBlank() ? "{}" : rawArgs);

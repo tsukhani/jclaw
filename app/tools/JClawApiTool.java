@@ -12,6 +12,7 @@ import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.mvc.ActionInvoker;
 import play.mvc.Router;
@@ -284,7 +285,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         }
     }
 
-    private static HttpUrl buildUrl(String path, JsonObject args) {
+    private static @Nullable HttpUrl buildUrl(String path, JsonObject args) {
         var port = Play.configuration.getProperty("http.port", "9000");
         var base = "http://127.0.0.1:" + port + path;
         var parsed = HttpUrl.parse(base);
@@ -306,7 +307,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
      *  body-less verb, we accept silently rather than fail -- the
      *  alternative would force the model to coordinate verb + body
      *  shape perfectly, which it sometimes doesn't. */
-    private static RequestBody requestBodyFor(String method, JsonObject args) {
+    private static @Nullable RequestBody requestBodyFor(String method, JsonObject args) {
         var bodyJson = args.has(KEY_BODY) && args.get(KEY_BODY).isJsonObject()
                 ? args.getAsJsonObject(KEY_BODY) : null;
         if ("GET".equals(method)) return null;
@@ -314,7 +315,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         return RequestBody.create(serialized, JSON);
     }
 
-    private static String stringField(JsonObject obj, String key) {
+    private static @Nullable String stringField(JsonObject obj, String key) {
         // Guard before delegating: optNonBlankString calls getAsString, which throws on
         // an object/array value (a JsonNull is also non-primitive).
         JsonElement el = obj.get(key);
@@ -334,7 +335,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
      * {@code @Operation} summary and {@code @RequestBody} schema, synthesized from
      * the action name and request DTO when those are absent.
      */
-    private String discover(String filter) {
+    private String discover(@Nullable String filter) {
         var needle = (filter == null || filter.isBlank()) ? null : filter.toLowerCase(Locale.ROOT);
         var entries = new ArrayList<String>();
         var seen = new HashSet<String>();
@@ -453,7 +454,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
      * are simply skipped by callers, which is what makes the default-allow gate
      * still refuse non-controller routes.
      */
-    private static Method resolveMethod(String action) {
+    private static @Nullable Method resolveMethod(String action) {
         if (action == null || action.isBlank()) return null;
         // Preferred: Play's own action resolver.
         try {

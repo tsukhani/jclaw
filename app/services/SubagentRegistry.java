@@ -3,6 +3,7 @@ package services;
 import mcp.McpAllowlist;
 import models.Agent;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.Map;
@@ -297,7 +298,7 @@ public final class SubagentRegistry {
      *                     call was a no-op)
      * @param message      human-readable summary used in audit + UI display
      */
-    public record KillResult(boolean killed, SubagentRun.Status finalStatus, String message) {}
+    public record KillResult(boolean killed, SubagentRun.@Nullable Status finalStatus, String message) {}
 
     /**
      * Flip the cooperative-cancellation flag for {@code runId}, cancel the

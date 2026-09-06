@@ -1,6 +1,7 @@
 package services.transcription;
 
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.UvProbe;
@@ -44,7 +45,7 @@ public final class DiarizeModelStore extends ModelPrefetchStore<DiarizeModelStor
 
     /** No {@code totalBytes}: diarization repos are free-text/unknown-size, so
      *  the UI shows a live downloaded-MB counter rather than a percentage. */
-    public record Status(State state, long bytesDownloaded, String engine, String error) {}
+    public record Status(State state, long bytesDownloaded, @Nullable String engine, @Nullable String error) {}
 
     private static final DiarizeModelStore INSTANCE = new DiarizeModelStore();
 
@@ -95,7 +96,7 @@ public final class DiarizeModelStore extends ModelPrefetchStore<DiarizeModelStor
      *  fold in — the row is built straight from the shared fields. */
     @Override
     protected Status buildStatus(String key, State state, long bytesDownloaded,
-                                 String engine, String error) {
+                                 @Nullable String engine, @Nullable String error) {
         return new Status(state, bytesDownloaded, engine, error);
     }
 

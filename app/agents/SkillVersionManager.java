@@ -1,5 +1,7 @@
 package agents;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -65,9 +67,9 @@ public final class SkillVersionManager {
 
     // --- Frontmatter splitting ---
 
-    public record FrontmatterSplit(String frontmatter, String body) {}
+    public record FrontmatterSplit(@Nullable String frontmatter, @Nullable String body) {}
 
-    public static FrontmatterSplit splitFrontmatter(String content) {
+    public static FrontmatterSplit splitFrontmatter(@Nullable String content) {
         if (content == null) return new FrontmatterSplit(null, null);
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (matcher.find() && matcher.start() == 0) {
@@ -115,7 +117,7 @@ public final class SkillVersionManager {
      * auto-bump patch on material change, preserve on no-op, inject version
      * if missing. See {@link SkillLoader#finalizeSkillMdWrite} for full contract.
      */
-    public static String finalizeSkillMdWrite(Path targetPath, String newContent) {
+    public static String finalizeSkillMdWrite(Path targetPath, @Nullable String newContent) {
         if (newContent == null) newContent = "";
         try {
             var llmVersion = extractExplicitVersion(newContent);
@@ -143,7 +145,7 @@ public final class SkillVersionManager {
      * Return the version the LLM wrote in the new content's frontmatter, or {@code null}
      * if no {@code version:} line is present.
      */
-    static String extractExplicitVersion(String content) {
+    static @Nullable String extractExplicitVersion(@Nullable String content) {
         if (content == null) return null;
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (!matcher.find() || matcher.start() != 0) return null;
@@ -155,12 +157,12 @@ public final class SkillVersionManager {
      * Choose between an LLM-supplied version and the automatic target. The LLM wins
      * only when it writes a value that is a strict upgrade over the automatic target.
      */
-    static String resolveVersion(String llmVersion, String autoVersion) {
+    static String resolveVersion(@Nullable String llmVersion, String autoVersion) {
         if (llmVersion == null || llmVersion.isBlank()) return autoVersion;
         return compareVersions(llmVersion, autoVersion) > 0 ? llmVersion : autoVersion;
     }
 
-    static String[] parseFrontmatterStringForVersion(String content) {
+    static String[] parseFrontmatterStringForVersion(@Nullable String content) {
         if (content == null) return new String[]{DEFAULT_VERSION};
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (matcher.find() && matcher.start() == 0) {

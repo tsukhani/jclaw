@@ -3,6 +3,7 @@ package services;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 
 import java.time.Instant;
@@ -75,7 +76,7 @@ public final class TaskRunQueryService {
      * and for a run with no text turn yet. One indexed lookup, and only for the
      * at-most-one RUNNING run in a history page.
      */
-    public static String latestTurnPreviewFor(TaskRun r) {
+    public static @Nullable String latestTurnPreviewFor(TaskRun r) {
         if (r.status != TaskRun.Status.RUNNING) return null;
         var latest = (TaskRunMessage) TaskRunMessage.find(
                 "taskRun = ?1 AND content IS NOT NULL ORDER BY turnIndex DESC", r).first();

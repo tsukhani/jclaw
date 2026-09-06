@@ -8,6 +8,7 @@ import mcp.McpGrants;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Task;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.EventLogger;
 import services.TaskWriteService;
@@ -101,7 +102,7 @@ public final class EvalCapture {
      * @return the agent, or {@code null} when there is no {@code main} agent to
      *         derive a provider and model from
      */
-    public static Agent ensureEvalAgent() {
+    public static @Nullable Agent ensureEvalAgent() {
         var existing = Agent.findByName(Agent.EVALTEST_AGENT_NAME);
         if (existing != null) return existing;
 
@@ -371,18 +372,19 @@ public final class EvalCapture {
         private final Map<String, List<String>> resultsByTool = new ConcurrentHashMap<>();
 
         @Override
-        public void appendUserMessage(String content, List<AttachmentService.Input> attachments) {
+        public void appendUserMessage(String content, @Nullable List<AttachmentService.Input> attachments) {
             // The eval question is the input we already hold; nothing to record.
         }
 
         @Override
-        public void appendAssistantMessage(String content, String toolCalls, String usageJson,
-                                           String reasoning, boolean truncated) {
+        public void appendAssistantMessage(@Nullable String content, @Nullable String toolCalls,
+                                           @Nullable String usageJson, @Nullable String reasoning,
+                                           boolean truncated) {
             if (toolCalls != null) recordToolName(toolCalls);
         }
 
         @Override
-        public void appendToolResult(String toolCallId, String result, String structuredJson) {
+        public void appendToolResult(@Nullable String toolCallId, String result, @Nullable String structuredJson) {
             // Stashed by call id rather than filed under the tool immediately: the
             // outcome that decides whether this call counts arrives next, in
             // noteToolOutcome. A refused call must contribute no result, for the same
@@ -391,7 +393,7 @@ public final class EvalCapture {
         }
 
         @Override
-        public void noteToolOutcome(String toolCallId, ToolRegistry.ToolResult.Outcome outcome) {
+        public void noteToolOutcome(@Nullable String toolCallId, ToolRegistry.ToolResult.Outcome outcome) {
             if (outcome != ToolRegistry.ToolResult.Outcome.DISPATCHED) return;
             var name = nameByCallId.get(toolCallId);
             if (name == null) return;

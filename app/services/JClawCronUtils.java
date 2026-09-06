@@ -2,6 +2,7 @@ package services;
 
 import com.github.kagkarlsson.scheduler.task.ExecutionComplete;
 import com.github.kagkarlsson.scheduler.task.schedule.CronSchedule;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -50,7 +51,7 @@ public final class JClawCronUtils {
      * for legacy call sites that don't yet have a {@link models.Task}
      * context to resolve a zone from.
      */
-    public static Instant nextExecution(String expr) {
+    public static @Nullable Instant nextExecution(String expr) {
         return nextExecution(expr, null);
     }
 
@@ -61,7 +62,7 @@ public final class JClawCronUtils {
      * JVM default. A null zone falls back to {@code ZoneId.systemDefault()}
      * (the same behavior as the no-zone constructor).
      */
-    public static Instant nextExecution(String expr, ZoneId zone) {
+    public static @Nullable Instant nextExecution(String expr, @Nullable ZoneId zone) {
         if (expr == null || expr.isBlank()) return null;
         try {
             var schedule = zone != null

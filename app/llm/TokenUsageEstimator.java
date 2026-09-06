@@ -10,6 +10,7 @@ import com.knuddels.jtokkit.api.EncodingType;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolDef;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.Locale;
@@ -77,9 +78,9 @@ public final class TokenUsageEstimator {
      * for provider-facing headroom math, while keeping provider usage as the
      * persisted source of truth when available.
      */
-    public static ChatRequestTokens estimateChatRequest(String model,
+    public static ChatRequestTokens estimateChatRequest(@Nullable String model,
                                                          List<ChatMessage> messages,
-                                                         List<ToolDef> tools) {
+                                                         @Nullable List<ToolDef> tools) {
         var resolved = resolveEncoding(model);
         int messageTokens = ASSISTANT_REPLY_PRIMER;
         if (messages != null) {
@@ -97,7 +98,7 @@ public final class TokenUsageEstimator {
     }
 
     /** Estimate one chat message without the assistant reply primer. */
-    public static TokenCount estimateMessage(String model, ChatMessage message) {
+    public static TokenCount estimateMessage(@Nullable String model, ChatMessage message) {
         var resolved = resolveEncoding(model);
         return new TokenCount(estimateMessage(resolved.encoding(), message),
                 resolved.name(), resolved.modelMatched());
@@ -125,14 +126,14 @@ public final class TokenUsageEstimator {
      * <p>{@code model} may be null, resolving to the {@code cl100k_base} fallback — which
      * is what memory recall reports its block cost with, having no model in scope.
      */
-    public static TokenCount estimateText(String model, String text) {
+    public static TokenCount estimateText(@Nullable String model, String text) {
         var resolved = resolveEncoding(model);
         return new TokenCount(count(resolved.encoding(), text),
                 resolved.name(), resolved.modelMatched());
     }
 
     /** Estimate streamed reasoning text by itself for UI/reporting fallback fields. */
-    public static TokenCount estimateReasoning(String model, String reasoningText) {
+    public static TokenCount estimateReasoning(@Nullable String model, String reasoningText) {
         return estimateText(model, reasoningText);
     }
 
@@ -150,12 +151,12 @@ public final class TokenUsageEstimator {
         return tokens;
     }
 
-    private static int estimateTools(Encoding encoding, List<ToolDef> tools) {
+    private static int estimateTools(Encoding encoding, @Nullable List<ToolDef> tools) {
         if (tools == null || tools.isEmpty()) return 0;
         return count(encoding, gson.toJson(tools));
     }
 
-    private static int countContent(Encoding encoding, Object content) {
+    private static int countContent(Encoding encoding, @Nullable Object content) {
         if (content instanceof String s) return count(encoding, s);
         if (!(content instanceof List<?> parts)) return 0;
         int tokens = 0;
@@ -167,12 +168,12 @@ public final class TokenUsageEstimator {
         return tokens;
     }
 
-    private static int countToolCalls(Encoding encoding, List<ToolCall> toolCalls) {
+    private static int countToolCalls(Encoding encoding, @Nullable List<ToolCall> toolCalls) {
         if (toolCalls == null || toolCalls.isEmpty()) return 0;
         return count(encoding, gson.toJson(toolCalls));
     }
 
-    private static int count(Encoding encoding, String text) {
+    private static int count(Encoding encoding, @Nullable String text) {
         if (text == null || text.isEmpty()) return 0;
         return COUNT_CACHE.get(new TokenKey(encoding, text),
                 k -> k.encoding().countTokensOrdinary(k.text()));
@@ -186,7 +187,7 @@ public final class TokenUsageEstimator {
         return COUNT_CACHE.stats().hitCount();
     }
 
-    private static ResolvedEncoding resolveEncoding(String model) {
+    private static ResolvedEncoding resolveEncoding(@Nullable String model) {
         var modelKey = canonicalModelName(model);
         if (!modelKey.isEmpty()) {
             var direct = REGISTRY.getEncodingForModel(modelKey);
@@ -201,7 +202,7 @@ public final class TokenUsageEstimator {
         return new ResolvedEncoding(encoding, encodingName, false);
     }
 
-    private static String canonicalModelName(String model) {
+    private static String canonicalModelName(@Nullable String model) {
         if (model == null) return "";
         var trimmed = model.strip();
         var slash = trimmed.lastIndexOf('/');

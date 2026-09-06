@@ -7,6 +7,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SessionCompaction;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -55,14 +56,14 @@ public final class SessionCompactor {
     public interface Summarizer {
         // Production lambda calls LlmProvider.chat which surfaces provider-specific checked exceptions; broad signature avoids leaking provider exception types into the seam.
         @SuppressWarnings("java:S112")
-        String summarize(List<ChatMessage> messages) throws Exception;
+        @Nullable String summarize(List<ChatMessage> messages) throws Exception;
     }
 
     public record CompactionResult(
             boolean compacted,
             int turnsCompacted,
             int summaryChars,
-            String skipReason
+            @Nullable String skipReason
     ) {
         public static CompactionResult skipped(String reason) {
             return new CompactionResult(false, 0, 0, reason);
@@ -131,7 +132,7 @@ public final class SessionCompactor {
      * migration work").
      */
     public static CompactionResult compact(Long conversationId, String modelLabel, Summarizer summarizer,
-                                            boolean force, String additionalInstructions) {
+                                            boolean force, @Nullable String additionalInstructions) {
         var planOpt = Tx.run(() -> buildPlan(conversationId, force));
         if (planOpt.isEmpty()) return CompactionResult.skipped("no safe boundary or below min-turns");
         var plan = planOpt.get();
@@ -319,7 +320,7 @@ public final class SessionCompactor {
      * response. Returns {@code null} when the response shape is
      * unexpected (non-string content, empty choices, etc.).
      */
-    public static String firstChoiceText(ChatResponse response) {
+    public static @Nullable String firstChoiceText(ChatResponse response) {
         if (response == null || response.choices() == null || response.choices().isEmpty()) return null;
         var msg = response.choices().getFirst().message();
         if (msg == null) return null;
@@ -398,7 +399,7 @@ public final class SessionCompactor {
      *                   to fresh and emits SUBAGENT_ERROR.
      */
     @SuppressWarnings("java:S112") // mirrors Summarizer.summarize: broad signature avoids leaking provider exception types
-    public static String summarizeParentForSubagent(List<MessageSnapshot> parentMessages, Summarizer summarizer)
+    public static @Nullable String summarizeParentForSubagent(List<MessageSnapshot> parentMessages, Summarizer summarizer)
             throws Exception {
         if (parentMessages == null || parentMessages.isEmpty()) return null;
         var sumMessages = List.<ChatMessage>of(

@@ -8,6 +8,7 @@ import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 
@@ -103,7 +104,7 @@ public final class ContextWindowManager {
      * non-OpenAI providers), multiplies by the resolved per-provider /
      * per-model safety multiplier — see {@link #resolveSafetyMultiplier}.
      */
-    public static int adjustedPromptTokens(String providerName, String modelId,
+    public static int adjustedPromptTokens(@Nullable String providerName, @Nullable String modelId,
                                            TokenUsageEstimator.ChatRequestTokens estimate) {
         if (estimate.modelMatched()) return estimate.promptTokens();
         return (int) Math.ceil(estimate.promptTokens() * resolveSafetyMultiplier(providerName, modelId));
@@ -125,7 +126,7 @@ public final class ContextWindowManager {
      * produced by {@link #adjustedPromptTokens}.
      */
     public static int adjustedMessageTokens(int rawTokens, boolean modelMatched,
-                                            String providerName, String modelId) {
+                                            @Nullable String providerName, @Nullable String modelId) {
         if (modelMatched) return rawTokens;
         return (int) Math.ceil(rawTokens * resolveSafetyMultiplier(providerName, modelId));
     }
@@ -149,22 +150,23 @@ public final class ContextWindowManager {
      *       back to {@value #DEFAULT_SAFETY_MULTIPLIER} when unset.</li>
      * </ol>
      */
-    public static double resolveSafetyMultiplier(String providerName, String modelId) {
+    public static double resolveSafetyMultiplier(@Nullable String providerName,
+                                                 @Nullable String modelId) {
         if (providerName != null && modelId != null) {
             var specific = parseMultiplier(ConfigService.get(
-                    SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId, null));
+                    SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId));
             if (specific != null) return specific;
         }
         if (providerName != null) {
             var perProvider = parseMultiplier(ConfigService.get(
-                    SAFETY_MULTIPLIER_PREFIX + providerName, null));
+                    SAFETY_MULTIPLIER_PREFIX + providerName));
             if (perProvider != null) return perProvider;
         }
-        var global = parseMultiplier(ConfigService.get(SAFETY_MULTIPLIER_KEY, null));
+        var global = parseMultiplier(ConfigService.get(SAFETY_MULTIPLIER_KEY));
         return global != null ? global : DEFAULT_SAFETY_MULTIPLIER;
     }
 
-    private static Double parseMultiplier(String raw) {
+    private static @Nullable Double parseMultiplier(@Nullable String raw) {
         if (raw == null || raw.isBlank()) return null;
         try {
             return Math.clamp(Double.parseDouble(raw), MIN_SAFETY_MULTIPLIER, MAX_SAFETY_MULTIPLIER);
@@ -193,8 +195,10 @@ public final class ContextWindowManager {
      * which case we omit {@code max_tokens} from the request and let
      * the provider apply its own default.
      */
-    static Integer effectiveMaxTokens(Agent agent, Conversation conv, LlmProvider provider,
-                                      List<ChatMessage> messages, List<ToolDef> tools) {
+    static @Nullable Integer effectiveMaxTokens(Agent agent, Conversation conv,
+                                                LlmProvider provider,
+                                                List<ChatMessage> messages,
+                                                @Nullable List<ToolDef> tools) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.maxTokens() <= 0) return null;
 
@@ -243,7 +247,7 @@ public final class ContextWindowManager {
     }
 
     static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv,
-                                                 LlmProvider provider, List<ToolDef> tools) {
+                                                 LlmProvider provider, @Nullable List<ToolDef> tools) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
 
@@ -358,9 +362,9 @@ public final class ContextWindowManager {
     private record Candidate(int index, int contentLength) {
     }
 
-    private static TruncationOutcome truncateOversizedToolResults(
-            List<ChatMessage> messages, String providerName, String modelId, boolean modelMatched,
-            int trimTarget, int estimatedTokens, Agent agent) {
+    private static @Nullable TruncationOutcome truncateOversizedToolResults(
+            List<ChatMessage> messages, @Nullable String providerName, @Nullable String modelId,
+            boolean modelMatched, int trimTarget, int estimatedTokens, Agent agent) {
         int minChars = ConfigService.getInt(TOOL_TRUNCATE_MIN_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_MIN_CHARS);
         int keepHead = ConfigService.getInt(TOOL_TRUNCATE_KEEP_HEAD_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_KEEP_HEAD_CHARS);
         int keepTail = ConfigService.getInt(TOOL_TRUNCATE_KEEP_TAIL_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_KEEP_TAIL_CHARS);
@@ -428,9 +432,13 @@ public final class ContextWindowManager {
      * Otherwise mutates {@code working} in place and returns the deltas the
      * caller's running totals need.
      */
-    private static TruncationSavings attemptTruncate(List<ChatMessage> working, Candidate cand,
-                                                     String modelId, boolean modelMatched, String providerName,
-                                                     int keepHead, int keepTail) {
+    // collectCandidates only admits indices whose content is a String, so the cast and the
+    // length() below cannot see null — an invariant the checker has no way to follow.
+    @SuppressWarnings("NullAway")
+    private static @Nullable TruncationSavings attemptTruncate(
+            List<ChatMessage> working, Candidate cand,
+            @Nullable String modelId, boolean modelMatched, @Nullable String providerName,
+            int keepHead, int keepTail) {
         var original = working.get(cand.index());
         var originalText = (String) original.content();
         var truncated = truncateToolResultContent(originalText, keepHead, keepTail);
@@ -480,11 +488,12 @@ public final class ContextWindowManager {
 
     static TokenUsageEstimator.ChatRequestTokens estimateProviderPromptTokens(
             Agent agent, Conversation conv, LlmProvider provider,
-            List<ChatMessage> messages, List<ToolDef> tools) {
+            List<ChatMessage> messages, @Nullable List<ToolDef> tools) {
         return TokenUsageEstimator.estimateChatRequest(modelIdFor(agent, conv, provider), messages, tools);
     }
 
-    private static String modelIdFor(Agent agent, Conversation conv, LlmProvider provider) {
+    private static @Nullable String modelIdFor(Agent agent, Conversation conv,
+                                               @Nullable LlmProvider provider) {
         var modelId = ModelResolver.effectiveModelId(agent, conv);
         if (modelId != null) return modelId;
         var models = provider != null && provider.config() != null ? provider.config().models() : null;
@@ -492,7 +501,7 @@ public final class ContextWindowManager {
         return null;
     }
 
-    private static String providerNameFor(LlmProvider provider) {
+    private static @Nullable String providerNameFor(@Nullable LlmProvider provider) {
         return provider != null && provider.config() != null ? provider.config().name() : null;
     }
 
@@ -518,7 +527,7 @@ public final class ContextWindowManager {
      * only — image data is base64 and doesn't meaningfully correspond to
      * the chars/4 heuristic (providers count image tokens separately).
      */
-    private static int contentChars(Object content) {
+    private static int contentChars(@Nullable Object content) {
         if (content instanceof String s) return s.length();
         if (!(content instanceof List<?> parts)) return 0;
         int chars = 0;
@@ -533,7 +542,7 @@ public final class ContextWindowManager {
     /**
      * Tool call names + arguments also consume input tokens.
      */
-    private static int toolCallChars(List<LlmTypes.ToolCall> toolCalls) {
+    private static int toolCallChars(@Nullable List<LlmTypes.ToolCall> toolCalls) {
         if (toolCalls == null) return 0;
         int chars = 0;
         for (var tc : toolCalls) {

@@ -1,5 +1,7 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
+
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -77,7 +79,7 @@ public final class PwgRasterEncoder {
      * @param duplex     whether to request two-sided output
      * @param tumble     short-edge binding when {@code duplex}
      */
-    public static byte[] encode(List<BufferedImage> pages, int dpi, String mediaName,
+    public static byte[] encode(List<BufferedImage> pages, int dpi, @Nullable String mediaName,
                                 boolean duplex, boolean tumble, boolean grayscale)
             throws IOException {
         var colors = grayscale ? 1 : 3;
@@ -97,7 +99,7 @@ public final class PwgRasterEncoder {
      * printer reads the page dimensions out of the wrong offset.
      */
     private static void writePageHeader(OutputStream out, int width, int height, int dpi,
-                                        String mediaName, boolean duplex, boolean tumble,
+                                        @Nullable String mediaName, boolean duplex, boolean tumble,
                                         int colors) throws IOException {
         var bytesPerLine = width * colors;
         // Page size in PWG units (1/72 inch points), derived from pixels and DPI.

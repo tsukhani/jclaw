@@ -1,6 +1,7 @@
 package services.catalog;
 
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.EventLogger;
 import services.SkillCategoryClassifier;
@@ -60,8 +61,8 @@ public final class StaticDumpCatalog implements Catalog {
 
     // Published once, atomically, at the end of a successful load. null until
     // the first load completes; read on the query fast-path without locking.
-    private volatile List<CatalogSkill> catalog;
-    private volatile String scrapedAt;
+    private volatile @Nullable List<CatalogSkill> catalog;
+    private volatile @Nullable String scrapedAt;
     private final Object loadLock = new Object();
 
     /**
@@ -256,7 +257,7 @@ public final class StaticDumpCatalog implements Catalog {
         return (configured != null && !configured.isBlank()) ? configured.trim() : defaultUrl;
     }
 
-    private static String nz(String s) {
+    private static String nz(@Nullable String s) {
         return s != null ? s : "";
     }
 

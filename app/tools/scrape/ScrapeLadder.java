@@ -1,5 +1,6 @@
 package tools.scrape;
 
+import org.jspecify.annotations.Nullable;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
@@ -43,8 +44,8 @@ public final class ScrapeLadder {
     public static final String DEFAULT_LANGUAGE = "en";
 
     /** One rung's product, and which rung produced it. */
-    public record Attempt(ScrapeRung servedBy, WebExtraction.FetchResult fetched,
-                          String text, ScrapeReason reason, String detail) {
+    public record Attempt(ScrapeRung servedBy, WebExtraction.@Nullable FetchResult fetched,
+                          @Nullable String text, ScrapeReason reason, @Nullable String detail) {
 
         public boolean usable() {
             return reason == ScrapeReason.OK;
@@ -52,6 +53,12 @@ public final class ScrapeLadder {
 
         int textLength() {
             return text == null ? 0 : text.length();
+        }
+
+        /** Valid only when {@link #usable()} — a non-OK attempt extracted no text. */
+        public String resolvedText() {
+            if (text == null) throw new IllegalStateException("attempt not usable: " + reason);
+            return text;
         }
     }
 

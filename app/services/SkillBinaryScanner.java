@@ -1,6 +1,7 @@
 package services;
 
 import agents.SkillLoader;
+import org.jspecify.annotations.Nullable;
 import services.scanners.Scanner;
 import services.scanners.ScannerRegistry;
 
@@ -40,7 +41,7 @@ public class SkillBinaryScanner {
 
     private static final String LOG_CATEGORY = "scanner";
 
-    public record Violation(String relativePath, String sha256, String scanner, String reason) {
+    public record Violation(String relativePath, String sha256, String scanner, @Nullable String reason) {
         /** Short, user-facing description suitable for error messages. */
         public String describe() {
             return "%s: %s (%s)".formatted(relativePath, reason, scanner);

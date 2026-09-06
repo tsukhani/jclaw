@@ -6,6 +6,7 @@ import mcp.McpGrants;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
@@ -29,7 +30,7 @@ final class SubagentChildBootstrap {
 
     /** Result of bootstrapping the child rows. {@code error} non-null means the
      *  caller should bail and surface the message verbatim. */
-    record Bootstrap(Long childAgentId, Long childConvId, String childAgentName, String error) {
+    record Bootstrap(@Nullable Long childAgentId, @Nullable Long childConvId, @Nullable String childAgentName, @Nullable String error) {
         static Bootstrap ok(Long agentId, Long convId, String agentName) {
             return new Bootstrap(agentId, convId, agentName, null);
         }
@@ -39,7 +40,7 @@ final class SubagentChildBootstrap {
     /** Result of {@link #buildInheritSummary}: either the populated summary
      *  text (or null when fresh / nothing to summarize) plus an optional
      *  failure reason that maps to a deferred SUBAGENT_ERROR event. */
-    record InheritSummary(String text, String errorReason) {
+    record InheritSummary(@Nullable String text, @Nullable String errorReason) {
         static final InheritSummary NONE = new InheritSummary(null, null);
     }
 
@@ -52,7 +53,7 @@ final class SubagentChildBootstrap {
      * InheritSummary#NONE} unconditionally.
      */
     static InheritSummary buildInheritSummary(Agent parentAgent, Long parentConvId,
-                                              String context) {
+                                              @Nullable String context) {
         if (!SubagentSpawnTool.CONTEXT_INHERIT.equals(context)) return InheritSummary.NONE;
         try {
             var text = buildParentContextSummary(parentAgent, parentConvId);
@@ -79,16 +80,16 @@ final class SubagentChildBootstrap {
     }
 
     private static Bootstrap bootstrapChild(Agent parentAgent, Conversation parentConv,
-                                            Long requestedAgentId,
-                                            String label,
-                                            String modelProviderOverride,
-                                            String modelIdOverride,
+                                            @Nullable Long requestedAgentId,
+                                            @Nullable String label,
+                                            @Nullable String modelProviderOverride,
+                                            @Nullable String modelIdOverride,
                                             boolean applyInheritGrants,
-                                            String parentContextSummary,
+                                            @Nullable String parentContextSummary,
                                             boolean inlineMode) {
         var resolved = resolveChildAgent(parentAgent, requestedAgentId, label);
         if (resolved.error() != null) return Bootstrap.fail(resolved.error());
-        var childAgent = resolved.agent();
+        var childAgent = resolved.resolvedAgent();
 
         // JCLAW-495: a freshly-cloned subagent is a delegate of its parent and
         // must inherit the parent's MCP server grants. MCP grouped tools are
@@ -124,9 +125,15 @@ final class SubagentChildBootstrap {
     }
 
     /** {@code error} non-null short-circuits {@link #bootstrapChild}. */
-    private record ResolvedChildAgent(Agent agent, String error) {
+    private record ResolvedChildAgent(@Nullable Agent agent, @Nullable String error) {
         static ResolvedChildAgent ok(Agent a) { return new ResolvedChildAgent(a, null); }
         static ResolvedChildAgent fail(String msg) { return new ResolvedChildAgent(null, msg); }
+
+        /** Valid only once {@link #error()} has been checked null — {@code fail()} resolves no agent. */
+        Agent resolvedAgent() {
+            if (agent == null) throw new IllegalStateException("child agent unresolved: " + error);
+            return agent;
+        }
     }
 
     /**
@@ -136,7 +143,7 @@ final class SubagentChildBootstrap {
      * rows (see in-method commentary for the rationale).
      */
     private static ResolvedChildAgent resolveChildAgent(Agent parentAgent,
-                                                        Long requestedAgentId, String label) {
+                                                        @Nullable Long requestedAgentId, @Nullable String label) {
         if (requestedAgentId != null) {
             Agent existing = Agent.findById(requestedAgentId);
             if (existing == null) {
@@ -211,7 +218,7 @@ final class SubagentChildBootstrap {
      * equal-or-narrower agents pass. Returns an error string on escalation, or
      * null when the named agent is within bounds.
      */
-    private static String capabilityEscalationError(Agent spawningAgent, Agent named) {
+    private static @Nullable String capabilityEscalationError(Agent spawningAgent, Agent named) {
         if (named.id != null && named.id.equals(spawningAgent.id)) {
             return null; // self-reuse is always within bounds
         }
@@ -249,9 +256,9 @@ final class SubagentChildBootstrap {
      */
     private static Conversation resolveChildConversation(Agent childAgent,
                                                          Conversation parentConv,
-                                                         String modelProviderOverride,
-                                                         String modelIdOverride,
-                                                         String parentContextSummary,
+                                                         @Nullable String modelProviderOverride,
+                                                         @Nullable String modelIdOverride,
+                                                         @Nullable String parentContextSummary,
                                                          boolean inlineMode) {
         // JCLAW-267: inline mode reuses the parent Conversation as the child's
         // run target — the SubagentRun row points its childConversation FK at
@@ -323,7 +330,7 @@ final class SubagentChildBootstrap {
      * </ol>
      */
     static SubagentModel resolveSubagentModel(Conversation parentConv, Agent childAgent,
-                                              String overrideProvider, String overrideId) {
+                                              @Nullable String overrideProvider, @Nullable String overrideId) {
         if (SubagentSpawnTool.notBlank(overrideProvider) && SubagentSpawnTool.notBlank(overrideId)) {
             return new SubagentModel(overrideProvider, overrideId);
         }
@@ -375,7 +382,7 @@ final class SubagentChildBootstrap {
      * union IS the full grant — the child only sees tools the parent had
      * enabled OR the child default-allowed.
      */
-    private static void unionParentToolGrants(Agent parentAgent, Agent childAgent) {
+    private static void unionParentToolGrants(Agent parentAgent, @Nullable Agent childAgent) {
         var parentDisabled = ToolRegistry.loadDisabledTools(parentAgent);
         var allRegistered = ToolRegistry.listTools();
         // Parent's enabled set: every registered tool not in the parent's
@@ -416,7 +423,7 @@ final class SubagentChildBootstrap {
      * child has none for MCP tools (they are disabled-by-default, not by an
      * explicit row), so there is nothing to flip.
      */
-    private static void grantParentMcpGrants(Agent parentAgent, Agent childAgent) {
+    private static void grantParentMcpGrants(Agent parentAgent, @Nullable Agent childAgent) {
         var parentDisabled = ToolRegistry.loadDisabledTools(parentAgent);
         var childDisabled = ToolRegistry.loadDisabledTools(childAgent);
         var toGrant = ToolRegistry.listTools().stream()
@@ -450,7 +457,7 @@ final class SubagentChildBootstrap {
      * agentId}-reuse path runs an existing agent that already carries its own
      * rows.
      */
-    private static void copyParentToolRestrictions(Agent parentAgent, Agent childAgent) {
+    private static void copyParentToolRestrictions(Agent parentAgent, @Nullable Agent childAgent) {
         var childByName = new HashMap<String, AgentToolConfig>();
         for (var r : AgentToolConfig.findByAgent(childAgent)) childByName.put(r.handle(), r);
         boolean any = false;
@@ -491,7 +498,7 @@ final class SubagentChildBootstrap {
      * silently, no error". Any other failure (provider unconfigured, LLM
      * error, network) throws and the caller emits SUBAGENT_ERROR.
      */
-    private static String buildParentContextSummary(Agent parentAgent, Long parentConvId) throws Exception {
+    private static @Nullable String buildParentContextSummary(Agent parentAgent, Long parentConvId) throws Exception {
         var snapshot = Tx.run(() -> {
             var conv = Conversation.<Conversation>findById(parentConvId);
             return SessionCompactor.snapshotParentMessages(conv);
@@ -520,7 +527,7 @@ final class SubagentChildBootstrap {
         return parentName + "-sub-" + suffix;
     }
 
-    static Conversation resolveParentConversation(Long parentAgentId) {
+    static @Nullable Conversation resolveParentConversation(Long parentAgentId) {
         var parent = (Agent) Agent.findById(parentAgentId);
         if (parent == null) return null;
         // Pick the most recently-updated conversation that ISN'T a subagent

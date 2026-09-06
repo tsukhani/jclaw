@@ -1,5 +1,6 @@
 package services.videogen;
 
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import utils.Strings;
 
@@ -43,12 +44,12 @@ public final class VideoGenerationRouter {
      *
      * @return the effective model id, or null when the provider is unknown or unset
      */
-    public static String effectiveModel(String provider) {
+    public static @Nullable String effectiveModel(String provider) {
         if (provider == null || provider.isBlank()) return null;
         return switch (provider) {
             case "replicate" -> Strings.firstNonBlank(ConfigService.get("videogen.cloud.model"));
-            case "ltx-local" -> Strings.firstNonBlank(ConfigService.get(LOCAL_MODEL_KEY), "ltx");
-            case "wan-local" -> Strings.firstNonBlank(ConfigService.get(LOCAL_MODEL_KEY), "wan-5b");
+            case "ltx-local" -> Strings.firstNonBlankOr("ltx", ConfigService.get(LOCAL_MODEL_KEY));
+            case "wan-local" -> Strings.firstNonBlankOr("wan-5b", ConfigService.get(LOCAL_MODEL_KEY));
             default -> null;
         };
     }
@@ -58,7 +59,7 @@ public final class VideoGenerationRouter {
      * the provider it was <em>submitted</em> with (stored on the job row), which may differ from the
      * current {@code videogen.provider} if the operator changed the Settings mid-job.
      */
-    public static Optional<VideoGenerationService> serviceFor(String provider) {
+    public static Optional<VideoGenerationService> serviceFor(@Nullable String provider) {
         if (provider == null || provider.isBlank()) return Optional.empty();
         return switch (provider) {
             case "replicate" -> Optional.of(new ReplicateVideoGenerationClient());
@@ -68,9 +69,9 @@ public final class VideoGenerationRouter {
             // sizes (wan-5b / wan-14b) on CUDA — so both arms read the operator's choice, defaulting to
             // the smallest in each family.
             case "ltx-local" -> Optional.of(new LocalVideoGenerationClient(
-                    Strings.firstNonBlank(ConfigService.get(LOCAL_MODEL_KEY), "ltx")));
+                    Strings.firstNonBlankOr("ltx", ConfigService.get(LOCAL_MODEL_KEY))));
             case "wan-local" -> Optional.of(new LocalVideoGenerationClient(
-                    Strings.firstNonBlank(ConfigService.get(LOCAL_MODEL_KEY), "wan-5b")));
+                    Strings.firstNonBlankOr("wan-5b", ConfigService.get(LOCAL_MODEL_KEY))));
             default -> Optional.empty();
         };
     }

@@ -5,6 +5,7 @@ import agents.RunCancelledException;
 import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.SubagentRegistry;
 import services.Tx;
@@ -53,8 +54,8 @@ final class SubagentSyncRunner {
      * the H2 FileChannel post-mortem.
      */
     @SuppressWarnings("java:S1181")
-    static SyncRunOutcome runChildSynchronously(Long runId, Long childAgentId,
-                                                Long childConvId, String task,
+    static SyncRunOutcome runChildSynchronously(Long runId, @Nullable Long childAgentId,
+                                                @Nullable Long childConvId, String task,
                                                 int timeoutSeconds, boolean inlineMode) {
         var future = new CompletableFuture<AgentRunner.RunResult>();
         SubagentRegistry.register(runId, future);

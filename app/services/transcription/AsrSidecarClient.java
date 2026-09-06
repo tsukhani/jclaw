@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.LocalSidecarDaemon;
 import services.sidecar.SidecarHttpClient;
@@ -37,7 +38,7 @@ public class AsrSidecarClient extends SidecarHttpClient {
     }
 
     /** Test seam: fixed base URL (no sidecar spawn) + injected client. */
-    public AsrSidecarClient(String baseUrlOverride, OkHttpClient client) {
+    public AsrSidecarClient(@Nullable String baseUrlOverride, OkHttpClient client) {
         super(baseUrlOverride, client);
     }
 
@@ -60,12 +61,12 @@ public class AsrSidecarClient extends SidecarHttpClient {
      * First call may build the script env and download weights.
      */
     public List<WhisperTranscriber.Segment> transcribe(Path audioFile, String model,
-                                                          String language) {
+                                                          @Nullable String language) {
         return withSidecarLock(() -> transcribeLocked(audioFile, model, language));
     }
 
     private List<WhisperTranscriber.Segment> transcribeLocked(Path audioFile, String model,
-                                                                 String language) {
+                                                                 @Nullable String language) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : AsrSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("audio_path", audioFile.toAbsolutePath().toString());

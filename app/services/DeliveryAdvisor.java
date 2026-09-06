@@ -3,6 +3,7 @@ package services;
 import channels.SlackWebApi;
 import models.Agent;
 import models.SlackBinding;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JCLAW-455: non-blocking advisory for a task's declared delivery target — the
@@ -29,7 +30,7 @@ public final class DeliveryAdvisor {
      * Slack {@code conversations.list} probe runs off-tx so a network call never
      * holds a transaction open.
      */
-    public static String advisoryFor(Agent agent, String deliverySpec) {
+    public static @Nullable String advisoryFor(Agent agent, String deliverySpec) {
         if (agent == null || deliverySpec == null || deliverySpec.isBlank()) return null;
         var spec = DeliverySpec.parse(deliverySpec);
         if (spec.kind() != DeliverySpec.Kind.CHANNEL || !"slack".equals(spec.channel())) return null;

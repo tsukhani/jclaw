@@ -1,6 +1,7 @@
 package services;
 
 import models.LatencyMetric;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 
 import java.util.ArrayList;
@@ -48,13 +49,13 @@ public final class LatencyMetricRecorder {
         excludedAgentIds = Set.copyOf(agentIds);
     }
 
-    public static boolean isExcluded(String agentId) {
+    public static boolean isExcluded(@Nullable String agentId) {
         return agentId != null && excludedAgentIds.contains(agentId);
     }
 
     /** Queue one sample. Cheap (constructs a detached entity, no DB); flushes inline
      *  only when the batch threshold trips. */
-    public static void enqueue(String agentId, String channel, String segment, long latencyMs) {
+    public static void enqueue(@Nullable String agentId, String channel, String segment, long latencyMs) {
         if (isExcluded(agentId)) return;
         var m = new LatencyMetric();
         m.agentId = agentId;

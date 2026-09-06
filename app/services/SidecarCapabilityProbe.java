@@ -2,6 +2,7 @@ package services;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.Play;
 
@@ -29,7 +30,8 @@ public final class SidecarCapabilityProbe {
     public enum State { NEEDS_PROBE, PROBING, READY, UNAVAILABLE, ERROR }
 
     /** {@code capability} is the parsed sidecar {@code --probe} payload (null until READY). */
-    public record Snapshot(boolean uvAvailable, String uvReason, State state, JsonObject capability, String error) {}
+    public record Snapshot(boolean uvAvailable, String uvReason, State state,
+                           @Nullable JsonObject capability, @Nullable String error) {}
 
     private final String sidecarRelDir; // e.g. "sidecar/video"
     private final String threadName;    // probe virtual-thread name
@@ -37,8 +39,8 @@ public final class SidecarCapabilityProbe {
 
     private final Object lock = new Object();
     private volatile State state = State.NEEDS_PROBE;
-    private volatile JsonObject capability;
-    private volatile String error;
+    private volatile @Nullable JsonObject capability;
+    private volatile @Nullable String error;
 
     public SidecarCapabilityProbe(String sidecarRelDir, String threadName, String logLabel) {
         this.sidecarRelDir = sidecarRelDir;

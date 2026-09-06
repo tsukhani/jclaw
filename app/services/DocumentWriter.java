@@ -42,6 +42,7 @@ import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.jspecify.annotations.Nullable;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.STTblWidth;
 import org.xhtmlrenderer.pdf.ITextRenderer;
 
@@ -185,7 +186,7 @@ public class DocumentWriter {
         private static final int TABLE_TOTAL_WIDTH = 9000;
 
         private final XWPFDocument doc;
-        private XWPFParagraph currentParagraph;
+        private @Nullable XWPFParagraph currentParagraph;
         private int listDepth;
         private int orderedCounter;
         private boolean inOrderedList;
@@ -437,7 +438,7 @@ public class DocumentWriter {
 
         /** Render a node's inline children into {@link #currentParagraph}. */
         private void emitInline(Node node, boolean bold, boolean italic, boolean code, boolean strike,
-                                int fontSize, String color) {
+                                int fontSize, @Nullable String color) {
             for (Node child = node.getFirstChild(); child != null; child = child.getNext()) {
                 switch (child) {
                     case Text t ->
@@ -469,7 +470,7 @@ public class DocumentWriter {
         }
 
         private void addRun(String text, boolean bold, boolean italic, boolean code, boolean strike,
-                            int fontSize, String color) {
+                            int fontSize, @Nullable String color) {
             if (currentParagraph == null) currentParagraph = doc.createParagraph();
             var run = currentParagraph.createRun();
             run.setText(text);

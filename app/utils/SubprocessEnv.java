@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -87,7 +89,7 @@ public final class SubprocessEnv {
      * the operator-provided entries. A null or empty {@code configEnv} yields
      * just the filtered host env.
      */
-    public static void apply(ProcessBuilder pb, Map<String, String> configEnv) {
+    public static void apply(ProcessBuilder pb, @Nullable Map<String, String> configEnv) {
         pb.environment().keySet().removeIf(SubprocessEnv::isSensitive);
         if (configEnv != null) pb.environment().putAll(configEnv);
     }

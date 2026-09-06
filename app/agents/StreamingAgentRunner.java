@@ -9,6 +9,7 @@ import memory.MemoryAutoCapture;
 import models.Agent;
 import models.ChannelType;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.ConversationQueue;
 import services.ConversationService;
@@ -61,8 +62,8 @@ final class StreamingAgentRunner {
                              String userMessage,
                              AtomicBoolean isCancelled,
                              AgentRunner.StreamingCallbacks cb,
-                             Long acceptedAtNs,
-                             List<AttachmentService.Input> attachments) {
+                             @Nullable Long acceptedAtNs,
+                             @Nullable List<AttachmentService.Input> attachments) {
         Thread.ofVirtual().name("agent-stream").start(() -> {
             final Long[] conversationIdRef = {null};
             // queueReleased is shared between the wrapper's terminal
@@ -194,7 +195,7 @@ final class StreamingAgentRunner {
     private static Optional<Conversation> resolveConversationAndAcquireQueue(
             Agent agent, Long conversationId, String channelType, String peerId,
             String userMessage, AgentRunner.StreamingCallbacks cb,
-            List<AttachmentService.Input> attachments) {
+            @Nullable List<AttachmentService.Input> attachments) {
 
         Conversation conversation = Tx.run(() -> {
             if (conversationId != null) {
@@ -353,8 +354,9 @@ final class StreamingAgentRunner {
      * Resolve the streaming LLM provider for an agent+conversation. Fires
      * {@code cb.onError} and returns {@code null} when no provider is configured.
      */
-    private static LlmProvider resolveStreamingProvider(Agent agent, Conversation conversation,
-                                                         String channelType, AgentRunner.StreamingCallbacks cb) {
+    private static @Nullable LlmProvider resolveStreamingProvider(Agent agent, Conversation conversation,
+                                                         @Nullable String channelType,
+                                                         AgentRunner.StreamingCallbacks cb) {
         var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conversation));
         var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
         if (primary == null) {
@@ -370,9 +372,11 @@ final class StreamingAgentRunner {
      * Returns {@code null} when cancellation fired during either await.
      */
     @SuppressWarnings("java:S107") // Streaming first-round invocation needs the full call surface
-    private static LlmProvider.StreamAccumulator streamFirstRoundWithRetry(
-            LlmProvider primary, String effectiveModelIdForCall, List<ChatMessage> messages, List<ToolDef> tools,
-            AgentRunner.StreamingCallbacks cb, Integer maxTokens, String thinkingMode, String channelType,
+    private static LlmProvider.@Nullable StreamAccumulator streamFirstRoundWithRetry(
+            LlmProvider primary, String effectiveModelIdForCall, List<ChatMessage> messages,
+            @Nullable List<ToolDef> tools,
+            AgentRunner.StreamingCallbacks cb, @Nullable Integer maxTokens,
+            @Nullable String thinkingMode, @Nullable String channelType,
             AtomicBoolean isCancelled, Agent agent) throws InterruptedException {
         var accumulator = primary.chatStreamAccumulate(
                 effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
@@ -410,9 +414,11 @@ final class StreamingAgentRunner {
      * usable transcript results (Whisper failed/timed out) the original 4xx is surfaced unchanged.
      */
     @SuppressWarnings("java:S107") // mirrors streamFirstRoundWithRetry's call surface + audio context
-    private static StreamRound1 streamRound1WithAudioFallback(
-            LlmProvider primary, String effectiveModelId, List<ChatMessage> messages, List<ToolDef> tools,
-            AgentRunner.StreamingCallbacks cb, Integer maxTokens, String thinkingMode, String channelType,
+    private static @Nullable StreamRound1 streamRound1WithAudioFallback(
+            LlmProvider primary, String effectiveModelId, List<ChatMessage> messages,
+            @Nullable List<ToolDef> tools,
+            AgentRunner.StreamingCallbacks cb, @Nullable Integer maxTokens,
+            @Nullable String thinkingMode, @Nullable String channelType,
             AtomicBoolean isCancelled, Agent agent, Conversation conversation,
             AgentPromptPreparer.PreparedPrologue prepared,
             boolean supportsAudio) throws InterruptedException {
@@ -467,9 +473,12 @@ final class StreamingAgentRunner {
     @SuppressWarnings("java:S107") // mirrors the orchestration state of streamLlmLoop
     private static StreamingPostAccumulator runPostAccumulatorToolLoop(LlmProvider.StreamAccumulator accumulator,
                                                                         Agent agent, Conversation conversation,
-                                                                        LlmProvider primary, String channelType,
-                                                                        List<ChatMessage> messages, List<ToolDef> tools,
-                                                                        AgentRunner.StreamingCallbacks cb, String thinkingMode,
+                                                                        LlmProvider primary,
+                                                                        @Nullable String channelType,
+                                                                        List<ChatMessage> messages,
+                                                                        @Nullable List<ToolDef> tools,
+                                                                        AgentRunner.StreamingCallbacks cb,
+                                                                        @Nullable String thinkingMode,
                                                                         AtomicBoolean isCancelled, LatencyTrace trace,
                                                                         LlmProvider.TurnUsage turnUsage,
                                                                         AgentExecutionSink sink) {
@@ -520,8 +529,9 @@ final class StreamingAgentRunner {
      * {@code emitUsageAndComplete} fires {@code cb.onComplete}.
      */
     @SuppressWarnings("java:S107") // Final persist receives every piece of turn state by design
-    private static void finalizeStreamingTurn(String content, boolean replyTruncated, LlmProvider.TurnUsage turnUsage,
-                                               ModelInfo modelInfo, long streamStartMs,
+    private static void finalizeStreamingTurn(String content, boolean replyTruncated,
+                                               LlmProvider.TurnUsage turnUsage,
+                                               @Nullable ModelInfo modelInfo, long streamStartMs,
                                                Agent agent, Conversation conversation, String channelType,
                                                LatencyTrace trace, AgentExecutionSink sink, AgentRunner.StreamingCallbacks cb) {
         // Build usage JSON before persisting so it can be stored alongside the message.

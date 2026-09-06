@@ -7,6 +7,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import utils.HttpKeys;
 
 import java.io.IOException;
@@ -79,7 +80,7 @@ public final class ReplicatePredictions {
 
     /** {@code output} is a result URL string or an array of URL strings — the first, or {@code null}
      *  when absent, JSON-null, or an empty array. Callers that require an output throw on null. */
-    public static String firstOutputUrl(JsonObject prediction) {
+    public static @Nullable String firstOutputUrl(JsonObject prediction) {
         if (!prediction.has(OUTPUT) || prediction.get(OUTPUT).isJsonNull()) return null;
         var output = prediction.get(OUTPUT);
         if (output.isJsonArray()) {
@@ -107,8 +108,8 @@ public final class ReplicatePredictions {
     public static final class ReplicateException extends RuntimeException {
 
         private final int code;
-        private final String statusMessage;
-        private final String body;
+        private final @Nullable String statusMessage;
+        private final @Nullable String body;
 
         ReplicateException(int code, String statusMessage, String body) {
             super("replicate HTTP " + code);
@@ -124,6 +125,13 @@ public final class ReplicatePredictions {
             this.body = null;
         }
 
+        /** Valid only when {@link #isTransport()} — the transport constructor always sets a cause. */
+        public Throwable resolvedCause() {
+            var cause = getCause();
+            if (cause == null) throw new IllegalStateException("not a transport failure");
+            return cause;
+        }
+
         /** True when this wraps a transport (I/O) failure rather than an HTTP-error response. */
         public boolean isTransport() {
             return getCause() != null;
@@ -133,11 +141,11 @@ public final class ReplicatePredictions {
             return code;
         }
 
-        public String statusMessage() {
+        public @Nullable String statusMessage() {
             return statusMessage;
         }
 
-        public String body() {
+        public @Nullable String body() {
             return body;
         }
     }

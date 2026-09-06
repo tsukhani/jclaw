@@ -1,5 +1,7 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The wire protocols the printer tool speaks, in the order
  * {@link PrintDispatcher} tries them.
@@ -43,7 +45,7 @@ public enum PrintProtocol {
     }
 
     /** The protocol advertised under {@code serviceType}, or null if it isn't one of ours. */
-    public static PrintProtocol fromServiceType(String serviceType) {
+    public static @Nullable PrintProtocol fromServiceType(String serviceType) {
         for (var p : values()) {
             if (p.serviceType.equals(serviceType)) {
                 return p;
@@ -53,7 +55,7 @@ public enum PrintProtocol {
     }
 
     /** Parse a caller-supplied protocol name, case-insensitively. Null when unrecognized. */
-    public static PrintProtocol parse(String name) {
+    public static @Nullable PrintProtocol parse(@Nullable String name) {
         if (name == null || name.isBlank()) {
             return null;
         }

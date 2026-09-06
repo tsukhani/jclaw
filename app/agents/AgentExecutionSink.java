@@ -1,6 +1,7 @@
 package agents;
 
 import models.MessageAttachment;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 
 import java.util.List;
@@ -59,7 +60,7 @@ public interface AgentExecutionSink {
      * @param attachments file attachments riding with the message; may be
      *                    {@code null} or empty for a text-only message
      */
-    void appendUserMessage(String content, List<AttachmentService.Input> attachments);
+    void appendUserMessage(String content, @Nullable List<AttachmentService.Input> attachments);
 
     /**
      * Persist an assistant turn with all optional metadata. Other
@@ -73,8 +74,9 @@ public interface AgentExecutionSink {
      * @param reasoning model-reported reasoning trace, or {@code null}
      * @param truncated true if the model hit {@code finish_reason=length}
      */
-    void appendAssistantMessage(String content, String toolCalls, String usageJson,
-                                String reasoning, boolean truncated);
+    void appendAssistantMessage(@Nullable String content, @Nullable String toolCalls,
+                                @Nullable String usageJson, @Nullable String reasoning,
+                                boolean truncated);
 
     /**
      * Convenience overload: assistant turn without usage, reasoning, or truncated.
@@ -82,7 +84,7 @@ public interface AgentExecutionSink {
      * @param content   assistant text
      * @param toolCalls JSON-encoded tool-call list, or {@code null}
      */
-    default void appendAssistantMessage(String content, String toolCalls) {
+    default void appendAssistantMessage(@Nullable String content, @Nullable String toolCalls) {
         appendAssistantMessage(content, toolCalls, null, null, false);
     }
 
@@ -100,7 +102,8 @@ public interface AgentExecutionSink {
      *         the live SSE {@code tool_call} frame), empty when nothing was inlined
      */
     default List<MessageAttachment> appendAssistantMessage(
-            String content, String toolCalls, List<GeneratedAttachment> attachments) {
+            @Nullable String content, @Nullable String toolCalls,
+            List<GeneratedAttachment> attachments) {
         appendAssistantMessage(content, toolCalls);
         return List.of();
     }
@@ -115,7 +118,8 @@ public interface AgentExecutionSink {
      * @return the persisted placeholder {@link MessageAttachment} (so the caller can surface it on the
      *         live SSE {@code tool_call} frame), or {@code null} otherwise
      */
-    default MessageAttachment appendVideoPlaceholder(String content, String toolCalls, ToolRegistry.VideoJobRef videoJob) {
+    default @Nullable MessageAttachment appendVideoPlaceholder(@Nullable String content,
+            @Nullable String toolCalls, ToolRegistry.VideoJobRef videoJob) {
         appendAssistantMessage(content, toolCalls);
         return null;
     }
@@ -132,7 +136,8 @@ public interface AgentExecutionSink {
      *                       rendering; {@code null} for tools that don't
      *                       produce one
      */
-    void appendToolResult(String toolCallId, String result, String structuredJson);
+    void appendToolResult(@Nullable String toolCallId, String result,
+                          @Nullable String structuredJson);
 
     /**
      * JCLAW-883: note whether the registry actually dispatched the call behind
@@ -147,7 +152,7 @@ public interface AgentExecutionSink {
      * @param toolCallId id correlating with the {@code tool_calls} entry
      * @param outcome    whether a tool ran, and if not, why not
      */
-    default void noteToolOutcome(String toolCallId, ToolRegistry.ToolResult.Outcome outcome) {}
+    default void noteToolOutcome(@Nullable String toolCallId, ToolRegistry.ToolResult.Outcome outcome) {}
 
     /**
      * Convenience overload: tool result with no structured payload.
@@ -156,7 +161,7 @@ public interface AgentExecutionSink {
      *                   turn's {@code tool_calls} entry
      * @param result     plain-text result body
      */
-    default void appendToolResult(String toolCallId, String result) {
+    default void appendToolResult(@Nullable String toolCallId, String result) {
         appendToolResult(toolCallId, result, null);
     }
 

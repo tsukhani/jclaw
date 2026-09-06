@@ -10,6 +10,7 @@ import models.MessageRole;
 import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
+import org.jspecify.annotations.Nullable;
 import utils.GsonHolder;
 
 import java.util.LinkedHashMap;
@@ -112,7 +113,7 @@ public final class DeliveryDispatcher {
      *              Slack: channel id ({@code Cxxxx}). WhatsApp: e.164 phone.
      * @param text    UTF-8 message body. Channel-specific formatting limits apply.
      */
-    public static DispatchResult dispatch(Agent agent, String channelType, String target, String text) {
+    public static DispatchResult dispatch(Agent agent, String channelType, @Nullable String target, String text) {
         if (channelType == null || channelType.isBlank()) {
             return DispatchResult.unsupported("(null)");
         }

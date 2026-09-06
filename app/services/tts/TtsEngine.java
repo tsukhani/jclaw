@@ -1,5 +1,7 @@
 package services.tts;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Optional;
 
 /**
@@ -36,7 +38,7 @@ public enum TtsEngine {
     public String id() { return id; }
     public String displayName() { return displayName; }
 
-    public static Optional<TtsEngine> byId(String id) {
+    public static Optional<TtsEngine> byId(@Nullable String id) {
         if (id == null) return Optional.empty();
         for (var e : values()) {
             if (e.id.equals(id)) return Optional.of(e);
@@ -46,7 +48,7 @@ public enum TtsEngine {
 
     /** Resolve a config value to an engine, falling back to {@link #DEFAULT}
      *  for null/blank/unknown so a stale or empty key never breaks read-aloud. */
-    public static TtsEngine fromConfigOrDefault(String id) {
+    public static TtsEngine fromConfigOrDefault(@Nullable String id) {
         return byId(id).orElse(DEFAULT);
     }
 }

@@ -5,6 +5,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.LocalSidecarDaemon;
 import utils.HttpFactories;
@@ -35,20 +36,21 @@ public class LocalImageGenerationClient implements ImageGenerationService {
 
     private final OkHttpClient client;
     /** Non-null only in tests — bypasses the sidecar manager and points at MockWebServer. */
-    private final String baseUrlOverride;
+    private final @Nullable String baseUrlOverride;
 
     public LocalImageGenerationClient() {
         this(null, HttpFactories.llmSingleShot());
     }
 
     /** Test seam — inject a base URL (e.g. MockWebServer) and client, skipping the real sidecar. */
-    public LocalImageGenerationClient(String baseUrl, OkHttpClient client) {
+    public LocalImageGenerationClient(@Nullable String baseUrl, OkHttpClient client) {
         this.baseUrlOverride = baseUrl;
         this.client = client;
     }
 
     @Override
-    public GeneratedImage generate(String prompt, String model, Integer width, Integer height) {
+    public GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                   @Nullable Integer height) {
         return generate(prompt, model, width, height, null);
     }
 
@@ -59,8 +61,9 @@ public class LocalImageGenerationClient implements ImageGenerationService {
      * plain text-to-image.
      */
     @Override
-    public GeneratedImage generate(String prompt, String model, Integer width, Integer height,
-                                   ReferenceImage referenceImage) {
+    public GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                   @Nullable Integer height,
+                                   @Nullable ReferenceImage referenceImage) {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
@@ -101,7 +104,7 @@ public class LocalImageGenerationClient implements ImageGenerationService {
         }
     }
 
-    private static String shortName(String repo) {
+    private static String shortName(@Nullable String repo) {
         if (repo == null || repo.isBlank()) return "flux";
         int slash = repo.lastIndexOf('/');
         return slash >= 0 ? repo.substring(slash + 1) : repo;

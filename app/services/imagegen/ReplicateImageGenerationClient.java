@@ -3,6 +3,7 @@ package services.imagegen;
 import com.google.gson.JsonObject;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.ReplicatePredictions;
 import utils.HttpFactories;
@@ -45,7 +46,8 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
     }
 
     @Override
-    public GeneratedImage generate(String prompt, String model, Integer width, Integer height) {
+    public GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                   @Nullable Integer height) {
         return generate(prompt, model, width, height, null);
     }
 
@@ -57,8 +59,9 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
      * a text-to-image model ignores the field. Null reference = text-to-image as before.
      */
     @Override
-    public GeneratedImage generate(String prompt, String model, Integer width, Integer height,
-                                   ReferenceImage referenceImage) {
+    public GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                   @Nullable Integer height,
+                                   @Nullable ReferenceImage referenceImage) {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
@@ -70,7 +73,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
         if (apiKey == null || apiKey.isBlank()) {
             throw new ImageGenerationException("provider.replicate.apiKey is not configured");
         }
-        var effModel = Strings.firstNonBlank(model, ConfigService.get("imagegen.replicate.model"), DEFAULT_MODEL);
+        var effModel = Strings.firstNonBlankOr(DEFAULT_MODEL, model, ConfigService.get("imagegen.replicate.model"));
 
         var prediction = createPrediction(Strings.trimTrailingSlash(baseUrl), effModel, apiKey, prompt, width, height, referenceImage);
         var imageUrl = resolveOutputUrl(prediction, apiKey);
@@ -78,7 +81,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
     }
 
     private JsonObject createPrediction(String baseUrl, String model, String apiKey, String prompt,
-            Integer width, Integer height, ReferenceImage referenceImage) {
+            @Nullable Integer width, @Nullable Integer height, @Nullable ReferenceImage referenceImage) {
         var input = new JsonObject();
         input.addProperty("prompt", prompt);
         // Flux models on Replicate take an aspect_ratio string, not raw pixels (those need
@@ -97,9 +100,9 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             return predictions.create(baseUrl, model, apiKey, input, true); // Prefer: wait — run inline ~60s
         } catch (ReplicatePredictions.ReplicateException e) {
             if (e.isTransport()) {
-                throw new ImageGenerationException("replicate create transport failed: " + e.getCause().getMessage(), e.getCause());
+                throw new ImageGenerationException("replicate create transport failed: " + e.resolvedCause().getMessage(), e.resolvedCause());
             }
-            var body = e.body();
+            var body = e.body() == null ? "" : e.body();
             throw new ImageGenerationException("replicate create failed: HTTP %d %s%s".formatted(
                     e.code(), e.statusMessage(), body.isEmpty() ? "" : (" — " + Strings.truncate(body, Strings.ERROR_SNIPPET_MAX_CHARS))));
         }
@@ -154,7 +157,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
             return predictions.get(getUrl, apiKey);
         } catch (ReplicatePredictions.ReplicateException e) {
             if (e.isTransport()) {
-                throw new ImageGenerationException("replicate poll transport failed: " + e.getCause().getMessage(), e.getCause());
+                throw new ImageGenerationException("replicate poll transport failed: " + e.resolvedCause().getMessage(), e.resolvedCause());
             }
             throw new ImageGenerationException("replicate poll failed: HTTP " + e.code());
         }
@@ -185,7 +188,7 @@ public class ReplicateImageGenerationClient implements ImageGenerationService {
 
     /** Map the tool's width/height back to a Flux {@code aspect_ratio} label (landscape/portrait/square);
      *  null when dims are unset, so the model keeps its own default. */
-    private static String aspectRatioFor(Integer width, Integer height) {
+    private static @Nullable String aspectRatioFor(@Nullable Integer width, @Nullable Integer height) {
         if (width == null || height == null) return null;
         if (width > height) return "16:9";
         if (height > width) return "9:16";

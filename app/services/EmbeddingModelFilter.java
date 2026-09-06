@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.regex.Pattern;
 
 /**
@@ -39,7 +41,7 @@ public final class EmbeddingModelFilter {
      * Return true if the id matches a known non-chat naming pattern and
      * should be hidden from the discover-models flow.
      */
-    public static boolean isLikelyNonChat(String modelId) {
+    public static boolean isLikelyNonChat(@Nullable String modelId) {
         if (modelId == null || modelId.isBlank()) return false;
         var lower = modelId.toLowerCase();
         var lastSegment = lower.contains("/")

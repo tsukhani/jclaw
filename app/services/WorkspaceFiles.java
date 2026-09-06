@@ -1,6 +1,7 @@
 package services;
 
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.cache.Cache;
 import play.cache.CacheConfig;
@@ -133,7 +134,7 @@ public final class WorkspaceFiles {
      * @return the canonical absolute path inside {@code root}, or
      *         {@code null} on escape / missing root / I/O error
      */
-    public static Path resolveContained(Path root, String relativePath) {
+    public static @Nullable Path resolveContained(Path root, String relativePath) {
         return WorkspacePathGuard.resolveContained(root, relativePath);
     }
 
@@ -163,7 +164,7 @@ public final class WorkspaceFiles {
      * @param relativePath path relative to that workspace
      * @return the canonical absolute path, or {@code null} on escape
      */
-    public static Path resolveWorkspacePath(String agentName, String relativePath) {
+    public static @Nullable Path resolveWorkspacePath(String agentName, String relativePath) {
         return resolveContained(workspacePath(agentName), relativePath);
     }
 
@@ -352,7 +353,7 @@ public final class WorkspaceFiles {
         }
     }
 
-    public static String readWorkspaceFile(String agentName, String filename) {
+    public static @Nullable String readWorkspaceFile(String agentName, String filename) {
         var cacheKey = agentName + "/" + filename;
         var cached = fileCache.getIfPresent(cacheKey);
         if (cached != null) return cached;
@@ -401,9 +402,9 @@ public final class WorkspaceFiles {
      * the old name also closes the reuse-leak: a new agent taking it later
      * materialises a fresh, empty workspace via {@link #createWorkspace}.
      */
-    static void moveWorkspaceDirectory(Path src, Path dest) {
+    static void moveWorkspaceDirectory(@Nullable Path src, Path dest) {
         try {
-            if (!Files.exists(src)) return;          // workspace never materialised
+            if (src == null || !Files.exists(src)) return;   // workspace never materialised
             if (Files.exists(dest)) {
                 throw new IllegalStateException("workspace target already exists: " + dest);
             }

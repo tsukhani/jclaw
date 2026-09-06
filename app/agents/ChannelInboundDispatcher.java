@@ -5,6 +5,7 @@ import channels.ChannelStreamingSink;
 import models.Agent;
 import models.ChannelType;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.ConversationQueue;
 import services.ConversationService;
@@ -173,7 +174,7 @@ final class ChannelInboundDispatcher {
             Agent agent, String channelType, String peerId, String text,
             Function<Long, ChannelStreamingSink> sinkFactory,
             List<AttachmentService.Input> attachments,
-            String chatType) {
+            @Nullable String chatType) {
         // JCLAW-26: intercept slash commands before the LLM round. Reuse the
         // existing sink machinery to deliver the canned response — an unused
         // sink's seal() path falls through to the per-binding TelegramChannel's

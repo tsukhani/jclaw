@@ -3,6 +3,7 @@ package services;
 import com.google.gson.JsonObject;
 import models.Agent;
 import models.Task;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 
@@ -117,7 +118,7 @@ public final class TaskWriteService {
      * cannot take the array form: {@code JsonArray.getAsString()} throws for any size but
      * one, so a two-tool allow-list 500'd instead of persisting.
      */
-    public static String readToolNameList(JsonObject body, String key) {
+    public static @Nullable String readToolNameList(JsonObject body, String key) {
         if (!body.has(key)) return null;
         var el = body.get(key);
         if (el.isJsonNull()) return null;
@@ -125,7 +126,7 @@ public final class TaskWriteService {
         return readOptionalString(body, key);
     }
 
-    public static String readOptionalString(JsonObject body, String key) {
+    public static @Nullable String readOptionalString(JsonObject body, String key) {
         if (!body.has(key)) return null;
         var el = body.get(key);
         if (el.isJsonNull()) return null;

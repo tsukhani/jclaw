@@ -154,7 +154,7 @@ public final class TransientErrorClassifier {
         return TRANSIENT_EXCEPTION_CLASSES.contains(t.getClass().getSimpleName());
     }
 
-    private static boolean matchesMessage(String message) {
+    private static boolean matchesMessage(@Nullable String message) {
         if (message == null || message.isEmpty()) return false;
         for (var p : TRANSIENT_PATTERNS) {
             if (p.matcher(message).find()) return true;

@@ -8,6 +8,7 @@ import models.Agent;
 import models.Conversation;
 import models.Message;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.Tx;
 import utils.GsonHolder;
 import utils.JsonArgs;
@@ -165,9 +166,9 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
     }
 
     /** Parsed-args bundle. {@code error} non-null short-circuits execute. */
-    private record ParsedArgs(String error, long runId, int limit, Long beforeMessageId) {
+    private record ParsedArgs(@Nullable String error, long runId, int limit, @Nullable Long beforeMessageId) {
         static ParsedArgs fail(String msg) { return new ParsedArgs(msg, 0L, 0, null); }
-        static ParsedArgs ok(long runId, int limit, Long beforeMessageId) {
+        static ParsedArgs ok(long runId, int limit, @Nullable Long beforeMessageId) {
             return new ParsedArgs(null, runId, limit, beforeMessageId);
         }
     }
@@ -201,7 +202,7 @@ public class ConversationHistoryTool implements ToolRegistry.Tool {
 
     /** Build the JSON payload. Must be called inside an active Tx. */
     private static String renderHistoryJson(SubagentRun run, Conversation childConv,
-                                             int limit, Long beforeMessageId) {
+                                             int limit, @Nullable Long beforeMessageId) {
         // Fetch one row beyond the requested limit so we can set {@code
         // has_more} truthfully without a second count query.
         int fetchLimit = limit + 1;

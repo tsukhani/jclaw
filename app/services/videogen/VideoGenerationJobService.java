@@ -7,6 +7,7 @@ import models.VideoGenerationJob;
 import models.VideoGenerationJob.State;
 import okhttp3.HttpUrl;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.AttachmentService;
 import services.ConfigService;
@@ -46,7 +47,7 @@ public final class VideoGenerationJobService {
      * always returned so the caller (the {@code generate_video} tool, JCLAW-235) can link a placeholder
      * attachment to it regardless.
      */
-    public static VideoGenerationJob submit(Long agentId, Long conversationId, VideoGenRequest request) {
+    public static VideoGenerationJob submit(Long agentId, @Nullable Long conversationId, VideoGenRequest request) {
         var provider = ConfigService.get("videogen.provider");
         var job = new VideoGenerationJob();
         // Resolved rather than stored raw (JCLAW-984): the columns are foreign keys now, so an
@@ -122,7 +123,7 @@ public final class VideoGenerationJobService {
      * contract, and losing the bytes shouldn't lose the job. A succeeded job with no placeholder (e.g.
      * one submitted outside the tool flow) simply records completion.
      */
-    private static void completeSucceeded(VideoGenerationJob job, String resultUrl) {
+    private static void completeSucceeded(VideoGenerationJob job, @Nullable String resultUrl) {
         job.state = State.SUCCEEDED;
         // A finished job is 100% — normalize across providers: cloud reports null progress (SV-1) and the
         // local MLX hook caps RUNNING at 95 (reserving headroom for the decode/mux phase), so the terminal
@@ -210,7 +211,7 @@ public final class VideoGenerationJobService {
         return Duration.between(since, Instant.now()).toMinutes() >= maxMinutes;
     }
 
-    private static VideoGenerationJob fail(VideoGenerationJob job, String message) {
+    private static VideoGenerationJob fail(VideoGenerationJob job, @Nullable String message) {
         job.state = State.FAILED;
         job.errorMessage = message;
         job.completedAt = Instant.now();

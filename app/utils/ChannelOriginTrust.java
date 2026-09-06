@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * JCLAW-777: the single source of truth for whether an agent turn originates from
  * the operator's own trusted surface or from an untrusted external channel peer.
@@ -49,7 +51,7 @@ public final class ChannelOriginTrust {
      * @param origin the conversation's {@code channelType}, or {@code null}/blank when
      *               no origin was recorded for the turn
      */
-    public static Trust classify(String origin) {
+    public static Trust classify(@Nullable String origin) {
         if (origin == null || origin.isBlank()) {
             return Trust.UNKNOWN;
         }
@@ -64,7 +66,7 @@ public final class ChannelOriginTrust {
      * @param origin the conversation's {@code channelType}, or {@code null} when there
      *               is no conversation context
      */
-    public static boolean isOperatorOrigin(String origin) {
+    public static boolean isOperatorOrigin(@Nullable String origin) {
         return classify(origin) == Trust.OPERATOR;
     }
 }

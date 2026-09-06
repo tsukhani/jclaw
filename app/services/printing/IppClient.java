@@ -16,6 +16,7 @@ import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okio.BufferedSink;
+import org.jspecify.annotations.Nullable;
 import utils.HttpFactories;
 
 import java.io.ByteArrayOutputStream;
@@ -61,7 +62,7 @@ public final class IppClient {
     private static final AtomicInteger REQUEST_ID = new AtomicInteger(1);
 
     /** Outcome of a Print-Job. */
-    public record PrintResult(boolean accepted, Integer jobId, String state, String message) {}
+    public record PrintResult(boolean accepted, Integer jobId, @Nullable String state, String message) {}
 
     private IppClient() {}
 
@@ -225,7 +226,7 @@ public final class IppClient {
      * @param types     the raw {@code pwg-raster-document-type-supported} keywords
      */
     public record RasterCapabilities(int dpi, boolean grayscale, Set<String> types,
-                                     String mediaReady) {
+                                     @Nullable String mediaReady) {
         /** What to assume when the printer will not say. */
         public static final RasterCapabilities UNKNOWN =
                 new RasterCapabilities(0, false, Set.of(), null);
@@ -285,7 +286,7 @@ public final class IppClient {
      * @param defaultValue what it uses when a job omits the attribute, or null
      */
     public record JobOption(String name, String label, List<OptionValue> values,
-                            Integer min, Integer max, String defaultValue) {
+                            @Nullable Integer min, @Nullable Integer max, @Nullable String defaultValue) {
 
         /** True when this is a number input rather than a select. */
         public boolean isRange() {
@@ -479,7 +480,7 @@ public final class IppClient {
      * this wrong produces an OkHttp "unexpected url" that reads like a malformed
      * printer address rather than a client bug.
      */
-    private static IppPacket exchange(String printerUri, IppPacket packet, byte[] document)
+    private static IppPacket exchange(String printerUri, IppPacket packet, byte @Nullable [] document)
             throws IOException {
         var httpUrl = printerUri.replaceFirst("^ipps://", "https://").replaceFirst("^ipp://", "http://");
 

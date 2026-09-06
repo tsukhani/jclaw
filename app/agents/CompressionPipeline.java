@@ -5,6 +5,7 @@ import llm.TokenUsageEstimator;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.CompressionMetrics;
 import services.ConfigService;
@@ -58,7 +59,8 @@ public final class CompressionPipeline {
     private static final String CCR_RETRIEVE_TOOL = "ccr_retrieve";
 
     /** Enabled content types, the text compressor's aggressiveness, and the metrics agent id + channel. */
-    private record CompressionSettings(Set<ContentType> types, double targetRatio, String agentId, String channel) {}
+    private record CompressionSettings(Set<ContentType> types, double targetRatio,
+                                       @Nullable String agentId, @Nullable String channel) {}
 
     /** The compressor for a content type. TEXT/LOG share the statistical compressor, tuned per agent. */
     private static ContentCompressor compressorFor(ContentType type, double targetRatio) {

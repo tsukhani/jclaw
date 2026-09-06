@@ -2,6 +2,7 @@ package services.sidecar;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import org.jspecify.annotations.Nullable;
 import utils.HttpFactories;
 import utils.HttpKeys;
 
@@ -36,10 +37,10 @@ public abstract class SidecarHttpClient {
 
     protected static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
 
-    protected final String baseUrlOverride;
+    protected final @Nullable String baseUrlOverride;
     protected final OkHttpClient client;
 
-    protected SidecarHttpClient(String baseUrlOverride, OkHttpClient client) {
+    protected SidecarHttpClient(@Nullable String baseUrlOverride, OkHttpClient client) {
         this.baseUrlOverride = baseUrlOverride;
         this.client = client;
     }
@@ -67,7 +68,7 @@ public abstract class SidecarHttpClient {
     }
 
     /** Collapse an error body to a single ≤300-char line for exception messages. */
-    protected static String truncate(String s) {
+    protected static String truncate(@Nullable String s) {
         if (s == null) return "";
         var oneLine = s.replaceAll("\\s+", " ").strip();
         return oneLine.length() > 300 ? oneLine.substring(0, 300) + "…" : oneLine;

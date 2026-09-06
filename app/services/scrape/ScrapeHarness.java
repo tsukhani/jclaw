@@ -1,6 +1,7 @@
 package services.scrape;
 
 import okhttp3.OkHttpClient;
+import org.jspecify.annotations.Nullable;
 import tools.WebScrapeTool;
 import tools.scrape.ImpersonatedFetcher;
 import tools.scrape.RenderedFetcher;
@@ -180,10 +181,10 @@ public final class ScrapeHarness {
      *  <p>{@code nextRung} is what the aggregate cannot say: which rung would have to
      *  exist for this failure to become a success. {@code prerender} counts origins that
      *  would serve a declared crawler more than they served us. */
-    public record Result(String url, String stratum, String vendor, String outcome,
-                         String rendering, boolean ok, ScrapeReason reason,
+    public record Result(@Nullable String url, @Nullable String stratum, @Nullable String vendor, @Nullable String outcome,
+                         @Nullable String rendering, boolean ok, ScrapeReason reason,
                          ScrapeRung nextRung, boolean prerender,
-                         int chars, boolean titleSeen, long ms, String detail) {}
+                         int chars, boolean titleSeen, long ms, @Nullable String detail) {}
 
     public record Score(int total, int ok, double rate) {}
 
@@ -303,7 +304,7 @@ public final class ScrapeHarness {
         }
 
         boolean ok = reason == ScrapeReason.OK;
-        var detail = obs.failed() ? obs.error() : text;
+        var detail = obs.failed() ? obs.resolvedError() : text;
         return new Result(e.url(), e.stratum(), e.vendor(), e.outcome(), e.rendering(),
                 ok, reason, BlockClassifier.nextRung(reason, attempted),
                 BlockClassifier.hasPrerenderMarkers(obs),

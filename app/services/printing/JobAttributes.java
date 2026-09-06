@@ -2,6 +2,7 @@ package services.printing;
 
 import com.hp.jipp.model.PrintColorMode;
 import com.hp.jipp.model.Sides;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +24,7 @@ import java.util.List;
  * @param media     {@code media} keyword or name — a size ({@code iso_a4_210x297mm})
  *                  or, on many printers, an input tray name. Null for the default
  */
-public record JobAttributes(String sides, String colorMode, String media) {
+public record JobAttributes(@Nullable String sides, @Nullable String colorMode, @Nullable String media) {
 
     /** Nothing specified — the printer's own defaults apply throughout. */
     public static final JobAttributes DEFAULTS = new JobAttributes(null, null, null);
@@ -82,7 +83,7 @@ public record JobAttributes(String sides, String colorMode, String media) {
      *
      * @return the reason it is invalid, or null when it is fine
      */
-    public String validationError() {
+    public @Nullable String validationError() {
         if (sides != null && !SIDES_VALUES.contains(sides)) {
             return "invalid 'sides' value '" + sides + "'; expected one of " + SIDES_VALUES;
         }

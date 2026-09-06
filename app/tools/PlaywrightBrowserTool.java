@@ -10,6 +10,7 @@ import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.options.LoadState;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
 import utils.SsrfGuard;
@@ -98,7 +99,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      */
     private static final class SessionHolder {
         final ReentrantLock lock = new ReentrantLock();
-        BrowserSession session;
+        @Nullable BrowserSession session;
         volatile long lastUsed = System.currentTimeMillis();
         boolean removed;
     }

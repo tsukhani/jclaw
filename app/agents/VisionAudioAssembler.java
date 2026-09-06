@@ -5,6 +5,7 @@ import models.Agent;
 import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.AttachmentService;
 import services.EventLogger;
@@ -547,7 +548,8 @@ public final class VisionAudioAssembler {
      * text", not "is the base a String".
      */
     @SuppressWarnings("unchecked")
-    private static ChatMessage spliceVideoParts(ChatMessage base, List<Map<String, Object>> videoParts) {
+    private static ChatMessage spliceVideoParts(ChatMessage base,
+                                                @Nullable List<Map<String, Object>> videoParts) {
         if (videoParts == null || videoParts.isEmpty()) return base;
 
         var parts = new ArrayList<Map<String, Object>>();

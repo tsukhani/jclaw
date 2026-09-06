@@ -6,6 +6,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.LocalSidecarDaemon;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -40,7 +41,7 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
 
     private final String model;
     private final OkHttpClient client;
-    private final String baseUrlOverride; // tests inject a mock server; null in prod -> resolve dynamically
+    private final @Nullable String baseUrlOverride; // tests inject a mock server; null in prod -> resolve dynamically
 
     public LocalVideoGenerationClient(String model) {
         this(model, HttpFactories.general(), null);
@@ -48,7 +49,7 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
 
     /** Test seam: {@code baseUrlOverride} points at a mock server so no real {@code uv} sidecar spawns.
      *  Public only because jclaw's tests live in the default package and can't reach package-private ctors. */
-    public LocalVideoGenerationClient(String model, OkHttpClient client, String baseUrlOverride) {
+    public LocalVideoGenerationClient(String model, OkHttpClient client, @Nullable String baseUrlOverride) {
         this.model = model;
         this.client = client;
         this.baseUrlOverride = baseUrlOverride;
@@ -146,7 +147,7 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
 
     /** Map the tool's aspect_ratio enum to a base width x height (~480p short side); null = let the
      *  sidecar use its default landscape resolution. */
-    private static int[] dimsForAspect(String aspect) {
+    private static int @Nullable [] dimsForAspect(@Nullable String aspect) {
         if (aspect == null) return null;
         return switch (aspect) {
             case "16:9" -> new int[]{832, 480}; // landscape

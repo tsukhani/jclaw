@@ -7,6 +7,7 @@ import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import jobs.DbSchedulerBootstrapJob;
 import models.Task;
+import org.jspecify.annotations.Nullable;
 import play.db.DB;
 
 import java.sql.SQLException;
@@ -91,7 +92,7 @@ public final class TaskSchedulingService {
      * class lives in the default package and reaches in through
      * a {@code services.TaskSchedulingServiceTestHooks} bridge.
      */
-    static void setSchedulerClientSupplierForTest(Supplier<SchedulerClient> supplier) {
+    static void setSchedulerClientSupplierForTest(@Nullable Supplier<SchedulerClient> supplier) {
         clientSupplier = supplier != null
                 ? supplier
                 : DbSchedulerBootstrapJob::scheduler;
@@ -215,7 +216,7 @@ public final class TaskSchedulingService {
 
     // --- Internal ---
 
-    private static SchedulerClient client() {
+    private static @Nullable SchedulerClient client() {
         SchedulerClient client = clientSupplier.get();
         if (client == null) {
             EventLogger.warn("task", null, null,
@@ -225,7 +226,7 @@ public final class TaskSchedulingService {
         return client;
     }
 
-    private static Instant computeFirstFire(Task task) {
+    private static @Nullable Instant computeFirstFire(Task task) {
         return switch (task.type) {
             case IMMEDIATE -> Instant.now();
             case SCHEDULED -> computeScheduledFire(task);
@@ -245,7 +246,7 @@ public final class TaskSchedulingService {
         return task.scheduledAt;
     }
 
-    private static Instant computeIntervalFirstFire(Task task) {
+    private static @Nullable Instant computeIntervalFirstFire(Task task) {
         if (task.intervalSeconds == null || task.intervalSeconds <= 0) {
             EventLogger.warn("task",
                     task.agent != null ? task.agent.name : null, null,
@@ -259,7 +260,7 @@ public final class TaskSchedulingService {
         return Instant.now();
     }
 
-    private static Instant computeCronFirstFire(Task task) {
+    private static @Nullable Instant computeCronFirstFire(Task task) {
         if (task.cronExpression == null || task.cronExpression.isBlank()) {
             EventLogger.warn("task",
                     task.agent != null ? task.agent.name : null, null,

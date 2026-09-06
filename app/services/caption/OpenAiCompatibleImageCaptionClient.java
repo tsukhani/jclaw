@@ -8,6 +8,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.AttachmentService;
 import services.ConfigService;
@@ -44,14 +45,14 @@ public class OpenAiCompatibleImageCaptionClient extends OpenAiCompatibleClientBa
     /** OpenAI chat-completions message field name (request part + response parse). */
     private static final String CONTENT = "content";
 
-    private final String defaultModel;
+    private final @Nullable String defaultModel;
 
-    public OpenAiCompatibleImageCaptionClient(String providerName, String defaultModel) {
+    public OpenAiCompatibleImageCaptionClient(String providerName, @Nullable String defaultModel) {
         this(providerName, defaultModel, HttpFactories.llmSingleShot());
     }
 
     /** Test seam — inject a MockWebServer-backed client. */
-    public OpenAiCompatibleImageCaptionClient(String providerName, String defaultModel, OkHttpClient client) {
+    public OpenAiCompatibleImageCaptionClient(String providerName, @Nullable String defaultModel, OkHttpClient client) {
         super(providerName, client);
         this.defaultModel = defaultModel;
     }

@@ -1,5 +1,7 @@
 package tools;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,15 +24,27 @@ final class FsSupport {
 
     static final long MAX_FILE_READ_BYTES = 1_048_576; // 1MB
 
-    record EditResult(String result, String error, String note) {
+    record EditResult(@Nullable String result, @Nullable String error, @Nullable String note) {
         static EditResult ok(String result) { return new EditResult(result, null, null); }
         static EditResult okWithNote(String result, String note) { return new EditResult(result, null, note); }
         static EditResult err(String error) { return new EditResult(null, error, null); }
+
+        /** Valid only once {@link #error()} has been checked null — {@code err()} carries no result. */
+        String resolvedResult() {
+            if (result == null) throw new IllegalStateException("edit failed: " + error);
+            return result;
+        }
     }
 
-    record LoadedFile(String content, String error) {
+    record LoadedFile(@Nullable String content, @Nullable String error) {
         static LoadedFile ok(String content) { return new LoadedFile(content, null); }
         static LoadedFile err(String error) { return new LoadedFile(null, error); }
+
+        /** Valid only once {@link #error()} has been checked null — {@code err()} carries no content. */
+        String resolvedContent() {
+            if (content == null) throw new IllegalStateException("load failed: " + error);
+            return content;
+        }
     }
 
     /**

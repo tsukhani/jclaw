@@ -9,6 +9,7 @@ import models.Conversation;
 import models.SlackBinding;
 import models.TelegramBinding;
 import models.ToolApprovalGrant;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
@@ -133,7 +134,7 @@ public final class DangerousActionGate {
 
     /** A fire in progress. Bound-with-null-channel is a fire whose Task recorded no origin —
      *  which the unbound (no fire at all) state must not be confused with. */
-    private record FireScope(String channel) {}
+    private record FireScope(@Nullable String channel) {}
 
     /**
      * True while this thread is serving a turn the channel's own access policy proved came
@@ -185,7 +186,7 @@ public final class DangerousActionGate {
      * ({@link #effectiveOrigin}); a null {@code origin} classifies as {@code UNKNOWN} and
      * the off-channel fallback fails closed on it.
      */
-    public static <T> T withFireOrigin(String origin, Supplier<T> body) {
+    public static <T> T withFireOrigin(@Nullable String origin, Supplier<T> body) {
         var previous = FIRE.get();
         FIRE.set(new FireScope(origin));
         try {
@@ -215,7 +216,8 @@ public final class DangerousActionGate {
      * @return {@link Decision#PROCEED} to run the tool, {@link Decision#ABORT}
      *         to skip it and return a denial result to the model
      */
-    public static Decision guard(Agent agent, Long conversationId, String toolName, String argsJson) {
+    public static Decision guard(Agent agent, @Nullable Long conversationId,
+                                 @Nullable String toolName, String argsJson) {
         if (agent == null || !ToolRegistry.isDangerous(toolName, argsJson)) {
             return Decision.PROCEED;
         }
@@ -240,8 +242,8 @@ public final class DangerousActionGate {
      * @param toolName        the action the harness wants to run
      * @param argsJson        the harness's request payload, surfaced in the prompt
      */
-    public static Decision guardHarnessPermission(Agent agent, Long conversationId,
-                                                  String toolName, String argsJson) {
+    public static Decision guardHarnessPermission(Agent agent, @Nullable Long conversationId,
+                                                  String toolName, @Nullable String argsJson) {
         if (agent == null) {
             return Decision.PROCEED;
         }
@@ -255,7 +257,8 @@ public final class DangerousActionGate {
      * policy. Callers decide <em>whether</em> an action reaches this point;
      * arbitration decides how it is resolved.
      */
-    private static Decision arbitrate(Agent agent, Long conversationId, String toolName, String argsJson) {
+    private static Decision arbitrate(Agent agent, @Nullable Long conversationId,
+                                      @Nullable String toolName, @Nullable String argsJson) {
         // A standing grant (in-process session set or the JCLAW-385 persisted
         // always-store) is an explicit operator approval for this (agent, tool)
         // — honor it on ANY channel without prompting.
@@ -326,8 +329,9 @@ public final class DangerousActionGate {
      * {@code ask} routes a confirmation to the agent's bound Telegram DM (fail-closed
      * if there is none).
      */
-    private static Decision offChannelDecision(Agent agent, String toolName, String argsJson,
-                                              String channelType, ChannelOriginTrust.Trust trust) {
+    private static Decision offChannelDecision(Agent agent, @Nullable String toolName, @Nullable String argsJson,
+                                              @Nullable String channelType,
+                                              ChannelOriginTrust.Trust trust) {
         var chan = channelType == null ? "none" : channelType;
         var policy = ConfigService.get(CFG_OFF_CHANNEL_POLICY, DEFAULT_OFF_CHANNEL_POLICY);
 
@@ -370,7 +374,8 @@ public final class DangerousActionGate {
      * binding there is nobody who can confirm, so it fails closed (ABORT) rather
      * than run ungated. Reuses the same blocking prompt/await as the Telegram path.
      */
-    private static Decision askViaTelegram(Agent agent, String toolName, String argsJson, String chan) {
+    private static Decision askViaTelegram(Agent agent, @Nullable String toolName, @Nullable String argsJson,
+                                           String chan) {
         var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
         if (binding != null && binding.enabled) {
             EventLogger.info(LOG_CATEGORY, agent.name, chan,
@@ -389,7 +394,7 @@ public final class DangerousActionGate {
      * (JCLAW-385) covers {@code (agent, toolName)}. The persisted lookup hits
      * the DB, so it runs in its own transaction.
      */
-    private static boolean hasStandingGrant(Agent agent, String toolName) {
+    private static boolean hasStandingGrant(Agent agent, @Nullable String toolName) {
         return GRANTS.contains(grantKey(agent, toolName))
                 || Tx.run(() -> ToolApprovalGrant.exists(agent.id, toolName));
     }
@@ -408,7 +413,7 @@ public final class DangerousActionGate {
      * <p>Public so the task-write path can record the same provenance the gate will later
      * judge a fire of that task by.
      */
-    public static String effectiveOrigin(Long conversationId) {
+    public static @Nullable String effectiveOrigin(@Nullable Long conversationId) {
         var fire = FIRE.get();
         if (fire == null) {
             return conversationChannel(conversationId);
@@ -420,7 +425,7 @@ public final class DangerousActionGate {
     }
 
     /** The conversation's {@code channelType}, or {@code null} when it has none / is gone. */
-    private static String conversationChannel(Long conversationId) {
+    private static @Nullable String conversationChannel(@Nullable Long conversationId) {
         if (conversationId == null) {
             return null;
         }
@@ -431,7 +436,7 @@ public final class DangerousActionGate {
     }
 
     /** The conversation's {@code peerId} (the Slack channel to prompt in), or {@link Optional#empty()}. */
-    private static Optional<String> resolvePeerId(Long conversationId) {
+    private static Optional<String> resolvePeerId(@Nullable Long conversationId) {
         if (conversationId == null) {
             return Optional.empty();
         }
@@ -441,7 +446,7 @@ public final class DangerousActionGate {
         });
     }
 
-    private static Decision promptAndAwait(Agent agent, String toolName, String argsJson,
+    private static Decision promptAndAwait(Agent agent, @Nullable String toolName, @Nullable String argsJson,
                                            TelegramBinding binding) {
         // The bound user's private chat: in a Telegram private chat
         // chat.id == user.id, so the binding's telegramUserId is both the
@@ -480,7 +485,7 @@ public final class DangerousActionGate {
      * user id, and block until the owner taps a button (or it times out). Shares the
      * standing-grant recording and {@link #timeout()} with the Telegram path.
      */
-    private static Decision promptAndAwaitSlack(Agent agent, String toolName, String argsJson,
+    private static Decision promptAndAwaitSlack(Agent agent, @Nullable String toolName, @Nullable String argsJson,
                                                 SlackBinding binding, String channelId) {
         var prompt = buildSlackPrompt(toolName, argsJson);
 
@@ -511,7 +516,8 @@ public final class DangerousActionGate {
     }
 
     /** Record an in-process session grant for {@code (agent, toolName)} and log it. */
-    private static void recordSessionGrant(Agent agent, String toolName, String channelName, String outcomeName) {
+    private static void recordSessionGrant(Agent agent, @Nullable String toolName, String channelName,
+                                           String outcomeName) {
         GRANTS.add(grantKey(agent, toolName));
         EventLogger.info(LOG_CATEGORY, agent.name, channelName,
                 "Dangerous tool '%s' approved (%s) — future calls won't re-prompt"
@@ -522,7 +528,8 @@ public final class DangerousActionGate {
      * Record a session grant AND persist an always-grant (JCLAW-385) so it survives
      * a restart. The upsert is idempotent on the unique {@code (agent, tool)} key.
      */
-    private static void recordAlwaysGrant(Agent agent, String toolName, String channelName, String outcomeName) {
+    private static void recordAlwaysGrant(Agent agent, @Nullable String toolName, String channelName,
+                                          String outcomeName) {
         GRANTS.add(grantKey(agent, toolName));
         Tx.run(() -> ToolApprovalGrant.upsert(agent, toolName));
         EventLogger.info(LOG_CATEGORY, agent.name, channelName,
@@ -535,7 +542,7 @@ public final class DangerousActionGate {
      * by a denial / timeout. Phrased so the model treats it as a hard stop
      * for this action, not a transient error to retry around.
      */
-    public static String abortResult(String toolName) {
+    public static String abortResult(@Nullable String toolName) {
         return ("The user denied (or did not approve in time) the request to run the '%s' action. "
                 + "Do not retry this action. Acknowledge that it was not approved and continue with "
                 + "whatever else you can do without it.").formatted(toolName);
@@ -547,7 +554,7 @@ public final class DangerousActionGate {
      * length-capped so an oversized payload can't blow the 4096-char message
      * budget the keyboard send assumes.
      */
-    private static String buildPrompt(String toolName, String argsJson) {
+    private static String buildPrompt(@Nullable String toolName, @Nullable String argsJson) {
         var args = argsJson == null ? "" : argsJson;
         if (args.length() > 600) {
             args = args.substring(0, 600) + "… (truncated)";
@@ -565,7 +572,7 @@ public final class DangerousActionGate {
      * a fenced code block so backticks/asterisks in them don't format, and are
      * length-capped like {@link #buildPrompt}.
      */
-    private static String buildSlackPrompt(String toolName, String argsJson) {
+    private static String buildSlackPrompt(@Nullable String toolName, @Nullable String argsJson) {
         var args = argsJson == null ? "" : argsJson;
         if (args.length() > 600) {
             args = args.substring(0, 600) + "… (truncated)";
@@ -582,7 +589,7 @@ public final class DangerousActionGate {
      * malformed JSON or a missing/blank field, so the prompt still renders from the
      * raw args alone. Public for direct test coverage.
      */
-    public static String extractWhy(String argsJson) {
+    public static @Nullable String extractWhy(@Nullable String argsJson) {
         if (argsJson == null || argsJson.isBlank()) return null;
         try {
             var obj = JsonParser.parseString(argsJson).getAsJsonObject();
@@ -596,7 +603,7 @@ public final class DangerousActionGate {
         return null;
     }
 
-    private static String grantKey(Agent agent, String toolName) {
+    private static String grantKey(Agent agent, @Nullable String toolName) {
         return agent.id + ":" + toolName;
     }
 

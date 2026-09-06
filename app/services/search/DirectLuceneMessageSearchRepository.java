@@ -18,6 +18,7 @@ import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.search.TermQuery;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.ConfigService;
 import services.EventLogger;
@@ -67,7 +68,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     private record Backfiller(LuceneIndexer.Scope scope, String jpql, String countJpql,
                               Function<Object, Long> id,
                               Function<Object, String> content,
-                              Function<Object, String> agent) {
+                              @Nullable Function<Object, String> agent) {
         /** Most scopes carry no per-owner filter field. */
         Backfiller(LuceneIndexer.Scope scope, String jpql, String countJpql,
                    Function<Object, Long> id,
@@ -111,7 +112,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         // with the previous tokenization, so the new query terms match nothing and search
         // degrades silently instead of failing.
         boolean analyzerChanged = !LuceneIndexer.ANALYZER_GENERATION
-                .equals(ConfigService.get(ANALYZER_GENERATION_KEY, null));
+                .equals(ConfigService.get(ANALYZER_GENERATION_KEY));
         // JCLAW-961: a deficit rebuilds rather than gating on an empty index — a hard kill
         // loses up to one commit interval of writes, and those rows would otherwise sit in
         // the database and on the UI while being permanently invisible to search. Re-running
@@ -308,7 +309,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * then relevance-ranked + floored). Returns {@code null} when the query yields no
      * usable tokens (e.g. all stopwords).
      */
-    private static Query buildContentQuery(String query, boolean requireAll) throws IOException {
+    private static @Nullable Query buildContentQuery(String query, boolean requireAll) throws IOException {
         var terms = analyzeToTerms(query);
         if (terms.isEmpty()) return null;
         var occur = requireAll ? BooleanClause.Occur.MUST : BooleanClause.Occur.SHOULD;
@@ -344,7 +345,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * {@code agentKey} searches unfiltered.
      */
     private static List<ScoredId> collectScored(SearcherManager sm, String query,
-                                                String agentKey, int limit, boolean requireAll) throws IOException {
+                                                @Nullable String agentKey, int limit, boolean requireAll) throws IOException {
         // Prefix-match each query token (see buildContentQuery) rather than the
         // free-form QueryParser: operators typing free text get partial-word matching,
         // and stray Lucene operator characters can't ParseException the query out from

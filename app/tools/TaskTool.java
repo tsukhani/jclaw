@@ -8,6 +8,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Task;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.DeliveryAdvisor;
 import services.DeliveryDispatcher;
@@ -273,7 +274,7 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     /** Optional-string read: missing, null, or blank → null. */
-    private static String optStr(JsonObject args, String key) {
+    private static @Nullable String optStr(JsonObject args, String key) {
         if (!args.has(key)) return null;
         var el = args.get(key);
         if (el.isJsonNull()) return null;
@@ -291,7 +292,7 @@ public class TaskTool implements ToolRegistry.Tool {
      * models honor the string schema by sending a JSON-array string while
      * others send a real array.
      */
-    private static String readDescriptionArg(JsonObject args) {
+    private static @Nullable String readDescriptionArg(JsonObject args) {
         if (!hasValue(args, SchemaKeys.DESCRIPTION)) return null;
         var el = args.get(SchemaKeys.DESCRIPTION);
         if (el.isJsonArray()) return el.toString();         // ["step 1","step 2"]
@@ -409,7 +410,7 @@ public class TaskTool implements ToolRegistry.Tool {
      *       inference (operator knows what they're doing).</li>
      * </ol>
      */
-    private static String resolveDeliverySpec(String explicit, Agent agent) {
+    private static @Nullable String resolveDeliverySpec(@Nullable String explicit, Agent agent) {
         if (explicit == null) return DeliveryResolver.inferSpec(agent).orElse(null);
         var trimmed = explicit.trim();
         if (trimmed.isEmpty()) return DeliveryResolver.inferSpec(agent).orElse(null);
@@ -433,7 +434,7 @@ public class TaskTool implements ToolRegistry.Tool {
      * Recurring duplicate-name check — mirrors POST /api/tasks 409.
      * Returns the conflict error string, or null when there is no conflict.
      */
-    private static String checkRecurringDuplicate(String name, Agent agent,
+    private static @Nullable String checkRecurringDuplicate(String name, Agent agent,
                                                   ScheduleShorthandParser.ScheduleSpec spec) {
         if (spec.type() != Task.Type.CRON && spec.type() != Task.Type.INTERVAL) {
             return null;
@@ -513,7 +514,7 @@ public class TaskTool implements ToolRegistry.Tool {
      * DangerousActionGate#effectiveOrigin}) so a task is recorded with exactly the origin
      * the gate will later judge its fire by. Null for a headless call with neither.
      */
-    private static String callerOrigin() {
+    private static @Nullable String callerOrigin() {
         return DangerousActionGate.effectiveOrigin(ToolContext.conversationId());
     }
 
@@ -534,7 +535,7 @@ public class TaskTool implements ToolRegistry.Tool {
     /** Parse the optional {@code schedule} shorthand into a spec, or null when absent. Throws
      *  IllegalArgumentException on a malformed schedule (the caller maps it to a tool error).
      *  Extracted to keep {@link #updateTask} under the cognitive-complexity bound (Sonar S3776). */
-    private ScheduleShorthandParser.ScheduleSpec resolveScheduleSpec(JsonObject args) {
+    private ScheduleShorthandParser.@Nullable ScheduleSpec resolveScheduleSpec(JsonObject args) {
         if (!hasValue(args, KEY_SCHEDULE)) return null;
         return TaskScheduleSupport.parse(args.get(KEY_SCHEDULE).getAsString(), optStr(args, KEY_TIMEZONE));
     }
@@ -607,14 +608,14 @@ public class TaskTool implements ToolRegistry.Tool {
      *  change touched the schedule (so the caller knows to re-arm the run), and
      *  the saved {@link Task} (null when the task was gone) so the caller can
      *  reschedule without a second Tx re-read. */
-    private record PatchResult(boolean anyChange, boolean scheduleChanged, Task task) {}
+    private record PatchResult(boolean anyChange, boolean scheduleChanged, @Nullable Task task) {}
 
     /**
      * Apply the patch surface to the addressed Task inside the calling Tx.
      * Both flags false when the task is gone or no patchable field was provided.
      */
     private static PatchResult applyPatch(JsonObject args, Long taskId,
-                                          ScheduleShorthandParser.ScheduleSpec spec) {
+                                          ScheduleShorthandParser.@Nullable ScheduleSpec spec) {
         var task = (Task) Task.findById(taskId);
         if (task == null) return new PatchResult(false, false, null);
         boolean scheduleChanged = false;

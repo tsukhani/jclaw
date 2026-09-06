@@ -1,6 +1,7 @@
 package services.transcription;
 
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.UvProbe;
 
@@ -20,7 +21,7 @@ import java.util.stream.Collectors;
 public final class AsrModelStore extends ModelPrefetchStore<AsrModelStore.Status> {
 
     public record Status(State state, long bytesDownloaded, long totalBytes,
-                         String engine, String error) {}
+                         @Nullable String engine, @Nullable String error) {}
 
     private static final AsrModelStore INSTANCE = new AsrModelStore();
 
@@ -69,7 +70,7 @@ public final class AsrModelStore extends ModelPrefetchStore<AsrModelStore.Status
      *  from HF replaces it once a download begins. */
     @Override
     protected Status buildStatus(String key, State state, long bytesDownloaded,
-                                 String engine, String error) {
+                                 @Nullable String engine, @Nullable String error) {
         long totalBytes = (long) AsrModel.byId(key).orElseThrow().approxSizeMb() * 1024 * 1024;
         return new Status(state, bytesDownloaded, totalBytes, engine, error);
     }

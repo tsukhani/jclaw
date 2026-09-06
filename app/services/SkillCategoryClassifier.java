@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.List;
 
 /**
@@ -120,7 +122,7 @@ public final class SkillCategoryClassifier {
      * Classify a skill by its name/repo signals. Returns the first matching
      * category (taxonomy order) or {@link #OTHER} when nothing matches.
      */
-    public static String classify(String skillId, String displayName, String repo) {
+    public static String classify(@Nullable String skillId, @Nullable String displayName, @Nullable String repo) {
         return classifyText(nz(skillId) + " " + nz(displayName) + " " + nz(repo));
     }
 
@@ -139,7 +141,7 @@ public final class SkillCategoryClassifier {
         return OTHER;
     }
 
-    private static String nz(String s) {
+    private static String nz(@Nullable String s) {
         return s != null ? s : "";
     }
 }

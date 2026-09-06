@@ -1,5 +1,7 @@
 package services.videogen;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Single contract for any video-generation backend in jclaw (JCLAW-231) — the video analog of
  * {@code services.imagegen.ImageGenerationService}. The key difference: video generation is
@@ -37,7 +39,7 @@ public interface VideoGenerationService {
      * null to use provider defaults. For the local sidecar, {@code num_frames = durationSeconds * fps} and
      * the clip is exported at {@code fps} (default 24).
      */
-    record VideoGenRequest(String prompt, String model, Integer durationSeconds, String aspectRatio, Integer fps) {}
+    record VideoGenRequest(String prompt, @Nullable String model, @Nullable Integer durationSeconds, @Nullable String aspectRatio, @Nullable Integer fps) {}
 
     /** Running-or-terminal lifecycle state, mapped from each provider's status strings. */
     enum State { RUNNING, SUCCEEDED, FAILED }
@@ -48,8 +50,8 @@ public interface VideoGenerationService {
      * report a reliable percentage — the local sidecar does, JCLAW-232); {@code error} is the upstream
      * failure reason, set only on {@link State#FAILED}.
      */
-    record PollResult(State state, String resultUrl, Integer percent, String error) {
-        public static PollResult running(Integer percent) {
+    record PollResult(State state, @Nullable String resultUrl, @Nullable Integer percent, @Nullable String error) {
+        public static PollResult running(@Nullable Integer percent) {
             return new PollResult(State.RUNNING, null, percent, null);
         }
 

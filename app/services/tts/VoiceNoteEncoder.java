@@ -1,5 +1,6 @@
 package services.tts;
 
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.transcription.FfmpegProbe;
 
@@ -74,7 +75,7 @@ public final class VoiceNoteEncoder {
      *                null when unknown — which takes the broadly-playable MP3 path
      *                rather than gambling on a voice-note client being at the far end.
      */
-    public static Encoded forChannel(byte[] wavBytes, String channel) {
+    public static Encoded forChannel(byte[] wavBytes, @Nullable String channel) {
         if (wavBytes == null || wavBytes.length == 0) return wav(wavBytes);
         if (!FfmpegProbe.isAvailable()) {
             Logger.debug("VoiceNoteEncoder: ffmpeg unavailable (%s) — sending WAV",
@@ -122,7 +123,7 @@ public final class VoiceNoteEncoder {
         }
     }
 
-    private static void deleteQuietly(Path p) {
+    private static void deleteQuietly(@Nullable Path p) {
         if (p == null) return;
         try {
             Files.deleteIfExists(p);

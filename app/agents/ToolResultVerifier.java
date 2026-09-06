@@ -1,6 +1,7 @@
 package agents;
 
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 
 import java.util.Arrays;
@@ -93,7 +94,7 @@ public final class ToolResultVerifier {
     }
 
     /** A verdict and the one-line reason behind it, for the metric label and for logs. */
-    public record Verification(Verdict verdict, String reason) {
+    public record Verification(Verdict verdict, @Nullable String reason) {
         public boolean failed() {
             return verdict != Verdict.OK && verdict != Verdict.SKIPPED;
         }
@@ -110,7 +111,7 @@ public final class ToolResultVerifier {
      * judge and counting it as a verification failure would double-count a
      * different defect (JCLAW-883 already separates those).
      */
-    public static Verification verify(String toolName, ToolRegistry.ToolResult result) {
+    public static Verification verify(@Nullable String toolName, ToolRegistry.ToolResult result) {
         if (result == null || !result.dispatched()) return Verification.skipped();
         if (!ConfigService.getBoolean(CFG_ENABLED, true)) return Verification.skipped();
         if (parseSkipTools(ConfigService.get(CFG_SKIP_TOOLS, "")).contains(normalize(toolName))) {
@@ -130,7 +131,7 @@ public final class ToolResultVerifier {
      * announced the failure to the model, which is materially different from a
      * failure only its post-condition can see.
      */
-    public static Verification check(String toolName, ToolRegistry.ToolResult result) {
+    public static Verification check(@Nullable String toolName, ToolRegistry.ToolResult result) {
         var text = result.text();
         if (text == null || text.isBlank()) {
             return new Verification(Verdict.EMPTY, "tool returned no text");
@@ -155,7 +156,8 @@ public final class ToolResultVerifier {
      * and drops the count. Catching it silently would leave a broken post-condition
      * reporting clean verdicts forever.
      */
-    private static Verification postCondition(String toolName, ToolRegistry.ToolResult result) {
+    private static Verification postCondition(@Nullable String toolName,
+                                              ToolRegistry.ToolResult result) {
         var tool = ToolRegistry.lookupTool(toolName);
         if (tool == null) return Verification.ok();
         return tool.postConditionFailure(result)
@@ -192,7 +194,7 @@ public final class ToolResultVerifier {
         return line.length() > 120 ? line.substring(0, 120) + "…" : line;
     }
 
-    public static Set<String> parseSkipTools(String raw) {
+    public static Set<String> parseSkipTools(@Nullable String raw) {
         if (raw == null || raw.isBlank()) return Set.of();
         return Arrays.stream(raw.split(","))
                 .map(ToolResultVerifier::normalize)
@@ -200,7 +202,7 @@ public final class ToolResultVerifier {
                 .collect(Collectors.toUnmodifiableSet());
     }
 
-    private static String normalize(String s) {
+    private static String normalize(@Nullable String s) {
         return s == null ? "" : s.strip().toLowerCase(Locale.ROOT);
     }
 }

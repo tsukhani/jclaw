@@ -7,6 +7,7 @@ import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.SessionCompactor;
 import services.Tx;
@@ -309,7 +310,7 @@ public final class MemoryEvalGenerator {
     }
 
     /** A bridge question over the pair, or null when the pair cannot carry one. */
-    private static String bridgeQuestion(Row relation, Set<String> relationTokens, Row target,
+    private static @Nullable String bridgeQuestion(Row relation, Set<String> relationTokens, Row target,
             Map<String, Integer> docFreq, QuestionWriter writer) {
         var targetTokens = MemorySimilarity.contentTokens(target.text());
         // The target must NOT already carry the relation, or there is no gap to bridge
@@ -487,7 +488,7 @@ public final class MemoryEvalGenerator {
     }
 
     /** A content token both clusters carry that is rare enough corpus-wide to be an entity. */
-    private static String sharedRareToken(List<Row> a, List<Row> b, Map<String, Integer> docFreq) {
+    private static @Nullable String sharedRareToken(List<Row> a, List<Row> b, Map<String, Integer> docFreq) {
         var aTokens = new HashSet<String>();
         a.forEach(r -> aTokens.addAll(MemorySimilarity.contentTokens(r.text())));
         var bTokens = new HashSet<String>();
@@ -499,7 +500,7 @@ public final class MemoryEvalGenerator {
                 .orElse(null);
     }
 
-    private static String multiHopQuestion(List<Row> first, List<Row> second, QuestionWriter writer) {
+    private static @Nullable String multiHopQuestion(List<Row> first, List<Row> second, QuestionWriter writer) {
         String question;
         try {
             question = writer.write(List.of(
@@ -655,10 +656,15 @@ public final class MemoryEvalGenerator {
     }
 
     /** Production question writer: the agent's own model, which is local on this install. */
-    public static QuestionWriter writerFor(Agent agent) {
+    public static @Nullable QuestionWriter writerFor(Agent agent) {
         var provider = ProviderRegistry.get(agent.modelProvider);
         if (provider == null) return null;
-        return msgs -> SessionCompactor.firstChoiceText(
-                provider.chat(agent.modelId, msgs, List.of(), 120, null, null));
+        return msgs -> {
+            // A model that returns no text means "no question"; every caller already
+            // rejects a blank one, where a null would have surfaced as a caught NPE.
+            var text = SessionCompactor.firstChoiceText(
+                    provider.chat(agent.modelId, msgs, List.of(), 120, null, null));
+            return text == null ? "" : text;
+        };
     }
 }

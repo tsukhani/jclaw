@@ -3,6 +3,7 @@ package llm;
 import llm.LlmTypes.ProviderMetrics;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.Usage;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -41,9 +42,9 @@ interface LlmStreamCarriers {
     class StreamAccumulator {
         volatile String content = "";
         volatile List<ToolCall> toolCalls = List.of();
-        volatile String finishReason;
+        volatile @Nullable String finishReason;
         volatile boolean complete = false;
-        volatile Exception error;
+        volatile @Nullable Exception error;
         volatile boolean reasoningDetected = false;
         volatile int reasoningTokens = 0;
         /**
@@ -63,13 +64,13 @@ interface LlmStreamCarriers {
         private final StringBuilder reasoningTextBuffer = new StringBuilder();
         private final ReentrantLock reasoningLock =
                 new ReentrantLock();
-        volatile Usage usage;
+        volatile @Nullable Usage usage;
         /** JTokkit-measured prompt tokens for this provider request, available even when provider usage is absent. */
-        volatile TokenUsageEstimator.ChatRequestTokens promptTokenEstimate;
+        volatile TokenUsageEstimator.@Nullable ChatRequestTokens promptTokenEstimate;
         /** JTokkit-measured completion tokens for streamed content/tool calls/reasoning. */
-        volatile TokenUsageEstimator.TokenCount completionTokenEstimate;
+        volatile TokenUsageEstimator.@Nullable TokenCount completionTokenEstimate;
         /** JTokkit-measured reasoning-token subset for streamed reasoning text. */
-        volatile TokenUsageEstimator.TokenCount reasoningTokenEstimate;
+        volatile TokenUsageEstimator.@Nullable TokenCount reasoningTokenEstimate;
         // Wall-clock nanoTime at first and latest reasoning chunk. Both remain 0
         // when the model emitted no reasoning. reasoningEndNanos is updated on
         // every append so it naturally captures "end of reasoning phase" — the
@@ -182,8 +183,8 @@ interface LlmStreamCarriers {
         public long firstContentNanos() { return firstContentNanos; }
         public String content() { return content; }
         public List<ToolCall> toolCalls() { return toolCalls; }
-        public String finishReason() { return finishReason; }
-        public Exception error() { return error; }
+        public @Nullable String finishReason() { return finishReason; }
+        public @Nullable Exception error() { return error; }
 
         /**
          * Fluent construction of a round fixture for the default-package unit
@@ -267,7 +268,7 @@ interface LlmStreamCarriers {
         int jtokkitCompletionTokens;
         int jtokkitReasoningTokens;
         int jtokkitTotalTokens;
-        String jtokkitEncoding;
+        @Nullable String jtokkitEncoding;
         boolean jtokkitModelMatched = true;
         /**
          * Wall-clock nanoTime at the first reasoning chunk anywhere in this
@@ -343,7 +344,7 @@ interface LlmStreamCarriers {
         }
 
         /** Returns the aggregated reasoning text, or {@code null} if nothing was streamed. */
-        public synchronized String reasoningText() {
+        public synchronized @Nullable String reasoningText() {
             return reasoningText.isEmpty() ? null : reasoningText.toString();
         }
 
@@ -387,7 +388,7 @@ interface LlmStreamCarriers {
         public int jtokkitCompletionTokens() { return jtokkitCompletionTokens; }
         public int jtokkitReasoningTokens() { return jtokkitReasoningTokens; }
         public int jtokkitTotalTokens() { return jtokkitTotalTokens; }
-        public String jtokkitEncoding() { return jtokkitEncoding; }
+        public @Nullable String jtokkitEncoding() { return jtokkitEncoding; }
         public boolean jtokkitModelMatched() { return jtokkitModelMatched; }
     }
 }

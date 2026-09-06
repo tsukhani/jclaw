@@ -32,10 +32,10 @@ public final class LatencyTrace {
     public static final String PERSIST_DONE = "persist_done";
     public static final String TERMINAL_SENT = "terminal_sent";
 
-    private final String channel;
+    private final @Nullable String channel;
     // Set once the conversation/agent is resolved (AgentRunner, at PROLOGUE_CONV_RESOLVED).
     // Tags every persisted segment sample so the dashboard's agent filter works (JCLAW-515).
-    private volatile String agentId;
+    private volatile @Nullable String agentId;
     private final long startNs;
     private final long acceptedAtNs;
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
@@ -67,7 +67,7 @@ public final class LatencyTrace {
         this(null, 0L);
     }
 
-    private LatencyTrace(String channel, long acceptedAtNs) {
+    private LatencyTrace(@Nullable String channel, long acceptedAtNs) {
         this.channel = channel;
         this.startNs = System.nanoTime();
         this.acceptedAtNs = acceptedAtNs;

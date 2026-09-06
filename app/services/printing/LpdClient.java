@@ -1,5 +1,7 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -68,7 +70,7 @@ public final class LpdClient {
      * @param timeoutMs   connect and read timeout
      * @throws IOException if the connection fails or the daemon refuses any step
      */
-    public static void print(String host, int port, String queue, String jobName,
+    public static void print(@Nullable String host, int port, String queue, String jobName,
                              String user, byte[] document, int timeoutMs) throws IOException {
         // Three digits, per the RFC's cfA<nnn> convention. Derived from the document
         // rather than a counter so the id is stable for a given job and carries no

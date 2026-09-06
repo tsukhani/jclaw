@@ -3,6 +3,7 @@ package utils;
 import okhttp3.Interceptor;
 import okhttp3.Response;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import javax.net.ssl.SSLException;
 
@@ -94,7 +95,7 @@ public final class TransientRetryInterceptor implements Interceptor {
     }
 
     /** {@code Retry-After} when the origin sends a usable one, else exponential. */
-    private static Duration backoff(int attempt, Response response) {
+    private static Duration backoff(int attempt, @Nullable Response response) {
         var asked = retryAfter(response);
         return capped(asked != null ? asked : BASE_BACKOFF.multipliedBy(1L << (attempt - 1)));
     }
@@ -108,7 +109,7 @@ public final class TransientRetryInterceptor implements Interceptor {
      * out. An HTTP-date form is legal and rare, and falls through to the exponential
      * rather than earning a second grammar for a value that gets capped anyway.
      */
-    private static Duration retryAfter(Response response) {
+    private static @Nullable Duration retryAfter(@Nullable Response response) {
         if (response == null) return null;
         var header = response.header("Retry-After");
         if (header == null || header.isBlank()) return null;

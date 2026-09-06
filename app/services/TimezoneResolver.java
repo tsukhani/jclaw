@@ -1,6 +1,7 @@
 package services;
 
 import models.Task;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 
 import java.time.ZoneId;
@@ -69,7 +70,7 @@ public final class TimezoneResolver {
      * Resolve when only a candidate {@code perTask} string is known
      * (e.g. preview-validating a user's input before persisting it).
      */
-    public static ZoneId resolve(String perTask) {
+    public static ZoneId resolve(@Nullable String perTask) {
         var zone = tryParse(perTask, "task.timezone");
         if (zone != null) return zone;
 
@@ -127,7 +128,7 @@ public final class TimezoneResolver {
         return ZoneId.systemDefault();
     }
 
-    private static ZoneId tryParse(String raw, String source) {
+    private static @Nullable ZoneId tryParse(@Nullable String raw, String source) {
         if (raw == null || raw.isBlank()) return null;
         try {
             return ZoneId.of(raw.trim());

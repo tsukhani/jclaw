@@ -6,6 +6,7 @@ import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import models.Agent;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import static utils.GsonHolder.GSON;
@@ -75,7 +76,7 @@ public final class UsageMetricsBuilder {
      * reported provider usage.
      */
     public static String buildUsageJson(LlmProvider.TurnUsage turnUsage,
-                                        ModelInfo modelInfo, long streamStartMs, Agent agent,
+                                        @Nullable ModelInfo modelInfo, long streamStartMs, Agent agent,
                                         Conversation conversation) {
         return buildUsageJson(turnUsage, modelInfo, streamStartMs, agent, conversation, 0L);
     }
@@ -90,7 +91,7 @@ public final class UsageMetricsBuilder {
      * field is simply omitted.
      */
     public static String buildUsageJson(LlmProvider.TurnUsage turnUsage,
-                                        ModelInfo modelInfo, long streamStartMs, Agent agent,
+                                        @Nullable ModelInfo modelInfo, long streamStartMs, Agent agent,
                                         Conversation conversation, long streamBodyMs) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
         var reasoningMs = turnUsage.reasoningDurationMs(System.nanoTime());
@@ -181,7 +182,7 @@ public final class UsageMetricsBuilder {
     }
 
     /** Append non-negative pricing fields and the context window when {@code modelInfo} is present. */
-    private static void addModelInfoFields(JsonObject usageMap, ModelInfo modelInfo) {
+    private static void addModelInfoFields(JsonObject usageMap, @Nullable ModelInfo modelInfo) {
         if (modelInfo == null) return;
         if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());
         if (modelInfo.completionPrice() >= 0) usageMap.addProperty("completionPrice", modelInfo.completionPrice());

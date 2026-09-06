@@ -3,6 +3,7 @@ package services;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import utils.HandoffShell;
 import utils.HttpFactories;
@@ -70,14 +71,14 @@ public final class UpgradeService {
     private static final Pattern RELEASE_VERSION = Pattern.compile("v?\\d+\\.\\d+\\.\\d+");
 
     /** Test seam: when non-null, {@link #requestUpgrade(String)} hands the plan here instead of spawning it. */
-    public static Consumer<Plan> spawnerForTest;
+    public static @Nullable Consumer<Plan> spawnerForTest;
 
     /** Test seam: when non-null, {@link #latestVersion(boolean)} returns this instead of calling GitHub. */
-    public static String latestVersionForTest;
+    public static @Nullable String latestVersionForTest;
 
     private record CachedTag(String tag, Instant at) {}
 
-    private static volatile CachedTag cachedTag;
+    private static volatile @Nullable CachedTag cachedTag;
 
     /**
      * @param command        argv handed to {@link ProcessBuilder}
@@ -94,8 +95,8 @@ public final class UpgradeService {
      * Mirrors {@code logs/upgrade-status.json} — see {@code upgrade_status} in
      * jclaw.sh for the phase vocabulary.
      */
-    public record Status(String phase, int pct, String message,
-                         String fromVersion, String toVersion, String startedAt) {}
+    public record Status(@Nullable String phase, int pct, @Nullable String message,
+                         @Nullable String fromVersion, @Nullable String toVersion, @Nullable String startedAt) {}
 
     private UpgradeService() {}
 
@@ -111,7 +112,7 @@ public final class UpgradeService {
      * rather than a half-applied upgrade, but the UI should never offer a
      * button the helper would reject.
      */
-    public static String unavailableReason() {
+    public static @Nullable String unavailableReason() {
         if (isDeveloperClone()) {
             return "This is a source checkout — update it with 'git pull'.";
         }
@@ -179,7 +180,7 @@ public final class UpgradeService {
      *
      * @param refresh bypass the cache for an operator-initiated re-check
      */
-    public static String latestVersion(boolean refresh) {
+    public static @Nullable String latestVersion(boolean refresh) {
         if (latestVersionForTest != null) return latestVersionForTest;
 
         var cached = cachedTag;
@@ -345,7 +346,7 @@ public final class UpgradeService {
      * on its way there — which is how the panel reports the outcome of the very
      * upgrade that replaced it.
      */
-    public static Status status() {
+    public static @Nullable Status status() {
         var file = new File(Play.applicationPath, STATUS_FILE);
         if (!file.isFile()) return null;
         try {
@@ -364,7 +365,7 @@ public final class UpgradeService {
         }
     }
 
-    private static String str(JsonObject json, String key) {
+    private static @Nullable String str(JsonObject json, String key) {
         return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : null;
     }
 

@@ -8,6 +8,7 @@ import memory.MemoryStore;
 import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.AgentService;
 import services.ConfigService;
@@ -144,7 +145,8 @@ public class SystemPromptAssembler {
      * the tool schemas sent alongside the LLM request. Pass {@code null} for the
      * legacy behavior that loads the set internally.
      */
-    public static AssembledPrompt assemble(Agent agent, String userMessage, Set<String> disabledTools) {
+    public static AssembledPrompt assemble(Agent agent, String userMessage,
+                                           @Nullable Set<String> disabledTools) {
         return assemble(agent, userMessage, disabledTools, null);
     }
 
@@ -157,7 +159,8 @@ public class SystemPromptAssembler {
      * tests and administrative paths do this.
      */
     public static AssembledPrompt assemble(Agent agent, String userMessage,
-                                            Set<String> disabledTools, String channelType) {
+                                            @Nullable Set<String> disabledTools,
+                                            @Nullable String channelType) {
         return assemble(agent, userMessage, disabledTools, channelType, null);
     }
 
@@ -173,8 +176,9 @@ public class SystemPromptAssembler {
      * before.
      */
     public static AssembledPrompt assemble(Agent agent, String userMessage,
-                                            Set<String> disabledTools, String channelType,
-                                            float[] queryEmbedding) {
+                                            @Nullable Set<String> disabledTools,
+                                            @Nullable String channelType,
+                                            float @Nullable [] queryEmbedding) {
         var builder = new SectionedBuilder();
         var skills = buildPrompt(agent, userMessage, builder, disabledTools, channelType, queryEmbedding);
         return new AssembledPrompt(builder.sb.toString(), skills);
@@ -266,13 +270,15 @@ public class SystemPromptAssembler {
      * entry points cannot drift.
      */
     private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b,
-                                                           Set<String> disabledTools, String channelType) {
+                                                           @Nullable Set<String> disabledTools,
+                                                           @Nullable String channelType) {
         return buildPrompt(agent, userMessage, b, disabledTools, channelType, null);
     }
 
     private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b,
-                                                           Set<String> disabledTools, String channelType,
-                                                           float[] queryEmbedding) {
+                                                           @Nullable Set<String> disabledTools,
+                                                           @Nullable String channelType,
+                                                           float @Nullable [] queryEmbedding) {
         // Loadtest agent: emit only the static behavioral sections (safety,
         // execution bias, channel guidance) so cross-provider tokens-per-sec
         // measurements aren't dragged down by prompt-prefill costs that
@@ -287,10 +293,7 @@ public class SystemPromptAssembler {
             appendSafetySection(b.sb);
             b.startSection("Execution Bias");
             appendExecutionBiasSection(b.sb, agent, channelType);
-            channelGuidanceFor(channelType).ifPresent(loadtestGuidance -> {
-                b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
-                appendChannelGuidanceSection(b.sb, channelType, loadtestGuidance);
-            });
+            appendChannelGuidance(b, channelType);
             return List.of();
         }
 
@@ -403,10 +406,7 @@ public class SystemPromptAssembler {
         // Sits in the cacheable prefix because the guidance is static per channel;
         // different channels produce different cache keys, which is the intended
         // trade-off for per-channel tuning.
-        channelGuidanceFor(channelType).ifPresent(guidance -> {
-            b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
-            appendChannelGuidanceSection(b.sb, channelType, guidance);
-        });
+        appendChannelGuidance(b, channelType);
 
         // 9. Environment info — only JVM-stable, per-agent values, so the section
         // stays byte-identical within an agent's lifetime and never busts the LLM
@@ -492,7 +492,16 @@ public class SystemPromptAssembler {
      * constant and the enum's {@code value} field is not. The values must
      * therefore stay in step with that enum by hand.
      */
-    private static Optional<String> channelGuidanceFor(String channelType) {
+    /** Emits the channel section only for a channel that has registered guidance. */
+    private static void appendChannelGuidance(SectionedBuilder b, @Nullable String channelType) {
+        if (channelType == null) return;
+        var guidance = channelGuidanceFor(channelType);
+        if (guidance.isEmpty()) return;
+        b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
+        appendChannelGuidanceSection(b.sb, channelType, guidance.get());
+    }
+
+    private static Optional<String> channelGuidanceFor(@Nullable String channelType) {
         if (channelType == null) return Optional.empty();
         return switch (channelType.toLowerCase()) {
             case "web" -> Optional.of(WEB_CHANNEL_GUIDANCE);
@@ -598,7 +607,8 @@ public class SystemPromptAssembler {
             - Automatic memory capture is not running for this conversation. Nothing from it reaches your long-term memory on its own, though memories already stored are still loaded back for you. Do NOT write or edit a workspace file (such as USER.md) to store something, and do NOT go looking for a "save memory" API or endpoint. Storing goes through the `memory` tool, if it appears in your Tool Catalog, and only when the operator explicitly directs you to remember a specific thing — capture is off by deliberate configuration, not by oversight, so never store something you merely noticed or judged worth keeping. The tool's other actions are unaffected: recall a stored detail the current turn did not surface, and forget what they direct you to forget.
             """;
 
-    private static void appendExecutionBiasSection(StringBuilder sb, Agent agent, String channelType) {
+    private static void appendExecutionBiasSection(StringBuilder sb, Agent agent,
+                                                   @Nullable String channelType) {
         sb.append("\n## Execution Bias\n");
         sb.append("""
                 - Do the work rather than narrating about it. If you have enough information to take a concrete step, take it — don't announce a plan in chat and then wait for approval you weren't asked for. The exception is a genuinely sensitive or irreversible action (destructive commands, spending, sending on someone's behalf): on channels that support it, an interactive approve/deny prompt may be raised for those, and you should wait for that explicit approval before proceeding.
@@ -664,7 +674,7 @@ public class SystemPromptAssembler {
                 """);
     }
 
-    private static void appendSection(StringBuilder sb, String content) {
+    private static void appendSection(StringBuilder sb, @Nullable String content) {
         if (content != null && !content.isBlank()) {
             sb.append(content.strip());
             sb.append("\n\n");
@@ -772,7 +782,7 @@ public class SystemPromptAssembler {
      * transaction (JCLAW-960). {@code null} leaves the store to embed inline.
      */
     public static RecallResult recall(String agentId, String query, Set<String> excludeIds,
-                                      float[] queryEmbedding) {
+                                      float @Nullable [] queryEmbedding) {
         return recall(agentId, query, excludeIds, queryEmbedding, 0);
     }
 
@@ -787,7 +797,7 @@ public class SystemPromptAssembler {
      * caller that has already decided on a number is entitled to it.
      */
     public static RecallResult recall(String agentId, String query, Set<String> excludeIds,
-                                      float[] queryEmbedding, int limitOverride) {
+                                      float @Nullable [] queryEmbedding, int limitOverride) {
         long startNs = System.nanoTime();
         try {
             return recallTimed(agentId, query, excludeIds, queryEmbedding, limitOverride);
@@ -797,7 +807,7 @@ public class SystemPromptAssembler {
     }
 
     private static RecallResult recallTimed(String agentId, String query, Set<String> excludeIds,
-                                            float[] queryEmbedding, int limitOverride) {
+                                            float @Nullable [] queryEmbedding, int limitOverride) {
         int recallLimit = limitOverride > 0
                 ? limitOverride
                 : ConfigService.getInt("memory.recall.limit", 10);
@@ -857,7 +867,7 @@ public class SystemPromptAssembler {
     }
 
     private static void appendMemories(StringBuilder sb, Agent agent, String userMessage,
-                                       Set<String> excludeIds, float[] queryEmbedding) {
+                                       Set<String> excludeIds, float @Nullable [] queryEmbedding) {
         if (userMessage == null || userMessage.isBlank()) return;
 
         try {
@@ -932,7 +942,7 @@ public class SystemPromptAssembler {
     private static final class SectionedBuilder {
         final StringBuilder sb = new StringBuilder();
         private final List<BuiltSection> built = new ArrayList<>();
-        private String currentName;
+        private @Nullable String currentName;
         private int currentStart;
 
         void startSection(String name) {

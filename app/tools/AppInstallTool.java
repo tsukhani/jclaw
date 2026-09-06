@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.WorkspaceFiles;
 import utils.GsonHolder;
@@ -232,7 +233,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
 
     /** Resolve {@code public/apps/<slug>}, containment-checked. Null on escape.
      *  Read-only probe — never creates the directory. */
-    static Path resolvePublicApp(String slug) {
+    static @Nullable Path resolvePublicApp(String slug) {
         return WorkspacePathGuard.resolveContained(publicAppsDir(), slug);
     }
 
@@ -242,7 +243,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
 
     /** Resolve a workspace-relative dir param (falling back to the slug) inside
      *  the agent's workspace. Null when the arg escapes the workspace. */
-    private static Path resolveWorkspaceDir(JsonObject args, String param, String slug, Agent agent) {
+    private static @Nullable Path resolveWorkspaceDir(JsonObject args, String param, String slug, Agent agent) {
         var dir = JsonArgs.optString(args, param);
         if (dir == null || dir.isBlank()) dir = slug;
         try {
@@ -259,7 +260,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
      *  {@code coding/<session>/<slug>/} — a {@code runtime=acp} harness runs in a
      *  per-session {@code coding/} workdir (JCLAW-666), so its output lands there,
      *  not at the workspace root. Returns {@code null} when nothing valid is found. */
-    private static Path resolveBuildSource(JsonObject args, String slug, Agent agent) {
+    private static @Nullable Path resolveBuildSource(JsonObject args, String slug, Agent agent) {
         var explicit = JsonArgs.optString(args, PARAM_SOURCE);
         if (explicit != null && !explicit.isBlank()) {
             try {
@@ -282,7 +283,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
      *  {@code null}. Bridges the harness path: a {@code runtime=acp} build lands
      *  under its per-session coding workdir, not the workspace root where the
      *  default source looks. */
-    private static Path newestCodingBuild(Agent agent, String slug) {
+    private static @Nullable Path newestCodingBuild(Agent agent, String slug) {
         Path codingRoot;
         try {
             codingRoot = WorkspaceFiles.acquireWorkspacePath(agent.name, "coding");

@@ -9,6 +9,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
@@ -391,7 +392,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                     .formatted(parentAgent.name);
         }
 
-        var summary = SubagentChildBootstrap.buildInheritSummary(parentAgent, parentConv.id, parsed.context());
+        var summary = SubagentChildBootstrap.buildInheritSummary(parentAgent, parentConv.id, parsed.resolvedContext());
         var bootstrap = SubagentChildBootstrap.bootstrapChildInTx(parentAgent, parentConv, parsed, summary);
         if (bootstrap.error() != null) return bootstrap.error();
         var childAgentId = bootstrap.childAgentId();
@@ -407,7 +408,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var runIdStr = String.valueOf(runId);
         EventLogger.recordSubagentSpawn(
                 parentAgent.name, childAgentName,
-                runIdStr, parsed.mode(), parsed.context());
+                runIdStr, parsed.resolvedMode(), parsed.resolvedContext());
 
         // JCLAW-499: register the external-harness command for this run when
         // runtime=acp (already validated above); executeChildRun consumes it.
@@ -424,12 +425,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (summary.errorReason() != null) {
             EventLogger.recordSubagentError(
                     parentAgent.name, childAgentName,
-                    runIdStr, parsed.mode(), parsed.context(), summary.errorReason());
+                    runIdStr, parsed.resolvedMode(), parsed.resolvedContext(), summary.errorReason());
         }
 
-        final boolean inlineMode = MODE_INLINE.equals(parsed.mode());
+        final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
         if (inlineMode) {
-            SubagentResponses.writeInlineStartMarker(parentConvIdFinal, runId, parsed.label(), parsed.task());
+            SubagentResponses.writeInlineStartMarker(parentConvIdFinal, runId, parsed.label(), parsed.resolvedTask());
         }
 
         // JCLAW-270: async branch — dispatch the run to a background VT and
@@ -462,7 +463,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         SyncRunOutcome runOutcome;
         try {
             runOutcome = SubagentSyncRunner.runChildSynchronously(runId, childAgentId, childConvId,
-                    parsed.task(), parsed.timeoutSeconds(), inlineMode);
+                    parsed.resolvedTask(), parsed.timeoutSeconds(), inlineMode);
         } finally {
             if (acpBridged) SubagentChatBridge.clearRunCallbacks(runId);
         }
@@ -483,7 +484,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // already emitted SUBAGENT_KILL — don't duplicate as SUBAGENT_ERROR.
         if (!runOutcome.killedByOperator()) {
             SubagentResponses.emitTerminalEvent(parentAgent.name, childAgentName, runIdStr,
-                    parsed.mode(), parsed.context(),
+                    parsed.resolvedMode(), parsed.resolvedContext(),
                     runOutcome.terminalStatus(), runOutcome.errorReason());
         }
 
@@ -620,7 +621,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     }
 
     /** JCLAW-498: one entry of a batch fan-out. */
-    private record BatchTaskSpec(String task, String label, Long agentId) {}
+    private record BatchTaskSpec(String task, @Nullable String label, @Nullable Long agentId) {}
 
     /**
      * JCLAW-809: reject a spawn mode that is not in {@link #ALLOWED_MODES},
@@ -630,7 +631,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * {@code (got '…')} suffix. Extracted so the single-spawn and batch paths
      * cannot diverge on which modes they accept.
      */
-    static String modeRejection(String requestedMode, String normalizedMode) {
+    static @Nullable String modeRejection(@Nullable String requestedMode, String normalizedMode) {
         if (!ALLOWED_MODES.contains(normalizedMode)) {
             return "Error: 'mode' must be one of " + ALLOWED_MODES
                     + GOT_LITERAL + requestedMode + "').";
@@ -643,11 +644,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  terminal status from {@link #awaitFuture}. */
     public record SyncRunOutcome(
             String reply, SubagentRun.Status terminalStatus,
-            String terminalOutcome, String errorReason,
+            String terminalOutcome, @Nullable String errorReason,
             boolean killedByOperator, boolean replyTruncated) {}
 
     /** Resolved (provider, modelId) pair for a spawned subagent. */
-    public record SubagentModel(String provider, String modelId) {}
+    public record SubagentModel(@Nullable String provider, @Nullable String modelId) {}
 
     /**
      * JCLAW-422: resolve the model a session subagent runs on. Public facade
@@ -724,7 +725,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * the adapter's conservative {@code defaultPermissionArgs()} otherwise.
      */
     public static List<String> withPermissionArgs(HarnessAdapter adapter, List<String> argv) {
-        var configured = ConfigService.get(ACP_PERMISSION_ARGS_KEY, null);
+        var configured = ConfigService.get(ACP_PERMISSION_ARGS_KEY);
         List<String> extra;
         if (configured != null && !configured.isBlank()) {
             extra = "none".equalsIgnoreCase(configured.strip())
@@ -764,7 +765,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     }
 
     /** Shared blank-check used by the spawn collaborators. */
-    static boolean notBlank(String s) {
+    static boolean notBlank(@Nullable String s) {
         return s != null && !s.isBlank();
     }
 }

@@ -1,6 +1,7 @@
 package llm;
 
 import models.MessageRole;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -19,18 +20,18 @@ public final class LlmTypes {
     public record ChatRequest(
             String model,
             List<ChatMessage> messages,
-            List<ToolDef> tools,
+            @Nullable List<ToolDef> tools,
             boolean stream,
-            Integer maxTokens,
-            String thinkingMode
+            @Nullable Integer maxTokens,
+            @Nullable String thinkingMode
     ) {}
 
     public record ChatMessage(
             String role,
-            Object content,
-            List<ToolCall> toolCalls,
-            String toolCallId,
-            String toolName
+            @Nullable Object content,
+            @Nullable List<ToolCall> toolCalls,
+            @Nullable String toolCallId,
+            @Nullable String toolName
     ) {
         public static ChatMessage system(String text) {
             return new ChatMessage(MessageRole.SYSTEM.value, text, null, null, null);
@@ -53,7 +54,8 @@ public final class LlmTypes {
         // particular rejects with HTTP 400 "function_response.name: Name cannot
         // be empty" when it's missing. OpenAI's own API tolerates a "name" field
         // here, so emitting it unconditionally is safe across providers.
-        public static ChatMessage toolResult(String toolCallId, String toolName, String content) {
+        public static ChatMessage toolResult(@Nullable String toolCallId, @Nullable String toolName,
+                                             String content) {
             return new ChatMessage(MessageRole.TOOL.value, content, null, toolCallId, toolName);
         }
     }
@@ -74,29 +76,29 @@ public final class LlmTypes {
     ) {}
 
     public record ToolCall(
-            String id,
+            @Nullable String id,
             String type,
             FunctionCall function
     ) {}
 
     public record FunctionCall(
-            String name,
+            @Nullable String name,
             String arguments
     ) {}
 
     // --- Response types ---
 
     public record ChatResponse(
-            String id,
-            String model,
+            @Nullable String id,
+            @Nullable String model,
             List<Choice> choices,
-            Usage usage
+            @Nullable Usage usage
     ) {}
 
     public record Choice(
             int index,
             ChatMessage message,
-            String finishReason
+            @Nullable String finishReason
     ) {}
 
     /**
@@ -372,7 +374,7 @@ public final class LlmTypes {
             double completionPrice,
             double cachedReadPrice,
             double cacheWritePrice,
-            List<String> thinkingLevels,
+            @Nullable List<String> thinkingLevels,
             boolean alwaysThinks
     ) {
         /** Convenience constructor — capabilities only; defaults all pricing to

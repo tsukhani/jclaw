@@ -1,7 +1,30 @@
+import net.ltgt.gradle.errorprone.CheckSeverity
+import net.ltgt.gradle.errorprone.errorprone
+
 plugins {
     id("org.playframework.play1")
     id("org.sonarqube") version "7.4.0.8496"
     id("com.diffplug.spotless") version "8.10.1"
+    id("net.ltgt.errorprone") version "5.1.1"
+}
+
+// JCLAW-1149: nullness enforcement. Play's dev mode and `play autotest` compile with
+// ECJ inside the fork, where a javac plugin cannot load — so the checker rides the Gradle
+// compileJava that Sonar and pre-push already depend on, the same layering Spotless uses.
+tasks.withType<JavaCompile>().configureEach {
+    options.errorprone {
+        // compileTestJava stays out: test/ is 500+ default-package classes with no nullness
+        // annotations, and the contracts being enforced are production ones.
+        enabled.set(name == "compileJava")
+        // Nullness only. Adopting the rest of Error Prone's catalogue is its own decision.
+        disableAllChecks.set(true)
+        check("NullAway", CheckSeverity.ERROR)
+        // Packages whose unannotated types default to non-null. `models` is deliberately
+        // absent: JPA populates entity fields reflectively after construction, so every
+        // non-null column would report as uninitialised. Widening to another package is a
+        // name here plus a @NullMarked package-info per (sub)package it contains.
+        option("NullAway:AnnotatedPackages", "utils,llm,agents,tools,services")
+    }
 }
 
 // Import hygiene enforcement for production Java (JCLAW code-audit follow-up). Two
@@ -256,6 +279,11 @@ repositories {
 }
 
 dependencies {
+    // JCLAW-1149: the javac plugin host, and the nullness checker that runs inside it.
+    // Both are compile-only tool dependencies — nothing here reaches the dist.
+    errorprone("com.google.errorprone:error_prone_core:2.50.0")
+    errorprone("com.uber.nullaway:nullaway:0.14.1")
+
     // Agent Client Protocol (ACP) SDK — the official Java client for driving a
     // coding harness over ACP (JSON-RPC/stdio). Used by the runtime=acp subagent
     // path (Stage 2) to speak real ACP instead of the stdin/stdout wrapper.

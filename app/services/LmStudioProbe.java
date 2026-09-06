@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * One-shot health check for an LM Studio instance reachable at
  * {@code provider.lm-studio.baseUrl}. Mirrors {@link OllamaLocalProbe} —
@@ -11,7 +13,7 @@ package services;
  */
 public class LmStudioProbe {
 
-    public record ProbeResult(boolean available, int modelCount, String reason, boolean connectionRefused) { }
+    public record ProbeResult(boolean available, int modelCount, @Nullable String reason, boolean connectionRefused) { }
 
     private static final ProbeCache<ProbeResult> CACHE = new ProbeCache<>(
             new ProbeResult(false, 0, "lm-studio probe has not run yet", false));

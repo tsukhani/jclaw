@@ -12,6 +12,7 @@ import memory.MemoryVectorSettings;
 import models.Agent;
 import models.Config;
 import org.hibernate.Session;
+import org.jspecify.annotations.Nullable;
 import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
@@ -43,7 +44,7 @@ public class ConfigService {
                     .expireAfterWrite(Duration.ofSeconds(60))
                     .build());
 
-    public static String get(String key) {
+    public static @Nullable String get(String key) {
         // get(key, loader) provides single-flight semantics — concurrent misses
         // for the same key invoke the loader at most once.
         return cache.get(key, k -> {
@@ -57,6 +58,8 @@ public class ConfigService {
         }).orElse(null);
     }
 
+    /** The configured value, or {@code defaultValue} when the key is unset. Callers wanting
+     *  "unset" to stay distinguishable use the single-argument {@link #get(String)}. */
     public static String get(String key, String defaultValue) {
         var value = get(key);
         return value != null ? value : defaultValue;
@@ -187,7 +190,7 @@ public class ConfigService {
      *
      * @return an error message if the key is rejected, or {@code null} on success
      */
-    public static String setWithSideEffects(String key, String value) {
+    public static @Nullable String setWithSideEffects(String key, String value) {
         // JCLAW-1022: a row that would loosen a conf-capped key is already inert at the read.
         // Refusing it here is for the operator: a save that cannot take effect would otherwise
         // answer 200 and then read back as something else.
@@ -415,7 +418,7 @@ public class ConfigService {
         return SENSITIVE_PATTERNS.stream().anyMatch(lower::contains);
     }
 
-    public static String maskValue(String key, String value) {
+    public static @Nullable String maskValue(String key, String value) {
         if (value == null) return null;
         if (isSensitive(key) && value.length() > 4) {
             return value.substring(0, 4) + "****";

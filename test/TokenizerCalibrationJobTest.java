@@ -106,7 +106,7 @@ class TokenizerCalibrationJobTest extends UnitTest {
         int updated = TokenizerCalibrationJob.applyCalibrations(groups);
         assertEquals(1, updated, "should have written one new multiplier");
 
-        var stored = ConfigService.get(CONFIG_KEY, null);
+        var stored = ConfigService.get(CONFIG_KEY);
         assertNotNull(stored);
         double parsed = Double.parseDouble(stored);
         // max=1.45, * 1.05 headroom = 1.5225 → "1.52"
@@ -122,7 +122,7 @@ class TokenizerCalibrationJobTest extends UnitTest {
 
         int updated = TokenizerCalibrationJob.applyCalibrations(groups);
         assertEquals(0, updated);
-        assertNull(ConfigService.get(CONFIG_KEY, null),
+        assertNull(ConfigService.get(CONFIG_KEY),
                 "below-threshold groups must not write to Config");
     }
 
@@ -137,7 +137,7 @@ class TokenizerCalibrationJobTest extends UnitTest {
 
         int updated = TokenizerCalibrationJob.applyCalibrations(groups);
         assertEquals(0, updated, "delta below threshold must not trigger a write");
-        assertEquals("1.50", ConfigService.get(CONFIG_KEY, null));
+        assertEquals("1.50", ConfigService.get(CONFIG_KEY));
     }
 
     @Test
@@ -149,7 +149,7 @@ class TokenizerCalibrationJobTest extends UnitTest {
 
         int updated = TokenizerCalibrationJob.applyCalibrations(groups);
         assertEquals(1, updated);
-        var stored = ConfigService.get(CONFIG_KEY, null);
+        var stored = ConfigService.get(CONFIG_KEY);
         assertTrue(Double.parseDouble(stored) > 1.49);
     }
 

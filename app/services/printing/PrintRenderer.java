@@ -3,6 +3,7 @@ package services.printing;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
+import org.jspecify.annotations.Nullable;
 
 import javax.imageio.ImageIO;
 
@@ -77,7 +78,7 @@ public final class PrintRenderer {
          * arbitrary PWG name would produce a page that is subtly the wrong size,
          * which wastes paper more quietly than an obvious failure.
          */
-        public static PageSize fromMedia(String media, int dpi) {
+        public static PageSize fromMedia(@Nullable String media, int dpi) {
             var resolved = dpi > 0 ? dpi : DEFAULT_DPI;
             var name = media == null ? "" : media.toLowerCase();
             // Legal before Letter: "na_legal_8.5x14in" contains neither substring

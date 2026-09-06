@@ -1,5 +1,6 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import utils.HandoffShell;
 
@@ -49,7 +50,7 @@ public final class RestartService {
      * instead of spawning it. Lets tests assert the composed command without
      * rebooting the test JVM.
      */
-    public static Consumer<Plan> spawnerForTest;
+    public static @Nullable Consumer<Plan> spawnerForTest;
 
     /**
      * A restart that has been resolved but not yet launched.
@@ -82,7 +83,7 @@ public final class RestartService {
      * {@link #requestRestart()}'s pre-spawn guard, so the UI never offers a
      * button that the POST would refuse.
      */
-    public static String unavailableReason() {
+    public static @Nullable String unavailableReason() {
         var script = script();
         if (!script.isFile()) {
             return "jclaw.sh not found at " + script.getAbsolutePath()

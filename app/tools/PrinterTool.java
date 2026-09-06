@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.WorkspaceFiles;
 import services.printing.DiscoveredPrinter;
 import services.printing.JobAttributes;
@@ -169,7 +170,7 @@ public class PrinterTool implements ToolRegistry.Tool {
     }
 
     /** One JSON-Schema property. {@code enumValues} null when the value is free-form. */
-    private static Map<String, Object> prop(String type, List<String> enumValues, String description) {
+    private static Map<String, Object> prop(String type, @Nullable List<String> enumValues, String description) {
         if (enumValues == null) {
             return Map.of(SchemaKeys.TYPE, type, SchemaKeys.DESCRIPTION, description);
         }
@@ -353,7 +354,7 @@ public class PrinterTool implements ToolRegistry.Tool {
      * <p>Discovery is re-run rather than cached — see {@link PrinterDiscovery} for
      * why a stale address is worse than a slow lookup.
      */
-    private static DiscoveredPrinter resolveTarget(JsonObject args) {
+    private static @Nullable DiscoveredPrinter resolveTarget(JsonObject args) {
         var protocol = PrintProtocol.parse(str(args, "protocol"));
         var host = str(args, "host");
         if (host != null) {
@@ -424,11 +425,11 @@ public class PrinterTool implements ToolRegistry.Tool {
         return HttpKeys.APPLICATION_OCTET_STREAM;
     }
 
-    private static String firstNonNull(String a, String b) {
+    private static @Nullable String firstNonNull(@Nullable String a, @Nullable String b) {
         return a != null ? a : b;
     }
 
-    private static String str(JsonObject args, String key) {
+    private static @Nullable String str(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) {
             return null;
         }
@@ -436,7 +437,7 @@ public class PrinterTool implements ToolRegistry.Tool {
         return v.isEmpty() ? null : v;
     }
 
-    private static Integer intOrNull(JsonObject args, String key) {
+    private static @Nullable Integer intOrNull(JsonObject args, String key) {
         if (!args.has(key) || args.get(key).isJsonNull()) {
             return null;
         }

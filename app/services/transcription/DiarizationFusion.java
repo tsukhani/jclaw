@@ -1,5 +1,7 @@
 package services.transcription;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -47,7 +49,7 @@ public final class DiarizationFusion {
         return sb.toString();
     }
 
-    private static void flush(StringBuilder sb, String speaker, String emotion, List<String> buffer) {
+    private static void flush(StringBuilder sb, @Nullable String speaker, @Nullable String emotion, List<String> buffer) {
         if (speaker == null || buffer.isEmpty()) return;
         if (!sb.isEmpty()) sb.append('\n');
         sb.append(speaker);
@@ -57,7 +59,7 @@ public final class DiarizationFusion {
 
     /** The turn with the most time-overlap with {@code [startMs,endMs)}; the
      *  earliest such turn wins ties, null when no turn overlaps. */
-    private static DiarizeSidecarClient.Turn turnFor(long startMs, long endMs,
+    private static DiarizeSidecarClient.@Nullable Turn turnFor(long startMs, long endMs,
                                                      List<DiarizeSidecarClient.Turn> turns) {
         DiarizeSidecarClient.Turn best = null;
         long bestOverlap = 0;

@@ -3,6 +3,7 @@ package tools;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -86,7 +87,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
      * HarnessEvent#STEP} carrying the raw line.
      */
     @Override
-    public HarnessEvent parse(String line) {
+    public @Nullable HarnessEvent parse(String line) {
         JsonObject obj;
         try {
             var parsed = JsonParser.parseString(line);
@@ -136,7 +137,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
      * as {@code text_delta} tokens. Falls back to a raw-line step when the message
      * carries no structured content.
      */
-    private static HarnessEvent fromAssistant(JsonObject obj, String line) {
+    private static @Nullable HarnessEvent fromAssistant(JsonObject obj, String line) {
         var message = obj.has(FIELD_MESSAGE) && obj.get(FIELD_MESSAGE).isJsonObject()
                 ? obj.getAsJsonObject(FIELD_MESSAGE) : obj;
         JsonElement content = message.get(FIELD_CONTENT);
@@ -161,7 +162,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
      * message_start}, {@code ping}, {@code content_block_start}/{@code _stop},
      * {@code input_json_delta}, …) is a coarse {@link HarnessEvent#STEP}.
      */
-    private static HarnessEvent fromStreamEvent(JsonObject obj) {
+    private static @Nullable HarnessEvent fromStreamEvent(JsonObject obj) {
         JsonElement event = obj.get("event");
         if (event != null && event.isJsonObject()) {
             JsonElement delta = event.getAsJsonObject().get("delta");
@@ -184,7 +185,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
      * (e.g. "File created successfully at …") rather than the raw JSON, and drop
      * it ({@code null}) when it carries no readable content.
      */
-    private static HarnessEvent fromUser(JsonObject obj) {
+    private static @Nullable HarnessEvent fromUser(JsonObject obj) {
         var message = obj.has(FIELD_MESSAGE) && obj.get(FIELD_MESSAGE).isJsonObject()
                 ? obj.getAsJsonObject(FIELD_MESSAGE) : obj;
         JsonElement content = message.get(FIELD_CONTENT);
@@ -234,7 +235,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
     }
 
     /** First present, non-null primitive field among {@code keys}, as a string. */
-    private static String firstString(JsonObject obj, String... keys) {
+    private static @Nullable String firstString(JsonObject obj, String... keys) {
         for (var key : keys) {
             JsonElement el = obj.get(key);
             if (el != null && el.isJsonPrimitive()) {

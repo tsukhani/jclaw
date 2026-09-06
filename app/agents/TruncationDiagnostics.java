@@ -5,6 +5,7 @@ import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import models.Agent;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.util.List;
@@ -40,7 +41,7 @@ public final class TruncationDiagnostics {
      * signals the model exhausted its output token budget
      * mid-response.
      */
-    public static boolean isTruncationFinish(String finishReason) {
+    public static boolean isTruncationFinish(@Nullable String finishReason) {
         return "length".equals(finishReason) || "max_tokens".equals(finishReason);
     }
 
@@ -54,9 +55,9 @@ public final class TruncationDiagnostics {
      * format stays canonical across streaming and non-streaming.
      */
     static void logEmptyToolCallsTruncation(String site, Agent agent, Conversation conversation,
-                                             LlmProvider provider, String channelType,
-                                             String finishReason, List<ChatMessage> messages,
-                                             List<ToolDef> tools) {
+                                             LlmProvider provider, @Nullable String channelType,
+                                             @Nullable String finishReason, List<ChatMessage> messages,
+                                             @Nullable List<ToolDef> tools) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, provider).orElse(null);
         var providerName = provider != null && provider.config() != null ? provider.config().name() : null;
         var modelId = ModelResolver.effectiveModelId(agent, conversation);
@@ -68,7 +69,7 @@ public final class TruncationDiagnostics {
         int headroom = contextWindow > 0
                 ? contextWindow - promptTokens - ContextWindowManager.OUTPUT_SAFETY_MARGIN_TOKENS
                 : -1;
-        Integer clamped = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, messages, tools);
+        var clamped = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, messages, tools);
         EventLogger.warn("llm", agent.name, channelType,
                 "Truncated reply (site=%s, finish=%s, configured=%d, contextWindow=%d, prompt~%d, headroom=%d, clamped=%s)"
                         .formatted(site, finishReason, configured, contextWindow, promptTokens, headroom,

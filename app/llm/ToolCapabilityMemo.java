@@ -1,6 +1,7 @@
 package llm;
 
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.ConfigService;
 import services.Tx;
@@ -49,7 +50,7 @@ public final class ToolCapabilityMemo {
     };
 
     /** True when {@code message} is a provider's way of saying the model can't call tools. */
-    public static boolean isToolsUnsupported(String message) {
+    public static boolean isToolsUnsupported(@Nullable String message) {
         if (message == null) return false;
         var lower = message.toLowerCase();
         for (var sig : SIGNATURES) {

@@ -9,6 +9,7 @@ import models.MessageRole;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 import tools.MessageTool;
@@ -71,7 +72,7 @@ public final class TaskExecutor {
      * may be a detached entity once the surrounding Tx commits, but
      * those are primitive/String fields that remain accessible.
      */
-    private record PreparedFire(Agent agent, String userPrompt, Set<String> allowedTools, String taskName) {}
+    private record PreparedFire(Agent agent, String userPrompt, @Nullable Set<String> allowedTools, String taskName) {}
 
     /**
      * Run one fire of {@code task} and return the persisted TaskRun.
@@ -85,7 +86,7 @@ public final class TaskExecutor {
      * the TaskRun — the body succeeded; only the post-completion push
      * to the configured channel did not.
      */
-    public static TaskRun runTask(Task task) {
+    public static @Nullable TaskRun runTask(Task task) {
         Objects.requireNonNull(task, "task");
         if (task.id == null) {
             throw new IllegalArgumentException("task must be persisted before being run");
@@ -192,7 +193,7 @@ public final class TaskExecutor {
     private static String appendToolDeliveryDirective(String prompt, Task task) {
         if (task.noAgent || isReminder(task)) return prompt;
         var spec = DeliverySpec.parse(task.delivery);
-        if (spec.kind() != DeliverySpec.Kind.TOOL || spec.tool().isBlank()) return prompt;
+        if (spec.kind() != DeliverySpec.Kind.TOOL || spec.resolvedTool().isBlank()) return prompt;
         return prompt + "\n\nWhen you have produced the final output, deliver it by calling the `"
                 + spec.tool() + "` tool.";
     }
@@ -383,7 +384,7 @@ public final class TaskExecutor {
      * final reply through {@link DeliveryDispatcher#dispatchSpec} when
      * {@link Task#delivery} is set.
      */
-    private static TaskRun finalizeRun(Task task, TaskRun run) {
+    private static @Nullable TaskRun finalizeRun(Task task, TaskRun run) {
         // Re-read the closed TaskRun so durationMs reflects the
         // sink.onComplete-written value rather than recomputing. When a
         // delivery spec is configured (and this isn't a reminder, which
@@ -435,7 +436,7 @@ public final class TaskExecutor {
      * {@link #dispatchDelivery} doesn't have to open a second transaction
      * for the LIKE count.
      */
-    private record Resolved(TaskRun run, boolean deliveredViaMessageTool) {}
+    private record Resolved(@Nullable TaskRun run, boolean deliveredViaMessageTool) {}
 
     /**
      * Push the closed TaskRun's {@link TaskRun#outputSummary} through
@@ -571,7 +572,7 @@ public final class TaskExecutor {
      * for re-shipping to a provider, which rewrites a real id like
      * {@code functions.message:27} and would no longer match the TOOL row it has to join to.
      */
-    private static LlmTypes.ToolCall rawToolCall(String toolCallsJson) {
+    private static LlmTypes.@Nullable ToolCall rawToolCall(String toolCallsJson) {
         if (toolCallsJson == null || toolCallsJson.isBlank()) return null;
         try {
             return GsonHolder.GSON.fromJson(toolCallsJson, LlmTypes.ToolCall.class);
@@ -581,7 +582,7 @@ public final class TaskExecutor {
     }
 
     private static void stampDelivery(Long runId, TaskRun.DeliveryStatus status,
-                                      String target, String error) {
+                                      @Nullable String target, @Nullable String error) {
         Tx.run(() -> {
             var fresh = (TaskRun) TaskRun.findById(runId);
             if (fresh == null) return null;

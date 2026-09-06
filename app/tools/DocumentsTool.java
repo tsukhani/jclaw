@@ -15,6 +15,7 @@ import org.apache.tika.parser.ocr.TesseractOCRConfig;
 import org.apache.tika.parser.pdf.OcrConfig;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
+import org.jspecify.annotations.Nullable;
 import org.xml.sax.SAXException;
 import play.Logger;
 import play.Play;
@@ -33,6 +34,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Tool for reading and writing rich document formats. Reading uses Apache
@@ -199,7 +201,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
     /** Outcome of a write/render: the text response, plus (on success) the produced
      *  file and its resolved format so {@link #richResult} can carry the bytes as a
      *  downloadable attachment. On any error path, {@code file} is null. */
-    private record Written(String text, Path file, String format) {
+    private record Written(String text, @Nullable Path file, @Nullable String format) {
         static Written error(String text) { return new Written(text, null, null); }
     }
 
@@ -226,15 +228,15 @@ public class DocumentsTool implements ToolRegistry.Tool {
         }
     }
 
-    private static String mimeForFormat(String format) {
+    private static String mimeForFormat(@Nullable String format) {
         return switch (format) {
             case "pdf" -> "application/pdf";
             case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-            default -> "text/html";
+            case null, default -> "text/html";
         };
     }
 
-    private Written writeDocument(Path target, String relativePath, String content, String format) {
+    private Written writeDocument(Path target, String relativePath, @Nullable String content, @Nullable String format) {
         if (content == null || content.isEmpty()) {
             return Written.error("Error: writeDocument requires 'content' (markdown).");
         }
@@ -298,7 +300,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
     private static final List<String> BINARY_EXTENSIONS = List.of("docx", "pdf", "xlsx", "pptx");
 
-    private String appendDocument(Path target, String relativePath, String content) {
+    private String appendDocument(Path target, String relativePath, @Nullable String content) {
         if (content == null || content.isEmpty()) {
             return "Error: appendDocument requires 'content' (markdown to append).";
         }
@@ -344,7 +346,8 @@ public class DocumentsTool implements ToolRegistry.Tool {
      */
     public static Path resolveNonConflicting(Path desired) {
         if (!Files.exists(desired)) return desired;
-        var parent = desired.getParent();
+        // Callers resolve against the agent workspace, so the path always has a parent.
+        var parent = Objects.requireNonNull(desired.getParent(), "desired path has no parent");
         var name = desired.getFileName().toString();
         int dot = name.lastIndexOf('.');
         var base = (dot <= 0) ? name : name.substring(0, dot);
@@ -380,7 +383,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
         return dot > 0 ? fileName.substring(0, dot + 1) + format : fileName + "." + format;
     }
 
-    private static String resolveFormat(String explicit, String path) {
+    private static @Nullable String resolveFormat(@Nullable String explicit, String path) {
         if (explicit != null && !explicit.isBlank()) {
             return explicit.toLowerCase(Locale.ROOT);
         }
@@ -551,7 +554,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
      * a real "no text in this document" result and shouldn't be muddied with
      * a misleading install hint.
      */
-    private static String ocrUnavailableHint() {
+    private static @Nullable String ocrUnavailableHint() {
         var probe = OcrHealthProbe.lastResult();
         if (probe.available()) return null;
         return "Note: tesseract is unavailable (" + probe.reason() + "). "

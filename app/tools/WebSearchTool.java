@@ -10,6 +10,7 @@ import models.Agent;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import utils.GsonHolder;
@@ -78,11 +79,11 @@ public class WebSearchTool implements ToolRegistry.Tool {
      *                   (handles every host uniformly without an API key);
      *                   {@code null} when the host cannot be parsed
      */
-    public record SearchResult(String title, String url, String snippet, String faviconUrl) {}
+    public record SearchResult(String title, String url, @Nullable String snippet, @Nullable String faviconUrl) {}
 
     /** Outcome of a provider call — carries both the LLM-visible markdown and
      *  the structured list the UI uses for JCLAW-170 result chips. */
-    private record SearchOutcome(String text, List<SearchResult> results, String providerDisplayName, boolean ok) {
+    private record SearchOutcome(String text, @Nullable List<SearchResult> results, @Nullable String providerDisplayName, boolean ok) {
         static SearchOutcome error(String msg) { return new SearchOutcome(msg, null, null, false); }
     }
 
@@ -257,7 +258,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
     }
 
-    private static int parseInt(String s, int fallback) {
+    private static int parseInt(@Nullable String s, int fallback) {
         try { return Integer.parseInt(s); } catch (NumberFormatException _) { return fallback; }
     }
 
@@ -266,7 +267,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
      * icon service. Returns {@code null} when the URL can't be parsed or has
      * no host — the UI falls back to a generic globe icon on null.
      */
-    static String faviconUrlFor(String url) {
+    static @Nullable String faviconUrlFor(String url) {
         if (url == null || url.isBlank()) return null;
         try {
             var host = URI.create(url).getHost();
@@ -300,7 +301,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
     @FunctionalInterface
     private interface SnippetReader {
-        String snippet(JsonObject result);
+        @Nullable String snippet(JsonObject result);
     }
 
     private static List<SearchResult> parseResultArray(JsonArray arr, String urlKey, SnippetReader snippetReader) {
@@ -318,11 +319,11 @@ public class WebSearchTool implements ToolRegistry.Tool {
         return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : fallback;
     }
 
-    private static String nullableString(JsonObject obj, String key) {
+    private static @Nullable String nullableString(JsonObject obj, String key) {
         return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : null;
     }
 
-    private static String trimmedContentSnippet(JsonObject obj) {
+    private static @Nullable String trimmedContentSnippet(JsonObject obj) {
         var content = nullableString(obj, "content");
         if (content == null) return null;
         content = content.strip();
@@ -330,7 +331,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 ? content.substring(0, CONTENT_SNIPPET_MAX_CHARS) + "..." : content;
     }
 
-    private static JsonArray topLevelArray(String responseJson, String key) {
+    private static @Nullable JsonArray topLevelArray(String responseJson, String key) {
         var json = JsonParser.parseString(responseJson).getAsJsonObject();
         // Providers — notably Ollama's /api/web_search — return the array key
         // present but JSON-null for a query that found nothing. has(key) is
@@ -430,7 +431,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             return sb.toString().strip();
         }
 
-        private static String joinedHighlights(JsonObject result) {
+        private static @Nullable String joinedHighlights(JsonObject result) {
             if (!result.has(KEY_HIGHLIGHTS) || result.getAsJsonArray(KEY_HIGHLIGHTS).isEmpty()) return null;
             var sb = new StringBuilder();
             for (var h : result.getAsJsonArray(KEY_HIGHLIGHTS)) {

@@ -1,6 +1,7 @@
 package services.transcription;
 
 
+import org.jspecify.annotations.Nullable;
 import services.UvProbe;
 
 import java.nio.file.Path;
@@ -49,7 +50,7 @@ public final class WhisperTranscriber {
      * models and whisper-jni's {@code "en"} default on English-only models
      * (whisper.cpp rejects detection on {@code .en} models).
      */
-    public static List<Segment> transcribeSegments(Path audioFile, AsrModel model, String language) {
+    public static List<Segment> transcribeSegments(Path audioFile, AsrModel model, @Nullable String language) {
         // JCLAW-650: sidecar-or-error, the JCLAW-614 pattern. The engine is
         // host-relevant (mlx-whisper on Apple silicon, faster-whisper on
         // CUDA/CPU) and its only prerequisite is uv — whisper weights are

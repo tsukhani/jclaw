@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
@@ -223,8 +224,9 @@ public class WebFetchTool implements ToolRegistry.Tool {
             // them through a different transport would be a way around the guard.
             var escalated = climb(url, null, null, e.getMessage(), agent);
             if (escalated.usable()) {
-                return "html".equals(mode) && escalated.fetched() != null
-                        ? rawHtml(escalated.fetched(), url, agent) : escalated.text();
+                var escalatedBody = escalated.fetched();
+                return "html".equals(mode) && escalatedBody != null
+                        ? rawHtml(escalatedBody, url, agent) : escalated.resolvedText();
             }
             return "Error fetching URL: %s".formatted(e.getMessage());
         }
@@ -232,8 +234,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
 
     /** Hand one URL to the ladder, classifying the plain attempt the way the crawler and
      *  the harness both do so all three agree on what counts as a failure. */
-    private static ScrapeLadder.Attempt climb(String url, WebExtraction.FetchResult fetched,
-                                              String text, String error, Agent agent) {
+    private static ScrapeLadder.Attempt climb(String url, WebExtraction.@Nullable FetchResult fetched,
+                                              @Nullable String text, @Nullable String error, Agent agent) {
         var detail = error == null ? "fetch failed" : error;
         var obs = fetched == null
                 ? ScrapeObservation.failed(url, detail)

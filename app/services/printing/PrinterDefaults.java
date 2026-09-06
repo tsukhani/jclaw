@@ -1,5 +1,6 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 
 import java.util.LinkedHashMap;
@@ -48,7 +49,7 @@ public final class PrinterDefaults {
      * @param options  IPP job attribute → value, for whatever this printer offers.
      *                  Empty means "use the printer's own defaults throughout"
      */
-    public record Defaults(String name, String host, int port, String protocol,
+    public record Defaults(@Nullable String name, @Nullable String host, int port, @Nullable String protocol,
                            Map<String, String> options) {
 
         public Defaults {
@@ -56,15 +57,15 @@ public final class PrinterDefaults {
         }
 
         /** Convenience for the three the print path itself consumes. */
-        public String sides() {
+        public @Nullable String sides() {
             return options.get(OPT_SIDES);
         }
 
-        public String color() {
+        public @Nullable String color() {
             return options.get(OPT_COLOR);
         }
 
-        public String media() {
+        public @Nullable String media() {
             return options.get(OPT_MEDIA);
         }
 
@@ -80,7 +81,7 @@ public final class PrinterDefaults {
             }
             // Port 0 means "whatever the protocol's standard is", so a saved default
             // with no explicit port still matches the printer it was chosen from.
-            return host.equals(otherHost) && (port == 0 || port == otherPort);
+            return host != null && host.equals(otherHost) && (port == 0 || port == otherPort);
         }
 
         /** The subset the raster/IPP path consumes directly. */
@@ -132,7 +133,7 @@ public final class PrinterDefaults {
      * with "invalid 'sides' value ''". Caught by cross-test pollution rather than
      * by the round-trip test, which only ever set real values or cleared all of them.
      */
-    private static String blankToNull(String raw) {
+    private static @Nullable String blankToNull(@Nullable String raw) {
         return raw == null || raw.isBlank() ? null : raw;
     }
 
@@ -170,11 +171,11 @@ public final class PrinterDefaults {
     }
 
     /** Write, or blank the key when the value is absent — no stale halves left behind. */
-    private static void set(String key, String value) {
+    private static void set(String key, @Nullable String value) {
         ConfigService.set(key, value == null ? "" : value);
     }
 
-    private static int parsePort(String raw) {
+    private static int parsePort(@Nullable String raw) {
         if (raw == null || raw.isBlank()) {
             return 0;
         }

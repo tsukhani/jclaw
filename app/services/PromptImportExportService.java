@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import models.Prompt;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -85,11 +86,11 @@ public final class PromptImportExportService {
         return true;
     }
 
-    private static String str(JsonObject o, String key) {
+    private static @Nullable String str(JsonObject o, String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString() : null;
     }
 
-    private static String blankToNull(String s) {
+    private static @Nullable String blankToNull(@Nullable String s) {
         return (s == null || s.isBlank()) ? null : s.trim();
     }
 }

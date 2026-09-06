@@ -2,6 +2,7 @@ package services.catalog;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import services.SkillCategoryClassifier;
 import utils.JsonArgs;
 
@@ -40,7 +41,7 @@ public final class MastraDumpParser implements DumpParser {
         return new ParsedDump(List.copyOf(list), when);
     }
 
-    private static String str(JsonObject o, String key) {
+    private static @Nullable String str(JsonObject o, String key) {
         return o == null ? null : JsonArgs.optString(o, key);
     }
 

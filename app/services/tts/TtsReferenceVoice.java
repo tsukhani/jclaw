@@ -1,5 +1,6 @@
 package services.tts;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.ConfigService;
 
@@ -61,14 +62,14 @@ public final class TtsReferenceVoice {
     /** The active clip's absolute path, or null when none is set or the file has
      *  gone missing underneath us (a stale config row must not be handed to the
      *  sidecar, which would fail the synthesis rather than the setting). */
-    public static String activePath(TtsEngine engine) {
+    public static @Nullable String activePath(TtsEngine engine) {
         var configured = ConfigService.get(configKey(engine));
         if (configured == null || configured.isBlank()) return null;
         return Files.isRegularFile(Path.of(configured)) ? configured : null;
     }
 
     /** Rejection reason for {@code filename}/{@code size}, or null when acceptable. */
-    public static String validate(String filename, long sizeBytes) {
+    public static @Nullable String validate(String filename, long sizeBytes) {
         var ext = extensionOf(filename);
         if (ext == null || !ALLOWED_EXTENSIONS.contains(ext)) {
             return "Reference clip must be one of: " + String.join(", ", ALLOWED_EXTENSIONS);
@@ -116,7 +117,7 @@ public final class TtsReferenceVoice {
         }
     }
 
-    private static String extensionOf(String filename) {
+    private static @Nullable String extensionOf(String filename) {
         if (filename == null) return null;
         int dot = filename.lastIndexOf('.');
         if (dot < 0 || dot == filename.length() - 1) return null;

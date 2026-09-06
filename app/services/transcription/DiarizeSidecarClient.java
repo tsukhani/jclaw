@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.LocalSidecarDaemon;
 import services.sidecar.SidecarHttpClient;
@@ -29,7 +30,7 @@ public class DiarizeSidecarClient extends SidecarHttpClient {
     /** One speaker turn: {@code [startMs, endMs)} attributed to {@code speaker},
      *  optionally with a per-turn emotion (null unless emotions were requested
      *  and the turn was long enough to score). */
-    public record Turn(long startMs, long endMs, String speaker, Emotion emotion) {
+    public record Turn(long startMs, long endMs, String speaker, @Nullable Emotion emotion) {
         public Turn(long startMs, long endMs, String speaker) {
             this(startMs, endMs, speaker, null);
         }
@@ -38,7 +39,7 @@ public class DiarizeSidecarClient extends SidecarHttpClient {
     /** MERaLiON-SER per-turn emotion: a categorical {@code label} plus optional
      *  valence/arousal/dominance in [0,1] (null when the model emits no VAD). */
     public record Emotion(String label, double confidence,
-                          Double valence, Double arousal, Double dominance) {}
+                          @Nullable Double valence, @Nullable Double arousal, @Nullable Double dominance) {}
 
     /** The sidecar is one-inference-at-a-time by design (HTTP 409 when busy).
      *  Serialize all sidecar calls JVM-wide with a FAIR lock so concurrent
@@ -52,7 +53,7 @@ public class DiarizeSidecarClient extends SidecarHttpClient {
     }
 
     /** Test seam: fixed base URL (no sidecar spawn) + injected client. */
-    public DiarizeSidecarClient(String baseUrlOverride, OkHttpClient client) {
+    public DiarizeSidecarClient(@Nullable String baseUrlOverride, OkHttpClient client) {
         super(baseUrlOverride, client);
     }
 
@@ -68,12 +69,12 @@ public class DiarizeSidecarClient extends SidecarHttpClient {
      * {@code emotions} runs a per-turn SER pass; {@code emotionModel} picks the
      * SER model (null/blank = the sidecar default, MERaLiON-SER-v1).
      */
-    public List<Turn> diarize(Path audioFile, Integer numSpeakers, boolean emotions, String emotionModel) {
+    public List<Turn> diarize(Path audioFile, @Nullable Integer numSpeakers, boolean emotions, @Nullable String emotionModel) {
         return withSidecarLock(() -> diarizeLocked(audioFile, numSpeakers, emotions, emotionModel));
     }
 
-    private List<Turn> diarizeLocked(Path audioFile, Integer numSpeakers, boolean emotions,
-                                     String emotionModel) {
+    private List<Turn> diarizeLocked(Path audioFile, @Nullable Integer numSpeakers, boolean emotions,
+                                     @Nullable String emotionModel) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : DiarizeSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("audio_path", audioFile.toAbsolutePath().toString());
@@ -161,7 +162,7 @@ public class DiarizeSidecarClient extends SidecarHttpClient {
     }
 
     /** The optional {@code emotion} object on a turn, or null if absent. */
-    private static Emotion parseEmotion(JsonObject turn) {
+    private static @Nullable Emotion parseEmotion(JsonObject turn) {
         final var field = "emotion";
         if (!turn.has(field) || turn.get(field).isJsonNull()) return null;
         var e = turn.getAsJsonObject(field);

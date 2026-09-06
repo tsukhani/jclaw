@@ -1,5 +1,7 @@
 package services.printing;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Map;
 
 /**
@@ -18,7 +20,7 @@ import java.util.Map;
  *                     are vendor-flavored and normalizing them here would throw away
  *                     the detail an operator needs when a job lands wrong.
  */
-public record DiscoveredPrinter(String name, String host, int port,
+public record DiscoveredPrinter(@Nullable String name, @Nullable String host, int port,
                                 PrintProtocol protocol, Map<String, String> capabilities) {
 
     public DiscoveredPrinter {

@@ -1,6 +1,7 @@
 package tools;
 
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
 
@@ -125,7 +126,7 @@ public final class TerminalImageRenderer {
      * Each character cell maps to cellSize x (cellSize*2) pixels to preserve the
      * 1:2 aspect ratio of half-block encoding.
      */
-    private static String renderBlockArtToPng(List<String> lines, Agent agent) {
+    private static @Nullable String renderBlockArtToPng(List<String> lines, Agent agent) {
         try {
             int cellW = 8;  // pixels per character width
             int cellH = 8;  // pixels per HALF character height (each char = 2 vertical halves)

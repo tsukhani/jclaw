@@ -1,5 +1,7 @@
 package services.scanners;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -43,7 +45,7 @@ public interface Scanner {
      * @param reason    human-readable classification reason; {@code null}
      *                  when {@code malicious} is false
      */
-    record Verdict(boolean malicious, String reason) {
+    record Verdict(boolean malicious, @Nullable String reason) {
         public static Verdict clean() { return new Verdict(false, null); }
         public static Verdict malicious(String reason) { return new Verdict(true, reason); }
     }

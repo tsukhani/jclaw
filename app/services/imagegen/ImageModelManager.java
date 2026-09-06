@@ -5,6 +5,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okio.BufferedSource;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import play.Play;
 import services.ConfigService;
@@ -55,7 +56,7 @@ public final class ImageModelManager {
      * @param totalBytes      expected total (0 when unknown)
      * @param error           error message; non-null only when {@code state == ERROR}
      */
-    public record ModelStatus(State state, long bytesDownloaded, long totalBytes, String error) {}
+    public record ModelStatus(State state, long bytesDownloaded, long totalBytes, @Nullable String error) {}
 
     /** Progress event passed to the optional callback as ndjson lines arrive. */
     public record DownloadProgress(String model, long bytesDownloaded, long totalBytes) {}

@@ -4,6 +4,7 @@ import mcp.McpConnectionManager;
 import mcp.McpServerTool;
 import models.Agent;
 import models.McpServer;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -106,7 +107,7 @@ public final class McpServerCatalog {
      * line for servers without an admin-supplied description. The {@code server}
      * row is looked up once by the caller from a batch-loaded map.
      */
-    private static String describeServer(McpServer server, ToolRegistry.Tool handle) {
+    private static String describeServer(@Nullable McpServer server, ToolRegistry.Tool handle) {
         if (server != null && server.transport != null) {
             // No description column on McpServer today; render transport
             // shape as a hint so the operator can still tell HTTP vs stdio

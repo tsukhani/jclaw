@@ -2,6 +2,7 @@ package services;
 
 import models.CompressionMetric;
 import models.CompressionMetric.Kind;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 
 /**
@@ -15,7 +16,7 @@ public final class CompressionMetrics {
 
     private CompressionMetrics() {}
 
-    public static void recordCompression(String agentId, String channel, String modelId, String contentType,
+    public static void recordCompression(@Nullable String agentId, @Nullable String channel, String modelId, String contentType,
                                          String algorithm, int tokensBefore, int tokensAfter) {
         if (agentId == null) return; // agent-less (test seam) — nothing to attribute
         var m = new CompressionMetric();
@@ -30,7 +31,7 @@ public final class CompressionMetrics {
         persist(m);
     }
 
-    public static void recordInflationGuard(String agentId, String channel, String modelId, String contentType,
+    public static void recordInflationGuard(@Nullable String agentId, @Nullable String channel, String modelId, String contentType,
                                             int tokensBefore, int tokensAfter) {
         if (agentId == null) return;
         var m = new CompressionMetric();

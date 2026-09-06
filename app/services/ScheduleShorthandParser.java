@@ -1,6 +1,7 @@
 package services;
 
 import models.Task;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -76,9 +77,9 @@ public final class ScheduleShorthandParser {
      */
     public record ScheduleSpec(
             Task.Type type,
-            Instant scheduledAt,
-            String cronExpression,
-            Long intervalSeconds,
+            @Nullable Instant scheduledAt,
+            @Nullable String cronExpression,
+            @Nullable Long intervalSeconds,
             String scheduleDisplay) {}
 
     /**
@@ -103,7 +104,7 @@ public final class ScheduleShorthandParser {
      * task's timezone (the chat tool, the create/update endpoints) pass it so
      * "{@code 2026-06-13T15:00}" means 3 pm in the user's zone, not the server's.
      */
-    public static ScheduleSpec parse(String input, ZoneId zone) {
+    public static ScheduleSpec parse(String input, @Nullable ZoneId zone) {
         if (input == null || input.isBlank()) {
             throw new IllegalArgumentException("Schedule expression is empty");
         }

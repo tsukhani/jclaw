@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.nio.file.Path;
@@ -39,7 +40,7 @@ final class FsLineEditor {
         }
         var loaded = FsSupport.loadEditableFile(target);
         if (loaded.error() != null) return loaded.error();
-        var original = loaded.content();
+        var original = loaded.resolvedContent();
 
         // Detect native line ending before splitting so we can preserve it on write.
         var nativeEol = detectLineEnding(original);
@@ -153,7 +154,7 @@ final class FsLineEditor {
         return new OpCounts(replaced, inserted, deleted);
     }
 
-    private record ParsedOp(LineOp op, String error) {
+    private record ParsedOp(@Nullable LineOp op, @Nullable String error) {
         static ParsedOp ok(LineOp op) { return new ParsedOp(op, null); }
         static ParsedOp err(String error) { return new ParsedOp(null, error); }
     }
@@ -197,7 +198,7 @@ final class FsLineEditor {
         };
     }
 
-    private static String checkBounds(int index, int startLine, int endLine, int lineCount, String opName) {
+    private static @Nullable String checkBounds(int index, int startLine, int endLine, int lineCount, String opName) {
         if (endLine < startLine) {
             return "Error: operation #%d (%s) endLine %d < startLine %d".formatted(index, opName, endLine, startLine);
         }

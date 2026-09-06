@@ -1,5 +1,7 @@
 package agents;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -187,9 +189,9 @@ public final class MessageDeduplicator {
      *
      * <p>Exposed for unit tests; not part of the public runner API.
      */
-    public static String buildDownloadSuffix(List<String> collectedImages,
+    public static String buildDownloadSuffix(@Nullable List<String> collectedImages,
                                              String content,
-                                             String channelType) {
+                                             @Nullable String channelType) {
         if (collectedImages == null || collectedImages.isEmpty()) return "";
         // Only the web frontend renders relative links as clickable (see Javadoc).
         if (!"web".equalsIgnoreCase(channelType)) return "";

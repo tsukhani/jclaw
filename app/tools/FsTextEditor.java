@@ -37,7 +37,7 @@ final class FsTextEditor {
         var loaded = FsSupport.loadEditableFile(target);
         if (loaded.error() != null) return loaded.error();
 
-        var working = loaded.content();
+        var working = loaded.resolvedContent();
         var notes = new ArrayList<String>();
         // Per-batch regex cache: reuses the compiled Pattern across edits that
         // share the same oldText. Scope is one editFile call; the map is
@@ -47,7 +47,7 @@ final class FsTextEditor {
         for (int i = 0; i < editsJson.size(); i++) {
             var applied = applyEditAtIndex(editsJson.get(i), working, i + 1, regexCache);
             if (applied.error() != null) return applied.error();
-            working = applied.result();
+            working = applied.resolvedResult();
             if (applied.note() != null) notes.add(applied.note());
         }
 

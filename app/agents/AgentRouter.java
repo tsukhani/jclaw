@@ -2,6 +2,7 @@ package agents;
 
 import models.Agent;
 import models.AgentBinding;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 /**
@@ -21,7 +22,7 @@ public class AgentRouter {
      * @param peerId      the peer identifier (chat ID, user ID, etc.)
      * @return the resolved agent and how it was matched, or null if no route found
      */
-    public static RouteResult resolve(String channelType, String peerId) {
+    public static @Nullable RouteResult resolve(String channelType, @Nullable String peerId) {
         // Tier 1: Exact peer match
         if (peerId != null) {
             var binding = AgentBinding.findByChannelAndPeer(channelType, peerId);

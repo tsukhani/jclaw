@@ -2,6 +2,7 @@ package services;
 
 import models.Agent;
 import models.Conversation;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Single source of truth for the (provider, modelId) pair driving a given
@@ -41,7 +42,7 @@ public final class ModelOverrideResolver {
      *                 "no LLM provider configured" error)
      * @param modelId  model id; same null semantics as {@code provider}
      */
-    public record Resolved(String provider, String modelId) {}
+    public record Resolved(@Nullable String provider, @Nullable String modelId) {}
 
     /**
      * Resolve the effective provider + model id. Null-safe on both arguments
@@ -53,7 +54,7 @@ public final class ModelOverrideResolver {
     }
 
     /** Effective provider name. See {@link #resolve} for precedence. */
-    public static String provider(Conversation conversation, Agent agent) {
+    public static @Nullable String provider(Conversation conversation, Agent agent) {
         if (hasOverride(conversation)) {
             return conversation.modelProviderOverride;
         }
@@ -61,7 +62,7 @@ public final class ModelOverrideResolver {
     }
 
     /** Effective model id. See {@link #resolve} for precedence. */
-    public static String modelId(Conversation conversation, Agent agent) {
+    public static @Nullable String modelId(Conversation conversation, Agent agent) {
         if (hasOverride(conversation)) {
             return conversation.modelIdOverride;
         }

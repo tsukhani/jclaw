@@ -13,6 +13,7 @@ import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
@@ -317,7 +318,7 @@ public class MemoryTool implements ToolRegistry.Tool {
         // for that instruction, so core is the default rather than fact. An explicit
         // category still wins, which is what lets the operator accept a different bucket
         // when core is full.
-        var requested = JsonArgs.optString(args, FIELD_CATEGORY, null);
+        var requested = JsonArgs.optString(args, FIELD_CATEGORY);
         var category = requested == null || requested.isBlank()
                 ? MemoryCategory.CORE.label
                 : MemoryCategory.coerceForStorage(requested);
@@ -363,7 +364,7 @@ public class MemoryTool implements ToolRegistry.Tool {
      * store under another category unprompted. Enforcing the conversation would need the
      * approval gate.
      */
-    private static String coreCapReached(String agentId) {
+    private static @Nullable String coreCapReached(String agentId) {
         int cap = ConfigService.getInt("memory.coreload.maxCount", 20);
         // Tool dispatch carries no ambient transaction (JCLAW-199) — the streaming chat
         // path is @NoTransaction, so a bare finder here throws "No active EntityManager".
@@ -384,7 +385,7 @@ public class MemoryTool implements ToolRegistry.Tool {
      * (JCLAW-529). A model that omits it stores a keyless memory — the pre-529 behavior,
      * not an error — and {@code MemoryKeyBackfillService} can key it later.
      */
-    static String parseQuestions(JsonObject args) {
+    static @Nullable String parseQuestions(JsonObject args) {
         if (!args.has(FIELD_QUESTIONS) || args.get(FIELD_QUESTIONS).isJsonNull()) return null;
         var raw = args.get(FIELD_QUESTIONS);
         var out = new ArrayList<String>();
@@ -531,7 +532,7 @@ public class MemoryTool implements ToolRegistry.Tool {
      * The store-side question: would capture have called this a duplicate? Keeps capture's
      * own thresholds, so a store cannot create a row capture would have rejected.
      */
-    private static List<Memory> sameFact(String agentId, String text, String retrievalKey) {
+    private static List<Memory> sameFact(String agentId, String text, @Nullable String retrievalKey) {
         return matching(agentId, text, retrievalKey,
                 ConfigService.getDouble("memory.autocapture.dedup.threshold", 0.85), 0.82);
     }
@@ -550,7 +551,7 @@ public class MemoryTool implements ToolRegistry.Tool {
      * loss is the embedding asymmetry rather than the threshold, and lowering a cosine
      * floor on a destructive path without measuring it would be guesswork.
      */
-    private static List<Memory> matching(String agentId, String text, String retrievalKey,
+    private static List<Memory> matching(String agentId, String text, @Nullable String retrievalKey,
             double jaccard, double containment) {
         // Keyless callers (forget) take the lexical leg only: a semantic hit is topical, and
         // deleting on topic removes neighboring facts the operator did not name.
@@ -625,7 +626,7 @@ public class MemoryTool implements ToolRegistry.Tool {
 
     /** Empty on any failure: no vector backend, no embedding provider, or a lookup error
      *  must not make memory unusable — fail open to the lexical tier, as capture does. */
-    private static List<Long> semanticNeighbours(String agentId, String text, String retrievalKey) {
+    private static List<Long> semanticNeighbours(String agentId, String text, @Nullable String retrievalKey) {
         var store = MemoryStoreFactory.get();
         try {
             // No key means the caller holds a description rather than a stored statement,

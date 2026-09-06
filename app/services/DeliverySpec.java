@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Set;
 
 /**
@@ -27,7 +29,7 @@ import java.util.Set;
  * so a {@code null} delivery is no longer ambiguous between "no output" and
  * "delivered in-run".
  */
-public record DeliverySpec(Kind kind, String channel, String target, String tool, String raw) {
+public record DeliverySpec(Kind kind, @Nullable String channel, @Nullable String target, @Nullable String tool, @Nullable String raw) {
 
     public enum Kind { CHANNEL, TOOL, NONE }
 
@@ -43,7 +45,7 @@ public record DeliverySpec(Kind kind, String channel, String target, String tool
      */
     public static final Set<String> DISPATCH_CHANNELS = Set.of("telegram", "slack", "whatsapp", "web");
 
-    public static DeliverySpec none(String raw) {
+    public static DeliverySpec none(@Nullable String raw) {
         return new DeliverySpec(Kind.NONE, null, null, null, raw);
     }
 
@@ -52,7 +54,7 @@ public record DeliverySpec(Kind kind, String channel, String target, String tool
      * never throws, never validates support/resolvability. {@code null}, blank,
      * and the literal {@code "none"} all collapse to {@link Kind#NONE}.
      */
-    public static DeliverySpec parse(String raw) {
+    public static DeliverySpec parse(@Nullable String raw) {
         if (raw == null) return none(null);
         var s = raw.trim();
         if (s.isEmpty() || s.equalsIgnoreCase(NONE_LITERAL)) return none(raw);
@@ -76,6 +78,18 @@ public record DeliverySpec(Kind kind, String channel, String target, String tool
         return kind == Kind.NONE;
     }
 
+    /** Valid only for {@link Kind#TOOL} — {@link #parse} sets it on exactly that branch. */
+    public String resolvedTool() {
+        if (tool == null) throw new IllegalStateException("delivery kind is " + kind + ", not TOOL");
+        return tool;
+    }
+
+    /** Valid only for {@link Kind#CHANNEL} — {@link #parse} sets it on exactly that branch. */
+    public String resolvedChannel() {
+        if (channel == null) throw new IllegalStateException("delivery kind is " + kind + ", not CHANNEL");
+        return channel;
+    }
+
     /** True when this is a dispatcher-routed channel JClaw can actually push to. */
     public boolean isDispatchChannel() {
         return kind == Kind.CHANNEL && channel != null && DISPATCH_CHANNELS.contains(channel);
@@ -85,7 +99,7 @@ public record DeliverySpec(Kind kind, String channel, String target, String tool
      * Short, human-facing label for the Tasks UI's "Channel" column:
      * the channel name, the tool name, or {@code "none"}.
      */
-    public String label() {
+    public @Nullable String label() {
         return switch (kind) {
             case CHANNEL -> channel;
             case TOOL -> tool;
@@ -104,19 +118,19 @@ public record DeliverySpec(Kind kind, String channel, String target, String tool
      * the dispatcher set is fixed and small; an unknown channel is almost
      * always a typo for {@code tool:}.
      */
-    public static String validate(String raw) {
+    public static @Nullable String validate(@Nullable String raw) {
         var spec = parse(raw);
         return switch (spec.kind()) {
             case NONE -> null;
-            case TOOL -> spec.tool().isBlank()
+            case TOOL -> spec.resolvedTool().isBlank()
                     ? "Delivery 'tool:' requires a tool name, e.g. 'tool:send_gmail_message'."
                     : null;
             case CHANNEL -> {
-                if (spec.channel().isBlank()) {
+                if (spec.resolvedChannel().isBlank()) {
                     yield "Delivery is empty; use '<channel>:<target>', 'tool:<name>', or 'none'.";
                 }
-                if (!DISPATCH_CHANNELS.contains(spec.channel())) {
-                    yield "Unknown delivery channel '" + spec.channel() + "'. Use one of "
+                if (!DISPATCH_CHANNELS.contains(spec.resolvedChannel())) {
+                    yield "Unknown delivery channel '" + spec.resolvedChannel() + "'. Use one of "
                             + DISPATCH_CHANNELS + ", or 'tool:<name>' for in-run tool delivery"
                             + " (e.g. email via 'tool:send_gmail_message').";
                 }

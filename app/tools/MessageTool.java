@@ -11,6 +11,7 @@ import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
 import models.WhatsAppTransport;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.DeliveryDispatcher;
 import services.Tx;
@@ -409,8 +410,8 @@ public class MessageTool implements ToolRegistry.Tool {
     /** Resolve channel + target (explicit overrides win; otherwise infer from
      *  the calling agent's active conversation), then hand off to the
      *  dispatcher. Must run inside an active Tx. */
-    private static String dispatch(Long callingAgentId, String explicitChannel,
-                                    String explicitTarget, String message) {
+    private static String dispatch(Long callingAgentId, @Nullable String explicitChannel,
+                                    @Nullable String explicitTarget, String message) {
         var agent = (Agent) Agent.findById(callingAgentId);
         if (agent == null) {
             return ERR_CALLING_AGENT + callingAgentId + ERR_NOT_FOUND;
@@ -508,7 +509,7 @@ public class MessageTool implements ToolRegistry.Tool {
      * irrelevant here: that gates delivery (in {@link DeliveryDispatcher}), not
      * which destination the agent owns.
      */
-    private static String perAgentBindingDestination(Agent agent, String channel) {
+    private static @Nullable String perAgentBindingDestination(Agent agent, String channel) {
         if (CHANNEL_SLACK.equalsIgnoreCase(channel)) {
             var binding = SlackBinding.findByAgentOrAncestor(agent);
             return binding == null ? null : binding.ownerUserId;
@@ -566,8 +567,8 @@ public class MessageTool implements ToolRegistry.Tool {
      * blank/null {@code quote} reproduces today's reply behavior exactly.
      */
     private static String telegramAction(Long callingAgentId, String action,
-                                          String explicitTarget, int messageId,
-                                          String emoji, String message, String quote) {
+                                          @Nullable String explicitTarget, int messageId,
+                                          @Nullable String emoji, @Nullable String message, @Nullable String quote) {
         if (!actionEnabled(action)) {
             return resultJson(action, "not-enabled",
                     "Action '" + action + "' is disabled by configuration "
@@ -620,9 +621,9 @@ public class MessageTool implements ToolRegistry.Tool {
      * validation (non-blank question, 2-10 options) are already applied in
      * {@link #executePoll} before this runs. Must run inside an active Tx.
      */
-    private static String poll(Long callingAgentId, String explicitTarget, String question,
-                               List<String> options, Boolean isAnonymous,
-                               Boolean allowsMultiple, Integer openPeriod) {
+    private static String poll(Long callingAgentId, @Nullable String explicitTarget, String question,
+                               List<String> options, @Nullable Boolean isAnonymous,
+                               @Nullable Boolean allowsMultiple, @Nullable Integer openPeriod) {
         var agent = (Agent) Agent.findById(callingAgentId);
         if (agent == null) {
             return ERR_CALLING_AGENT + callingAgentId + ERR_NOT_FOUND;
@@ -652,7 +653,7 @@ public class MessageTool implements ToolRegistry.Tool {
     /** Chat id for a Telegram action: explicit {@code target} wins, else the
      *  peer of the agent's most-recently-updated conversation (the same shared
      *  {@link DeliveryResolver} lookup the {@code send} inference rule uses). */
-    private static String resolveChatId(Agent agent, String explicitTarget) {
+    private static @Nullable String resolveChatId(Agent agent, @Nullable String explicitTarget) {
         if (explicitTarget != null && !explicitTarget.isBlank()) return explicitTarget;
         return DeliveryResolver.mostRecentConversation(agent).map(c -> c.peerId).orElse(null);
     }
@@ -682,7 +683,7 @@ public class MessageTool implements ToolRegistry.Tool {
 
     /** Structured tool result: {@code {action, status[, reason]}}. Mirrors the
      *  send path's JSON envelope shape. */
-    private static String resultJson(String action, String status, String reason) {
+    private static String resultJson(String action, String status, @Nullable String reason) {
         var payload = new LinkedHashMap<String, Object>();
         payload.put(PARAM_ACTION, action);
         payload.put("status", status);

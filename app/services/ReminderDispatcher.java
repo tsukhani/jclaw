@@ -5,6 +5,7 @@ import models.Notification;
 import models.Task;
 import models.TaskRun;
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Routes reminder-task fires (tasks with {@code payloadType="reminder"})
@@ -90,7 +91,7 @@ public final class ReminderDispatcher {
         return DeliveryDispatcher.DispatchResult.delivered();
     }
 
-    private static DeliveryDispatcher.DispatchResult dispatchTelegram(Task task, String chatId, String content) {
+    private static DeliveryDispatcher.DispatchResult dispatchTelegram(Task task, @Nullable String chatId, String content) {
         if (task.agent == null) {
             return DeliveryDispatcher.DispatchResult.failedDelivery(
                     "Reminder telegram dispatch requires an agent context for per-binding bot-token lookup.");

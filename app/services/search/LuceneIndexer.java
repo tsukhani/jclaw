@@ -20,6 +20,7 @@ import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.SearcherFactory;
 import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.store.FSDirectory;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.EventLogger;
 import services.Tx;
@@ -220,7 +221,7 @@ public final class LuceneIndexer {
      * stopped in {@link #close()}. Guarded by the class monitor along with
      * the writer/searcher maps.
      */
-    private static ScheduledExecutorService commitScheduler;
+    private static @Nullable ScheduledExecutorService commitScheduler;
 
     private LuceneIndexer() {}
 
@@ -420,7 +421,7 @@ public final class LuceneIndexer {
      * keys this on the agent id). A null {@code agentKey} writes no agent field,
      * matching every other scope.
      */
-    public static void upsert(Scope scope, long id, String content, String agentKey) {
+    public static void upsert(Scope scope, long id, String content, @Nullable String agentKey) {
         upsert(scope, id, content, agentKey, null);
     }
 
@@ -438,7 +439,7 @@ public final class LuceneIndexer {
      * for the vector path too — a bad embedding must never lose the FTS doc or
      * abort the caller.
      */
-    public static void upsert(Scope scope, long id, String content, String agentKey, float[] vector) {
+    public static void upsert(Scope scope, long id, String content, @Nullable String agentKey, float @Nullable [] vector) {
         var writer = writers.get(scope);
         if (writer == null) return;
         try {
@@ -542,7 +543,7 @@ public final class LuceneIndexer {
     }
 
     /** Internal accessor for a scope's SearcherManager. */
-    static SearcherManager searcherManager(Scope scope) {
+    static @Nullable SearcherManager searcherManager(Scope scope) {
         return searchers.get(scope);
     }
 

@@ -137,6 +137,12 @@ public final class WebExtraction {
                     + "Ask the operator to add it if this fetch is intended.")
                     .formatted(host, CFG_ALLOWLIST));
         }
+
+        /** The only constructor always supplies a message, so this narrows Throwable's @Nullable. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
+        }
     }
 
     /**

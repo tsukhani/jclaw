@@ -1,5 +1,7 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -60,7 +62,7 @@ public final class MatroskaTracks {
         return isAudioOnly(file) ? audioMime : sniffedMime;
     }
 
-    private static String audioVariantOf(String mime) {
+    private static @Nullable String audioVariantOf(String mime) {
         if ("video/webm".equals(mime)) return "audio/webm";
         if ("video/x-matroska".equals(mime)) return "audio/x-matroska";
         return null;

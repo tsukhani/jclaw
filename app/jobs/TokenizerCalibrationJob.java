@@ -149,7 +149,7 @@ public class TokenizerCalibrationJob extends Job<Void> {
                 ContextWindowManager.MAX_SAFETY_MULTIPLIER);
 
         var configKey = ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + key;
-        var existingRaw = ConfigService.get(configKey, null);
+        var existingRaw = ConfigService.get(configKey);
         double existing = parseDouble(existingRaw, -1.0);
 
         if (existing >= 0 && Math.abs(newMultiplier - existing) <= UPDATE_DELTA_THRESHOLD) return false;

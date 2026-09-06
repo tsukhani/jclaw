@@ -8,6 +8,7 @@ import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.openaicompat.OpenAiCompatibleClientBase;
 import utils.HttpFactories;
@@ -74,7 +75,8 @@ public class OpenAiCompatibleImageGenerationClient extends OpenAiCompatibleClien
     }
 
     @Override
-    public GeneratedImage generate(String prompt, String model, Integer width, Integer height) {
+    public GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                   @Nullable Integer height) {
         return generate(prompt, model, width, height, null);
     }
 
@@ -86,8 +88,9 @@ public class OpenAiCompatibleImageGenerationClient extends OpenAiCompatibleClien
      * A null reference is the original text-to-image path.
      */
     @Override
-    public GeneratedImage generate(String prompt, String model, Integer width, Integer height,
-                                   ReferenceImage referenceImage) {
+    public GeneratedImage generate(String prompt, @Nullable String model, @Nullable Integer width,
+                                   @Nullable Integer height,
+                                   @Nullable ReferenceImage referenceImage) {
         if (prompt == null || prompt.isBlank()) {
             throw new ImageGenerationException("image generation: prompt is required");
         }
@@ -99,9 +102,8 @@ public class OpenAiCompatibleImageGenerationClient extends OpenAiCompatibleClien
 
         var base = creds.baseUrl();
         var size = sizeFor(width, height);
-        boolean hasReference = referenceImage != null
-                && referenceImage.bytes() != null && referenceImage.bytes().length > 0;
-        var request = hasReference
+        var request = referenceImage != null && referenceImage.bytes() != null
+                        && referenceImage.bytes().length > 0
                 ? buildEditsRequest(base, creds.apiKey(), effModel, prompt, size, referenceImage)
                 : buildGenerationsRequest(base, creds.apiKey(), effModel, prompt, size);
 
@@ -191,7 +193,7 @@ public class OpenAiCompatibleImageGenerationClient extends OpenAiCompatibleClien
     }
 
     /** Map requested pixel dims to a size the GPT image models accept (1024x1024, 1536x1024, 1024x1536). */
-    private static String sizeFor(Integer width, Integer height) {
+    private static String sizeFor(@Nullable Integer width, @Nullable Integer height) {
         if (width == null || height == null) {
             var cfg = ConfigService.get("imagegen.imageSize");
             return (cfg != null && !cfg.isBlank()) ? cfg : "1024x1024";

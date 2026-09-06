@@ -1,6 +1,7 @@
 package tools;
 
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import tools.FsSupport.EditResult;
 import tools.UnifiedPatchParser.FileOp;
@@ -69,17 +70,24 @@ final class FsPatchApplier {
         var resolution = resolvePatchOps(ops, agent, workspace);
         if (resolution.error != null) return resolution.error;
 
+        var resolvedOps = resolution.resolvedOps();
         var lockTargets = new ArrayList<Path>();
-        for (var r : resolution.resolved) {
+        for (var r : resolvedOps) {
             lockTargets.add(r.target);
             if (r.moveTarget != null) lockTargets.add(r.moveTarget);
         }
-        return FsLocks.runUnderFileLocks(lockTargets, () -> applyPatchLocked(resolution.resolved));
+        return FsLocks.runUnderFileLocks(lockTargets, () -> applyPatchLocked(resolvedOps));
     }
 
-    private record PatchResolution(List<ResolvedOp> resolved, String error) {
+    private record PatchResolution(@Nullable List<ResolvedOp> resolved, @Nullable String error) {
         static PatchResolution ok(List<ResolvedOp> resolved) { return new PatchResolution(resolved, null); }
         static PatchResolution err(String error) { return new PatchResolution(null, error); }
+
+        /** Valid only once {@link #error()} has been checked null — {@code err()} resolves no ops. */
+        List<ResolvedOp> resolvedOps() {
+            if (resolved == null) throw new IllegalStateException("patch unresolved: " + error);
+            return resolved;
+        }
     }
 
     /**
@@ -144,7 +152,7 @@ final class FsPatchApplier {
         return summarizeCommittedOps(committed);
     }
 
-    private record PlannedOp(OpPlan plan, String error) {
+    private record PlannedOp(@Nullable OpPlan plan, @Nullable String error) {
         static PlannedOp ok(OpPlan plan) { return new PlannedOp(plan, null); }
         static PlannedOp err(String error) { return new PlannedOp(null, error); }
     }
@@ -183,7 +191,7 @@ final class FsPatchApplier {
                 }
                 var applied = applyUpdateChunks(snapshot, upd.chunks(), upd.path(), opIndex);
                 if (applied.error() != null) yield PlannedOp.err(applied.error());
-                yield PlannedOp.ok(new OpPlan(r, applied.result(), snapshot));
+                yield PlannedOp.ok(new OpPlan(r, applied.resolvedResult(), snapshot));
             }
         };
     }
@@ -192,19 +200,19 @@ final class FsPatchApplier {
      * Apply one validated plan, appending CommittedOp markers used for rollback.
      * Returns a non-null error message if this op failed; callers must rollback before returning.
      */
-    private static String applyPlannedOp(OpPlan plan, List<CommittedOp> committed) {
+    private static @Nullable String applyPlannedOp(OpPlan plan, List<CommittedOp> committed) {
         var r = plan.resolved;
         return switch (r.op) {
             case FileOp.Add add -> applyAddOp(r, plan, committed, add.path());
             case FileOp.Delete(var path) -> applyDeleteOp(r, plan, committed, path);
-            case FileOp.Update upd -> (r.moveTarget != null)
-                    ? applyUpdateMoveOp(r, plan, committed, upd)
+            case FileOp.Update upd -> r.moveTarget != null
+                    ? applyUpdateMoveOp(r, r.moveTarget, plan, committed, upd)
                     : applyUpdateInPlaceOp(r, plan, committed, upd);
         };
     }
 
-    private static String applyAddOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, String path) {
-        var result = FsWriter.writeFile(r.target, plan.newContent);
+    private static @Nullable String applyAddOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, String path) {
+        var result = FsWriter.writeFile(r.target, plan.content());
         if (result.startsWith(FsSupport.ERROR_PREFIX)) {
             return "Error applying Add File '%s': %s".formatted(path, result);
         }
@@ -212,35 +220,36 @@ final class FsPatchApplier {
         return null;
     }
 
-    private static String applyDeleteOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, String path) {
+    private static @Nullable String applyDeleteOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, String path) {
         try {
             Files.deleteIfExists(r.target);
-            committed.add(new CommittedOp.Deleted(r.target, plan.preSnapshot));
+            committed.add(new CommittedOp.Deleted(r.target, plan.snapshot()));
             return null;
         } catch (IOException e) {
             return "Error applying Delete File '%s': %s".formatted(path, e.getMessage());
         }
     }
 
-    private static String applyUpdateInPlaceOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, FileOp.Update upd) {
-        var result = FsWriter.writeFile(r.target, plan.newContent);
+    private static @Nullable String applyUpdateInPlaceOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, FileOp.Update upd) {
+        var result = FsWriter.writeFile(r.target, plan.content());
         if (result.startsWith(FsSupport.ERROR_PREFIX)) {
             return "Error applying Update File '%s': %s".formatted(upd.path(), result);
         }
-        committed.add(new CommittedOp.Updated(r.target, plan.preSnapshot));
+        committed.add(new CommittedOp.Updated(r.target, plan.snapshot()));
         return null;
     }
 
-    private static String applyUpdateMoveOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, FileOp.Update upd) {
-        var writeResult = FsWriter.writeFile(r.moveTarget, plan.newContent);
+    private static @Nullable String applyUpdateMoveOp(ResolvedOp r, Path moveTarget, OpPlan plan,
+                                                      List<CommittedOp> committed, FileOp.Update upd) {
+        var writeResult = FsWriter.writeFile(moveTarget, plan.content());
         if (writeResult.startsWith(FsSupport.ERROR_PREFIX)) {
             return "Error applying Update+Move '%s'→'%s': %s"
                     .formatted(upd.path(), upd.newPath().orElse(""), writeResult);
         }
-        committed.add(new CommittedOp.Added(r.moveTarget));
+        committed.add(new CommittedOp.Added(moveTarget));
         try {
             Files.deleteIfExists(r.target);
-            committed.add(new CommittedOp.Deleted(r.target, plan.preSnapshot));
+            committed.add(new CommittedOp.Deleted(r.target, plan.snapshot()));
             return null;
         } catch (IOException e) {
             return "Error applying Update+Move '%s'→'%s': %s"
@@ -293,7 +302,7 @@ final class FsPatchApplier {
         for (int c = 0; c < chunks.size(); c++) {
             var applied = applySingleChunk(working, chunks.get(c), path, opIndex, c + 1);
             if (applied.error() != null) return applied;
-            working = applied.result();
+            working = applied.resolvedResult();
         }
         return EditResult.ok(working);
     }
@@ -357,8 +366,20 @@ final class FsPatchApplier {
     // UnifiedPatchParser. The types below are specific to the transactional apply phase and
     // stay here since they carry filesystem Paths.
 
-    private record ResolvedOp(FileOp op, Path target, Path moveTarget) {}
-    private record OpPlan(ResolvedOp resolved, String newContent, String preSnapshot) {}
+    private record ResolvedOp(FileOp op, Path target, @Nullable Path moveTarget) {}
+
+    private record OpPlan(ResolvedOp resolved, @Nullable String newContent, @Nullable String preSnapshot) {
+        /** Set by the Add and Update branches of {@link #planOp}; Delete never reads it. */
+        String content() { return require(newContent, "newContent"); }
+
+        /** Set by the Delete and Update branches of {@link #planOp}; Add never reads it. */
+        String snapshot() { return require(preSnapshot, "preSnapshot"); }
+
+        private static String require(@Nullable String v, String field) {
+            if (v == null) throw new IllegalStateException("OpPlan." + field + " unset for this op kind");
+            return v;
+        }
+    }
 
     private sealed interface CommittedOp {
         Path path();

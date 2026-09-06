@@ -1,5 +1,6 @@
 package services;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import utils.TikaHolder;
 
@@ -20,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class OcrHealthProbe {
 
-    public record ProbeResult(boolean available, String version, String reason) { }
+    public record ProbeResult(boolean available, @Nullable String version, @Nullable String reason) { }
 
     /**
      * The command Tika itself will run, so a green probe means OCR actually works.
@@ -42,7 +43,7 @@ public class OcrHealthProbe {
      * Windows branch would corrupt whatever ran beside it. Public because Play 1.x
      * tests live in the default package.
      */
-    public static String tesseractCommand(String osName, String configuredDir) {
+    public static String tesseractCommand(String osName, @Nullable String configuredDir) {
         var prog = osName != null && osName.startsWith("Windows") ? "tesseract.exe" : "tesseract";
         if (configuredDir == null || configuredDir.isBlank()) return prog;
         return Paths.get(configuredDir.trim()).resolve(prog).toString();
@@ -69,7 +70,7 @@ public class OcrHealthProbe {
     public static ProbeResult probe() {
         var r = ExecutableProbeSupport.probeCapturing(tesseractCommand(), "--version", "");
         if (r.available()) {
-            var firstLine = r.output().lines().findFirst().orElse("(no version output)").trim();
+            var firstLine = r.resolvedOutput().lines().findFirst().orElse("(no version output)").trim();
             return CACHE.set(new ProbeResult(true, firstLine, null));
         }
         return CACHE.set(new ProbeResult(false, null, r.reason()));

@@ -3,6 +3,7 @@ package services.imagegen;
 import com.google.gson.JsonParser;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.LocalSidecarDaemon;
 import services.UvProbe;
@@ -79,7 +80,7 @@ public final class LocalImageSidecarManager {
      * throws: any failure (sidecar down, unreachable, malformed body) reads as "no progress" so the chat
      * bar simply doesn't show. Polled by the chat via {@code GET /api/imagegen/progress}.
      */
-    public static Integer currentProgressPercent() {
+    public static @Nullable Integer currentProgressPercent() {
         var req = new Request.Builder().url(DAEMON.baseUrl() + "/progress")
                 .header(LocalSidecarDaemon.AUTH_HEADER, DAEMON.authToken()).get().build();
         try (var resp = PROGRESS_CLIENT.newCall(req).execute()) {

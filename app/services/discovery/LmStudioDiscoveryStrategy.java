@@ -2,6 +2,7 @@ package services.discovery;
 
 import com.google.gson.JsonParser;
 import okhttp3.Request;
+import org.jspecify.annotations.Nullable;
 import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
 import utils.HttpFactories;
@@ -38,7 +39,7 @@ public final class LmStudioDiscoveryStrategy implements DiscoveryStrategy {
 
     /** @return the parsed native catalog, or {@code null} when the endpoint is unusable. */
     @SuppressWarnings("java:S1168") // null means "fall back to OpenAI-compat"; an empty list is a valid catalog
-    private static List<Map<String, Object>> fetchNative(String baseUrl, String apiKey) {
+    private static @Nullable List<Map<String, Object>> fetchNative(String baseUrl, String apiKey) {
         try {
             var nativeBase = ModelDiscoveryService.stripV1Suffix(baseUrl);
             var url = nativeBase + "/api/v0/models";

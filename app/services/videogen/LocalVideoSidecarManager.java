@@ -1,5 +1,6 @@
 package services.videogen;
 
+import org.jspecify.annotations.Nullable;
 import services.LocalSidecarDaemon;
 import services.UvProbe;
 
@@ -32,7 +33,7 @@ public final class LocalVideoSidecarManager {
     // fast path detect an engine-switch without a health round-trip; the true
     // source of truth is DAEMON.isHealthy(), which reconciles a stale value (see
     // ensureRunning). Volatile for cross-thread visibility (JCLAW-830).
-    private static volatile String runningModel;
+    private static volatile @Nullable String runningModel;
 
     private LocalVideoSidecarManager() {}
 

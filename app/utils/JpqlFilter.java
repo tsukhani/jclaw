@@ -100,7 +100,7 @@ public final class JpqlFilter {
      * positional index, so multi-field predicates (e.g. {@code IS NULL OR <>})
      * can reference the field more than once without repeating it as an arg.
      */
-    private JpqlFilter add(String template, String field, Object value) {
+    private JpqlFilter add(String template, String field, @Nullable Object value) {
         if (isPresent(value)) {
             clauses.add(template.formatted(field, idx++));
             params.add(value);
@@ -108,7 +108,7 @@ public final class JpqlFilter {
         return this;
     }
 
-    private static boolean isPresent(Object value) {
+    private static boolean isPresent(@Nullable Object value) {
         if (value == null) return false;
         if (value instanceof String s) return !s.isBlank();
         return true;

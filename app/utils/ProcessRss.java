@@ -1,5 +1,7 @@
 package utils;
 
+import org.jspecify.annotations.Nullable;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,14 +31,14 @@ public final class ProcessRss {
      */
     static final long TTL_MS = 30_000;
 
-    private record Cached(Long bytes, long readAtMs) {}
+    private record Cached(@Nullable Long bytes, long readAtMs) {}
 
     private static final AtomicReference<Cached> CACHE = new AtomicReference<>();
 
     private ProcessRss() {}
 
     /** RSS in bytes, or null when this platform has no supported way to report it. */
-    public static Long bytes() {
+    public static @Nullable Long bytes() {
         var now = System.currentTimeMillis();
         var cached = CACHE.get();
         if (cached != null && now - cached.readAtMs() < TTL_MS) return cached.bytes();
@@ -56,7 +58,7 @@ public final class ProcessRss {
         CACHE.set(null);
     }
 
-    private static Long read() {
+    private static @Nullable Long read() {
         var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("linux")) return fromProcStatus();
         if (os.contains("mac")) return fromPs();
@@ -64,7 +66,7 @@ public final class ProcessRss {
     }
 
     /** {@code VmRSS:\t  123456 kB} — a plain file read, so no spawn on Linux. */
-    private static Long fromProcStatus() {
+    private static @Nullable Long fromProcStatus() {
         try {
             for (var line : Files.readAllLines(Path.of("/proc/self/status"))) {
                 if (!line.startsWith("VmRSS:")) continue;
@@ -84,7 +86,7 @@ public final class ProcessRss {
      * cannot fill the pipe buffer — unlike the probe helpers, this needs no drainer
      * thread to keep the bounded wait honest.
      */
-    private static Long fromPs() {
+    private static @Nullable Long fromPs() {
         var pb = new ProcessBuilder("ps", "-o", "rss=", "-p",
                 String.valueOf(ProcessHandle.current().pid()));
         pb.redirectError(ProcessBuilder.Redirect.DISCARD);

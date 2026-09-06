@@ -10,6 +10,7 @@ import mcp.transport.McpStdioTransport;
 import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
 import models.McpServer;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import utils.SsrfGuard;
 
@@ -73,15 +74,15 @@ public final class McpServerService {
      * directly without re-parsing.
      */
     public record View(Long id, String name, boolean enabled, boolean requiresApproval, String transport,
-                       String command, List<String> args, Map<String, String> env,
-                       String url, Map<String, String> headers,
+                       @Nullable String command, List<String> args, Map<String, String> env,
+                       @Nullable String url, Map<String, String> headers,
                        String status, String lastError,
-                       String lastConnectedAt, String lastDisconnectedAt,
+                       @Nullable String lastConnectedAt, @Nullable String lastDisconnectedAt,
                        int toolCount,
                        List<ToolInfo> tools,
-                       String createdAt, String updatedAt,
+                       @Nullable String createdAt, @Nullable String updatedAt,
                        /** JCLAW-982: name of the older server this one duplicates, else null. */
-                       String duplicateOf) {
+                       @Nullable String duplicateOf) {
 
         public static View of(McpServer row) {
             var cfg = explodeConfigJson(row.transport, row.configJson);
@@ -129,7 +130,7 @@ public final class McpServerService {
         }
 
         /** {@link #of} sees one row; only the caller holding the whole list can spot a twin. */
-        public View withDuplicateOf(String original) {
+        public View withDuplicateOf(@Nullable String original) {
             return new View(id, name, enabled, requiresApproval, transport, command, args, env,
                     url, headers, status, lastError, lastConnectedAt, lastDisconnectedAt,
                     toolCount, tools, createdAt, updatedAt, original);
@@ -152,7 +153,7 @@ public final class McpServerService {
      * <p>Compares against the earliest-created match so exactly one of a pair is flagged:
      * the newer one, which is the one to remove.
      */
-    private static String originalFor(McpServer row, List<McpServer> all) {
+    private static @Nullable String originalFor(McpServer row, List<McpServer> all) {
         return all.stream()
                 .filter(other -> !other.id.equals(row.id))
                 .filter(other -> other.transport == row.transport)
@@ -186,8 +187,8 @@ public final class McpServerService {
      * @param url     HTTP-transport endpoint URL (null for stdio)
      * @param headers HTTP-transport request headers
      */
-    public record TransportConfig(String command, List<String> args, Map<String, String> env,
-                                  String url, Map<String, String> headers) {
+    public record TransportConfig(@Nullable String command, List<String> args, Map<String, String> env,
+                                  @Nullable String url, Map<String, String> headers) {
 
         public static TransportConfig empty() {
             return new TransportConfig(null, List.of(), Map.of(), null, Map.of());
@@ -447,7 +448,7 @@ public final class McpServerService {
         };
     }
 
-    private static String optionalString(JsonObject obj, String key) {
+    private static @Nullable String optionalString(JsonObject obj, String key) {
         if (!obj.has(key) || obj.get(key).isJsonNull()) return null;
         return obj.get(key).getAsString();
     }
