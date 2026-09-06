@@ -3,7 +3,7 @@ import net.ltgt.gradle.errorprone.errorprone
 
 plugins {
     id("org.playframework.play1")
-    id("org.sonarqube") version "7.4.0.8496"
+    id("org.sonarqube") version "7.5.0.8588"
     id("com.diffplug.spotless") version "8.10.1"
     id("net.ltgt.errorprone") version "5.1.1"
 }
