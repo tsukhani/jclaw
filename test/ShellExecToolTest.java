@@ -1,5 +1,6 @@
 import models.Agent;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -25,12 +26,20 @@ class ShellExecToolTest extends UnitTest {
 
     @BeforeEach
     void setup() {
+        // JCLAW-1153: shell.sandbox is process-global and read on every execute(),
+        // so these runs must not overlap ShellExecSandboxTest turning it on.
+        ShellSandboxSync.acquire();
         Fixtures.deleteDatabase();
         cleanupTestAgent();
         tool = new ShellExecTool();
         agent = AgentService.create("shell-test-agent", "openrouter", "gpt-4.1");
         // Seed allowlist
         ConfigService.set("shell.allowlist", "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
+    }
+
+    @AfterEach
+    void releaseSandboxFlag() {
+        ShellSandboxSync.release();
     }
 
     @AfterAll
