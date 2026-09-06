@@ -115,6 +115,19 @@ class WhatsAppCloudApiParserTest extends UnitTest {
         assertEquals("London", msg.location().address());
     }
 
+    /**
+     * JCLAW-1163: the sibling of {@code WhatsAppCobaltParserTest.reactionWithoutATargetIsDropped}
+     * — both transports drop a reaction they cannot attribute to a message.
+     */
+    @Test
+    void reactionWithoutATargetIsDropped() {
+        var msg = WhatsAppCloudApiParser.parse(envelope("""
+                {"from":"447900000001","id":"wamid.RXN3","timestamp":"1","type":"reaction",
+                 "reaction":{"emoji":"\\uD83D\\uDC4D"}}
+                """));
+        assertNull(msg, "a reaction with no message_id must be dropped");
+    }
+
     @Test
     void parsesReaction() {
         var msg = WhatsAppCloudApiParser.parse(envelope("""

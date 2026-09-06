@@ -15,6 +15,7 @@ import it.auties.whatsapp.model.message.standard.StickerMessage;
 import it.auties.whatsapp.model.message.standard.TextMessage;
 import it.auties.whatsapp.model.message.standard.VideoOrGifMessage;
 import org.jspecify.annotations.Nullable;
+import play.Logger;
 
 import java.util.List;
 import java.util.Optional;
@@ -160,14 +161,27 @@ public final class WhatsAppCobaltParser {
                 env.botMentioned(), env.quotedMessageId(), env.senderDisplayName());
     }
 
-    private static WhatsAppInboundMessage reactionMessage(
+    /**
+     * JCLAW-1163: the target message id is guaranteed here, so this path cannot produce
+     * the null-target reaction the Cloud-API parser refuses. Cobalt's
+     * {@code ReactionMessage} constructor does {@code requireNonNull(key)} and
+     * {@code ChatMessageKey} substitutes a random UUID for a null id, so both hops are
+     * non-null by construction — the guard this replaced was dead code that only made
+     * the two transports look like they disagreed.
+     *
+     * <p>A container typed REACTION whose payload is not a {@code ReactionMessage} is
+     * equally unreachable ({@code mapType} reads the type off the payload), but it is
+     * dropped rather than forwarded as a reaction-less REACTION.
+     */
+    private static @Nullable WhatsAppInboundMessage reactionMessage(
             String messageId, String from, String chatId, String chatType,
             Message content, @Nullable String senderDisplayName) {
-        WhatsAppInboundMessage.Reaction reaction = null;
-        if (content instanceof ReactionMessage rm) {
-            var targetId = rm.key() != null ? rm.key().id() : null;
-            reaction = new WhatsAppInboundMessage.Reaction(targetId, rm.content());
+        if (!(content instanceof ReactionMessage rm)) {
+            Logger.debug("WhatsApp Cobalt: message %s typed REACTION carries %s; dropped",
+                    messageId, content.getClass().getSimpleName());
+            return null;
         }
+        var reaction = new WhatsAppInboundMessage.Reaction(rm.key().id(), rm.content());
         // botMentioned irrelevant for reactions (dispatchMessage routes them to
         // dispatchReaction before the gate); pass true for shape consistency.
         return new WhatsAppInboundMessage(messageId, from, chatId, chatType, null,

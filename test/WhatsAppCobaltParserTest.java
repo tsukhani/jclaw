@@ -202,6 +202,20 @@ class WhatsAppCobaltParserTest extends UnitTest {
         assertEquals("❤️", msg.reaction().emoji());
     }
 
+    /**
+     * JCLAW-1163: the Cloud-API parser drops a reaction with no {@code message_id}, and
+     * this transport cannot produce that shape at all — Cobalt's {@code ReactionMessage}
+     * requires a key and {@code ChatMessageKey} substitutes a UUID for a null id. Pinned
+     * as a fact about the SDK, because it is what lets the shared record declare the
+     * target non-null.
+     */
+    @Test
+    void theSdkRefusesAReactionWithoutAKey() {
+        var builder = new ReactionMessageBuilder().content("❤️");
+        assertThrows(NullPointerException.class, builder::build,
+                "a target-less reaction is unreachable here; the shared record relies on it");
+    }
+
     // --- nulls / drops ---
 
     @Test

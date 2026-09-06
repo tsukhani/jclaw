@@ -62,7 +62,7 @@ public record WhatsAppInboundMessage(
 
     /** An emoji reaction on an earlier message; {@code emoji} is blank when the
      *  reaction was removed. */
-    public record Reaction(@Nullable String targetMessageId, String emoji) {}
+    public record Reaction(String targetMessageId, String emoji) {}
 
     /**
      * Media metadata only — the bytes are NOT loaded here. Download is deferred to
