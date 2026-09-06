@@ -481,6 +481,15 @@ public class SystemPromptAssembler {
                 """);
     }
 
+    /** Emits the channel section only for a channel that has registered guidance. */
+    private static void appendChannelGuidance(SectionedBuilder b, @Nullable String channelType) {
+        if (channelType == null) return;
+        var guidance = channelGuidanceFor(channelType);
+        if (guidance.isEmpty()) return;
+        b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
+        appendChannelGuidanceSection(b.sb, channelType, guidance.get());
+    }
+
     /**
      * Resolve a per-channel guidance body, or {@link Optional#empty()} when the
      * channel has no registered section (Slack, WhatsApp, unknown types).
@@ -492,15 +501,6 @@ public class SystemPromptAssembler {
      * constant and the enum's {@code value} field is not. The values must
      * therefore stay in step with that enum by hand.
      */
-    /** Emits the channel section only for a channel that has registered guidance. */
-    private static void appendChannelGuidance(SectionedBuilder b, @Nullable String channelType) {
-        if (channelType == null) return;
-        var guidance = channelGuidanceFor(channelType);
-        if (guidance.isEmpty()) return;
-        b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
-        appendChannelGuidanceSection(b.sb, channelType, guidance.get());
-    }
-
     private static Optional<String> channelGuidanceFor(@Nullable String channelType) {
         if (channelType == null) return Optional.empty();
         return switch (channelType.toLowerCase()) {

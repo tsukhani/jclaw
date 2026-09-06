@@ -164,7 +164,7 @@ public final class UsageMetricsBuilder {
         var metrics = turnUsage.providerMetrics();
         if (metrics == null || metrics.isEmpty()) return;
         var obj = new JsonObject();
-        metrics.values().forEach((key, value) -> obj.addProperty(key, value));
+        metrics.values().forEach(obj::addProperty);
         usageMap.add("providerMetrics", obj);
     }
 

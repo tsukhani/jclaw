@@ -52,7 +52,7 @@ class TaskScopeTest extends UnitTest {
     }
 
     @Test
-    void firstFailureCancelsTheSiblingsStillRunning() throws Exception {
+    void firstFailureCancelsTheSiblingsStillRunning() {
         var blocker = new Blocker();
 
         // Preemptive: a scope that failed to cancel would park join() forever rather

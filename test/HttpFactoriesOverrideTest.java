@@ -61,7 +61,7 @@ class HttpFactoriesOverrideTest extends UnitTest {
     }
 
     @Test
-    void boundTransportServesCannedResponsesWithoutAListener() throws Exception {
+    void boundTransportServesCannedResponsesWithoutAListener() {
         var body = HttpFactories.callWith(cannedClient(418, "brewed"), () -> {
             var request = new Request.Builder().url(UNROUTABLE).get().build();
             try (var response = HttpFactories.general().newCall(request).execute()) {
@@ -75,7 +75,7 @@ class HttpFactoriesOverrideTest extends UnitTest {
     }
 
     @Test
-    void aForeignThreadStillSeesTheProductionClient() throws Exception {
+    void aForeignThreadStillSeesTheProductionClient() {
         var production = HttpFactories.general();
         var seen = new AtomicReference<OkHttpClient>();
 

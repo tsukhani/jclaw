@@ -29,6 +29,10 @@ import utils.ApiResponses;
  */
 public class AuthCheck extends Controller {
 
+    /** The 401 body every unauthenticated path renders; the %s carries the reason code. */
+    private static final String AUTH_REQUIRED_JSON =
+            "{\"error\":\"Authentication required\",\"code\":\"%s\"}";
+
     @Before
     static void checkAuthentication() {
         var path = Http.Request.current().path;
@@ -78,13 +82,13 @@ public class AuthCheck extends Controller {
             case CREDENTIALS_CHANGED -> {
                 session.clear();
                 response.status = 401;
-                renderJSON("{\"error\":\"Authentication required\",\"code\":\"%s\"}"
+                renderJSON(AUTH_REQUIRED_JSON
                         .formatted(ApiResponses.CREDENTIALS_CHANGED));
             }
             case REVOKED -> {
                 session.clear();
                 response.status = 401;
-                renderJSON("{\"error\":\"Authentication required\",\"code\":\"%s\"}"
+                renderJSON(AUTH_REQUIRED_JSON
                         .formatted(ApiResponses.SESSION_REVOKED));
             }
             case NOT_AUTHENTICATED -> {
@@ -111,7 +115,7 @@ public class AuthCheck extends Controller {
         if (hash == null || hash.isBlank()) {
             session.clear();
             response.status = 401;
-            renderJSON("{\"error\":\"Authentication required\",\"code\":\"%s\"}"
+            renderJSON(AUTH_REQUIRED_JSON
                     .formatted(ApiResponses.PASSWORD_UNSET));
         }
     }

@@ -487,15 +487,18 @@ public class ApiProvidersController extends Controller {
      *
      * <p>Omitted when empty so the shared default keeps applying.
      */
+    /** Wire key for a model's advertised reasoning-effort ladder. */
+    private static final String KEY_THINKING_LEVELS = "thinkingLevels";
+
     private static void addThinkingLevelsIfSet(JsonObject out, JsonObject body) {
-        if (!body.has("thinkingLevels") || !body.get("thinkingLevels").isJsonArray()) return;
+        if (!body.has(KEY_THINKING_LEVELS) || !body.get(KEY_THINKING_LEVELS).isJsonArray()) return;
         var levels = new JsonArray();
-        for (var el : body.getAsJsonArray("thinkingLevels")) {
+        for (var el : body.getAsJsonArray(KEY_THINKING_LEVELS)) {
             if (el == null || !el.isJsonPrimitive()) continue;
             var level = el.getAsString().trim();
             if (!level.isEmpty()) levels.add(level);
         }
-        if (!levels.isEmpty()) out.add("thinkingLevels", levels);
+        if (!levels.isEmpty()) out.add(KEY_THINKING_LEVELS, levels);
     }
 
     private static void addPriceIfSet(JsonObject out, JsonObject body, String key) {

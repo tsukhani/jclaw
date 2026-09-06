@@ -250,8 +250,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * {@link #extractCacheCreationTokens}'s top-then-nested shape.
      */
     protected int readReasoningTokens(JsonObject usageObj) {
-        int top = readUsageInt(usageObj, "reasoning_tokens");
-        return top > 0 ? top : readUsageInt(usageObj, JSON_COMPLETION_TOKENS_DETAILS, "reasoning_tokens");
+        int top = readUsageInt(usageObj, JSON_REASONING_TOKENS);
+        return top > 0 ? top : readUsageInt(usageObj, JSON_COMPLETION_TOKENS_DETAILS, JSON_REASONING_TOKENS);
     }
 
     /**
@@ -1110,16 +1110,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     // ─── Usage parsing ────────────────────────────────────────────────────
 
-    /**
-     * Instance method: parse a usage JSON object using this provider's template
-     * methods ({@link #extractReasoningTokens}, {@link #extractCachedTokens},
-     * {@link #extractCacheCreationTokens}, {@link #extractCostUsd}). Subclass
-     * overrides are honored, so provider-specific JSON paths are handled correctly.
-     *
-     * @param usageObj the provider's {@code usage} JSON object
-     * @return the parsed {@link Usage} record with all token-count categories and
-     *         the provider-reported cost populated
-     */
+    /** Usage key carrying the reasoning-token count, at top level and under the details object. */
+    private static final String JSON_REASONING_TOKENS = "reasoning_tokens";
+
     /**
      * Leaf key names already carried by a dedicated {@link Usage} component, in every
      * spelling the providers use. {@link #extractProviderMetrics} skips these so a
@@ -1127,7 +1120,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      */
     private static final Set<String> MAPPED_USAGE_KEYS = Set.of(
             "prompt_tokens", "completion_tokens", "total_tokens",
-            "reasoning_tokens", "cached_tokens",
+            JSON_REASONING_TOKENS, "cached_tokens",
             "cache_creation_input_tokens", "cache_creation_tokens", "cache_write_tokens",
             "cost");
 
@@ -1182,6 +1175,16 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
     }
 
+    /**
+     * Instance method: parse a usage JSON object using this provider's template
+     * methods ({@link #extractReasoningTokens}, {@link #extractCachedTokens},
+     * {@link #extractCacheCreationTokens}, {@link #extractCostUsd}). Subclass
+     * overrides are honored, so provider-specific JSON paths are handled correctly.
+     *
+     * @param usageObj the provider's {@code usage} JSON object
+     * @return the parsed {@link Usage} record with all token-count categories and
+     *         the provider-reported cost populated
+     */
     public Usage parseUsage(JsonObject usageObj) {
         return new Usage(
                 readUsageInt(usageObj, "prompt_tokens"),

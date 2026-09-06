@@ -95,14 +95,16 @@ final class OkHttpLlmHttpDriver {
 
         var done = new CountDownLatch(1);
         var listener = new EventSourceListener() {
-            @Override public void onEvent(EventSource es, String id, String type, String data) {
+            @Override public void onEvent(EventSource es, @Nullable String id,
+                                          @Nullable String type, String data) {
                 onEvent.accept(data);
             }
             @Override public void onClosed(EventSource es) {
                 try { onComplete.run(); }
                 finally { done.countDown(); }
             }
-            @Override public void onFailure(EventSource es, Throwable t, Response resp) {
+            @Override public void onFailure(EventSource es, @Nullable Throwable t,
+                                            @Nullable Response resp) {
                 try {
                     if (resp != null && resp.code() != 200) {
                         var body = "";

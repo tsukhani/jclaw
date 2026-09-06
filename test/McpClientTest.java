@@ -68,7 +68,7 @@ class McpClientTest extends UnitTest {
                 } catch (InterruptedException _) {}
             });
 
-            var ex = assertThrows(McpException.class, () -> client.connect());
+            var ex = assertThrows(McpException.class, client::connect);
             assertTrue(ex.getMessage().contains("Unsupported version"),
                     "exception should propagate server error message: " + ex.getMessage());
             assertEquals(McpClient.State.DISCONNECTED, client.state());
@@ -80,7 +80,7 @@ class McpClientTest extends UnitTest {
         transport = new FakeTransport();
         try (var client = new McpClient("test", transport, "0.0.1")) {
             completeHandshake(client);
-            assertThrows(McpException.class, () -> client.connect());
+            assertThrows(McpException.class, client::connect);
         }
     }
 

@@ -222,6 +222,9 @@ public class ApiAuthController extends Controller {
 
     public record ResetPasswordResponse(String status) {}
 
+    /** The 401 detail every session-rejection branch renders. */
+    private static final String AUTH_REQUIRED = "Authentication required";
+
     /** GET /api/auth/status — unauthenticated. Returns whether a password
      *  has been set, so the login/setup routing decision lives client-side. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AuthStatusResponse.class)))
@@ -415,14 +418,14 @@ public class ApiAuthController extends Controller {
             case null -> { /* live operator session */ }
             case CREDENTIALS_CHANGED -> {
                 session.clear();
-                ApiResponses.error(401, ApiResponses.CREDENTIALS_CHANGED, "Authentication required");
+                ApiResponses.error(401, ApiResponses.CREDENTIALS_CHANGED, AUTH_REQUIRED);
             }
             case REVOKED -> {
                 session.clear();
-                ApiResponses.error(401, ApiResponses.SESSION_REVOKED, "Authentication required");
+                ApiResponses.error(401, ApiResponses.SESSION_REVOKED, AUTH_REQUIRED);
             }
             case NOT_AUTHENTICATED ->
-                    ApiResponses.error(401, ApiResponses.AUTHENTICATION_REQUIRED, "Authentication required");
+                    ApiResponses.error(401, ApiResponses.AUTHENTICATION_REQUIRED, AUTH_REQUIRED);
         }
         ConfigService.delete(PASSWORD_HASH_KEY);
         bumpCredentialVersion();

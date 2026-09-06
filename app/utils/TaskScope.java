@@ -43,7 +43,10 @@ public final class TaskScope<T> implements AutoCloseable {
 
     /** Leaking one leaks its virtual-thread pool, so the compiler requires the caller to close it. */
     @MustBeClosed
-    public TaskScope() {}
+    public TaskScope() {
+        // Every field initialises inline; the body exists so @MustBeClosed has a
+        // constructor to bind, which is what forces callers into try-with-resources.
+    }
 
     /** Start {@code task} on its own virtual thread. */
     public Future<T> fork(Callable<T> task) {

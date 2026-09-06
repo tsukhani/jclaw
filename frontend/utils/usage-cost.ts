@@ -188,7 +188,7 @@ function metricParent(key: string): string {
 }
 
 function isCostMetric(key: string): boolean {
-  return /cost$/.test(key)
+  return key.endsWith('cost')
 }
 
 function metricLeaf(key: string): string {
@@ -204,7 +204,7 @@ function metricLeaf(key: string): string {
  * that path verbatim for anyone who needs it.
  */
 function providerMetricLabel(key: string, qualify: boolean): string {
-  const leaf = metricLeaf(key).replace(/_/g, ' ').trim()
+  const leaf = metricLeaf(key).replaceAll('_', ' ').trim()
   if (!leaf) return key
   const dot = key.lastIndexOf('.')
   const parent = dot < 0 ? '' : key.slice(0, dot).split('.').pop()!.split('_')[0]!

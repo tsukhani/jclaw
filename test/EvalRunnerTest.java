@@ -211,7 +211,7 @@ class EvalRunnerTest extends UnitTest {
                         blocked.countDown();
                         try {
                             new CountDownLatch(1).await();
-                        } catch (InterruptedException e) {
+                        } catch (InterruptedException _) {
                             interrupted.set(true);
                             Thread.currentThread().interrupt();
                         }
