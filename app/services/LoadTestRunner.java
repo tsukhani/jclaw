@@ -18,6 +18,7 @@ import play.libs.Time;
 import play.mvc.CookieDataCodec;
 import play.mvc.Scope;
 import services.search.LuceneIndexer;
+import utils.AppClock;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.LatencyStats;
@@ -320,7 +321,7 @@ public final class LoadTestRunner {
 
         var metrics = new RunMetrics(req.concurrency(), req.turns());
         var segmentsBefore = snapshotTrackedSegments();
-        long persistMarker = System.currentTimeMillis();
+        long persistMarker = AppClock.now().toEpochMilli();
 
         long startNs = System.nanoTime();
         runConcurrentWorkers(req, baseUrl, sessionCookie, agentId, messageFor, client, metrics);
@@ -1043,7 +1044,7 @@ public final class LoadTestRunner {
         // server-side (a 401 never reaches a handler). Scope.Session.TS_KEY is
         // package-private, hence the literal.
         if (Scope.COOKIE_EXPIRE != null) {
-            long expiry = System.currentTimeMillis()
+            long expiry = AppClock.now().toEpochMilli()
                     + Time.parseDuration(Scope.COOKIE_EXPIRE) * 1000L;
             data.put("___TS", Long.toString(expiry));
         }

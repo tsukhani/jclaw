@@ -4,6 +4,7 @@ import models.Agent;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
+import utils.AppClock;
 
 import javax.imageio.ImageIO;
 
@@ -149,7 +150,7 @@ public final class TerminalImageRenderer {
             paintBlockArt(g, lines, cellW, cellH);
             g.dispose();
 
-            var timestamp = System.currentTimeMillis();
+            var timestamp = AppClock.now().toEpochMilli();
             var filename = "terminal-image-%d.png".formatted(timestamp);
             var path = AgentService.workspacePath(agent.name).resolve(filename);
             ImageIO.write(img, "PNG", path.toFile());

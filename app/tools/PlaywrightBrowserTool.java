@@ -13,6 +13,7 @@ import models.Agent;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
+import utils.AppClock;
 import utils.SsrfGuard;
 
 import java.nio.file.Files;
@@ -273,7 +274,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     }
 
     private String screenshot(Page page, String agentName, Long agentId) {
-        var timestamp = System.currentTimeMillis();
+        var timestamp = AppClock.now().toEpochMilli();
         var filename = "screenshot-%d.png".formatted(timestamp);
         var path = AgentService.workspacePath(agentName).resolve(filename);
         page.screenshot(new Page.ScreenshotOptions().setPath(path).setFullPage(true));

@@ -12,6 +12,7 @@ import models.AgentSkillConfig;
 import models.SkillRegistryTool;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import utils.AppClock;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -107,8 +108,8 @@ public class SkillPromotionService {
         var targetDir = agentSkillsDir.resolve(skillName);
         var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve(SKILL_FILE_NAME));
 
-        var stagingDir = agentSkillsDir.resolve(skillName + ".copying-" + System.currentTimeMillis());
-        var backupDir = agentSkillsDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
+        var stagingDir = agentSkillsDir.resolve(skillName + ".copying-" + AppClock.now().toEpochMilli());
+        var backupDir = agentSkillsDir.resolve(skillName + ".replacing-" + AppClock.now().toEpochMilli());
 
         AtomicDirSwap.stageAndSwap(targetDir, stagingDir, backupDir, replacing, staging -> {
             try (var walk = Files.walk(globalDir)) {
@@ -455,8 +456,8 @@ public class SkillPromotionService {
                                                List<String> binaryFiles) {
         var globalDir = SkillLoader.globalSkillsPath();
         var targetDir = globalDir.resolve(skillName);
-        var stagingDir = globalDir.resolve(skillName + ".promoting-" + System.currentTimeMillis());
-        var backupDir = globalDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
+        var stagingDir = globalDir.resolve(skillName + ".promoting-" + AppClock.now().toEpochMilli());
+        var backupDir = globalDir.resolve(skillName + ".replacing-" + AppClock.now().toEpochMilli());
         var replacingExisting = Files.isDirectory(targetDir);
 
         // The system-managed version is assigned on this write path — without it
