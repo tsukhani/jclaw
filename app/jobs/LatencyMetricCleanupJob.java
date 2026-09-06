@@ -7,8 +7,8 @@ import play.jobs.OnApplicationStart;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import utils.AppClock;
 
-import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 /**
@@ -46,7 +46,7 @@ public class LatencyMetricCleanupJob extends Job<Void> {
         var retentionDays = resolveRetentionDays();
         if (retentionDays == RETENTION_DISABLED) return;
 
-        var cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
+        var cutoff = AppClock.now().minus(retentionDays, ChronoUnit.DAYS);
         int deleted = Tx.run(() -> LatencyMetric.delete("createdAt < ?1", cutoff));
         if (deleted > 0) {
             EventLogger.info(EVENT_CATEGORY, null, null,

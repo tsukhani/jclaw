@@ -16,6 +16,7 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 import services.search.LuceneIndexer;
+import utils.AppClock;
 
 import java.time.Instant;
 
@@ -165,7 +166,7 @@ public class SubagentRun extends Model {
 
     @PrePersist
     void onCreate() {
-        if (startedAt == null) startedAt = Instant.now();
+        if (startedAt == null) startedAt = AppClock.now();
     }
 
     /**

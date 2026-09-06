@@ -7,8 +7,8 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
 import services.NotificationService;
+import utils.AppClock;
 
-import java.time.Instant;
 import java.util.List;
 
 import static utils.GsonHolder.GSON;
@@ -90,7 +90,7 @@ public class ApiNotificationsController extends Controller {
         var n = NotificationService.findById(id);
         if (n == null) notFound();
         if (n.acknowledgedAt == null) {
-            n.acknowledgedAt = Instant.now();
+            n.acknowledgedAt = AppClock.now();
             n.save();
             EventLogger.info("notification",
                     n.agent != null ? n.agent.name : null, null,

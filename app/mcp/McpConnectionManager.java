@@ -14,11 +14,11 @@ import play.Play;
 import play.db.jpa.JPA;
 import services.EventLogger;
 import services.Tx;
+import utils.AppClock;
 
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -564,7 +564,7 @@ public final class McpConnectionManager {
                 int removed = McpAllowlist.unregister(serverName);
                 if (removed == 0) return;
                 var ev = new EventLog();
-                ev.timestamp = Instant.now();
+                ev.timestamp = AppClock.now();
                 ev.level = "INFO";
                 ev.category = "MCP_TOOL_UNREGISTER";
                 ev.message = "Removed %d MCP allowlist row(s) for server '%s'"
@@ -638,7 +638,7 @@ public final class McpConnectionManager {
                         "UPDATE McpServer s SET s.status = :status, s.lastError = :err, s.updatedAt = :now WHERE s.id = :id")
                         .setParameter("status", status)
                         .setParameter("err", truncated)
-                        .setParameter("now", Instant.now())
+                        .setParameter("now", AppClock.now())
                         .setParameter("id", serverId)
                         .executeUpdate());
         } catch (RuntimeException _) { /* best effort persistence */ }
@@ -659,7 +659,7 @@ public final class McpConnectionManager {
                 default -> throw new IllegalArgumentException("Unsupported timestamp column: " + column);
             };
             Tx.run(() -> JPA.em().createQuery(jpql)
-                        .setParameter("now", Instant.now())
+                        .setParameter("now", AppClock.now())
                         .setParameter("id", serverId)
                         .executeUpdate());
         } catch (RuntimeException _) { /* best effort persistence */ }

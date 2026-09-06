@@ -2,6 +2,7 @@ package services;
 
 import models.Task;
 import org.jspecify.annotations.Nullable;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -112,7 +113,7 @@ public final class ScheduleShorthandParser {
         var lower = trimmed.toLowerCase();
 
         if ("now".equals(lower)) {
-            return new ScheduleSpec(Task.Type.IMMEDIATE, Instant.now(), null, null, input);
+            return new ScheduleSpec(Task.Type.IMMEDIATE, AppClock.now(), null, null, input);
         }
 
         if (lower.startsWith("every ")) {
@@ -141,7 +142,7 @@ public final class ScheduleShorthandParser {
 
         // Bare duration: SCHEDULED at now + duration.
         long secs = parseDurationSeconds(trimmed);
-        return new ScheduleSpec(Task.Type.SCHEDULED, Instant.now().plusSeconds(secs), null, null, input);
+        return new ScheduleSpec(Task.Type.SCHEDULED, AppClock.now().plusSeconds(secs), null, null, input);
     }
 
     /**

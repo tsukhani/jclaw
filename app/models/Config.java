@@ -8,6 +8,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 
@@ -32,12 +33,12 @@ public class Config extends Model {
 
     @PrePersist
     void onCreate() {
-        updatedAt = Instant.now();
+        updatedAt = AppClock.now();
     }
 
     @PreUpdate
     void onUpdate() {
-        updatedAt = Instant.now();
+        updatedAt = AppClock.now();
     }
 
     public static Config findByKey(String key) {

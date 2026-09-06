@@ -6,8 +6,8 @@ import play.jobs.Every;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
+import utils.AppClock;
 
-import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 /**
@@ -28,7 +28,7 @@ public class EventLogCleanupJob extends Job<Void> {
     @Override
     public void doJob() {
         var retentionDays = resolveRetentionDays(Play.configuration.getProperty(CONFIG_KEY));
-        var cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
+        var cutoff = AppClock.now().minus(retentionDays, ChronoUnit.DAYS);
         var deleted = EventLog.deleteOlderThan(cutoff);
         if (deleted > 0) {
             EventLogger.info("system", "Cleaned up %s event log entries older than %s days"

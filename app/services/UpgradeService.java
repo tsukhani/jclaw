@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import okhttp3.Request;
 import org.jspecify.annotations.Nullable;
 import play.Play;
+import utils.AppClock;
 import utils.HandoffShell;
 import utils.HttpFactories;
 
@@ -184,12 +185,12 @@ public final class UpgradeService {
         if (latestVersionForTest != null) return latestVersionForTest;
 
         var cached = cachedTag;
-        if (!refresh && cached != null && Duration.between(cached.at(), Instant.now()).compareTo(CHECK_TTL) < 0) {
+        if (!refresh && cached != null && Duration.between(cached.at(), AppClock.now()).compareTo(CHECK_TTL) < 0) {
             return cached.tag();
         }
         try {
             var tag = fetchLatestTag();
-            cachedTag = new CachedTag(tag, Instant.now());
+            cachedTag = new CachedTag(tag, AppClock.now());
             return tag;
         } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY, "Could not check for a newer release: " + e.getMessage());

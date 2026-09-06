@@ -10,8 +10,8 @@ import play.jobs.Every;
 import play.jobs.Job;
 import services.ConfigService;
 import services.EventLogger;
+import utils.AppClock;
 
-import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -79,7 +79,7 @@ public class TokenizerCalibrationJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        var since = Instant.now().minus(LOOKBACK_DAYS, ChronoUnit.DAYS);
+        var since = AppClock.now().minus(LOOKBACK_DAYS, ChronoUnit.DAYS);
         // Scalar projection: this scan only reads the usageJson column, so
         // select it directly instead of hydrating up to MAX_SAMPLES_PER_RUN
         // full Message entities every cycle just to discard every other field.

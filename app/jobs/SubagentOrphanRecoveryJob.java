@@ -6,8 +6,8 @@ import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.Tx;
+import utils.AppClock;
 
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -57,7 +57,7 @@ public class SubagentOrphanRecoveryJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        var cutoff = Instant.now().minusSeconds(ORPHAN_AGE_SECONDS);
+        var cutoff = AppClock.now().minusSeconds(ORPHAN_AGE_SECONDS);
         List<SubagentRun> orphans;
         try {
             orphans = Tx.run(() -> SubagentRun.<SubagentRun>find(
@@ -77,7 +77,7 @@ public class SubagentOrphanRecoveryJob extends Job<Void> {
                     var fresh = (SubagentRun) SubagentRun.findById(orphanId);
                     if (fresh == null || fresh.status != SubagentRun.Status.RUNNING) return;
                     fresh.status = SubagentRun.Status.FAILED;
-                    fresh.endedAt = Instant.now();
+                    fresh.endedAt = AppClock.now();
                     fresh.outcome = "Subagent run did not survive JVM restart (VT / harness process gone)";
                     fresh.save();
                     McpAllowlist.releaseSubagentGrants(fresh.childAgent);

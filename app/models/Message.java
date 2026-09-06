@@ -18,6 +18,7 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 import services.search.LuceneIndexer;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.util.List;
@@ -158,7 +159,7 @@ public class Message extends Model {
 
     @PrePersist
     void onCreate() {
-        createdAt = Instant.now();
+        createdAt = AppClock.now();
     }
 
     /**

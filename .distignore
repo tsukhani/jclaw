@@ -44,3 +44,8 @@ jacoco.exec
 jacoco.xml
 bin/
 conf/jacoco-agent.properties
+# ArchUnit's frozen-violation baseline for WallClockDisciplineTest and the
+# config knob that regenerates it: both are read only by test/, which is
+# already excluded, so neither belongs in a prod zip.
+archunit_store/
+conf/archunit.properties

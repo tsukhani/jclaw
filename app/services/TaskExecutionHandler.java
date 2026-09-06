@@ -8,6 +8,7 @@ import com.github.kagkarlsson.scheduler.task.helper.CustomTask;
 import com.github.kagkarlsson.scheduler.task.helper.Tasks;
 import models.Task;
 import org.jspecify.annotations.Nullable;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
@@ -297,7 +298,7 @@ public final class TaskExecutionHandler {
     private static CompletionHandler<Void> scheduleIntervalNextCompletion(Task task) {
         return (executionComplete, executionOperations) -> {
             stopCurrentRow(task, executionOperations);
-            rescheduleNext(task, () -> Instant.now().plusSeconds(task.intervalSeconds),
+            rescheduleNext(task, () -> AppClock.now().plusSeconds(task.intervalSeconds),
                     "INTERVAL", " (every %ds)".formatted(task.intervalSeconds));
         };
     }

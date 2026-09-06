@@ -6,6 +6,7 @@ import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 
@@ -51,6 +52,6 @@ public class LatencyMetric extends Model {
 
     @PrePersist
     void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
+        if (createdAt == null) createdAt = AppClock.now();
     }
 }

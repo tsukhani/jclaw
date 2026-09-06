@@ -5,10 +5,13 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.JClawCronUtils;
+import utils.AppClock;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 
 class TaskSchedulingTest extends UnitTest {
 
@@ -23,11 +26,10 @@ class TaskSchedulingTest extends UnitTest {
     void cronEveryMinute() {
         // Spring 6-field: seconds minutes hours dom month dow.
         // "0 * * * * *" = "at second 0 of every minute".
-        var next = JClawCronUtils.nextExecution("0 * * * * *");
-        assertNotNull(next);
-        assertTrue(next.isAfter(Instant.now()));
-        var ldt = LocalDateTime.ofInstant(next, ZoneId.systemDefault());
-        assertEquals(0, ldt.getSecond());
+        var next = AppClock.callWith(
+                Clock.fixed(Instant.parse("2020-02-29T12:00:30Z"), ZoneOffset.UTC),
+                () -> JClawCronUtils.nextExecution("0 * * * * *"));
+        assertEquals(Instant.parse("2020-02-29T12:01:00Z"), next);
     }
 
     @Test

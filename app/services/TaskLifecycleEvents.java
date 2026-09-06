@@ -3,10 +3,10 @@ package services;
 import models.Task;
 import models.TaskRun;
 import org.jspecify.annotations.Nullable;
+import utils.AppClock;
 import utils.GsonHolder;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -160,7 +160,7 @@ public final class TaskLifecycleEvents {
                                     String classification, String errorMessage) {
         var agentName = task.agent != null ? task.agent.name : null;
         long durationMs = run != null && run.startedAt != null
-                ? Duration.between(run.startedAt, Instant.now()).toMillis()
+                ? Duration.between(run.startedAt, AppClock.now()).toMillis()
                 : 0L;
         var message = "Task '%s' failed (%s): %s".formatted(
                 task.name, classification, errorMessage);

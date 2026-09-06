@@ -14,10 +14,10 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.LoadTestRunner;
+import utils.AppClock;
 import utils.GsonHolder;
 import utils.LatencyTrace;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -820,7 +820,7 @@ public class SystemPromptAssembler {
         double impWeight = ConfigService.getDouble("memory.recall.importanceWeight", 0.3);
         // JCLAW-526: the blend is multiplied by a half-life time decay, so
         // stale facts fade in ranking (never vanish — the factor is floored).
-        var now = Instant.now();
+        var now = AppClock.now();
         var selected = rankRecall(hits, excludeIds, relWeight, impWeight, recallLimit,
                 e -> MemoryDecay.factorFor(e, now));
 

@@ -6,8 +6,8 @@ import models.Task;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
+import utils.AppClock;
 
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -72,7 +72,7 @@ public final class TaskWriteService {
         // nextRunAt is no longer authoritative under db-scheduler (see
         // JCLAW-21), but keep it populated for the Tasks-page render
         // until the column is dropped.
-        t.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
+        t.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : AppClock.now();
 
         t.delivery = readOptionalString(body, KEY_DELIVERY);
         t.payloadType = readOptionalString(body, KEY_PAYLOAD_TYPE);

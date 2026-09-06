@@ -7,6 +7,7 @@ import models.Task;
 import models.TaskRun;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import utils.AppClock;
 import utils.TransientErrorClassifier;
 
 import java.time.Instant;
@@ -195,7 +196,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
 
         if (isTransient && currentRetry < budget) {
             long backoffSecs = BACKOFF_SECONDS[currentRetry];
-            Instant nextRunAt = Instant.now().plusSeconds(backoffSecs);
+            Instant nextRunAt = AppClock.now().plusSeconds(backoffSecs);
             int newRetryCount = currentRetry + 1;
             task.retryCount = newRetryCount;
             task.lastError = errorMessage;

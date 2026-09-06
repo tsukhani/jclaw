@@ -27,6 +27,7 @@ import services.TaskWriteService;
 import services.TimezoneResolver;
 import services.Tx;
 import utils.ApiResponses;
+import utils.AppClock;
 import utils.ChannelOriginTrust;
 
 import java.time.DateTimeException;
@@ -472,7 +473,7 @@ public class ApiTasksController extends Controller {
         // nextRunAt mirrors the new fire time so the Tasks page render
         // stays in sync — the scheduled_tasks row is the source of
         // truth at fire time but operators read nextRunAt from the UI.
-        task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
+        task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : AppClock.now();
         return true;
     }
 
@@ -677,7 +678,7 @@ public class ApiTasksController extends Controller {
         task.retryCount = 0;
         // Recurring tasks return to ACTIVE, one-shot to PENDING.
         task.transitionTo(Task.initialStatusFor(task.type));
-        task.nextRunAt = Instant.now();
+        task.nextRunAt = AppClock.now();
         task.lastError = null;
         task.save();
         if (wasLost) {

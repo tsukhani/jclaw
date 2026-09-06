@@ -7,6 +7,7 @@ import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.AgentService;
 import services.EventLogger;
+import utils.AppClock;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -37,7 +38,7 @@ public class OrphanSubagentSweepJob extends Job<Void> {
         if (Play.runningInTestMode()) {
             return;
         }
-        int swept = sweep(Instant.now().minus(SPAWN_GRACE));
+        int swept = sweep(AppClock.now().minus(SPAWN_GRACE));
         if (swept > 0) {
             EventLogger.info("system",
                     "Swept %d orphaned subagent(s) whose runs no longer exist".formatted(swept));

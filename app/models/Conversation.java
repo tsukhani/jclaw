@@ -82,7 +82,7 @@ public class Conversation extends TimestampedModel {
      * visible in the web sidebar) but stop being shipped to the model.
      *
      * <p>Cleared by no command: {@code /reset} overwrites with a fresh
-     * {@code Instant.now()}, {@code /new} creates a new row where this is
+     * {@code AppClock.now()}, {@code /new} creates a new row where this is
      * null by default, and history never un-resets.
      */
     @Column(name = "context_since")

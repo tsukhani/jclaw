@@ -16,6 +16,7 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 import services.search.LuceneIndexer;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.util.List;
@@ -106,7 +107,7 @@ public class TaskRunMessage extends Model {
 
     @PrePersist
     void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
+        if (createdAt == null) createdAt = AppClock.now();
     }
 
     /**

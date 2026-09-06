@@ -8,9 +8,9 @@ import models.Agent;
 import models.EventLog;
 import models.McpServer;
 import services.Tx;
+import utils.AppClock;
 
 import java.io.IOException;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -112,7 +112,7 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
      *  The AC requires both to land atomically. */
     private void writeInvokeAudit(Agent agent, String argsJson, boolean allowed) {
         var ev = new EventLog();
-        ev.timestamp = Instant.now();
+        ev.timestamp = AppClock.now();
         ev.level = allowed ? "INFO" : "WARN";
         ev.category = "MCP_TOOL_INVOKE";
         var agentName = agent != null && agent.name != null ? agent.name : "<unknown>";

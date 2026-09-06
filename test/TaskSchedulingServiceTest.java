@@ -12,11 +12,14 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.TaskExecutionHandler;
 import services.TaskSchedulingService;
+import utils.AppClock;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,6 +46,10 @@ import java.util.List;
  * end-to-end via the running prod-mode app, not in unit-test mode.
  */
 class TaskSchedulingServiceTest extends UnitTest {
+
+    private static final Instant FIXED_NOW = Instant.parse("2020-02-29T12:00:00Z");
+
+    private static final Clock FIXED = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
 
     private Agent agent;
     private RecordingSchedulerStub stub;
@@ -75,19 +82,13 @@ class TaskSchedulingServiceTest extends UnitTest {
     }
 
     @Test
-    void registerSchedulesAnImmediateTaskAtRoughlyNow() {
+    void registerSchedulesAnImmediateTaskAtTheClocksInstant() {
         var task = persistTask(Task.Type.IMMEDIATE, null, null);
 
-        var beforeCall = Instant.now();
-        TaskSchedulingService.register(task);
-        var afterCall = Instant.now();
+        AppClock.runWith(FIXED, () -> TaskSchedulingService.register(task));
 
         assertEquals(1, stub.schedules.size());
-        var when = stub.schedules.getFirst().when;
-        assertFalse(when.isBefore(beforeCall),
-                "IMMEDIATE schedule should not be before the call site");
-        assertFalse(when.isAfter(afterCall.plusSeconds(1)),
-                "IMMEDIATE schedule should be ~now");
+        assertEquals(FIXED_NOW, stub.schedules.getFirst().when);
     }
 
     @Test
@@ -151,13 +152,12 @@ class TaskSchedulingServiceTest extends UnitTest {
     void runNowReschedulesExistingRow() {
         stub.rescheduleReturns = true;
 
-        var beforeCall = Instant.now();
-        TaskSchedulingService.runNow(123L);
+        AppClock.runWith(FIXED, () -> TaskSchedulingService.runNow(123L));
 
         assertEquals(1, stub.reschedules.size());
         var r = stub.reschedules.getFirst();
         assertEquals("123", r.instanceId.getId());
-        assertFalse(r.when.isBefore(beforeCall), "runNow should set execution_time to ~now");
+        assertEquals(FIXED_NOW, r.when, "runNow should set execution_time to the clock's instant");
         assertTrue(stub.schedules.isEmpty(), "no fresh schedule when reschedule succeeded");
     }
 

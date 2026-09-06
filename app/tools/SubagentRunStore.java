@@ -10,8 +10,8 @@ import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 import tools.SubagentSpawnTool.SyncRunOutcome;
+import utils.AppClock;
 
-import java.time.Instant;
 
 /**
  * JCLAW-677: all {@link SubagentRun} audit-row DB access for the spawn flow,
@@ -53,7 +53,7 @@ final class SubagentRunStore {
             var fresh = (SubagentRun) SubagentRun.findById(runId);
             if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
                 fresh.status = status;
-                fresh.endedAt = Instant.now();
+                fresh.endedAt = AppClock.now();
                 fresh.outcome = outcome;
                 fresh.save();
                 McpAllowlist.releaseSubagentGrants(fresh.childAgent);
@@ -79,7 +79,7 @@ final class SubagentRunStore {
                 var fresh = (SubagentRun) SubagentRun.findById(runId);
                 if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
                     fresh.status = finalStatus;
-                    fresh.endedAt = Instant.now();
+                    fresh.endedAt = AppClock.now();
                     fresh.outcome = outcomeText;
                     fresh.save();
                     McpAllowlist.releaseSubagentGrants(fresh.childAgent);

@@ -10,6 +10,7 @@ import services.EventLogger;
 import services.TaskSchedulingService;
 import services.Tx;
 import services.search.LuceneIndexer;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -78,7 +79,7 @@ public class TaskCleanupJob extends Job<Void> {
             return;
         }
 
-        var cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
+        var cutoff = AppClock.now().minus(retentionDays, ChronoUnit.DAYS);
         int deleted = Tx.run(() -> deleteExpired(cutoff));
 
         if (deleted > 0) {

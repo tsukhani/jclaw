@@ -13,6 +13,7 @@ import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
+import utils.AppClock;
 
 import java.time.Instant;
 import java.util.List;
@@ -133,7 +134,7 @@ public class MessageAttachment extends Model {
 
     @PrePersist
     void onCreate() {
-        createdAt = Instant.now();
+        createdAt = AppClock.now();
     }
 
     public boolean isImage() {

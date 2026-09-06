@@ -12,6 +12,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.EventLogger;
 import services.Tx;
+import utils.AppClock;
 import utils.GsonHolder;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -330,7 +331,7 @@ public class WhatsAppChannel implements Channel {
         if (bindingId == null) return true;
         try {
             return Tx.run(() -> WhatsAppConversationWindow.isWithinWindow(
-                    bindingId, peerId, Instant.now()));
+                    bindingId, peerId, AppClock.now()));
         } catch (Exception e) {
             EventLogger.warn(CHANNEL, null, WHATSAPP,
                     "24h-window check failed (%s); defaulting to free-form".formatted(e.getMessage()));

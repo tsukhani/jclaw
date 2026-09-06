@@ -16,6 +16,7 @@ import services.TaskRunQueryService;
 import services.TaskRunRegistry;
 import services.TaskService;
 import utils.ApiResponses;
+import utils.AppClock;
 
 import java.time.DateTimeException;
 import java.time.Duration;
@@ -195,7 +196,7 @@ public class ApiTaskRunsController extends Controller {
         if (from != null && !from.isBlank()) {
             try {
                 var since = Instant.parse(from);
-                var until = (to != null && !to.isBlank()) ? Instant.parse(to) : Instant.now();
+                var until = (to != null && !to.isBlank()) ? Instant.parse(to) : AppClock.now();
                 return new RunWindow(since, until);
             } catch (DateTimeException _) {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "from/to must be ISO-8601 instants");
@@ -203,7 +204,7 @@ public class ApiTaskRunsController extends Controller {
             }
         }
         int h = (hours != null && hours > 0) ? Math.min(hours, 24 * 30) : 24;
-        return new RunWindow(Instant.now().minusSeconds((long) h * 3600), null);
+        return new RunWindow(AppClock.now().minusSeconds((long) h * 3600), null);
     }
 
     /**
@@ -232,7 +233,7 @@ public class ApiTaskRunsController extends Controller {
         // CANCELED so the UI reflects it at once. The tool loop's onCancelled is
         // idempotent and won't double-write once this terminal status lands.
         TaskRunRegistry.requestCancel(runId);
-        run.completedAt = Instant.now();
+        run.completedAt = AppClock.now();
         run.durationMs = run.startedAt != null
                 ? Duration.between(run.startedAt, run.completedAt).toMillis() : null;
         run.status = TaskRun.Status.CANCELLED;

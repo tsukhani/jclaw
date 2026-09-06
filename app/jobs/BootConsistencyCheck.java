@@ -11,6 +11,7 @@ import services.TaskExecutionHandler;
 import services.TaskRunRegistry;
 import services.TaskSchedulingService;
 import services.Tx;
+import utils.AppClock;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -107,7 +108,7 @@ public class BootConsistencyCheck extends Job<Void> {
      * </ol>
      */
     public static int sweep(SchedulerClient scheduler) {
-        return sweep(scheduler, Instant.now());
+        return sweep(scheduler, AppClock.now());
     }
 
     /**
@@ -173,7 +174,7 @@ public class BootConsistencyCheck extends Job<Void> {
      */
     public static int reconcileOrphanedRuns(Instant bootCutoff) {
         return Tx.run(() -> {
-            var now = Instant.now();
+            var now = AppClock.now();
             int count = 0;
             for (Object o : TaskRun.find("status = ?1 and startedAt < ?2",
                     TaskRun.Status.RUNNING, bootCutoff).fetch()) {
@@ -230,7 +231,7 @@ public class BootConsistencyCheck extends Job<Void> {
                         || task.updatedAt.isAfter(staleBefore)) {
                     continue;
                 }
-                long strandedSeconds = Duration.between(task.updatedAt, Instant.now()).toSeconds();
+                long strandedSeconds = Duration.between(task.updatedAt, AppClock.now()).toSeconds();
                 task.transitionTo(Task.initialStatusFor(task.type));
                 task.save();
                 EventLogger.warn("task",
@@ -269,7 +270,7 @@ public class BootConsistencyCheck extends Job<Void> {
         // JCLAW-1103: reconcile stranded RUNNING Tasks before the alive scan below,
         // so this same pass re-registers whatever it returns to an alive state.
         reconcileStrandedRunning(alreadyScheduled,
-                Instant.now().minus(LostTaskDetector.STALE_THRESHOLD));
+                AppClock.now().minus(LostTaskDetector.STALE_THRESHOLD));
 
         // Scan both PENDING (one-shot waiting) and ACTIVE (recurring
         // ongoing). Both need their scheduled_tasks rows reconstructed
