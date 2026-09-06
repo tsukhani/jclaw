@@ -29,6 +29,41 @@ play autotest             # Run all tests (unit + functional)
 play dist                 # Build production distribution
 ```
 
+### Property-based tests (jqwik)
+
+Every jqwik `@Property` in the backend lives in **one class**, `test/PropertyBasedTest.java`. That
+is a hard constraint, not a style preference: the play1 fork runs pure unit-test classes on a
+16-way parallel lane and gives each class its own `LauncherFactory.create()`, while jqwik's engine
+keeps process-global mutable state (`StoreRepository.current` is a plain static). Two
+property-bearing classes executing at the same time corrupt each other. Measured on jqwik 1.10.1:
+four property classes run together failed two runs in three, with `ConcurrentModificationException`,
+a `StoreRepository` NPE, `CannotFindArbitraryException` and `IllegalArgumentException: List length
+= -1` — all spurious, none reproducible when the classes run alone. The same properties gathered
+into one class passed five consecutive runs against 13-, 61- and 101-class slices. Lifting the
+constraint needs a change in the fork: `TestEngine` would have to run property-bearing classes on
+the serial (`D:`) lane, or `FirePhoque` would need a third lane for them.
+
+**Reach for a property when the invariant is easier to state than the examples are to enumerate** —
+a round trip (`render → parse → apply` reproduces the input), an idempotence (`f(f(x)) == f(x)`), a
+bound that must hold for every input (no chunk exceeds the API's cap), or an order that must survive
+a transformation. **Reach for an example test for everything else**: a specific edge case, an exact
+error string, a regression a ticket named, or anything with fixtures. Properties and examples are
+complements — `UnifiedPatchParserTest`, `TelegramOutboundPlannerTest` and `UtilsFilenamesTest` still
+own the named cases and the error messages; the properties cover the arithmetic between them.
+
+Two mechanics the fork forces:
+
+- **Pin `tries` and write the wall-time budget next to the annotation.** The suite's critical path
+  is what everyone pays; an unpinned property silently grows it. The current set costs ~290 ms.
+- **Put the generated inputs in the assertion's message supplier.** jqwik publishes its sample
+  report through JUnit Platform reporting entries, and the fork's `TestEngine.Listener` does not
+  implement `reportingEntryPublished` — it records `Throwable.getMessage()` and nothing else. A
+  message supplier is therefore the only route a shrunk counterexample has into `test-result`. It
+  works well: a deliberately falsified `n < 500` reported `falsified at n=500`, the exact boundary.
+
+`play autotest` writes jqwik's failure database to `.jqwik-database` at the repo root on every run;
+it is gitignored.
+
 ### Frontend (Nuxt 4)
 ```bash
 cd frontend
@@ -88,6 +123,41 @@ it hid a tool from the model but did not stop it running, so a model that guesse
 a real tool name bypassed the operator's configuration. JCLAW-883 added the
 execution guard in `ToolRegistry.execute`/`executeRich` for native tools; MCP
 tools already gated through `AgentSkillAllowedTool`.
+
+### Diagnostics
+```bash
+./jclaw.sh diagnostics                        # compile errors, as JSON on stdout
+./jclaw.sh diagnostics --tests                # also run play autotest (~7 min)
+./jclaw.sh diagnostics --tests --out d.json   # write the document to a file
+```
+
+The same facts `./jclaw.sh test` prints for a human, as one JSON array for an agent
+repair loop: an array of `{kind, file, line, message, fix?}` records, where `kind` is
+`compile` (a javac error), `test` (a failure in a `test-result/TEST-*.xml` report) or
+`arch` (one violated site from an ArchUnit rule). `bin/README.md` is the schema
+contract; `bin/diagnostics.mjs` is the implementation and `node --test
+bin/diagnostics.test.mjs` its parser tests.
+
+It parses, it does not add builds. It runs `./gradlew compileTestJava` — with `--tests`,
+`play autotest` as well — and reads javac's output plus the xunit reports already on
+disk. Parsing the 514 reports costs milliseconds against a compile measured in seconds
+and a suite measured in minutes.
+
+Three contracts make the output safe to believe. A clean tree prints `[]`, never nothing:
+empty output means the command did not run. Without `--tests` the reports in
+`test-result/` are not read at all, because they belong to whenever the suite last ran —
+and with `--tests` they are deleted before the suite runs, so a class deleted since the
+last run cannot be read back as still failing. And exit 2 is reserved for the harness
+failing rather than the build: a compile that broke without javac printing a diagnostic,
+or a suite that failed with no report recording a failure, exits 2 with the underlying
+output on stderr instead of a green-looking `[]`. Exit 0 is a clean tree, exit 1 is
+diagnostics reported.
+
+One asymmetry is deliberate: a tree that does not compile skips the suite and reports
+only `compile` records. javac gates the test run, so the reports on disk would describe
+the previous build. This also means a single run never mixes `compile` records with
+`test`/`arch` ones — not a limitation of the parser, but of what a broken tree can
+physically produce.
 
 ### Running Both Together
 Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm dev`) in separate terminals. The frontend proxies `/api/**` requests to `localhost:9000`.
@@ -155,6 +225,263 @@ JClaw uses **OkHttp 5.x** (with `okhttp-sse` for streaming) as its single outbou
 
 All HTTP-client provisioning lives in `app/utils/HttpFactories.java` — a single class that exposes named factory methods (`llmStreaming()`, `llmSingleShot()`, `general()`) so call sites declare *intent* rather than reach into named static fields. Internally it shares two connection pools (LLM/64-slot, general/32-slot) and two dispatchers (LLM uses a virtual-thread executor, general uses OkHttp's default cached pool — request volume on the non-LLM path doesn't justify VT scheduling). The Telegram SDK and `WebFetchTool`/`SsrfGuard` build their own clients with stack-specific tuning that doesn't fit any of the three `HttpFactories` tiers (the SDK has its own internal usage; `SsrfGuard` plugs in a per-request DNS allow-list against tool-fetch SSRF).
 
+Because every call site reaches the transport through those factory methods, it is substitutable in one place: `HttpFactories.runWith(client, body)` — and its value-returning twin `callWith` — binds a `ScopedValue` that all six accessors (the three tiers plus their SSRF-guarded variants) honour for the dynamic extent of `body`, so a test installs a canned-response OkHttp interceptor instead of standing up a mock server on a port. Nothing binds it in production, and a `ScopedValue` does not follow an unrelated thread, so one test class cannot leak a transport into another that play1 is running concurrently — but for that same reason the binding does not reach Play's own request threads, and a `FunctionalTest` driving a controller still needs a per-collaborator seam such as `WhatsAppCloudApiProbe.installForTest`.
+
+### Wall clock — AppClock
+
+Every wall-clock read in `app/` goes through **`utils.AppClock`** (JCLAW-1150). `AppClock.now()`
+returns the current `Instant`; `AppClock.clock()` hands back the `java.time.Clock` behind it for
+call sites that need a zone or a `Clock`-taking API. Production never binds anything — the unbound
+default is `Clock.systemUTC()`.
+
+A test overrides it for the duration of a call with `AppClock.runWith(clock, body)` or
+`AppClock.callWith(clock, body)`, which bind a `ScopedValue` (final in JDK 25, JEP 506). The binding
+is deliberately **not** a static setter: the play1 fork runs test classes concurrently, so a
+process-global flip would leak a frozen clock into whatever else happens to be running.
+
+**Propagation boundary.** A `ScopedValue` binding is visible to the binding thread and is inherited
+by `StructuredTaskScope` forks. It is *not* inherited by a thread from
+`Executors.newVirtualThreadPerTaskExecutor()`, `CompletableFuture.supplyAsync`, a raw
+`Thread.start()`, or db-scheduler's worker pool — those read the unbound default, the system clock.
+Code under test that crosses one of those boundaries must read the clock before spawning or rebind
+inside the task. `WallClockDisciplineTest.theBindingDoesNotCrossAVirtualThreadExecutor` pins that
+behaviour so the boundary is a tested fact rather than a comment. The same boundary governs
+`HttpFactories.runWith` above and any future `ScopedValue` seam.
+
+**The gate.** `test/WallClockDisciplineTest` is an ArchUnit rule banning `Instant.now()`,
+`LocalDate.now()`, `LocalDateTime.now()`, `OffsetDateTime.now()`, `ZonedDateTime.now()` and
+`System.currentTimeMillis()` anywhere in `app/` outside `AppClock` itself. It is a `FreezingArchRule`,
+because the `System.currentTimeMillis()` sites are not all wall-clock reads: 50 of them are interval
+baselines for a throttle, a rate-limit window or a duration, where rewriting them would change
+throttle behaviour for no gain. Those 50 are recorded in the committed `archunit_store/`, so the
+exception list is explicit and shrinkable while a *new* read of either kind still fails the build.
+`System.nanoTime()` is not matched at all — it has no relation to wall-clock time and is the correct
+primitive for the interval measurement in `utils.LatencyStats`.
+
+`conf/archunit.properties` pins `freeze.store.default.allowStoreCreation=false` so a run can never
+silently mint a fresh baseline and turn the rule into a no-op. To regenerate deliberately, flip that
+one line for a single run and flip it back — `playAutotest` does not forward `-D` to the Play JVM, so
+the properties file is the only lever. The store key is the rule's description, so editing the
+rule's `because(...)` text orphans the baseline.
+
+**Writing a time-dependent test.** Bind a fixed clock instead of sleeping or asserting on a ±1s
+window: `TaskSchedulingServiceTest` and `TaskSchedulingTest.cronEveryMinute` are the worked examples.
+
+### Structured concurrency — `utils.TaskScope`
+
+Fan-out with all-or-nothing semantics goes through `app/utils/TaskScope.java`: a
+try-with-resources scope over a virtual-thread executor where the first task to fail cancels its
+siblings, `join()` rethrows that failure as an `ExecutionException`, and `close()` cancels
+whatever is still running so no forked task outlives the block. It is homogeneous — every task
+in a scope returns the same type — which covers the fan-out shape the codebase actually has;
+heterogeneous fan-out still uses plain futures. `EvalRunner.mapCasesBounded` is the reference
+call site.
+
+The JDK's own `java.util.concurrent.StructuredTaskScope` is deliberately **not** used. JCLAW-1155
+spiked it and the answer was no, for a reason specific to this repo's two-compiler build:
+
+- `StructuredTaskScope` is still a preview API in JDK 25 (JEP 505), so `javac` refuses it without
+  `--enable-preview` and, once given the flag, marks the calling classfile preview (minor version
+  65535) — a marking the JVM then enforces at load time.
+- `playRun`, `playStart` and `playAutotest` all `dependsOn("compileJava")`, so every `app/` class
+  passes through Gradle's `javac` before Play starts. Neither the play1 Gradle plugin nor
+  `conf/application.conf` passes `--enable-preview` to the app JVM (`jvm.memory` is the only
+  injection point, and the plugin adds just `--enable-native-access=ALL-UNNAMED`).
+- The play1 fork's dev-mode compiler is ECJ, configured by `ApplicationCompiler`'s fixed settings
+  map. That map has no preview option and no config knob — `java.source` only selects
+  source/target/compliance. ECJ 3.46 refuses `--enable-preview` at source 25 outright
+  ("Preview of features is supported only at the latest source level"), and compiles preview API
+  use to an **unmarked** classfile on a warning.
+
+So the same source yields differently-marked bytecode from the two compilers, and the runtime
+guard that `--enable-preview` exists to provide is enforced on one path and silently absent on the
+other. `utils.TaskScope` avoids the split entirely.
+
+**Revisit when structured concurrency finalises — JDK 26 at the earliest.** At that point
+`StructuredTaskScope` needs no flag from either compiler, and `TaskScope` should be deleted rather
+than kept beside it.
+
+### Nullness — NullAway on the Gradle compile
+
+`org.jspecify:jspecify` annotations (`@Nullable` / `@NonNull` / `@NullMarked`) are checked by
+**NullAway**, running as an Error Prone plugin on the Gradle `compileJava` task. Inside the
+annotated packages a type with no annotation means *not null*, and NullAway fails the build on
+any dereference, return, assignment or argument that contradicts that.
+
+**Where it runs.** `./gradlew compileJava` only — which is what `.githooks/pre-push` invokes
+before the test suite, and what Sonar already depends on. It does **not** run under `play run`
+or `play autotest`: Play 1.x compiles with ECJ inside the fork, and a javac plugin cannot load
+there. That split is structural, not a gap to close — the Gradle compile is the single place a
+javac plugin can see this codebase, the same layering Spotless uses.
+
+**What is in scope.** The `NullAway:AnnotatedPackages` option in `build.gradle.kts` lists
+`utils`, `llm`, `agents`, `tools` and `services`; every package and subpackage under those roots
+carries a `package-info.java` with `@NullMarked`. `models` is excluded deliberately: JPA
+populates entity fields reflectively after construction, so every non-null column would report as
+uninitialised. `controllers`, `channels` and `jobs` are simply not annotated yet.
+
+**To widen it.** Add the package name to the `AnnotatedPackages` option, add a
+`package-info.java` carrying `@NullMarked` to that package *and to each of its subpackages*
+(`@NullMarked` is per-package and does not inherit; `AnnotatedPackages` itself is prefix-matched,
+so one name covers a whole tree), then run `./gradlew compileJava` and annotate what it reports.
+`NullnessGateConformanceTest` fails if a package inside the scope has no `@NullMarked`
+package-info, if the checker is downgraded below `ERROR`, or if `models` reappears in the list.
+
+**Writing the annotations.** Two spellings catch people out, because `@Nullable` is a
+`TYPE_USE` annotation. On a qualified nested type it goes on the simple name
+(`SkillLoader.@Nullable FrontmatterSplit`, not `@Nullable SkillLoader.FrontmatterSplit`), and on
+an array it goes after the element type (`float @Nullable [] vector` annotates the array;
+`@Nullable float[]` annotates the elements and leaves the array non-null).
+
+**Result carriers.** The commonest false positive is a record that means "either a value or an
+error" — NullAway cannot see that a null `error()` implies a non-null payload. The convention
+here is an accessor that asserts the invariant and names it in one line, rather than a
+suppression: `FsPaths.TargetPath.resolvedTarget()`, `FsSupport.LoadedFile.resolvedContent()`,
+`DeliverySpec.resolvedTool()`, `ScrapeObservation.resolvedError()` and a dozen siblings all
+follow that shape. Prefer it — a `resolvedX()` throws where a suppression would return null.
+
+**Suppressions.** `@SuppressWarnings("NullAway")` with a one-line reason, and rare — two exist
+today (`ContextWindowManager.attemptTruncate`, `SkillLoader.parseSkillFile`), each recording an
+invariant the checker cannot follow: a candidate list whose members were already filtered to
+non-null, and a path whose parent every caller guarantees. Note that NullAway does not analyse a
+suppressed method's body at all, so a nullness contract on one is unverified by construction.
+
+### Resource leaks — MustBeClosed on the Gradle compile
+
+Error Prone's `MustBeClosedChecker` rides the same Gradle compile as NullAway, at `ERROR`, and
+additionally on `compileTestJava` — which the nullness block deliberately excludes. A
+constructor or factory annotated `com.google.errorprone.annotations.@MustBeClosed` may only be
+called from a try-with-resources resource variable, or returned from another `@MustBeClosed`
+method. Anything else fails the build.
+
+**What carries the annotation.** Every concrete `AutoCloseable` in `app/`: `McpClient`,
+`McpStdioTransport`, `McpStreamableHttpTransport`, `DirectLuceneMessageSearchRepository`'s
+`LeasedSearcher`, `VoiceVad`, `VoiceSession`, and `LatencyTrace.bind`. The `McpTransport` and
+`LatencyTrace.Binding` interfaces carry nothing — the annotation belongs on the thing that
+hands out an instance, which is the implementations' constructors and `bind` respectively.
+`ResourceLeakGateConformanceTest` fails if a new `AutoCloseable` class appears in `app/` with no
+`@MustBeClosed` anywhere in its file, or if either compile task drops the check below `ERROR`.
+
+`HttpFactories` is deliberately untouched: its methods hand back the three shared
+`OkHttpClient` singletons, not per-call resources. The resource on that path is the `Response`,
+which belongs to whoever executes the call — `OkHttpLlmHttpDriver.send` already closes its own
+in try-with-resources, and `streamSse` blocks to completion rather than returning a live stream
+handle, so neither returns anything a caller could leak.
+
+**The Lucene test lock.** `LuceneTestSync` guards a JVM-global index behind one
+`ReentrantLock`; an acquire with no matching `release()` does not fail — it hangs every later
+Lucene test on that lock, which surfaces as a suite-wide timeout with no pointer to the cause.
+`LuceneTestSync.openLease()` / `closedLease()` return an `@MustBeClosed` `Lease`, so a window
+that lives inside one method body is compiler-enforced. Windows that span JUnit lifecycle hooks
+keep the older `openForTest()` / `release()` pair, because `@MustBeClosed` accepts only a
+resource variable or a return and a `@BeforeEach`/`@AfterEach` pair is neither; those callers
+are covered instead by a source scan in `ResourceLeakGateConformanceTest` that fails on an
+acquire with no release in the same file. **Prefer the lease** for any new Lucene test whose
+window fits in one method.
+
+**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a one-line reason, and rare — three
+exist today. `McpConnectionManager.doConnect` and `McpServerService.testConnection` build a
+transport that a longer-lived owner closes; `VoiceController.initSession` hands its `VoiceVad`
+to a `VoiceSession` that outlives the method, with a local `handedOff` flag closing it on every
+path that never gets there. A fourth shape appears on the two `buildTransport` methods, which
+are annotated `@MustBeClosed` *and* suppressed: the checker does not treat a `yield` from a
+switch block arm as a return position (a plain `->` arm it does), so the suppression silences
+the body while the contract still binds every caller.
+
+**To widen it.** `services.scanners.ScannerHttpClient.send` returns a fresh `okhttp3.Response`
+whose Javadoc already tells callers to close it in try-with-resources, and is the strongest
+remaining candidate in `app/`. JCLAW-1156 scoped its clause to `HttpFactories` and the LLM
+driver and left it alone; it is a `@FunctionalInterface` implemented by lambdas, so the widening
+needs a check that Error Prone accepts `@MustBeClosed` on a method implemented that way.
+
+### Capabilities
+
+Java 25 cannot express a capability in a signature, and JEP 486 removed the
+SecurityManager, so nothing confines one at runtime either — which class may spawn a
+process or reach the database is invisible to both javac and the JVM. `ArchUnit`
+stands in for that at test time: `test/CapabilityRulesTest.java` holds four
+allowlists, one per authority the codebase actually exercises, and a class that picks
+up an authority it was never granted fails `play autotest` with a `because` clause
+naming the capability.
+
+| Capability | Holders |
+| --- | --- |
+| Spawn an OS process | 17 files — the sidecar supervisors, media transcoders, harness runners and `tools.ShellExecTool`; enumerated in `archunit_store/shell-process-spawners` |
+| Resolve a model-controlled path | `tools.FsPaths` → `utils.WorkspacePathGuard`; the sites under `tools..` predating that seam are listed in `archunit_store/filesystem-tool-paths` |
+| Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..` and `services.LocalSidecarDaemon` |
+| Reach the database | Everything except the subsystems `jobs.ShutdownJob` stops — teardown that needs a connection has no useful recovery when it cannot get one (JCLAW-1143) |
+
+Shell and filesystem carry pre-existing holders, so they run as `FreezingArchRule`s
+and the checked-in store under `archunit_store/` *is* the allowlist: a listed site
+passes, a new one fails, and fixing one prunes it from the store on the next run.
+Deleting an entry is how the list shrinks; editing a rule is not. Each frozen rule is
+paired with a floor on its live match count, because a predicate that silently stopped
+matching would otherwise let the store prune itself to empty and pass forever.
+
+The filesystem authority is deliberately the narrow one: it covers paths resolved from
+tool arguments, since those are the only ones an operator does not control.
+Application-internal file access — config, caches, sidecar working directories — is not
+this capability and is not gated.
+
+### Process sandboxing
+
+The table above says which classes may start a process; this says what one can reach once
+started. Every process JClaw spawns that can be steered by model output goes through
+`app/tools/HarnessSandbox.java` — one class holding both platform profile builders, so the
+coding-harness boundary and the native-tool boundary cannot drift apart:
+
+- **macOS** — `sandbox-exec -p '<inline Seatbelt profile>'`: allow-default, deny all writes,
+  then grant back the one write root plus `/private/tmp`, `/private/var/folders` and `/dev`;
+  deny reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, `~/.netrc`.
+- **Linux** — `bwrap --ro-bind / / --tmpfs $HOME --bind <writeRoot> <writeRoot>`: the visible
+  filesystem is built from nothing, so secrets are *absent* rather than merely denied.
+
+Two independent tri-state keys drive it, both `false` by default, both accepting
+`true` (confine every run) or `untrusted` (confine only runs whose origin channel is not the
+operator's own web chat):
+
+| Key | Covers | Write root |
+| --- | --- | --- |
+| `subagent.acp.sandbox` | ACP coding-harness processes | the run's session directory |
+| `shell.sandbox` | `exec` (`/bin/sh -c`) and `diarize_audio`'s ffmpeg extraction | the agent's resolved workspace |
+
+They are separate on purpose: confining a coding harness is not the same operator decision as
+confining every shell command. Neither key is seeded into the Config DB — an absent key already
+means "off", so both are documented in `conf/application.conf` and left unset.
+
+**Both fail closed.** With a key on and no usable mechanism (native Windows; a host missing
+`sandbox-exec`/`bwrap`; a WSL2 kernel with unprivileged user namespaces disabled),
+`HarnessSandbox.wrap` throws `SandboxUnavailableException` and the caller aborts the run rather
+than launching unconfined. Never add a fallback that launches anyway.
+
+**What the shell sandbox does and does not change.** It bounds *reach*, not grammar. `exec`'s
+first-token allowlist is still a UX guardrail rather than a metacharacter defence — `echo hi;
+rm -rf ~/Documents` still passes it and still runs both statements — but with `shell.sandbox`
+on, the `rm` fails on every path outside the workspace. Do not "harden" the allowlist into
+per-token gating; `ShellExecToolTest.commandCompositionRunsBothCommands` pins that posture
+deliberately.
+
+**The `browser` tool sits outside the boundary**, and this is a measured verdict rather than an
+omission. Two independent reasons, either sufficient:
+
+1. Playwright's Java client spawns its own driver, which spawns Chromium — JClaw never builds a
+   Chromium argv, so there is nothing for `wrap` to prefix.
+2. Under a macOS Seatbelt profile, Chromium's own child-process sandbox cannot initialize
+   (`sandbox initialization failed: Operation not permitted`) and the browser aborts with
+   `GPU process isn't usable. Goodbye.` It launches only with `--no-sandbox`, which trades the
+   per-renderer confinement that actually defends against a hostile page for a coarse
+   filesystem jail. (Under Linux `bwrap` it does launch — the block is macOS-specific, but
+   reason 1 is not.)
+
+Confining the browser means confining the whole JVM (a container, firejail), which is the
+operator-side mitigation `ShellExecTool`'s security-posture Javadoc already names.
+
+**Testing note.** `shell.sandbox` is process-global Config-DB state read on every
+`ShellExecTool.execute`, and play1 runs test classes concurrently. Any test that flips it must
+take `ShellSandboxSync.acquire()` / `release()`, the sibling of `LuceneTestSync` and
+`LoadTestHarnessSync`. A real confined run needs `@EnabledOnOs(OS.MAC)` and must target a
+genuinely-denied path — **not** the temp tree, which the profile grants for `TMPDIR`.
+
 ### Frontend
 - Nuxt 4 SPA in `frontend/` with Tailwind CSS v4
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
@@ -176,7 +503,6 @@ Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `G
 - Node.js 22.19+ (the dev container ships 24; Nuxt's `engines` rejects Node 20)
 - pnpm
 
-
 ## graphify
 
 Optional codebase knowledge graph, installed per-machine with `uv tool install graphifyy` (the CLI is `graphify`). Build it with `/graphify .`; `graphify-out/` is gitignored, so the graph is local to each clone and never committed.
@@ -191,7 +517,6 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-
 
 ## Behavioral Guidelines
 
