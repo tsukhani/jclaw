@@ -14,9 +14,10 @@ import java.util.stream.Stream;
 /**
  * The build-time nullness gate's own guard rail (JCLAW-1149).
  *
- * <p>NullAway runs on the Gradle {@code compileJava}, which {@code play autotest} never
- * invokes — so nothing in the suite would notice the gate being switched off, downgraded
- * to a warning, or left behind by a new subpackage. These assertions read
+ * <p>NullAway runs on the Gradle {@code compileJava}. The play CLI's autotest task depends on
+ * it, so a violation does fail {@code play autotest} — but nothing in the suite would notice
+ * the gate being switched off, downgraded to a warning, or left behind by a new subpackage.
+ * These assertions read
  * {@code build.gradle.kts} and the {@code package-info.java} files directly, which is the
  * only way to make those three regressions fail a test run rather than a later push.
  */
@@ -24,6 +25,16 @@ class NullnessGateConformanceTest extends UnitTest {
 
     private static final Pattern ANNOTATED_PACKAGES = Pattern.compile(
             "option\\(\"NullAway:AnnotatedPackages\",\\s*\"([^\"]*)\"\\)");
+
+    /** The annotation on the package declaration itself, not a mention of it in prose. */
+    private static final Pattern NULL_MARKED_PACKAGE = Pattern.compile("@NullMarked\\s+package\\s");
+
+    private static final String TEST_COMPILE_BLOCK = "tasks.named<JavaCompile>(\"compileTestJava\")";
+
+    /** Everything a commented-out line would leave behind: the token without the configuration. */
+    private static final List<String> SILENT_SWITCH_OFFS = List.of(
+            "enabled.set(false)", "disable(\"NullAway\")", "excludedPaths", "errorproneArgs",
+            "-XepDisableAllChecks", "NullAway:UnannotatedSubPackages", "NullAway:ExcludedClasses");
 
     private static Path repo(String... parts) {
         var path = Path.of(Play.applicationPath.getAbsolutePath());
@@ -34,7 +45,7 @@ class NullnessGateConformanceTest extends UnitTest {
     }
 
     private static String buildScript() throws IOException {
-        return Files.readString(repo("build.gradle.kts"));
+        return ResourceLeakGateConformanceTest.withoutComments(Files.readString(repo("build.gradle.kts")));
     }
 
     private static List<String> annotatedPackages() throws IOException {
@@ -48,10 +59,18 @@ class NullnessGateConformanceTest extends UnitTest {
         var script = buildScript();
         assertTrue(script.contains("id(\"net.ltgt.errorprone\")"), "Error Prone plugin is applied");
         assertTrue(script.contains("com.uber.nullaway:nullaway:"), "NullAway is on the errorprone configuration");
-        assertTrue(script.contains("check(\"NullAway\", CheckSeverity.ERROR)"),
-                "NullAway must fail the build, not warn — a warning nobody reads is not a gate");
         assertTrue(script.contains("enabled.set(name == \"compileJava\")"),
                 "the checker stays scoped to compileJava");
+        int testBlock = script.indexOf(TEST_COMPILE_BLOCK);
+        assertTrue(testBlock > 0, "compileTestJava carries its own Error Prone block");
+        var mainBlock = script.substring(0, testBlock);
+        assertTrue(mainBlock.contains("check(\"NullAway\", CheckSeverity.ERROR)"),
+                "NullAway must fail the app/ compile, not warn — a warning nobody reads is not a gate");
+        assertFalse(mainBlock.contains("check(\"NullAway\", CheckSeverity.OFF)"),
+                "NullAway is OFF for compileTestJava only");
+        for (var off : SILENT_SWITCH_OFFS) {
+            assertFalse(script.contains(off), off + " would leave every token above intact while the checker checks nothing");
+        }
     }
 
     @Test
@@ -76,7 +95,8 @@ class NullnessGateConformanceTest extends UnitTest {
                     var info = pkgDir.resolve("package-info.java");
                     // @NullMarked is per-package and does not reach subpackages, so a new
                     // one silently loses the source-level contract without this check.
-                    if (!Files.exists(info) || !Files.readString(info).contains("@NullMarked")) {
+                    if (!Files.exists(info) || !NULL_MARKED_PACKAGE.matcher(
+                            ResourceLeakGateConformanceTest.withoutComments(Files.readString(info))).find()) {
                         missing.add(repo().relativize(pkgDir).toString());
                     }
                 }

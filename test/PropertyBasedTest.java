@@ -16,6 +16,7 @@ import net.jqwik.api.constraints.StringLength;
 import net.jqwik.api.lifecycle.AfterContainer;
 import net.jqwik.api.lifecycle.BeforeContainer;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 import services.AgentService;
 import services.printing.LpdClient;
@@ -24,11 +25,13 @@ import utils.Filenames;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 /**
  * Every jqwik {@code @Property} in the backend suite (JCLAW-1154). Properties state an invariant
@@ -98,6 +101,22 @@ class PropertyBasedTest extends UnitTest {
     @Test
     void jupiterAndJqwikBothRunInThisClass() {
         assertEquals(2, 1 + 1);
+    }
+
+    /**
+     * The one-class rule in the class Javadoc has teeth only if something checks it: a second
+     * property-bearing class would race this one on the parallel lane and fail spuriously.
+     */
+    @Test
+    void noOtherTestClassCarriesAProperty() throws IOException {
+        var offenders = new ArrayList<String>();
+        try (Stream<Path> tree = Files.list(Path.of(Play.applicationPath.getAbsolutePath(), "test"))) {
+            for (var file : tree.filter(f -> f.toString().endsWith(".java")).toList()) {
+                if (file.getFileName().toString().equals("PropertyBasedTest.java")) continue;
+                if (Files.readString(file).contains("net.jqwik")) offenders.add(file.getFileName().toString());
+            }
+        }
+        assertEquals(List.of(), offenders, "jqwik properties live in PropertyBasedTest only — see the class Javadoc");
     }
 
     // tries=50: O(1) per try, single-digit milliseconds.

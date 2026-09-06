@@ -75,6 +75,15 @@ class TaskScopeTest extends UnitTest {
     }
 
     @Test
+    void aSecondJoinFailsInsteadOfParking() throws Exception {
+        try (var scope = new TaskScope<String>()) {
+            scope.fork(() -> "a");
+            scope.join();
+            assertThrows(IllegalStateException.class, scope::join);
+        }
+    }
+
+    @Test
     void closeCancelsTasksLeftRunning() {
         var blocker = new Blocker();
 

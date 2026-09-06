@@ -39,6 +39,7 @@ public final class TaskScope<T> implements AutoCloseable {
     private final ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
     private final CompletionService<T> completion = new ExecutorCompletionService<>(pool);
     private final List<Future<T>> forked = new ArrayList<>();
+    private boolean joined;
 
     /** Leaking one leaks its virtual-thread pool, so the compiler requires the caller to close it. */
     @MustBeClosed
@@ -58,8 +59,12 @@ public final class TaskScope<T> implements AutoCloseable {
      * @throws ExecutionException wrapping the first task failure; the siblings that
      *                            were still running have been cancelled
      * @throws InterruptedException if the joining thread is interrupted while waiting
+     * @throws IllegalStateException on a second call — the completion queue is already drained,
+     *                               so it would park forever instead of failing
      */
     public void join() throws ExecutionException, InterruptedException {
+        if (joined) throw new IllegalStateException("TaskScope.join() may be called once per scope");
+        joined = true;
         for (int i = 0; i < forked.size(); i++) {
             try {
                 // Completion order, not submission order — a failure three forks along
