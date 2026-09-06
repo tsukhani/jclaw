@@ -86,7 +86,8 @@ public class ApiTranscriptionController extends Controller {
         var statuses = AsrModelStore.statusAll();
         var models = new ArrayList<AsrModelEntry>();
         for (var m : AsrModel.values()) {
-            // statusAll() drops ids the sidecar omitted; NPE here rather than silently list fewer models.
+            // statusAll() covers every AsrModel on all three of its paths, so this asserts
+            // an invariant rather than guarding a gap.
             var status = Objects.requireNonNull(statuses.get(m.id()), m.id());
             models.add(new AsrModelEntry(
                     m.id(),

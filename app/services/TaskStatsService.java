@@ -47,7 +47,9 @@ public final class TaskStatsService {
         return q.getSingleResult();
     }
 
-    public static Double avgCompletedDuration(Instant since, String payloadType, String excludePayloadType) {
+    /** Null when no completed run matches the window — {@code AVG} over an empty set. */
+    public static @Nullable Double avgCompletedDuration(Instant since, String payloadType,
+                                                        String excludePayloadType) {
         var jpql = "SELECT AVG(r.durationMs) FROM TaskRun r "
                 + "WHERE r.startedAt >= :since AND r.status = :rstatus AND r.durationMs IS NOT NULL"
                 + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType);

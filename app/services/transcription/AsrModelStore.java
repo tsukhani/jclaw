@@ -53,7 +53,15 @@ public final class AsrModelStore extends ModelPrefetchStore<AsrModelStore.Status
             var status = JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("status");
             for (var m : AsrModel.values()) {
                 var s = status.getAsJsonObject(m.id());
-                if (s == null) continue;
+                if (s == null) {
+                    // The sidecar answered but said nothing about this id — version skew, a
+                    // model added here before the sidecar knew it. Report it unavailable
+                    // rather than omitting the row: the Settings page reads one entry per
+                    // AsrModel and a gap took the whole page down with a 500.
+                    out.put(m.id(), new Status(State.UNAVAILABLE, 0, 0, null,
+                            "ASR sidecar reported no status for '%s'".formatted(m.id())));
+                    continue;
+                }
                 out.put(m.id(), INSTANCE.rowFor(m.id(), s));
             }
         } catch (RuntimeException e) {
