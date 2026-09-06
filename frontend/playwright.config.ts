@@ -26,6 +26,15 @@ export default defineConfig({
   workers: undefined, // defaults to half the logical CPU count
   reporter: [['list'], ['html', { open: 'never' }]],
 
+  // Playwright's 5s default is a render budget, and this SPA does not meet it
+  // when N specs paint at once: measured against a live instance, 8 of 10
+  // intermittent failures were the same `expect(main).toBeVisible()` timing out
+  // at 5s while the API behind that page answered in 3-12ms. So the assertions
+  // were measuring worker contention, not the app. 15s is the value
+  // auth.uat.spec.ts had already been pinned to for this exact locator; setting
+  // it here applies that to all nine sites instead of the one someone hit.
+  expect: { timeout: 15_000 },
+
   use: {
     baseURL: process.env.JCLAW_E2E_BASE_URL || 'http://localhost:3000',
     trace: 'retain-on-failure',

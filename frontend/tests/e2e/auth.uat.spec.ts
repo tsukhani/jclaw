@@ -56,7 +56,7 @@ test.describe('UAT-1 authentication', () => {
     await page.locator('input[type="password"]').fill(PASSWORD)
     await page.getByRole('button', { name: 'Login' }).click()
 
-    await expect(page).toHaveURL(/\/$|\/#/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/$|\/#/)
     await expect(page.getByRole('navigation').first()).toContainText('Dashboard')
   })
 
@@ -67,10 +67,10 @@ test.describe('UAT-1 authentication', () => {
     await page.goto('/login')
     await page.locator('input[type="password"]').fill(PASSWORD)
     await page.getByRole('button', { name: 'Login' }).click()
-    await expect(page.locator('main')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('main')).toBeVisible()
 
     await page.getByRole('button', { name: 'Sign out' }).click()
-    await expect(page).toHaveURL(/\/login/, { timeout: 15_000 })
+    await expect(page).toHaveURL(/\/login/)
 
     // The cookie is gone from the browser context, so the API refuses again.
     const res = await page.request.get('/api/agents')
