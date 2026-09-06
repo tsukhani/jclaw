@@ -7,6 +7,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import play.test.UnitTest;
 
+import java.util.ArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  * Unit tests for {@link TelegramStreamingSink}. We exercise the pure-logic
  * paths — image stripping, state transitions, cap detection, sealed-idempotence
@@ -859,4 +866,43 @@ class TelegramStreamingSinkTest extends UnitTest {
             play.Play.configuration.setProperty("telegram.linkPreview", prior);
         }
     }
+    /**
+     * JCLAW-1162: {@code scheduler()} re-creates the executor after {@link
+     * TelegramStreamingSink#shutdown()} clears it, via a compare-and-set. The losing
+     * branch used to re-read the reference without retrying, so a shutdown landing
+     * between the read and the CAS handed the caller a null — which its three call
+     * sites dereference immediately, two while holding the sink's state lock.
+     */
+    @Test
+    void schedulerSurvivesAConcurrentShutdown() throws Exception {
+        int threads = 8;
+        var start = new CountDownLatch(1);
+        var nulls = new AtomicInteger();
+        var pool = Executors.newFixedThreadPool(threads);
+        try {
+            var done = new ArrayList<Future<?>>();
+            for (int t = 0; t < threads; t++) {
+                boolean shutdowner = t % 2 == 0;
+                done.add(pool.submit(() -> {
+                    start.await();
+                    for (int i = 0; i < 2_000; i++) {
+                        if (shutdowner) {
+                            TelegramStreamingSink.shutdown();
+                        } else if (TelegramStreamingSinkTestHooks.scheduler() == null) {
+                            nulls.incrementAndGet();
+                        }
+                    }
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (var f : done) f.get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+            TelegramStreamingSink.shutdown();
+        }
+        assertEquals(0, nulls.get(),
+                "scheduler() must never hand a caller null; a lost compare-and-set has to retry");
+    }
+
 }

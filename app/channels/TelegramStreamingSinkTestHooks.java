@@ -2,6 +2,8 @@ package channels;
 
 import org.jspecify.annotations.Nullable;
 
+import java.util.concurrent.ScheduledExecutorService;
+
 /**
  * Public bridge into {@link TelegramStreamingSink}'s package-private test accessors
  * (JCLAW-771). JClaw's tests live in the default package, so they cannot call
@@ -22,6 +24,11 @@ import org.jspecify.annotations.Nullable;
 public final class TelegramStreamingSinkTestHooks {
 
     private TelegramStreamingSinkTestHooks() {}
+
+    /** The scheduler accessor itself, for the JCLAW-1162 re-init race test. */
+    public static ScheduledExecutorService scheduler() {
+        return TelegramStreamingSink.schedulerForTest();
+    }
 
     public static @Nullable Integer messageId(TelegramStreamingSink sink) { return sink.messageIdForTest(); }
 

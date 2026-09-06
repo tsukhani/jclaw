@@ -18,7 +18,6 @@ import services.Tx;
 import utils.VirtualThreads;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -151,18 +150,30 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      */
     private static final AtomicReference<ScheduledExecutorService> SCHEDULER_REF = new AtomicReference<>();
 
-    private static @Nullable ScheduledExecutorService scheduler() {
-        var s = SCHEDULER_REF.get();
-        if (s != null && !s.isShutdown()) return s;
-        var fresh = VirtualThreads.newSingleThreadScheduledExecutor();
-        if (SCHEDULER_REF.compareAndSet(s, fresh)) return fresh;
-        fresh.shutdown();
-        return SCHEDULER_REF.get();
+    /**
+     * The live scheduler, re-created after {@link #shutdown} clears the reference.
+     *
+     * <p>The retry is load-bearing (JCLAW-1162): a lost compare-and-set means someone
+     * else moved the reference between the read and the swap, and re-reading it once
+     * returns whatever they left — including the null {@link #shutdown} installs. That
+     * handed callers a null they dereference immediately, two of them under
+     * {@code stateLock}. Looping re-reads instead, so the caller either adopts the
+     * winner's executor or installs its own.
+     */
+    private static ScheduledExecutorService scheduler() {
+        while (true) {
+            var s = SCHEDULER_REF.get();
+            if (s != null && !s.isShutdown()) return s;
+            var fresh = VirtualThreads.newSingleThreadScheduledExecutor();
+            if (SCHEDULER_REF.compareAndSet(s, fresh)) return fresh;
+            // Lost the race — discard ours rather than leak its carrier thread, then re-read.
+            fresh.shutdown();
+        }
     }
 
-    /** {@link #scheduler()} yields null only when {@link #shutdown} races a losing compare-and-set. */
-    private static ScheduledExecutorService requireScheduler() {
-        return Objects.requireNonNull(scheduler(), "scheduler shut down while a task was being scheduled");
+    /** Test seam: the accessor itself, so a test can race it against {@link #shutdown()}. */
+    static ScheduledExecutorService schedulerForTest() {
+        return scheduler();
     }
 
     /**
@@ -708,7 +719,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
             // from seal() / update() can suppress the first pulse if it
             // hasn't landed yet. Each tick spawns a VT so the scheduler
             // thread stays free for other sinks' flushes.
-            typingHeartbeat = requireScheduler().scheduleAtFixedRate(
+            typingHeartbeat = scheduler().scheduleAtFixedRate(
                     () -> {
                         if (System.nanoTime() >= deadlineNanos) {
                             cancelTypingHeartbeat(); // JCLAW-342: TTL reached
@@ -805,7 +816,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         long wait = Math.max(0, currentThrottleMs - (System.currentTimeMillis() - lastSentAt));
         // Scheduler thread only spawns the flush; the flush itself runs on a
         // fresh virtual thread so cross-sink flushes don't serialize (JCLAW-95).
-        scheduledFlush = requireScheduler().schedule(
+        scheduledFlush = scheduler().schedule(
                 () -> Thread.ofVirtual().name("telegram-stream-flush").start(this::flush),
                 wait, TimeUnit.MILLISECONDS);
     }
@@ -856,7 +867,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
                 // If more tokens arrived during the call, schedule the next flush
                 // on a fresh virtual thread (same pattern as scheduleFlushLocked).
                 if (pending.length() > lastSentText.length() && !sealed.get() && !streamCapReached) {
-                    scheduledFlush = requireScheduler().schedule(
+                    scheduledFlush = scheduler().schedule(
                             () -> Thread.ofVirtual().name("telegram-stream-flush").start(this::flush),
                             currentThrottleMs, TimeUnit.MILLISECONDS);
                 }
