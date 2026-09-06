@@ -9,6 +9,9 @@ docs/architecture/
 # (docs/user-guide/ stays: the in-app guide reads it at runtime).
 docs/spikes/
 test/
+# The frozen ArchUnit capability allowlists (JCLAW-1152) are a build-time
+# baseline read by test/CapabilityRulesTest, never by a running install.
+archunit_store/
 loadtest/
 # The eval dataset (JCLAW-875) is a development measuring stick — the runner
 # reads it from a checkout, never from a running install.

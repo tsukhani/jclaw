@@ -1,8 +1,6 @@
 import com.tngtech.archunit.base.DescribedPredicate;
-import com.tngtech.archunit.core.domain.JavaCall;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
-import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
@@ -14,14 +12,8 @@ import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
@@ -42,18 +34,17 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * import the app's class files directly and assert against constructor calls and
  * package dependencies. A violation fails the check exactly like any other test.
  *
- * <p>Rules 1 and 2 currently hold clean. Rule 3 carries an explicit, visible list
- * of the three pre-existing {@code new Gson()} offenders the wave-5 audit found;
- * the rule guards every <em>other</em> class from regressing, and each excluded
- * entry should be deleted as that class migrates to {@code GsonHolder.GSON}.
- * When a baseline like this grows past a handful of sites, switch the rule to
- * {@link com.tngtech.archunit.library.freeze.FreezingArchRule#freeze} instead,
- * which manages the baseline in a committed violation store.
+ * <p>Every rule here is strict, so a violation is a regression rather than debt.
+ * The capability allowlists — which class may spawn a process, resolve a
+ * model-controlled path, open a connection or reach the database, and the frozen
+ * baseline of the ones that already do — live next door in {@link CapabilityRulesTest}
+ * (JCLAW-1152), which asserts over this class's import.
  */
 class ArchitectureTest extends UnitTest {
 
-    /** The app's compiled production classes, read from disk (ArchUnit works on bytecode). */
-    private static final JavaClasses APP_CLASSES = importAppClasses();
+    /** The app's compiled production classes, read from disk (ArchUnit works on bytecode).
+     *  Package-private so {@link CapabilityRulesTest} asserts over the same single import. */
+    static final JavaClasses APP_CLASSES = importAppClasses();
 
     /**
      * Import ONLY the Gradle main-source output — {@code build/classes/java/main} — which the
@@ -76,7 +67,7 @@ class ArchitectureTest extends UnitTest {
 
     /** Matches a call to {@code new <ownerFqn>(...)}; when {@code noArgOnly}, only the
      * zero-parameter constructor. Bytecode owner names use {@code $} for nested classes. */
-    private static DescribedPredicate<JavaConstructorCall> constructorCall(String ownerFqn, boolean noArgOnly) {
+    static DescribedPredicate<JavaConstructorCall> constructorCall(String ownerFqn, boolean noArgOnly) {
         return DescribedPredicate.describe(
                 "a call to new " + ownerFqn + (noArgOnly ? "()" : "(...)"),
                 call -> {
@@ -86,91 +77,6 @@ class ArchitectureTest extends UnitTest {
                     }
                     return !noArgOnly || target.getRawParameterTypes().isEmpty();
                 });
-    }
-
-    /**
-     * Outbound OkHttp clients must be provisioned through {@code HttpFactories}
-     * (JCLAW-185..188), which owns the shared connection pools and virtual-thread
-     * dispatcher. The two documented exceptions build their own tuned clients:
-     * {@code SsrfGuard} (per-request DNS allow-list) and {@code TelegramBotApiHttpClients}
-     * (the Telegram SDK's stack). Deriving a per-call client via {@code someFactoryClient
-     * .newBuilder()} is fine — it reuses the pool — so this rule targets only the
-     * from-scratch {@code new OkHttpClient.Builder()} constructor.
-     */
-    @Test
-    void okHttpClientsAreProvisionedThroughHttpFactories() {
-        ArchRule rule = noClasses()
-                .that().doNotHaveFullyQualifiedName("utils.HttpFactories")
-                .and().doNotHaveFullyQualifiedName("utils.SsrfGuard")
-                .and().doNotHaveFullyQualifiedName("channels.TelegramBotApiHttpClients")
-                .should().callConstructorWhere(constructorCall("okhttp3.OkHttpClient$Builder", true))
-                .because("outbound OkHttp clients must come from HttpFactories (JCLAW-185..188); "
-                        + "SsrfGuard and the Telegram SDK are the documented exceptions");
-        rule.check(APP_CLASSES);
-    }
-
-    /** Packages and classes allowed to open a raw socket; see {@link #rawSocketsAreConfinedToThePrintingStack}. */
-    private static final String PRINTING_PACKAGE = "services.printing..";
-    private static final String PORT_PROBE_CLASS = "services.LocalSidecarDaemon";
-
-    /** Matches {@code new java.net.Socket(...)}, {@code new java.net.ServerSocket(...)} and
-     *  {@code URL.openConnection()} — constructor and method calls together, hence {@code JavaCall}. */
-    private static final DescribedPredicate<JavaCall<?>> RAW_SOCKET_CALL = DescribedPredicate.describe(
-            "a call to new java.net.Socket(...), new java.net.ServerSocket(...) or URL.openConnection()",
-            call -> {
-                String owner = call.getTargetOwner().getName();
-                String name = call.getTarget().getName();
-                boolean socketCtor = ("java.net.Socket".equals(owner) || "java.net.ServerSocket".equals(owner))
-                        && "<init>".equals(name);
-                return socketCtor || ("java.net.URL".equals(owner) && "openConnection".equals(name));
-            });
-
-    /**
-     * Outbound network access is {@code HttpFactories}' OkHttp clients and nothing else
-     * (JCLAW-1151). A raw {@code java.net} socket or a {@code URL.openConnection()} is a
-     * second stack that bypasses the shared pools, the timeout policy, the SSRF DNS — and
-     * the {@code HttpFactories.runWith} transport override, so anything built on one cannot
-     * be tested without a live listener. The self-built OkHttp clients ({@code SsrfGuard},
-     * {@code TelegramBotApiHttpClients}) are named in
-     * {@link #okHttpClientsAreProvisionedThroughHttpFactories}, not here — they are still
-     * OkHttp and still substitutable.
-     *
-     * <p>{@code services.printing} is the standing exception: LPD and JetDirect 9100 are
-     * socket protocols, not HTTP, and discovery probes reachability by connecting.
-     * {@code LocalSidecarDaemon} binds a loopback {@code ServerSocket} to learn whether a
-     * port is already held — a probe that sends nothing, not traffic.
-     */
-    @Test
-    void rawSocketsAreConfinedToThePrintingStack() {
-        ArchRule rule = noClasses()
-                .that().resideOutsideOfPackage(PRINTING_PACKAGE)
-                .and().doNotHaveFullyQualifiedName(PORT_PROBE_CLASS)
-                .should().callCodeUnitWhere(RAW_SOCKET_CALL)
-                .because("outbound network access goes through HttpFactories' OkHttp clients "
-                        + "(JCLAW-1151); services.printing speaks LPD/9100 and LocalSidecarDaemon "
-                        + "binds a loopback port probe");
-        rule.check(APP_CLASSES);
-
-        assertTrue(APP_CLASSES.stream()
-                        .filter(c -> c.getPackageName().startsWith("services.printing"))
-                        .flatMap(c -> c.getCodeUnitCallsFromSelf().stream())
-                        .anyMatch(RAW_SOCKET_CALL),
-                "no socket call found inside " + PRINTING_PACKAGE + " — the exclusion is carrying "
-                        + "nothing, so the predicate has stopped matching and the rule passes vacuously");
-    }
-
-    /**
-     * Outbound HTTP in app/ is OkHttp-only; the JDK {@code java.net.http.HttpClient}
-     * stack was removed in the OkHttp migration (JCLAW-185..188) to avoid the LM Studio
-     * h2c-upgrade hang and to keep a single virtual-thread-clean client. This guards
-     * against the second stack creeping back in.
-     */
-    @Test
-    void noJdkHttpClientInApp() {
-        ArchRule rule = noClasses()
-                .should().dependOnClassesThat().resideInAnyPackage("java.net.http..")
-                .because("outbound HTTP is OkHttp-only in app/ (JCLAW-185..188); the JDK HttpClient was removed");
-        rule.check(APP_CLASSES);
     }
 
     /**
@@ -318,111 +224,5 @@ class ArchitectureTest extends UnitTest {
                         + "depending back on models closes a write-path cycle. It takes scope + id + text, "
                         + "never an entity");
         rule.check(APP_CLASSES);
-    }
-
-    // ===== JCLAW-1143/1144: shutdown teardown must not reach the database =====
-
-    /** Call targets that mean "this reached the database". */
-    private static final Set<String> DB_SINK_OWNERS = Set.of(
-            "services.Tx", "services.ConfigService", "play.db.jpa.JPA");
-
-    /**
-     * Traversal stops here. EventLogger is called by nearly every component and its flush
-     * path does reach a transaction, but it is explicitly shutdown-aware: ShutdownJob calls
-     * markShuttingDown() before any component runs, after which record() and flush() go
-     * file-only. Following it would flag all 17 components for a path that cannot execute.
-     */
-    private static final Set<String> SHUTDOWN_AWARE = Set.of("services.EventLogger");
-
-    /**
-     * A method that consults {@code EventLogger.isShuttingDown()} has already been made
-     * teardown-aware, so neither its own DB calls nor anything it calls run during shutdown.
-     * {@code McpConnectionManager.clearAllowlistAndAudit} is the existing example: it skips
-     * its DELETE while shutting down because the next boot re-registers the allowlist anyway.
-     *
-     * <p>This is a heuristic and it cuts both ways — it cannot tell a real guard from an
-     * incidental read of the flag, so a method that checks it and then reaches the DB anyway
-     * would pass. Recognising the idiom beats a hard-coded name list, which would go stale.
-     */
-    private static boolean guardsOnShutdownFlag(JavaMethod method) {
-        return method.getCallsFromSelf().stream().anyMatch(call ->
-                "services.EventLogger".equals(call.getTargetOwner().getName())
-                        && "isShuttingDown".equals(call.getTarget().getName()));
-    }
-
-    /**
-     * No subsystem stopped by {@link jobs.ShutdownJob} may reach the database, transitively.
-     *
-     * <p>Teardown that needs a connection has no useful recovery when it cannot get one, and
-     * the one observed failure here was exactly that — a config read on the shutdown path
-     * that surfaced as an unexplained "JDBC begin transaction failed" (JCLAW-1143).
-     *
-     * <p>What this cannot see: anything inside a third-party frame. ArchUnit imports only
-     * {@code app/}, so db-scheduler reaching H2 through {@code Scheduler.stop()} is invisible
-     * here — that is what the runtime tripwire in {@link services.Tx} is for. Virtual calls
-     * also resolve to the declared target, so an interface hop can hide an implementation's
-     * DB access. Treat a pass as "no direct path in our own code", not as proof.
-     */
-    @Test
-    void shutdownComponentsMustNotReachTheDatabase() {
-        var doJob = APP_CLASSES.get("jobs.ShutdownJob").getMethod("doJob");
-
-        // The Component list holds method references, so the roots are discovered rather
-        // than hand-listed — a new subsystem is covered the moment it is registered.
-        List<JavaMethod> roots = doJob.getMethodReferencesFromSelf().stream()
-                .map(ref -> ref.getTarget().resolveMember())
-                .flatMap(Optional::stream)
-                .filter(JavaMethod.class::isInstance)
-                .map(JavaMethod.class::cast)
-                .toList();
-
-        assertFalse(roots.isEmpty(),
-                "no shutdown component method references resolved — the rule would pass vacuously");
-
-        var offenders = new ArrayList<String>();
-        for (JavaMethod root : roots) {
-            String path = findDbPath(root);
-            if (path != null) offenders.add(path);
-        }
-        assertTrue(offenders.isEmpty(),
-                "shutdown components must not reach the database:\n  " + String.join("\n  ", offenders));
-    }
-
-    /** BFS from a component's stop method; returns a readable call path to a DB sink, or null. */
-    private static String findDbPath(JavaMethod root) {
-        var seen = new HashSet<String>();
-        var parent = new HashMap<String, String>();
-        var queue = new ArrayDeque<JavaMethod>();
-        queue.add(root);
-        seen.add(root.getFullName());
-
-        while (!queue.isEmpty()) {
-            JavaMethod current = queue.poll();
-            if (guardsOnShutdownFlag(current)) continue;
-            for (var call : current.getCallsFromSelf()) {
-                String owner = call.getTargetOwner().getName();
-                if (DB_SINK_OWNERS.contains(owner)) {
-                    return renderPath(parent, current.getFullName(), root)
-                            + " -> " + owner + "." + call.getTarget().getName();
-                }
-                if (SHUTDOWN_AWARE.contains(owner)) continue;
-                var member = call.getTarget().resolveMember();
-                if (member.isEmpty() || !(member.get() instanceof JavaMethod next)) continue;
-                if (seen.add(next.getFullName())) {
-                    parent.put(next.getFullName(), current.getFullName());
-                    queue.add(next);
-                }
-            }
-        }
-        return null;
-    }
-
-    private static String renderPath(Map<String, String> parent, String from, JavaMethod root) {
-        var chain = new ArrayList<String>();
-        for (String at = from; at != null; at = parent.get(at)) {
-            chain.add(0, at);
-            if (at.equals(root.getFullName())) break;
-        }
-        return String.join(" -> ", chain);
     }
 }
