@@ -2987,11 +2987,7 @@ do_start_prod() {
     # `play start` forks, so this banner used to announce a server that was not
     # reachable yet, and every "restart, then do X" sequence inherited the gap:
     # `${INVOKE} e2e` straight after a restart found no listener and refused.
-    if ! wait_for_backend_ready; then
-        echo "Error: the backend was launched but never answered on port $BACKEND_PORT." >&2
-        echo "       Check logs/system.out — it may have failed during startup." >&2
-        return 1
-    fi
+    wait_for_backend_ready || return 1
 
     echo ""
     echo "JClaw is running (production):"
@@ -3886,12 +3882,39 @@ do_diagnostics() {
 # at the end. Continues past failures so the user sees every result in one
 # round-trip — the whole point of this subcommand. Exits non-zero if any
 # Block until the backend answers /api/status, so a caller can treat a returned
-# start/restart as "reachable" rather than "process launched". Bounded, because a
-# server that dies during startup must surface as an error rather than a hang.
+# start/restart as "reachable" rather than "process launched". Same shape as the
+# dev-mode loop in do_start_dev: a JVM that dies during startup fails now, not
+# after the full timeout, and a timeout leaves nothing running that `start`
+# would then refuse to replace as "already running".
 wait_for_backend_ready() {
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "    (curl not found — not waiting for the backend to answer)"
+        return 0
+    fi
     echo "==> Waiting for the backend to answer on port ${BACKEND_PORT}..."
-    curl -fs -m 120 --retry 60 --retry-delay 2 --retry-all-errors \
-         --retry-connrefused -o /dev/null "http://localhost:${BACKEND_PORT}/api/status"
+    local waited=0 pid
+    while true; do
+        pid=$(cat "$SCRIPT_DIR/server.pid" 2>/dev/null || true)
+        if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+            echo "Error: Play backend exited during startup (pid $pid no longer alive)." >&2
+            echo "       Last lines of logs/system.out:" >&2
+            tail -20 "$SCRIPT_DIR/logs/system.out" 2>/dev/null | sed 's/^/         /' >&2
+            rm -f "$SCRIPT_DIR/server.pid"
+            return 1
+        fi
+        if curl -fs -m 5 -o /dev/null "http://localhost:${BACKEND_PORT}/api/status" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+        if [[ $waited -ge 120 ]]; then
+            echo "Error: backend did not answer on port ${BACKEND_PORT} within 120 seconds." >&2
+            echo "       Check logs/system.out for details." >&2
+            [[ -n "$pid" ]] && kill_tree "$pid"
+            rm -f "$SCRIPT_DIR/server.pid"
+            return 1
+        fi
+    done
 }
 
 # Confirm the resolved target answers before handing the suite a base URL.
