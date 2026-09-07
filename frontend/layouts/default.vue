@@ -63,6 +63,9 @@ const paletteOpen = ref(false)
 const apiVersion = ref('')
 const frameworkVersion = ref('')
 const expectedFrameworkVersion = ref('')
+// Distinguishes "not probed yet" from "probed, and this install reports no
+// framework version" — the Framework row reserves its space only for the first.
+const statusProbed = ref(false)
 
 // Match-state for the dot next to FRAMEWORK in the sidebar footer:
 // green when the running fork matches .play-version, amber when it
@@ -148,6 +151,9 @@ async function checkStatus() {
   }
   catch {
     apiOnline.value = false
+  }
+  finally {
+    statusProbed.value = true
   }
 }
 
@@ -560,14 +566,18 @@ const navGroups: NavGroup[] = [
             />
           </div>
         </div>
+        <!-- Rendered before the probe answers too, so the row does not pop in
+             and push the page down (CLS) — the Version row above does the same
+             with its '...' placeholder. An install that reports no framework
+             version drops the row once probed; that is the rarer case. -->
         <div
-          v-if="frameworkVersion"
+          v-if="!statusProbed || frameworkVersion"
           class="shrink-0 border-t border-fg-muted/40 px-4 py-2.5"
         >
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-2 min-w-0">
               <span class="text-xs text-fg-muted font-mono uppercase tracking-wider w-[5.5rem] shrink-0">Framework</span>
-              <span class="text-sm text-fg-primary font-mono truncate">v{{ frameworkVersion }}</span>
+              <span class="text-sm text-fg-primary font-mono truncate">{{ frameworkVersion ? `v${frameworkVersion}` : '...' }}</span>
             </div>
             <!-- Match dot: green when running fork == .play-version,
                  amber when drift, hidden when the expected version
@@ -754,9 +764,12 @@ const navGroups: NavGroup[] = [
         </div>
       </header>
 
-      <!-- Status banners -->
+      <!-- Status banners. Gated on statusProbed: apiOnline starts false, so
+           without it every page load flashed "API is unreachable" for the ~20ms
+           until /api/status answered — a false error, and one that shifted the
+           whole page down 41px and back (CLS). -->
       <StatusBanner
-        v-if="!apiOnline"
+        v-if="statusProbed && !apiOnline"
         message="API is unreachable. Some features may be unavailable."
         variant="error"
         action-text="Retry"
