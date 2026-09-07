@@ -42,17 +42,11 @@ export default defineNuxtConfig({
     '/api/**': { proxy: `${backendUrl}/api/**` },
   },
 
-  // NOTE: do NOT add `experimental.payloadExtraction: 'client'` here even
-  // though `nuxi generate` keeps emitting "Payload extraction is recommended
-  // for full-static output" on every prod start. The warning is unfixable
-  // from user config in Nuxt 4.4.2 SPA mode: @nuxt/schema's resolver
-  // (see node_modules/.pnpm/@nuxt+schema@4.4.2/.../dist/index.mjs,
-  // `payloadExtraction.$resolve`) hardcodes `return false` whenever
-  // `ssr === false`, overwriting any user value before nitro-server's
-  // warning check runs. Setting it to 'client' or true compiles into
-  // nuxt.config but the schema strips it, the warning fires regardless,
-  // and the dev server / build behavior is identical either way. Cosmetic
-  // noise only — leave alone until upstream resolves the contradiction.
+  // NOTE: do NOT add `experimental.payloadExtraction` here. @nuxt/schema's
+  // resolver hardcodes it to false whenever `ssr === false`, so any value set
+  // in SPA mode is stripped before it can take effect. (Nuxt 4.4.2 then also
+  // warned "Payload extraction is recommended" on every generate; since 4.5
+  // nitro-server gates that warning on `ssr`, so it no longer fires here.)
 
   compatibilityDate: '2026-04-16',
 
