@@ -542,12 +542,17 @@ genuinely-denied path — **not** the temp tree, which the profile grants for `T
 - Nuxt 4 SPA in `frontend/` with Tailwind CSS v4
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
 - Backend calls use Nuxt's auto-imported `useFetch` / `$fetch` directly; `frontend/composables/` adds `useApiParsed` (schema-validated reads, JCLAW-287) and `useApiMutation` (POST/PUT/DELETE) as consistent wrappers
-- Package manager: **pnpm**, version pinned in `frontend/package.json`'s `packageManager` field with a `+sha512-...` integrity hash. Three layers keep the hash present and verified:
-  1. `./jclaw.sh setup` runs `corepack use pnpm@<version>` to add the hash if missing (idempotent — no-op once the hash is in place).
-  2. The `.githooks/pre-commit` guard refuses to commit a `frontend/package.json` whose `packageManager` value lacks a hash, so a hand-edit that drops it can't slip through.
-  3. `./jclaw.sh start` (both dev and prod) runs `corepack install` before any pnpm step — read-only validate, never mutates `package.json`. Downloads the pinned version on first use, verifies the tarball against the hash on every subsequent run. Hard-fails the start on missing hash or mismatch — never bypass.
+- Package manager: **pnpm 12+**, version pinned in `frontend/package.json`'s `packageManager` field. pnpm installs standalone (`curl -fsSL https://get.pnpm.io/install.sh | sh -`) and switches itself to the pinned version on first use — **not** through corepack, which cannot launch pnpm 12 (per-platform native binary, no `bin/pnpm.cjs`) and which Node 25+ no longer ships.
 
-  To bump the pin: `cd frontend && corepack use pnpm@<version>` (writes both the version and a fresh hash), then commit `frontend/package.json`.
+  **Where the integrity check lives.** The `+sha512-...` suffix corepack verified against is ignored by pnpm — measured, not assumed. pnpm records its own per-platform releases in `frontend/pnpm-lock.yaml` under `packageManagerDependencies` and refuses to run one whose bytes do not match a published, signed npm release (`ERR_PNPM_PNPM_ENGINE_IDENTITY_MISMATCH`, reproduced by tampering with one integrity line). That is a stronger guarantee than the old one — provenance rather than agreement with a locally-edited string — and it is committed, reviewable in a diff, and covers every platform rather than whichever one last ran `corepack use`.
+
+  Two layers keep it honest:
+  1. The `.githooks/pre-commit` guard refuses to commit a `frontend/package.json` that pins pnpm while `frontend/pnpm-lock.yaml` carries no `packageManagerDependencies` block — the block's absence is what would silently disable the gate.
+  2. `./jclaw.sh start` (dev and prod) resolves the pin before any pnpm step and hard-fails when it is missing.
+
+  To bump the pin: `cd frontend && pnpm self-update <version>`, then commit `frontend/package.json` **and** `frontend/pnpm-lock.yaml` — the lockfile carries the new binaries' integrity.
+
+  **Node 25+ and the test suite.** Node 25 enabled its own Web Storage API by default, and that partial implementation shadows jsdom's: `localStorage` lands undefined and 93 specs fail on what looks like a jsdom bug. `frontend/vitest.config.ts` sets `--no-webstorage` via `NODE_OPTIONS`, gated on the running Node major because Node 24 rejects the flag outright. Do not ungate it while anything still builds on Node 24 (CI's `node-24` agent does). Tracking: vitest-dev/vitest#8757.
 
 ### API Contract
 Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `GET /api/status`). The frontend consumes these through the proxy — no CORS configuration needed.

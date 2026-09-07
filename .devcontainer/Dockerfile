@@ -1,7 +1,7 @@
 # JClaw development container.
 #
 # Installs the toolchain ./jclaw.sh setup's check_prereqs expects: Java 25
-# (Azul Zulu), Node 24 (NodeSource), corepack, the Play 1.13.x fork from
+# (Azul Zulu), Node 26 (NodeSource), pnpm, the Play 1.13.x fork from
 # tsukhani/play1, and tesseract-ocr for OCR paths. Built and consumed by
 # .devcontainer/devcontainer.json — postCreateCommand runs ./jclaw.sh setup
 # on first open to wire git hooks and pnpm install.
@@ -64,14 +64,16 @@ RUN curl -fsSL https://repos.azul.com/azul-repo.key \
     apt-get install -y --no-install-recommends zulu25-jdk && \
     rm -rf /var/lib/apt/lists/*
 
-# Node.js 24 via NodeSource. corepack ships with Node 16.13+ but isn't
-# enabled by default — `corepack enable` symlinks the pnpm shim into PATH;
-# the actual binary downloads on first use, verified against the +sha512
-# integrity hash pinned in frontend/package.json.
-RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+# Node.js 26 via NodeSource, then pnpm from its own installer. Node 25+ does
+# not ship corepack, and corepack cannot launch pnpm 12 anyway (per-platform
+# native binary, no bin/pnpm.cjs). pnpm switches itself to the version pinned
+# in frontend/package.json on first use and verifies it against the lockfile.
+RUN curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/* && \
-    corepack enable
+    curl -fsSL https://get.pnpm.io/install.sh | ENV=/root/.bashrc SHELL=/bin/bash sh -
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH=$PNPM_HOME:$PATH
 
 # Play 1.13.x — tsukhani/play1 fork. Exact version is read from
 # .play-version at the jclaw repo root (single source of truth shared

@@ -19,30 +19,41 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 
-# pnpm pin integrity-hash guard. Refuse commits to frontend/package.json
-# whose `packageManager` field lacks a +sha512-... hash — that hash is
-# what corepack uses to verify downloaded tarballs against tampering, and
-# a hand-edit that drops it silently disables the security gate enforced
-# by ./jclaw.sh start. Catches the regression at commit time so neither
-# `setup` nor `start` has to deal with it after the fact.
+# pnpm package-manager integrity guard. Refuse commits that pin pnpm in
+# frontend/package.json while frontend/pnpm-lock.yaml carries no record of the
+# package manager itself.
 #
-# Only fires when frontend/package.json is staged AND the staged content
-# pins pnpm without a hash. Reads the staged blob via `git show :` so a
-# fix-and-restage cycle (without `git add`) is detected correctly.
+# This used to check for a +sha512-... suffix on the pin, which is what corepack
+# verified tarballs against. pnpm 12 ignores that suffix entirely (measured) and
+# records its own per-platform releases in the lockfile instead, refusing to run
+# one whose bytes do not match a published, signed npm release. The lockfile
+# block is therefore the thing whose absence silently disables the gate, so it
+# is the thing to guard.
+#
+# Reads staged blobs via `git show :` — for a path that is not staged that
+# returns the index copy, i.e. HEAD's content, so a package.json-only commit is
+# still checked against the lockfile that will be in the tree.
 if git diff --cached --name-only --diff-filter=ACMR | grep -qx 'frontend/package.json'; then
     staged_pin=$(git show ':frontend/package.json' \
         | sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' | head -1)
-    if [[ -n "$staged_pin" && "$staged_pin" != *"+sha"* ]]; then
-        echo "[jclaw pre-commit] frontend/package.json packageManager pin lacks +sha512-... integrity hash:" >&2
-        echo "[jclaw pre-commit]   staged pin: $staged_pin" >&2
-        echo "[jclaw pre-commit] Without the hash, corepack cannot verify the downloaded pnpm tarball" >&2
-        echo "[jclaw pre-commit] against tampering — refusing the commit." >&2
-        echo "" >&2
-        echo "[jclaw pre-commit] Fix with one of:" >&2
-        echo "[jclaw pre-commit]   ./jclaw.sh setup" >&2
-        echo "[jclaw pre-commit]   cd frontend && corepack use ${staged_pin}" >&2
-        echo "[jclaw pre-commit] then re-stage frontend/package.json and re-commit." >&2
-        exit 1
+    if [[ -n "$staged_pin" ]]; then
+        # grep -c, not grep -q: this file runs under `set -o pipefail`, and
+        # `grep -q` closes the pipe on its first match, so `git show` dies of
+        # SIGPIPE and the pipeline reports failure on the SUCCESS path — which
+        # would block every commit that touches frontend/package.json.
+        lock_pm_records=$(git show ':frontend/pnpm-lock.yaml' 2>/dev/null \
+            | grep -c 'packageManagerDependencies:' || true)
+        if [[ "${lock_pm_records:-0}" -eq 0 ]]; then
+            echo "[jclaw pre-commit] frontend/package.json pins ${staged_pin} but frontend/pnpm-lock.yaml" >&2
+            echo "[jclaw pre-commit] records no packageManagerDependencies block." >&2
+            echo "[jclaw pre-commit] That block is what pnpm verifies its own binary against; without it" >&2
+            echo "[jclaw pre-commit] the package manager is unverified — refusing the commit." >&2
+            echo "" >&2
+            echo "[jclaw pre-commit] Fix with:" >&2
+            echo "[jclaw pre-commit]   cd frontend && pnpm install" >&2
+            echo "[jclaw pre-commit] then stage frontend/pnpm-lock.yaml and re-commit." >&2
+            exit 1
+        fi
     fi
 fi
 

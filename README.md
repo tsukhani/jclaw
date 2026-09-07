@@ -294,7 +294,7 @@ What happens automatically once you click:
 3. The IDE runs `postCreateCommand: ./jclaw.sh setup` automatically, which:
    - Validates all prerequisites (every check passes — they're baked into the image)
    - Wires git hooks (`.githooks/pre-commit`, `.githooks/pre-push`)
-   - Validates the pinned pnpm version via corepack with integrity-hash verification
+   - Resolves the pinned pnpm version, which pnpm verifies against the lockfile's signed package-manager record
    - Runs `pnpm install` for the frontend
    - Adds the canonical `github` remote (`https://github.com/tsukhani/jclaw.git`)
 4. Recommended VS Code/Cursor extensions install (Volar, Java Pack, ESLint, Stylelint, YAML).

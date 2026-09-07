@@ -13,14 +13,14 @@
 # install, play1 fork install — change rarely), volatile come last (the
 # source-tree COPY + playBundle RUN — change every iteration). Inside
 # Stage 1's build RUN, BuildKit cache mounts persist Gradle's dep cache,
-# pnpm's content-addressed store, corepack downloads, and the project's
+# pnpm's content-addressed store, its package-manager downloads, and the project's
 # resolved frontend/node_modules across builds even though the COPY
 # layer they sit under invalidates per source change — saves ~60-90 s of
 # dep resolution + pnpm install on warm-cache rebuilds. The mounts hold
 # no application state; missing them just reverts to clean rebuilds.
 
 # ── Stage 1: Build the playBundle zip ──────────────────────────────────────
-# Azul Zulu 25 JDK (Ubuntu noble base) + Gradle 9.5 + Node 24 + Play 1.13.x.
+# Azul Zulu 25 JDK (Ubuntu noble base) + Gradle 9.5 + Node 26 + Play 1.13.x.
 # `gradle playBundle` runs the play1 plugin's full pipeline:
 #   1. pnpm install + pnpm run generate (Nuxt SPA → frontend/.output/public/)
 #   2. copy frontend SPA into public/spa/
@@ -55,17 +55,20 @@ ARG TARGETARCH
 ARG BUILDARCH
 
 # Toolchain. unzip extracts the Gradle dist + the play1 release zip + the
-# bundle. curl/git fetch the play1 fork. Node 24 + corepack drive pnpm
-# (whose exact version + integrity hash is pinned in
-# frontend/package.json's "packageManager" field; corepack downloads and
-# verifies the binary on first invocation).
+# bundle. curl/git fetch the play1 fork. Node 26 runs Nuxt and vitest; pnpm is
+# installed on its own because Node 25+ no longer ships corepack, and corepack
+# could not launch pnpm 12 regardless — it is a per-platform native binary now.
+# pnpm reads the version pinned in frontend/package.json's "packageManager"
+# field and verifies it against frontend/pnpm-lock.yaml on first invocation.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates curl unzip git gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
-    corepack enable && \
+    curl -fsSL https://get.pnpm.io/install.sh | ENV=/root/.bashrc SHELL=/bin/bash sh - && \
     rm -rf /var/lib/apt/lists/*
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH=$PNPM_HOME:$PATH
 
 # Gradle 9.5 — pinned to match gradle/wrapper/gradle-wrapper.properties
 # (distributionUrl = gradle-9.5.0-bin.zip). Installing the binary directly
@@ -126,9 +129,9 @@ COPY . /src/
 #                              ~200 MB. Writes are hash-addressed adds, so
 #                              concurrent builds pool it safely and skip
 #                              re-downloading the same tarballs.
-#   /root/.cache/node          [shared] corepack's pnpm-binary download
-#                              cache. ~50 MB. The pnpm npm package is
-#                              pure JavaScript — arch-independent.
+#   /root/.cache/node          [shared] Node's own download cache, plus the
+#                              per-platform pnpm releases pnpm fetches when
+#                              switching to the pinned version. ~50 MB.
 #   /src/frontend/node_modules [per-target] pnpm's project-resolved tree
 #                              (symlinks into the store). ~200 MB. A
 #                              mutable tree that two simultaneous `pnpm

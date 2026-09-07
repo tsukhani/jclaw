@@ -1591,14 +1591,12 @@ print(json.dumps(prompts))
     fi
 fi
 
-# Route every `pnpm` invocation through corepack so the version pinned
-# in frontend/package.json's `packageManager` field is authoritative,
-# regardless of what's installed globally. corepack presence is enforced
-# upstream by check_prereqs at every dispatch entry point, so this
-# function never has to defend against the corepack-missing case.
-pnpm() {
-    corepack pnpm "$@"
-}
+# No pnpm() shadow any more. pnpm 12 reads frontend/package.json's
+# `packageManager` field itself and switches to the pinned version on first use
+# (manage-package-manager-versions, on by default), so routing through corepack
+# bought nothing and corepack cannot launch pnpm 12 at all: pnpm 12 ships a
+# per-platform native binary and dropped the bin/pnpm.cjs entry corepack
+# resolves. Presence is enforced upstream by check_prereqs.
 
 # Read the packageManager pin from frontend/package.json. Echoes the raw
 # value (e.g. "pnpm@10.33.1+sha512.abc...") on stdout, or empty when the
@@ -1611,113 +1609,67 @@ read_pnpm_pin() {
         "$frontend_dir/package.json" | head -1
 }
 
-# Setup-time only: ensure the packageManager pin includes a +sha512-...
-# integrity hash. Idempotent — already-hashed pins land in the no-op
-# branch. Called from do_setup, never from start paths, so the
-# package.json mutation is scoped to an explicit "I'm setting up this
-# clone" action rather than appearing as a surprise during start.
-setup_corepack_pnpm_pin() {
-    local frontend_dir="$SCRIPT_DIR/frontend"
-    [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
 
-    local current_pin
-    current_pin=$(read_pnpm_pin)
-    if [[ -z "$current_pin" ]]; then
-        echo "    Warning: no packageManager pin in frontend/package.json — nothing to migrate."
-        return 0
-    fi
-
-    if [[ "$current_pin" == *"+sha"* ]]; then
-        echo "    pnpm pin already includes integrity hash — no migration needed."
-        return 0
-    fi
-
-    # `corepack use pnpm@VERSION` re-pins to the same version string and
-    # appends the +sha512-... hash. Rewrites frontend/package.json — the
-    # mutation is the whole point of running setup.
-    local pin_version="${current_pin#pnpm@}"
-    echo "    Adding pnpm integrity hash via corepack use..."
-    echo "      Old pin: $current_pin"
-    if ! (cd "$frontend_dir" && corepack use "pnpm@$pin_version" >/dev/null 2>&1); then
-        echo "Error: corepack use failed; could not add integrity hash."
-        echo "       Try manually: cd frontend && corepack use pnpm@$pin_version"
-        exit 1
-    fi
-    local new_pin
-    new_pin=$(read_pnpm_pin)
-    echo "      New pin: $new_pin"
-    echo "      Note: frontend/package.json was modified — review and commit."
-}
-
-# Start-time only: validate that the pinned pnpm is present locally and
-# verifies against its +sha hash. Read-only — never mutates package.json.
-# Hard-fails on missing hash with an actionable error pointing at setup,
-# so the security gate doesn't silently degrade to no-op when someone
-# hand-edits the pin and drops the hash.
-validate_corepack_pnpm() {
-    local frontend_dir="$SCRIPT_DIR/frontend"
-    [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
-
-    local current_pin
-    current_pin=$(read_pnpm_pin)
-    if [[ -z "$current_pin" ]]; then
-        echo "    Warning: no packageManager pin in frontend/package.json — cannot validate pnpm."
-        return 0
-    fi
-
-    if [[ "$current_pin" != *"+sha"* ]]; then
-        echo "Error: pnpm pin lacks integrity hash (frontend/package.json: packageManager=$current_pin)."
-        echo "       Without the +sha512-... hash, corepack cannot verify the downloaded"
-        echo "       tarball against tampering — refusing to launch."
-        echo ""
-        echo "       Fix with one of:"
-        echo "         ${INVOKE} setup"
-        echo "         cd frontend && corepack use ${current_pin}"
-        exit 1
-    fi
-
-    # `corepack install` reads packageManager, downloads the version if
-    # missing, and verifies it against the +sha hash. Output is suppressed
-    # on success because corepack is noisy on cached hits.
-    local install_log install_status
-    install_log=$(cd "$frontend_dir" && corepack install 2>&1)
-    install_status=$?
-    if (( install_status != 0 )); then
-        echo "Error: corepack install failed — pnpm hash validation may have failed."
-        echo "       frontend/package.json packageManager pin: $current_pin"
-        echo "       corepack output:"
-        echo "$install_log" | sed 's/^/         /'
-        exit 1
-    fi
-    echo "==> pnpm validated via corepack ($current_pin)"
-}
-
-# Make `pnpm` resolvable on PATH for grandchild processes — specifically
-# the Gradle daemon spawned by `play dist`, whose PlayDistTask probes the
-# frontend toolchain via execve. The bash pnpm() shadow at the top of this
-# script only catches in-script calls; once we hand off to Gradle, only
-# env vars and PATH cross the process boundary.
+# Start-time only: check the packageManager pin is intact and let pnpm resolve
+# it. Read-only — never mutates package.json.
 #
-# corepack enable --install-directory writes shims to a path we control
-# (here tmp/corepack-shims/, already gitignored via tmp/), sidestepping
-# the system-write requirement of plain `corepack enable` on installs
-# where node lives in a root-owned tool dir (Debian's nodejs package,
-# Jenkins agents that re-shim per stage, locked-down CI runners).
-# Idempotent — corepack rewrites the same shim on repeat invocations.
-ensure_pnpm_on_path_for_gradle() {
-    local shim_dir="$SCRIPT_DIR/tmp/corepack-shims"
-    mkdir -p "$shim_dir"
-    if ! corepack enable --install-directory "$shim_dir" pnpm >/dev/null 2>&1; then
-        echo "Error: corepack enable failed to write a pnpm shim to $shim_dir."
-        echo "       Gradle's :playDist task probes pnpm directly on PATH; the bash"
-        echo "       pnpm() shadow doesn't reach grandchild processes, so we cannot"
-        echo "       proceed without a real shim."
+# Integrity moved rather than disappeared. Corepack verified the downloaded
+# tarball against a +sha512 hash hand-written into the pin; pnpm 12 records its
+# own per-platform binaries in frontend/pnpm-lock.yaml under
+# packageManagerDependencies and refuses to run one whose bytes do not match a
+# published, signed npm release (ERR_PNPM_PNPM_ENGINE_IDENTITY_MISMATCH,
+# verified by tampering with a lockfile integrity line). That is a stronger
+# check — provenance, not just consistency with a locally-edited string — and it
+# is committed and reviewable, covering every platform rather than whichever one
+# last ran `corepack use`.
+validate_pnpm_pin() {
+    local frontend_dir="$SCRIPT_DIR/frontend"
+    [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
+
+    local current_pin
+    current_pin=$(read_pnpm_pin)
+    if [[ -z "$current_pin" ]]; then
+        echo "Error: no packageManager pin in frontend/package.json."
+        echo "       Without it pnpm runs at whatever version happens to be installed,"
+        echo "       and the lockfile's package-manager integrity has nothing to check"
+        echo "       against — refusing to launch."
+        echo ""
+        echo "       Fix with: cd frontend && pnpm self-update <version>"
         exit 1
     fi
-    case ":$PATH:" in
-        *":$shim_dir:"*) ;;
-        *) export PATH="$shim_dir:$PATH" ;;
-    esac
+
+    # `pnpm --version` resolves the pin, downloading and verifying the pinned
+    # release if this machine has not run it before. Suppressed on success
+    # because the switch is silent once cached.
+    local resolve_log resolve_status
+    resolve_log=$(cd "$frontend_dir" && pnpm --version 2>&1)
+    resolve_status=$?
+    if (( resolve_status != 0 )); then
+        echo "Error: pnpm could not resolve the pinned version."
+        echo "       frontend/package.json packageManager pin: $current_pin"
+        echo "       pnpm output:"
+        echo "$resolve_log" | sed 's/^/         /'
+        exit 1
+    fi
+    echo "==> pnpm $resolve_log resolved from pin ($current_pin)"
+}
+
+# Make `pnpm` resolvable on PATH for grandchild processes — specifically the
+# Gradle daemon spawned by `play dist`, whose PlayDistTask probes the frontend
+# toolchain via execve. Only env vars and PATH cross that process boundary.
+#
+# Previously this wrote a corepack shim into tmp/corepack-shims/, because the
+# in-script pnpm() shadow could not reach a grandchild. pnpm 12 is a real
+# executable on PATH, so inheriting PATH is all it takes and there is no shim to
+# generate or keep in sync.
+ensure_pnpm_on_path_for_gradle() {
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo "Error: pnpm not found on PATH."
+        echo "       Gradle's :playDist task probes pnpm directly, and only PATH"
+        echo "       crosses into the daemon, so we cannot proceed without it."
+        echo "       Install with: curl -fsSL https://get.pnpm.io/install.sh | sh -"
+        exit 1
+    fi
 }
 
 # Resolve the env-var name that backs `application.secret` in conf.
@@ -2268,8 +2220,9 @@ check_java() {
     fi
 }
 
-# Verify Node.js 20+ is available. Required for the Nuxt dev server, the
-# prod SPA build (npx nuxi generate), and corepack itself.
+# Verify Node.js is available. Required for the Nuxt dev server and the prod
+# SPA build (npx nuxi generate). pnpm no longer needs it — pnpm 12 is a native
+# binary — but Nuxt and vitest still run on Node.
 check_node() {
     if ! command -v node >/dev/null 2>&1; then
         echo "Error: node not found. Node.js 20+ is required."
@@ -2284,14 +2237,17 @@ check_node() {
     fi
 }
 
-# Verify corepack is on PATH. Ships with Node 20+ by default but some
-# distros (Debian's `nodejs` package, certain Nix profiles) strip it. We
-# use it to validate the pnpm pin's +sha integrity hash on every start —
+# Verify pnpm is on PATH. Since pnpm 12 it is a standalone per-platform binary
+# installed on its own, not a corepack shim: corepack cannot launch it, and
+# Node 25+ does not ship corepack anyway. pnpm resolves the pinned version from
+# frontend/package.json itself and verifies it against the lockfile —
 # without it, the security gate goes inert.
-check_corepack() {
-    if ! command -v corepack >/dev/null 2>&1; then
-        echo "Error: corepack not found. It ships with Node 20+ — your install"
-        echo "       may have stripped it. Install with: npm install -g corepack"
+check_pnpm() {
+    if ! command -v pnpm >/dev/null 2>&1; then
+        echo "Error: pnpm not found. It is a standalone binary since pnpm 12 —"
+        echo "       corepack cannot launch it, and Node 25+ no longer ships"
+        echo "       corepack at all. Install with:"
+        echo "         curl -fsSL https://get.pnpm.io/install.sh | sh -"
         exit 1
     fi
 }
@@ -2320,14 +2276,13 @@ check_play() {
 # pnpm install. Cheap (4 fork-execs, ~50ms total on warm caches).
 #
 # Order matters — foundational toolchains first, derived tools after, so
-# each successful check is unambiguous. corepack is checked after node
-# because it ships inside Node's binary distribution.
+# each successful check is unambiguous.
 #
 # Dependency graph:
 #   java     — standalone
-#   node     — standalone (corepack ships inside it)
+#   node     — standalone
 #   play     — standalone (the 1.13.x `play` CLI is a /bin/sh Gradle wrapper)
-#   corepack — depends on node
+#   pnpm     — standalone since pnpm 12 (its own native binary, not a Node script)
 
 check_prereqs() {
     # Foundational — no dependencies on other checks
@@ -2336,14 +2291,14 @@ check_prereqs() {
     # Derived — depends on the foundational checks above
     check_play       # the play CLI must be on PATH
 
-    # Node + corepack are only needed when there's frontend source to
+    # Node + pnpm are only needed when there's frontend source to
     # build, which means we're in a developer clone. A dist install
     # ships the prebuilt SPA in public/spa/ and never invokes
     # node/pnpm at runtime — requiring them there would be a needless
     # regression.
     if [[ -d "$SCRIPT_DIR/frontend" ]]; then
         check_node
-        check_corepack
+        check_pnpm
     fi
 }
 
@@ -2376,7 +2331,7 @@ do_setup() {
     echo "    Java:     $(java -version 2>&1 | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
     echo "    Node:     $(node -v)"
     echo "    Play:     $(command -v play)"
-    echo "    Corepack: $(corepack -v 2>/dev/null || echo 'present')"
+    echo "    pnpm:     $(pnpm -v 2>/dev/null || echo 'present')"
 
     echo ""
     echo "==> Wiring git hooks (.githooks/)..."
@@ -2389,8 +2344,6 @@ do_setup() {
     do_init_worktree
 
     echo ""
-    echo "==> Pinning pnpm via corepack (with integrity hash)..."
-    setup_corepack_pnpm_pin
 
     echo ""
     echo "==> Installing frontend dependencies (so pre-commit's lint-staged is available)..."
@@ -2525,9 +2478,9 @@ do_dist() {
     # reach grandchild processes, so the shim is what crosses the boundary.
     ensure_pnpm_on_path_for_gradle
 
-    # Validate the corepack/pnpm pin (hard-fail on a missing or mismatched
-    # integrity hash) before Gradle drives pnpm under the hood.
-    validate_corepack_pnpm
+    # Resolve and validate the pnpm pin (hard-fail on a missing pin) before
+    # Gradle drives pnpm under the hood.
+    validate_pnpm_pin
 
     # play dist (PlayDistTask) is self-contained: it runs playPrecompile
     # (via dependsOn — Gradle resolves deps natively in 1.13.x, PF-90) and
@@ -2588,7 +2541,7 @@ do_bundle() {
     # playPrecompile + buildFrontendAndCopySpa + dep/framework resolution + zip
     # in one task — so, like do_dist, we don't pre-run any of it here.
     ensure_pnpm_on_path_for_gradle
-    validate_corepack_pnpm
+    validate_pnpm_pin
 
     # play bundle (PlayBundleTask) writes dist/<rootProject.name>-bundle.zip =
     # dist/jclaw-bundle.zip (inner prefix "jclaw/"). Unlike the dist zip it
@@ -2781,7 +2734,7 @@ do_start_prod() {
             echo "==> Skipping precompile (precompiled classes are up to date)"
         fi
 
-        validate_corepack_pnpm
+        validate_pnpm_pin
 
         echo "==> Installing frontend dependencies..."
         cd "$SCRIPT_DIR/frontend"
@@ -3154,7 +3107,7 @@ do_start_dev() {
     # Nuxt dev server is staying up on the deps it already resolved, so this
     # is pure added latency on the in-app restart path.
     if [[ "$BACKEND_ONLY" != true ]]; then
-        validate_corepack_pnpm
+        validate_pnpm_pin
 
         echo "==> Checking frontend dependencies..."
         cd "$SCRIPT_DIR/frontend"

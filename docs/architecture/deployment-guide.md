@@ -22,7 +22,7 @@ Setup ──► Build (parallel BE + FE) ──► Test (parallel BE + FE) ─�
 
 Key steps:
 
-- **Setup** — check Java/Play versions, `corepack enable`, `pnpm install --frozen-lockfile`.
+- **Setup** — check Java/Play versions, install pnpm via `get.pnpm.io`, `pnpm install --frozen-lockfile`.
 - **Build.Backend** — `play precompile` (Gradle resolves deps transitively; PF-90 dropped the legacy `play deps --sync`).
 - **Build.Frontend** — `(cd frontend && npx nuxi generate)`.
 - **Test.Backend** — `play autotest` + JaCoCo XML; JUnit XML published from `test-result/*.xml`.
@@ -101,7 +101,7 @@ On first boot the entrypoint generates a 64-char `PLAY_SECRET` (persisted to `./
 
 ## Dockerfile stages
 
-1. **bundle stage** (`azul/zulu-openjdk:25`) — Node 24 (NodeSource) + corepack + Gradle 9; downloads the `tsukhani/play1` release pinned in `.play-version`, runs `pnpm install` + `nuxi generate` (SPA → `public/spa/`), `play precompile`, and `gradle playBundle` to produce the self-contained bundle. (Exact base-image tag and Gradle version are pinned in the `Dockerfile`.)
+1. **bundle stage** (`azul/zulu-openjdk:25`) — Node 26 (NodeSource) + standalone pnpm + Gradle 9; downloads the `tsukhani/play1` release pinned in `.play-version`, runs `pnpm install` + `nuxi generate` (SPA → `public/spa/`), `play precompile`, and `gradle playBundle` to produce the self-contained bundle. (Exact base-image tag and Gradle version are pinned in the `Dockerfile`.)
 2. **chromium stage** (`azul/zulu-openjdk:25`) — installs Playwright Chromium into `/opt/pw-browsers`.
 3. **runtime** (`ubuntu:26.04` + Zulu 25 JRE) — copies the unpacked bundle + Chromium libs; bakes `workspace/main/` (SOUL.md, IDENTITY.md, USER.md, BOOTSTRAP.md, AGENT.md) as the main-agent seed (the `./workspace` bind-mount shadows it at runtime); `EXPOSE 9000 9443/tcp 9443/udp`; entrypoint auto-provisions `PLAY_SECRET` + certs, then `./play run --%prod --https.port=9443`.
 

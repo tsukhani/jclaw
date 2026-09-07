@@ -1,5 +1,20 @@
 import { defineVitestConfig } from '@nuxt/test-utils/config'
 
+// Node 25 turned its own Web Storage API on by default, and that partial
+// implementation shadows jsdom's: `localStorage.getItem` resolves undefined and
+// 93 specs fail on what looks like a jsdom bug. `--no-webstorage` hands the
+// global back to jsdom. Gated on the major because Node 24 rejects the flag
+// outright ("node: bad option"), and this repo has to run on both while the
+// Node 26 rollout lands. Drop the gate once nothing builds on <25.
+// Tracking: vitest-dev/vitest#8757.
+// Set on the env rather than poolOptions.execArgv: the pool ignores execArgv here
+// (verified — the workers' process.execArgv carried vitest's own flags and not
+// this one), while NODE_OPTIONS is inherited by every worker vitest forks.
+const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10)
+if (nodeMajor >= 25) {
+  process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --no-webstorage`.trim()
+}
+
 export default defineVitestConfig({
   test: {
     environment: 'nuxt',

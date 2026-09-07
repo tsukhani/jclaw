@@ -59,17 +59,29 @@ pipeline {
 
     tools {
         jdk 'JDK25'
-        // node-24 to match Dockerfile (NodeSource setup_24.x) and
-        // .devcontainer/Dockerfile, so the SPA build that ships in the
-        // Release zip is from the same Node major as the SPA inside
-        // the GHCR Docker image. Requires the Jenkins admin to have
-        // node-24 configured in Manage Jenkins → Tools → NodeJS.
+        // Deliberately still node-24 while Dockerfile and .devcontainer moved to
+        // Node 26 (NodeSource setup_26.x), so the SPA in the Release zip and the
+        // SPA in the GHCR image are NOT from the same Node major for now. The
+        // build is verified green on both (1546 frontend tests pass on 24 and
+        // 26), and vitest.config.ts gates its Node 25+ webstorage workaround on
+        // the running major, so neither side needs the other to move first.
+        //
+        // Flip to node-26 — one line, no other edit — once a node-26 tool exists
+        // in Manage Jenkins → Tools → NodeJS. Until then this must stay: naming a
+        // tool the controller does not have fails the build at checkout.
         nodejs 'node-24'
     }
 
     environment {
         PLAY_HOME = '/opt/play1'
-        PATH = "${PLAY_HOME}:${env.PATH}"
+        // PNPM_HOME on PATH: get.pnpm.io's installer appends to a shell rc, and
+        // every `sh` step here is a fresh non-login shell that never reads one.
+        // Without this the Setup stage installs pnpm and the next step cannot
+        // find it. Set to the installer's default rather than overridden, so
+        // pnpm's content-addressed store still lands outside the workspace and
+        // survives post{cleanup{cleanWs}} — see the store note in Setup.
+        PNPM_HOME = "${env.HOME}/.local/share/pnpm"
+        PATH = "${PLAY_HOME}:${env.HOME}/.local/share/pnpm:${env.PATH}"
         // GRADLE_OPTS: applied to every Gradle launcher invocation in this
         // pipeline. Two things worth carrying:
         //   -Dorg.gradle.vfs.watch=false — suppresses the "Already watching
@@ -86,7 +98,7 @@ pipeline {
         //     happened anyway; matching both saves a JVM start per Gradle
         //     invocation. It also makes -Dorg.gradle.daemon=false genuinely
         //     run in-process rather than fork, which is what lets the Package
-        //     stage's Gradle see corepack's pnpm shim on PATH.
+        //     stage's Gradle see pnpm on PATH.
         GRADLE_OPTS = '-Dorg.gradle.vfs.watch=false -Xmx2g -XX:MaxMetaspaceSize=512m'
     }
 
@@ -95,20 +107,24 @@ pipeline {
             steps {
                 sh 'java -version'
                 sh 'play version || echo "Play not found at ${PLAY_HOME}"'
-                // Corepack resolves pnpm from frontend/package.json's
-                // `packageManager` field on first invocation, so no hardcoded
-                // version pins here. Bumping the pin in package.json (the
-                // single source of truth) doesn't need a parallel edit to
-                // this file.
+                // pnpm is installed here rather than resolved through corepack:
+                // corepack cannot launch pnpm 12 (per-platform native binary, no
+                // bin/pnpm.cjs), and Node 25+ does not ship corepack at all. The
+                // installer is version-agnostic — pnpm then reads
+                // frontend/package.json's `packageManager` field and switches to
+                // the pinned version itself, so bumping the pin still needs no
+                // parallel edit here.
                 //
-                // `corepack install` is the read-only validate AGENTS.md calls
-                // layer 3 of the pnpm-pin guard: it downloads the pinned
-                // version on first use and verifies the tarball against the
-                // +sha512- integrity hash on every subsequent run, hard-failing
-                // on a mismatch. It never mutates package.json. This used to
-                // reach CI only indirectly, via ./jclaw.sh dist ->
-                // validate_corepack_pnpm; the Package stage now drives Gradle
-                // directly, so the gate is stated explicitly here instead.
+                // The integrity gate moved with it. pnpm records its own
+                // per-platform releases in frontend/pnpm-lock.yaml and refuses to
+                // run one whose bytes do not match a published, signed npm
+                // release, so `pnpm install --frozen-lockfile` below both installs
+                // dependencies and validates the package manager itself.
+                //
+                // The agent still runs the `node-24` tool. pnpm 12 is verified
+                // green on Node 24, and vitest.config.ts gates its Node 25+
+                // webstorage workaround on the running major, so this file needs
+                // no change when the agent moves to node-26.
                 //
                 // Deliberately NO PNPM_HOME override. pnpm resolves its
                 // content-addressed store to $PNPM_HOME/store whenever that var
@@ -120,9 +136,8 @@ pipeline {
                 // survives across builds. Tradeoff: store and workspace may now
                 // sit on different filesystems, in which case pnpm copies
                 // instead of hardlinking — far cheaper than re-fetching.
-                sh 'corepack enable'
+                sh 'curl -fsSL https://get.pnpm.io/install.sh | SHELL=/bin/bash sh -'
                 dir('frontend') {
-                    sh 'corepack install'
                     sh 'pnpm install --frozen-lockfile'
                 }
 
@@ -322,9 +337,9 @@ pipeline {
                 // -Dorg.gradle.daemon=false for exactly the reason ./jclaw.sh
                 // dist used it (see do_dist): both tasks probe `pnpm --version`
                 // via ExecOperations.exec, which inherits the JVM's
-                // frozen-at-startup PATH. A daemon started before `corepack
-                // enable` — or by an earlier job — wouldn't have the pnpm shim
-                // on PATH and the probe fails. The bare `./gradlew playBundle`
+                // frozen-at-startup PATH. A daemon started before pnpm was
+                // installed — or by an earlier job — wouldn't have pnpm on PATH
+                // and the probe fails. The bare `./gradlew playBundle`
                 // this replaces used the daemon and carried that latent flake.
                 // Because GRADLE_OPTS now matches org.gradle.jvmargs exactly,
                 // this runs in-process and inherits the calling shell's PATH.
