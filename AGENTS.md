@@ -561,8 +561,8 @@ Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `G
 
 - JDK 25+ (Zulu recommended)
 - `play` command in PATH (custom fork: github.com/tsukhani/play1)
-- Node.js 22.19+ (the dev container ships 24; Nuxt's `engines` rejects Node 20)
-- pnpm
+- Node.js 24+ (the dev container ships 26; Nuxt's `engines` rejects Node 20). Node 25+ needs no extra step — `frontend/vitest.config.ts` handles the Web Storage change itself.
+- pnpm 12+, installed standalone: `curl -fsSL https://get.pnpm.io/install.sh | sh -`. Not via corepack — it cannot launch pnpm 12, and Node 25+ does not ship it.
 
 ## graphify
 
