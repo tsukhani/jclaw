@@ -72,8 +72,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/* && \
     curl -fsSL https://get.pnpm.io/install.sh | ENV=/root/.bashrc SHELL=/bin/bash sh -
+# $PNPM_HOME/bin, not $PNPM_HOME: pnpm 12 installs the executable one level
+# down and prints that path itself. pnpm 11 was reachable from the parent,
+# which is what makes the wrong one look right until a build says
+# "pnpm: not found" immediately after a successful install.
 ENV PNPM_HOME=/root/.local/share/pnpm
-ENV PATH=$PNPM_HOME:$PATH
+ENV PATH=$PNPM_HOME/bin:$PATH
 
 # Play 1.13.x — tsukhani/play1 fork. Exact version is read from
 # .play-version at the jclaw repo root (single source of truth shared

@@ -79,8 +79,14 @@ pipeline {
         // find it. Set to the installer's default rather than overridden, so
         // pnpm's content-addressed store still lands outside the workspace and
         // survives post{cleanup{cleanWs}} — see the store note in Setup.
+        //
+        // The entry must be $PNPM_HOME/bin, not $PNPM_HOME. pnpm 12 installs the
+        // executable one level down and prints that path itself ("export
+        // PATH=\"$PNPM_HOME/bin:$PATH\""); pnpm 11 was reachable from the parent,
+        // which is what makes the wrong one look plausible. The bare directory is
+        // kept after it so an older pnpm on an agent still resolves.
         PNPM_HOME = "${env.HOME}/.local/share/pnpm"
-        PATH = "${PLAY_HOME}:${env.HOME}/.local/share/pnpm:${env.PATH}"
+        PATH = "${PLAY_HOME}:${env.HOME}/.local/share/pnpm/bin:${env.HOME}/.local/share/pnpm:${env.PATH}"
         // GRADLE_OPTS: applied to every Gradle launcher invocation in this
         // pipeline. Two things worth carrying:
         //   -Dorg.gradle.vfs.watch=false — suppresses the "Already watching

@@ -67,8 +67,12 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends nodejs && \
     curl -fsSL https://get.pnpm.io/install.sh | ENV=/root/.bashrc SHELL=/bin/bash sh - && \
     rm -rf /var/lib/apt/lists/*
+# $PNPM_HOME/bin, not $PNPM_HOME: pnpm 12 installs the executable one level
+# down and prints that path itself. pnpm 11 was reachable from the parent,
+# which is what makes the wrong one look right until a build says
+# "pnpm: not found" immediately after a successful install.
 ENV PNPM_HOME=/root/.local/share/pnpm
-ENV PATH=$PNPM_HOME:$PATH
+ENV PATH=$PNPM_HOME/bin:$PATH
 
 # Gradle 9.5 — pinned to match gradle/wrapper/gradle-wrapper.properties
 # (distributionUrl = gradle-9.5.0-bin.zip). Installing the binary directly
