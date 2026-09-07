@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -371,7 +372,28 @@ public class ApiSkillsController extends Controller {
             notFound();
             throw ApiResponses.unreachable();
         }
+        renderJSON(gson.toJson(installedSkillsOf(agent)));
+    }
 
+    /**
+     * GET /api/skills/by-agent — every agent's installed skills in one response, keyed by
+     * agent id, each value the shape {@link #listForAgent} returns for one agent.
+     *
+     * <p>Exists so the skills page can draw its agent rows at full height on first paint;
+     * fetched per agent, they expand after paint and shift the list below them.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentSkillView.class)))
+    @Operation(summary = "List every agent's installed skills and enabled state, keyed by agent id")
+    public static void listByAgent() {
+        var byAgent = new LinkedHashMap<String, Object>();
+        for (var agent : ApiAgentsController.listedAgents()) {
+            byAgent.put(String.valueOf(agent.id), installedSkillsOf(agent));
+        }
+        renderJSON(gson.toJson(byAgent));
+    }
+
+    /** An agent's workspace skills plus their enabled state; absent config reads as enabled. */
+    private static List<Map<String, Object>> installedSkillsOf(Agent agent) {
         var agentDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
         var skills = new ArrayList<SkillLoader.SkillInfo>();
         if (Files.isDirectory(agentDir)) {
@@ -395,12 +417,11 @@ public class ApiSkillsController extends Controller {
             configMap.put(c.skillName, c.enabled);
         }
 
-        var result = skills.stream().map(s -> {
+        return skills.stream().<Map<String, Object>>map(s -> {
             var map = skillToMap(s, false);
             map.put(KEY_ENABLED, configMap.getOrDefault(s.name(), true));
             return map;
         }).toList();
-        renderJSON(gson.toJson(result));
     }
 
     /** Reject the agent principal on the two writes that move shell-allowlist grants. Gated on

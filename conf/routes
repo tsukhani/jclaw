@@ -167,6 +167,8 @@ DELETE  /api/agents/{id}/tool-approvals/{toolName}  ApiToolApprovalsController.r
 # promotion from an agent workspace. Manual file edits through the API are
 # forbidden — no POST /api/skills, no PUT .../files, no PUT .../{name}.
 GET     /api/skills                             ApiSkillsController.list
+# One response for every agent, so the skills page can draw its rows at full height.
+GET     /api/skills/by-agent                    ApiSkillsController.listByAgent
 # Importable-skills catalogs: a selector list + per-catalog browse/search.
 # Placed before the GET /api/skills/{name} pattern below so they resolve first.
 GET     /api/skills/catalogs                    ApiSkillsController.catalogs

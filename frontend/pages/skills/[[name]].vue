@@ -33,8 +33,18 @@ marked.setOptions({ breaks: true, gfm: true })
 // consistent between the Agent detail page and these skill cards.
 const { getPillClass } = useToolMeta()
 
-const { data: skills, refresh: refreshSkills } = await useFetch<Skill[]>('/api/skills')
-const { data: agents } = await useFetch<Agent[]>('/api/agents')
+// Fetched together, not in sequence: three awaits in a row make the page wait out
+// three round trips for data none of which depends on the others.
+const [
+  { data: skills, refresh: refreshSkills },
+  { data: agents },
+  { data: agentSkillsSeed, refresh: refreshAgentSkills },
+] = await Promise.all([
+  useFetch<Skill[]>('/api/skills'),
+  useFetch<Agent[]>('/api/agents'),
+  // Awaited, so the agent rows paint at full height instead of expanding into place.
+  useFetch<Record<string, AgentSkill[]>>('/api/skills/by-agent'),
+])
 
 // One page instance across /skills and /skills/<name>. NuxtPage keys by path by
 // default, so opening a skill would otherwise unmount and remount the whole page —
@@ -45,28 +55,23 @@ definePageMeta({ key: () => '/skills' })
 const route = useRoute()
 const router = useRouter()
 
-// Skills per agent, keyed by agent id
-const agentSkillsMap = ref<Record<number, AgentSkill[]>>({})
-const loadingAgents = ref(true)
+/** JSON object keys are strings; the template indexes by the numeric agent id. */
+function toSkillsMap(seed: Record<string, AgentSkill[]> | null | undefined): Record<number, AgentSkill[]> {
+  return Object.fromEntries(Object.entries(seed ?? {}).map(([id, list]) => [Number(id), list]))
+}
+
+const agentSkillsMap = ref<Record<number, AgentSkill[]>>(toSkillsMap(agentSkillsSeed.value))
+const loadingAgents = ref(false)
 
 async function loadAllAgentSkills() {
   loadingAgents.value = true
-  const map: Record<number, AgentSkill[]> = {}
-  if (agents.value?.length) {
-    await Promise.all(agents.value.map(async (agent) => {
-      try {
-        map[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
-      }
-      catch {
-        map[agent.id] = []
-      }
-    }))
-  }
-  agentSkillsMap.value = map
+  await refreshAgentSkills()
+  agentSkillsMap.value = toSkillsMap(agentSkillsSeed.value)
   loadingAgents.value = false
 }
 
-watch(agents, () => loadAllAgentSkills(), { immediate: true })
+// Not immediate: the seed above already covers the first render.
+watch(agents, () => loadAllAgentSkills())
 
 // --- Importable-skills catalogs (static dump + dynamic registry) ---
 // Two catalog TYPES, browsed one at a time via a selector:

@@ -62,7 +62,7 @@ beforeEach(async () => {
   await useRouter().replace('/skills')
 })
 
-function setupApi(opts?: { skills?: unknown[], agents?: unknown[] }) {
+function setupApi(opts?: { skills?: unknown[], agents?: unknown[], agentSkills?: Record<string, unknown[]> }) {
   // Opening a skill navigates now, and the global auth middleware probes
   // /api/config on every navigation; without it the push lands on /login.
   registerEndpoint('/api/config', () => ({ entries: [] }))
@@ -75,10 +75,15 @@ function setupApi(opts?: { skills?: unknown[], agents?: unknown[] }) {
     { id: 1, name: 'main-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true },
     { id: 2, name: 'helper', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true },
   ])
-  registerEndpoint('/api/agents/1/skills', () => [
-    { name: 'web-search', folderName: 'web-search', enabled: true, version: '1.0.0' },
-  ])
-  registerEndpoint('/api/agents/2/skills', () => [])
+  // The page loads every agent's skills in one call; the per-agent endpoints below
+  // still serve the refetch after a copy or a toggle, so both read one definition.
+  const agentSkills = opts?.agentSkills ?? {
+    1: [{ name: 'web-search', folderName: 'web-search', enabled: true, version: '1.0.0' }],
+    2: [],
+  }
+  registerEndpoint('/api/skills/by-agent', () => agentSkills)
+  registerEndpoint('/api/agents/1/skills', () => agentSkills['1'] ?? [])
+  registerEndpoint('/api/agents/2/skills', () => agentSkills['2'] ?? [])
 }
 
 describe('Skills page — filter-bar LIKE matching (global list)', () => {
@@ -184,11 +189,8 @@ describe('Skills page — promote flow opens ConfirmDialog when global already e
       agents: [
         { id: 1, name: 'main-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true },
       ],
+      agentSkills: { 1: [{ name: 'web-search', folderName: 'web-search', enabled: true, version: '1.1.0' }] },
     })
-    // Override the per-agent skills endpoint to give main-agent a web-search to promote.
-    registerEndpoint('/api/agents/1/skills', () => [
-      { name: 'web-search', folderName: 'web-search', enabled: true, version: '1.1.0' },
-    ])
 
     const component = await mountSuspended(SkillsHarness)
     await flushPromises()
@@ -245,10 +247,8 @@ describe('Skills page — promote flow opens ConfirmDialog when global already e
       agents: [
         { id: 1, name: 'main-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true },
       ],
+      agentSkills: { 1: [{ name: 'web-search', folderName: 'web-search', enabled: true, version: '1.1.0' }] },
     })
-    registerEndpoint('/api/agents/1/skills', () => [
-      { name: 'web-search', folderName: 'web-search', enabled: true, version: '1.1.0' },
-    ])
 
     const component = await mountSuspended(SkillsHarness)
     await flushPromises()
@@ -477,11 +477,9 @@ describe('Skills page — version-update affordance', () => {
       agents: [
         { id: 1, name: 'main-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true },
       ],
+      // Agent holds the older 1.0.0 against a 2.0.0 global → update button shows.
+      agentSkills: { 1: [{ name: 'web-search', folderName: 'web-search', enabled: true, version: '1.0.0' }] },
     })
-    // Agent has older version 1.0.0; global is 2.0.0 → update button shows.
-    registerEndpoint('/api/agents/1/skills', () => [
-      { name: 'web-search', folderName: 'web-search', enabled: true, version: '1.0.0' },
-    ])
 
     const component = await mountSuspended(Skills)
     await flushPromises()
@@ -509,10 +507,9 @@ describe('Skills page — version-update affordance', () => {
       agents: [
         { id: 1, name: 'main-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true },
       ],
+      // Agent holds the older 1.0.0 against a 2.0.0 global → update button shows.
+      agentSkills: { 1: [{ name: 'web-search', folderName: 'web-search', enabled: true, version: '1.0.0' }] },
     })
-    registerEndpoint('/api/agents/1/skills', () => [
-      { name: 'web-search', folderName: 'web-search', enabled: true, version: '1.0.0' },
-    ])
 
     const component = await mountSuspended(Skills)
     await flushPromises()

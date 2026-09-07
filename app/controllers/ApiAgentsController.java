@@ -183,19 +183,27 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentView.class))))
     @Operation(summary = "List agents (id, name, modelProvider, modelId, enabled, isMain)")
     public static void list() {
-        var agents = AgentService.listAll();
         var configuredKeys = AgentService.configuredModelKeys();
-        // Subagents (parentAgent != null) are scoped to their parent's spawn
-        // tree and don't belong in the user-facing dropdown — they appear on
-        // the /subagents admin page, where their transcripts are viewable.
-        // Filtering here keeps the chat UI's "Agent" selector strictly for
-        // top-level agents.
-        var result = agents.stream()
-                .filter(a -> !isHiddenFromList(a.name))
-                .filter(a -> a.parentAgent == null)
+        var result = listedAgents().stream()
                 .map(a -> AgentView.of(a, configuredKeys))
                 .toList();
         renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * The agents this endpoint exposes. Subagents (parentAgent != null) are scoped to
+     * their parent's spawn tree and don't belong in the user-facing dropdown — they
+     * appear on the /subagents admin page, where their transcripts are viewable.
+     *
+     * <p>Package-visible because {@code ApiSkillsController.listByAgent} must report on
+     * exactly this set; selecting from {@code listAll()} there walked 73 agent
+     * workspaces to render 4 rows.
+     */
+    static List<Agent> listedAgents() {
+        return AgentService.listAll().stream()
+                .filter(a -> !isHiddenFromList(a.name))
+                .filter(a -> a.parentAgent == null)
+                .toList();
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
