@@ -8,7 +8,7 @@ How to set up, run, test, and iterate on jclaw locally.
 |---|---|---|
 | JDK | 25+ | Zulu recommended (Docker and Jenkins both pin to Azul Zulu 25). |
 | Play Framework CLI | 1.13.x (custom fork) | Install from [github.com/tsukhani/play1](https://github.com/tsukhani/play1); `play` on `$PATH`. In 1.13.x the `play` CLI is Gradle-driven (PF-90 removed the legacy Python CLI). Exact patch pinned in `.play-version`. |
-| Node.js | 20+ (24 recommended) | For the Nuxt frontend. |
+| Node.js | 24.11+ or 26+ | For the Nuxt frontend. The range Nuxt 4.5's `engines` allows, intersected with this project's 24 floor; `./jclaw.sh` enforces it. Node 25 is excluded because Nuxt excludes it. |
 | pnpm | 12+ (pinned) | Exact version lives in `frontend/package.json`'s `packageManager` field; pnpm installs standalone and switches to it itself. Integrity is the `packageManagerDependencies` block in `frontend/pnpm-lock.yaml`, not the pin — corepack is no longer used and cannot launch pnpm 12. |
 | Python | 3.10+ (optional) | Only for the local image/video generation sidecars (`sidecar/`); not needed for the `play` CLI. |
 | Tesseract | optional | OCR for the `documents` tool (image / scanned-PDF text). |

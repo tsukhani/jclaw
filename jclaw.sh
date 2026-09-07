@@ -2223,18 +2223,31 @@ check_java() {
 # Verify Node.js is available. Required for the Nuxt dev server and the prod
 # SPA build (npx nuxi generate). pnpm no longer needs it — pnpm 12 is a native
 # binary — but Nuxt and vitest still run on Node.
+#
+# The accepted range mirrors Nuxt's `engines` intersected with AGENTS.md's 24+
+# floor — re-check it on a Nuxt bump. Node 25 is absent because Nuxt omits it.
 check_node() {
+    local requirement="Node.js 24.11+ or 26+"
     if ! command -v node >/dev/null 2>&1; then
-        echo "Error: node not found. Node.js 20+ is required."
+        echo "Error: node not found. ${requirement} is required."
         echo "       Install from https://nodejs.org/ (or use nvm/fnm/asdf)."
         exit 1
     fi
-    local node_major
-    node_major=$(node -v | sed -E 's/^v([0-9]+).*/\1/')
-    if [[ -z "$node_major" || "$node_major" -lt 20 ]]; then
-        echo "Error: Node $(node -v) found, but Node.js 20+ is required."
+    local node_version node_major node_minor
+    node_version=$(node -v)
+    node_major=$(echo "$node_version" | sed -E 's/^v([0-9]+)\.([0-9]+).*/\1/')
+    node_minor=$(echo "$node_version" | sed -E 's/^v([0-9]+)\.([0-9]+).*/\2/')
+    if [[ ! "$node_major" =~ ^[0-9]+$ || ! "$node_minor" =~ ^[0-9]+$ ]]; then
+        echo "Error: could not read a version from 'node -v' output '${node_version}'."
         exit 1
     fi
+    if [[ "$node_major" -eq 24 && "$node_minor" -ge 11 ]] || [[ "$node_major" -ge 26 ]]; then
+        return 0
+    fi
+    echo "Error: Node ${node_version} found, but ${requirement} is required."
+    echo "       Nuxt's engines field rejects every other version, Node 25 included."
+    echo "       Install from https://nodejs.org/ (or use nvm/fnm/asdf)."
+    exit 1
 }
 
 # Verify pnpm is on PATH. Since pnpm 12 it is a standalone per-platform binary
