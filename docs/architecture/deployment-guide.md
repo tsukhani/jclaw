@@ -13,7 +13,7 @@ How JClaw is built, packaged, and shipped.
 
 ## Build pipeline (Jenkins)
 
-`Jenkinsfile` runs on `agent any` with `tools { jdk 'JDK25'; nodejs 'node-24' }`.
+`Jenkinsfile` runs on `agent any` with `tools { jdk 'JDK25'; nodejs 'node-26' }`.
 
 ```
 Setup ──► Build (parallel BE + FE) ──► Test (parallel BE + FE) ──► Sonar

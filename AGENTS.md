@@ -552,7 +552,7 @@ genuinely-denied path — **not** the temp tree, which the profile grants for `T
 
   To bump the pin: `cd frontend && pnpm self-update <version>`, then commit `frontend/package.json` **and** `frontend/pnpm-lock.yaml` — the lockfile carries the new binaries' integrity.
 
-  **Node 25+ and the test suite.** Node 25 enabled its own Web Storage API by default, and that partial implementation shadows jsdom's: `localStorage` lands undefined and 93 specs fail on what looks like a jsdom bug. `frontend/vitest.config.ts` sets `--no-webstorage` via `NODE_OPTIONS`, gated on the running Node major because Node 24 rejects the flag outright. Do not ungate it while anything still builds on Node 24 (CI's `node-24` agent does). Tracking: vitest-dev/vitest#8757.
+  **Node 25+ and the test suite.** Node 25 enabled its own Web Storage API by default, and that partial implementation shadows jsdom's: `localStorage` lands undefined and 93 specs fail on what looks like a jsdom bug. `frontend/vitest.config.ts` sets `--no-webstorage` via `NODE_OPTIONS`, gated on the running Node major because Node 24 rejects the flag outright. Keep the gate while anything still builds on Node 24 — CI is on `node-26` now, but local clones and older checkouts are not, and an ungated flag is a hard `node: bad option` failure there. Tracking: vitest-dev/vitest#8757.
 
 ### API Contract
 Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `GET /api/status`). The frontend consumes these through the proxy — no CORS configuration needed.

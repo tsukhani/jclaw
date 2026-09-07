@@ -38,7 +38,7 @@ Current version: see `application.version` in `conf/application.conf` (the sourc
 | Package manager | Gradle (`build.gradle.kts`, `org.playframework.play1` plugin) | pnpm (exact version + `+sha512` hash pinned in `frontend/package.json`'s `packageManager`) |
 | Testing | JUnit 6 (Jupiter 6.x, bundled by the fork), Play `UnitTest`/`FunctionalTest`, `play autotest` | Vitest 4, `@vue/test-utils`, `@nuxt/test-utils`, jsdom, Playwright |
 | Build | `play precompile` + `gradle playBundle` / `play dist` | `nuxi generate` → `public/spa/` |
-| CI | Jenkins (`Jenkinsfile`, tools `jdk 'JDK25'` + `nodejs 'node-24'`) | — |
+| CI | Jenkins (`Jenkinsfile`, tools `jdk 'JDK25'` + `nodejs 'node-26'`) | — |
 | Container | Multi-stage Dockerfile (Zulu 25 build → Ubuntu 26.04 runtime) → GHCR `ghcr.io/tsukhani/jclaw:latest` | built into backend image |
 
 ## High-level architecture

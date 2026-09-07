@@ -59,17 +59,16 @@ pipeline {
 
     tools {
         jdk 'JDK25'
-        // Deliberately still node-24 while Dockerfile and .devcontainer moved to
-        // Node 26 (NodeSource setup_26.x), so the SPA in the Release zip and the
-        // SPA in the GHCR image are NOT from the same Node major for now. The
-        // build is verified green on both (1546 frontend tests pass on 24 and
-        // 26), and vitest.config.ts gates its Node 25+ webstorage workaround on
-        // the running major, so neither side needs the other to move first.
+        // node-26 to match Dockerfile and .devcontainer/Dockerfile (NodeSource
+        // setup_26.x), so the SPA in the Release zip and the SPA in the GHCR image
+        // come from the same Node major. Requires a node-26 tool in Manage Jenkins
+        // → Tools → NodeJS; naming one the controller does not have fails the
+        // build at checkout, before any stage runs.
         //
-        // Flip to node-26 — one line, no other edit — once a node-26 tool exists
-        // in Manage Jenkins → Tools → NodeJS. Until then this must stay: naming a
-        // tool the controller does not have fails the build at checkout.
-        nodejs 'node-24'
+        // Node 25+ needs no pipeline-side workaround: vitest.config.ts sets
+        // --no-webstorage itself, gated on the running major (Node 24 rejects the
+        // flag), so this line can move back to node-24 without any other edit.
+        nodejs 'node-26'
     }
 
     environment {
@@ -121,10 +120,10 @@ pipeline {
                 // release, so `pnpm install --frozen-lockfile` below both installs
                 // dependencies and validates the package manager itself.
                 //
-                // The agent still runs the `node-24` tool. pnpm 12 is verified
-                // green on Node 24, and vitest.config.ts gates its Node 25+
-                // webstorage workaround on the running major, so this file needs
-                // no change when the agent moves to node-26.
+                // pnpm 12 is verified green on Node 24 and Node 26 alike, and
+                // vitest.config.ts gates its Node 25+ webstorage workaround on the
+                // running major, so the agent's Node version is not this stage's
+                // concern either way.
                 //
                 // Deliberately NO PNPM_HOME override. pnpm resolves its
                 // content-addressed store to $PNPM_HOME/store whenever that var
