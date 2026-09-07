@@ -122,6 +122,21 @@
       matchPackageNames: ["@tanstack/vue-table"],
       allowedVersions: "<9",
     },
+    // Block pnpm 12. It ships per-platform native binaries with shell wrappers
+    // and no bin/pnpm.cjs, which corepack 0.34.0 (bundled with Node 24) cannot
+    // launch — `pnpm --version` exits 1 on a merged v12 branch. The failure
+    // hides where it matters: `corepack install` still exits 0 after caching
+    // the package, so ./jclaw.sh start clears its validation gate and then dies
+    // at the first real pnpm step, pointing at a missing .cjs rather than at
+    // the bump. Adopting 12 means moving off corepack, which is three layers
+    // here (jclaw.sh setup's `corepack use`, the pre-commit packageManager-hash
+    // guard, jclaw.sh start's `corepack install`) — infrastructure, not a
+    // version bump. Lift once a corepack release understands pnpm 12's layout,
+    // or when this project stops resolving pnpm through corepack. 11.x flows.
+    {
+      matchPackageNames: ["pnpm"],
+      allowedVersions: "<12",
+    },
     {
       groupName: "eslint",
       matchManagers: ["npm"],
