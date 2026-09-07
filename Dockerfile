@@ -13,8 +13,8 @@
 # install, play1 fork install — change rarely), volatile come last (the
 # source-tree COPY + playBundle RUN — change every iteration). Inside
 # Stage 1's build RUN, BuildKit cache mounts persist Gradle's dep cache,
-# pnpm's content-addressed store, its package-manager downloads, and the project's
-# resolved frontend/node_modules across builds even though the COPY
+# pnpm's content-addressed store, and the project's resolved
+# frontend/node_modules across builds even though the COPY
 # layer they sit under invalidates per source change — saves ~60-90 s of
 # dep resolution + pnpm install on warm-cache rebuilds. The mounts hold
 # no application state; missing them just reverts to clean rebuilds.
@@ -153,9 +153,6 @@ COPY . /src/
 #                              parent: that is $PNPM_HOME, holding the pnpm
 #                              shim and @pnpm/exe, and a cache mount starts
 #                              empty — mounting it hid pnpm from this RUN.
-#   /root/.cache/node          [shared] Node's own download cache, plus the
-#                              per-platform pnpm releases pnpm fetches when
-#                              switching to the pinned version. ~50 MB.
 #   /src/frontend/node_modules [per-target] pnpm's project-resolved tree
 #                              (symlinks into the store). ~200 MB. A
 #                              mutable tree that two simultaneous `pnpm
@@ -180,7 +177,6 @@ COPY . /src/
 # docker-entrypoint.sh.
 RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH} \
     --mount=type=cache,target=/root/.local/share/pnpm/store \
-    --mount=type=cache,target=/root/.cache/node \
     --mount=type=cache,target=/src/frontend/node_modules,id=node_modules-${BUILDARCH}-${TARGETARCH} \
     git init -q && \
     gradle --no-daemon playBundle -PtargetArch=${TARGETARCH} && \
