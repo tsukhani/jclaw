@@ -122,6 +122,21 @@
       matchPackageNames: ["@tanstack/vue-table"],
       allowedVersions: "<9",
     },
+    // Block vitest 5. Every spec runs under `environment: 'nuxt'`, which resolves
+    // through @nuxt/test-utils, and 4.2.0 declares `peer vitest: ^4.0.2`: its
+    // exports map offers ./vitest-environment while vitest 5 resolves a
+    // ./environments subpath that is not there ("is not exported under the
+    // conditions [node, development, import]"). The failure mode is the reason
+    // this is a hold and not a fix-forward: all 136 files fail to start a pool
+    // worker and vitest reports "Test Files no tests", so a gate that only looks
+    // for failures reads a suite that ran nothing as a clean run. Lift once
+    // @nuxt/test-utils ships a peer range admitting vitest 5, bumping vitest,
+    // @vitest/coverage-v8 and @nuxt/test-utils in the same change. 4.x minors and
+    // patches still flow through the "vitest" group rule below.
+    {
+      matchPackageNames: ["vitest", "@vitest/**"],
+      allowedVersions: "<5",
+    },
     {
       groupName: "eslint",
       matchManagers: ["npm"],
