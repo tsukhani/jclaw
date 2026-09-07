@@ -145,10 +145,14 @@ COPY . /src/
 #                              ~500 MB warm. Gradle takes exclusive locks
 #                              on this tree, so a shared id would serialise
 #                              the two target builds for their whole run.
-#   /root/.local/share/pnpm    [shared] pnpm's content-addressed store.
+#   /root/.local/share/pnpm/store
+#                              [shared] pnpm's content-addressed store.
 #                              ~200 MB. Writes are hash-addressed adds, so
 #                              concurrent builds pool it safely and skip
-#                              re-downloading the same tarballs.
+#                              re-downloading the same tarballs. Not the
+#                              parent: that is $PNPM_HOME, holding the pnpm
+#                              shim and @pnpm/exe, and a cache mount starts
+#                              empty — mounting it hid pnpm from this RUN.
 #   /root/.cache/node          [shared] Node's own download cache, plus the
 #                              per-platform pnpm releases pnpm fetches when
 #                              switching to the pinned version. ~50 MB.
@@ -175,7 +179,7 @@ COPY . /src/
 # fresh per-container at entrypoint time instead — see
 # docker-entrypoint.sh.
 RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH} \
-    --mount=type=cache,target=/root/.local/share/pnpm \
+    --mount=type=cache,target=/root/.local/share/pnpm/store \
     --mount=type=cache,target=/root/.cache/node \
     --mount=type=cache,target=/src/frontend/node_modules,id=node_modules-${BUILDARCH}-${TARGETARCH} \
     git init -q && \
