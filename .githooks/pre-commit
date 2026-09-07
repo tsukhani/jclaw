@@ -115,4 +115,27 @@ if ! git diff --cached --name-only --diff-filter=ACMR | grep -qE '^frontend/'; t
 fi
 
 cd "$FRONTEND_DIR"
+
+# pnpm's installer appends its PATH export to a shell rc that a GUI git client
+# or a non-login shell never sources, so probe its install locations (the same
+# list as ./jclaw.sh's locate_pnpm) before concluding it is absent. Absent,
+# fail open like the lint-staged check above rather than blocking the commit.
+if ! command -v pnpm >/dev/null 2>&1; then
+    for candidate in \
+        "${PNPM_HOME:-}/bin/pnpm" \
+        "${PNPM_HOME:-}/pnpm" \
+        "$HOME/Library/pnpm/bin/pnpm" \
+        "$HOME/.local/share/pnpm/bin/pnpm" \
+        "$HOME/.local/share/pnpm/pnpm"
+    do
+        [[ -n "$candidate" && -x "$candidate" ]] || continue
+        export PATH="$(dirname "$candidate"):$PATH"
+        break
+    done
+fi
+if ! command -v pnpm >/dev/null 2>&1; then
+    echo "[jclaw pre-commit] pnpm not found — skipping lint-staged." >&2
+    echo "[jclaw pre-commit] Install it with: curl -fsSL https://get.pnpm.io/install.sh | sh -" >&2
+    exit 0
+fi
 exec pnpm exec lint-staged
