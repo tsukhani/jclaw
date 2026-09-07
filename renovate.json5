@@ -137,6 +137,23 @@
       matchPackageNames: ["vitest", "@vitest/**"],
       allowedVersions: "<5",
     },
+    // The other half of that hold: nothing gates @nuxt/test-utils, so Renovate
+    // already opens a PR the week its next major lands — and that major IS the
+    // signal, because its version tracks vitest's exactly (3.x needs vitest
+    // ^3.2.0, 4.x needs ^4.0.2). This rule does not change when the PR arrives,
+    // only what it says: without the note the reviewer sees a routine test-utils
+    // bump with no hint that it is the thing the vitest hold was waiting for.
+    // Checked by hand instead, this is a registry poll nobody remembers to run —
+    // the last such wait was 108 days (vitest 4.0.0 to test-utils 4.0.0).
+    {
+      matchPackageNames: ["@nuxt/test-utils"],
+      matchUpdateTypes: ["major"],
+      prBodyNotes: [
+        "**This may unblock vitest 5.** `renovate.json5` holds vitest at `<5` because every spec runs under `environment: 'nuxt'`, and @nuxt/test-utils 4.x declares `peer vitest: ^4.0.2` — vitest 5 resolves a `./environments` subpath it does not export, so all test files fail to start a pool worker and the suite reports **\"Test Files no tests\"** rather than failing.",
+        "If this release's `peerDependencies.vitest` admits 5.x: delete the `allowedVersions: \"<5\"` rule for `vitest`/`@vitest/**`, then bump **vitest, @vitest/coverage-v8 and @nuxt/test-utils in the same change**. Moving vitest alone reproduces the silent no-tests failure.",
+        "Verify with `pnpm test` reporting a real test count — not merely a zero exit.",
+      ],
+    },
     {
       groupName: "eslint",
       matchManagers: ["npm"],
