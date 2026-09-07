@@ -16,8 +16,24 @@
   // run opens PRs for whatever drift exists at that moment.
 
   // Disabled — Bitbucket Server doesn't have a native issues UI for the
-  // Dependency Dashboard pattern Renovate's GitHub support uses. Status
+  // Dependency Dashboard pattern Renovate's GitHub support uses. Renovate's own
+  // bitbucket-server docs put it as "creating issues not implemented yet", and
+  // the dashboard needs issues with dynamic Markdown checkboxes. Status
   // visibility comes from the open PR list instead.
+  //
+  // The github mirror DOES have Issues enabled, which looks like a way out and
+  // is not: Renovate runs with RENOVATE_PLATFORM=bitbucket-server and builds the
+  // dashboard on the platform it operates against, so it never reaches github at
+  // all. Pointing it there instead would open dependency PRs on a mirror where
+  // no development happens and nothing merges back — Bitbucket is the source of
+  // truth and /deploy pushes onward to github, not the reverse. Note
+  // Jenkinsfile.renovate's GITHUB_COM_TOKEN is for fetching changelogs, not
+  // platform auth, and does not make github the platform.
+  //
+  // Setting this true is inert at best and has been reported to fail outright on
+  // self-hosted Bitbucket (renovatebot/renovate#10517). Routing the dashboard to
+  // Jira has been open upstream since 2022 (renovatebot/renovate#16625); if that
+  // ever lands, this is the line to revisit.
   dependencyDashboard: false,
 
   // Wait 3 days after a package version is published before opening a PR for
