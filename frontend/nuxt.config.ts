@@ -68,8 +68,15 @@ export default defineNuxtConfig({
     // h3.mjs re-export glue: it re-exports h3 symbols (H3Error, getCookie, ...)
     // the local module never uses, which Rolldown flags as unused external
     // imports. Third-party code, harmless — drop once Nitro's codegen is fixed.
+    //
+    // The first test restates Nitro's own onwarn (nitropack dist/rollup,
+    // getRollupConfig): a user onwarn replaces it outright rather than
+    // chaining, so without this Nitro's internal module cycles print as three
+    // "Circular dependency" warnings on every build.
     rollupConfig: {
       onwarn(warning, defaultHandler) {
+        if (['CIRCULAR_DEPENDENCY', 'EVAL'].includes(warning.code ?? '')
+          || warning.message?.includes('Unsupported source map comment')) return
         if (warning.message?.includes('imported from external module')
           && warning.message?.includes('h3')) return
         defaultHandler(warning)
