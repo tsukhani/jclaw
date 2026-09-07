@@ -8,7 +8,7 @@ import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.mvc.Before;
 import play.mvc.Controller;
-import services.AgentService;
+import services.WorkspaceFiles;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -130,29 +130,6 @@ public class ApiController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = WorkspaceStatsResponse.class)))
     @Operation(summary = "Total on-disk size of the agent workspace root, for the dashboard's runaway-growth line")
     public static void workspaceStats() {
-        renderJSON(GSON.toJson(
-                new WorkspaceStatsResponse(directorySizeBytes(AgentService.workspaceRoot()))));
-    }
-
-    /**
-     * Recursive on-disk size of {@code root} in bytes: 0 when the directory
-     * doesn't exist, -1 when the walk fails midway (unreadable subtree,
-     * files vanishing during iteration). Never throws — a dashboard stat
-     * must not 500 the page. Public because the test tree compiles into the
-     * default package.
-     */
-    public static long directorySizeBytes(Path root) {
-        if (!Files.isDirectory(root)) return 0;
-        try (var files = Files.walk(root)) {
-            return files.filter(Files::isRegularFile).mapToLong(p -> {
-                try {
-                    return Files.size(p);
-                } catch (IOException _) {
-                    return 0; // vanished mid-walk — count what remains
-                }
-            }).sum();
-        } catch (IOException | RuntimeException _) {
-            return -1;
-        }
+        renderJSON(GSON.toJson(new WorkspaceStatsResponse(WorkspaceFiles.workspaceSizeBytes())));
     }
 }

@@ -1,19 +1,20 @@
 import com.google.gson.JsonParser;
-import controllers.ApiController;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.WorkspaceFiles;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
  * GET /api/workspace/stats — the dashboard's workspace-disk-footprint line.
- * Session-gated (unlike its sibling /api/status health check), and backed by
- * {@link ApiController#directorySizeBytes} whose sum/absent/never-throw
- * contract is pinned here against a real temp tree.
+ * Session-gated (unlike its sibling /api/status health check). The endpoint reads
+ * {@link WorkspaceFiles#workspaceSizeBytes}, so the positive-total case below covers
+ * the memoized path end to end; {@link WorkspaceFiles#directorySizeBytes} is the walk
+ * underneath it, whose sum/absent/never-throw contract is pinned against a temp tree.
  */
 class ApiControllerWorkspaceStatsTest extends FunctionalTest {
 
@@ -54,13 +55,13 @@ class ApiControllerWorkspaceStatsTest extends FunctionalTest {
         Files.createDirectories(dir.resolve("sub/deep"));
         Files.writeString(dir.resolve("sub/deep/b.txt"), "hello");        // 5 bytes
         Files.writeString(dir.resolve("sub/empty.txt"), "");              // 0 bytes
-        assertEquals(8L, ApiController.directorySizeBytes(dir),
+        assertEquals(8L, WorkspaceFiles.directorySizeBytes(dir),
                 "size must be the recursive sum of regular-file bytes");
     }
 
     @Test
     void directorySizeIsZeroForAMissingDirectory(@TempDir Path dir) {
-        assertEquals(0L, ApiController.directorySizeBytes(dir.resolve("never-created")),
+        assertEquals(0L, WorkspaceFiles.directorySizeBytes(dir.resolve("never-created")),
                 "an absent workspace reads as empty, not as an error");
     }
 }

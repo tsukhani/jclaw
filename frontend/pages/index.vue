@@ -39,60 +39,64 @@ async function fetchTaskCount(status: string, scope = 'excludePayloadType=remind
   return headerTotal ? Number.parseInt(headerTotal, 10) : (res._data?.length ?? 0)
 }
 
-const [
-  { data: agents },
-  { data: activeChannels },
-  { data: activeTaskCount, refresh: refreshActiveTasks },
-  { data: runningTaskCount, refresh: refreshRunningTasks },
-  { data: pendingTaskCount, refresh: refreshPendingTasks },
-  { data: activeReminderCount, refresh: refreshActiveReminders },
-  { data: pendingReminderCount, refresh: refreshPendingReminders },
-  { data: logs, refresh: refreshLogs },
-  { data: conversationCount },
-] = await Promise.all([
-  useFetch<Agent[]>('/api/agents'),
-  // /api/channels/active aggregates the transport-backed channels
-  // (telegram bindings + slack/whatsapp ChannelConfig) into a single
-  // count. The in-app "web" chat is deliberately excluded so this number
-  // matches the channel cards on /channels. The plain /api/channels
-  // endpoint reads only ChannelConfig and silently misses Telegram
-  // bindings — that's why the previous dashboard showed "0 channels
-  // active" while Telegram polled messages live. See
-  // ChannelStatusService.activeChannelTypes for the per-channel logic.
-  useFetch<ActiveChannelsResponse>('/api/channels/active',
-    { default: () => ({ count: 0, channelTypes: [] }) }),
-  // Three task-status buckets surfaced as separate sub-stats in the
-  // 4th dashboard card. ACTIVE = recurring (CRON / INTERVAL) in
-  // steady state; RUNNING = currently firing; PENDING = one-shot
-  // (SCHEDULED / IMMEDIATE) waiting to fire. Each call asks for one
-  // row of a single status and reads the true total off the
-  // X-Total-Count header — mirroring the conversation-count pattern
-  // below — so the displayed number is accurate regardless of how
-  // many task rows exist.
-  useAsyncData<number>('dashboard-active-task-count', () => fetchTaskCount('ACTIVE')),
-  useAsyncData<number>('dashboard-running-task-count', () => fetchTaskCount('RUNNING')),
-  useAsyncData<number>('dashboard-pending-task-count', () => fetchTaskCount('PENDING')),
-  // Reminders are payloadType=reminder tasks — counted separately for their
-  // own card (ACTIVE = recurring, PENDING = one-shot waiting to fire).
-  useAsyncData<number>('dashboard-active-reminder-count', () => fetchTaskCount('ACTIVE', 'payloadType=reminder')),
-  useAsyncData<number>('dashboard-pending-reminder-count', () => fetchTaskCount('PENDING', 'payloadType=reminder')),
-  useFetch<{ events: LogEvent[] }>('/api/logs?limit=10'),
-  // Total conversation count: ask the listing endpoint with a tiny limit
-  // and read X-Total-Count from the response headers — same pattern the
-  // conversations page uses (see pages/conversations/index.vue). Falls
-  // back to the body's array length if the header is missing (test stubs
-  // via registerEndpoint don't simulate response headers).
-  useAsyncData<number>('dashboard-conversation-count', async () => {
-    const res = await $fetch.raw<unknown[]>('/api/conversations?limit=1')
-    const headerTotal = res.headers.get('x-total-count')
-    return headerTotal ? Number.parseInt(headerTotal, 10) : (res._data?.length ?? 0)
-  }),
-])
+// Every dashboard read is lazy: a top-level `await` here makes the page
+// component async, so Suspense holds back the entire dashboard until the
+// slowest of a dozen requests settles — and the workspace walk below alone
+// costs ~600 ms over 66k files. Lazy means the cards paint immediately and
+// each stat fills in as it arrives; every consumer below already defaults.
+const { data: agents } = useLazyFetch<Agent[]>('/api/agents')
+
+// /api/channels/active aggregates the transport-backed channels
+// (telegram bindings + slack/whatsapp ChannelConfig) into a single
+// count. The in-app "web" chat is deliberately excluded so this number
+// matches the channel cards on /channels. The plain /api/channels
+// endpoint reads only ChannelConfig and silently misses Telegram
+// bindings — that's why the previous dashboard showed "0 channels
+// active" while Telegram polled messages live. See
+// ChannelStatusService.activeChannelTypes for the per-channel logic.
+const { data: activeChannels } = useLazyFetch<ActiveChannelsResponse>('/api/channels/active',
+  { default: () => ({ count: 0, channelTypes: [] }) })
+
+// Three task-status buckets surfaced as separate sub-stats in the
+// 4th dashboard card. ACTIVE = recurring (CRON / INTERVAL) in
+// steady state; RUNNING = currently firing; PENDING = one-shot
+// (SCHEDULED / IMMEDIATE) waiting to fire. Each call asks for one
+// row of a single status and reads the true total off the
+// X-Total-Count header — mirroring the conversation-count pattern
+// below — so the displayed number is accurate regardless of how
+// many task rows exist.
+const { data: activeTaskCount, refresh: refreshActiveTasks }
+  = useLazyAsyncData<number>('dashboard-active-task-count', () => fetchTaskCount('ACTIVE'))
+const { data: runningTaskCount, refresh: refreshRunningTasks }
+  = useLazyAsyncData<number>('dashboard-running-task-count', () => fetchTaskCount('RUNNING'))
+const { data: pendingTaskCount, refresh: refreshPendingTasks }
+  = useLazyAsyncData<number>('dashboard-pending-task-count', () => fetchTaskCount('PENDING'))
+
+// Reminders are payloadType=reminder tasks — counted separately for their
+// own card (ACTIVE = recurring, PENDING = one-shot waiting to fire).
+const { data: activeReminderCount, refresh: refreshActiveReminders }
+  = useLazyAsyncData<number>('dashboard-active-reminder-count', () => fetchTaskCount('ACTIVE', 'payloadType=reminder'))
+const { data: pendingReminderCount, refresh: refreshPendingReminders }
+  = useLazyAsyncData<number>('dashboard-pending-reminder-count', () => fetchTaskCount('PENDING', 'payloadType=reminder'))
+
+const { data: logs, refresh: refreshLogs } = useLazyFetch<{ events: LogEvent[] }>('/api/logs?limit=10')
+
+// Total conversation count: ask the listing endpoint with a tiny limit
+// and read X-Total-Count from the response headers — same pattern the
+// conversations page uses (see pages/conversations/index.vue). Falls
+// back to the body's array length if the header is missing (test stubs
+// via registerEndpoint don't simulate response headers).
+const { data: conversationCount } = useLazyAsyncData<number>('dashboard-conversation-count', async () => {
+  const res = await $fetch.raw<unknown[]>('/api/conversations?limit=1')
+  const headerTotal = res.headers.get('x-total-count')
+  return headerTotal ? Number.parseInt(headerTotal, 10) : (res._data?.length ?? 0)
+})
 
 // Workspace disk footprint — a runaway shell loop once grew a 30 GiB file in
 // workspace/main/ unnoticed; this line makes such growth visible on the
-// dashboard. bytes = -1 (walk failed) hides the line rather than lying.
-const { data: workspaceStats } = await useFetch<{ bytes: number }>('/api/workspace/stats',
+// dashboard. bytes = -1 (walk failed) hides the line rather than lying, which
+// is also what the card shows while the walk is still in flight.
+const { data: workspaceStats } = useLazyFetch<{ bytes: number }>('/api/workspace/stats',
   { default: () => ({ bytes: -1 }) })
 const workspaceBytes = computed(() => workspaceStats.value?.bytes ?? -1)
 /** Number and adaptive unit split apart: the card shows the value big and names the unit in the label. */

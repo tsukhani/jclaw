@@ -45,9 +45,58 @@ public final class WorkspaceFiles {
                     .maximumSize(500)
                     .build());
 
+    /**
+     * Memoized workspace byte size. 60 s is negligible against the runaway growth the
+     * dashboard card this feeds exists to catch, and it collapses a revisit storm —
+     * {@link Cache#get} runs the loader once per concurrent miss, not once per caller.
+     */
+    private static final Cache<String, Long> sizeCache = Caches.named(
+            "workspace-size",
+            CacheConfig.newBuilder()
+                    .expireAfterWrite(Duration.ofSeconds(60))
+                    .maximumSize(4)
+                    .build());
+
     public static Path workspaceRoot() {
         var root = Play.configuration.getProperty("jclaw.workspace.path", "workspace");
         return Path.of(root);
+    }
+
+    /**
+     * Recursive byte size of the workspace root, memoized for 60 s: the walk stats every
+     * file (~600 ms over 66k files) and the dashboard re-reads it on every visit.
+     * A failed walk (-1) is not memoized — a transient IOException must not blind the
+     * runaway-growth card for a minute.
+     */
+    public static long workspaceSizeBytes() {
+        var root = workspaceRoot();
+        var cached = sizeCache.get(root.toString(), _ -> {
+            var bytes = directorySizeBytes(root);
+            return bytes >= 0 ? bytes : null;
+        });
+        return cached != null ? cached : -1;
+    }
+
+    /**
+     * Recursive on-disk size of {@code root} in bytes: 0 when the directory
+     * doesn't exist, -1 when the walk fails midway (unreadable subtree,
+     * files vanishing during iteration). Never throws — a dashboard stat
+     * must not 500 the page. Public because the test tree compiles into the
+     * default package.
+     */
+    public static long directorySizeBytes(Path root) {
+        if (!Files.isDirectory(root)) return 0;
+        try (var files = Files.walk(root)) {
+            return files.filter(Files::isRegularFile).mapToLong(p -> {
+                try {
+                    return Files.size(p);
+                } catch (IOException _) {
+                    return 0; // vanished mid-walk — count what remains
+                }
+            }).sum();
+        } catch (IOException | RuntimeException _) {
+            return -1;
+        }
     }
 
     /**

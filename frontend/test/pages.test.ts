@@ -72,6 +72,8 @@ describe('Dashboard page', () => {
   it('displays agent count', async () => {
     setupMockApi()
     const component = await mountSuspended(Index)
+    // The dashboard's reads are lazy, so mount resolves before they land.
+    await flushPromises()
 
     // 1 agent enabled out of 1 total
     expect(component.text()).toContain('1/1')
