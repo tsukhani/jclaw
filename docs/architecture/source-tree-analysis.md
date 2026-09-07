@@ -119,7 +119,7 @@ jclaw/
 ├── workspace/                    # Per-agent workspace (filesystem-tool scoped; main/ holds Standing Orders).
 ├── data/                         # H2 DB file + attachments/ + jclaw-lucene/ index (dev default).
 ├── .githooks/                    # pre-commit (lint-staged) + pre-push (full suite) hooks.
-├── .devcontainer/                # Dev Container (Ubuntu 26.04, Zulu 25, Node 24, Play fork).
+├── .devcontainer/                # Dev Container (Ubuntu 26.04, Zulu 25, Node 26, Play fork).
 ├── docs/                         # <-- this documentation suite (architecture/ + user-guide/).
 ├── _bmad/, _bmad-output/         # BMAD/BMM workflow artifacts.
 ├── jclaw.sh                      # One-stop dev/deploy launcher (backend + frontend).

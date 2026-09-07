@@ -13,7 +13,7 @@ How to set up, run, test, and iterate on jclaw locally.
 | Python | 3.10+ (optional) | Only for the local image/video generation sidecars (`sidecar/`); not needed for the `play` CLI. |
 | Tesseract | optional | OCR for the `documents` tool (image / scanned-PDF text). |
 
-> Fastest path: use the **Dev Container** (`.devcontainer/`, Ubuntu 26.04 + Zulu 25 + Node 24 + the Play fork). "Reopen in Container" runs `./jclaw.sh setup` for you.
+> Fastest path: use the **Dev Container** (`.devcontainer/`, Ubuntu 26.04 + Zulu 25 + Node 26 + the Play fork). "Reopen in Container" runs `./jclaw.sh setup` for you.
 
 ## Clone + bootstrap
 
