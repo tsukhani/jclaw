@@ -430,7 +430,9 @@ onBeforeUnmount(() => {
         lets the middle column absorb flex slack while the side clusters
         size to their content (JCLAW-102).
       -->
-      <div class="px-4 py-3 border-b border-border grid grid-cols-[auto_1fr_auto] items-center gap-3">
+      <!-- min-h matches the height this header takes once its data-gated view toggle
+           renders, so the toggle appearing does not nudge the panel. -->
+      <div class="px-4 py-3 border-b border-border grid grid-cols-[auto_1fr_auto] items-center gap-3 min-h-[55px]">
         <div class="flex items-center gap-3 min-w-0">
           <h2 class="text-sm font-medium text-fg-primary shrink-0">
             Chat Performance
@@ -553,192 +555,196 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div
-        v-if="!hasLatencyData"
-        class="px-4 py-8 text-center text-sm text-fg-muted"
-      >
-        No latency samples in this window.
-      </div>
-
-      <div
-        v-else-if="latencyView === 'counts'"
-        class="overflow-x-auto"
-      >
-        <!--
-          JCLAW-884: cardinalities live here rather than in the latency table.
-          They ride the same histograms (hence the same percentiles and the same
-          agent/channel/window filters), but the latency table's Total summarises
-          an additive chain of durations and has no meaning for a count — and the
-          windowed Total column below is meaningless for a duration, which is why
-          it appears only in this view.
-        -->
+      <!-- Fixed-height body — see the Recent Activity note below. 500px caps a
+           table that ran 692px here and grows with the segment count. -->
+      <div class="h-[500px] overflow-auto">
         <div
-          v-if="!hasCountData"
+          v-if="!hasLatencyData"
           class="px-4 py-8 text-center text-sm text-fg-muted"
         >
-          No call or round samples in this window.
+          No latency samples in this window.
         </div>
-        <table
-          v-else
-          class="w-full text-xs"
-        >
-          <thead>
-            <tr class="text-fg-muted border-b border-border">
-              <th class="text-left font-normal px-4 py-2">
-                Metric
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                turns
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                total
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                p50
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                p90
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                p99
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                max
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="row in countRows"
-              :key="row.key"
-              class="border-b border-border last:border-b-0"
-            >
-              <td class="px-4 py-2 text-fg-strong">
-                {{ row.label }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                {{ row.h.count }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-strong">
-                {{ Math.round(row.h.sum_ms ?? 0) }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono">
-                {{ Math.round(row.h.p50_ms) }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono">
-                {{ Math.round(row.h.p90_ms) }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono">
-                {{ Math.round(row.h.p99_ms) }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                {{ Math.round(row.h.max_ms) }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p
-          v-if="cachedShare !== null"
-          class="px-4 py-2 text-[11px] text-fg-muted border-t border-border"
-        >
-          {{ (cachedShare * 100).toFixed(1) }}% of LLM calls were served from the
-          provider's prompt cache — a ratio of summed calls, not of percentiles,
-          because a turn with no cached call emits no sample at all.
-        </p>
-      </div>
 
-      <div
-        v-else-if="latencyView === 'table'"
-        class="overflow-x-auto"
-      >
-        <!--
-          Single table that rotates based on the channel dropdown in the
-          header (JCLAW-102). Each channel's distribution is meaningfully
-          different (Telegram's Terminal delivery includes outbound Bot-API
-          round-trip time, web's doesn't) — the dropdown lets operators pick
-          which distribution they're inspecting without comingling them.
-        -->
-        <table class="w-full text-xs">
-          <thead>
-            <tr class="text-fg-muted border-b border-border">
-              <th class="text-left font-normal px-4 py-2">
-                Segment
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                n
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                p50
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                p90
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                p99
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                p999
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                min
-              </th>
-              <th class="text-right font-normal px-3 py-2">
-                max
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="row in latencyRows"
-              :key="row.key"
-              :class="row.key === 'total' ? 'bg-muted/50 font-semibold' : 'border-b border-border last:border-b-0'"
-            >
-              <!--
-                Child rows render with indent + muted label + smaller font —
-                the Grafana / Datadog / Linear data-table pattern. Indent
-                alone plus color contrast is enough to signal "these belong
-                to the parent above" without glyphs or border-rules that
-                fight against table cell geometry.
-              -->
-              <td
-                class="py-2 px-4"
-                :class="row.isChild
-                  ? 'text-fg-muted text-[0.95em] pl-10'
-                  : 'text-fg-primary'"
+        <div
+          v-else-if="latencyView === 'counts'"
+          class="overflow-x-auto"
+        >
+          <!--
+            JCLAW-884: cardinalities live here rather than in the latency table.
+            They ride the same histograms (hence the same percentiles and the same
+            agent/channel/window filters), but the latency table's Total summarises
+            an additive chain of durations and has no meaning for a count — and the
+            windowed Total column below is meaningless for a duration, which is why
+            it appears only in this view.
+          -->
+          <div
+            v-if="!hasCountData"
+            class="px-4 py-8 text-center text-sm text-fg-muted"
+          >
+            No call or round samples in this window.
+          </div>
+          <table
+            v-else
+            class="w-full text-xs"
+          >
+            <thead>
+              <tr class="text-fg-muted border-b border-border">
+                <th class="text-left font-normal px-4 py-2">
+                  Metric
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  turns
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  total
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  p50
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  p90
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  p99
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  max
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in countRows"
+                :key="row.key"
+                class="border-b border-border last:border-b-0"
               >
-                {{ row.label }}
-              </td>
-              <td class="text-right font-mono text-fg-muted px-3 py-2">
-                {{ row.h.count }}
-              </td>
-              <td class="text-right font-mono text-fg-primary px-3 py-2">
-                {{ formatStat(row.key, row.h.p50_ms) }}
-              </td>
-              <td class="text-right font-mono text-fg-primary px-3 py-2">
-                {{ formatStat(row.key, row.h.p90_ms) }}
-              </td>
-              <td class="text-right font-mono text-fg-primary px-3 py-2">
-                {{ formatStat(row.key, row.h.p99_ms) }}
-              </td>
-              <td class="text-right font-mono text-fg-primary px-3 py-2">
-                {{ formatStat(row.key, row.h.p999_ms) }}
-              </td>
-              <td class="text-right font-mono text-fg-muted px-3 py-2">
-                {{ formatStat(row.key, row.h.min_ms) }}
-              </td>
-              <td class="text-right font-mono text-fg-muted px-3 py-2">
-                {{ formatStat(row.key, row.h.max_ms) }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                <td class="px-4 py-2 text-fg-strong">
+                  {{ row.label }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ row.h.count }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-strong">
+                  {{ Math.round(row.h.sum_ms ?? 0) }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono">
+                  {{ Math.round(row.h.p50_ms) }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono">
+                  {{ Math.round(row.h.p90_ms) }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono">
+                  {{ Math.round(row.h.p99_ms) }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ Math.round(row.h.max_ms) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p
+            v-if="cachedShare !== null"
+            class="px-4 py-2 text-[11px] text-fg-muted border-t border-border"
+          >
+            {{ (cachedShare * 100).toFixed(1) }}% of LLM calls were served from the
+            provider's prompt cache — a ratio of summed calls, not of percentiles,
+            because a turn with no cached call emits no sample at all.
+          </p>
+        </div>
 
-      <div
-        v-else
-        class="p-4"
-      >
-        <LatencyOverlayChart :series="latencyChartSeries" />
+        <div
+          v-else-if="latencyView === 'table'"
+          class="overflow-x-auto"
+        >
+          <!--
+            Single table that rotates based on the channel dropdown in the
+            header (JCLAW-102). Each channel's distribution is meaningfully
+            different (Telegram's Terminal delivery includes outbound Bot-API
+            round-trip time, web's doesn't) — the dropdown lets operators pick
+            which distribution they're inspecting without comingling them.
+          -->
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-fg-muted border-b border-border">
+                <th class="text-left font-normal px-4 py-2">
+                  Segment
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  n
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  p50
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  p90
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  p99
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  p999
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  min
+                </th>
+                <th class="text-right font-normal px-3 py-2">
+                  max
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in latencyRows"
+                :key="row.key"
+                :class="row.key === 'total' ? 'bg-muted/50 font-semibold' : 'border-b border-border last:border-b-0'"
+              >
+                <!--
+                  Child rows render with indent + muted label + smaller font —
+                  the Grafana / Datadog / Linear data-table pattern. Indent
+                  alone plus color contrast is enough to signal "these belong
+                  to the parent above" without glyphs or border-rules that
+                  fight against table cell geometry.
+                -->
+                <td
+                  class="py-2 px-4"
+                  :class="row.isChild
+                    ? 'text-fg-muted text-[0.95em] pl-10'
+                    : 'text-fg-primary'"
+                >
+                  {{ row.label }}
+                </td>
+                <td class="text-right font-mono text-fg-muted px-3 py-2">
+                  {{ row.h.count }}
+                </td>
+                <td class="text-right font-mono text-fg-primary px-3 py-2">
+                  {{ formatStat(row.key, row.h.p50_ms) }}
+                </td>
+                <td class="text-right font-mono text-fg-primary px-3 py-2">
+                  {{ formatStat(row.key, row.h.p90_ms) }}
+                </td>
+                <td class="text-right font-mono text-fg-primary px-3 py-2">
+                  {{ formatStat(row.key, row.h.p99_ms) }}
+                </td>
+                <td class="text-right font-mono text-fg-primary px-3 py-2">
+                  {{ formatStat(row.key, row.h.p999_ms) }}
+                </td>
+                <td class="text-right font-mono text-fg-muted px-3 py-2">
+                  {{ formatStat(row.key, row.h.min_ms) }}
+                </td>
+                <td class="text-right font-mono text-fg-muted px-3 py-2">
+                  {{ formatStat(row.key, row.h.max_ms) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div
+          v-else
+          class="p-4"
+        >
+          <LatencyOverlayChart :series="latencyChartSeries" />
+        </div>
       </div>
     </div>
 
@@ -790,108 +796,112 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <template v-if="activityView === 'all'">
-        <div
-          v-if="logs?.events?.length"
-        >
-          <!-- Column headers — same flex template as data rows so the columns
-             stay aligned to the same shrink-0 widths. Hidden under sm, where
-             the row wraps and the columns no longer line up. -->
-          <div class="px-4 py-2 hidden sm:flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
-            <span class="shrink-0 w-10">Level</span>
-            <span class="shrink-0 w-28 sm:w-44">Category</span>
-            <span class="shrink-0 w-16">Agent</span>
-            <span class="flex-1 min-w-0">Message</span>
-            <span class="ml-auto shrink-0 w-48 text-right">Timestamp</span>
-          </div>
-          <div class="divide-y divide-border">
-            <!-- Wraps under sm: the four fixed columns total 472px, which at a
-                 320px viewport left the message span zero-width (WCAG 1.4.10). -->
-            <div
-              v-for="event in logs.events"
-              :key="event.id"
-              class="px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-start gap-3"
-            >
-              <span
-                :class="{
-                  'text-red-700 dark:text-red-400': event.level === 'ERROR',
-                  'text-yellow-700 dark:text-yellow-400': event.level === 'WARN',
-                  'text-fg-muted': event.level === 'INFO',
-                }"
-                class="text-xs font-mono mt-0.5 shrink-0 w-10"
-              >{{ event.level }}</span>
-              <span
-                :title="event.category"
-                class="text-xs text-fg-muted shrink-0 w-28 sm:w-44 font-mono truncate mt-0.5"
-              >{{ event.category }}</span>
-              <span
-                :title="event.agentId || ''"
-                class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5"
-              >{{ event.agentId || '—' }}</span>
-              <span class="text-sm text-fg-primary basis-full sm:basis-auto min-w-0 truncate">{{ event.message }}</span>
-              <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5">{{ formatActivityTimestamp(event.timestamp) }}</span>
+      <!-- Fixed-height body: every state (loading, empty, events, video) occupies
+           the same box, so the panels below never move when data lands. -->
+      <div class="h-[448px] overflow-auto">
+        <template v-if="activityView === 'all'">
+          <div
+            v-if="logs?.events?.length"
+          >
+            <!-- Column headers — same flex template as data rows so the columns
+               stay aligned to the same shrink-0 widths. Hidden under sm, where
+               the row wraps and the columns no longer line up. -->
+            <div class="px-4 py-2 hidden sm:flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
+              <span class="shrink-0 w-10">Level</span>
+              <span class="shrink-0 w-28 sm:w-44">Category</span>
+              <span class="shrink-0 w-16">Agent</span>
+              <span class="flex-1 min-w-0">Message</span>
+              <span class="ml-auto shrink-0 w-48 text-right">Timestamp</span>
             </div>
-          </div>
-        </div>
-        <div
-          v-else
-          class="px-4 py-8 text-center text-sm text-fg-muted"
-        >
-          No recent events
-        </div>
-      </template>
-      <template v-else>
-        <div v-if="recentVideoJobs?.length">
-          <!-- Column headers — same flex widths as the rows below. Hidden under
-             sm, where the row wraps and the columns no longer line up. -->
-          <div class="px-4 py-2 hidden sm:flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
-            <span class="shrink-0 w-20">State</span>
-            <span class="flex-1 min-w-0">Prompt</span>
-            <span class="shrink-0 w-48 text-right">Submitted</span>
-            <span class="shrink-0 w-36 text-right">Conversation</span>
-          </div>
-          <div class="divide-y divide-border">
-            <div
-              v-for="job in recentVideoJobs"
-              :key="job.id"
-              class="px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-3"
-            >
-              <span
-                class="shrink-0 w-20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-center"
-                :class="{
-                  'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300': job.state === 'SUCCEEDED',
-                  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300': job.state === 'FAILED',
-                  'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300': job.state === 'RUNNING' || job.state === 'PENDING',
-                }"
-              >{{ job.state }}</span>
-              <span
-                class="grow basis-full sm:basis-0 min-w-0 truncate text-sm text-fg-primary"
-                :title="job.prompt ?? ''"
-              >{{ job.prompt || '(no prompt)' }}</span>
-              <span class="shrink-0 w-48 text-right text-xs text-fg-muted font-mono">{{ job.createdAt ? formatActivityTimestamp(job.createdAt) : '—' }}</span>
-              <span class="shrink-0 w-36 text-right">
-                <NuxtLink
-                  v-if="job.conversationId != null"
-                  :to="`/chat?conversation=${job.conversationId}`"
-                  class="text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
-                >
-                  see in conversation
-                </NuxtLink>
+            <div class="divide-y divide-border">
+              <!-- Wraps under sm: the four fixed columns total 472px, which at a
+                   320px viewport left the message span zero-width (WCAG 1.4.10). -->
+              <div
+                v-for="event in logs.events"
+                :key="event.id"
+                class="px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-start gap-3"
+              >
                 <span
-                  v-else
-                  class="text-xs text-fg-muted"
-                >—</span>
-              </span>
+                  :class="{
+                    'text-red-700 dark:text-red-400': event.level === 'ERROR',
+                    'text-yellow-700 dark:text-yellow-400': event.level === 'WARN',
+                    'text-fg-muted': event.level === 'INFO',
+                  }"
+                  class="text-xs font-mono mt-0.5 shrink-0 w-10"
+                >{{ event.level }}</span>
+                <span
+                  :title="event.category"
+                  class="text-xs text-fg-muted shrink-0 w-28 sm:w-44 font-mono truncate mt-0.5"
+                >{{ event.category }}</span>
+                <span
+                  :title="event.agentId || ''"
+                  class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5"
+                >{{ event.agentId || '—' }}</span>
+                <span class="text-sm text-fg-primary basis-full sm:basis-auto min-w-0 truncate">{{ event.message }}</span>
+                <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5">{{ formatActivityTimestamp(event.timestamp) }}</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div
-          v-else
-          class="px-4 py-8 text-center text-sm text-fg-muted"
-        >
-          No video generation jobs yet.
-        </div>
-      </template>
+          <div
+            v-else
+            class="px-4 py-8 text-center text-sm text-fg-muted"
+          >
+            No recent events
+          </div>
+        </template>
+        <template v-else>
+          <div v-if="recentVideoJobs?.length">
+            <!-- Column headers — same flex widths as the rows below. Hidden under
+               sm, where the row wraps and the columns no longer line up. -->
+            <div class="px-4 py-2 hidden sm:flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
+              <span class="shrink-0 w-20">State</span>
+              <span class="flex-1 min-w-0">Prompt</span>
+              <span class="shrink-0 w-48 text-right">Submitted</span>
+              <span class="shrink-0 w-36 text-right">Conversation</span>
+            </div>
+            <div class="divide-y divide-border">
+              <div
+                v-for="job in recentVideoJobs"
+                :key="job.id"
+                class="px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-3"
+              >
+                <span
+                  class="shrink-0 w-20 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-center"
+                  :class="{
+                    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300': job.state === 'SUCCEEDED',
+                    'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300': job.state === 'FAILED',
+                    'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300': job.state === 'RUNNING' || job.state === 'PENDING',
+                  }"
+                >{{ job.state }}</span>
+                <span
+                  class="grow basis-full sm:basis-0 min-w-0 truncate text-sm text-fg-primary"
+                  :title="job.prompt ?? ''"
+                >{{ job.prompt || '(no prompt)' }}</span>
+                <span class="shrink-0 w-48 text-right text-xs text-fg-muted font-mono">{{ job.createdAt ? formatActivityTimestamp(job.createdAt) : '—' }}</span>
+                <span class="shrink-0 w-36 text-right">
+                  <NuxtLink
+                    v-if="job.conversationId != null"
+                    :to="`/chat?conversation=${job.conversationId}`"
+                    class="text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
+                  >
+                    see in conversation
+                  </NuxtLink>
+                  <span
+                    v-else
+                    class="text-xs text-fg-muted"
+                  >—</span>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div
+            v-else
+            class="px-4 py-8 text-center text-sm text-fg-muted"
+          >
+            No video generation jobs yet.
+          </div>
+        </template>
+      </div>
     </div>
   </div>
 </template>
