@@ -1663,7 +1663,7 @@ validate_pnpm_pin() {
 # executable on PATH, so inheriting PATH is all it takes and there is no shim to
 # generate or keep in sync.
 ensure_pnpm_on_path_for_gradle() {
-    if ! command -v pnpm >/dev/null 2>&1; then
+    if ! locate_pnpm; then
         echo "Error: pnpm not found on PATH."
         echo "       Gradle's :playDist task probes pnpm directly, and only PATH"
         echo "       crosses into the daemon, so we cannot proceed without it."
@@ -2242,12 +2242,42 @@ check_node() {
 # Node 25+ does not ship corepack anyway. pnpm resolves the pinned version from
 # frontend/package.json itself and verifies it against the lockfile —
 # without it, the security gate goes inert.
+# Locate pnpm and put it on PATH for the rest of this run. Echoes nothing and
+# returns 0 on success, 1 when pnpm is genuinely absent.
+#
+# The PATH search alone is not enough. pnpm's installer appends its export to a
+# shell rc, so the shell that ran the install still has the old PATH until it is
+# re-sourced — and the pnpm 12 migration moved the entry from $PNPM_HOME to
+# $PNPM_HOME/bin, so even a shell that already had pnpm points at a directory
+# with no binary in it. Failing there tells someone who just installed pnpm to
+# install pnpm, so probe the install locations before giving up.
+locate_pnpm() {
+    command -v pnpm >/dev/null 2>&1 && return 0
+
+    local candidate
+    for candidate in \
+        "${PNPM_HOME:-}/bin/pnpm" \
+        "${PNPM_HOME:-}/pnpm" \
+        "$HOME/Library/pnpm/bin/pnpm" \
+        "$HOME/.local/share/pnpm/bin/pnpm" \
+        "$HOME/.local/share/pnpm/pnpm"
+    do
+        [[ -n "$candidate" && -x "$candidate" ]] || continue
+        export PATH="$(dirname "$candidate"):$PATH"
+        return 0
+    done
+    return 1
+}
+
 check_pnpm() {
-    if ! command -v pnpm >/dev/null 2>&1; then
+    if ! locate_pnpm; then
         echo "Error: pnpm not found. It is a standalone binary since pnpm 12 —"
         echo "       corepack cannot launch it, and Node 25+ no longer ships"
         echo "       corepack at all. Install with:"
         echo "         curl -fsSL https://get.pnpm.io/install.sh | sh -"
+        echo ""
+        echo "       If you just installed it, its PATH export lands in your shell"
+        echo "       rc — open a new shell or re-source that rc."
         exit 1
     fi
 }
