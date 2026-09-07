@@ -459,14 +459,17 @@ pipeline {
                         // manifest index clean. Flip back to `=true` if
                         // supply-chain requirements emerge.
                         dockerPrelude()
-                        sh """
-                            docker buildx build \\
-                                --provenance=false \\
-                                --platform linux/amd64,linux/arm64 \\
-                                -t ghcr.io/tsukhani/jclaw:${version} \\
-                                -t ghcr.io/tsukhani/jclaw:latest \\
-                                --push .
-                        """
+                        // Backstop for the Dockerfile's per-fetch retries; re-pushing the same tags is idempotent.
+                        retry(2) {
+                            sh """
+                                docker buildx build \\
+                                    --provenance=false \\
+                                    --platform linux/amd64,linux/arm64 \\
+                                    -t ghcr.io/tsukhani/jclaw:${version} \\
+                                    -t ghcr.io/tsukhani/jclaw:latest \\
+                                    --push .
+                            """
+                        }
                     }
                 }
             }
@@ -503,14 +506,16 @@ pipeline {
                         // storage concern, add a cleanup stage modeled on
                         // `Cleanup Old Releases` below.
                         dockerPrelude()
-                        sh '''
-                            docker buildx build \\
-                                --provenance=false \\
-                                --platform linux/amd64,linux/arm64 \\
-                                -t ghcr.io/tsukhani/jclaw-devcontainer:latest \\
-                                --push \\
-                                .devcontainer/
-                        '''
+                        retry(2) {
+                            sh '''
+                                docker buildx build \\
+                                    --provenance=false \\
+                                    --platform linux/amd64,linux/arm64 \\
+                                    -t ghcr.io/tsukhani/jclaw-devcontainer:latest \\
+                                    --push \\
+                                    .devcontainer/
+                            '''
+                        }
                     }
                 }
             }

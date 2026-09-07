@@ -32,7 +32,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # can drive a real browser when the WebFetchTool fires. The t64 suffix
 # is load-bearing: Ubuntu 24.04+ ran the time_t 64-bit ABI transition
 # and the un-suffixed jammy-era names no longer resolve.
-RUN apt-get update && \
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
         gnupg \
@@ -56,7 +57,7 @@ RUN apt-get update && \
 # JClaw requires 25+. The `signed-by=` keyring is the modern replacement for
 # the deprecated `apt-key add` — keys live per-repo, not in the global
 # /etc/apt/trusted.gpg.
-RUN curl -fsSL https://repos.azul.com/azul-repo.key \
+RUN curl -fsSL --retry 5 --retry-all-errors https://repos.azul.com/azul-repo.key \
         | gpg --dearmor -o /usr/share/keyrings/azul.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/azul.gpg] https://repos.azul.com/zulu/deb stable main" \
         > /etc/apt/sources.list.d/zulu.list && \
@@ -68,10 +69,20 @@ RUN curl -fsSL https://repos.azul.com/azul-repo.key \
 # not ship corepack, and corepack cannot launch pnpm 12 anyway (per-platform
 # native binary, no bin/pnpm.cjs). pnpm switches itself to the version pinned
 # in frontend/package.json on first use and verifies it against the lockfile.
-RUN curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && \
+# Fetched to a file, then run: `curl ... | sh` reports the shell's exit status,
+# so a failed fetch would leave the layer green and the toolchain absent. curl
+# retries the fetch; the wrapper retries the run, where these scripts do their
+# own downloading.
+RUN retry() { n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 5 ] && return 1; sleep $((n * 3)); done; }; \
+    curl -fsSL --retry 5 --retry-all-errors \
+        https://deb.nodesource.com/setup_26.x -o /tmp/nodesource.sh && \
+    retry bash /tmp/nodesource.sh && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/* && \
-    curl -fsSL https://get.pnpm.io/install.sh | ENV=/root/.bashrc SHELL=/bin/bash sh -
+    curl -fsSL --retry 5 --retry-all-errors \
+        https://get.pnpm.io/install.sh -o /tmp/pnpm-install.sh && \
+    retry env ENV=/root/.bashrc SHELL=/bin/bash sh /tmp/pnpm-install.sh && \
+    rm -f /tmp/nodesource.sh /tmp/pnpm-install.sh
 # $PNPM_HOME/bin, not $PNPM_HOME: pnpm 12 installs the executable one level
 # down and prints that path itself. pnpm 11 was reachable from the parent,
 # which is what makes the wrong one look right until a build says
@@ -93,7 +104,8 @@ ENV PATH=$PNPM_HOME/bin:$PATH
 COPY .play-version /tmp/.play-version
 RUN PLAY_VERSION=$(tr -d '[:space:]' < /tmp/.play-version) && \
     test -n "$PLAY_VERSION" || (echo "Could not read .play-version" && exit 1) && \
-    curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
+    curl -fsSL -L --retry 5 --retry-all-errors \
+        "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \
     ln -s "/opt/play-${PLAY_VERSION}" /opt/play1 && \

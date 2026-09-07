@@ -60,12 +60,26 @@ ARG BUILDARCH
 # could not launch pnpm 12 regardless — it is a per-platform native binary now.
 # pnpm reads the version pinned in frontend/package.json's "packageManager"
 # field and verifies it against frontend/pnpm-lock.yaml on first invocation.
-RUN apt-get update && \
+#
+# Each installer is fetched to a file, then run: `curl ... | sh` reports the
+# shell's exit status, so a failed fetch would leave the layer green and the
+# toolchain absent. curl retries the fetch; the wrapper retries the run, which
+# is where these scripts do their own downloading — pnpm's dist-tag lookup to
+# registry.npmjs.org 502'd there on v0.18.41's arm64 leg, 12 s after the amd64
+# leg's identical request succeeded, and took the whole release build with it.
+RUN retry() { n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 5 ] && return 1; sleep $((n * 3)); done; }; \
+    echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates curl unzip git gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_26.x | bash - && \
+    curl -fsSL --retry 5 --retry-all-errors \
+        https://deb.nodesource.com/setup_26.x -o /tmp/nodesource.sh && \
+    retry bash /tmp/nodesource.sh && \
     apt-get install -y --no-install-recommends nodejs && \
-    curl -fsSL https://get.pnpm.io/install.sh | ENV=/root/.bashrc SHELL=/bin/bash sh - && \
+    curl -fsSL --retry 5 --retry-all-errors \
+        https://get.pnpm.io/install.sh -o /tmp/pnpm-install.sh && \
+    retry env ENV=/root/.bashrc SHELL=/bin/bash sh /tmp/pnpm-install.sh && \
+    rm -f /tmp/nodesource.sh /tmp/pnpm-install.sh && \
     rm -rf /var/lib/apt/lists/*
 # $PNPM_HOME/bin, not $PNPM_HOME: pnpm 12 installs the executable one level
 # down and prints that path itself. pnpm 11 was reachable from the parent,
@@ -79,7 +93,8 @@ ENV PATH=$PNPM_HOME/bin:$PATH
 # rather than driving `./gradlew` saves a network round-trip on each
 # clean build and gives a deterministic toolchain regardless of the
 # wrapper jar's state in the source tree.
-RUN curl -fsSL https://services.gradle.org/distributions/gradle-9.5.0-bin.zip -o /tmp/gradle.zip && \
+RUN curl -fsSL --retry 5 --retry-all-errors \
+        https://services.gradle.org/distributions/gradle-9.5.0-bin.zip -o /tmp/gradle.zip && \
     unzip -q /tmp/gradle.zip -d /opt && \
     ln -s /opt/gradle-9.5.0/bin/gradle /usr/local/bin/gradle && \
     rm /tmp/gradle.zip
@@ -95,7 +110,8 @@ RUN curl -fsSL https://services.gradle.org/distributions/gradle-9.5.0-bin.zip -o
 COPY .play-version /tmp/.play-version
 RUN PLAY_VERSION=$(tr -d '[:space:]' < /tmp/.play-version) && \
     test -n "$PLAY_VERSION" || (echo "Could not read .play-version" && exit 1) && \
-    curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
+    curl -fsSL -L --retry 5 --retry-all-errors \
+        "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \
     ln -s "/opt/play-${PLAY_VERSION}" /opt/play1 && \
@@ -233,10 +249,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Ubuntu 24.04+ ran the time_t 64-bit ABI transition — the t64 suffix on
 # libasound2, libatk*, libatspi*, libcups2, libglib2 below is load-bearing;
 # the un-suffixed jammy-era names no longer resolve.
-RUN apt-get update && \
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates curl gnupg && \
-    curl -fsSL https://repos.azul.com/azul-repo.key \
+    curl -fsSL --retry 5 --retry-all-errors https://repos.azul.com/azul-repo.key \
         | gpg --dearmor -o /usr/share/keyrings/azul.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/azul.gpg] https://repos.azul.com/zulu/deb stable main" \
         > /etc/apt/sources.list.d/zulu.list && \
