@@ -79,7 +79,7 @@ const { data: activeReminderCount, refresh: refreshActiveReminders }
 const { data: pendingReminderCount, refresh: refreshPendingReminders }
   = useLazyAsyncData<number>('dashboard-pending-reminder-count', () => fetchTaskCount('PENDING', 'payloadType=reminder'))
 
-const { data: logs, refresh: refreshLogs } = useLazyFetch<{ events: LogEvent[] }>('/api/logs?limit=10')
+const { data: logs, refresh: refreshLogs, status: logsStatus } = useLazyFetch<{ events: LogEvent[] }>('/api/logs?limit=10')
 
 // Total conversation count: ask the listing endpoint with a tiny limit
 // and read X-Total-Count from the response headers — same pattern the
@@ -146,10 +146,20 @@ const latencyQuery = computed<Record<string, string>>(() => {
   return q
 })
 
-const { data: latency, refresh: refreshLatency } = useFetch<LatencyRowsResponse>(
+const { data: latency, refresh: refreshLatency, status: latencyStatus } = useFetch<LatencyRowsResponse>(
   '/api/metrics/latency/rows',
   { query: latencyQuery, default: () => ({ since: '', channels: [], segments: {} }), watch: [latencyQuery] },
 )
+
+// Panel bodies reserve the height they had last visit, so the tables landing
+// don't shove the page around. Fallbacks are the measured natural heights here.
+// Read `status`, not `pending`: a lazy fetch sits at 'idle' with pending false
+// before it starts, which would release the reservation before it ever applied.
+const settled = (s: 'idle' | 'pending' | 'success' | 'error') => s === 'success' || s === 'error'
+const { reservedHeight: latencyBodyHeight, el: latencyBodyEl }
+  = useStableHeight('latency', 692, computed(() => settled(latencyStatus.value)))
+const { reservedHeight: activityBodyHeight, el: activityBodyEl }
+  = useStableHeight('activity', 441, computed(() => settled(logsStatus.value)))
 
 // The UNKNOWN_CHANNEL bucket is system-internal LLM traffic (embedding recall,
 // slash compaction, skill promotion), not a chat channel — keep it out of the
@@ -555,9 +565,12 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Fixed-height body — see the Recent Activity note below. 500px caps a
-           table that ran 692px here and grows with the segment count. -->
-      <div class="h-[500px] overflow-auto">
+      <!-- Body reserves its last-known height — see useStableHeight. 692px here,
+           but it scales with the segment count, hence the remembered value. -->
+      <div
+        ref="latencyBodyEl"
+        :style="{ minHeight: latencyBodyHeight }"
+      >
         <div
           v-if="!hasLatencyData"
           class="px-4 py-8 text-center text-sm text-fg-muted"
@@ -796,9 +809,12 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <!-- Fixed-height body: every state (loading, empty, events, video) occupies
-           the same box, so the panels below never move when data lands. -->
-      <div class="h-[448px] overflow-auto">
+      <!-- Body reserves its last-known height so the events landing don't move
+           anything; limit=10 bounds the row count but not the row heights. -->
+      <div
+        ref="activityBodyEl"
+        :style="{ minHeight: activityBodyHeight }"
+      >
         <template v-if="activityView === 'all'">
           <div
             v-if="logs?.events?.length"

@@ -974,6 +974,11 @@ function csvCell(value: string): string {
   return '"' + value.replaceAll('"', '""') + '"'
 }
 
+// Reserve the height this panel had last visit so the tables landing don't move
+// the page. 1243px is the measured natural body height on a populated install.
+const { reservedHeight: bodyHeight, el: bodyEl }
+  = useStableHeight('cost', 1243, hasLoadedOnce)
+
 defineExpose({ refresh })
 </script>
 
@@ -1096,10 +1101,12 @@ defineExpose({ refresh })
       </div>
     </div>
 
-    <!-- Fixed-height body so the pending, empty and loaded states are the same
-         size: this panel grew 137px -> 1349px on load, shoving every panel
-         below it down the page. The Teleported tooltip stays outside it. -->
-    <div class="h-[500px] overflow-auto">
+    <!-- Body reserves its last-known height: this panel grew 137px -> 1349px on
+         load, shoving every panel below it down the page. See useStableHeight. -->
+    <div
+      ref="bodyEl"
+      :style="{ minHeight: bodyHeight }"
+    >
       <!-- Body: pending / empty / table / chart -->
       <div
         v-if="pending && !hasLoadedOnce"

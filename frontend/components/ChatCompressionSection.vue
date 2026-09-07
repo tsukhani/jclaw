@@ -44,11 +44,16 @@ const since = computed(() => {
   return new Date(Date.now() - days * 86_400_000).toISOString()
 })
 
-const { data, refresh } = useFetch<CompressionResponse>('/api/metrics/compression', {
+const { data, refresh, status } = useFetch<CompressionResponse>('/api/metrics/compression', {
   query: { since },
   default: () => ({ since: '', rows: [] }),
 })
 defineExpose({ refresh })
+
+// Reserve the height this panel had last visit so the tiles landing don't move
+// the page. 349px is the measured natural body height on a populated install.
+const { reservedHeight: bodyHeight, el: bodyEl }
+  = useStableHeight('compression', 349, computed(() => status.value === 'success' || status.value === 'error'))
 
 const rows = computed<Row[]>(() => data.value?.rows ?? [])
 
@@ -277,8 +282,12 @@ function fmt(n: number) {
       </div>
     </div>
 
-    <!-- Fixed-height body so the empty and loaded states are the same size. -->
-    <div class="h-[360px] overflow-auto">
+    <!-- Body reserves its last-known height so the tiles landing don't move the
+         page. See useStableHeight. -->
+    <div
+      ref="bodyEl"
+      :style="{ minHeight: bodyHeight }"
+    >
       <div
         v-if="!agg.hasData"
         class="px-4 py-4 text-xs text-fg-muted"
