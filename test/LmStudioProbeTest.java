@@ -5,7 +5,6 @@ import play.test.UnitTest;
 import services.LmStudioProbe;
 
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 
 /**
  * Tests for {@link LmStudioProbe} — the boot-time health check that
@@ -74,14 +73,10 @@ class LmStudioProbeTest extends UnitTest {
 
     @Test
     void probeReportsConnectionRefusedForUnreachableHost() throws Exception {
-        // Bind a socket then close it to get a port that nothing listens on —
-        // the kernel returns ECONNREFUSED on a connect attempt, which is the
-        // typical "LM Studio not started" failure mode (the desktop app may
-        // be installed but the local server is paused).
-        int closedPort;
-        try (var s = new ServerSocket(0)) {
-            closedPort = s.getLocalPort();
-        }
+        // Port 1 is privileged and never bound here, so connect gets ECONNREFUSED — the typical
+        // "LM Studio not started" failure mode (installed, local server paused). A freed ephemeral
+        // port can be re-bound by a concurrent test before the probe connects, turning that into an EOF.
+        int closedPort = 1;
 
         var r = LmStudioProbe.probe("http://127.0.0.1:" + closedPort);
 

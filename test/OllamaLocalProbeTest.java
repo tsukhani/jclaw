@@ -5,7 +5,6 @@ import play.test.UnitTest;
 import services.OllamaLocalProbe;
 
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 
 /**
  * Tests for {@link OllamaLocalProbe} — the boot-time health check that
@@ -93,13 +92,10 @@ class OllamaLocalProbeTest extends UnitTest {
 
     @Test
     void probeReportsConnectionRefusedForUnreachableHost() throws Exception {
-        // Bind a socket then close it to get a port that nothing listens on.
-        // The kernel returns ECONNREFUSED on a connect attempt — exactly the
-        // "Ollama not installed" failure mode AC #6 cares about.
-        int closedPort;
-        try (var s = new ServerSocket(0)) {
-            closedPort = s.getLocalPort();
-        }
+        // Port 1 is privileged and never bound here, so connect gets ECONNREFUSED — exactly the
+        // "Ollama not installed" failure mode AC #6 cares about. A freed ephemeral port can be
+        // re-bound by a concurrent test before the probe connects, turning that into an EOF.
+        int closedPort = 1;
 
         var r = OllamaLocalProbe.probe("http://127.0.0.1:" + closedPort);
 
