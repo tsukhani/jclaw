@@ -275,6 +275,11 @@ POST    /api/tailscale                          ApiTailscaleController.toggle
 GET     /api/system/restart                     ApiSystemController.restartPreflight
 POST    /api/system/restart                     ApiSystemController.restart
 
+# OpenTelemetry export (JCLAW-34). GET is the runtime's view of the otel.* keys;
+# POST emits one span and reports whether the collector confirmed it.
+GET     /api/telemetry                          ApiTelemetryController.status
+POST    /api/telemetry/test                     ApiTelemetryController.test
+
 # Upgrade. Same handoff shape as restart, but the helper downloads and unpacks
 # the release before it stops anything — so the 202 is followed by minutes of
 # normal service, tracked through the status route rather than a down-then-up poll.

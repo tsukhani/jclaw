@@ -13,6 +13,7 @@ import services.StealthSidecarManager;
 import services.TailscaleFunnel;
 import services.imagegen.LocalImageSidecarManager;
 import services.search.LuceneIndexer;
+import services.telemetry.OtelRuntime;
 import services.transcription.AsrSidecarManager;
 import services.transcription.DiarizeSidecarManager;
 import services.tts.TtsJvmEngine;
@@ -114,7 +115,8 @@ public class ShutdownJob extends Job<Void> {
                 new Component("stealth-sidecar", StealthSidecarManager::stop),
                 new Component("mcp-connections", McpConnectionManager::shutdown),
                 new Component("lucene-index", LuceneIndexer::close),
-                new Component("tailscale-funnel", TailscaleFunnel::disableIfEnabled)
+                new Component("tailscale-funnel", TailscaleFunnel::disableIfEnabled),
+                new Component("telemetry", OtelRuntime::shutdown)
         );
 
         EventLogger.info(CATEGORY,

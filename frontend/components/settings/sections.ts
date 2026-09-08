@@ -40,6 +40,7 @@ import {
   SpeakerWaveIcon,
   UserGroupIcon,
   WrenchScrewdriverIcon,
+  ChartBarSquareIcon,
 } from '@heroicons/vue/24/outline'
 
 import SettingsApprovalsPanel from './SettingsApprovalsPanel.vue'
@@ -49,6 +50,7 @@ import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
 import SettingsImageGenPanel from './SettingsImageGenPanel.vue'
 import SettingsLoggingPanel from './SettingsLoggingPanel.vue'
 import SettingsMaintenancePanel from './SettingsMaintenancePanel.vue'
+import SettingsTelemetryPanel from './SettingsTelemetryPanel.vue'
 import SettingsMalwarePanel from './SettingsMalwarePanel.vue'
 import SettingsMemoryEmbeddingsPanel from './SettingsMemoryEmbeddingsPanel.vue'
 import SettingsMemoryLimitsPanel from './SettingsMemoryLimitsPanel.vue'
@@ -100,6 +102,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
       { id: 'printers', title: 'Printers', icon: PrinterIcon, component: SettingsPrintersPanel },
+      { id: 'telemetry', title: 'Telemetry', icon: ChartBarSquareIcon, component: SettingsTelemetryPanel },
       // Last in the group deliberately: this is the section whose controls take
       // the instance down, so it shouldn't sit next to the section the rail
       // opens on by default.

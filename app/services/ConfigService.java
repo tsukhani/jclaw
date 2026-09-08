@@ -17,6 +17,8 @@ import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.JPA;
+import services.telemetry.OtelConfig;
+import services.telemetry.OtelRuntime;
 import services.tts.TtsEngine;
 import services.tts.TtsSidecarManager;
 import utils.HttpFactories;
@@ -256,7 +258,20 @@ public class ConfigService {
             return "memory.recall.minCosine must be a finite number between -1.0 and 1.0.";
         }
 
+        // JCLAW-34: a collector URL or sampler ratio that cannot take effect is refused
+        // here, where the write happens, rather than logged at the next export.
+        if (key.startsWith(OtelConfig.KEY_PREFIX)) {
+            var rejected = OtelConfig.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
+        }
+
         set(key, value);
+
+        if (key.startsWith(OtelConfig.KEY_PREFIX)) {
+            OtelRuntime.applyConfig();
+        }
 
         // JCLAW-863: switching the sidecar TTS model is the moment the operator
         // declares intent to use it, and the one moment they aren't waiting on a
@@ -395,6 +410,9 @@ public class ConfigService {
         // (root → its captured file baseline). See LoggerLevelService.
         if (key.startsWith(LoggerLevelService.PREFIX)) {
             LoggerLevelService.revert(key.substring(LoggerLevelService.PREFIX.length()));
+        }
+        if (key.startsWith(OtelConfig.KEY_PREFIX)) {
+            OtelRuntime.applyConfig();
         }
     }
 

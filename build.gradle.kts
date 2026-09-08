@@ -320,6 +320,19 @@ dependencies {
     // WorkspacePathGuard). Broadening to the rest of app/ is the next increment.
     implementation("org.jspecify:jspecify:1.0.1")
 
+    // JCLAW-34: OpenTelemetry. The SDK runs in-process (traces + metrics over OTLP) so
+    // the collector endpoint can change without a restart; the Java agent is optional
+    // and attaches through PF-92's javaagent.path instead. Both BOMs so every artifact
+    // moves together. The OTLP sender's OkHttp is okhttp-jvm 5.x, the same artifact
+    // family pinned below — no exclusion needed, unlike the telegrambots graph.
+    implementation(platform("io.opentelemetry:opentelemetry-bom:1.65.0"))
+    implementation(platform("io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha:2.31.1-alpha"))
+    implementation("io.opentelemetry:opentelemetry-api")
+    implementation("io.opentelemetry:opentelemetry-sdk")
+    implementation("io.opentelemetry:opentelemetry-exporter-otlp")
+    implementation("io.opentelemetry:opentelemetry-sdk-testing")
+    implementation("io.opentelemetry.semconv:opentelemetry-semconv-incubating:1.43.0-alpha")
+
     // ArchUnit — architecture rules as unit tests (test/ArchitectureTest). Guards
     // the canonical seams the audit waves keep having to re-consolidate: outbound
     // HTTP goes through HttpFactories, no JDK java.net.http creeps back in, and a
