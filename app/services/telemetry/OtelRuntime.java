@@ -12,6 +12,7 @@ import io.opentelemetry.exporter.otlp.http.metrics.OtlpHttpMetricExporter;
 import io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter;
 import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
+import io.opentelemetry.instrumentation.okhttp.v3_0.OkHttpTelemetry;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.common.export.RetryPolicy;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
@@ -25,6 +26,8 @@ import io.opentelemetry.sdk.trace.export.SpanExporter;
 import io.opentelemetry.sdk.trace.samplers.Sampler;
 import io.opentelemetry.semconv.ServiceAttributes;
 import io.opentelemetry.semconv.incubating.DeploymentIncubatingAttributes;
+import okhttp3.Call;
+import okhttp3.OkHttpClient;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.EventLogger;
@@ -196,6 +199,27 @@ public final class OtelRuntime {
 
     public static OpenTelemetry openTelemetry() {
         return api;
+    }
+
+    private static volatile @Nullable OkHttpTelemetry okHttp;
+    private static volatile @Nullable OpenTelemetry okHttpApi;
+
+    /**
+     * {@code client} wrapped to emit an HTTP CLIENT span per call under whatever span is
+     * current — the raw client while export is off, so the disabled path adds nothing.
+     */
+    public static Call.Factory traced(OkHttpClient client) {
+        if (!applied.enabled()) {
+            return client;
+        }
+        var a = api;
+        var t = okHttp;
+        if (t == null || okHttpApi != a) {
+            t = OkHttpTelemetry.create(a);
+            okHttp = t;
+            okHttpApi = a;
+        }
+        return t.createCallFactory(client);
     }
 
     public static boolean isEnabled() {

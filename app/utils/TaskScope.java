@@ -1,6 +1,7 @@
 package utils;
 
 import com.google.errorprone.annotations.MustBeClosed;
+import io.opentelemetry.context.Context;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +51,9 @@ public final class TaskScope<T> implements AutoCloseable {
 
     /** Start {@code task} on its own virtual thread. */
     public Future<T> fork(Callable<T> task) {
-        var future = completion.submit(task);
+        // Same boundary AGENTS.md documents for ScopedValue: the pool's threads inherit no
+        // OTel context, so the forking thread's span is carried in explicitly.
+        var future = completion.submit(Context.current().wrap(task));
         forked.add(future);
         return future;
     }

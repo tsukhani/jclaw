@@ -533,6 +533,7 @@ public class AgentRunner {
         // scheduled turns now show up in the Chat Performance dashboard
         // (channel-partitioned per JCLAW-102).
         var trace = LatencyTrace.forTurn(conversation.channelType, null);
+        trace.conversationId(conversationId);
         trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
 
         // JCLAW-882: bind the turn to this thread so every provider dispatch below

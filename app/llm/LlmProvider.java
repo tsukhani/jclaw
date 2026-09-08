@@ -28,6 +28,7 @@ import llm.ToolCallChunkMerger.ToolCallBuilder;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import services.telemetry.GenAiSpans;
 import utils.HttpKeys;
 import utils.LatencyTrace;
 import utils.PlayConfig;
@@ -472,34 +473,51 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // request that ends in an exception still shows as a call the harness
         // decided to make — the NFR is about decisions, not successes.
         LatencyTrace.countLlmCall();
-        String responseBody;
-        try {
-            responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH, json, timeoutSeconds, channel);
+        var call = GenAiSpans.start(config, GenAiSpans.OPERATION_CHAT, model, false, maxTokens);
+        try (var _ = call.makeCurrent()) {
+            String responseBody;
+            try {
+                responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH, json, timeoutSeconds, channel);
+            } catch (RuntimeException e) {
+                // JCLAW-1076: the provider has just told us this model can't use
+                // tools. Retry once without them rather than failing the turn. The
+                // retry carries no tools, so it cannot raise this error again.
+                if (!sentTools(request) || !ToolCapabilityMemo.isToolsUnsupported(e)) throw e;
+                ToolCapabilityMemo.record(config.name(), model);
+                var retry = new ChatRequest(model, messages, List.of(), false, maxTokens, thinkingMode);
+                responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH,
+                        serializeRequest(retry), timeoutSeconds, channel);
+            }
+            // A provider can return a 200 whose body is garbage (truncated JSON, an
+            // HTML error page, a missing "choices" array). deserializeResponse then
+            // throws a raw JsonSyntaxException / IllegalStateException — which
+            // chatWithFailover doesn't catch, so the failover never fires. Wrap it as
+            // an LlmException so provider-side garbage-with-200 is a failover trigger.
+            ChatResponse response;
+            try {
+                response = deserializeResponse(responseBody);
+            } catch (LlmException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw new LlmException("Malformed 200 response from " + config.name(), e);
+            }
+            noteCachedCall(LatencyTrace.current(), response.usage());
+            call.response(response.id(), response.model(), response.usage(), finishReasons(response));
+            call.succeeded();
+            return response;
         } catch (RuntimeException e) {
-            // JCLAW-1076: the provider has just told us this model can't use
-            // tools. Retry once without them rather than failing the turn. The
-            // retry carries no tools, so it cannot raise this error again.
-            if (!sentTools(request) || !ToolCapabilityMemo.isToolsUnsupported(e)) throw e;
-            ToolCapabilityMemo.record(config.name(), model);
-            var retry = new ChatRequest(model, messages, List.of(), false, maxTokens, thinkingMode);
-            responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH,
-                    serializeRequest(retry), timeoutSeconds, channel);
-        }
-        // A provider can return a 200 whose body is garbage (truncated JSON, an
-        // HTML error page, a missing "choices" array). deserializeResponse then
-        // throws a raw JsonSyntaxException / IllegalStateException — which
-        // chatWithFailover doesn't catch, so the failover never fires. Wrap it as
-        // an LlmException so provider-side garbage-with-200 is a failover trigger.
-        ChatResponse response;
-        try {
-            response = deserializeResponse(responseBody);
-        } catch (LlmException e) {
+            call.failed(e);
             throw e;
-        } catch (RuntimeException e) {
-            throw new LlmException("Malformed 200 response from " + config.name(), e);
         }
-        noteCachedCall(LatencyTrace.current(), response.usage());
-        return response;
+    }
+
+    private static List<String> finishReasons(ChatResponse response) {
+        if (response.choices() == null) return List.of();
+        return response.choices().stream()
+                .map(Choice::finishReason)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
     }
 
     /**
@@ -531,9 +549,26 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // the virtual thread below, because the turn binding lives on the calling
         // thread — the stream thread and the provider's IO thread carry none.
         LatencyTrace.countLlmCall();
-        Thread.ofVirtual().name("llm-stream").start(() ->
-                streamOnce(model, messages, tools, onChunk, onComplete, onError,
-                        maxTokens, thinkingMode, channel, true));
+        var call = GenAiSpans.start(config, GenAiSpans.OPERATION_CHAT, model, true, maxTokens);
+        Consumer<ChatCompletionChunk> observedChunk = chunk -> {
+            call.chunk(chunk);
+            onChunk.accept(chunk);
+        };
+        // The span ends before the caller's callback: that callback is what releases
+        // whoever is waiting on the stream, and they must not see the latch before the span.
+        Runnable observedComplete = () -> {
+            call.succeeded();
+            onComplete.run();
+        };
+        Consumer<Exception> observedError = e -> {
+            call.failed(e);
+            onError.accept(e);
+        };
+        // The transport runs on its own virtual thread, which inherits no OTel context; the
+        // wrap carries the span so the HTTP client span nests under it.
+        Thread.ofVirtual().name("llm-stream").start(call.context().wrap(() ->
+                streamOnce(model, messages, tools, observedChunk, observedComplete, observedError,
+                        maxTokens, thinkingMode, channel, true)));
     }
 
     /**
@@ -714,19 +749,27 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     public EmbeddingResult embeddingsDetailed(String model, String input, @Nullable String channel) {
         var request = new EmbeddingRequest(model, input);
         var json = gson.toJson(request);
-        var responseBody = executeWithRetry("/embeddings", json, null, channel);
-        EmbeddingResponse response;
-        try {
-            response = gson.fromJson(responseBody, EmbeddingResponse.class);
+        var call = GenAiSpans.start(config, GenAiSpans.OPERATION_EMBEDDINGS, model, false, null);
+        try (var _ = call.makeCurrent()) {
+            var responseBody = executeWithRetry("/embeddings", json, null, channel);
+            EmbeddingResponse response;
+            try {
+                response = gson.fromJson(responseBody, EmbeddingResponse.class);
+            } catch (RuntimeException e) {
+                // Same garbage-with-200 concern as chat(): a malformed body must
+                // surface as an LlmException, not a raw JsonSyntaxException.
+                throw new LlmException("Malformed embeddings response from " + config.name(), e);
+            }
+            if (response == null || response.data() == null || response.data().isEmpty()) {
+                throw new LlmException("Empty embedding response");
+            }
+            call.response(null, response.model(), response.usage(), List.of());
+            call.succeeded();
+            return new EmbeddingResult(response.data().getFirst().embedding(), response.model());
         } catch (RuntimeException e) {
-            // Same garbage-with-200 concern as chat(): a malformed body must
-            // surface as an LlmException, not a raw JsonSyntaxException.
-            throw new LlmException("Malformed embeddings response from " + config.name(), e);
+            call.failed(e);
+            throw e;
         }
-        if (response == null || response.data() == null || response.data().isEmpty()) {
-            throw new LlmException("Empty embedding response");
-        }
-        return new EmbeddingResult(response.data().getFirst().embedding(), response.model());
     }
 
     // ─── Failover (static utility) ───────────────────────────────────────

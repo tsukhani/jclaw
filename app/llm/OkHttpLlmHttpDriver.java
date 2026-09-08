@@ -8,6 +8,7 @@ import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
 import org.jspecify.annotations.Nullable;
+import services.telemetry.OtelRuntime;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.Strings;
@@ -54,7 +55,7 @@ final class OkHttpLlmHttpDriver {
                 .post(RequestBody.create(jsonBody, JSON));
         if (channel != null) builder.tag(String.class, channel);
         var req = builder.build();
-        var call = HttpFactories.llmSingleShot().newCall(req);
+        var call = OtelRuntime.traced(HttpFactories.llmSingleShot()).newCall(req);
         // Per-call timeout via Call.timeout() — no per-call client allocation.
         call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
         try (var resp = call.execute()) {
@@ -122,7 +123,7 @@ final class OkHttpLlmHttpDriver {
             }
         };
 
-        var eventSource = EventSources.createFactory(HttpFactories.llmStreaming())
+        var eventSource = EventSources.createFactory(OtelRuntime.traced(HttpFactories.llmStreaming()))
                 .newEventSource(req, listener);
         try {
             done.await();

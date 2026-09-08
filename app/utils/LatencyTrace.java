@@ -1,9 +1,15 @@
 package utils;
 
 import com.google.errorprone.annotations.MustBeClosed;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
+import services.telemetry.OtelRuntime;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,7 +39,18 @@ public final class LatencyTrace {
     public static final String PERSIST_DONE = "persist_done";
     public static final String TERMINAL_SENT = "terminal_sent";
 
+    private static final AttributeKey<String> JCLAW_CHANNEL = AttributeKey.stringKey("jclaw.channel");
+    private static final AttributeKey<String> JCLAW_AGENT = AttributeKey.stringKey("jclaw.agent");
+    private static final AttributeKey<Long> JCLAW_LLM_CALLS = AttributeKey.longKey("jclaw.llm.calls");
+    private static final AttributeKey<Long> JCLAW_LLM_CACHED_CALLS = AttributeKey.longKey("jclaw.llm.cached_calls");
+    private static final AttributeKey<Long> JCLAW_TOOL_ROUNDS = AttributeKey.longKey("jclaw.tool.rounds");
+    private static final AttributeKey<Boolean> JCLAW_REASONING = AttributeKey.booleanKey("jclaw.reasoning");
+
     private final @Nullable String channel;
+    // The turn span (JCLAW-34): marks become its events, the counters its attributes.
+    // Non-recording while export is off, so every call below is a cheap no-op.
+    private final Span span;
+    private volatile @Nullable String conversationId;
     // Set once the conversation/agent is resolved (AgentRunner, at PROLOGUE_CONV_RESOLVED).
     // Tags every persisted segment sample so the dashboard's agent filter works (JCLAW-515).
     private volatile @Nullable String agentId;
@@ -72,6 +89,28 @@ public final class LatencyTrace {
         this.channel = channel;
         this.startNs = System.nanoTime();
         this.acceptedAtNs = acceptedAtNs;
+        var builder = OtelRuntime.tracer().spanBuilder("turn").setSpanKind(SpanKind.INTERNAL);
+        if (channel != null) builder.setAttribute(JCLAW_CHANNEL, channel);
+        this.span = builder.startSpan();
+    }
+
+    public @Nullable String channel() {
+        return channel;
+    }
+
+    public @Nullable String agentId() {
+        return agentId;
+    }
+
+    public @Nullable String conversationId() {
+        return conversationId;
+    }
+
+    /** Tags the turn span — and, through {@code GenAiSpans}, each model call under it. */
+    public void conversationId(@Nullable Long id) {
+        if (id == null) return;
+        this.conversationId = Long.toString(id);
+        span.setAttribute(GenAiIncubatingAttributes.GEN_AI_CONVERSATION_ID, this.conversationId);
     }
 
     /**
@@ -93,6 +132,7 @@ public final class LatencyTrace {
      *  the samples agent-less — they still record, just without agent attribution. */
     public void agentId(@Nullable String id) {
         this.agentId = id;
+        if (id != null) span.setAttribute(JCLAW_AGENT, id);
     }
 
     /**
@@ -111,7 +151,9 @@ public final class LatencyTrace {
 
     /** Record a named mark. First writer wins; subsequent calls are no-ops. */
     public void mark(@NonNull String name) {
-        marks.putIfAbsent(name, System.nanoTime());
+        if (marks.putIfAbsent(name, System.nanoTime()) == null) {
+            span.addEvent(name);
+        }
     }
 
     /**
@@ -207,11 +249,16 @@ public final class LatencyTrace {
      * or may not be inside a turn need no guard of their own.
      */
     @MustBeClosed
+    @SuppressWarnings("MustBeClosed") // the Scope is closed by the Binding this returns
     public static @NonNull Binding bind(@Nullable LatencyTrace trace) {
         var prev = CURRENT.get();
         if (trace == null) CURRENT.remove();
         else CURRENT.set(trace);
+        // Making the turn span current is what parents the model-call and HTTP client
+        // spans under it — at the same five sites that already cross a thread boundary.
+        Scope scope = trace == null ? null : trace.span.makeCurrent();
         return () -> {
+            if (scope != null) scope.close();
             if (prev == null) CURRENT.remove();
             else CURRENT.set(prev);
         };
@@ -301,6 +348,11 @@ public final class LatencyTrace {
         // QueueDrainOrchestrator double-terminal CAS.
         if (!ended.compareAndSet(false, true)) return;
         long endNs = System.nanoTime();
+        span.setAttribute(JCLAW_LLM_CALLS, (long) llmCallCount.get());
+        span.setAttribute(JCLAW_LLM_CACHED_CALLS, (long) llmCachedCallCount.get());
+        span.setAttribute(JCLAW_TOOL_ROUNDS, (long) toolRoundCount.get());
+        span.setAttribute(JCLAW_REASONING, reasoningSeen.get());
+        span.end();
 
         Long prologueDone = marks.get(PROLOGUE_DONE);
         if (prologueDone == null) return;

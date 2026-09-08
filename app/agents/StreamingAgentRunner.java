@@ -1,5 +1,6 @@
 package agents;
 
+import io.opentelemetry.context.Context;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
@@ -65,7 +66,9 @@ final class StreamingAgentRunner {
                              AgentRunner.StreamingCallbacks cb,
                              @Nullable Long acceptedAtNs,
                              @Nullable List<AttachmentService.Input> attachments) {
-        Thread.ofVirtual().name("agent-stream").start(() -> {
+        // The request thread's span (JCLAW-34) does not follow a new virtual thread by
+        // itself; the wrap is what makes the turn a child of the HTTP server span.
+        Thread.ofVirtual().name("agent-stream").start(Context.current().wrap(() -> {
             final Long[] conversationIdRef = {null};
             // queueReleased is shared between the wrapper's terminal
             // callbacks (which do the early release before cb.onComplete
@@ -89,6 +92,7 @@ final class StreamingAgentRunner {
                 if (conversationOpt.isEmpty()) return; // queued, not-found, or error — already handled
                 var conversation = conversationOpt.get();
                 conversationIdRef[0] = conversation.id;
+                trace.conversationId(conversation.id);
 
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
                 trace.agentId(AgentRunner.agentIdOf(agent));
@@ -113,7 +117,7 @@ final class StreamingAgentRunner {
                 // terminal callback.
                 QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
             }
-        });
+        }));
     }
 
     /**
