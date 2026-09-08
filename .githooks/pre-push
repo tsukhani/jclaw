@@ -15,6 +15,22 @@ if [[ "${JCLAW_SKIP_TESTS:-}" == "1" ]]; then
     exit 0
 fi
 
+# git hands the hook one "<local ref> <local sha> <remote ref> <remote sha>"
+# line per ref on stdin. A deletion carries an all-zero local sha and pushes
+# no commits, so a push made only of deletions has nothing to test — before
+# this check, deleting a stale branch ran the whole suite against whatever
+# unrelated HEAD the clone happened to be on.
+zero_sha=0000000000000000000000000000000000000000
+refs_seen=0; deletions_only=1
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    refs_seen=1
+    [[ "$local_sha" == "$zero_sha" ]] || deletions_only=0
+done
+if [[ "$refs_seen" == 1 && "$deletions_only" == 1 ]]; then
+    echo "[jclaw pre-push] Push only deletes refs — nothing to test."
+    exit 0
+fi
+
 repo_root=$(git rev-parse --show-toplevel)
 git_dir=$(git rev-parse --git-dir)
 cache_file="$git_dir/jclaw-last-tested-sha"
