@@ -8,6 +8,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
@@ -16,7 +17,10 @@ import java.util.List;
 
 @Entity
 @Table(name = "conversation", indexes = {
-        @Index(name = "idx_conversation_agent_channel_peer", columnList = "agent_id,channel_type,peer_id")
+        @Index(name = "idx_conversation_agent_channel_peer", columnList = "agent_id,channel_type,peer_id"),
+        // Indexed where starred is not: the pinned section is fetched on every
+        // conversations-page load, while the starred filter is opt-in.
+        @Index(name = "idx_conversation_pinned", columnList = "pinned")
 })
 public class Conversation extends TimestampedModel {
 
@@ -49,6 +53,25 @@ public class Conversation extends TimestampedModel {
 
     @Column(length = 100)
     public String preview;
+
+    /**
+     * Operator-set favorite marker, surfaced as the {@code starred}
+     * key in the conversation list's filter bar. Orthogonal to {@link #pinned} —
+     * a conversation can be either, both, or neither.
+     */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    public boolean starred = false;
+
+    /**
+     * Operator-set pin. Pinned conversations render in their own
+     * section above the paginated list and never appear inside it, so the cap in
+     * {@link services.ConversationService#MAX_PINNED} is what keeps that section
+     * a bounded header rather than a second unpaginated list.
+     */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    public boolean pinned = false;
 
     /**
      * Streaming checkpoint (JCLAW-95). Set when the Telegram streaming sink

@@ -53,10 +53,13 @@ public class ApiConversationsController extends Controller {
     // Conversation field/JSON keys reused across the filter, sort whitelist, and view mappers.
     private static final String CHANNEL_TYPE = "channelType";
     private static final String CREATED_AT = "createdAt";
+    // Conversation.preview is @Column(length = 100), so a longer name cannot be stored.
+    private static final int MAX_NAME_LENGTH = 100;
 
     public record ConversationView(Long id, Long agentId, String agentName, String channelType,
                                    String peerId, String createdAt, String updatedAt,
                                    long messageCount, String preview,
+                                   boolean starred, boolean pinned,
                                    String modelProviderOverride, String modelIdOverride,
                                    Long parentConversationId,
                                    long compactionCount) {}
@@ -139,9 +142,14 @@ public class ApiConversationsController extends Controller {
 
     public record DeleteByIdsRequest(List<Long> ids) {}
 
-    public record DeleteFilter(String channel, Long agentId, String name, String peer) {}
+    public record DeleteFilter(String channel, Long agentId, String name, String peer,
+                              Boolean starred) {}
 
     public record DeleteByFilterRequest(DeleteFilter filter) {}
+
+    public record RenameRequest(String name) {}
+
+    public record NameResponse(String name) {}
 
     public record ModelOverrideRequest(String modelProvider, String modelId) {}
 
@@ -160,16 +168,24 @@ public class ApiConversationsController extends Controller {
      * not worth the unbounded fetch cost.
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConversationView.class))))
-    @Operation(summary = "List conversations with optional channel, agent, name, peer, and full-text (q) filters, paginated")
+    @Operation(summary = "List conversations with optional channel, agent, name, peer, starred, pinned, and full-text (q) filters, paginated")
     public static void listConversations(String channel, Long agentId, String name, String peer,
-                                          String q, String sort, String dir, Integer limit, Integer offset) {
+                                          String q, Boolean starred, Boolean pinned,
+                                          String sort, String dir, Integer limit, Integer offset) {
         boolean hasNameFilter = name != null && !name.isBlank();
 
+        // starred and pinned are tri-state: absent means "no constraint", which
+        // is what every caller other than the /conversations page sends — the
+        // chat sidebar and the command palette must keep seeing pinned rows.
+        // That page asks for pinned=false in the paginated list and pinned=true
+        // for the section above it, so no row can appear in both.
         var filter = new JpqlFilter()
                 .eq(CHANNEL_TYPE, channel)
                 .eq("agent.id", agentId)
                 .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
-                .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null);
+                .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null)
+                .eq("starred", starred)
+                .eq("pinned", pinned);
 
         // JCLAW-304: when q is non-blank, resolve it against the
         // CONVERSATION_MESSAGE Lucene scope, derive the distinct set of
@@ -506,11 +522,13 @@ public class ApiConversationsController extends Controller {
      * <p>Two body shapes:
      * <ul>
      *   <li>{@code {"ids": [1, 2, 3]}} — delete the listed ids.</li>
-     *   <li>{@code {"filter": {"channel": "...", "agentId": ..., "name": "...", "peer": "..."}}}
-     *       — delete every row matching the filter, using the same predicates
-     *       as the listing endpoint. Each filter field is optional; an empty
-     *       filter object matches every conversation, mirroring the no-filter
-     *       semantic of GET /api/conversations.</li>
+     *   <li>{@code {"filter": {"channel": "...", "agentId": ..., "name": "...",
+     *       "peer": "...", "starred": true}}} — delete every row matching the
+     *       filter, using the same predicates as the listing endpoint. Each
+     *       filter field is optional; an empty filter object matches every
+     *       conversation the list would show, mirroring the no-filter semantic
+     *       of GET /api/conversations. Pinned conversations are never in scope
+     *       (see {@link ConversationService#deleteByFilter}).</li>
      * </ul>
      *
      * <p>Rejects with 400 when neither shape is present — guards against an
@@ -546,7 +564,8 @@ public class ApiConversationsController extends Controller {
             Long agentId = longField(f, "agentId");
             String name = stringField(f, "name");
             String peer = stringField(f, "peer");
-            int deleted = ConversationService.deleteByFilter(channel, agentId, name, peer);
+            Boolean starred = booleanField(f, "starred");
+            int deleted = ConversationService.deleteByFilter(channel, agentId, name, peer, starred);
             renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
             return;
         }
@@ -558,6 +577,11 @@ public class ApiConversationsController extends Controller {
         if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
         var s = obj.get(key).getAsString();
         return (s == null || s.isBlank()) ? null : s;
+    }
+
+    private static @Nullable Boolean booleanField(JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
+        return obj.get(key).getAsBoolean();
     }
 
     private static @Nullable Long longField(JsonObject obj, String key) {
@@ -650,7 +674,106 @@ public class ApiConversationsController extends Controller {
         renderJSON(gson.toJson(new StatusResponse("cleared")));
     }
 
+    /**
+     * PUT /api/conversations/{id}/name
+     *
+     * <p>Body: {@code {"name": "Invoice thread"}}. Writes {@link models.Conversation#preview}
+     * itself, so the new name reaches the chat header, the command palette and the
+     * detail page as well as the list — every surface already reads that field.
+     *
+     * <p>A blank name or one over the column's 100-character cap is a 400 rather
+     * than a truncation, so what is stored is never quietly different from what
+     * the operator typed.
+     */
+    @SuppressWarnings("java:S2259")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = RenameRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = NameResponse.class)))
+    @Operation(summary = "Rename a conversation; the name is non-blank and at most 100 characters")
+    public static void renameConversation(Long id) {
+        Conversation conversation = ConversationService.findById(id);
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+
+        var body = JsonBodyReader.readJsonBody();
+        var name = body == null ? null : stringField(body, "name");
+        if (name == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "A non-blank 'name' is required.");
+            return;
+        }
+        var trimmed = name.trim();
+        if (trimmed.length() > MAX_NAME_LENGTH) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "Name must be at most " + MAX_NAME_LENGTH + " characters.");
+            return;
+        }
+
+        ConversationService.rename(conversation, trimmed);
+        renderJSON(gson.toJson(new NameResponse(trimmed)));
+    }
+
+    /**
+     * PUT /api/conversations/{id}/star — mark the conversation a favorite.
+     * Idempotent; the list's {@code starred=true} filter reads the same column.
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Star a conversation (idempotent)")
+    public static void starConversation(Long id) {
+        ConversationService.setStarred(requireConversation(id), true);
+        renderJSON(gson.toJson(new StatusResponse("starred")));
+    }
+
+    /** DELETE /api/conversations/{id}/star — clear the favorite marker. Idempotent. */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Unstar a conversation (idempotent)")
+    public static void unstarConversation(Long id) {
+        ConversationService.setStarred(requireConversation(id), false);
+        renderJSON(gson.toJson(new StatusResponse("unstarred")));
+    }
+
+    /**
+     * PUT /api/conversations/{id}/pin — move the conversation into the pinned
+     * section above the list. Idempotent, but 409s once
+     * {@link ConversationService#MAX_PINNED} are already pinned: the alternative
+     * (evicting the oldest pin) would silently undo an operator's choice.
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @ApiResponse(responseCode = "409", description = "The pinned-conversation cap is already reached")
+    @Operation(summary = "Pin a conversation, up to a cap of 10 (idempotent below the cap)")
+    public static void pinConversation(Long id) {
+        if (!ConversationService.pin(requireConversation(id))) {
+            ApiResponses.error(409, ApiResponses.CONFLICT,
+                    "At most " + ConversationService.MAX_PINNED
+                            + " conversations can be pinned. Unpin one first.");
+            return;
+        }
+        renderJSON(gson.toJson(new StatusResponse("pinned")));
+    }
+
+    /** DELETE /api/conversations/{id}/pin — return the conversation to the list. Idempotent. */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Unpin a conversation (idempotent)")
+    public static void unpinConversation(Long id) {
+        ConversationService.unpin(requireConversation(id));
+        renderJSON(gson.toJson(new StatusResponse("unpinned")));
+    }
+
     // --- Helpers ---
+
+    /** Load the addressed conversation or end the request with a 404. */
+    private static Conversation requireConversation(Long id) {
+        Conversation conversation = ConversationService.findById(id);
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        return conversation;
+    }
 
     private static void setPaginationHeaders(long total) {
         response.setHeader("X-Total-Count", String.valueOf(total));
@@ -699,6 +822,8 @@ public class ApiConversationsController extends Controller {
         map.put("updatedAt", c.updatedAt.toString());
         map.put("messageCount", c.messageCount);
         map.put("preview", c.preview != null ? c.preview : "");
+        map.put("starred", c.starred);
+        map.put("pinned", c.pinned);
         // JCLAW-108: expose override fields so the chat UI's model
         // dropdown can reflect the effective model for the open
         // conversation, and so the cost aggregator's per-turn attribution

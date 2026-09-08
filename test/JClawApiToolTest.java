@@ -358,6 +358,8 @@ class JClawApiToolTest extends UnitTest {
             DELETE /api/attachments/{uuid}
             DELETE /api/channels/whatsapp/bindings/{id}
             DELETE /api/conversations/{id}/model-override
+            DELETE /api/conversations/{id}/pin
+            DELETE /api/conversations/{id}/star
             DELETE /api/logging/levels/{logger}
             DELETE /api/mcp-servers/{id}
             DELETE /api/metrics/compression
@@ -497,6 +499,9 @@ class JClawApiToolTest extends UnitTest {
             PUT /api/agents/{id}
             PUT /api/channels/whatsapp/bindings/{id}
             PUT /api/conversations/{id}/model-override
+            PUT /api/conversations/{id}/name
+            PUT /api/conversations/{id}/pin
+            PUT /api/conversations/{id}/star
             PUT /api/mcp-servers/{id}
             PUT /api/printers/default
             PUT /api/prompts/{id}

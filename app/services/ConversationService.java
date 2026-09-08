@@ -19,6 +19,9 @@ import java.util.function.Supplier;
 
 public class ConversationService {
 
+    /** Ceiling on simultaneously-pinned conversations. See {@link #pin}. */
+    public static final int MAX_PINNED = 10;
+
     private ConversationService() {}
 
     /**
@@ -114,6 +117,54 @@ public class ConversationService {
         conversation.modelProviderOverride = null;
         conversation.modelIdOverride = null;
         conversation.save();
+    }
+
+    /**
+     * Overwrite the conversation's display name. Writes {@link Conversation#preview}
+     * itself rather than a parallel title column, so the rename reaches every
+     * surface that already reads it — the list, the chat header, the command
+     * palette, the detail page — with no per-surface fallback.
+     *
+     * <p>{@code name} must be non-blank and within the column's 100-character
+     * cap; the caller validates both, because a silent truncate here would hide
+     * the mismatch from the operator who typed it.
+     */
+    public static void rename(Conversation conversation, String name) {
+        conversation.preview = name;
+        conversation.save();
+    }
+
+    /** Set or clear the favorite marker. Idempotent. */
+    public static void setStarred(Conversation conversation, boolean starred) {
+        conversation.starred = starred;
+        conversation.save();
+    }
+
+    /**
+     * Pin the conversation, refusing once {@link #MAX_PINNED} are already pinned.
+     * Refusing rather than evicting the oldest pin: silently unpinning something
+     * the operator chose is the more surprising of the two failures.
+     *
+     * @return false when the cap is already reached and this conversation is not
+     *         itself pinned; true when the pin landed (including a no-op re-pin)
+     */
+    public static boolean pin(Conversation conversation) {
+        if (conversation.pinned) return true;
+        if (countPinned() >= MAX_PINNED) return false;
+        conversation.pinned = true;
+        conversation.save();
+        return true;
+    }
+
+    /** Unpin the conversation. Idempotent. */
+    public static void unpin(Conversation conversation) {
+        conversation.pinned = false;
+        conversation.save();
+    }
+
+    /** Number of pinned top-level conversations, i.e. what {@link #MAX_PINNED} caps. */
+    public static long countPinned() {
+        return Conversation.count("pinned = true AND parentConversation IS NULL");
     }
 
     public static Conversation create(@Nullable Agent agent, String channelType, String peerId) {
@@ -544,10 +595,10 @@ public class ConversationService {
     /**
      * Resolve every conversation id matching the given filter (same predicates
      * the listing endpoint accepts), then delegate to {@link #deleteByIds} so
-     * the cascade ordering and FK handling stay in one place. Any of
-     * {@code channel}, {@code agentId}, {@code name}, {@code peer} may be
-     * {@code null}/blank to mean "no constraint on this field"; passing all
-     * four as null/blank deletes every conversation in the table.
+     * the cascade ordering and FK handling stay in one place. Every filter
+     * argument may be {@code null}/blank to mean "no constraint on this
+     * field"; passing them all as null deletes every conversation the list
+     * endpoint would show.
      *
      * <p>Two-step (resolve ids, then delete) rather than a single
      * filtered-DELETE because the cascade has to delete attachments and
@@ -560,27 +611,29 @@ public class ConversationService {
      *                 preview, or null/blank for any preview
      * @param peer     case-insensitive substring of the peer id, or
      *                 null/blank for any peer
+     * @param starred  {@code TRUE} to delete only starred conversations, or
+     *                 null for any
      * @return the number of conversations deleted
      */
     public static int deleteByFilter(@Nullable String channel, @Nullable Long agentId,
-                                     @Nullable String name, @Nullable String peer) {
+                                     @Nullable String name, @Nullable String peer,
+                                     @Nullable Boolean starred) {
         var filter = new JpqlFilter()
                 .eq("channelType", channel)
                 .eq("agent.id", agentId)
                 .like("LOWER(preview)", name != null && !name.isBlank() ? "%" + name.toLowerCase() + "%" : null)
-                .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null);
+                .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null)
+                .eq("starred", starred);
 
-        // Bulk-delete must mirror the listing endpoint's exclusion of
-        // subagent children (parentConversation != null). Without this,
-        // the /conversations page's "Delete all" would silently nuke the
-        // subagent transcripts too — invisible to the operator and
-        // potentially destructive to a still-RUNNING subagent's audit row
-        // foreign keys. Per-id deletes (deleteByIds) are still allowed
-        // because those are explicit, scoped operator actions.
+        // Bulk-delete must mirror the listing endpoint's two exclusions, or
+        // "Delete all N matching" destroys rows the operator never counted:
+        // subagent children (invisible in the list, and their FKs back a
+        // possibly-RUNNING SubagentRun) and pinned rows (shown in their own
+        // section, outside the paginated set the N came from). Per-id deletes
+        // still reach both — those are explicit, scoped operator actions.
         var dynamicWhere = filter.toWhereClause();
-        var fullWhere = dynamicWhere.isEmpty()
-                ? "c.parentConversation IS NULL"
-                : "c.parentConversation IS NULL AND " + dynamicWhere;
+        var baseWhere = "c.parentConversation IS NULL AND c.pinned = false";
+        var fullWhere = dynamicWhere.isEmpty() ? baseWhere : baseWhere + " AND " + dynamicWhere;
         String jpql = "SELECT c.id FROM Conversation c WHERE " + fullWhere;
         var q = JPA.em().createQuery(jpql, Long.class);
         var params = filter.paramList();

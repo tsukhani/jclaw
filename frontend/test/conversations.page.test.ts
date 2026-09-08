@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { getQuery, readBody, type H3Event } from 'h3'
 import Conversations from '~/pages/conversations/index.vue'
 
 /**
@@ -25,6 +26,32 @@ const { navigateToMock } = vi.hoisted(() => ({
   navigateToMock: vi.fn().mockResolvedValue(undefined),
 }))
 
+/**
+ * The page asks /api/conversations twice — pinned=false for the paginated list,
+ * pinned=true for the section above it. registerEndpoint matches on path alone,
+ * so a handler that ignores the query serves both and every row renders twice.
+ */
+function listHandler(rows: unknown[], pinned: unknown[] = []) {
+  return (event: H3Event) => (getQuery(event).pinned === 'true' ? pinned : rows)
+}
+
+function conversationRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 101,
+    agentId: 1,
+    agentName: 'main',
+    channelType: 'web',
+    peerId: 'admin',
+    messageCount: 2,
+    preview: 'Hi',
+    starred: false,
+    pinned: false,
+    createdAt: '2026-04-29T10:45:22Z',
+    updatedAt: '2026-04-29T10:45:59Z',
+    ...overrides,
+  }
+}
+
 mockNuxtImport('navigateTo', () => navigateToMock)
 
 beforeEach(() => {
@@ -32,7 +59,7 @@ beforeEach(() => {
 })
 
 function setupTwoConversations() {
-  registerEndpoint('/api/conversations', () => [
+  registerEndpoint('/api/conversations', listHandler([
     {
       id: 101,
       agentId: 1,
@@ -55,7 +82,7 @@ function setupTwoConversations() {
       createdAt: '2026-04-29T10:45:00Z',
       updatedAt: '2026-04-29T10:45:22Z',
     },
-  ])
+  ]))
 }
 
 describe('Conversations page — row + icon navigation', () => {
@@ -126,7 +153,7 @@ describe('Conversations page — list/pagination/filter init', () => {
     // renders one placeholder row when the data array is empty, so we
     // assert "no rows with a data-id attribute" rather than zero total
     // rows — the placeholder is intentionally a tr without that hook.
-    registerEndpoint('/api/conversations', () => [])
+    registerEndpoint('/api/conversations', listHandler([]))
     const component = await mountSuspended(Conversations)
     await flushPromises()
     // Mount succeeded — page shell is up. The interesting branch (load
@@ -145,6 +172,7 @@ describe('Conversations page — list/pagination/filter init', () => {
     // absence in subsequent tests. Here we just sanity-check the mount
     // doesn't crash on a header-bearing response shape.
     registerEndpoint('/api/conversations', (event) => {
+      if (getQuery(event).pinned === 'true') return []
       event.node.res.setHeader('x-total-count', '42')
       return [
         {
@@ -182,7 +210,7 @@ describe('Conversations page — list/pagination/filter init', () => {
     // Exercises the row render loop over differing channelType values —
     // covers branches in the channel-badge / icon resolution that the
     // homogeneous web-only fixture in setupTwoConversations skips.
-    registerEndpoint('/api/conversations', () => [
+    registerEndpoint('/api/conversations', listHandler([
       {
         id: 301, agentId: 1, agentName: 'main', channelType: 'web', peerId: 'web-user',
         messageCount: 3, preview: 'web msg',
@@ -198,7 +226,7 @@ describe('Conversations page — list/pagination/filter init', () => {
         messageCount: 2, preview: 'slack msg',
         createdAt: '2026-05-02T10:02:00Z', updatedAt: '2026-05-02T10:02:00Z',
       },
-    ])
+    ]))
     const component = await mountSuspended(Conversations)
     await flushPromises()
     const rows = component.findAll('tbody tr')
@@ -209,7 +237,7 @@ describe('Conversations page — list/pagination/filter init', () => {
     // The DataTable maps each conversation's preview into a cell. With
     // distinct previews we should see both verbatim in the DOM — this
     // pins the rowFormatter contract.
-    registerEndpoint('/api/conversations', () => [
+    registerEndpoint('/api/conversations', listHandler([
       {
         id: 401, agentId: 1, agentName: 'main', channelType: 'web', peerId: 'admin',
         messageCount: 1, preview: 'first-preview-marker',
@@ -220,11 +248,158 @@ describe('Conversations page — list/pagination/filter init', () => {
         messageCount: 1, preview: 'second-preview-marker',
         createdAt: '2026-05-04T10:01:00Z', updatedAt: '2026-05-04T10:01:00Z',
       },
-    ])
+    ]))
     const component = await mountSuspended(Conversations)
     await flushPromises()
     const html = component.html()
     expect(html).toContain('first-preview-marker')
     expect(html).toContain('second-preview-marker')
+  })
+})
+
+/**
+ * Star, pin and rename are row actions with three observable halves: the
+ * request the click sends, the section a row lands in, and what the page does
+ * when the server refuses. Each case pins one of those.
+ */
+describe('Conversations page — star, pin and rename', () => {
+  it('renders pinned rows in their own section and out of the paginated list', async () => {
+    registerEndpoint('/api/conversations', listHandler(
+      [conversationRow({ id: 102, preview: 'ordinary-row' })],
+      [conversationRow({ id: 101, preview: 'pinned-row', pinned: true })],
+    ))
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+
+    const html = component.html()
+    expect(html).toContain('Pinned')
+    expect(html).toContain('1 of 10')
+    // Two tables, one row each — a pinned row must never also appear below.
+    expect(component.findAll('tbody tr').length).toBe(2)
+    expect(html.match(/pinned-row/g)?.length).toBe(2) // cell text + its title attribute
+  })
+
+  it('star toggle PUTs for an unstarred row and DELETEs for a starred one', async () => {
+    const methods: string[] = []
+    registerEndpoint('/api/conversations', listHandler([
+      conversationRow({ id: 101, starred: false }),
+      conversationRow({ id: 102, starred: true }),
+    ]))
+    for (const id of [101, 102]) {
+      registerEndpoint(`/api/conversations/${id}/star`, {
+        method: 'PUT',
+        handler: () => {
+          methods.push(`PUT:${id}`)
+          return { status: 'starred' }
+        },
+      })
+      registerEndpoint(`/api/conversations/${id}/star`, {
+        method: 'DELETE',
+        handler: () => {
+          methods.push(`DELETE:${id}`)
+          return { status: 'unstarred' }
+        },
+      })
+    }
+
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+
+    const stars = component.findAll('[data-testid="star-toggle"]')
+    expect(stars.length).toBe(2)
+    // aria-pressed carries the current state, so a screen reader announces the
+    // toggle rather than an unlabelled button.
+    expect(stars[0]!.attributes('aria-pressed')).toBe('false')
+    expect(stars[1]!.attributes('aria-pressed')).toBe('true')
+
+    await stars[0]!.trigger('click')
+    await flushPromises()
+    await stars[1]!.trigger('click')
+    await flushPromises()
+
+    expect(methods).toEqual(['PUT:101', 'DELETE:102'])
+    // The star sits inside the row, so its handler has to stop propagation or
+    // starring would also navigate to /chat.
+    expect(navigateToMock).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the pin cap 409 message instead of failing silently', async () => {
+    registerEndpoint('/api/conversations', listHandler([conversationRow({ id: 101 })]))
+    registerEndpoint('/api/conversations/101/pin', {
+      method: 'PUT',
+      handler: (event) => {
+        event.node.res.statusCode = 409
+        return { error: 'conflict', message: 'At most 10 conversations can be pinned. Unpin one first.' }
+      },
+    })
+
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+
+    await component.find('[data-testid="pin-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(component.html()).toContain('At most 10 conversations can be pinned')
+  })
+
+  it('rename commits the trimmed name on Enter', async () => {
+    let sent: unknown = null
+    registerEndpoint('/api/conversations', listHandler([conversationRow({ id: 101, preview: 'Hi' })]))
+    registerEndpoint('/api/conversations/101/name', {
+      method: 'PUT',
+      handler: async (event) => {
+        sent = await readBody(event)
+        return { name: 'Invoice thread' }
+      },
+    })
+
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+
+    await component.find('[data-testid="rename-button"]').trigger('click')
+    await flushPromises()
+
+    const input = component.find('[data-testid="rename-input"]')
+    expect(input.exists()).toBe(true)
+    const field = input.element as HTMLInputElement
+    expect(field.value).toBe('Hi')
+    // maxlength mirrors the column cap, so the input can't compose a name the
+    // server would reject.
+    expect(input.attributes('maxlength')).toBe('100')
+
+    field.value = '  Invoice thread  '
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(sent).toEqual({ name: 'Invoice thread' })
+  })
+
+  it('Escape leaves the rename without sending a request', async () => {
+    let calls = 0
+    registerEndpoint('/api/conversations', listHandler([conversationRow({ id: 101, preview: 'Hi' })]))
+    registerEndpoint('/api/conversations/101/name', {
+      method: 'PUT',
+      handler: () => {
+        calls += 1
+        return { name: 'x' }
+      },
+    })
+
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+
+    await component.find('[data-testid="rename-button"]').trigger('click')
+    await flushPromises()
+    const input = component.find('[data-testid="rename-input"]')
+    const field = input.element as HTMLInputElement
+    field.value = 'discarded'
+    await input.trigger('keydown', { key: 'Escape' })
+    // Escape unmounts the input, and removing a focused element fires blur —
+    // the commit guard is what keeps that from sending the discarded draft.
+    await input.trigger('blur')
+    await flushPromises()
+
+    expect(calls).toBe(0)
+    expect(component.find('[data-testid="rename-input"]').exists()).toBe(false)
   })
 })

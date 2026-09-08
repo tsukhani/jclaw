@@ -324,7 +324,7 @@ class ApiConversationsControllerTest extends FunctionalTest {
         // listing/filter exclusion drops the child). Returned count is
         // the number of top-level rows the filter resolved to — 1.
         Integer deletedCount = commitInFreshTx(() ->
-                ConversationService.deleteByFilter(null, null, null, "delete-filter-test"));
+                ConversationService.deleteByFilter(null, null, null, "delete-filter-test", null));
         assertEquals(Integer.valueOf(1), deletedCount,
                 "expected deletedCount=1 (parent only — child not directly matched by filter)");
 

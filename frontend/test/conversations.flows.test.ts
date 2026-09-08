@@ -58,9 +58,19 @@ function convo(over: Record<string, unknown> = {}) {
 }
 
 let listRows: unknown[] = []
+let pinnedRows: unknown[] = []
 let totalCount = 0
 let capturedQueries: Record<string, unknown>[] = []
 let deleteBody: Record<string, unknown> | null = null
+
+/**
+ * The page fetches the paginated list (pinned=false) and the pinned section
+ * (pinned=true) from the same path, so the capture array interleaves both.
+ * Only the former carries the pagination and sort the assertions read.
+ */
+function lastListQuery(): Record<string, unknown> {
+  return capturedQueries.filter(q => q.pinned !== 'true').at(-1)!
+}
 
 registerEndpoint('/api/agents', () => [
   { id: 1, name: 'main', enabled: true, isMain: true, modelProvider: 'openai', modelId: 'gpt-4.1' },
@@ -70,7 +80,9 @@ registerEndpoint('/api/conversations', {
   method: 'GET',
   handler: async (event) => {
     const { getQuery } = await import('h3')
-    capturedQueries.push({ ...getQuery(event) })
+    const query = { ...getQuery(event) }
+    capturedQueries.push(query)
+    if (query.pinned === 'true') return pinnedRows
     event.node.res.setHeader('x-total-count', String(totalCount))
     return listRows
   },
@@ -94,6 +106,7 @@ beforeEach(() => {
   localStorage.clear() // FilterBar saved views persist per storage key
   navigateToMock.mockClear()
   listRows = [convo(), convo({ id: 102, preview: 'Second one', peerId: 'bob' })]
+  pinnedRows = []
   totalCount = 2
   capturedQueries = []
   deleteBody = null
@@ -123,7 +136,7 @@ describe('Conversations — filter commit drives load() params', () => {
     await commitFilter(component, 'q:morning channel:web agent:main peer:bob')
     expect(capturedQueries.length).toBeGreaterThan(initialLoads)
 
-    const q = capturedQueries.at(-1)!
+    const q = lastListQuery()
     expect(q.q).toBe('morning')
     expect(q.channel).toBe('web')
     expect(q.agentId).toBe('1') // 'main' resolved case-insensitively to id 1
@@ -138,7 +151,7 @@ describe('Conversations — filter commit drives load() params', () => {
 
     await commitFilter(component, 'agent:ghost')
 
-    const q = capturedQueries.at(-1)!
+    const q = lastListQuery()
     expect(q.agentId).toBeUndefined()
     expect(q.offset).toBe('0')
   })
@@ -156,7 +169,7 @@ describe('Conversations — pagination', () => {
     expect(component.text()).toContain('Page 1 of 3')
 
     await component.findAll('button').find(b => b.text() === 'Next')!.trigger('click')
-    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('20'))
+    await vi.waitFor(() => expect(lastListQuery().offset).toBe('20'))
     expect(component.text()).toContain('Page 2 of 3')
 
     // The async list stub resolves a beat after the offset capture, and both
@@ -165,7 +178,7 @@ describe('Conversations — pagination', () => {
     const prevBtn = component.findAll('button').find(b => b.text() === 'Prev')!
     await vi.waitFor(() => expect(prevBtn.attributes('disabled')).toBeUndefined())
     await prevBtn.trigger('click')
-    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('0'))
+    await vi.waitFor(() => expect(lastListQuery().offset).toBe('0'))
     expect(component.text()).toContain('Page 1 of 3')
   })
 })
@@ -301,6 +314,46 @@ describe('Conversations — delete all with filter scope', () => {
   })
 })
 
+describe('Conversations — starred filter scope', () => {
+  it('narrows both lists and carries into the delete-all payload', async () => {
+    const component = await mountSuspended(Harness)
+    await flushPromises()
+    capturedQueries = []
+
+    await commitFilter(component, 'starred:true')
+
+    // A starred filter that reached only the paginated list would leave
+    // unstarred conversations pinned above it, contradicting the chip.
+    const starred = capturedQueries.filter(q => q.starred === 'true')
+    expect(starred.some(q => q.pinned === 'false')).toBe(true)
+    expect(starred.some(q => q.pinned === 'true')).toBe(true)
+
+    // Delete-all quotes the filtered count, so its payload has to carry the
+    // same narrowing or it deletes far more than the dialog said it would.
+    await component.findAll('button').find(b => b.text().startsWith('Delete all'))!.trigger('click')
+    await flushPromises()
+    const gateInput = document.body.querySelector<HTMLInputElement>('[role="dialog"] input[type="text"]')
+    gateInput!.value = 'delete'
+    gateInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+      .find(b => (b.textContent ?? '').trim() === 'Delete 2')!.click()
+    await vi.waitFor(() => expect(deleteBody).not.toBeNull())
+
+    expect(deleteBody!.filter).toEqual({ starred: true })
+  })
+
+  it('reads starred:false as the unstarred set rather than as truthy', async () => {
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+    capturedQueries = []
+
+    await commitFilter(component, 'starred:false')
+
+    expect(lastListQuery().starred).toBe('false')
+  })
+})
+
 describe('Conversations — server-side sort', () => {
   it('clicking a column header refetches with sort/dir params (manual sorting)', async () => {
     const component = await mountSuspended(Conversations)
@@ -311,16 +364,16 @@ describe('Conversations — server-side sort', () => {
     const channelHeader = component.findAll('th').find(th => th.text().includes('Channel'))!
     expect(channelHeader).toBeTruthy()
     await channelHeader.trigger('click')
-    await vi.waitFor(() => expect(capturedQueries.at(-1)!.sort).toBe('channelType'))
-    const firstDir = capturedQueries.at(-1)!.dir
+    await vi.waitFor(() => expect(lastListQuery().sort).toBe('channelType'))
+    const firstDir = lastListQuery().dir
     expect(firstDir).toBeDefined()
 
     // A second click on the same column flips the direction (still server-side).
     await channelHeader.trigger('click')
-    await vi.waitFor(() => expect(capturedQueries.at(-1)!.dir).not.toBe(firstDir))
-    expect(capturedQueries.at(-1)!.sort).toBe('channelType')
+    await vi.waitFor(() => expect(lastListQuery().dir).not.toBe(firstDir))
+    expect(lastListQuery().sort).toBe('channelType')
     // Sort resets to page 1.
-    expect(capturedQueries.at(-1)!.offset).toBe('0')
+    expect(lastListQuery().offset).toBe('0')
   })
 })
 

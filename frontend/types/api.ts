@@ -144,6 +144,13 @@ export interface Conversation {
   messageCount: number
   createdAt: string
   updatedAt: string
+  /** Operator-set favorite marker, filterable from the list's filter bar with
+   *  `starred:true`. Optional for backwards-compat; absent → treat as false. */
+  starred?: boolean
+  /** Operator-set pin. Pinned conversations render in their own section above
+   *  the paginated list, capped at 10. Optional for backwards-compat; absent →
+   *  treat as false. */
+  pinned?: boolean
   /** Conversation-scoped model override (JCLAW-108). Null when the conversation inherits the agent default. */
   modelProviderOverride?: string | null
   /** Companion to modelProviderOverride — see type docs above. */

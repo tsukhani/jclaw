@@ -3,7 +3,8 @@ import type { Agent, Conversation, Message } from '~/types/api'
 import type { Filter } from '~/components/FilterBar.vue'
 import { h } from 'vue'
 import type { ColumnDef, SortingState } from '@tanstack/vue-table'
-import { ChatBubbleLeftRightIcon } from '@heroicons/vue/24/outline'
+import { ChatBubbleLeftRightIcon, PencilSquareIcon, StarIcon as StarOutlineIcon } from '@heroicons/vue/24/outline'
+import { StarIcon as StarSolidIcon } from '@heroicons/vue/24/solid'
 
 const { confirm } = useConfirm()
 
@@ -12,6 +13,21 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
+
+// Pinned conversations live above the paginated list and never inside it — the
+// two loads ask the same endpoint for disjoint halves (pinned=true / false), so
+// "Showing X-Y of N" keeps describing exactly the rows in the table below it.
+// Mirrors ConversationService.MAX_PINNED, which is what the pin PUT enforces.
+const MAX_PINNED = 10
+const pinnedConversations = ref<Conversation[]>([])
+
+// Surfaces the pin cap's 409 (and any other failed row action) as a dismissible
+// line rather than a silent no-op.
+const actionNotice = ref<string | null>(null)
+
+// Id of the row whose Name cell is currently an input. Null = nothing is being
+// renamed; only one row at a time.
+const renamingId = ref<number | null>(null)
 
 // Active filters from FilterBar — maps filter keys to API params
 const activeFilters = ref<Filter[]>([])
@@ -35,40 +51,64 @@ const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
 // matching conversations" is a different mental model from "no
 // conversations at all".
 const hasNoData = computed(() =>
-  !loading.value && total.value === 0 && activeFilters.value.length === 0,
+  !loading.value && total.value === 0 && !pinnedConversations.value.length
+  && activeFilters.value.length === 0,
 )
 
 function getFilterValue(key: string): string {
   return activeFilters.value.find(f => f.key === key)?.value ?? ''
 }
 
+/**
+ * Read a boolean filter chip. FilterBar values are always strings, so
+ * `starred:false` would otherwise read as truthy and silently narrow to the
+ * opposite set. Undefined means the chip is absent — no constraint at all.
+ */
+function getFilterFlag(key: string): boolean | undefined {
+  const raw = getFilterValue(key)
+  if (!raw) return undefined
+  return ['true', '1', 'yes', 'on'].includes(raw.toLowerCase())
+}
+
+/**
+ * The filter + sort half of a list query, shared by the paginated list and the
+ * pinned section so a filter can never apply to one and not the other. Each
+ * caller adds its own paging and its own `pinned` half.
+ */
+function filterParams(): URLSearchParams {
+  const params = new URLSearchParams()
+  const name = getFilterValue('name')
+  const channel = getFilterValue('channel')
+  const agent = getFilterValue('agent')
+  const peer = getFilterValue('peer')
+  // JCLAW-304: q is the new FTS keyword key. Backend intersects the
+  // matching message conversation ids with the other equality filters.
+  const q = getFilterValue('q')
+  if (q) params.set('q', q)
+  if (name) params.set('name', name)
+  if (channel) params.set('channel', channel)
+  if (agent) {
+    // Resolve agent name to ID
+    const a = agentList.value?.find((ag: Agent) => ag.name.toLowerCase() === agent.toLowerCase())
+    if (a) params.set('agentId', String(a.id))
+  }
+  if (peer) params.set('peer', peer)
+  const starred = getFilterFlag('starred')
+  if (starred !== undefined) params.set('starred', String(starred))
+  if (sortState.value.length) {
+    params.set('sort', sortState.value[0]!.id)
+    params.set('dir', sortState.value[0]!.desc ? 'desc' : 'asc')
+  }
+  return params
+}
+
 async function load() {
   loading.value = true
   try {
-    const offset = (page.value - 1) * pageSize
-    const params = new URLSearchParams()
+    const params = filterParams()
     params.set('limit', String(pageSize))
-    params.set('offset', String(offset))
-    const name = getFilterValue('name')
-    const channel = getFilterValue('channel')
-    const agent = getFilterValue('agent')
-    const peer = getFilterValue('peer')
-    // JCLAW-304: q is the new FTS keyword key. Backend intersects the
-    // matching message conversation ids with the other equality filters.
-    const q = getFilterValue('q')
-    if (q) params.set('q', q)
-    if (name) params.set('name', name)
-    if (channel) params.set('channel', channel)
-    if (agent) {
-      // Resolve agent name to ID
-      const a = agentList.value?.find((ag: Agent) => ag.name.toLowerCase() === agent.toLowerCase())
-      if (a) params.set('agentId', String(a.id))
-    }
-    if (peer) params.set('peer', peer)
-    if (sortState.value.length) {
-      params.set('sort', sortState.value[0]!.id)
-      params.set('dir', sortState.value[0]!.desc ? 'desc' : 'asc')
-    }
+    params.set('offset', String((page.value - 1) * pageSize))
+    params.set('pinned', 'false')
     const res = await $fetch.raw<Conversation[]>(`/api/conversations?${params.toString()}`)
     conversations.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
@@ -79,13 +119,36 @@ async function load() {
   }
 }
 
-await load()
+/**
+ * Fetch the pinned section. A pinned row that doesn't match the active filter
+ * isn't in the current result set, so showing it above one would misrepresent
+ * the filter — hence the shared {@link filterParams}.
+ */
+async function loadPinned() {
+  const params = filterParams()
+  params.set('pinned', 'true')
+  params.set('limit', String(MAX_PINNED))
+  try {
+    pinnedConversations.value = await $fetch<Conversation[]>(`/api/conversations?${params.toString()}`) ?? []
+  }
+  catch {
+    // A failed pinned fetch must not blank the page the operator came for.
+    pinnedConversations.value = []
+  }
+}
+
+/** Refetch both halves — every mutation can move a row between them. */
+async function reload() {
+  await Promise.all([load(), loadPinned()])
+}
+
+await reload()
 
 function onFiltersChanged(filters: Filter[]) {
   activeFilters.value = filters
   page.value = 1
   selectedIds.value = new Set()
-  load()
+  reload()
 }
 
 // A header click emits the new sort state; refetch from page 1 with the
@@ -94,13 +157,13 @@ function onSortChange(s: SortingState) {
   sortState.value = s
   page.value = 1
   selectedIds.value = new Set()
-  load()
+  reload()
 }
 
 function exportAllConversations() {
   const csv = [
     ['ID', 'Name', 'Channel', 'Agent', 'Peer', 'Messages', 'Created', 'Updated'].join(','),
-    ...conversations.value.map(c =>
+    ...[...pinnedConversations.value, ...conversations.value].map(c =>
       [c.id, `"${(c.preview || '').replaceAll('"', '""')}"`, c.channelType, c.agentName, c.peerId || '', c.messageCount, c.createdAt, c.updatedAt].join(','),
     ),
   ].join('\n')
@@ -187,8 +250,8 @@ const deletingAll = ref(false)
  * (number or undefined) so the description can echo a human-readable name
  * separately.
  */
-function activeFilterPayload(): { channel?: string, agentId?: number, name?: string, peer?: string } {
-  const out: { channel?: string, agentId?: number, name?: string, peer?: string } = {}
+function activeFilterPayload(): { channel?: string, agentId?: number, name?: string, peer?: string, starred?: boolean } {
+  const out: { channel?: string, agentId?: number, name?: string, peer?: string, starred?: boolean } = {}
   const name = getFilterValue('name')
   const channel = getFilterValue('channel')
   const agent = getFilterValue('agent')
@@ -196,6 +259,8 @@ function activeFilterPayload(): { channel?: string, agentId?: number, name?: str
   if (name) out.name = name
   if (channel) out.channel = channel
   if (peer) out.peer = peer
+  const starred = getFilterFlag('starred')
+  if (starred !== undefined) out.starred = starred
   if (agent) {
     const a = agentList.value?.find((ag: Agent) => ag.name.toLowerCase() === agent.toLowerCase())
     if (a) out.agentId = a.id
@@ -242,6 +307,66 @@ async function deleteAll() {
   }
 }
 
+/**
+ * Star, pin and rename all move a row between the pinned section, the current
+ * page and the filtered-out set, so each one refetches both halves rather than
+ * patching the row in place.
+ */
+async function toggleStar(convo: Conversation) {
+  actionNotice.value = null
+  try {
+    await $fetch(`/api/conversations/${convo.id}/star`, { method: convo.starred ? 'DELETE' : 'PUT' })
+    await reload()
+  }
+  catch (e) {
+    console.error('Failed to update star:', e)
+    actionNotice.value = 'Could not update the star on that conversation.'
+  }
+}
+
+async function togglePin(convo: Conversation) {
+  actionNotice.value = null
+  try {
+    await $fetch(`/api/conversations/${convo.id}/pin`, { method: convo.pinned ? 'DELETE' : 'PUT' })
+    selectedIds.value = new Set()
+    await reload()
+  }
+  catch (e) {
+    // The pin PUT 409s at the cap; the server's message names the limit.
+    const message = (e as { data?: { message?: string } })?.data?.message
+    actionNotice.value = message ?? 'Could not update the pin on that conversation.'
+  }
+}
+
+function startRename(convo: Conversation) {
+  actionNotice.value = null
+  renamingId.value = convo.id
+}
+
+function cancelRename() {
+  renamingId.value = null
+}
+
+/**
+ * Commit an inline rename. Called from both Enter and blur, and blur fires
+ * again as the input unmounts — the renamingId guard is what keeps that from
+ * sending the PUT twice.
+ */
+async function commitRename(convo: Conversation, value: string) {
+  if (renamingId.value !== convo.id) return
+  renamingId.value = null
+  const name = value.trim()
+  if (!name || name === (convo.preview ?? '')) return
+  try {
+    await $fetch(`/api/conversations/${convo.id}/name`, { method: 'PUT', body: { name } })
+    await reload()
+  }
+  catch (e) {
+    console.error('Failed to rename conversation:', e)
+    actionNotice.value = 'Could not rename that conversation.'
+  }
+}
+
 const peekOpen = ref(false)
 
 async function selectConversation(convo: Conversation) {
@@ -285,12 +410,58 @@ const columns: ColumnDef<Conversation, unknown>[] = [
     header: 'Name',
     cell: ({ row, getValue }) => {
       const v = getValue() as string | null
+      const convo = row.original
+      // Renaming swaps the whole cell for an input. The draft is never bound
+      // back into a ref: reading it off the event at commit time keeps the cell
+      // from re-rendering on every keystroke, which would drop the caret.
+      if (renamingId.value === convo.id) {
+        return h('input', {
+          'type': 'text',
+          'value': v ?? '',
+          'maxlength': 100,
+          'aria-label': 'Conversation name',
+          'data-testid': 'rename-input',
+          'class': 'w-full max-w-xs bg-surface-elevated border border-ring px-1.5 py-0.5 text-sm text-fg-strong focus:outline-hidden',
+          'onVnodeMounted': ({ el }) => {
+            const input = el as HTMLInputElement
+            input.focus()
+            input.select()
+          },
+          'onClick': (e: Event) => e.stopPropagation(),
+          'onKeydown': (e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commitRename(convo, (e.target as HTMLInputElement).value)
+            }
+            else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancelRename()
+            }
+          },
+          'onBlur': (e: FocusEvent) => commitRename(convo, (e.target as HTMLInputElement).value),
+        })
+      }
+      const starred = convo.starred === true
       // JCLAW-267: session-mode subagent conversations carry a
       // parentConversationId — render an inline "subagent" pill alongside
       // the preview so operators can distinguish delegated runs from
       // user-initiated chats at a glance. Top-level rows have no badge.
-      const parentId = row.original.parentConversationId
+      const parentId = convo.parentConversationId
       const children = [
+        h('button', {
+          'type': 'button',
+          'class': starred
+            ? 'shrink-0 text-amber-500 hover:text-amber-400 transition-colors'
+            : 'shrink-0 text-fg-muted hover:text-amber-500 transition-colors',
+          'title': starred ? 'Unstar' : 'Star',
+          'aria-label': starred ? 'Unstar this conversation' : 'Star this conversation',
+          'aria-pressed': starred,
+          'data-testid': 'star-toggle',
+          'onClick': (e: Event) => {
+            e.stopPropagation()
+            toggleStar(convo)
+          },
+        }, [h(starred ? StarSolidIcon : StarOutlineIcon, { class: 'w-4 h-4' })]),
         v
           ? h('span', { class: 'text-fg-primary truncate max-w-xs block', title: v }, v)
           : h('span', { class: 'text-fg-muted' }, '—'),
@@ -335,8 +506,49 @@ const columns: ColumnDef<Conversation, unknown>[] = [
     id: 'actions',
     header: 'Actions',
     enableSorting: false,
-    size: 96,
+    size: 148,
     cell: ({ row }) => h('div', { class: 'flex items-center justify-end gap-1' }, [
+      h('button', {
+        'type': 'button',
+        'class': 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
+        'title': 'Rename',
+        'aria-label': 'Rename this conversation',
+        'data-testid': 'rename-button',
+        'onClick': (e: Event) => {
+          e.stopPropagation()
+          startRename(row.original)
+        },
+      }, [h(PencilSquareIcon, { class: 'w-4 h-4' })]),
+      h('button', {
+        'type': 'button',
+        'class': row.original.pinned
+          ? 'p-1.5 text-emerald-600 dark:text-emerald-400 transition-colors'
+          : 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
+        'title': row.original.pinned ? 'Unpin' : 'Pin to top',
+        'aria-label': row.original.pinned ? 'Unpin this conversation' : 'Pin this conversation',
+        'aria-pressed': row.original.pinned === true,
+        'data-testid': 'pin-toggle',
+        'onClick': (e: Event) => {
+          e.stopPropagation()
+          togglePin(row.original)
+        },
+      }, [
+        h('svg', {
+          class: 'w-4 h-4',
+          fill: row.original.pinned ? 'currentColor' : 'none',
+          stroke: 'currentColor',
+          viewBox: '0 0 24 24',
+        }, [
+          // Hand-rolled pushpin: Heroicons v2 ships no pin glyph, and MapPin
+          // reads as a location marker rather than "keep this at the top".
+          h('path', {
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+            'stroke-width': '1.5',
+            'd': 'M9 3h6v6l3 3v2h-5v5l-1 3-1-3v-5H6v-2l3-3V3Z',
+          }),
+        ]),
+      ]),
       h('button', {
         type: 'button',
         class: 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
@@ -391,6 +603,11 @@ const columns: ColumnDef<Conversation, unknown>[] = [
     ]),
   },
 ]
+
+// The pinned section is a second table, so it drops the select column: bulk
+// delete operates on the paginated list, and "Delete all matching" skips pinned
+// rows server-side. Unpinning a conversation returns it to the selectable list.
+const pinnedColumns = columns.filter(c => c.id !== 'select')
 </script>
 
 <template>
@@ -464,15 +681,61 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       <div class="mb-3">
         <FilterBar
           storage-key="conversations"
-          placeholder="Filter... (e.g., q:morning agent:main channel:web)"
-          :filter-keys="['q', 'name', 'channel', 'agent', 'peer']"
+          placeholder="Filter... (e.g., q:morning agent:main starred:true)"
+          :filter-keys="['q', 'name', 'channel', 'agent', 'peer', 'starred']"
           @update:filters="onFiltersChanged"
           @export="exportAllConversations"
         />
       </div>
 
+      <!-- Row-action failures (most often the pin cap's 409) surface here
+           rather than as a console-only error the operator never sees. -->
+      <div
+        v-if="actionNotice"
+        class="mb-3 flex items-center justify-between gap-3 border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300"
+        role="status"
+      >
+        <span>{{ actionNotice }}</span>
+        <button
+          type="button"
+          class="text-amber-800/70 hover:text-amber-800 dark:text-amber-300/70 dark:hover:text-amber-300"
+          aria-label="Dismiss notice"
+          @click="actionNotice = null"
+        >
+          ×
+        </button>
+      </div>
+
+      <!-- Pinned section. Its own table rather than a leading group inside the
+           main one: the rows come from a separate request, so they're outside
+           the paginated set and must not affect its "Showing X-Y of N". -->
+      <section
+        v-if="pinnedConversations.length"
+        class="mb-4 bg-surface-elevated border border-border"
+      >
+        <div class="flex items-center justify-between px-4 py-2 border-b border-border">
+          <h2 class="text-xs font-medium uppercase tracking-wide text-fg-muted">
+            Pinned
+          </h2>
+          <span class="text-xs text-fg-muted">{{ pinnedConversations.length }} of {{ MAX_PINNED }}</span>
+        </div>
+        <DataTable
+          :columns="pinnedColumns"
+          :data="pinnedConversations"
+          @row-click="(c: Conversation) => navigateTo(`/chat?conversation=${c.id}`)"
+        />
+      </section>
+
       <!-- List view -->
       <div class="bg-surface-elevated border border-border">
+        <div
+          v-if="pinnedConversations.length"
+          class="px-4 py-2 border-b border-border"
+        >
+          <h2 class="text-xs font-medium uppercase tracking-wide text-fg-muted">
+            All conversations
+          </h2>
+        </div>
         <DataTable
           :columns="columns"
           :data="conversations"

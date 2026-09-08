@@ -237,6 +237,11 @@ DELETE  /api/conversations/{id}                 ApiConversationsController.delet
 DELETE  /api/conversations                      ApiConversationsController.deleteConversations
 PUT     /api/conversations/{id}/model-override  ApiConversationsController.setModelOverride
 DELETE  /api/conversations/{id}/model-override  ApiConversationsController.clearModelOverride
+PUT     /api/conversations/{id}/name            ApiConversationsController.renameConversation
+PUT     /api/conversations/{id}/star            ApiConversationsController.starConversation
+DELETE  /api/conversations/{id}/star            ApiConversationsController.unstarConversation
+PUT     /api/conversations/{id}/pin             ApiConversationsController.pinConversation
+DELETE  /api/conversations/{id}/pin             ApiConversationsController.unpinConversation
 
 # Channels API
 GET     /api/channels                           ApiChannelsController.list

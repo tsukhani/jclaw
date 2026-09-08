@@ -22,6 +22,7 @@ The filter bar at the top of the page accepts free-text keywords and typed keys:
 | `channel:`   | `channel:slack`        | Restrict to one of `web`, `slack`, `telegram`, `whatsapp`.          |
 | `agent:`     | `agent:main-bot`       | Conversations served by a specific agent.                           |
 | `peer:`      | `peer:+15551234567`    | The external user id (Telegram handle, Slack user id, phone number). Blank for web chat. |
+| `starred:`   | `starred:true`         | Only starred conversations. `starred:false` shows only unstarred ones.  |
 
 Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversations from the scrum-bot agent whose messages mention "retro." Clear a filter chip with the **×** on it, or remove the token from the bar.
 
@@ -30,7 +31,7 @@ Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversat
 | Column                | Meaning                                                                              |
 |-----------------------|--------------------------------------------------------------------------------------|
 | **ID**                | The conversation id. Use this when reporting an issue or referencing in a tool call. |
-| **Preview**           | The conversation's first user message (truncated).                                   |
+| **Name**              | The conversation's name — its first user message (truncated) until you rename it.    |
 | **Channel**           | Where it came in from.                                                               |
 | **Agent**             | Which agent answered.                                                                |
 | **Peer**              | External user id (blank for in-app web chat).                                        |
@@ -39,6 +40,16 @@ Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversat
 
 Click any row to open the conversation in [Chat](/chat) (read-only if it came from a subagent run; fully editable if it's your own thread).
 
+### Naming, starring and pinning
+
+Three per-row actions let you organize the archive as it grows:
+
+- **Rename** — the pencil icon turns the name into a text field. Enter saves, Escape discards, and clicking away saves. The new name is at most 100 characters and shows up everywhere the conversation is named: this list, the [Chat](/chat) header, the command palette, and the conversation's own page.
+- **Star** — the star beside the name marks a conversation as a favorite. Starring changes nothing about the thread; it just gives you `starred:true` as a filter, which combines with every other filter key.
+- **Pin** — the pushpin icon lifts a conversation into a **Pinned** section above the list, where it stays regardless of which page of results you're on. Up to **10** conversations can be pinned at once; pinning an eleventh is refused rather than silently unpinning one of the others. Pinned conversations are still filtered by the filter bar — a pinned thread that doesn't match your filter drops out of the section along with everything else.
+
+Starring and pinning are independent: a conversation can be either, both, or neither.
+
 ### Exporting
 
 The **Export all** button downloads the current filtered view as a CSV — useful for audit, sharing, or feeding into another tool.
@@ -46,6 +57,8 @@ The **Export all** button downloads the current filtered view as a CSV — usefu
 ### Deleting
 
 Select one or more rows and use the bulk action menu to delete. Deletion removes the thread and all its messages permanently; there's no undo.
+
+**Delete all matching** skips pinned conversations, the same way it skips subagent transcripts — it deletes exactly the rows the list is showing you a count of. To delete a pinned conversation, unpin it first.
 
 :::gotcha Cascade
 Deleting a conversation cascade-deletes every subagent run spawned from it — both the child transcripts and their audit rows on the [Subagents](/subagents) page. If you want to keep a child transcript, open it from [Subagents](/subagents) and use [Chat](/chat) → **Export as Markdown** *before* deleting the parent.

@@ -100,6 +100,8 @@ export const ConversationSchema = z.object({
   messageCount: z.number(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  starred: z.boolean().optional(),
+  pinned: z.boolean().optional(),
   modelProviderOverride: z.string().nullable().optional(),
   modelIdOverride: z.string().nullable().optional(),
 })
