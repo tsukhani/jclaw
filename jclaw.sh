@@ -3972,6 +3972,9 @@ do_e2e() {
     # Playwright pins a browser build per package version, so an unattended
     # dependency bump leaves the cache behind and the suite cannot launch at
     # all. Idempotent and near-instant once the matching build is present.
+    # Same probe start/test run: pnpm 12 lives in $PNPM_HOME/bin, which a shell
+    # whose rc was never re-sourced cannot see.
+    check_pnpm
     echo "==> Reconciling the Playwright browser build..."
     (cd "$SCRIPT_DIR/frontend" && pnpm exec playwright install chromium) || return 1
 
