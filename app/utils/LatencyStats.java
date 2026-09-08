@@ -6,6 +6,7 @@ import org.HdrHistogram.AtomicHistogram;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import services.LatencyMetricRecorder;
+import services.telemetry.TurnMetrics;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -68,6 +69,7 @@ public final class LatencyStats {
                 .computeIfAbsent(segment, _ -> new Histogram())
                 .record(valueMs);
         LatencyMetricRecorder.enqueue(agentId, resolved, segment, valueMs);
+        TurnMetrics.recordSegment(resolved, segment, valueMs, agentId);
     }
 
     /**

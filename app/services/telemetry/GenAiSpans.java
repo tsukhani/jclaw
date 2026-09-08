@@ -121,13 +121,16 @@ public final class GenAiSpans {
         var built = new Instruments(api,
                 meter.histogramBuilder(GenAiIncubatingMetrics.GEN_AI_CLIENT_TOKEN_USAGE_NAME)
                         .setDescription(GenAiIncubatingMetrics.GEN_AI_CLIENT_TOKEN_USAGE_DESCRIPTION)
-                        .setUnit(GenAiIncubatingMetrics.GEN_AI_CLIENT_TOKEN_USAGE_UNIT).build(),
+                        .setUnit(GenAiIncubatingMetrics.GEN_AI_CLIENT_TOKEN_USAGE_UNIT)
+                        .setExplicitBucketBoundariesAdvice(MetricBuckets.TOKENS).build(),
                 meter.histogramBuilder(GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME)
                         .setDescription(GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_DURATION_DESCRIPTION)
-                        .setUnit(GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_DURATION_UNIT).build(),
+                        .setUnit(GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_DURATION_UNIT)
+                        .setExplicitBucketBoundariesAdvice(MetricBuckets.GEN_AI_SECONDS).build(),
                 meter.histogramBuilder(GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_NAME)
                         .setDescription(GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_DESCRIPTION)
-                        .setUnit(GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_UNIT).build());
+                        .setUnit(GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_UNIT)
+                        .setExplicitBucketBoundariesAdvice(MetricBuckets.GEN_AI_SECONDS).build());
         instruments = built;
         return built;
     }

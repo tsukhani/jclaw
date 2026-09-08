@@ -1,10 +1,13 @@
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.sdk.metrics.data.HistogramPointData;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.semconv.ErrorAttributes;
 import io.opentelemetry.semconv.HttpAttributes;
 import io.opentelemetry.semconv.ServerAttributes;
 import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes;
+import io.opentelemetry.semconv.incubating.GenAiIncubatingMetrics;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ProviderConfig;
 import llm.OpenAiProvider;
@@ -25,6 +28,7 @@ import services.telemetry.OtelRuntime;
 import utils.HttpFactories;
 import utils.LatencyTrace;
 
+import java.util.Collection;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -144,6 +148,20 @@ public class GenAiSpansTest extends UnitTest {
         var http = httpClientSpan(spans);
         assertEquals(chat.getSpanContext().getSpanId(), http.getParentSpanContext().getSpanId(),
                 "the HTTP client span nests under the model call");
+
+        var metrics = OtelRuntime.captureMetricsForTest(() -> { });
+        var duration = histogramPoint(metrics, GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME);
+        assertTrue(duration.getBoundaries().contains(0.01), () -> "semconv buckets on the duration: " + duration.getBoundaries());
+        var tokens = histogramPoint(metrics, GenAiIncubatingMetrics.GEN_AI_CLIENT_TOKEN_USAGE_NAME);
+        assertTrue(tokens.getBoundaries().contains(4.0), () -> "semconv buckets on token usage: " + tokens.getBoundaries());
+    }
+
+    private static HistogramPointData histogramPoint(Collection<MetricData> metrics, String name) {
+        return metrics.stream()
+                .filter(m -> m.getName().equals(name))
+                .flatMap(m -> m.getHistogramData().getPoints().stream())
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(name + " in " + metrics.stream().map(MetricData::getName).toList()));
     }
 
     @Test

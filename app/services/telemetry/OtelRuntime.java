@@ -13,6 +13,7 @@ import io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter;
 import io.opentelemetry.exporter.otlp.metrics.OtlpGrpcMetricExporter;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
 import io.opentelemetry.instrumentation.okhttp.v3_0.OkHttpTelemetry;
+import io.opentelemetry.instrumentation.runtimetelemetry.RuntimeTelemetry;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.common.export.RetryPolicy;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
@@ -77,6 +78,7 @@ public final class OtelRuntime {
     private static volatile boolean agentAttached;
     private static volatile OtelConfig applied = OtelConfig.disabled();
     private static volatile @Nullable String lastExportError;
+    private static volatile @Nullable RuntimeTelemetry jvmMetrics;
 
     private OtelRuntime() {}
 
@@ -137,6 +139,8 @@ public final class OtelRuntime {
         api = built;
         TelemetryState.api = built;
         applyLeaves(config);
+        // JMX-backed jvm.* instruments; collected on the reader's interval even with export off.
+        jvmMetrics = RuntimeTelemetry.create(built);
         EventLogger.info(CATEGORY, config.enabled()
                 ? "OpenTelemetry export on → " + config.endpoint() + " (" + config.protocol().wire + ")"
                 : "OpenTelemetry SDK ready; export off");
@@ -182,6 +186,11 @@ public final class OtelRuntime {
         if (s == null) return;
         s.getSdkTracerProvider().forceFlush().join(EXPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         s.getSdkMeterProvider().forceFlush().join(EXPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        var jvm = jvmMetrics;
+        if (jvm != null) {
+            jvm.close();
+            jvmMetrics = null;
+        }
         s.close();
         sdk = null;
         api = OpenTelemetry.noop();
@@ -299,6 +308,32 @@ public final class OtelRuntime {
             body.run();
             s.getSdkTracerProvider().forceFlush().join(EXPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             return memory.getFinishedSpanItems();
+        } finally {
+            applyConfig();
+        }
+    }
+
+    /**
+     * Same contract as {@link #captureForTest}, for metrics: every instrument is collected
+     * into memory after {@code body} and the points returned. Aggregation is cumulative, so
+     * a test keys its own series with a unique attribute value.
+     */
+    public static java.util.Collection<io.opentelemetry.sdk.metrics.data.MetricData> captureMetricsForTest(Runnable body) {
+        var s = sdk;
+        if (s == null) {
+            throw new IllegalStateException("telemetry runtime is not initialized");
+        }
+        var memory = io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter.create();
+        synchronized (OtelRuntime.class) {
+            METRICS.swap(memory);
+            applied = new OtelConfig(true, applied.endpoint(), applied.protocol(), applied.headers(),
+                    applied.serviceName(), 1.0, applied.metricsInterval());
+            TelemetryState.enabled = true;
+        }
+        try {
+            body.run();
+            s.getSdkMeterProvider().forceFlush().join(EXPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            return memory.getFinishedMetricItems();
         } finally {
             applyConfig();
         }
