@@ -31,10 +31,14 @@ class ApiMetricsControllerLoadtestRunTest extends FunctionalTest {
     void setup() {
         LoadTestHarnessSync.acquire();
         Fixtures.deleteDatabase();
+        // The workers' minted session cookie is refused (401 password_unset) until an
+        // admin password exists.
+        AuthFixture.seedAdminPassword("loadtest-pw");
     }
 
     @AfterEach
     void releaseHarness() {
+        AuthFixture.clearAdminPassword();
         LoadTestHarnessSync.release();
     }
 
@@ -68,13 +72,10 @@ class ApiMetricsControllerLoadtestRunTest extends FunctionalTest {
         // Hand-computed: totalRequests = concurrency × turns = 1 × 2. This
         // 200 is itself the regression pin for the promptless-mock-mode 400
         // (validateLoadtestInput rejected the parsePromptsField empty-list
-        // default). Stream SUCCESS is deliberately not asserted: the runner's
-        // nested /api/chat/stream calls depend on the autotest server's HTTP
-        // environment, which this test can't control deterministically —
-        // every turn must be accounted for either way.
+        // default).
         assertEquals(2, json.get("totalRequests").getAsInt());
-        assertEquals(2, json.get("successCount").getAsInt() + json.get("errorCount").getAsInt(),
-                "every turn must be accounted as success or error: " + json);
+        assertEquals(2, json.get("successCount").getAsInt(), "every turn must succeed: " + json);
+        assertEquals(0, json.get("errorCount").getAsInt(), json.toString());
 
         // Duration aggregates must be internally consistent: min ≤ avg ≤ max,
         // and with one sequential worker the wall clock spans both turns.

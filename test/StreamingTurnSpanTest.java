@@ -101,7 +101,12 @@ public class StreamingTurnSpanTest extends FunctionalTest {
                             && "POST".equals(s.getAttributes().get(HttpAttributes.HTTP_REQUEST_METHOD))
                             && chat.getSpanContext().getSpanId().equals(s.getParentSpanContext().getSpanId()))
                     .toList();
-            assertEquals(1, http.size(), () -> "HTTP client spans under the model call in " + describe(spans));
+            // One span per attempt: a pooled connection to the mock gone stale since the harness
+            // last restarted costs an IOException span and a resend, so count the successful one.
+            var succeeded = http.stream()
+                    .filter(s -> Long.valueOf(200).equals(s.getAttributes().get(HttpAttributes.HTTP_RESPONSE_STATUS_CODE)))
+                    .count();
+            assertEquals(1L, succeeded, () -> "successful HTTP client spans under the model call in " + describe(spans));
         }
     }
 
