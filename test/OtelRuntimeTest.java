@@ -1,4 +1,7 @@
 import io.opentelemetry.api.trace.SpanKind;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
+import mockwebserver3.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -6,6 +9,10 @@ import play.test.UnitTest;
 import services.ConfigService;
 import services.telemetry.OtelConfig;
 import services.telemetry.OtelRuntime;
+import utils.LatencyStats;
+
+import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -66,6 +73,34 @@ public class OtelRuntimeTest extends UnitTest {
         assertFalse(off.enabled());
         assertFalse(off.exporting());
         assertFalse(OtelRuntime.tracer().spanBuilder("probe").startSpan().isRecording());
+    }
+
+    @Test
+    public void turningExportOffFlushesWhatTheOldEndpointHasNotSeenYet() throws Exception {
+        try (var collector = new MockWebServer()) {
+            collector.start();
+            for (int i = 0; i < 4; i++) {
+                collector.enqueue(new MockResponse.Builder().code(200).build());
+            }
+            var endpoint = collector.url("/").toString().replaceAll("/$", "");
+            assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENDPOINT, endpoint));
+            assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENABLED, "true"));
+            int seenBeforeOff;
+            try {
+                LatencyStats.record("web", "seg-" + System.nanoTime(), 12, "main");
+            } finally {
+                seenBeforeOff = collector.getRequestCount();
+                assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENABLED, "false"));
+            }
+            var targets = new ArrayList<String>();
+            RecordedRequest request;
+            while ((request = collector.takeRequest(2, TimeUnit.SECONDS)) != null) {
+                targets.add(request.getTarget());
+            }
+            var afterOff = targets.subList(Math.min(seenBeforeOff, targets.size()), targets.size());
+            assertTrue(afterOff.contains("/v1/metrics"),
+                    () -> "the off-swap collects and exports before the leaf goes; after off: " + afterOff);
+        }
     }
 
     @Test

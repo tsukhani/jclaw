@@ -56,6 +56,8 @@ public final class OtelRuntime {
     private static final String CATEGORY = "telemetry";
     private static final String INSTRUMENTATION_SCOPE = "jclaw";
     private static final Duration EXPORT_TIMEOUT = Duration.ofSeconds(5);
+    // Bounded so a config write cannot hang a request thread on a dead collector.
+    private static final Duration SWAP_FLUSH_TIMEOUT = Duration.ofSeconds(2);
     // Bounded so a refused collector answers the Settings delivery check within its wait,
     // rather than the exporter's default five attempts of growing backoff.
     private static final RetryPolicy RETRY = RetryPolicy.builder()
@@ -149,13 +151,19 @@ public final class OtelRuntime {
     /**
      * Re-reads the {@code otel.*} keys and swaps the leaves. Called from
      * {@code ConfigService.setWithSideEffects} after any of them is written, so a change
-     * takes effect on the next span and the next metric collection.
+     * takes effect on the next span and the next metric collection. What accumulated for
+     * the exporter being replaced is flushed to it first.
      */
     public static synchronized void applyConfig() {
         var config = OtelConfig.load();
-        if (sdk == null) {
+        var s = sdk;
+        if (s == null) {
             applied = config;
             return;
+        }
+        if (applied.enabled()) {
+            s.getSdkMeterProvider().forceFlush().join(SWAP_FLUSH_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            s.getSdkTracerProvider().forceFlush().join(SWAP_FLUSH_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         }
         applyLeaves(config);
         EventLogger.info(CATEGORY, config.enabled()
