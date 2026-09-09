@@ -5,9 +5,11 @@ import { clearNuxtData } from '#app'
 import { nextTick } from 'vue'
 import Telegram from '~/pages/channels/telegram.vue'
 
-// JCLAW-339: the webhook URL is base + the fixed /api/webhooks/telegram/{id}/{secret}
-// path. Only the public base is editable; the secret is auto-generated. The base
-// pre-fills from the Tailscale Funnel (or a public origin), else blank.
+// JCLAW-339: the webhook URL is base + the fixed /api/webhooks/telegram/{id} path.
+// Only the public base is editable; the secret is auto-generated and, since JCLAW-784,
+// rides in Telegram's X-Telegram-Bot-Api-Secret-Token header rather than the path
+// (JCLAW-1175 pins that the preview never shows it). The base pre-fills from the
+// Tailscale Funnel (or a public origin), else blank.
 
 const AGENT = { id: 1, name: 'main', enabled: true, modelProvider: 'openrouter', modelId: 'gpt-4.1' }
 
@@ -67,7 +69,7 @@ describe('telegram bindings page — webhook base URL + auto-secret (JCLAW-339)'
       id: 7,
       webhookBaseUrl: 'https://jclaw.tnet.ts.net',
       hasWebhookSecret: true,
-      effectiveWebhookUrl: 'https://jclaw.tnet.ts.net/api/webhooks/telegram/7/abc123',
+      effectiveWebhookUrl: 'https://jclaw.tnet.ts.net/api/webhooks/telegram/7',
     })]
     const c = await mountSuspended(Telegram)
     await c.find('[aria-label="Edit binding"]').trigger('click')
@@ -76,7 +78,7 @@ describe('telegram bindings page — webhook base URL + auto-secret (JCLAW-339)'
     const base = c.find('#binding-webhook-base').element as HTMLInputElement
     expect(base.value).toBe('https://jclaw.tnet.ts.net')
     // The full URL (with the fixed path) is shown.
-    expect(c.text()).toContain('https://jclaw.tnet.ts.net/api/webhooks/telegram/7/abc123')
+    expect(c.text()).toContain('https://jclaw.tnet.ts.net/api/webhooks/telegram/7')
     // The secret field is gone.
     expect(c.find('#binding-webhook-secret').exists()).toBe(false)
   })
@@ -86,10 +88,12 @@ describe('telegram bindings page — webhook base URL + auto-secret (JCLAW-339)'
     const c = await mountSuspended(Telegram)
     await c.find('[aria-label="Edit binding"]').trigger('click')
     await nextTick()
-    // Base pre-filled from the funnel; full URL built with a generated secret.
+    // Base pre-filled from the funnel; the full URL is base + the fixed path, and the
+    // generated secret is not in it (it is sent as a header, not a path segment).
     const base = c.find('#binding-webhook-base').element as HTMLInputElement
     expect(base.value).toBe('https://jclaw.tnet.ts.net')
-    expect(c.text()).toContain('https://jclaw.tnet.ts.net/api/webhooks/telegram/9/')
+    expect(c.text()).toContain('https://jclaw.tnet.ts.net/api/webhooks/telegram/9')
+    expect(c.text()).not.toMatch(/\/api\/webhooks\/telegram\/9\/[A-Za-z0-9_-]+/)
   })
 
   it('prompts for a public URL when the funnel is off and the origin is not public', async () => {

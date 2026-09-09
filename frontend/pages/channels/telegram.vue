@@ -130,23 +130,18 @@ function generateWebhookSecret(): string {
   return btoa(bin).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
 }
 
-// The full webhook URL preview: editable base + the fixed path. For an existing
-// secret (which we never receive) we reuse the server-built path from
-// effectiveWebhookUrl, swapping in the current base; otherwise we build it from
-// the freshly generated secret. Empty while creating (id assigned on save).
+// The full webhook URL preview: editable base + the fixed /api/webhooks/telegram/{id}
+// path, reusing the server-built path when the binding has one. The secret is never
+// part of it — since JCLAW-784 it travels in Telegram's X-Telegram-Bot-Api-Secret-Token
+// header. Empty while creating (id assigned on save).
 const fullWebhookUrl = computed(() => {
   if (form.value.transport !== 'WEBHOOK') return ''
   const base = form.value.webhookBaseUrl.trim().replace(/\/$/, '')
   if (!base) return ''
   const existing = editing.value?.effectiveWebhookUrl
-  if (existing && !form.value.webhookSecret) {
-    return base + existing.replace(/^https?:\/\/[^/]+/i, '')
-  }
+  if (existing) return base + existing.replace(/^https?:\/\/[^/]+/i, '')
   const id = editing.value?.id
-  if (id && form.value.webhookSecret) {
-    return `${base}/api/webhooks/telegram/${id}/${form.value.webhookSecret}`
-  }
-  return '' // creating: the id (and thus the path) is assigned on save
+  return id ? `${base}/api/webhooks/telegram/${id}` : ''
 })
 
 // Pre-fill the base + generate a secret when a binding enters webhook mode
