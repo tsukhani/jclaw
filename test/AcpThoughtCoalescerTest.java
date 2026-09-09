@@ -23,7 +23,7 @@ class AcpThoughtCoalescerTest extends UnitTest {
 
         var out = c.accept(new AgentMessageChunk("s", new TextContent("Created")));
         assertEquals(2, out.size(), out.toString());
-        assertEquals(HarnessEvent.STEP, out.get(0).kind());
+        assertEquals(HarnessEvent.THOUGHT, out.get(0).kind());
         assertEquals("The user wants files.", out.get(0).text());
         assertEquals(HarnessEvent.TOKEN, out.get(1).kind());
         assertEquals("Created", out.get(1).text());

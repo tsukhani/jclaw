@@ -13,7 +13,8 @@ import org.jspecify.annotations.Nullable;
  * @param kind one of {@code token} (an incremental output chunk),
  *             {@code tool_call} (the harness invoked a tool),
  *             {@code step} (a coarse progress line, and the tolerant fallback
- *             for a non-JSON line), {@code error} (a harness-reported failure),
+ *             for a non-JSON line), {@code thought} (a block of the harness's
+ *             own reasoning), {@code error} (a harness-reported failure),
  *             or {@code result} (the final answer)
  * @param text the human-readable payload for {@code kind} — token text, tool
  *             name/summary, step description, error message, or final result;
@@ -29,6 +30,8 @@ public record HarnessEvent(String kind, String text, @Nullable JsonObject raw) {
     public static final String TOOL_CALL = "tool_call";
     /** A coarse progress line — also the tolerant fallback for a non-JSON line. */
     public static final String STEP = "step";
+    /** A block of the harness's reasoning — progress, never part of the reply. */
+    public static final String THOUGHT = "thought";
     /** A harness-reported failure. */
     public static final String ERROR = "error";
     /** The final answer. */

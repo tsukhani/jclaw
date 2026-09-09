@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Folds an ACP harness's reasoning into one {@link HarnessEvent#STEP} per block. A
+ * Folds an ACP harness's reasoning into one {@link HarnessEvent#THOUGHT} per block. A
  * harness streams {@code agent_thought_chunk} updates a few characters at a time, and
  * mapping each through {@link AcpEventMapper} alone persisted one transcript row and one
  * live event per fragment — 145 rows of "The", " user", " wants" around two tool calls in
@@ -37,6 +37,6 @@ public final class AcpThoughtCoalescer {
     public List<HarnessEvent> flush() {
         var text = thought.toString().strip();
         thought.setLength(0);
-        return text.isEmpty() ? List.of() : List.of(new HarnessEvent(HarnessEvent.STEP, text, null));
+        return text.isEmpty() ? List.of() : List.of(new HarnessEvent(HarnessEvent.THOUGHT, text, null));
     }
 }

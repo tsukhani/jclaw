@@ -188,3 +188,22 @@ describe('CodingRunMonitor — Kill control', () => {
     expect(captured.body?.reason?.length ?? 0).toBeGreaterThan(0)
   })
 })
+
+describe('CodingRunMonitor — harness kind labels', () => {
+  it('labels a coalesced reply block as a Message and a reasoning block as Thinking', async () => {
+    registerEndpoint('/api/subagent-runs/9/steps', () => [
+      { seq: 1, kind: 'thought', text: 'The user wants two files.' },
+      { seq: 2, kind: 'tool_call', tool: 'Write', text: 'Write (PENDING)' },
+      { seq: 3, kind: 'token', text: 'Created fib.py and test_fib.py.' },
+    ])
+
+    const component = await mountSuspended(CodingRunMonitor, { props: { runId: 9 } })
+    await flushPromises()
+
+    const text = component.text()
+    expect(text).toContain('Thinking')
+    expect(text).toContain('Message')
+    expect(text).not.toContain('token')
+    expect(text).toContain('Created fib.py and test_fib.py.')
+  })
+})

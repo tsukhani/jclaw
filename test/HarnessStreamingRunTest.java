@@ -4,11 +4,13 @@ import models.Conversation;
 import models.Message;
 import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.AcpCapabilityCatalog;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
@@ -177,6 +179,70 @@ class HarnessStreamingRunTest extends UnitTest {
                             + " prev=" + prevSeq + ")");
             prevSeq = seq;
         }
+    }
+
+    @Test
+    void streamedReplyTokensPersistAsOneRowPerBlock() throws Exception {
+        // pi's JSONL streams the reply as text_delta tokens. Each token still reaches the chat
+        // live, but the monitor and the transcript get one token event per block: the tokens
+        // before a tool call, and the tokens after it, at the seq of each block's first token.
+        Assumptions.assumeTrue(AcpCapabilityCatalog.stdioAcpLaunchCommand("pi") == null,
+                "a pi-acp adapter on PATH would route this run over ACP instead of the wrapper");
+        var nonce = "streamtok-" + System.nanoTime();
+        var harness = writeScript("#!/bin/sh\ncat >/dev/null\n"
+                + piToken(nonce + "-Hel") + piToken("lo ")
+                + "printf '%s\\n' '{\"type\":\"tool_execution_start\",\"toolName\":\"write\"}'\n"
+                + piToken("wor") + piToken("ld"));
+        ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, harness.toString());
+        ConfigService.set(SubagentSpawnTool.ACP_HARNESS_KEY, "pi");
+        ConfigService.set(SubagentSpawnTool.ACP_MODE_KEY, "json");
+        var parent = createAcpAgent("p-stream-tokens");
+        commitAndReopen();
+        var received = new CopyOnWriteArrayList<String>();
+        subscribe(received::add);
+
+        var json = spawnAcp(parent.id);
+        assertEquals("COMPLETED", json.get("status").getAsString(), json.toString());
+        assertEquals(nonce + "-Hello world", json.get("reply").getAsString(),
+                "the reply is still every token, in order");
+        long runId = Long.parseLong(json.get("run_id").getAsString());
+
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(runId);
+        assertNotNull(run);
+        List<Message> rows = Message.find("conversation = ?1 AND messageKind = ?2 ORDER BY id ASC",
+                run.childConversation, SubagentSpawnTool.MESSAGE_KIND_CODINGRUN_STEP).fetch();
+        var kinds = rows.stream().map(m -> JsonParser.parseString(m.metadata).getAsJsonObject().get("kind").getAsString()).toList();
+        assertEquals(List.of(HarnessEvent.TOKEN, HarnessEvent.TOOL_CALL, HarnessEvent.TOKEN), kinds,
+                "one token row per block around the tool call, not one per token: " + rows.stream().map(m -> m.content).toList());
+        assertEquals(nonce + "-Hello ", rows.get(0).content);
+        assertEquals("world", rows.get(2).content);
+        assertEquals(1, JsonParser.parseString(rows.get(0).metadata).getAsJsonObject().get("seq").getAsInt(),
+                "a block is filed at its first token's seq");
+        assertEquals(4, JsonParser.parseString(rows.get(2).metadata).getAsJsonObject().get("seq").getAsInt());
+
+        long tokenBusEvents = received.stream()
+                .filter(e -> e.contains(NotificationBus.BUS_CODINGRUN_STEP) && e.contains("\"kind\":\"token\"")
+                        && (e.contains(nonce) || e.contains("world")))
+                .count();
+        assertEquals(2, tokenBusEvents, "the monitor sees one token event per block: " + received);
+        assertTrue(received.stream().anyMatch(e -> e.contains("\"text\":\"" + nonce + "-Hello \"")),
+                "the first block reaches the bus as one event carrying the whole text: " + received);
+    }
+
+    /** One pi JSONL text_delta line printing {@code text}. */
+    private static String piToken(String text) {
+        return "printf '%s\\n' '{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\""
+                + text + "\"}}'\n";
+    }
+
+    /** An executable temp script with {@code body}, deleted in teardown. */
+    private Path writeScript(String body) throws Exception {
+        var script = Files.createTempFile("jclaw-stream-harness-", ".sh");
+        Files.writeString(script, body);
+        script.toFile().setExecutable(true, false);
+        tempScripts.add(script);
+        return script;
     }
 
     // --- fixtures / helpers ------------------------------------------------

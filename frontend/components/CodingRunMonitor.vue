@@ -161,6 +161,10 @@ const KIND_META: Record<string, KindMeta> = {
   text: { label: 'Message', badge: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300' },
   message: { label: 'Message', badge: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300' },
   assistant: { label: 'Message', badge: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300' },
+  // A harness reply block (SubagentAcpRunner coalesces the streamed tokens into one).
+  token: { label: 'Message', badge: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300' },
+  step: { label: 'Step', badge: 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300' },
+  result: { label: 'Result', badge: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
   thought: { label: 'Thinking', badge: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300' },
   thinking: { label: 'Thinking', badge: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300' },
   reasoning: { label: 'Thinking', badge: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300' },

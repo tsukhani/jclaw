@@ -79,6 +79,21 @@ final class SubagentAcpRunner {
      *  command and, when one applies, the provider/model the harness is pinned to. */
     record AcpLaunch(List<String> command, @Nullable HarnessModel model) {}
 
+    /** Reply text a run has streamed since its last non-token event. Tokens reach the chat
+     *  one by one (Rail A); the monitor and the transcript get the block as one {@code
+     *  token} event when a non-token event or the run's end closes it (JCLAW-662 replay
+     *  otherwise held one row per token — 73 rows for a two-line reply). */
+    private static final ConcurrentHashMap<Long, TokenBlock> PENDING_TOKENS = new ConcurrentHashMap<>();
+
+    private static final class TokenBlock {
+        private final int firstSeq;
+        private final StringBuilder text = new StringBuilder();
+
+        private TokenBlock(int firstSeq) {
+            this.firstSeq = firstSeq;
+        }
+    }
+
     /** JCLAW-659: harness-id → adapter registry. JCLAW-660 seeds the {@code pi}
      *  (streaming JSONL) and {@code generic} (line-tail) adapters; JCLAW-667 adds
      *  the {@code claude} (streaming NDJSON) adapter; the {@code codex} adapter
@@ -572,6 +587,7 @@ final class SubagentAcpRunner {
                     dispatchHarnessEvent(runId, ev, seq.getAndIncrement());
                     acc.fold(ev);
                 }
+                flushTokens(runId);   // the reply block the turn ended on
                 reply = acc.reply();
             }
             publishRunDone(runId, seq.get(), reply);
@@ -579,6 +595,7 @@ final class SubagentAcpRunner {
         } catch (RuntimeException e) {
             throw new IllegalStateException("ACP harness failed: " + e.getMessage(), e);
         } finally {
+            flushTokens(runId);   // a failed or killed turn keeps whatever reply it had streamed
             SubagentRegistry.unregisterCloser(runId);
         }
     }
@@ -717,6 +734,7 @@ final class SubagentAcpRunner {
                 // EOF, force-kill, or overrun closed the stream — complete with what we have.
             }
             String reply = acc.reply();
+            flushTokens(runId);   // the reply block the stream ended on
             // JCLAW-662: the harness output stream has ended — signal terminal once
             // per run (every adapter) so a live monitor stops tailing and, on
             // reconnect, falls back to the persisted transcript.
@@ -738,6 +756,24 @@ final class SubagentAcpRunner {
      * steps it missed via {@link controllers.ApiSubagentRunsController#steps}.
      */
     private static void dispatchHarnessEvent(Long runId, HarnessEvent ev, int seq) {
+        if (HarnessEvent.TOKEN.equals(ev.kind())) {
+            PENDING_TOKENS.computeIfAbsent(runId, _ -> new TokenBlock(seq)).text.append(ev.text());
+            streamToChat(runId, ev);
+            return;
+        }
+        flushTokens(runId);
+        publishAndPersist(runId, ev, seq);
+        streamToChat(runId, ev);
+    }
+
+    /** Close the run's pending reply block: one bus event and one row, at the block's first seq. */
+    private static void flushTokens(Long runId) {
+        var block = PENDING_TOKENS.remove(runId);
+        if (block == null || block.text.isEmpty()) return;
+        publishAndPersist(runId, new HarnessEvent(HarnessEvent.TOKEN, block.text.toString(), null), block.firstSeq);
+    }
+
+    private static void publishAndPersist(Long runId, HarnessEvent ev, int seq) {
         var payload = new LinkedHashMap<String, Object>();
         payload.put(SubagentSpawnTool.BUS_RUN_ID, runId);
         payload.put("seq", seq);
@@ -745,7 +781,6 @@ final class SubagentAcpRunner {
         payload.put("text", ev.text());
         NotificationBus.publish(NotificationBus.BUS_CODINGRUN_STEP, payload);
         persistHarnessStep(runId, seq, ev);
-        streamToChat(runId, ev);
     }
 
     /**
