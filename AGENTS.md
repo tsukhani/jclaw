@@ -70,6 +70,7 @@ cd frontend
 pnpm install              # Install dependencies
 pnpm dev                  # Dev server on :3000
 pnpm build                # Production build
+pnpm generate             # nuxt generate — static output
 pnpm preview              # Preview production build
 
 pnpm lint                 # ESLint (logic + Vue + TS + a11y + stylistic)
@@ -79,6 +80,10 @@ pnpm stylelint:fix        # stylelint --fix
 pnpm typecheck            # vue-tsc --noEmit via nuxi typecheck
 pnpm audit                # pnpm audit --prod --audit-level=moderate
 pnpm test                 # Vitest (unit)
+pnpm test:watch           # Vitest in watch mode
+pnpm test:e2e             # Playwright e2e — needs a running server; prefer ./jclaw.sh e2e
+pnpm test:e2e:ui          # Playwright UI mode
+pnpm test:e2e:headed      # Playwright headed, one worker, PWSLOWMO=500
 ```
 
 ### Evals
@@ -159,6 +164,14 @@ the previous build. This also means a single run never mixes `compile` records w
 `test`/`arch` ones — not a limitation of the parser, but of what a broken tree can
 physically produce.
 
+### E2E
+```bash
+./jclaw.sh e2e                                # Playwright suite against an already-running server
+```
+
+Separate from `./jclaw.sh test` by design: it needs a live server and `JCLAW_ADMIN_PASSWORD` from
+`certs/.env`, and runs `pnpm test:e2e` against whichever mode is listening. Local UAT, not a gate.
+
 ### Running Both Together
 Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm dev`) in separate terminals. The frontend proxies `/api/**` requests to `localhost:9000`.
 
@@ -212,7 +225,7 @@ Why this matters: every push to `main` triggers the `pre-push` hook's full backe
 - Configuration in `conf/application.conf` — supports environment prefixes (`%prod.`, `%test.`)
 - Dependencies managed via `build.gradle.kts` using the `org.playframework.play1` plugin from the `/opt/play1` fork. `settings.gradle.kts` resolves that plugin from a flat `file:///opt/play1/framework/gradle-plugin-repo` Maven repo — **not** `includeBuild("/opt/play1")`, which builds the plugin from source and needs write access into the fork, so it fails on read-only installs. The plugin version is read from the installed fork's `framework/src/play/version`, and `build.gradle.kts` cross-checks that against `.play-version` (plus a pinned range), failing the build on drift. To bump the fork: edit `.play-version` **and** check out the matching version in `/opt/play1`.
   - Consequence: `/opt/play1` is a separate root build with its own Gradle wrapper, so builds there start their own daemon. `./gradlew --stop` in this repo does not stop it — run it from `/opt/play1` too.
-- Tests in `test/` — JUnit 6 (Jupiter 6.1.2, bundled by the play1 fork in `framework/lib`), extending Play's `UnitTest` or `FunctionalTest`
+- Tests in `test/` — JUnit 6 (Jupiter 6.1.3, bundled by the play1 fork in `framework/lib`), extending Play's `UnitTest` or `FunctionalTest`
 - Test mode uses H2 in-memory database (`%test.db.url` in application.conf)
 
 ### Outbound HTTP — OkHttp 5
@@ -225,7 +238,7 @@ JClaw uses **OkHttp 5.x** (with `okhttp-sse` for streaming) as its single outbou
 
 All HTTP-client provisioning lives in `app/utils/HttpFactories.java` — a single class that exposes named factory methods (`llmStreaming()`, `llmSingleShot()`, `general()`) so call sites declare *intent* rather than reach into named static fields. Internally it shares two connection pools (LLM/64-slot, general/32-slot) and two dispatchers (LLM uses a virtual-thread executor, general uses OkHttp's default cached pool — request volume on the non-LLM path doesn't justify VT scheduling). The Telegram SDK and `WebFetchTool`/`SsrfGuard` build their own clients with stack-specific tuning that doesn't fit any of the three `HttpFactories` tiers (the SDK has its own internal usage; `SsrfGuard` plugs in a per-request DNS allow-list against tool-fetch SSRF).
 
-Because call sites reach the transport through those factory methods, it is substitutable in one place: `HttpFactories.runWith(client, body)` — and its value-returning twin `callWith` — binds a `ScopedValue` that all six accessors (the three tiers plus their SSRF-guarded variants) honour for the dynamic extent of `body`, so a test installs a canned-response OkHttp interceptor instead of standing up a mock server on a port. Nothing binds it in production, and a `ScopedValue` does not follow an unrelated thread, so one test class cannot leak a transport into another that play1 is running concurrently — but for that same reason the binding does not reach Play's own request threads, and a `FunctionalTest` driving a controller still needs a per-collaborator seam such as `WhatsAppCloudApiProbe.installForTest`. The seam also stops at the accessor: ten classes derive a tuned client from `general().newBuilder()` into a static field at class-init (the rendered and impersonated fetchers, the Telegram/Slack/WhatsApp file downloaders, the sidecar clients), and a binding made later cannot reach a reference captured that early.
+Because call sites reach the transport through those factory methods, it is substitutable in one place: `HttpFactories.runWith(client, body)` — and its value-returning twin `callWith` — binds a `ScopedValue` that all six accessors (the three tiers plus their SSRF-guarded variants) honour for the dynamic extent of `body`, so a test installs a canned-response OkHttp interceptor instead of standing up a mock server on a port. Nothing binds it in production, and a `ScopedValue` does not follow an unrelated thread, so one test class cannot leak a transport into another that play1 is running concurrently — but for that same reason the binding does not reach Play's own request threads, and a `FunctionalTest` driving a controller still needs a per-collaborator seam such as `WhatsAppCloudApiProbe.installForTest`. The seam also stops at the accessor: nine sites derive a tuned client from `general().newBuilder()`, most of them into a static field at class-init (the rendered and impersonated fetchers, the Telegram/Slack/WhatsApp file downloaders through `StagedDownload`, the Slack uploader, the image-sidecar progress client) or at construction (the sidecar clients through `SidecarHttpClient`), and a binding made later cannot reach a reference captured that early.
 
 ### Wall clock — AppClock
 
@@ -307,6 +320,57 @@ other. `utils.TaskScope` avoids the split entirely.
 `StructuredTaskScope` needs no flag from either compiler, and `TaskScope` should be deleted rather
 than kept beside it.
 
+### Telemetry — OpenTelemetry in-process
+
+Traces and metrics leave the process over OTLP from `app/services/telemetry/` (JCLAW-34), and
+nothing leaves until an operator turns it on. `OtelRuntime.init()` builds the SDK once, from
+`jobs.TelemetryBootstrapJob` rather than a plugin start hook: it reads the Config DB, and a
+`conf/play.plugins` entry is ECJ-compiled before the app, so the plugin may reach nothing in
+`app/` beyond its own package (`TelemetryState` is the three volatile fields it reads). Only three
+leaves ever change — `DelegatingSampler`, `DelegatingSpanExporter`, `DelegatingMetricExporter` —
+and `applyConfig()` swaps them from `ConfigService.setWithSideEffects` on every `otel.*` write,
+force-flushing the meter and tracer providers to the exporter being replaced first (bounded at
+2 s so a config write cannot hang a request thread on a dead collector). Export off is a sampler
+that refuses every span plus empty exporter leaves, so the disabled cost is one volatile read per
+span start. The keys — `otel.enabled`, `otel.exporter.endpoint` (default
+`http://localhost:4318`), `otel.exporter.protocol` (`http/protobuf` | `grpc`),
+`otel.exporter.secretHeaders` (masked by the API), `otel.service.name`,
+`otel.traces.sampler.ratio`, and `otel.metrics.interval.seconds`, the one read at init — are
+documented in `conf/application.conf` and never seeded.
+
+**Sources.** `OtelPlayPlugin` (`conf/play.plugins` slot 450) opens one SERVER span per action
+invocation, bracketed by `beforeActionInvocation` / `onActionInvocationFinally` and named
+`METHOD route`. `GenAiSpans` opens one CLIENT span per model call at the two `LlmProvider` chat
+dispatch points and the embeddings one, following the GenAI semantic conventions — provider,
+model, usage including cache reads, time to first chunk; prompt and completion text are never
+recorded — plus the `gen_ai.client.*` histograms with semconv bucket advice. `LatencyTrace` owns
+the `turn` span (marks become events, counters attributes, `bind()` makes it current);
+`TurnMetrics` bridges `LatencyStats.record` into `jclaw.turn.segment.duration`;
+`RuntimeTelemetry` registers `jvm.*`; `OtelRuntime.traced()` wraps the LLM driver's OkHttp
+clients. JDBC rides `db.factory=services.telemetry.OtelHikariDataSourceFactory` (needs the
+fork's PF-174 loader fix, 1.13.70): the pool stays a `HikariDataSource` drawing connections from
+`TelemetryDataSource`, which switches between the raw datasource and a `JdbcTelemetry`-wrapped
+one on each toggle with a soft-evict that holds one connection across the eviction — an H2
+in-memory database is dropped with its last connection. Its static initializer sets
+`otel.semconv-stability.opt-in=database` unless already set.
+
+**Propagation boundary.** OTel `Context` is a `ThreadLocal`, with exactly the boundary the
+`ScopedValue` paragraph under AppClock documents. `StreamingAgentRunner`'s `agent-stream` thread
+and `TaskScope` wrap with `Context.current().wrap`, and `LlmProvider`'s `llm-stream` thread runs
+under the call's context; a new thread hop needs the same.
+
+**Agent mode.** With the OpenTelemetry Java agent attached (`javaagent.path` or
+`JAVA_TOOL_OPTIONS`), `init()` adopts `GlobalOpenTelemetry`, the keys are read once at start,
+the plugin renames the agent's server span from the route instead of opening its own,
+`traced()` returns the raw client, and JDBC/JVM instrumentation stays off — the agent owns
+those. Verified with agent 2.31.1 beside the framework's enhancer agent on Netty 4.2.
+
+**Test seams.** `OtelRuntime.captureForTest(Runnable)` routes every span into an
+`InMemorySpanExporter` with the sampler forced on; `captureMetricsForTest` does the same for
+metrics; `agentAttachedForTest` flags agent mode without an agent. The runtime is
+process-global, so a test using any of them holds `TelemetryTestSync`. The closeables above are
+covered by `ResourceLeakGateConformanceTest`.
+
 ### Nullness — NullAway on the Gradle compile
 
 `org.jspecify:jspecify` annotations (`@Nullable` / `@NonNull` / `@NullMarked`) are checked by
@@ -383,11 +447,10 @@ suppression: `FsPaths.TargetPath.resolvedTarget()`, `FsSupport.LoadedFile.resolv
 `DeliverySpec.resolvedTool()`, `ScrapeObservation.resolvedError()` and a dozen siblings all
 follow that shape. Prefer it — a `resolvedX()` throws where a suppression would return null.
 
-**Suppressions.** `@SuppressWarnings("NullAway")` with a one-line reason, and rare — two exist
-today (`ContextWindowManager.attemptTruncate`, `SkillLoader.parseSkillFile`), each recording an
-invariant the checker cannot follow: a candidate list whose members were already filtered to
-non-null, and a path whose parent every caller guarantees. Note that NullAway does not analyse a
-suppressed method's body at all, so a nullness contract on one is unverified by construction.
+**Suppressions.** `@SuppressWarnings("NullAway")` with a one-line reason, and rare — one exists
+today (`SkillLoader.parseSkillFile`), recording an invariant the checker cannot follow: a path
+whose parent every caller guarantees. Note that NullAway does not analyse a suppressed method's
+body at all, so a nullness contract on one is unverified by construction.
 
 ### Resource leaks — MustBeClosed on the Gradle compile
 
@@ -399,7 +462,10 @@ method. Anything else fails the build.
 
 **What carries the annotation.** Every concrete `AutoCloseable` in `app/`: `McpClient`,
 `McpStdioTransport`, `McpStreamableHttpTransport`, `DirectLuceneMessageSearchRepository`'s
-`LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, and `LatencyTrace.bind`. The
+`LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, `LatencyTrace.bind`, the three
+delegating telemetry leaves `DelegatingSampler`, `DelegatingSpanExporter` and
+`DelegatingMetricExporter` (OTel's `Sampler` and both exporter interfaces extend `Closeable`),
+and `GenAiSpans.Call.makeCurrent`, which hands out a `Scope`. The
 `McpTransport` and `LatencyTrace.Binding` interfaces carry nothing — the annotation belongs on
 the thing that hands out an instance, which is the implementations' constructors and `bind`
 respectively. `ResourceLeakGateConformanceTest` walks the imported bytecode for every concrete
@@ -424,11 +490,15 @@ are covered instead by a source scan in `ResourceLeakGateConformanceTest` that f
 acquire with no release in the same file. **Prefer the lease** for any new Lucene test whose
 window fits in one method.
 
-**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — five
+**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — ten
 sites today. `McpConnectionManager.doConnect` and `McpServerService.testConnection` build a
 transport that a longer-lived owner closes; `VoiceController.initSession` hands its `VoiceVad`
 to a `VoiceSession` that outlives the method, with a local `handedOff` flag closing it on every
-path that never gets there and a repeated init closing the session it displaces. A fourth shape
+path that never gets there and a repeated init closing the session it displaces. The five
+telemetry sites are the `McpConnectionManager` shape again: the three delegating leaves
+`OtelRuntime` holds in static fields are closed by its `shutdown()`, `OtelPlayPlugin`'s request
+`Scope` by `onActionInvocationFinally` on the same thread, and the turn `Scope` inside
+`LatencyTrace.bind` by the `Binding` it returns. A fourth shape
 appears on the two `buildTransport` methods, which
 are annotated `@MustBeClosed` *and* suppressed: the checker does not treat a `yield` from a
 switch block arm as a return position (a plain `->` arm it does), so the suppression silences
@@ -544,7 +614,7 @@ genuinely-denied path — **not** the temp tree, which the profile grants for `T
 - Backend calls use Nuxt's auto-imported `useFetch` / `$fetch` directly; `frontend/composables/` adds `useApiParsed` (schema-validated reads, JCLAW-287) and `useApiMutation` (POST/PUT/DELETE) as consistent wrappers
 - Package manager: **pnpm 12+**, version pinned in `frontend/package.json`'s `packageManager` field. pnpm installs standalone (`curl -fsSL https://get.pnpm.io/install.sh | sh -`) and switches itself to the pinned version on first use — **not** through corepack, which cannot launch pnpm 12 (per-platform native binary, no `bin/pnpm.cjs`) and which Node 25+ no longer ships.
 
-  **Where the integrity check lives.** The `+sha512-...` suffix corepack verified against is ignored by pnpm — measured, not assumed. pnpm records its own per-platform releases in `frontend/pnpm-lock.yaml` under `packageManagerDependencies` and refuses to run one whose bytes do not match a published, signed npm release (`ERR_PNPM_PNPM_ENGINE_IDENTITY_MISMATCH`, reproduced by tampering with one integrity line). That is a stronger guarantee than the old one — provenance rather than agreement with a locally-edited string — and it is committed, reviewable in a diff, and covers every platform rather than whichever one last ran `corepack use`.
+  **Where the integrity check lives.** The pin is a bare version; a `+sha512-...` suffix, when one is present, is what corepack verified against, and pnpm ignores it — measured, not assumed. pnpm records its own per-platform releases in `frontend/pnpm-lock.yaml` under `packageManagerDependencies` and refuses to run one whose bytes do not match a published, signed npm release (`ERR_PNPM_PNPM_ENGINE_IDENTITY_MISMATCH`, reproduced by tampering with one integrity line). That is a stronger guarantee than the old one — provenance rather than agreement with a locally-edited string — and it is committed, reviewable in a diff, and covers every platform rather than whichever one last ran `corepack use`.
 
   Two layers keep it honest:
   1. The `.githooks/pre-commit` guard refuses to commit a `frontend/package.json` that pins pnpm while `frontend/pnpm-lock.yaml` carries no `packageManagerDependencies` block — the block's absence is what would silently disable the gate.

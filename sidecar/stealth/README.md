@@ -63,7 +63,9 @@ the pinning with it, so the containment is rebuilt here in two layers, mirroring
 Layer 2 is a **second implementation of a security check**, which is a real cost. It
 lives in `ssrf.py` — stdlib-only, no Patchright import — and `StealthBrowserTest` runs
 that exact file against the same address table it feeds `SsrfGuard.isUnsafe`, failing
-when the two disagree. (Confirmed to fail on a deliberate mutation, not just pass.)
+if the Python guard admits anything the JVM rejects — a stricter Python verdict passes.
+(A positive control — `8.8.8.8` must come back public — stops a guard that rejects
+everything from reading as a pass.)
 
 ## Protocol
 

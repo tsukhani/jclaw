@@ -76,18 +76,20 @@ To **keep** a particular one-off reminder after it fires, untick its **Auto-dele
 
 ## The Reminders page
 
-Lists every reminder you've ever scheduled, with the same row regardless of delivery channel. Above the list, three cards track the lifecycle states that matter for reminders — **Pending** (one-time reminders waiting to fire), **Active** (recurring reminders), and **Failed**. Reminders skip the LLM, so there are no run-rate or success-rate metrics here.
+Lists every reminder you've ever scheduled, with the same row regardless of delivery channel. Above the list, three cards track the lifecycle states that matter for reminders — **Active** (recurring reminders), **Pending** (one-time reminders waiting to fire), and **Failed**. Reminders skip the LLM, so there are no run-rate or success-rate metrics here.
 
 | Column        | Meaning                                                                                                       |
 |---------------|---------------------------------------------------------------------------------------------------------------|
 | **Reminder**  | The text you (or the agent) wrote. Falls back to the task name when the description is empty.                  |
-| **When**      | Relative-time hint for the next fire — "in 5m", "in 3h", or an absolute date for far-future fires.             |
-| **Schedule**  | The original schedule shorthand — "every Mon 10:00", "0 0 9 * * *", "30m".                                     |
-| **Channel**   | `web` or `telegram`. `web (auto)` means the channel was inferred from the calling chat at creation time.       |
+| **Schedule**  | How it's scheduled, humanized — a recurring reminder shows its cadence ("every Tuesday at 5 PM", "every 30 min"); a one-shot shows a live countdown ("in 3 hours"). Never a raw cron or ISO value. |
 | **Status**    | Same enum as tasks — a one-time reminder is `PENDING` (waiting) then `COMPLETED`; a recurring one is `ACTIVE`. |
+| **Channel**   | `web` or `telegram`. `web (auto)` means the channel was inferred from the calling chat at creation time. A reminder that delivers itself through a tool shows the bare tool name (e.g. `send_gmail_message`). |
+| **When**      | The exact wall-clock date and time of the next fire, in the effective timezone ("10 Jun 2026 · 1:15 pm"); `—` once a one-time reminder has `COMPLETED`. |
 | **Fired**     | When the most recent fire happened. The truth-of-record for "did the reminder go off when I said?"             |
 | **Auto-delete** | For a one-time reminder, a checkbox: ticked (the default) means the reminder removes itself after it fires; untick to keep it. Recurring reminders show `—` (not applicable). |
 | **Actions**   | **Delete** — hard-deletes the reminder and any past notifications it produced.                                 |
+
+The page header also has a **Table / Calendar** switcher (Calendar persists as `?view=calendar`), a filter bar that takes free text or `q:` / `status:` / `type:` keys, an **Export** action, and a multi-select mode (the trash icon) for deleting several reminders at once with **Delete N**.
 
 There is no **Run now** affordance for reminders — by definition a reminder is "fire on a schedule"; running one manually is just sending yourself an immediate message.
 

@@ -30,6 +30,7 @@ Selection is `tts.engine=sidecar` + `tts.sidecar.model=<id>` (Settings › Speec
 |----|-------------|----------|
 | `qwen3-0.6b` (default) | mlx-audio | Apple silicon only |
 | `qwen3-0.6b-4bit` | mlx-audio | Apple silicon only |
+| `qwen3-1.7b` | mlx-audio | Apple silicon only — routed by `synth.py` (`MLX_REPOS`) but not in `TtsModel.java`, so `TtsRouter` coerces it to the default; only reachable by a hand-run `/synthesize` |
 | `kokoro` | mlx-audio | Apple silicon only |
 | `chatterbox` | PyTorch (torch) | Apple MPS + NVIDIA CUDA (+ CPU) |
 

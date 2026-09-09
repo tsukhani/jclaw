@@ -35,7 +35,7 @@ so they never share a venv.
 
 | Engine | Model ids | How it produces segments |
 |---|---|---|
-| **Whisper** (default) | `tiny`…`large` variants | mlx-whisper on Apple silicon, faster-whisper (CTranslate2) on CUDA / CPU int8. Emits segment times natively. |
+| **Whisper** (default) | `small`, `medium`, `large-turbo`, `large` | mlx-whisper on Apple silicon, faster-whisper (CTranslate2) on CUDA / CPU int8. Emits segment times natively. |
 | **MERaLiON** | `meralion-3-3b` → `MERaLiON/MERaLiON-3-3B-ASR` | A Southeast-Asia-tuned speech LLM (`meralion.py`). Produces a **plain transcript with no timestamps**, so it is paired with forced alignment (`align.py`) to recover the segment times Whisper gives for free. |
 
 **MERaLiON pipeline.** Audio is transcoded to 16 kHz mono, then silero-VAD
@@ -54,8 +54,8 @@ design: MMS is small and fast.
 ## Requirements
 
 - `uv` on PATH (shared prerequisite with the image/video sidecars). That is
-  the ONLY prerequisite — whisper weights are ungated, no Hugging Face
-  token needed. The MERaLiON weights are ungated too.
+  the ONLY prerequisite for the Whisper path — whisper weights are ungated, no
+  Hugging Face token needed. The MERaLiON weights are ungated too.
 - `ffmpeg` on PATH for the MERaLiON path (16 kHz mono transcode before VAD).
 - First launch resolves the Python env (mlx-whisper or faster-whisper) and
   downloads the selected model's weights into `data/asr-models` on first

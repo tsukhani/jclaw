@@ -94,7 +94,7 @@ JClaw is Abundent's AI-powered automation platform, built from scratch in **pure
 - **[JavaClaw](https://github.com/jobrunr/javaclaw)** (Spring Boot) — job scheduling, background task processing, browser automation
 - **[Hermes](https://github.com/NousResearch/hermes-agent)** (Python) — cron/task scheduling parity, subagent delegation patterns
 
-The implementation is entirely original — no code is shared with either project. JClaw is built on lean library primitives (OkHttp 5, db-scheduler, ProcessBuilder, virtual threads, JPA) with no Spring, no heavy framework bloat, no Python, and no Node.js runtime on the server. The result is a leaner, faster, more maintainable platform for building AI agents and automation workflows.
+The implementation is entirely original — no code is shared with any of them. JClaw is built on lean library primitives (OkHttp 5, db-scheduler, ProcessBuilder, virtual threads, JPA) with no Spring, no heavy framework bloat, and no Node.js runtime on the server — the only Python is in the optional local sidecars the JVM spawns (ASR, diarization, TTS, image, video, fetch, stealth). The result is a leaner, faster, more maintainable platform for building AI agents and automation workflows.
 
 ---
 
@@ -111,10 +111,14 @@ The implementation is entirely original — no code is shared with either projec
 
 - 🤖 **Agent System** — Conversational AI agents with memory and context
 - ⚡ **Job Scheduling** — Persistent cron & scheduled tasks via db-scheduler, with automatic retries and crash recovery
-- 🔧 **Pure Java** — No Python/JavaScript runtimes required
+- 🔧 **Pure Java** — The server is all Java; Python is needed only by the optional local sidecars, JavaScript only to build the SPA
 - 📦 **Built-in Frontend** — Nuxt 4 SPA (Vue 3 + TypeScript)
 - 🔌 **Plugin Architecture** — Modular, extensible design
 - 🧠 **Memory & Context** — Persistent conversations across sessions
+- ⏰ **Tasks & Reminders** — User-facing scheduled tasks and reminders, managed from the Tasks and Reminders pages
+- 🧩 **Skills, MCP & Subagents** — Reusable skills, MCP server tools, and subagent delegation including ACP coding harnesses
+- 📡 **OpenTelemetry** — Opt-in OTLP traces and metrics with GenAI spans per model call, reconfigurable live without a restart
+- 🎙️ **Voice, Image & Video** — Local ASR/TTS and image/video generation through the optional Python sidecars
 - 🚀 **Lightweight** — Minimal resource footprint, fast startup
 
 ---
@@ -137,11 +141,14 @@ jclaw/
 │   ├── jobs/                     # Play @Every jobs + db-scheduler handlers
 │   ├── views/                    # Groovy server templates
 │   └── utils/                    # Utility classes
+├── bin/                          # diagnostics.mjs and its tests
+├── certs/                        # Generated .env secret + optional TLS cert (gitignored)
 ├── conf/                         # Play configuration
 │   ├── application.conf          # Main app config
 │   ├── routes                    # URL routing
 │   ├── play.plugins              # Play plugin registration
 │   └── log4j2.xml                # Logging configuration
+├── docs/                         # User guide + generated architecture docs
 ├── frontend/                     # Nuxt 4 SPA (SPA-only; ssr: false)
 │   ├── app.vue                   # Root component
 │   ├── layouts/                  # Page layouts
@@ -155,6 +162,8 @@ jclaw/
 ├── lib/                          # Custom JARs (if needed)
 ├── modules/                      # Play modules (auto-managed)
 ├── public/                       # Static web assets
+├── sidecar/                      # Python sidecars (asr, diarize, fetch, image, stealth, tts, video)
+├── skills/                       # Skill definitions loaded by SkillLoader
 ├── test/                         # Unit and integration tests
 ├── tmp/                          # Play temp/runtime files
 ├── logs/                         # Application logs
@@ -263,7 +272,7 @@ Dependencies are automatically installed when you start with `jclaw.sh`.
 
 ### Dev Container (Recommended)
 
-The fastest way to start coding without installing any of the [Prerequisites](#runtime-prerequisites) on your host machine is to use the included dev container. The `.devcontainer/Dockerfile` ships a pinned toolchain (Java 25, Python 3.14, Node 26, pnpm, the Play fork at the version recorded in `.play-version`, tesseract-ocr) on top of Ubuntu 26.04 LTS — all the prerequisites listed above, already installed.
+The fastest way to start coding without installing any of the [Prerequisites](#runtime-prerequisites) on your host machine is to use the included dev container. The `.devcontainer/Dockerfile` ships a pinned toolchain (Java 25, Python 3, Node 26, pnpm, the Play fork at the version recorded in `.play-version`, tesseract-ocr) on top of Ubuntu 26.04 LTS — all the prerequisites listed above, already installed.
 
 #### Host prerequisites
 
@@ -291,9 +300,9 @@ What happens automatically once you click:
 
 1. Docker builds the image from `.devcontainer/Dockerfile` (~5–10 min the first time, cached on subsequent rebuilds).
 2. Your local jclaw directory is bind-mounted into the container at `/workspaces/jclaw`. **Edits you make inside the container persist on your host** — the container is an environment, not a copy.
-3. The IDE runs `postCreateCommand: ./jclaw.sh setup` automatically, which:
+3. The IDE runs the `postCreateCommand` automatically — `./jclaw.sh setup`, then `./gradlew playClasspath` to resolve the Gradle dependency cache, then a Playwright Chromium install (`com.microsoft.playwright.CLI install chromium`). `setup` itself:
    - Validates all prerequisites (every check passes — they're baked into the image)
-   - Wires git hooks (`.githooks/pre-commit`, `.githooks/pre-push`)
+   - Wires git hooks (`.githooks/pre-commit`, `.githooks/pre-push`, `.githooks/post-checkout`)
    - Resolves the pinned pnpm version, which pnpm verifies against the lockfile's signed package-manager record
    - Runs `pnpm install` for the frontend
    - Adds the canonical `github` remote (`https://github.com/tsukhani/jclaw.git`)
@@ -376,7 +385,7 @@ For a turnkey production install, use the [Quick Install](#quick-install-one-lin
 
 ### Docker (Production)
 
-The simplest way to run JClaw in production is with Docker Compose. The shipped `docker-compose.yml` pulls the prebuilt image from GHCR, publishes the app on **:9000**, and persists `data/`, `logs/`, `workspace/`, and `skills/` to the host so config and conversations survive restarts.
+The simplest way to run JClaw in production is with Docker Compose. The shipped `docker-compose.yml` pulls the prebuilt image from GHCR, publishes the app on **:9000**, and persists `data/`, `logs/`, `workspace/`, `skills/`, and `certs/` (the generated secret and TLS material) to the host so config and conversations survive restarts.
 
 ```bash
 # Start in the background
@@ -392,7 +401,7 @@ docker compose down
 JCLAW_PORT=8080 docker compose up -d
 ```
 
-That's it — no `.env` setup needed. On first boot the container's entrypoint generates a 64-character `PLAY_SECRET` (used to sign session cookies) and persists it to `./data/.play-secret`. Subsequent restarts read the same file, so existing user sessions survive across `docker compose down` / `up` cycles. To rotate the secret, delete `./data/.play-secret` and restart the container — all existing `PLAY_SESSION` cookies become invalid, which is the point.
+That's it — no `.env` setup needed. On first boot the container's entrypoint generates a 64-character `PLAY_SECRET` (used to sign session cookies) and persists it to `./certs/.env`. Subsequent restarts read the same file, so existing user sessions survive across `docker compose down` / `up` cycles. To rotate the secret, delete `./certs/.env` and restart the container — all existing `PLAY_SESSION` cookies become invalid, which is the point.
 
 If you'd rather pin the secret yourself (e.g. for multi-host deployments that need a shared cookie key, or rotation managed by your secret-store), drop a `.env` file alongside `docker-compose.yml` with `PLAY_SECRET=<value>` — Compose will forward it into the container and the entrypoint will defer to it instead of generating one.
 
@@ -480,7 +489,7 @@ Subsequent `docker compose up -d` calls reuse the existing cert — you only nee
 
 ### Custom Ports
 
-Use `--backend-port` and `--frontend-port` with any `jclaw.sh` mode. The frontend reads the backend port via the `JCLAW_BACKEND_PORT` environment variable at startup — no files are modified.
+Use `--backend-port` with any `jclaw.sh` mode; `--frontend-port` applies to dev mode only (it sets the Nuxt dev server port). The frontend reads the backend port via the `JCLAW_BACKEND_PORT` environment variable at startup — no files are modified.
 
 ```bash
 # Dev mode with custom ports

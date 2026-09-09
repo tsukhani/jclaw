@@ -26,8 +26,9 @@ a time; concurrent callers get `409` and queue on the JVM-wide fair lock.
 
 - `uv` on PATH (shared prerequisite with the asr/image/video sidecars).
 - `ffmpeg` on PATH (for the 16 kHz transcode).
-- A Hugging Face token in `HF_TOKEN` (the JVM passes it from
-  `imagegen.local.hfToken`) — `pyannote/speaker-diarization-community-1` is
+- A Hugging Face token in `HF_TOKEN` (the JVM passes
+  `transcription.diarization.local.hfToken`, falling back to `imagegen.local.hfToken`
+  when that is blank) — `pyannote/speaker-diarization-community-1` is
   gated; accept its terms once per HF account on the model page. Weights
   cache under `data/diarize-models` via HF_HOME on first use.
 
@@ -54,9 +55,11 @@ with identical labels; `DIARIZE_DEVICE` forces one, `PYTORCH_ENABLE_MPS_FALLBACK
 without labels). Turns under 1 s are skipped (too little signal).
 
 The SER model is **operator-configurable** (`transcription.diarization.emotionModel`
-→ `emotion_model` in the `/diarize` request; the worker caches per model). Any
-Hugging Face `AutoModelForAudioClassification` SER model loads — `AutoProcessor`,
-falling back to `AutoFeatureExtractor` for audio-only wav2vec2 models.
+→ `emotion_model` in the `/diarize` request; the worker caches per model). The
+sidecar accepts any Hugging Face `AutoModelForAudioClassification` SER model —
+`AutoProcessor`, falling back to `AutoFeatureExtractor` for audio-only wav2vec2
+models — but JClaw's Settings offer a fixed trio (`DiarizeModelStore.SER_MODELS`:
+MERaLiON-SER v1, superb, Dpngtm) and coerce any other value back to the default.
 **MERaLiON is a robust multilingual default** (English/Chinese/Malay/Tamil/
 Indonesian, conversational training, + V/A/D) — and the one verified accurate on
 the hardest tested domain (8 kHz Malay telephony), where the wav2vec2
@@ -92,7 +95,7 @@ curl -s -X POST localhost:9530/diarize \
 Two-tier uv split (same shape as `sidecar/asr`): a stdlib-only `serve.py`
 supervisor holds no ML deps and shells every request to `diarize.py`, whose
 `pyannote.audio` + `torch` deps live in its own PEP 723 inline script env
-(numpy ≥ 2; isolated from the asr env's numpy pin). The pyannote pipeline
+(numpy ≥ 2; separate from the asr scripts' envs). The pyannote pipeline
 (~20 s load) is held in a persistent worker so the load is paid once, then
 amortized across `/diarize` calls until the daemon self-evicts on idle.
 

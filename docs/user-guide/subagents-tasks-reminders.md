@@ -17,10 +17,10 @@ That's the whole story. The rest of this section is the detail behind each axis.
 | **What's the work?**             | A second LLM turn in a child context — agent reasoning, tool calls, a real reply.   | An agent turn fired in the background — same LLM-driven work, just deferred.          | **No work.** A pre-written message delivered verbatim.                     |
 | **When does it run?**            | Right now (or shortly, via `async`), inside the current conversation's "thinking." | On a schedule: immediate / once at a time / every N / cron.                            | On a schedule (same shapes as a task).                                     |
 | **Who triggers it?**             | The parent agent during its own turn.                                              | The agent via `task_manager`, in response to "do X every morning."                     | The agent via `task_manager` with `payloadType="reminder"`, in response to "remind me to X." |
-| **LLM at fire time?**            | Yes — that's the whole point.                                                      | Yes — runs the full agent loop in a fresh conversation.                                | **No** — fire path skips the LLM entirely.                                  |
+| **LLM at fire time?**            | Yes — that's the whole point.                                                      | Yes — runs the full agent loop against a fresh task run (not a conversation).          | **No** — fire path skips the LLM entirely.                                  |
 | **Lives across server restarts?**| No (in-flight runs die with the JVM).                                              | Yes (recurring schedules survive).                                                     | Yes.                                                                       |
-| **Where does the output land?**  | Inline block, sidebar conversation, or async announce card in the parent chat.     | Conversation transcript on the [Conversations](/conversations) page; optional `delivery` channel for the final message. | Top-right toast (web) or 🔔-prefixed Telegram message; never enters chat history. |
-| **Visible to the LLM next turn?**| Yes — the reply comes back into the parent (or via `subagent_yield`).           | Yes — the run's transcript is part of conversation history.                            | **No** — invisible by design.                                              |
+| **Where does the output land?**  | Inline block, sidebar conversation, or async announce card in the parent chat.     | The run's trace on the [Tasks](/tasks) page (expand the task's row) — never the [Conversations](/conversations) page; optional `delivery` channel for the final message. | Top-right toast (web) or 🔔-prefixed Telegram message; never enters chat history. |
+| **Visible to the LLM next turn?**| Yes — the reply comes back into the parent (or via `subagent_yield`).           | **No** — the trace is stored on the task run, not in any conversation's history.        | **No** — invisible by design.                                              |
 
 ## The load-bearing distinction
 
@@ -29,7 +29,7 @@ That's the whole story. The rest of this section is the detail behind each axis.
 - A **task** fires the agent loop. Use it when the schedule is "do this work later" and you want the agent to figure out *how* at fire time. The schedule is the trigger; the work is open-ended.
 - A **reminder** skips the loop. Use it when the schedule is "tell me this later" and you already know the message. The schedule is the trigger; the message is fixed.
 
-Every other difference between tasks and reminders (cascade-delete behavior, toast vs conversation surface, the 🔔 prefix on Telegram, the fact that reminders never enter LLM context on the next turn) falls out of that one choice.
+Every other difference between tasks and reminders (cascade-delete behavior, toast vs run-trace surface, the 🔔 prefix on Telegram, the fact that reminders never enter LLM context on the next turn) falls out of that one choice.
 
 The subagent's "axis" is different. It's not about *when* — subagents always fire as part of the current turn (the `async` variant just lets the parent keep working in parallel). It's about *what context the work runs in*: a child conversation, a child agent, a child tool set, a child reply that can either come back to the parent (`subagent_yield`) or land as a standalone announce card for *you*.
 

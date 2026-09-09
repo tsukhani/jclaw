@@ -4,8 +4,8 @@
 
 - **Immediate** — runs as soon as it's created.
 - **Scheduled** — runs once, at a specific date and time.
-- **Interval** — runs every N seconds, minutes, hours, or days, with no calendar awareness.
-- **Cron** — runs on a Spring 6-field cron schedule, or one of the `@daily` / `@hourly` shortcuts.
+- **Interval** — runs every N minutes, hours, or days, with no calendar awareness.
+- **Cron** — runs on a Spring 6-field cron schedule, or one of the `@hourly` / `@daily` / `@weekly` / `@monthly` / `@yearly` shortcuts.
 
 The [Tasks](/tasks) page is where you observe and manage every task across all your agents. For schedule-and-nudge work that doesn't need an agent turn — "remind me in 30 minutes to take the laundry out" — reach for [Reminders](/guide#reminders) instead. If you're trying to choose between tasks, reminders, and subagents, the [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) section lays out the three side by side.
 
@@ -58,11 +58,11 @@ Two ways to stop a task. They are not the same:
 
 ## The Tasks page
 
-The [Tasks](/tasks) page shows every task, with three view modes — Table, Cards, and Calendar — switched from the tab strip on the right. The view selection persists in the URL (`?view=cards`), so refresh and shareable links survive.
+The [Tasks](/tasks) page shows every task, with two view modes — Table and Calendar — switched from the tab strip on the right. Calendar persists in the URL (`?view=calendar`), so refresh and shareable links survive; Table is the default and writes nothing.
 
 ### Dashboard stats
 
-A KPI strip above the list shows **Runs today**, **Success rate**, **Avg duration**, and the live **Pending / Running / Failed** task counts. The first three are derived from your task **run history**. To clear them, click the **Reset stats** control (the circular-arrow icon in the page header, next to the retention label): it deletes completed/failed/cancelled run history — in-flight runs are kept — so the run-derived KPIs reset. The live task-status counts are unaffected, since they reflect current task state, not history.
+A KPI strip above the list shows seven tiles: **Runs today**, **Success rate**, **Avg duration**, and the live **Running / Active / Pending / Failed** task counts. The first three are derived from your task **run history**. To clear them, click the **Reset stats** control (the circular-arrow icon in the page header, next to the retention label): it deletes completed/failed/cancelled run history — in-flight runs are kept — so the run-derived KPIs reset. The live task-status counts are unaffected, since they reflect current task state, not history.
 
 ### Filters
 
@@ -74,6 +74,7 @@ The top of the page is a filter bar accepting free-text keywords and typed keys:
 | `status:` | `status:PENDING`     | One of `PENDING`, `ACTIVE`, `RUNNING`, `LOST`, `COMPLETED`, `FAILED`, `CANCELLED`. |
 | `type:`   | `type:CRON`          | `IMMEDIATE`, `SCHEDULED`, `INTERVAL`, or `CRON`.                                 |
 | `agent:`  | `agent:morning-bot`  | Tasks owned by an agent matching this string.                                    |
+| `transcript:` | `transcript:"daily briefing"` | Full-text search over the transcripts of past fires. Hits are listed in a panel below the bar rather than filtering the table; click one to open that run's trace. Quote phrases; `AND` / `OR` / `NOT` and a trailing `*` prefix wildcard work. |
 
 Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks containing "summary."
 
@@ -134,18 +135,22 @@ Walking the transitions:
 
 ### Per-row actions
 
-| Icon             | Appears when                       | Effect                                                                                |
-|------------------|------------------------------------|---------------------------------------------------------------------------------------|
-| 🚫 Cancel        | Status is `PENDING` or `ACTIVE`    | Stops the task firing. Recurring tasks keep their schedule config; `runNow` revives.   |
-| ↻ Retry          | Status is `FAILED` or `LOST`       | Requeues for another attempt.                                                         |
-| 🗑 Delete        | Always                              | Hard-delete the task and its run history. Confirms first.                              |
+| Icon             | Appears when                                              | Effect                                                                                |
+|------------------|-----------------------------------------------------------|---------------------------------------------------------------------------------------|
+| ▶ Run now        | Recurring and live (`PENDING`/`ACTIVE`), not paused, no fire in flight | Fires immediately; the next scheduled run is unchanged.                  |
+| ⏹ Cancel running fire | Recurring with a fire in flight                      | Stops that fire at the next safe point; the schedule is untouched.                    |
+| ⏸ Pause          | Recurring and live, not paused                            | Suspends the schedule without losing it.                                              |
+| ▶ Resume         | Recurring and live, paused                                | Picks the schedule back up.                                                           |
+| 🚫 Cancel        | One-off with status `PENDING`                             | Stops it firing. The row is kept; **Re-enable** or `runNow` revives it.               |
+| ↺ Re-enable      | Status is `CANCELLED`                                     | Re-arms a one-off's fire, or resumes a recurring task at its next scheduled fire.     |
+| ↻ Retry          | Status is `FAILED` or `LOST`                              | Requeues for another attempt.                                                         |
+| 🗑 Delete        | Always                                                    | Hard-delete the task and its run history. Confirms first.                              |
 
 For bulk delete, click the trash icon in the page header to enter multi-select mode, tick rows, then click **Delete N**.
 
-### Cards and Calendar views
+### Calendar view
 
-- **Cards** view is the same data laid out as denser per-task cards — easier to scan on a wide screen.
-- **Calendar** view places `SCHEDULED` and `CRON` next-fire times on a monthly grid, handy for spotting double-bookings before a task fires.
+**Calendar** view places `SCHEDULED` and `CRON` next-fire times on a monthly grid, handy for spotting double-bookings before a task fires.
 
 ## Cron syntax
 
@@ -176,19 +181,19 @@ When in doubt, ask the agent — `task_manager` knows Spring cron and can transl
 1. Per-task `timezone` (set by the agent or `updateTask`, validated as IANA — `America/New_York`, `Asia/Tokyo`, etc.).
 2. Operator default at **Settings → Tasks → Default timezone**.
 3. The `tasks.defaultTimezone` line in `application.conf` (shipped commented-out; uncomment to pin a zone).
-4. The JVM default (`ZoneId.systemDefault()`).
+4. The app timezone at **Settings → General** (`app.timezone`), which itself defaults to the server's JVM zone.
 
 `INTERVAL` and `IMMEDIATE` tasks ignore timezone — their schedule is duration-based, not wall-clock.
 
 ## Retention
 
-Completed and cancelled tasks are kept for **N days**, then swept by a daily cleanup job. The retention TTL is configured at **Settings → Tasks → Retention** and shown next to the page title so you don't get surprised by auto-deletes. Setting retention to `0` disables the sweep.
+Completed, failed, cancelled and lost tasks are kept for **N days**, then swept by a daily cleanup job. The retention TTL is configured at **Settings → Tasks → Retention** and shown next to the page title so you don't get surprised by auto-deletes. Setting retention to `0` disables the sweep.
 
-Independently of that day-based TTL, JClaw keeps only the **10 most recent runs per task** — each new fire prunes older run history for that task. A frequently-recurring task (an every-30-minutes labeler, say) therefore never grows its run table without bound: you always have the latest ten fires, while the day-based sweep removes whole completed/cancelled tasks past the TTL.
+Independently of that day-based TTL, JClaw keeps only the **10 most recent runs per task** — each new fire prunes older run history for that task. A frequently-recurring task (an every-30-minutes labeler, say) therefore never grows its run table without bound: you always have the latest ten fires, while the day-based sweep removes whole terminal (completed/failed/cancelled/lost) tasks past the TTL.
 
 ## Editing a task's instructions
 
-Expand a task's row to see its **Instructions** — the description the agent runs on. If the description is a list (one step per line), it renders as numbered steps; a plain description renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent and the inline **Channel** editor live in the same expanded detail.
+Expand a task's row to see its **Instructions** — the description the agent runs on. If the description is a list (one step per line), it renders as numbered steps; a plain description renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent, the inline **Channel** editor, and inline editors for the task's **name** and **timezone** live in the same expanded detail.
 
 ## What a task run looks like
 

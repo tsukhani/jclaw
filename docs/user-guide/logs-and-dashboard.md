@@ -7,15 +7,15 @@ Two read-only surfaces give you visibility into what JClaw is doing right now an
 
 ## Dashboard
 
-The [Dashboard](/) is the first thing you see after signing in. Five stat cards at the top, then three live panels below.
+The [Dashboard](/) is the first thing you see after signing in. Five stat cards at the top, then four panels below — Chat Cost, Chat Performance, Chat Compression, and Recent Activity.
 
 ### Stat cards
 
 | Card              | What it shows                                                                                          |
 |-------------------|--------------------------------------------------------------------------------------------------------|
-| **Agents**        | Enabled agents / total agents. Labeled **Active**.                                                      |
+| **Agents**        | Two sub-stats: **Active** (enabled agents / total agents) and **Size** — the agents' shared workspace's footprint on disk, turning amber past 10 GB so a runaway file shows up without a shell. |
 | **Conversations** | Cumulative count of all conversations. Labeled **Total**.                                               |
-| **Channels**      | Number of currently-active external channels — web + Telegram bindings + Slack/WhatsApp configs.       |
+| **Channels**      | Number of currently-active external channels — Telegram bindings + Slack/WhatsApp configs. The in-app web chat is deliberately excluded so the number matches the cards on [Channels](/channels). |
 | **Tasks**         | Three sub-stats side by side: **Active** (recurring `CRON` / `INTERVAL` in steady state), **Running** (currently firing), **Pending** (`SCHEDULED` / `IMMEDIATE` waiting). |
 | **Reminders**     | Two sub-stats: **Active** (recurring reminders) and **Pending** (one-shot reminders waiting to fire). |
 
@@ -23,28 +23,29 @@ The Tasks card's three-way split is intentional — you want to see `RUNNING` ti
 
 ### Refresh cadence
 
-All four stats and all three panels refresh in lockstep on a **5-second tick**. The page polls in the background as long as it's open, so an operator watching a task fire sees the numbers move without manual reload.
+The Tasks and Reminders sub-stats and three of the panels — Chat Cost, Chat Performance, and Recent Activity — refresh in lockstep on a **5-second tick**; Chat Compression is not on the tick, and the Agents, Conversations and Channels cards load once per visit. The page polls in the background as long as it's open, so an operator watching a task fire sees the numbers move without manual reload.
 
 ### Chat Cost
 
 Persisted aggregated token usage and dollar cost across your conversations. Header controls:
 
-- **Filters** — Agent (all / specific), Channel (all / web / telegram / slack / whatsapp), Window (Last 7 days / Last 30 days / all-time).
+- **Filters** — Agent (all / specific), Channel (all, or any channel that has cost data in the window — the list is built from the data, not fixed), Window (Last 7 days / Last 30 days / all-time).
 - **View** — table or bar chart.
 - **CSV** — download the per-model breakdown.
 
-When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, etc.), a **Subscription** subsection renders first with the pro-rated monthly fee for the selected window, and per-provider chips let you narrow to one. The **Per-token** subsection below covers everything billed on usage, and a **Combined Total** row sums the two.
+When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, etc.), a **Subscription** subsection renders first with the pro-rated monthly fee for the selected window, and per-provider chips let you narrow to one. The **Per-token** subsection below covers everything billed on usage, with its own provider chips and a rollup card per provider (total spend and average $/1M tokens), and a **Combined Total** row sums the two.
 
 ### Chat Performance
 
-Latency percentiles for each model, optionally filtered by channel via the in-panel dropdown (web first when present). Two views, toggled in the panel header:
+Latency percentiles per pipeline segment of a turn — queue wait, TTFT, the tool rounds or reasoning before the first text, stream body, tool execution, the voice group, total — rather than per model. Filters sit in the panel header: a **7d / 30d / All** window (default 30d), an agent select, and a channel select. Three views, toggled in the panel header:
 
-- **Table** — per-model latency: sample count (n), p50 / p90 / p99 / p999 percentiles, and min/max.
-- **Overlay chart** — overlapping latency density curves so you can compare distributions across models at a glance.
+- **Table** — per-segment latency: sample count (n), p50 / p90 / p99 / p999 percentiles, and min/max. Child segments are indented under their parent.
+- **Distribution chart** — overlapping latency density curves so you can compare the segments' distributions at a glance.
+- **Counts** — the per-turn call and round counts described below.
 
-Use this to spot a slow model or a slow channel before users complain.
+Use this to spot a slow segment or a slow channel before users complain.
 
-Three rows in the table are counts per turn rather than durations, and render without a unit:
+The **Counts** view holds three per-turn figures that are counts rather than durations, so they get their own view instead of rows in the latency table. Its columns are Metric / turns / total / p50 / p90 / p99 / max — **total** is the windowed sum, which has no meaning for a duration:
 
 | Row                           | What it counts                                                                                          |
 |-------------------------------|---------------------------------------------------------------------------------------------------------|
@@ -52,7 +53,7 @@ Three rows in the table are counts per turn rather than durations, and render wi
 | **LLM calls / turn**          | Chat requests dispatched to a provider during the turn — the first call plus every tool-loop continuation, retry-with-nudge, prologue summarization, and any call a tool makes on the turn's behalf. Transport retries behind one dispatch are not separate calls; a failover to a second provider is. |
 | **Cache-served calls / turn** | How many of those had their prompt served from the provider's cache — a much cheaper call than an uncached one. |
 
-Only turns with at least one cache-served call contribute to the last row, so read the cache-served *share* as the ratio of the two rows' totals rather than by subtracting percentiles (percentiles don't subtract).
+Only turns with at least one cache-served call contribute to the last row, so the cache-served *share* is printed as a percentage line under the table — the ratio of the two rows' totals rather than a subtraction of percentiles (percentiles don't subtract).
 
 Watch **LLM calls / turn** when you change agent configuration: it is what tells you whether a change bought its quality with extra model calls.
 
@@ -62,11 +63,11 @@ A live tail of the last 10 events. It shows the same message columns as the [Log
 
 | Column      | Width     | Notes                                       |
 |-------------|-----------|---------------------------------------------|
-| **Level**   | 10ch      | Color-coded: red `ERROR`, yellow `WARN`, muted `INFO`. |
-| **Category**| 44ch      | The subsystem the event came from.          |
-| **Agent**   | 16ch      | Owning agent id (or `—`).                    |
+| **Level**   | narrow    | Color-coded: red `ERROR`, yellow `WARN`, muted `INFO`. |
+| **Category**| medium (narrower on small screens) | The subsystem the event came from. |
+| **Agent**   | narrow    | Owning agent id (or `—`).                    |
 | **Message** | flex      | One-line description.                       |
-| **Timestamp**| 48ch     | Local date · time (matches Logs format).     |
+| **Timestamp**| wide, right-aligned | Local date · time (matches Logs format). |
 
 A segmented toggle in the panel header switches the table between two views:
 

@@ -24,7 +24,7 @@ The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view they
 - **Category pills** — filter the grid by category. Each pill carries an absolute count of prompts in that category (whole library, not the current search).
 - **Search** — the search box filters live across each prompt's **title, text, and tags**.
 - **Run / Edit / Delete** — every card's actions (see below).
-- **New prompt · Import · Export** — the toolbar, top-left.
+- **Export · Import · New prompt** — the toolbar, top-left.
 
 ## Creating a prompt
 
@@ -44,6 +44,8 @@ The **Generate** step calls your **main agent's** model, so it only works once t
 **Run** (on a card) is the whole point of the library: it opens [Chat](/chat) with the prompt's text pre-loaded into the composer, ready for you to edit before sending. It does **not** send automatically — you get the last word. (Under the hood it's the same `?compose=` hand-off the [Apps](/guide#apps) page uses, so no special chat wiring is involved.)
 
 The active agent is whichever one you have selected in Chat — a saved prompt carries text, not an agent binding, so the same prompt works with any agent.
+
+You can also reach the library from the chat composer with the `/prompt` slash command — `/prompt <search words>` picks a saved prompt matching those words. It works on every channel: on the web it prefills the composer just like **Run**; on Telegram, Slack and WhatsApp the bot replies with the prompt text for you to copy, since a bot can't prefill a message box there.
 
 ## Editing and deleting
 

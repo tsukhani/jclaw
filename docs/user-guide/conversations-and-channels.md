@@ -9,7 +9,7 @@ JClaw separates these two concepts on purpose: a **conversation** is a thread of
 
 ## Conversations
 
-The [Conversations](/conversations) page is a searchable archive of every top-level thread you've ever had — across [Chat](/chat), Slack, Telegram, and WhatsApp. Subagent-run transcripts are owned by their parent conversation and live on the [Subagents](/subagents) page instead, not here.
+The [Conversations](/conversations) page is a searchable archive of every top-level thread you've ever had — across [Chat](/chat), Slack, Telegram, and WhatsApp, plus the threads owned by [voice-mode](/guide#chat) sessions and by [app](/guide#apps) invocations. Subagent-run transcripts are owned by their parent conversation and live on the [Subagents](/subagents) page instead, not here.
 
 ### Filtering and search
 
@@ -19,7 +19,7 @@ The filter bar at the top of the page accepts free-text keywords and typed keys:
 |--------------|------------------------|--------------------------------------------------------------------|
 | `q:`         | `q:morning`            | Lucene full-text on the conversation's messages.                    |
 | `name:`      | `name:planning`        | Substring match on the conversation preview (the first user message). |
-| `channel:`   | `channel:slack`        | Restrict to one of `web`, `slack`, `telegram`, `whatsapp`.          |
+| `channel:`   | `channel:slack`        | Restrict to one of `web`, `slack`, `telegram`, `whatsapp`, `voice` (voice-mode sessions), or `app` (app invocations). |
 | `agent:`     | `agent:main-bot`       | Conversations served by a specific agent.                           |
 | `peer:`      | `peer:+15551234567`    | The external user id (Telegram handle, Slack user id, phone number). Blank for web chat. |
 | `starred:`   | `starred:true`         | Only starred conversations. `starred:false` shows only unstarred ones.  |
@@ -82,6 +82,8 @@ The shared mental model is the same across all three:
 
 External messages flow into the same [Conversations](/conversations) page as web chat, so you can read the full history in-app without bouncing between Slack and Telegram.
 
+Below the three cards sits a **Public access — Tailscale Funnel** card. One switch exposes this instance to the public internet over HTTPS through Tailscale Funnel, so the webhook transports below (a Telegram webhook, the Slack Events API, the WhatsApp Cloud API) get a reachable URL with no manual tunnel — Funnel publishes the whole port, so the one switch covers every channel. The card shows the public URL while it's on, reports when Tailscale is disconnected, and resumes on its own once it reconnects.
+
 ### Telegram
 
 Click the **Telegram** card to open the per-bot binding list. Each binding is a Telegram bot token paired with the agent that bot should run as. Add as many bindings as you have bots; disable a binding to temporarily silence a bot without losing its config.
@@ -93,19 +95,23 @@ You'll need:
 
 The bot starts receiving messages as soon as you save and enable the binding. Telegram surfaces JClaw's [slash commands](/guide#chat) (`/new`, `/reset`, `/compact`, …) in its native autocomplete dropdown automatically.
 
+Each binding also picks a **transport**: **POLLING** (the default — JClaw pulls updates from Telegram, nothing to expose) or **WEBHOOK**, which needs a public HTTPS **webhookBaseUrl** (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). The webhook path is fixed — `/api/webhooks/telegram/{bindingId}` — and the secret is generated for you and checked from Telegram's `X-Telegram-Bot-Api-Secret-Token` header, so the base URL is the only part you enter.
+
 ### Slack
 
 Click the **Slack** card to open its per-app binding list, then **+ New binding**. Each binding pairs one Slack app with the agent it runs as, so multiple Slack apps can coexist (one per agent):
 
 - **botToken** — your Slack app's bot token (`xoxb-…`).
-- **signingSecret** — the signing secret from your Slack app's Basic Information page.
+- **signingSecret** — the signing secret from your Slack app's Basic Information page (Events API transport).
 - **agent** — the [agent](/agents) this Slack app routes to (required).
+
+The binding's **transport** decides how messages reach JClaw. **Events API** (the default) is a webhook: it needs the signing secret and a public HTTPS **webhookBaseUrl** for the app's Request URL (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). **Socket Mode** opens a WebSocket from JClaw instead — no public URL and no signing secret, just the app-level **appToken** (`xapp-…`).
 
 Save and toggle **Enabled** on; the bot starts serving immediately.
 
 ### WhatsApp
 
-Cloud-API integration via Meta's WhatsApp Business Platform. Like Slack and Telegram it's per-binding — click the **WhatsApp** card, then **+ New binding** (one number per agent; multiple numbers can coexist). Each binding needs:
+Cloud-API integration via Meta's WhatsApp Business Platform. Like Slack and Telegram it's per-binding — click the **WhatsApp** card, then **+ New binding** (one number per agent; multiple numbers can coexist). Each Cloud-API binding needs:
 
 - **phoneNumberId** — from the WhatsApp Business Platform.
 - **accessToken** — a long-lived access token for the same number.
@@ -114,6 +120,8 @@ Cloud-API integration via Meta's WhatsApp Business Platform. Like Slack and Tele
 - **agent** — the [agent](/agents) this number routes to (required).
 
 Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
+
+A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language) used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** can instead be **WhatsApp Web** — a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all; proactive sends go to the paired owner.
 
 ## How channels and conversations connect
 

@@ -34,11 +34,14 @@ You can also **promote** an agent-specific skill back into the global library by
 
 ### Creating a skill
 
-Skills aren't authored on this page — there's no "New skill" button or file import. You create them with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body that becomes part of the system prompt). Once it's good, drag it from the agent's column to **Global Skills** to promote it for reuse.
+Skills aren't written on this page. Two ways to get one:
+
+- **Browse catalog** — the button above the Global Skills column opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click.
+- **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body that becomes part of the system prompt). Once it's good, drag it from the agent's column to **Global Skills** to promote it for reuse.
 
 ### Viewing
 
-Click any skill row to open a **read-only** viewer of its files. To change a skill, edit it via the skill-creator skill in an agent's workspace (then re-promote if it's a global skill). Updates apply to every agent using the skill the next time it generates; past conversations keep the prompt they were created with.
+Click any skill row to open a **read-only** viewer of its files. A global skill can be **renamed** inline (double-click its name in the Global Skills column) and **deleted** from its row; to change its content, edit it via the skill-creator skill in an agent's workspace (then re-promote if it's a global skill). Updates apply to every agent using the skill the next time it generates; past conversations keep the prompt they were created with.
 
 :::tip Start broad, then split
 A skill that's too narrow gets duplicated. A skill that's too broad gets attached to agents that don't need most of it. When in doubt, start broad and split when you notice an agent ignoring half the skill's content.
@@ -66,7 +69,7 @@ Tools listed here are *available*. To make a tool *active* for a specific agent:
 3. Scroll to **Tools** in the edit form.
 4. Tick the box next to the tool.
 
-A few tools require extra setup (an API key, a workspace path, a shell allowlist entry). The tool card flags those with an inline hint; the actual config lives under the matching [Settings](/guide#settings) section.
+A few tools require extra setup (an API key, a workspace path, a shell allowlist entry); that config lives under the matching [Settings](/guide#settings) section.
 
 :::note Why isn't this just one page?
 Tools are a *catalog* and binding tools to agents is an *agent* concern. Keeping them on separate pages means the catalog stays clean as your roster of agents grows.

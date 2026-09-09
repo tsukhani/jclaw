@@ -4,11 +4,13 @@ Agents remember. After each conversation turn, JClaw quietly extracts durable, r
 
 ## How capture works
 
-There is no "save this" command — capture is automatic and happens in the background after a turn completes, so it never delays a reply:
+Capture is automatic — it happens in the background after a turn completes, so it never delays a reply:
 
 1. A cheap **attention gate** skips trivial turns (greetings, bare acknowledgements) so the system doesn't pay an extraction call for "thanks".
 2. An **LLM extractor** reads the turn and proposes candidate memories, each with a category and an importance score. At most 5 are kept per turn.
 3. Each candidate is **deduplicated** against the agent's recent memories — a near-duplicate of something already stored is dropped rather than appended.
+
+An explicit instruction takes a different route: the agent's `memory` tool (recall, store, forget) answers "remember that…" and "forget what I told you about…" directly, and reports exactly what it touched — storing something already known is a no-op, not a second row. That tool is also the only way a `core` memory is created: automatic capture never assigns `core`, and a candidate the extractor labels `core` is demoted to `fact`.
 
 Capture applies to your operator-facing agents only — [subagents](/subagents) never capture (their work returns to the parent, which captures what matters). Each agent has its own **Auto-capture memories** toggle and an optional extractor-model override on its [Agents](/agents) edit form; point the override at a cheap model to keep extraction costs negligible.
 
@@ -50,15 +52,17 @@ By default relevance is keyword-based. Enabling **vector search** adds semantic 
 The [Memories](/memories) page is a cross-agent table: owning agent, memory text, category badge, importance, and created date. The filter bar composes free text with per-field predicates, e.g.:
 
 ```
-q:invoice category:core importance:>0.8 agent:main
+q:invoice category:core importance:>0.8 agent:main status:superseded
 ```
+
+`status:` picks between **active** (the default — the same set recall sees), **superseded**, and **all**. A memory replaced by a newer one is kept rather than deleted: it renders dimmed with a **superseded** badge whose tooltip says when it was superseded and by which memory, and it is excluded from recall.
 
 From a row you can:
 
 - **Adjust importance** inline (0–1, in 0.05 steps) — takes effect on the next recall.
-- **Delete** the memory — permanent, behind a confirm dialog. Delete anything wrong or stale; a bad memory recalled into future sessions is worse than no memory.
+- **Delete** — select rows with their checkboxes and use **Delete**, or **Delete all matching** to clear everything the active filters match (behind a typed confirmation). Both are permanent. Delete anything wrong or stale; a bad memory recalled into future sessions is worse than no memory.
 
-The **Export** action downloads the currently filtered view as a JSON snapshot. The table shows up to 200 matching entries — narrow the filters if you're near the cap.
+The table is paginated at 20 rows per page, with sorting and paging done server-side, so a filter applies to the whole store rather than the visible page. The **Export** action downloads the whole matching set (up to 500 entries) as a JSON snapshot — narrow the filters if you're near that cap.
 
 ## Tuning
 
@@ -81,7 +85,7 @@ The remaining knobs have no Settings section and live in the config store (`POST
 
 Vector search is opt-in from **Settings › Memory › Embeddings** — the Vector memory toggle, then a provider and model. It is not a `conf/application.conf` edit and needs no restart; the keys (`memory.jpa.vector.enabled`, `.provider`, `.model`, `.dimensions`) live in the config store like any other setting.
 
-**The provider must be a local one** — Ollama, LM Studio, or anything else with a local base URL. Embedding a memory sends its full text to the provider, and reranking renders the whole candidate shortlist into a prompt, so both are restricted to a model running on this machine and memory text never leaves it. The picker lists only local providers, and the backend rejects a non-local value even if the key is set directly. Models are discovered live from the provider, because embedding models are usually absent from the stored catalog.
+**The provider must be one you've marked local** — the **local** flag on its LLM Providers card (`provider.<name>.local`), seeded for Ollama Local, LM Studio, vLLM and llama.cpp; the base URL is not consulted. Embedding a memory sends its full text to the provider, and reranking renders the whole candidate shortlist into a prompt, so both are restricted to a model running on this machine and memory text never leaves it. The picker lists only local providers, and the backend rejects a non-local value even if the key is set directly. Models are discovered live from the provider, because embedding models are usually absent from the stored catalog.
 
 Save is gated on a probe (**Check the model before saving**) that confirms the model embeds and records its dimension. Changing the model afterwards marks the corpus **needs re-embedding**, with a re-embed action that rewrites the existing vectors against the new model.
 

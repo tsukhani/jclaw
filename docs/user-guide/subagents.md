@@ -16,7 +16,7 @@ You don't have to think about any of the parameters. Just ask:
 
 > "Spawn a subagent to research nose trimmers on Lazada and Shopee, then summarize."
 
-The parent agent picks sensible defaults: a new sidebar conversation, no inherited context, blocking until done, with a 5-minute idle budget. You'll see the child appear on the [Chat](/chat) page as a separate row in the sidebar, and when it finishes the parent reads its reply and continues.
+The parent agent picks sensible defaults: a new sidebar conversation, no inherited context, blocking until done, with a 5-minute idle budget (or whatever `subagent.defaultRunTimeoutSeconds` is set to in Settings → **Subagents**). You'll see the child appear on the [Chat](/chat) page as a separate row in the sidebar, and when it finishes the parent reads its reply and continues.
 
 The rest of this section is what you reach for when the defaults aren't quite right.
 
@@ -91,7 +91,7 @@ Without `subagent_yield`, the parent never gets to use the child's reply — the
 
 ## External coding harness (`runtime=acp`) {#acp-harness}
 
-By default a child runs on JClaw's own native agent loop. You can instead delegate the child to an **external coding harness** — a standalone CLI agent such as [Pi](https://github.com/pi-labs/pi), Claude Code, or the Codex CLI — by passing `runtime:"acp"`. JClaw launches the operator-configured harness command as a subprocess, hands it the `task` on stdin, and captures the harness's stdout as the child's reply. This is the Tier 1 integration: a one-shot request/response, no interactive protocol.
+By default a child runs on JClaw's own native agent loop. You can instead delegate the child to an **external coding harness** — a standalone CLI agent such as [Pi](https://github.com/pi-labs/pi), Claude Code, or the Codex CLI — by passing `runtime:"acp"`. JClaw launches the operator-configured harness command as a subprocess and captures its output as the child's reply. How the two talk is set by `subagent.acp.mode`: **batch** (the default) hands the `task` over on stdin and reads stdout when the harness exits; **json** streams the harness's line protocol as it runs; **rpc** opens a bidirectional session so the harness's mid-run permission prompts are routed through JClaw's approval gate (a harness that can't do that falls back to one-way streaming). A harness that speaks ACP natively over stdio is driven over that protocol directly, whichever mode is set.
 
 **Use when:** the child's job is better handled by a purpose-built coding agent with its own tools and sandbox than by JClaw's native loop — for example, a large refactor or a repo-wide edit you'd rather run through Pi.
 
@@ -104,6 +104,8 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
    ```
 
    The command is whitespace-split into an argv, so fixed flags are fine (`/usr/local/bin/pi --headless`). It is read from config **only** — never from the model — so a subagent can't steer JClaw into running arbitrary shell.
+
+   Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: an unknown value refuses the spawn with a message naming the allowed values rather than silently falling back. Settings → **Subagents** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click.
 
 2. **Grant the spawning agent the `acp` capability.** The harness runs as an external process *outside* JClaw's tool gating and workspace confinement, so it's a privileged capability. The **main agent** may always request it; a **custom agent** must have `acpAllowed = true` set on its [Agents](/agents) page. Without the grant, an `acp` spawn is refused on permission. The gate is on the *spawning* agent, so a confined custom agent can't break out by delegating to `acp`.
 
@@ -135,6 +137,8 @@ To stop a subagent from spawning grandchildren that spawn great-grandchildren, J
 | `subagent.maxChildrenPerParent` | 5       | How many concurrently-running children a single parent can have. |
 
 A depth limit of `1` means the top-level agent can spawn children, but those children cannot spawn further children. Bump it for explicit fan-in patterns; keep it conservative for runaway protection.
+
+The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (default 300) and `subagent.defaultYieldTimeoutSeconds` (default 300) — the fallbacks for a spawn or yield that omits its own timeout — the `subagent.acp.command` harness command, and an optional global subagent model (`subagent.modelProvider` / `subagent.modelId`) that pins every child to one model instead of inheriting the parent's.
 
 ## Inspecting what a child did
 
@@ -170,18 +174,24 @@ For the parent agent itself to recall what a previous child did. Returns the ful
 
 ```text
 subagent_spawn
-  task              string   required — instruction for the child
+  task              string   instruction for the child (required unless tasks is given)
+  tasks             string[] batch fan-out — one async child per string, returns run_ids (session mode only)
   label             string   short display name
   agentId           int      use an existing agent row instead of cloning current
   mode              string   "session" (default) | "inline" | (async via async=true)
   context           string   "fresh" (default) | "inherit"
+  runtime           string   "native" (default) | "acp"
   modelProvider     string   override child's provider
   modelId           string   override child's model
   async             bool     return run id immediately (session mode only)
-  runTimeoutSeconds int      idle budget (seconds of inactivity), default 300
+  runTimeoutSeconds int      idle budget (seconds of inactivity), default subagent.defaultRunTimeoutSeconds (300)
 
 subagent_yield
-  runId             string   required — the run id from a prior async spawn
+  runId             string   the run id from a prior async spawn
+  runIds            string[] collect a whole batch — waits for all of them
+  all               bool     wait for every outstanding async child you spawned
+  conversationId    string   alternative to runId — the child conversation id
+  timeoutSeconds    int      resume budget, default subagent.defaultYieldTimeoutSeconds (300); 0 disables
 
 conversation_history
   runId             string   required
@@ -243,15 +253,21 @@ session to the configured directory.
 By default a coding harness runs with the operator's own account permissions,
 scoped only by its `coding/<slug>/` working directory (which organizes output
 but confines nothing) and by the harness's permission flags. For a real OS
-boundary, set `subagent.acp.sandbox=true`:
+boundary, set `subagent.acp.sandbox`. It takes three values: `false` (the
+default — never confine), `true` (confine every run), or `untrusted` (confine
+only runs whose origin channel is not your own web chat — inbound Telegram or
+Slack, the prompt-injection surface — while your own web-driven runs stay
+unconfined):
 
 * **macOS** wraps the harness in `sandbox-exec` — writes are confined to the
-  session directory, and reads of `~/.ssh`, cloud credentials, and other
-  secrets are blocked (the harness's own config, e.g. `~/.claude`, is the only
-  home path it can still read).
+  session directory, and reads of `~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.config/gcloud`, `~/.kube` and `~/.netrc` are denied; everything else
+  stays readable, so the harness's own config (e.g. `~/.claude`) needs no
+  special grant.
 * **Linux** wraps it in `bwrap` — the visible filesystem is built from nothing,
   so secrets are absent rather than merely denied; only the session directory
-  is writable and only the harness's declared state paths are bound back.
+  is writable and only the harness's declared state paths (its own config,
+  e.g. `~/.claude`) are bound back.
 * **Windows** is supported via **WSL2** (it uses the Linux path). Native
   Windows and WSL1 have no sandbox.
 

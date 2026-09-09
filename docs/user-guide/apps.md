@@ -8,7 +8,7 @@ Reach for an app when you want a small, reusable, point-and-click tool that live
 
 Each app is a directory under `public/apps/<slug>/` that carries, at minimum, an `index.html` and an `app.json` manifest. **The filesystem is the whole registry** — there's no database row. Adding an app means adding its directory; removing an app means removing its directory.
 
-An app is a **static bundle**: no server, no database. It may use client-side storage (`localStorage` / `IndexedDB`) or call an external API, but it must not depend on JClaw's backend. Once installed, it's served at `/apps/<slug>/` and opens in a new browser tab from its card.
+An app is a **static bundle**: no server, no database. It may use client-side storage (`localStorage` / `IndexedDB`) or call an external API. The one part of JClaw's backend it may call is its own invoke endpoint: `POST /api/apps/<slug>/invoke` runs the app's designated agent on a `message` and/or file uploads (the agent is resolved from `app.json`'s `agent`, never from the request), and `GET /api/apps/<slug>/files/<uuid>` fetches a file that run produced. Each invoke runs in a fresh app-owned conversation (channel `app`), and because an app is not the operator's own web chat its turns are untrusted — dangerous tools such as `exec` fail closed for them. Once installed, it's served at `/apps/<slug>/` and opens in a new browser tab from its card.
 
 The `<slug>` (the directory name) must match `^[a-z0-9][a-z0-9-]*$` — lowercase letters, digits, and hyphens only — so it can never traverse out of `public/apps/`.
 
@@ -25,6 +25,7 @@ Every app self-describes through a small `app.json` alongside its `index.html`. 
 | `icon`        | Filename of an icon inside the app directory (e.g. `icon.svg`). Cards fall back to a placeholder tile when absent or unloadable. |
 | `price`       | A **metadata-only** pricing label (`Free`, `$20`, `$9/mo`). Purely a badge — JClaw charges nothing. |
 | `agent`       | Optional id of the single agent this app is allowed to invoke. Omit for a non-invoking app.        |
+| `limit`       | Optional cap on `invoke` calls per 60-second window. Default 30, hard ceiling 120; a manifest value can only tighten (a higher one is clamped to the ceiling). Over the limit, invoke answers HTTP 429 until the window rolls. |
 
 ## The Apps page
 

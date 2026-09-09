@@ -39,7 +39,7 @@ Click the paperclip in the composer to attach files. JClaw supports:
 - **Voice notes** — recorded directly in the composer (microphone button) or attached. Audio-capable models receive the audio; other models receive a transcript (see [Settings → Transcription](/guide#settings)).
 - **Video** — clips attached in the composer. Models that support video natively watch the clip directly; otherwise JClaw interprets it for them — a dedicated video-interpretation model summarizes the clip, or, failing that, frames are sampled and sent to a vision model as images, or captioned into a timestamped text summary for text-only models. Tune the sampling in [Settings → Video Interpretation](/guide#settings).
 
-The image and audio icons in the composer light up green when the active model supports those inputs natively, and a video capability pill appears for video — so you can tell at a glance whether the model will see the file or just a transcript, description, or summary.
+**Vision**, **Audio** and **Video** capability pills appear in the composer footer only when the active model advertises that input natively — so you can tell at a glance whether the model will see the file or just a transcript, description, or summary. Beside them, for reasoning-capable models, the **Think** pill toggles thinking for the turn and opens the reasoning-level picker.
 
 ## Voice mode
 

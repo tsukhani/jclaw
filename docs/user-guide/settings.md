@@ -31,6 +31,8 @@ For each provider you can:
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
 - Set **local** — the provider's Remote/Local classification. It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp; absent means remote. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
+- Set the **paymentModality** — how the provider bills you. `PER_TOKEN` estimates cost per turn from model pricing; `SUBSCRIPTION` ignores per-token pricing and pro-rates a flat monthly fee instead. A provider that supports only one billing model shows it locked.
+- Set **subscriptionMonthlyUsd** — shown only when the modality is `SUBSCRIPTION`: the monthly USD you pay the provider, which the Dashboard's Chat Cost **Subscription** block pro-rates to the selected window (`monthly × window_days / 30`).
 - **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability badges (vision, audio, video, thinking) confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess).
 - **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
 
@@ -60,9 +62,9 @@ Cloud backends are disabled in the radio group until their underlying provider k
 
 Below the backend picker, a **Diarization** subsection covers the who-spoke-when pipeline (independent of the master transcription toggle, since the `diarize_audio` tool runs its own local pipeline):
 
-- **Diarization** — who-said-what transcripts come from one of two providers you pick here. Ordinary voice-note transcription stays local (whisper) and works without any of this.
-  - **Audio-capable cloud chat model** — pick a provider (OpenAI or OpenRouter, using the API keys from LLM Providers) and one of its audio-capable models (the picker lists only models that accept audio input — the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names.
-  - **On-device (`pyannote-local`)** — fully offline. `pyannote/speaker-diarization-community-1` produces speaker turns, which are fused with the local ASR transcript; **no audio leaves the host**. It labels speakers by voice within the recording (Speaker 1, Speaker 2) rather than by name, so the cloud path remains the option when you need named speakers. The gated weights need a Hugging Face token — the same one Image Generation uses. The panel shows download status and live progress for the diarizer and emotion weights, and only contacts the sidecar when this path is active.
+- **Diarization** — who-said-what transcripts come from one of five providers you pick here. Ordinary voice-note transcription stays local (whisper) and works without any of this.
+  - **Audio-capable chat model** — pick a provider — **OpenRouter** or **OpenAI** (cloud, using the API keys from LLM Providers), or **llama.cpp** or **vLLM** (local, over their OpenAI-compatible APIs; audio input is experimental upstream) — and one of its audio-capable models (the picker lists only models that accept audio input — the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names.
+  - **On-device (`pyannote-local`)** — fully offline. `pyannote/speaker-diarization-community-1` produces speaker turns, which are fused with the local ASR transcript; **no audio leaves the host**. It labels speakers by voice within the recording (Speaker 1, Speaker 2) rather than by name, so the chat-model path remains the option when you need named speakers. The gated weights need a Hugging Face token — the same one Image Generation uses. The panel shows download status and live progress for the diarizer and emotion weights, and only contacts the sidecar when this path is active.
 - **Emotion labels on diarized transcripts** — when the `diarize_audio` tool asks for them, each turn on the on-device path is tagged with how it was said (7 categories plus valence / arousal / dominance), classified locally from the voice's tone. The model is operator-selectable (`transcription.diarization.emotionModel`) from a fixed set: **MERaLiON-SER v1** (the default — multilingual, covering English, Chinese, Malay, Tamil and Indonesian), or one of two English-trained wav2vec2 alternatives. Match the model to your audio: the English models load fine on other languages but misclassify them. Best-effort — a failure returns turns without labels. Ordinary voice-note transcription is unaffected.
 
 ## Speech
@@ -74,7 +76,7 @@ Two engines:
 - **Sidecar** — quality-first; runs a local Python process (needs `uv` on PATH), and weights download from Hugging Face on first use. Models: **Qwen3-TTS 0.6B** (plus a 4-bit variant), **Kokoro-82M**, and **Chatterbox** (a PyTorch model on Apple Silicon MPS or NVIDIA CUDA — the most natural voice, but noticeably slower than the others).
 - **JVM-native** — runs in-process via sherpa-onnx, no Python or sidecar. Models: **Piper Amy** (tiny, fast, English) and **Kokoro-82M multilingual**; the chosen voice downloads once (a button in the panel) then synthesizes on CPU.
 
-**Voice** — models with named speakers show a voice dropdown under the model. **Kokoro** offers American and British, male and female voices; **Qwen3-TTS** offers a few numbered speakers. Single-voice models (Piper) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
+**Voice** — models with named speakers show a voice dropdown under the model. **Kokoro** offers American and British, male and female voices. **Qwen3-TTS** and **Chatterbox** have no named voices: their voice is chosen by cloning a reference clip — **Record** a few seconds of clean speech in the panel or **Upload** one (WAV, MP3, FLAC, M4A or OGG, under 10 MB), and **Clear** it to return to the model default. Single-voice models (Piper) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
 
 ## OCR
 
@@ -179,7 +181,7 @@ An **Advanced — context window & compaction** collapsible reveals four lower-l
 | `compactionReserveTokens`    | 15000   | Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed `contextWindow − reserve`. Larger reserve = compaction fires sooner. |
 | `compactionMinTurns`         | 10      | Minimum messages in the to-summarize prefix before auto-compaction will run. Below this, the gate skips and trim drops oldest instead. Manual `/compact` uses a relaxed threshold (2). |
 | `compactionKeepMessages`     | 10      | Minimum messages kept verbatim at the end of the conversation after compaction. Smaller keep = more aggressive summarization. |
-| `jtokkit safety multiplier`  | 1.4×    | Fudge factor applied to jtokkit's token estimate when the model uses a fallback encoding (Kimi, DeepSeek, Gemma, Qwen, GLM, Mistral, Llama). Higher = trim/compact earlier, safer. OpenAI-family models use 1.0× regardless. |
+| `jtokkit.safetyMultiplier.unmatched` | 1.4× | Fudge factor applied to jtokkit's token estimate when the model uses a fallback encoding (Kimi, DeepSeek, Gemma, Qwen, GLM). Higher = trim/compact earlier, safer. OpenAI-family models use 1.0× regardless. This is the global cold-start default: a per-provider `jtokkit.safetyMultiplier.<provider>` or per-model `jtokkit.safetyMultiplier.<provider>.<model>` key overrides it, and the tokenizer calibration job writes the per-model ones automatically from observed provider-vs-jtokkit deltas. |
 
 ## Subagents
 
@@ -274,6 +276,26 @@ A reachability badge probes the saved default and reports whether it still answe
 
 **Job options** are read from the selected printer, not from a list JClaw carries — the page offers `sides`, `media`, `copies`, quality and whatever else the device announces, with its own default preselected. Leave any of them blank to use the printer's default. Options are re-queried whenever you change the selected printer, so a device that reports one-sided-only never lets you save a duplex default it would have to reject.
 
+## Telemetry
+
+Exports traces and metrics to an OpenTelemetry collector over OTLP. Off by default — nothing leaves the process until you turn it on. Found under **System → Telemetry** in the rail.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `otel.enabled` | `false` | Master switch. |
+| `otel.exporter.endpoint` | `http://localhost:4318` | Collector base URL; `/v1/traces` and `/v1/metrics` are appended for http/protobuf. |
+| `otel.exporter.protocol` | `http/protobuf` | `http/protobuf` or `grpc`. |
+| `otel.exporter.secretHeaders` | (empty) | Comma-separated `name=value` pairs sent with every export — vendor auth goes here. Masked once saved, so editing means retyping the whole value; save it empty to clear. |
+| `otel.service.name` | `jclaw` | How this instance is named in the collector. |
+| `otel.traces.sampler.ratio` | `1.0` | Share of root spans recorded, 0–1. |
+| `otel.metrics.interval.seconds` | `60` | Seconds between metric exports. Has no row in the panel and is **read at JVM start only** — set it through `POST /api/config` and restart. |
+
+Changes to the endpoint, headers, protocol and sampling ratio apply live — the exporter is swapped for the next span and the next metric collection, no restart. **Send test span** emits one span and waits for the collector's verdict, so you can tell "saved" from "reaching the collector": it reports **Delivered** with the trace id, or the exporter's own error.
+
+What leaves the process once enabled: an HTTP server span per request, named from the route (`GET /api/config/{key}` is one name however many keys are read); a `turn` span per agent turn, with each model call beneath it as a GenAI-convention client span carrying provider, model, token counts and cache reads; HTTP-client and JDBC spans under those; the `gen_ai.client.*` histograms (operation duration, token usage, time to first chunk) and `jclaw.turn.segment.duration`, the per-segment turn timings behind the Dashboard's Chat Performance panel; and the `jvm.*` runtime metrics. Prompt and completion text are never exported.
+
+When the OpenTelemetry Java agent is attached to the JVM, the panel says so and disables the export toggle: the agent's own `OTEL_*` settings decide where telemetry goes, and the keys here are read once at start rather than live.
+
 ## Skills Promotion
 
 LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) page. Promoted skills run an LLM pass that strips installation scripts and external network calls.
@@ -282,8 +304,8 @@ LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) pag
 |------------------------------------|----------------------------|-------------------------------------------------------------------------------|
 | `skillsPromotion.provider`         | (main agent's provider)    | LLM provider for the sanitization pass. Defaults to the main agent's.         |
 | `skillsPromotion.model`            | (main agent's model)       | Model id paired with the above.                                               |
-| `skillsPromotion.timeoutSeconds`   | 180                        | Hard timeout for one sanitization pass (30–900 s).                            |
-| `skillsPromotion.batchSizeKb`      | 200                        | Source-text batch size sent to the LLM in one pass (10–1000 KB).              |
+| `skillsPromotion.timeoutSeconds`   | 300                        | Hard timeout for one sanitization pass (30–900 s).                            |
+| `skillsPromotion.batchSizeKb`      | 100                        | Source-text batch size sent to the LLM in one pass (10–1000 KB).              |
 
 ## Memory: Limits
 
@@ -298,7 +320,7 @@ How many memories reach the prompt. These two counts are the *only* bound on the
 
 Vector memory — recall finds a memory by meaning rather than wording, and capture recognizes a fact you already stored even when you phrase it differently. Off by default; with it off memory still works, falling back to keyword matching for both recall and duplicate detection.
 
-Enable the toggle, then pick a provider and model. **Only providers in the Local section of [LLM Providers](#llm-providers) are offered.** Embedding a memory sends its full text to the provider, so it has to run on hardware you control for memory text not to leave it; the backend rejects any other provider even if the key is set directly through `POST /api/config`. If no local provider is configured the panel says so instead of listing models.
+Enable the toggle, then pick a provider and model. **Only providers in the Local section of [LLM Providers](#settings-llm-providers) are offered.** Embedding a memory sends its full text to the provider, so it has to run on hardware you control for memory text not to leave it; the backend rejects any other provider even if the key is set directly through `POST /api/config`. If no local provider is configured the panel says so instead of listing models.
 
 The classification is yours to make, not something read off the base URL. An address cannot answer it in either direction: a server on a VPN or tailnet looks remote (Tailscale's `100.64.0.0/10` is shared carrier-NAT space, indistinguishable from another subscriber's), while a cloud API behind a local proxy looks local but runs someone else's model. You say which providers you host.
 

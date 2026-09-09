@@ -24,7 +24,7 @@ Click **New Agent** at the top of the page, or click any existing row to edit it
 | **Name**             | How the agent appears in the sidebar and breadcrumbs.                                                          |
 | **Description**      | A short blurb shown under the name. Optional but useful when you have many agents.                             |
 | **Default Provider** | Which model provider to use. Must be configured in [Settings → LLM Providers](/guide#settings) first.          |
-| **Default Model**    | The specific model id within that provider. The capability pills (text / image / audio / video / reasoning) update to reflect what that model supports. |
+| **Default Model**    | The specific model id within that provider. The capability pills (thinking / vision / audio / video / no tools) update to reflect what that model supports. |
 
 ### System prompt
 
@@ -46,9 +46,9 @@ Use **Queue (FIFO)** by default; **Collect** when users tend to send a burst of 
 
 ### Tools
 
-A checklist of every tool available to the agent. Tools are first-party capabilities (web fetch, file system, code execution, search, etc.) and any third-party tools enabled via [MCP Servers](/mcp-servers) ticked on this agent. Untick to disable; tick to enable.
+Every tool available to the agent, grouped by category — **System**, **Files**, **Web**, **Utilities** — each with its own toggle, plus a master toggle in the section header that enables or disables all of them at once. Tools are first-party capabilities (web fetch, file system, code execution, search, etc.) and any third-party tools from [MCP Servers](/mcp-servers) ticked on this agent; each MCP server appears as a single group row whose toggle flips every tool that server contributes.
 
-If a tool requires extra configuration (an API key, a workspace path, a shell allowlist entry), JClaw shows an inline hint pointing at the right setting.
+Tools that need extra setup (an API key, a workspace path, a shell allowlist entry) are configured under the matching [Settings](/guide#settings) section.
 
 See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the full catalog.
 
@@ -74,7 +74,20 @@ A small workspace of named markdown files the platform reads into every turn's s
 | `BOOTSTRAP.md`    | First-run scaffolding the agent re-reads at the start of every fresh conversation. |
 | `AGENT.md`        | Project / repo / workspace notes you want the agent to carry into every turn. |
 
-Slash commands like `/new`, `/reset`, and `/compact` re-read these on entry, so you can edit a workspace file mid-session and have the agent pick it up on the next conversation reset without restarting anything.
+These files are read on every turn when the system prompt is assembled, through a 30-second cache that is invalidated the moment you save, so an edit is picked up on the agent's next turn without a conversation reset or a restart.
+
+### Other sections
+
+Four more sections on the same page, one line each:
+
+- **ACP External Harness** (custom agents only) — sets `acpAllowed`, letting this agent spawn [`runtime=acp` subagents](/guide#subagents-acp-harness) under an external coding harness, outside JClaw's tool and workspace confinement.
+- **Memory Autocapture** — automatically capture durable facts from this agent's conversations into long-term memory.
+- **Core memories** — the memories always loaded into this agent's prompt, independent of autocapture, with a cap and a **Migrate excess** action that refiles anything over it.
+- **Content Compression** — shrink large tool output (JSON arrays, code, prose) before it reaches the model: a master toggle, per-type sub-toggles, and an aggressiveness slider.
+
+:::note Tool Approvals
+Whether a dangerous action (such as `exec`) runs at all when nobody can be asked is decided platform-wide under [Settings → Security → Tool Approvals](/guide#settings) (`tool.approval.offChannelPolicy`: `allow`, `deny`, or `ask`). The two per-agent toggles below only widen what the Main Agent's shell may reach.
+:::
 
 ### Shell Exec Privileges (Main Agent only)
 
@@ -110,15 +123,15 @@ The Main Agent can't be disabled; it's the always-on fallback.
 
 ## Capability pills
 
-Each agent row shows a strip of capability pills derived from the chosen model:
+Each agent row shows a strip of capability pills derived from the chosen model; a pill only appears when the model supports it:
 
-- **Text** — the baseline; every model has this.
-- **Image** — the model accepts image inputs natively.
-- **Audio** — the model handles voice notes directly (no transcript pre-step).
-- **Video** — the model accepts video inputs natively (others fall back to the dedicated video model or frame extraction).
-- **Reasoning** — the model surfaces its internal thought process.
+- **thinking** — the model surfaces its internal thought process.
+- **vision** — the model accepts image inputs natively.
+- **audio** — the model handles voice notes directly (no transcript pre-step).
+- **video** — the model accepts video inputs natively (others fall back to the dedicated video model or frame extraction).
+- **no tools** — the model cannot call tools, so this agent's tools and skills will stay silent.
 
-Click a pill to toggle a per-listing capability filter — useful when you want to find "every agent that can see images" at a glance.
+Only the **thinking** pill is clickable: clicking it toggles the agent's reasoning mode on or off and saves it immediately. The other pills are informational. A model that always thinks shows a locked-on thinking pill that can't be toggled.
 
 ## Tips and gotchas
 
