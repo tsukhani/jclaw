@@ -81,7 +81,7 @@ public final class TelemetryDataSource implements DataSource {
         // Evicting closes every idle connection at once, and an H2 in-memory database is
         // dropped with its last connection: hold one across the eviction, and return its
         // successor to the pool before letting go.
-        try (var hold = pool.getConnection()) {
+        try (var _ = pool.getConnection()) {
             running.softEvictConnections();
             try (var successor = pool.getConnection()) {
                 successor.isValid(1);

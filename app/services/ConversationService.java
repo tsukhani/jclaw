@@ -42,6 +42,9 @@ public class ConversationService {
      */
     private static final ThreadLocal<Long> INLINE_SUBAGENT_RUN_ID = new ThreadLocal<>();
 
+    /** Bind name shared by the single-column update statements below. */
+    private static final String PARAM_VALUE = "value";
+
     /**
      * Run {@code body} with {@link #INLINE_SUBAGENT_RUN_ID} bound to
      * {@code runId} so every {@link #appendMessage} call made on the current
@@ -160,14 +163,14 @@ public class ConversationService {
     public static void rename(Conversation conversation, String name) {
         applyWithoutTouchingActivity(conversation, JPA.em()
                 .createQuery("UPDATE Conversation c SET c.preview = :value WHERE c.id = :id")
-                .setParameter("value", name));
+                .setParameter(PARAM_VALUE, name));
     }
 
     /** Set or clear the favorite marker. Idempotent. */
     public static void setStarred(Conversation conversation, boolean starred) {
         applyWithoutTouchingActivity(conversation, JPA.em()
                 .createQuery("UPDATE Conversation c SET c.starred = :value WHERE c.id = :id")
-                .setParameter("value", starred));
+                .setParameter(PARAM_VALUE, starred));
     }
 
     /**
@@ -193,7 +196,7 @@ public class ConversationService {
     private static void setPinned(Conversation conversation, boolean pinned) {
         applyWithoutTouchingActivity(conversation, JPA.em()
                 .createQuery("UPDATE Conversation c SET c.pinned = :value WHERE c.id = :id")
-                .setParameter("value", pinned));
+                .setParameter(PARAM_VALUE, pinned));
     }
 
     /** Number of pinned top-level conversations, i.e. what {@link #MAX_PINNED} caps. */

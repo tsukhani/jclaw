@@ -104,7 +104,14 @@ public final class GenAiSpans {
             var host = uri.getHost();
             if (host == null) return new Server(null, -1);
             var port = uri.getPort();
-            if (port < 0) port = "https".equalsIgnoreCase(uri.getScheme()) ? 443 : "http".equalsIgnoreCase(uri.getScheme()) ? 80 : -1;
+            if (port < 0) {
+                var scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+                port = switch (scheme) {
+                    case "https" -> 443;
+                    case "http" -> 80;
+                    default -> -1;
+                };
+            }
             return new Server(host, port);
         } catch (IllegalArgumentException _) {
             return new Server(null, -1);
@@ -258,6 +265,8 @@ public final class GenAiSpans {
             record(t.getClass().getName());
         }
 
+        // S6213: `record` matches the metric API's own verb (DoubleHistogram.record), as in LatencyStats.
+        @SuppressWarnings("java:S6213")
         private void record(@Nullable String errorType) {
             if (!TelemetryState.enabled) return;
             var i = instruments();

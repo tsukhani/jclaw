@@ -31,10 +31,6 @@ import utils.LatencyTrace;
 import java.util.Collection;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * One CLIENT span per model call, under the turn span, carrying the usage the provider
@@ -43,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the streaming path against a {@link MockWebServer}, because the stream runs on its own
  * virtual thread and a ScopedValue does not follow it there.
  */
-public class GenAiSpansTest extends UnitTest {
+class GenAiSpansTest extends UnitTest {
 
     private static final String CHAT_JSON = """
             {"id":"chatcmpl-1","object":"chat.completion","model":"gpt-x-2024",
@@ -62,13 +58,13 @@ public class GenAiSpansTest extends UnitTest {
             """;
 
     @BeforeEach
-    public void lock() {
+    void lock() {
         TelemetryTestSync.acquire();
         OtelRuntime.init();
     }
 
     @AfterEach
-    public void unlock() {
+    void unlock() {
         TelemetryTestSync.release();
     }
 
@@ -103,7 +99,7 @@ public class GenAiSpansTest extends UnitTest {
     }
 
     @Test
-    public void aChatCallIsOneClientSpanUnderTheTurnCarryingTheReportedUsage() {
+    void aChatCallIsOneClientSpanUnderTheTurnCarryingTheReportedUsage() {
         var spans = HttpFactories.callWith(canned(200, CHAT_JSON), () -> OtelRuntime.captureForTest(() -> {
             var trace = LatencyTrace.forTurn("web", null);
             trace.conversationId(42L);
@@ -165,7 +161,7 @@ public class GenAiSpansTest extends UnitTest {
     }
 
     @Test
-    public void aStreamedCallCarriesFirstChunkTimeAndTheFinalChunksUsage() throws Exception {
+    void aStreamedCallCarriesFirstChunkTimeAndTheFinalChunksUsage() throws Exception {
         try (var server = new MockWebServer()) {
             server.start();
             server.enqueue(new MockResponse.Builder()
@@ -211,18 +207,18 @@ public class GenAiSpansTest extends UnitTest {
     }
 
     @Test
-    public void aRefusedCallEndsTheSpanWithTheErrorType() {
+    void aRefusedCallEndsTheSpanWithTheErrorType() {
+        var p = provider("https://api.example.test/v1");
         var spans = HttpFactories.callWith(canned(400, "{\"error\":{\"message\":\"bad request\"}}"),
                 () -> OtelRuntime.captureForTest(() -> assertThrows(RuntimeException.class, () ->
-                        provider("https://api.example.test/v1")
-                                .chat("gpt-x", List.of(ChatMessage.user("hi")), null, null, null, "web"))));
+                        p.chat("gpt-x", List.of(ChatMessage.user("hi")), null, null, null, "web"))));
         var chat = one(spans, "chat gpt-x");
         assertEquals(StatusCode.ERROR, chat.getStatus().getStatusCode());
         assertNotNull(chat.getAttributes().get(ErrorAttributes.ERROR_TYPE));
     }
 
     @Test
-    public void withExportOffAChatCallRecordsNothing() {
+    void withExportOffAChatCallRecordsNothing() {
         HttpFactories.runWith(canned(200, CHAT_JSON), () ->
                 provider("https://api.example.test/v1")
                         .chat("gpt-x", List.of(ChatMessage.user("hi")), null, null, null, "web"));

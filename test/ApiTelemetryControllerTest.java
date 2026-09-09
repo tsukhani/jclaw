@@ -5,14 +5,12 @@ import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.telemetry.OtelRuntime;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** {@code /api/telemetry} (JCLAW-34): the runtime's view of the otel.* keys, and the delivery check. */
-public class ApiTelemetryControllerTest extends FunctionalTest {
+class ApiTelemetryControllerTest extends FunctionalTest {
 
     @BeforeEach
-    public void setup() {
+    void setup() {
         Fixtures.deleteDatabase();
         AuthFixture.seedAdminPassword("changeme");
         // After the wipe, so the reset re-applies the (now absent) keys.
@@ -21,7 +19,7 @@ public class ApiTelemetryControllerTest extends FunctionalTest {
     }
 
     @AfterEach
-    public void unlock() {
+    void unlock() {
         TelemetryTestSync.release();
     }
 
@@ -31,13 +29,13 @@ public class ApiTelemetryControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusRequiresAuth() {
+    void statusRequiresAuth() {
         assertEquals(401, GET("/api/telemetry").status.intValue());
         assertEquals(401, POST("/api/telemetry/test", "application/json", "{}").status.intValue());
     }
 
     @Test
-    public void statusReportsExportOffByDefault() {
+    void statusReportsExportOffByDefault() {
         login();
         var resp = GET("/api/telemetry");
         assertIsOk(resp);
@@ -48,7 +46,7 @@ public class ApiTelemetryControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void testSpanSaysWhyItWasNotDeliveredWhenExportIsOff() {
+    void testSpanSaysWhyItWasNotDeliveredWhenExportIsOff() {
         login();
         var resp = POST("/api/telemetry/test", "application/json", "{}");
         assertIsOk(resp);

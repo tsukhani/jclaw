@@ -8,8 +8,6 @@ import play.test.FunctionalTest;
 import services.telemetry.OtelPlayPlugin;
 import services.telemetry.OtelRuntime;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The plugin registered in {@code conf/play.plugins} produces one SERVER span per HTTP
@@ -17,21 +15,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Goes through the real framework — {@code GET} here runs the invocation hooks — so
  * this proves the registration and the hook order, not just the class.
  */
-public class OtelPlayPluginTest extends FunctionalTest {
+class OtelPlayPluginTest extends FunctionalTest {
 
     @BeforeEach
-    public void lock() {
+    void lock() {
         TelemetryTestSync.acquire();
         OtelRuntime.init();
     }
 
     @AfterEach
-    public void unlock() {
+    void unlock() {
         TelemetryTestSync.release();
     }
 
     @Test
-    public void aRequestYieldsOneServerSpanNamedFromTheRoute() {
+    void aRequestYieldsOneServerSpanNamedFromTheRoute() {
         var spans = OtelRuntime.captureForTest(() -> assertIsOk(GET("/api/status")));
         var server = spans.stream().filter(s -> s.getKind() == SpanKind.SERVER).toList();
         assertEquals(1, server.size(), () -> "server spans: " + spans);
@@ -44,7 +42,7 @@ public class OtelPlayPluginTest extends FunctionalTest {
     }
 
     @Test
-    public void withTheAgentAttachedTheRequestNamesTheAgentsSpanInsteadOfOpeningItsOwn() {
+    void withTheAgentAttachedTheRequestNamesTheAgentsSpanInsteadOfOpeningItsOwn() {
         // The hook is driven directly: a FunctionalTest request runs on another thread, and the
         // agent's context reaches the invocation thread only through the agent's own instrumentation.
         var request = newRequest();
@@ -75,7 +73,7 @@ public class OtelPlayPluginTest extends FunctionalTest {
     }
 
     @Test
-    public void withExportOffARequestRecordsNothing() {
+    void withExportOffARequestRecordsNothing() {
         // Outside the capture seam the sampler is off: the same request must leave no span behind.
         assertIsOk(GET("/api/status"));
         var spans = OtelRuntime.captureForTest(() -> { });

@@ -15,34 +15,27 @@ import utils.LatencyStats;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The runtime's contract with the Config DB (JCLAW-34): keys are validated at the write,
  * a write re-applies the leaves live, and with export off no span is recorded at all.
  * Holds {@link TelemetryTestSync} because the runtime is process-global.
  */
-public class OtelRuntimeTest extends UnitTest {
+class OtelRuntimeTest extends UnitTest {
 
     @BeforeEach
-    public void lock() {
+    void lock() {
         TelemetryTestSync.acquire();
         OtelRuntime.init();
     }
 
     @AfterEach
-    public void unlock() {
+    void unlock() {
         TelemetryTestSync.release();
     }
 
     @Test
-    public void offByDefaultAndNothingIsRecorded() {
+    void offByDefaultAndNothingIsRecorded() {
         var status = OtelRuntime.status();
         assertTrue(status.initialized());
         assertFalse(status.enabled());
@@ -54,7 +47,7 @@ public class OtelRuntimeTest extends UnitTest {
     }
 
     @Test
-    public void aBadEndpointIsRefusedAtTheWriteNotAtTheNextExport() {
+    void aBadEndpointIsRefusedAtTheWriteNotAtTheNextExport() {
         var rejection = ConfigService.setWithSideEffects(OtelConfig.KEY_ENDPOINT, "collector:4318");
         assertNotNull(rejection);
         assertTrue(rejection.contains("absolute http(s) URL"), rejection);
@@ -62,7 +55,7 @@ public class OtelRuntimeTest extends UnitTest {
     }
 
     @Test
-    public void enablingThroughTheConfigWriteSwapsTheLeavesWithoutRestart() {
+    void enablingThroughTheConfigWriteSwapsTheLeavesWithoutRestart() {
         assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENDPOINT, "http://127.0.0.1:1"));
         assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENABLED, "true"));
         var on = OtelRuntime.status();
@@ -79,7 +72,7 @@ public class OtelRuntimeTest extends UnitTest {
     }
 
     @Test
-    public void turningExportOffFlushesWhatTheOldEndpointHasNotSeenYet() throws Exception {
+    void turningExportOffFlushesWhatTheOldEndpointHasNotSeenYet() throws Exception {
         try (var collector = new MockWebServer()) {
             collector.start();
             for (int i = 0; i < 4; i++) {
@@ -107,7 +100,7 @@ public class OtelRuntimeTest extends UnitTest {
     }
 
     @Test
-    public void withTheAgentAttachedTheHttpClientIsHandedBackUnwrapped() {
+    void withTheAgentAttachedTheHttpClientIsHandedBackUnwrapped() {
         assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENDPOINT, "http://127.0.0.1:1"));
         assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENABLED, "true"));
         var client = new OkHttpClient();
@@ -122,7 +115,7 @@ public class OtelRuntimeTest extends UnitTest {
     }
 
     @Test
-    public void testSpanReportsExportOffRatherThanPretendingDelivery() {
+    void testSpanReportsExportOffRatherThanPretendingDelivery() {
         var result = OtelRuntime.sendTestSpan();
         assertFalse(result.delivered());
         assertNotNull(result.error());
@@ -130,7 +123,7 @@ public class OtelRuntimeTest extends UnitTest {
     }
 
     @Test
-    public void testSpanAgainstAClosedPortReportsTheFailureNotSuccess() {
+    void testSpanAgainstAClosedPortReportsTheFailureNotSuccess() {
         assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENDPOINT, "http://127.0.0.1:1"));
         assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENABLED, "true"));
         var result = OtelRuntime.sendTestSpan();
@@ -139,7 +132,7 @@ public class OtelRuntimeTest extends UnitTest {
     }
 
     @Test
-    public void captureSeamSeesSpansWhileExportStaysOffAfterwards() {
+    void captureSeamSeesSpansWhileExportStaysOffAfterwards() {
         var spans = OtelRuntime.captureForTest(() ->
                 OtelRuntime.tracer().spanBuilder("captured").startSpan().end());
         assertEquals(1, spans.size());
@@ -149,7 +142,7 @@ public class OtelRuntimeTest extends UnitTest {
     }
 
     @Test
-    public void signalPathsAreAppendedOnceForOtlpHttp() {
+    void signalPathsAreAppendedOnceForOtlpHttp() {
         assertEquals("http://c:4318/v1/traces", OtelRuntime.signalUrl("http://c:4318", "traces"));
         assertEquals("http://c:4318/v1/traces", OtelRuntime.signalUrl("http://c:4318/", "traces"));
         assertEquals("http://c:4318/v1/traces", OtelRuntime.signalUrl("http://c:4318/v1/traces", "traces"));

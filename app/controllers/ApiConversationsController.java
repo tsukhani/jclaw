@@ -51,6 +51,8 @@ public class ApiConversationsController extends Controller {
     // OpenAI-shaped tool-call element key (the wrapping "function" object).
     private static final String KEY_FUNCTION = "function";
     // Conversation field/JSON keys reused across the filter, sort whitelist, and view mappers.
+    private static final String STARRED = "starred";
+    private static final String PINNED = "pinned";
     private static final String CHANNEL_TYPE = "channelType";
     private static final String CREATED_AT = "createdAt";
     // Conversation.preview is @Column(length = 100), so a longer name cannot be stored.
@@ -184,8 +186,8 @@ public class ApiConversationsController extends Controller {
                 .eq("agent.id", agentId)
                 .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
                 .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null)
-                .eq("starred", starred)
-                .eq("pinned", pinned);
+                .eq(STARRED, starred)
+                .eq(PINNED, pinned);
 
         // JCLAW-304: when q is non-blank, resolve it against the
         // CONVERSATION_MESSAGE Lucene scope, derive the distinct set of
@@ -581,7 +583,7 @@ public class ApiConversationsController extends Controller {
             Long agentId = longField(f, "agentId");
             String name = stringField(f, "name");
             String peer = stringField(f, "peer");
-            Boolean starred = booleanField(f, "starred");
+            Boolean starred = booleanField(f, STARRED);
             String q = stringField(f, "q");
             List<Long> ftsIds = null;
             if (q != null) {
@@ -756,7 +758,7 @@ public class ApiConversationsController extends Controller {
     @Operation(summary = "Star a conversation (idempotent)")
     public static void starConversation(Long id) {
         ConversationService.setStarred(requireConversation(id), true);
-        renderJSON(gson.toJson(new StatusResponse("starred")));
+        renderJSON(gson.toJson(new StatusResponse(STARRED)));
     }
 
     /** DELETE /api/conversations/{id}/star — clear the favorite marker. Idempotent. */
@@ -785,7 +787,7 @@ public class ApiConversationsController extends Controller {
                             + " conversations can be pinned. Unpin one first.");
             return;
         }
-        renderJSON(gson.toJson(new StatusResponse("pinned")));
+        renderJSON(gson.toJson(new StatusResponse(PINNED)));
     }
 
     /** DELETE /api/conversations/{id}/pin — return the conversation to the list. Idempotent. */
@@ -856,8 +858,8 @@ public class ApiConversationsController extends Controller {
         map.put("updatedAt", c.updatedAt.toString());
         map.put("messageCount", c.messageCount);
         map.put("preview", c.preview != null ? c.preview : "");
-        map.put("starred", c.starred);
-        map.put("pinned", c.pinned);
+        map.put(STARRED, c.starred);
+        map.put(PINNED, c.pinned);
         // JCLAW-108: expose override fields so the chat UI's model
         // dropdown can reflect the effective model for the open
         // conversation, and so the cost aggregator's per-turn attribution

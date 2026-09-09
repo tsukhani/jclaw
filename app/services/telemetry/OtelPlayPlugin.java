@@ -61,7 +61,7 @@ public class OtelPlayPlugin extends PlayPlugin {
                 .setSpanKind(SpanKind.SERVER)
                 .setAttribute(HttpAttributes.HTTP_REQUEST_METHOD, request.method)
                 .setAttribute(UrlAttributes.URL_PATH, request.path)
-                .setAttribute(UrlAttributes.URL_SCHEME, request.secure ? "https" : "http");
+                .setAttribute(UrlAttributes.URL_SCHEME, Boolean.TRUE.equals(request.secure) ? "https" : "http");
         if (route != null) {
             builder.setAttribute(HttpAttributes.HTTP_ROUTE, route);
         }

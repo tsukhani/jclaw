@@ -14,8 +14,6 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The SPA staleness gate in {@code jclaw.sh} decides whether a restart rebuilds the bundle, and
@@ -98,7 +96,7 @@ class SpaBuildInputsConformanceTest extends UnitTest {
     }
 
     @Test
-    public void everyBuildInputOutsideTheFrontendSitsUnderARootTheStalenessGateProbes() throws IOException {
+    void everyBuildInputOutsideTheFrontendSitsUnderARootTheStalenessGateProbes() throws IOException {
         var roots = gateRoots();
         var inputs = escapingImports();
         assertTrue(inputs.size() >= KNOWN_ESCAPING_IMPORTS,

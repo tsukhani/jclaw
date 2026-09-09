@@ -91,7 +91,7 @@ class OllamaLocalProbeTest extends UnitTest {
     }
 
     @Test
-    void probeReportsConnectionRefusedForUnreachableHost() throws Exception {
+    void probeReportsConnectionRefusedForUnreachableHost() {
         // Port 1 is privileged and never bound here, so connect gets ECONNREFUSED — exactly the
         // "Ollama not installed" failure mode AC #6 cares about. A freed ephemeral port can be
         // re-bound by a concurrent test before the probe connects, turning that into an EOF.

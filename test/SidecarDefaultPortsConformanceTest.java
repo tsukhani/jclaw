@@ -13,8 +13,6 @@ import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Every sidecar manager compiles in a default port, and two sharing one means whichever spawns
@@ -31,7 +29,7 @@ class SidecarDefaultPortsConformanceTest extends UnitTest {
     private static final int KNOWN_MANAGERS = 7;
 
     @Test
-    public void everySidecarManagerDeclaresADistinctDefaultPort() throws IOException {
+    void everySidecarManagerDeclaresADistinctDefaultPort() throws IOException {
         var root = Path.of(Play.applicationPath.getAbsolutePath());
         Map<String, Integer> ports = new LinkedHashMap<>();
         try (Stream<Path> files = Files.walk(root.resolve("app/services"))) {

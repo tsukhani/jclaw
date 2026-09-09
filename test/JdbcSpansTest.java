@@ -14,28 +14,25 @@ import utils.LatencyTrace;
 import java.sql.SQLException;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * JDBC spans through {@code db.factory} (JCLAW-1164): the pool draws from the raw driver
  * datasource while export is off and from the instrumented one while it is on, and a
  * statement run under a turn is a CLIENT span beneath it.
  */
-public class JdbcSpansTest extends UnitTest {
+class JdbcSpansTest extends UnitTest {
 
     private static final AttributeKey<String> DB_SYSTEM_NAME = AttributeKey.stringKey("db.system.name");
     private static final AttributeKey<String> DB_QUERY_TEXT = AttributeKey.stringKey("db.query.text");
 
     @BeforeEach
-    public void lock() {
+    void lock() {
         TelemetryTestSync.acquire();
         OtelRuntime.init();
     }
 
     @AfterEach
-    public void unlock() {
+    void unlock() {
         TelemetryTestSync.release();
     }
 
@@ -55,12 +52,12 @@ public class JdbcSpansTest extends UnitTest {
     }
 
     @Test
-    public void thePoolDrawsFromTheRawDatasourceWhileExportIsOff() {
+    void thePoolDrawsFromTheRawDatasourceWhileExportIsOff() {
         assertFalse(inner().instrumented());
     }
 
     @Test
-    public void aStatementUnderATurnIsAClientSpanBeneathIt() {
+    void aStatementUnderATurnIsAClientSpanBeneathIt() {
         var spans = OtelRuntime.captureForTest(() -> {
             assertTrue(inner().instrumented(), "export on switches the pool to instrumented connections");
             var trace = LatencyTrace.forTurn("web", null);

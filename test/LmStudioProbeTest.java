@@ -72,7 +72,7 @@ class LmStudioProbeTest extends UnitTest {
     }
 
     @Test
-    void probeReportsConnectionRefusedForUnreachableHost() throws Exception {
+    void probeReportsConnectionRefusedForUnreachableHost() {
         // Port 1 is privileged and never bound here, so connect gets ECONNREFUSED — the typical
         // "LM Studio not started" failure mode (installed, local server paused). A freed ephemeral
         // port can be re-bound by a concurrent test before the probe connects, turning that into an EOF.

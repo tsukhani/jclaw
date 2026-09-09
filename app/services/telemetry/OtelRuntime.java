@@ -25,8 +25,8 @@ import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
 import io.opentelemetry.sdk.trace.samplers.Sampler;
+import io.opentelemetry.semconv.DeploymentAttributes;
 import io.opentelemetry.semconv.ServiceAttributes;
-import io.opentelemetry.semconv.incubating.DeploymentIncubatingAttributes;
 import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import org.jspecify.annotations.Nullable;
@@ -118,7 +118,7 @@ public final class OtelRuntime {
         resource = Resource.getDefault().toBuilder()
                 .put(ServiceAttributes.SERVICE_NAME, config.serviceName())
                 .put(ServiceAttributes.SERVICE_VERSION, Play.configuration.getProperty("application.version", "0.0.0"))
-                .put(DeploymentIncubatingAttributes.DEPLOYMENT_ENVIRONMENT_NAME, Play.id)
+                .put(DeploymentAttributes.DEPLOYMENT_ENVIRONMENT_NAME, Play.id)
                 .build();
         var tracerProvider = SdkTracerProvider.builder()
                 .setResource(resource)

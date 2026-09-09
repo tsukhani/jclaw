@@ -13,20 +13,18 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** JVM metrics and the turn-segment histogram reach the metric exporter (JCLAW-34). */
-public class TelemetryMetricsTest extends UnitTest {
+class TelemetryMetricsTest extends UnitTest {
 
     @BeforeEach
-    public void lock() {
+    void lock() {
         TelemetryTestSync.acquire();
         OtelRuntime.init();
     }
 
     @AfterEach
-    public void unlock() {
+    void unlock() {
         TelemetryTestSync.release();
     }
 
@@ -43,7 +41,7 @@ public class TelemetryMetricsTest extends UnitTest {
     }
 
     @Test
-    public void aSegmentRecordingIsOneHistogramPointCarryingItsSeries() {
+    void aSegmentRecordingIsOneHistogramPointCarryingItsSeries() {
         var segment = "seg-" + System.nanoTime();
         var metrics = OtelRuntime.captureMetricsForTest(() -> LatencyStats.record("web", segment, 12, "main"));
         var point = segmentPoint(metrics, segment)
@@ -57,7 +55,7 @@ public class TelemetryMetricsTest extends UnitTest {
     }
 
     @Test
-    public void withExportOffASegmentRecordingRecordsNothing() {
+    void withExportOffASegmentRecordingRecordsNothing() {
         var segment = "seg-off-" + System.nanoTime();
         LatencyStats.record("web", segment, 12, "main");
         var metrics = OtelRuntime.captureMetricsForTest(() -> { });
@@ -65,7 +63,7 @@ public class TelemetryMetricsTest extends UnitTest {
     }
 
     @Test
-    public void jvmMetricsAreRegisteredWithTheSdk() {
+    void jvmMetricsAreRegisteredWithTheSdk() {
         var names = names(OtelRuntime.captureMetricsForTest(() -> { }));
         assertTrue(names.contains("jvm.memory.used"), names::toString);
         assertTrue(names.contains("jvm.thread.count"), names::toString);

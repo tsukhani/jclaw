@@ -17,9 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A real streaming turn — the loadtest harness driving {@code POST /api/chat/stream}
@@ -29,10 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code StreamingAgentRunner}'s virtual thread and the model call on the LLM stream
  * thread, and neither inherits an OpenTelemetry context unless it is carried across.
  */
-public class StreamingTurnSpanTest extends FunctionalTest {
+class StreamingTurnSpanTest extends FunctionalTest {
 
     @BeforeEach
-    public void lock() {
+    void lock() {
         LoadTestHarnessSync.acquire();
         TelemetryTestSync.acquire();
         OtelRuntime.init();
@@ -42,7 +39,7 @@ public class StreamingTurnSpanTest extends FunctionalTest {
     }
 
     @AfterEach
-    public void unlock() {
+    void unlock() {
         AuthFixture.clearAdminPassword();
         TelemetryTestSync.release();
         LoadTestHarnessSync.release();
@@ -60,7 +57,7 @@ public class StreamingTurnSpanTest extends FunctionalTest {
     }
 
     @Test
-    public void aStreamingTurnNestsUnderItsRequestAndItsModelCallUnderTheTurn() {
+    void aStreamingTurnNestsUnderItsRequestAndItsModelCallUnderTheTurn() {
         var report = new String[1];
         var spans = OtelRuntime.captureForTest(() -> {
             var response = POST(authedLoadtestRequest(), "/api/metrics/loadtest", "application/json",
