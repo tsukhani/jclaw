@@ -258,24 +258,35 @@
         ":warning: `GenAiSpans` and `LatencyTrace` use 17 `gen_ai.*` constants that are deprecated upstream and may be **removed** in a release. Run `./gradlew compileJava` on this branch before merging — a removal breaks the build rather than warning.",
       ],
     },
+
+    // The play1 fork pin. See the custom manager below for why this can never
+    // automerge: the matching checkout in /opt/play1 is a step no PR can take.
+    {
+      matchDepNames: ["tsukhani/play1"],
+      automerge: false,
+      prBodyNotes: [
+        ":warning: Bumping `.play-version` alone breaks the build. `build.gradle.kts` requires the fork installed at `/opt/play1` to be checked out at the same version, so check out the matching tag there before merging.",
+      ],
+    },
   ],
 
   customManagers: [
-    // Bump the Play fork pin in build.gradle.kts from tsukhani/play1's
-    // GitHub releases. PF-90 retired the standalone .play-version file;
-    // the framework version now lives inside build.gradle.kts as
-    // `frameworkVersion.set("1.13.0")`, parsed at build time by the
-    // production + devcontainer Dockerfiles. extractVersion strips the
-    // leading 'v' so semver comparison happens on bare versions
-    // (1.13.0), matching the file contents.
+    // Bump the Play fork pin from tsukhani/play1's GitHub releases.
+    // The pin lives in .play-version, a single bare version line;
+    // build.gradle.kts reads that file and requires the fork installed at
+    // /opt/play1 to be checked out at the same version. extractVersion strips
+    // the release tag's leading 'v' so semver compares bare versions.
+    //
+    // Never automerge this one. The catch-all packageRule automerges every
+    // minor and patch, but a bumped .play-version fails the build on every
+    // clone whose /opt/play1 has not been checked out to match — the bump is
+    // only half the change, and the other half happens outside this repo.
     {
       customType: "regex",
       // Renamed from `fileMatch` in Renovate v40; old key still works
       // but emits a deprecation warning each run.
-      managerFilePatterns: ["^build\\.gradle\\.kts$"],
-      matchStrings: [
-        "frameworkVersion\\.set\\(\"(?<currentValue>[^\"]+)\"\\)",
-      ],
+      managerFilePatterns: ["^\\.play-version$"],
+      matchStrings: ["^(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
       datasourceTemplate: "github-releases",
       depNameTemplate: "tsukhani/play1",
       extractVersionTemplate: "^v(?<version>.+)$",
