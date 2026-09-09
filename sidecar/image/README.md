@@ -30,12 +30,35 @@ load — a per-request subprocess would re-pay it every time, and a model server
 |--------|-------------|-----------------|
 | GET    | `/health`   | `{status, device, dtype, model, weights_present, loaded}` |
 | GET    | `/capability` | `{kind, gpu, freeVramGb, totalVramGb, minVramGb, runnable, tier, reason}` — host GPU/VRAM verdict for the Settings gate (also one-shot via `--probe`) |
-| POST   | `/generate` | `{prompt, width?, height?, steps?, seed?, image?}` (`image` = base64 reference for image-to-image) → `image/png` bytes; `409` if weights absent or a generation is already in progress (one at a time) |
+| POST   | `/generate` | `{prompt, width?, height?, steps?, seed?, image?}` (`image` = base64 reference for image-to-image) → `image/png` bytes; `400` for a body that is not JSON, a missing `prompt`, or an `image` that does not decode; `409` if weights absent or a generation is already in progress (one at a time); `500` when the pipeline fails to load or the generation fails |
 | GET    | `/progress` | `{percent}` — live 0–100 step progress, `null` when idle (polled for the chat progress bar) |
-| POST   | `/pull`     | `application/x-ndjson` progress lines, then `{"status":"done"}` |
+| POST   | `/pull`     | `application/x-ndjson` progress lines, then `{"status":"done"}` — skips `IGNORE_PATTERNS` (the top-level `flux-2-klein-4b.safetensors` single-file checkpoint and the `*.jpg` examples, ~33% of the repo), since the diffusers pipeline loads only the subfolders |
+| CLI    | `--probe`   | the `/capability` JSON on stdout — no server, no model load, no token; `--port` and `--model` are not required |
 
 Device/dtype is picked here (the JVM can't see CUDA/MPS): `mps`→fp16
 (with `PYTORCH_ENABLE_MPS_FALLBACK=1`), `cuda`→bf16, `cpu`→fp32.
+
+## Configuration
+
+Keys live in the Config DB (Settings), not `conf/application.conf`. `DefaultConfigJob` seeds
+the first four; the rest fall back to the defaults below when absent.
+
+| Key | Default | Read by | Meaning |
+|---|---|---|---|
+| `imagegen.local.model` | `black-forest-labs/FLUX.2-klein-4B` | `LocalImageSidecarManager.ensureRunning` | HF repo passed as `--model` at spawn; a running sidecar keeps serving what it was launched with until it stops (the health check does not compare models) |
+| `imagegen.local.port` | `9527` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
+| `imagegen.local.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the daemon self-evicts and releases the GPU after that long idle |
+| `imagegen.local.hfToken` | blank | `LocalSidecarDaemon.spawn` | exported to the child as `HF_TOKEN` when non-blank — klein is ungated, so a token only lifts rate limits and unlocks gated repos; also the fallback token for `sidecar/diarize` |
+| `imagegen.local.generateTimeoutSeconds` | `300` | `LocalImageGenerationClient` | the JVM's per-call deadline on `/generate` |
+| `imagegen.local.startupTimeoutSeconds` | `180` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+
+`LocalSidecarDaemon` also reads `imagegen.local.timeoutSeconds` and exports it as
+`SIDECAR_REQUEST_TIMEOUT_SEC`; this sidecar does not read that variable, so the key has no
+effect here — `generateTimeoutSeconds` is the deadline that counts.
+
+`serve.py` flags: `--host` (`127.0.0.1`), `--port`, `--model` (HF repo id), `--cache-dir`
+(`data/image-models`; becomes `HF_HOME`), `--idle-timeout-min` (`15`), `--no-auth`, `--probe`.
+`--port` and `--model` are required unless `--probe` is given.
 
 ## Authentication
 

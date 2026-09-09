@@ -31,9 +31,8 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
- * Shared lifecycle mechanism for jclaw's local Python sidecars — the imagegen
- * daemon ({@link services.imagegen.LocalImageSidecarManager}) and the videogen
- * daemon ({@link services.videogen.LocalVideoSidecarManager}). Both
+ * Shared lifecycle mechanism for jclaw's local Python sidecars — one instance per
+ * manager under {@code sidecar/} (image, video, ASR, diarization, TTS, fetch, stealth). All
  * spawn {@code uv run serve.py}, drain its streams on virtual threads, poll
  * {@code /health}, and stop with a {@code destroy()} → {@code destroyForcibly()}
  * discipline; only the directories, config keys, labels, and exception type

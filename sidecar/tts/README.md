@@ -6,6 +6,38 @@ request to a persistent PEP-723 worker (`synth.py --worker`) over a stdin/stdout
 JSON line protocol, so the model loads once. The Java side (`app/services/tts/`)
 drives it via `TtsSidecarClient` → `TtsSidecarManager` (default port 9531).
 
+## Protocol
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/health` | → `{status, model, loaded}` |
+| POST | `/synthesize` | `{text, model?, voice?, ref_audio?, speed?, format?}` → audio bytes, `Content-Type` from `format` (default `wav`); `400` for a body that is not JSON or an empty `text`; `409` while another synthesis is running (one at a time — the Java client queues on its fair lock); `500` for a worker failure, message verbatim |
+| POST | `/shutdown` | → `200`, then exit — how a restarted JVM evicts an adopted orphan whose identity no longer matches |
+
+`_MIME` advertises `wav`, `flac`, `mp3` and `opus`, but `synth.py` writes only WAV, or FLAC when
+`format=flac` and the worker's libsndfile build supports it — so `mp3`/`opus` come back as WAV
+bytes labelled `audio/mpeg`/`audio/opus`. `TtsSidecarClient` sends `text`, `model`, `voice`,
+`format` and `ref_audio`; `speed` is accepted here but never sent by the JVM.
+
+## Configuration
+
+Keys live in the Config DB (Settings), not `conf/application.conf`. `DefaultConfigJob` seeds
+`tts.local.port` explicitly so the client and the spawned daemon agree; the rest fall back to
+the defaults below. Engine and model selection (`tts.engine`, `tts.sidecar.model`) is under
+[Engines / models](#engines--models).
+
+| Key | Default | Read by | Meaning |
+|---|---|---|---|
+| `tts.local.port` | `9531` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
+| `tts.local.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the daemon self-evicts after that long without a request |
+| `tts.local.timeoutSeconds` | `1800` | `TtsSidecarClient` (per-call deadline) and `LocalSidecarDaemon.spawnNow` | the JVM's `/synthesize` call timeout; also exported as `SIDECAR_REQUEST_TIMEOUT_SEC = max(60, n − 60)`, the sidecar's own request ceiling, so it gives up before the JVM's socket does |
+| `tts.local.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+
+`serve.py` flags: `--host` (`127.0.0.1`), `--port` (required), `--model` (`tts`, the identity
+echoed on `/health`), `--cache-dir` (`data/tts-models`), `--idle-timeout-min` (`15`), `--no-auth`.
+No `--probe`. `SIDECAR_REQUEST_TIMEOUT_SEC` defaults to `1740` when unset; no `HF_TOKEN` is passed
+(`TtsSidecarManager` spawns with an explicit null).
+
 ## Authentication
 
 Every request must carry `X-Sidecar-Token`, matching the `SIDECAR_TOKEN` the JVM derives

@@ -18,7 +18,7 @@ matching the image/video sidecar architecture).
 |---|---|---|
 | GET | `/health` | → `{status, model, loaded}` |
 | POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — `model` selects the engine (see below); persistent worker in its own uv script env (JCLAW-627/650) |
-| GET | `/asr/models?ids=a,b` | → per-model cached/bytesOnDisk/engine status for the Settings page |
+| GET | `/asr/models?ids=a,b` | → `{status: {<id>: …}}` — per-model cached/bytesOnDisk/engine status for the Settings page, wrapped in a `status` object |
 | POST | `/asr/prefetch` | `{model}` → downloads the host engine's weights ahead of use |
 | POST | `/shutdown` | graceful exit (JVM shutdown hook) |
 
@@ -66,6 +66,25 @@ design: MMS is small and fast.
 - ASR: [mlx-whisper](https://github.com/ml-explore/mlx-examples) (MIT) on Apple silicon; [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) elsewhere — OpenAI Whisper weights (MIT), same as whisper.cpp (JCLAW-627).
 - MERaLiON: [`MERaLiON/MERaLiON-3-3B-ASR`](https://huggingface.co/MERaLiON/MERaLiON-3-3B-ASR) — **not MIT**; ships under the MERaLiON Public License (the same license family flagged in `sidecar/diarize/README.md` for MERaLiON-SER). Check the model card's commercial terms before a paid-edition ship.
 - Forced alignment: torchaudio MMS multilingual aligner (part of [torchaudio](https://github.com/pytorch/audio), BSD-2-Clause).
+
+## Configuration
+
+Keys live in the Config DB (Settings), not `conf/application.conf`. `DefaultConfigJob` seeds
+only `transcription.localModel`; the `transcription.asr.local.*` keys fall back to the
+defaults below when absent.
+
+| Key | Default | Read by | Meaning |
+|---|---|---|---|
+| `transcription.localModel` | `small` (`AsrModel.DEFAULT`) | `WhisperLocalTranscriptionService`, `DiarizeAudioTool`, `VoiceController`, `ApiTranscriptionController` | the `model` id sent on `/transcribe`; an id `AsrModel` no longer knows is coerced back to the default at boot |
+| `transcription.asr.local.port` | `9529` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
+| `transcription.asr.local.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the daemon self-evicts after that long without a request |
+| `transcription.asr.local.timeoutSeconds` | `1800` | `AsrSidecarClient` (per-call deadline) and `LocalSidecarDaemon.spawnNow` | the JVM's call timeout on `/transcribe` and `/asr/prefetch`; also exported as `SIDECAR_REQUEST_TIMEOUT_SEC = max(60, n − 60)`, the sidecar's own subprocess ceiling, so it gives up before the JVM's socket does |
+| `transcription.asr.local.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+
+`serve.py` flags: `--host` (`127.0.0.1`), `--port` (required), `--model` (`asr`, the identity
+echoed on `/health`), `--cache-dir` (`data/asr-models`; becomes `HF_HOME`), `--idle-timeout-min`
+(`15`), `--no-auth`. No `--probe`. `SIDECAR_REQUEST_TIMEOUT_SEC` defaults to `1740` when unset;
+no `HF_TOKEN` is passed (`AsrSidecarManager` spawns with an explicit null — the weights are ungated).
 
 ## Authentication
 

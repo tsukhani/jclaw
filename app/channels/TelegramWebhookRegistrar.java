@@ -21,7 +21,7 @@ import java.util.List;
  * which long-poll {@code getUpdates} requires, since Telegram returns 409 while
  * a webhook is set.
  *
- * <p>The full webhook URL is {@code base + /api/webhooks/telegram/{id}/{secret}}:
+ * <p>The full webhook URL is {@code base + /api/webhooks/telegram/{id}} (the secret travels in the {@code X-Telegram-Bot-Api-Secret-Token} header since JCLAW-784):
  * the base is the operator-visible public host stored on the binding
  * ({@link TelegramBinding#webhookBaseUrl}, pre-filled from the Tailscale Funnel
  * or the public origin), and the path is fixed by the route + Telegram contract.

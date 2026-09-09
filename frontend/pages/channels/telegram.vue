@@ -99,10 +99,11 @@ const canSave = computed(() => {
 })
 
 // JCLAW-339: the webhook URL is base + a FIXED contract path
-// (/api/webhooks/telegram/{id}/{secret}). Only the public base is editable; the
-// secret is auto-generated and the path is derived. The base is pre-filled from
-// the live Tailscale Funnel, else the page's own origin when that's a public
-// HTTPS host, else left blank for the operator to enter.
+// (/api/webhooks/telegram/{id}); since JCLAW-784 the secret rides in the
+// X-Telegram-Bot-Api-Secret-Token header, not the path. Only the public base is
+// editable; the secret is auto-generated and the path is derived. The base is
+// pre-filled from the live Tailscale Funnel, else the page's own origin when
+// that's a public HTTPS host, else left blank for the operator to enter.
 const funnelBaseUrl = computed(() => {
   const t = tailscale.value
   return t?.enabled && t.available && t.publicUrl ? t.publicUrl : ''

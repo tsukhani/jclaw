@@ -58,7 +58,19 @@ the pinning with it, so the containment is rebuilt here in two layers, mirroring
    lookup — so the request that hit it is denied and the next one asks again. Lookups run
    on a fixed 8-thread pool, because a lookup past its deadline is abandoned and
    `getaddrinfo` cannot be interrupted: unbounded, a black-holed resolver would leave one
-   live thread per host the page names.
+   live thread per host the page names. Across one render the waits on unresolvable hosts
+   share a 15 s budget (`_RESOLVE_BUDGET_S`): route handlers run serially, so it is this
+   total, not the per-lookup deadline, that keeps a hostile page inside the JVM's call
+   timeout — past it an unknown host is denied without waiting. The decision cache holds at
+   most 512 hosts and is cleared wholesale when full, since a page can name an unlimited
+   number. The gate admits `http`/`https` after the host check and `data`/`blob`/`about`
+   unchecked (they reach no network); every other scheme — `file:`, `ftp:`,
+   `chrome-extension:` — is aborted, because defaulting an unknown scheme to allow is the
+   wrong way round for a security gate. WebSockets go through a second interceptor,
+   `context.route_web_socket` (`ws_gate`): `page.route` never sees WebSocket traffic, so
+   without it a page could open `ws://127.0.0.1`, read a loopback service and write the
+   reply into the DOM handed back. It applies the same host check to the socket's URL and
+   counts a refused one in `X-Blocked-Hosts`.
 
 Layer 2 is a **second implementation of a security check**, which is a real cost. It
 lives in `ssrf.py` — stdlib-only, no Patchright import — and `StealthBrowserTest` runs
@@ -83,6 +95,8 @@ everything from reading as a pass.)
 for — see [Looking like a real browser](#looking-like-a-real-browser).
 
 `POST /render` takes `{url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?}`.
+Defaults: `timeoutMs` `35000`, `settleMs` `4000`, `language` `en` (sent as `Accept-Language`
+and set as the context locale, so `navigator.language` agrees), `waitUntil` `domcontentloaded`.
 
 | Response header | Meaning |
 |---|---|
@@ -210,6 +224,27 @@ one probe instead of each running their own. The probe navigates to a locally fu
 route rather than the network, so the wait is milliseconds and the 15 s timeout is only a
 ceiling; running four of them in parallel would make the failure the retry exists for
 more likely, not less.
+
+## Configuration
+
+Keys live in the Config DB (Settings), not `conf/application.conf`; none is seeded by
+`DefaultConfigJob`, so an absent key means the default below.
+
+| Key | Default | Read by | Meaning |
+|---|---|---|---|
+| `scrape.stealth.enabled` | `true` | `StealthSidecarManager.available` | `false` takes rung 3 out of the ladder without touching the sidecar |
+| `scrape.stealth.port` | `9532` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
+| `scrape.stealth.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the process exits after that long without a render |
+| `scrape.stealth.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+
+`LocalSidecarDaemon` also reads `scrape.stealth.timeoutSeconds` (exported as
+`SIDECAR_REQUEST_TIMEOUT_SEC`) and `scrape.stealth.hfToken` (exported as `HF_TOKEN`) for every
+sidecar it launches; this one reads neither variable, so the two keys have no effect here.
+
+`serve.py` flags: `--host` (`127.0.0.1`), `--port`, `--model` (`patchright-chromium` — the
+identity `/health` echoes and the JVM's health check expects), `--cache-dir`
+(`data/stealth-sidecar`), `--idle-timeout-min` (`15`), `--max-concurrent` (`4`; the daemon's
+argv has no slot for it, so the JVM always gets the default), `--no-auth`, `--probe`.
 
 ## Authentication
 

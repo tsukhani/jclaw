@@ -11,8 +11,14 @@ to start.
 A custom header is deliberately not CORS-simple, so a page the operator visits cannot reach a warm
 sidecar even though it listens on loopback. `--no-auth` (off by default) serves unauthenticated.
 
-Protocol (SV-3 / JCLAW-512): `GET /health`, `GET /capability`, `POST /jobs` -> 202 {job_id},
-`GET /jobs/<id>` -> {state,percent}, `GET /jobs/<id>/result` -> mp4, `POST /pull` -> ndjson progress.
+Protocol (SV-3 / JCLAW-512): `GET /health`, `GET /capability` (the adaptive-picker payload plus `activeModel`,
+the engine this process serves), `POST /jobs {prompt, num_frames?, steps?, fps?, width?, height?}` -> 202 {job_id}
+(defaults `num_frames=49`, `steps=30`, `fps=24` clamped to 1–60) | 409 {busy} while a job is running |
+400 {insufficient_vram} when free VRAM is under the engine's floor, `GET /jobs/<id>` -> {state,percent} |
+404 {unknown_job}, `GET /jobs/<id>/result` -> mp4 | 409 {not_ready}, `POST /pull` -> ndjson progress.
+`--probe` prints the `/capability` JSON and exits — no server, no model load, no token. This is the only sidecar
+with **no `POST /shutdown`**: `LocalSidecarDaemon.evict()`, the JVM's one handle on a sidecar it did not spawn,
+gets `404 {not_found}` here, so an orphan stays up until its idle timeout.
 
 Models: `ltx` (plus `ltx-q8`/`ltx-bf16` on Apple Silicon, `ltx-fp8`/`ltx-fp8-offload` on CUDA — the
 tier spectrum below), `wan-5b`, `wan-14b`. WAN is NVIDIA-only (SV-2). On Linux+NVIDIA use the CUDA torch
@@ -38,3 +44,22 @@ The two stacks are platform-conditional deps (`pyproject.toml` `sys_platform` ma
 for the MLX workspace packages) so they never share a venv. Live percent on both LTX paths (MLX and
 CUDA `ltx_pipelines`) comes from wrapping the sampler's tqdm (neither pipeline exposes a callback);
 only the diffusers/WAN path uses a real `callback_on_step_end`.
+
+## Configuration
+
+Keys live in the Config DB (Settings), not `conf/application.conf`; none is seeded by `DefaultConfigJob`, so an
+absent key means the default below.
+
+| Key | Default | Read by | Meaning |
+|---|---|---|---|
+| `videogen.local.model` | `ltx` under `videogen.provider=ltx-local`, `wan-5b` under `wan-local` | `VideoGenerationRouter.serviceFor` | the engine id passed as `--model`; switching it stops and respawns the sidecar |
+| `videogen.local.port` | `9528` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
+| `videogen.local.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the daemon self-evicts and releases the VRAM after that long idle |
+| `videogen.local.hfToken` | blank | `LocalSidecarDaemon.spawn` | exported to the child as `HF_TOKEN` when non-blank |
+| `videogen.local.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+
+`LocalSidecarDaemon` also reads `videogen.local.timeoutSeconds` and exports it as `SIDECAR_REQUEST_TIMEOUT_SEC`; this
+sidecar does not read that variable, so the key has no effect here.
+
+`serve.py` flags: `--host` (`127.0.0.1`), `--port` (`9528`), `--model` (engine id), `--cache-dir` (becomes `HF_HOME`),
+`--idle-timeout-min` (`15`), `--no-auth`, `--probe`. `--model` and `--cache-dir` are required unless `--probe` is given.

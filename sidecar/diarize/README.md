@@ -12,9 +12,9 @@ that's the ASR sidecar's job.
 | Method | Path | Body → Response |
 |---|---|---|
 | GET | `/health` | → `{status, model, loaded}` |
-| POST | `/diarize` | `{audio_path, num_speakers?, emotions?}` → `{turns: [{startMs, endMs, speaker, emotion?}, ...]}` (`emotions=true` runs a MERaLiON-SER pass per turn — best-effort) |
-| GET | `/diarize/models?ids=repo1,repo2` | → per-repo cached/bytesOnDisk download status (pyannote + the operator's SER model) for the Settings page |
-| POST | `/diarize/prefetch` | `{model}` (an HF repo) → kicks a **detached** download and returns immediately, so `/diarize/models` keeps reporting live progress |
+| POST | `/diarize` | `{audio_path, num_speakers?, emotions?, emotion_model?}` → `{turns: [{startMs, endMs, speaker, emotion?}, ...]}` (`emotions=true` runs an SER pass per turn — best-effort; `emotion_model` picks the SER repo, default MERaLiON-SER-v1) |
+| GET | `/diarize/models?ids=repo1,repo2` | → per-repo cached/bytesOnDisk download status (pyannote + the operator's SER model) for the Settings page — answered by a one-shot `uv run hf_prefetch.py --status`, a minimal env that spawns no pyannote/SER worker |
+| POST | `/diarize/prefetch` | `{model}` (an HF repo) → kicks a **detached** `uv run hf_prefetch.py --prefetch` and returns immediately, so `/diarize/models` keeps reporting live progress |
 | POST | `/shutdown` | graceful exit (JVM shutdown hook) |
 
 The audio file is passed **by path** (same host; attachments are already on
@@ -68,6 +68,24 @@ alternatives (superb, Dpngtm — English/RAVDESS-trained) load fine but collapse
 wav2vec2 SER can be fine on clean English content. MERaLiON is ungated but under
 the **MERaLiON Public License** — check commercial terms before a paid-edition
 ship.
+
+## Configuration
+
+Keys live in the Config DB (Settings), not `conf/application.conf`; none is seeded by
+`DefaultConfigJob`, so an absent key means the default below.
+
+| Key | Default | Read by | Meaning |
+|---|---|---|---|
+| `transcription.diarization.local.port` | `9530` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
+| `transcription.diarization.local.hfToken` | blank | `DiarizeSidecarManager.resolveHfToken` | exported to the child as `HF_TOKEN`; blank falls back to `imagegen.local.hfToken`, both blank → no token and the gated community-1 download fails fast |
+| `transcription.diarization.local.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the daemon self-evicts after that long without a request |
+| `transcription.diarization.local.timeoutSeconds` | `1800` | `DiarizeSidecarClient` (per-call deadline) and `LocalSidecarDaemon.spawnNow` | the JVM's `/diarize` call timeout; also exported as `SIDECAR_REQUEST_TIMEOUT_SEC = max(60, n − 60)`, the sidecar's own subprocess ceiling, so it gives up before the JVM's socket does |
+| `transcription.diarization.local.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+
+`serve.py` flags: `--host` (`127.0.0.1`), `--port` (required), `--model` (`diarize`, the
+identity echoed on `/health`), `--cache-dir` (`data/diarize-models`; becomes `HF_HOME`),
+`--idle-timeout-min` (`15`), `--no-auth`. No `--probe`. `SIDECAR_REQUEST_TIMEOUT_SEC` defaults
+to `1740` when unset.
 
 ## Authentication
 

@@ -56,8 +56,8 @@ public class ApiProvidersController extends Controller {
     public record RefreshPricesResponse(boolean skipped, int providersScanned, int modelsUpdated, List<String> warnings) {}
 
     /**
-     * @param local effective locality — the base URL is local, or the operator classified the
-     *              provider as self-hosted (JCLAW-1102). Gates the memory embedding and
+     * @param local effective locality — the operator's Remote/Local flag, {@code provider.<name>.local}
+     *              (JCLAW-1102); the base URL is not consulted. Gates the memory embedding and
      *              reranker pickers.
      */
     public record ProviderInfo(String name,

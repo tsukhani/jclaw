@@ -150,7 +150,7 @@ For bulk delete, click the trash icon in the page header to enter multi-select m
 
 ### Calendar view
 
-**Calendar** view places `SCHEDULED` and `CRON` next-fire times on a monthly grid, handy for spotting double-bookings before a task fires.
+**Calendar** view places `SCHEDULED` and `CRON` next-fire times on a month, week, or day grid, handy for spotting double-bookings before a task fires.
 
 ## Cron syntax
 

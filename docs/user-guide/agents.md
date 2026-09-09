@@ -60,7 +60,7 @@ Skills can also contribute to the agent's effective shell allowlist (see *Shell 
 
 ### MCP Servers
 
-Servers you've connected on [MCP Servers](/mcp-servers) appear here as a checklist. Ticking a server makes that server's tools available to the agent, alongside built-in tools. The agent's tool list grows automatically as you tick servers — you don't have to enable each tool individually.
+Servers you've connected on [MCP Servers](/mcp-servers) also get their own **MCP Servers** sub-section below Tools, shown once the agent has been saved and at least one server is connected: one row per server with a single server-level toggle — the same switch as that server's group row in Tools — and a chevron that expands a read-only list of the actions the server exposes. There is no per-action toggling; the agent gets the whole server or nothing.
 
 ### Workspace file contents
 
@@ -101,6 +101,8 @@ Two toggles that govern how strictly the Main Agent's shell tools enforce safety
 :::gotcha
 **Bypass allowlist** removes the safety floor. Only enable it on a Main Agent you trust on a machine where you're comfortable letting the model run arbitrary commands. The system-wide allowlist itself is edited in [Settings → Shell Execution](/guide#settings).
 :::
+
+Neither toggle loosens the OS sandbox: with `shell.sandbox` set under [Settings → Security → Shell Execution](/guide#settings-shell-execution), a confined `exec` run can write only inside the agent's workspace, whatever these privileges say.
 
 ### Shell Allowlist (effective view)
 

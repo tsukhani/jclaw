@@ -2,7 +2,7 @@
 
 Two read-only surfaces give you visibility into what JClaw is doing right now and what it's done lately.
 
-- The [Dashboard](/) — the home page; stats and live panels covering agent/conversation/channel/task counts, chat performance, cost, and recent activity.
+- The [Dashboard](/) — the home page; stats and live panels covering agent/conversation/channel/task counts, chat performance, cost, compression, and recent activity.
 - The [Logs](/logs) page — a filterable, searchable event stream for everything happening server-side.
 
 ## Dashboard

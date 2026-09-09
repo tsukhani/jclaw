@@ -28,10 +28,10 @@ const showAllModels = ref(false)
 
 /**
  * Local providers only (JCLAW-939). Embedding a memory sends its full text to the
- * provider, so a cloud one would ship the whole corpus off the machine. The backend
- * decides which are local — from the configured base URL, not the name — and rejects a
- * remote one on both probe and save, so this list narrows the choice rather than being
- * the thing that enforces it.
+ * provider, so a cloud one would ship the whole corpus off the machine. Local means the
+ * operator's Remote/Local flag (`provider.<name>.local`), not the base URL — a cloud API
+ * behind a loopback proxy has a local address. The backend rejects a remote provider on
+ * both probe and save, so this list narrows the choice rather than enforcing it.
  */
 const providerNames = computed(() =>
   (providersData.value ?? []).filter(p => p.local).map(p => p.name))

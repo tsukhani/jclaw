@@ -370,9 +370,16 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on the 
 |--------------------------------|---------|------------------------------------------------------------------------------------------------------|
 | `shell.allowlist`              | (empty) | Newline-separated list of commands (with optional argument patterns) the agent may run.              |
 | `shell.defaultTimeoutSeconds`  | 30      | Per-command wall-clock budget (1–300 s).                                                              |
+| `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Has no row in the panel — set it with `POST /api/config`. |
 
 :::gotcha
 The allowlist is the safety floor for shell access. An empty allowlist plus no per-agent **Bypass allowlist** means agents can't run anything via the shell tool. Be deliberate about what you add here.
+:::
+
+`shell.sandbox` covers `exec`, `diarize_audio`'s ffmpeg extraction, and the ffmpeg transcode of an audio attachment on its way to a model. On macOS the process runs under `sandbox-exec`: writes are denied outside the agent's workspace and the system temp directories (the two ffmpeg runs get only their temp directory), and reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube` and `~/.netrc` are refused. On Linux it runs under `bwrap`, which builds the visible filesystem from nothing, so those secrets are absent rather than denied.
+
+:::gotcha
+The sandbox bounds **reach**, not grammar: the allowlist above is unchanged, so `echo hi; rm -rf ~/Documents` still passes it and still runs both statements — the `rm` now fails on every path outside the workspace. It also fails closed. With the key on and no mechanism on the host (native Windows, or a machine missing `sandbox-exec`/`bwrap`), the run is refused rather than launched unconfined.
 :::
 
 ## Malware and Virus Scanners

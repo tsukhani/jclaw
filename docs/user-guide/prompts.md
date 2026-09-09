@@ -24,7 +24,7 @@ The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view they
 - **Category pills** — filter the grid by category. Each pill carries an absolute count of prompts in that category (whole library, not the current search).
 - **Search** — the search box filters live across each prompt's **title, text, and tags**.
 - **Run / Edit / Delete** — every card's actions (see below).
-- **Export · Import · New prompt** — the toolbar, top-left.
+- **Export · Import · New prompt** — the toolbar, left-aligned below the intro text.
 
 ## Creating a prompt
 
