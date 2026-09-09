@@ -435,7 +435,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
           'maxlength': 100,
           'aria-label': 'Conversation name',
           'data-testid': 'rename-input',
-          'class': 'w-full max-w-xs bg-surface-elevated border border-ring px-1.5 py-0.5 text-sm text-fg-strong focus:outline-hidden',
+          'class': 'w-full max-w-56 bg-surface-elevated border border-ring px-1.5 py-0.5 text-sm text-fg-strong focus:outline-hidden',
           'onVnodeMounted': ({ el }) => {
             const input = el as HTMLInputElement
             input.focus()
@@ -477,7 +477,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
           },
         }, [h(starred ? StarSolidIcon : StarOutlineIcon, { class: 'w-4 h-4' })]),
         v
-          ? h('span', { class: 'text-fg-primary truncate max-w-xs block', title: v }, v)
+          ? h('span', { class: 'text-fg-primary truncate max-w-56 block', title: v }, v)
           : h('span', { class: 'text-fg-muted' }, '—'),
       ]
       if (parentId != null) {
@@ -521,10 +521,10 @@ const columns: ColumnDef<Conversation, unknown>[] = [
     header: 'Actions',
     enableSorting: false,
     size: 148,
-    cell: ({ row }) => h('div', { class: 'flex items-center justify-end gap-1' }, [
+    cell: ({ row }) => h('div', { class: 'flex items-center justify-end gap-0.5' }, [
       h('button', {
         'type': 'button',
-        'class': 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
+        'class': 'p-1 text-fg-muted hover:text-fg-strong transition-colors',
         'title': 'Rename',
         'aria-label': 'Rename this conversation',
         'data-testid': 'rename-button',
@@ -536,8 +536,8 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       h('button', {
         'type': 'button',
         'class': row.original.pinned
-          ? 'p-1.5 text-emerald-600 dark:text-emerald-400 transition-colors'
-          : 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
+          ? 'p-1 text-emerald-600 dark:text-emerald-400 transition-colors'
+          : 'p-1 text-fg-muted hover:text-fg-strong transition-colors',
         'title': row.original.pinned ? 'Unpin' : 'Pin to top',
         'aria-label': row.original.pinned ? 'Unpin this conversation' : 'Pin this conversation',
         'aria-pressed': row.original.pinned === true,
@@ -565,7 +565,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       ]),
       h('button', {
         type: 'button',
-        class: 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
+        class: 'p-1 text-fg-muted hover:text-fg-strong transition-colors',
         title: 'View details',
         onClick: (e: Event) => {
           e.stopPropagation()
@@ -596,7 +596,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       ]),
       h('button', {
         type: 'button',
-        class: 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
+        class: 'p-1 text-fg-muted hover:text-fg-strong transition-colors',
         title: 'Quick preview',
         onClick: (e: Event) => {
           e.stopPropagation()

@@ -7,6 +7,7 @@ import models.SessionCompaction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
+import play.db.jpa.JPA;
 import play.test.UnitTest;
 import services.AgentService;
 import services.AttachmentService;
@@ -482,6 +483,30 @@ class ConversationServiceTest extends UnitTest {
         Conversation refreshed = Conversation.findById(conv.id);
         assertNull(refreshed.modelProviderOverride);
         assertNull(refreshed.modelIdOverride);
+    }
+
+    /**
+     * Switching a conversation's model is an operator annotation, not activity:
+     * the list renders {@code updatedAt} as "Last Activity" and sorts by it, so
+     * an override write must not float the row to the top of the page.
+     */
+    @Test
+    void modelOverrideWritesDoNotCountAsActivity() {
+        var agent = newAgent("conv-override-activity");
+        var conv = ConversationService.create(agent, "web", "u");
+        // Re-read first so the baseline carries the column's stored precision
+        // rather than the in-memory Instant's, which can be finer.
+        JPA.em().refresh(conv);
+        var before = conv.updatedAt;
+
+        ConversationService.setModelOverride(conv, "ollama", "llama3.1");
+        assertEquals(before, conv.updatedAt, "setting an override must leave Last Activity alone");
+        assertEquals("ollama", conv.modelProviderOverride,
+                "and the caller still sees the new value without re-reading");
+
+        ConversationService.clearModelOverride(conv);
+        assertEquals(before, conv.updatedAt, "clearing an override must leave Last Activity alone");
+        assertNull(conv.modelIdOverride);
     }
 
     // =====================

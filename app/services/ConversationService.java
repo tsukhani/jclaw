@@ -1,5 +1,6 @@
 package services;
 
+import jakarta.persistence.Query;
 import models.Agent;
 import models.ChannelType;
 import models.Conversation;
@@ -100,23 +101,50 @@ public class ConversationService {
      * null clears the override and falls back to the agent's defaults.
      * Caller owns the transaction — this method assumes an active Tx so it
      * can piggy-back on {@code /model NAME}'s handler transaction without
-     * a redundant Tx.run nesting.
+     * a redundant Tx.run nesting. Switching models does not count as activity;
+     * see {@link #applyWithoutTouchingActivity}.
      *
      * @param conversation the conversation whose override columns to set
      * @param provider     provider override, or null to clear
      * @param modelId      model-id override, or null to clear
      */
-    public static void setModelOverride(Conversation conversation, String provider, String modelId) {
-        conversation.modelProviderOverride = provider;
-        conversation.modelIdOverride = modelId;
-        conversation.save();
+    public static void setModelOverride(Conversation conversation, @Nullable String provider,
+                                        @Nullable String modelId) {
+        applyWithoutTouchingActivity(conversation, JPA.em()
+                .createQuery("UPDATE Conversation c SET c.modelProviderOverride = :provider, "
+                        + "c.modelIdOverride = :modelId WHERE c.id = :id")
+                .setParameter("provider", provider)
+                .setParameter("modelId", modelId));
     }
 
     /** Clear the conversation-scoped override. See {@link #setModelOverride}. */
     public static void clearModelOverride(Conversation conversation) {
-        conversation.modelProviderOverride = null;
-        conversation.modelIdOverride = null;
-        conversation.save();
+        setModelOverride(conversation, null, null);
+    }
+
+    /**
+     * Run a bound {@code UPDATE Conversation} that must not count as activity,
+     * then re-sync the managed entity.
+     *
+     * <p>Naming, starring, pinning and switching the model are operator
+     * annotations, not conversation activity — but the list renders
+     * {@code updatedAt} as "Last Activity" and sorts by it. Routing them through
+     * {@code save()}, whose inherited {@link models.TimestampedModel}
+     * {@code @PreUpdate} stamps that column, dated a starred conversation to the
+     * moment of the click and jumped it to the top of the page. A bulk JPQL
+     * update bypasses the lifecycle callback, which is the semantic wanted here.
+     *
+     * <p>Two consequences of going around the entity, both handled here.
+     * The caller must not also assign the field: a dirty managed field is
+     * flushed at commit as an ordinary second UPDATE and stamps
+     * {@code updatedAt} after all. And a bulk update leaves the persistence
+     * context's copy stale, so the {@code refresh} is what keeps a caller that
+     * re-reads in the same transaction — {@code /model}'s handler, and the
+     * service tests — from seeing the pre-write value.
+     */
+    private static void applyWithoutTouchingActivity(Conversation conversation, Query update) {
+        update.setParameter("id", conversation.id).executeUpdate();
+        JPA.em().refresh(conversation);
     }
 
     /**
@@ -130,14 +158,16 @@ public class ConversationService {
      * the mismatch from the operator who typed it.
      */
     public static void rename(Conversation conversation, String name) {
-        conversation.preview = name;
-        conversation.save();
+        applyWithoutTouchingActivity(conversation, JPA.em()
+                .createQuery("UPDATE Conversation c SET c.preview = :value WHERE c.id = :id")
+                .setParameter("value", name));
     }
 
     /** Set or clear the favorite marker. Idempotent. */
     public static void setStarred(Conversation conversation, boolean starred) {
-        conversation.starred = starred;
-        conversation.save();
+        applyWithoutTouchingActivity(conversation, JPA.em()
+                .createQuery("UPDATE Conversation c SET c.starred = :value WHERE c.id = :id")
+                .setParameter("value", starred));
     }
 
     /**
@@ -151,15 +181,19 @@ public class ConversationService {
     public static boolean pin(Conversation conversation) {
         if (conversation.pinned) return true;
         if (countPinned() >= MAX_PINNED) return false;
-        conversation.pinned = true;
-        conversation.save();
+        setPinned(conversation, true);
         return true;
     }
 
     /** Unpin the conversation. Idempotent. */
     public static void unpin(Conversation conversation) {
-        conversation.pinned = false;
-        conversation.save();
+        setPinned(conversation, false);
+    }
+
+    private static void setPinned(Conversation conversation, boolean pinned) {
+        applyWithoutTouchingActivity(conversation, JPA.em()
+                .createQuery("UPDATE Conversation c SET c.pinned = :value WHERE c.id = :id")
+                .setParameter("value", pinned));
     }
 
     /** Number of pinned top-level conversations, i.e. what {@link #MAX_PINNED} caps. */

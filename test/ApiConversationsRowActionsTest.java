@@ -204,6 +204,41 @@ class ApiConversationsRowActionsTest extends FunctionalTest {
         assertIsOk(PUT("/api/conversations/" + ids[0] + "/pin", "application/json", ""));
     }
 
+    // ── annotations are not activity ──────────────────────────────────
+
+    /**
+     * The list renders {@code updatedAt} as "Last Activity" and sorts by it, so
+     * an annotation must not stamp it: routing these through {@code save()}
+     * dated a starred conversation to the moment of the click and jumped it to
+     * the top of the page.
+     */
+    @Test
+    void annotatingAConversationDoesNotCountAsActivity() {
+        login();
+        long id = commitInFreshTx(() -> newConv(newAgent("annotate-agent"), "u-1", "Hi"));
+        String before = commitInFreshTx(() -> {
+            Conversation c = Conversation.findById(id);
+            return c.updatedAt.toString();
+        });
+
+        assertIsOk(PUT("/api/conversations/" + id + "/star", "application/json", ""));
+        assertIsOk(PUT("/api/conversations/" + id + "/pin", "application/json", ""));
+        assertIsOk(PUT("/api/conversations/" + id + "/name", "application/json",
+                "{\"name\": \"Renamed\"}"));
+
+        String after = commitInFreshTx(() -> {
+            Conversation c = Conversation.findById(id);
+            return c.updatedAt.toString();
+        });
+        assertEquals(before, after, "star, pin and rename must leave Last Activity alone");
+
+        // The writes still landed — this is not a no-op dressed as a fix.
+        var row = getContent(GET("/api/conversations/" + id));
+        assertTrue(row.contains("\"starred\":true"), row);
+        assertTrue(row.contains("\"pinned\":true"), row);
+        assertTrue(row.contains("\"preview\":\"Renamed\""), row);
+    }
+
     // ── delete-by-filter scope ────────────────────────────────────────
 
     @Test
