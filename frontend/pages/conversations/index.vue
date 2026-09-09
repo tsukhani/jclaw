@@ -243,6 +243,15 @@ async function deleteSelected() {
 
 const deletingAll = ref(false)
 
+interface DeleteFilterPayload {
+  channel?: string
+  agentId?: number
+  name?: string
+  peer?: string
+  starred?: boolean
+  q?: string
+}
+
 /**
  * Build the filter object the server understands. Mirrors the param-set logic
  * in {@link load} but emits a JSON object suitable for the
@@ -250,12 +259,17 @@ const deletingAll = ref(false)
  * (number or undefined) so the description can echo a human-readable name
  * separately.
  */
-function activeFilterPayload(): { channel?: string, agentId?: number, name?: string, peer?: string, starred?: boolean } {
-  const out: { channel?: string, agentId?: number, name?: string, peer?: string, starred?: boolean } = {}
+function activeFilterPayload(): DeleteFilterPayload {
+  const out: DeleteFilterPayload = {}
   const name = getFilterValue('name')
   const channel = getFilterValue('channel')
   const agent = getFilterValue('agent')
   const peer = getFilterValue('peer')
+  // q narrows the count the confirm dialog quotes, so it has to narrow the
+  // delete as well — omitting it would destroy every row the other filters
+  // match instead of the keyword-matched subset the operator was shown.
+  const q = getFilterValue('q')
+  if (q) out.q = q
   if (name) out.name = name
   if (channel) out.channel = channel
   if (peer) out.peer = peer

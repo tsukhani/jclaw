@@ -613,11 +613,20 @@ public class ConversationService {
      *                 null/blank for any peer
      * @param starred  {@code TRUE} to delete only starred conversations, or
      *                 null for any
+     * @param conversationIds already-resolved id set to intersect with (the
+     *                 caller's {@code q} keyword search), or null for no such
+     *                 constraint. An empty list means the keyword matched
+     *                 nothing and deletes nothing — never everything.
      * @return the number of conversations deleted
      */
     public static int deleteByFilter(@Nullable String channel, @Nullable Long agentId,
                                      @Nullable String name, @Nullable String peer,
-                                     @Nullable Boolean starred) {
+                                     @Nullable Boolean starred,
+                                     @Nullable List<Long> conversationIds) {
+        // Resolved-but-empty is the dangerous case: `IN ()` is invalid JPQL, and
+        // dropping the predicate instead would delete everything the other
+        // filters match rather than the nothing the keyword actually selected.
+        if (conversationIds != null && conversationIds.isEmpty()) return 0;
         var filter = new JpqlFilter()
                 .eq("channelType", channel)
                 .eq("agent.id", agentId)
@@ -634,12 +643,14 @@ public class ConversationService {
         var dynamicWhere = filter.toWhereClause();
         var baseWhere = "c.parentConversation IS NULL AND c.pinned = false";
         var fullWhere = dynamicWhere.isEmpty() ? baseWhere : baseWhere + " AND " + dynamicWhere;
+        if (conversationIds != null) fullWhere = fullWhere + " AND c.id IN :ids";
         String jpql = "SELECT c.id FROM Conversation c WHERE " + fullWhere;
         var q = JPA.em().createQuery(jpql, Long.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
             q.setParameter(i + 1, params.get(i));
         }
+        if (conversationIds != null) q.setParameter("ids", conversationIds);
         List<Long> ids = q.getResultList();
         return deleteByIds(ids);
     }

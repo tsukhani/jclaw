@@ -1,4 +1,5 @@
 import models.Agent;
+import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import org.junit.jupiter.api.AfterEach;
@@ -10,7 +11,12 @@ import services.AgentService;
 import services.ConversationService;
 import services.Tx;
 import services.search.LuceneIndexer;
+import services.search.MessageSearchRepository;
+import services.search.MessageSearchTestHooks;
+import models.TaskRunMessage;
 
+import java.io.IOException;
+import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -130,6 +136,135 @@ class ApiConversationsControllerSearchTest extends FunctionalTest {
                 "the non-matching seeded conversation must be absent from the zero-row response");
     }
 
+    // ── delete-all scope (the q: filter must narrow the delete too) ──────
+
+    @Test
+    void deleteAllWithAKeywordDeletesOnlyTheMatchingConversations() {
+        var ids = commitInFreshTx(() -> {
+            var agent = AgentService.create("conv-qdel-agent", "openrouter", "gpt-4.1");
+            var match = seedConversationWithMessages(agent, "web", "u-match",
+                    new String[]{"filler", "carries deletetargettoken here"});
+            var spared = seedConversationWithMessages(agent, "web", "u-spared",
+                    new String[]{"entirely unrelated prose", "still unrelated"});
+            return new long[]{match, spared};
+        });
+
+        var resp = deleteWithJsonBody("/api/conversations",
+                "{\"filter\": {\"q\": \"deletetargettoken\"}}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":1"), getContent(resp));
+
+        assertTrue(commitInFreshTx(() -> Conversation.findById(ids[0]) == null),
+                "the keyword-matching conversation is deleted");
+        assertTrue(commitInFreshTx(() -> Conversation.findById(ids[1]) != null),
+                "a conversation the keyword never matched must survive");
+    }
+
+    /**
+     * The regression this guards: a {@code q} that resolves to no ids used to
+     * reach {@code deleteByFilter} as "no keyword constraint", so a delete the
+     * page had counted as zero rows wiped the table instead.
+     */
+    @Test
+    void deleteAllWithAKeywordThatMatchesNothingDeletesNothing() {
+        var ids = commitInFreshTx(() -> {
+            var agent = AgentService.create("conv-qdel-none-agent", "openrouter", "gpt-4.1");
+            var a = seedConversationWithMessages(agent, "web", "u-a", new String[]{"alpha"});
+            var b = seedConversationWithMessages(agent, "web", "u-b", new String[]{"beta"});
+            return new long[]{a, b};
+        });
+
+        var resp = deleteWithJsonBody("/api/conversations",
+                "{\"filter\": {\"q\": \"zzznosuchtokenzzz\"}}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":0"), getContent(resp));
+
+        for (var id : ids) {
+            assertTrue(commitInFreshTx(() -> Conversation.findById(id) != null),
+                    "conv id=" + id + " must survive a keyword that matched nothing");
+        }
+    }
+
+    /**
+     * The listing endpoint degrades open when the index is unreachable — a wider
+     * result set is harmless to look at. The delete must not: "no keyword
+     * constraint" would destroy every row the other filters match.
+     */
+    @Test
+    void deleteAllRefusesWhenTheSearchIndexIsUnreachable() throws IOException {
+        long id = commitInFreshTx(() -> {
+            var agent = AgentService.create("conv-qdel-down-agent", "openrouter", "gpt-4.1");
+            return seedConversationWithMessages(agent, "web", "u-down",
+                    new String[]{"holds outagetoken somewhere"});
+        });
+
+        MessageSearchTestHooks.setRepository(new UnreachableSearchRepository());
+        try {
+            var resp = deleteWithJsonBody("/api/conversations",
+                    "{\"filter\": {\"q\": \"outagetoken\"}}");
+            assertEquals(503, resp.status.intValue(), getContent(resp));
+        } finally {
+            // The repository reference is process-global; this class holds the
+            // Lucene lock for its lifecycle, but leaving a throwing backend
+            // installed would break every later test in the window.
+            MessageSearchTestHooks.setRepository(null);
+            services.search.MessageSearch.init();
+        }
+
+        assertTrue(commitInFreshTx(() -> Conversation.findById(id) != null),
+                "nothing is deleted when the delete's scope cannot be resolved");
+    }
+
+    /** A search backend that is present but cannot answer. */
+    private static final class UnreachableSearchRepository implements MessageSearchRepository {
+        @Override
+        public void init() {
+            // Already "started"; the failure is per-query, not at startup.
+        }
+
+        @Override
+        public List<TaskRunMessage> search(String query, int limit) throws IOException {
+            throw new IOException("index unreachable");
+        }
+
+        @Override
+        public List<Long> searchIds(LuceneIndexer.Scope scope, String query, int limit) throws IOException {
+            throw new IOException("index unreachable");
+        }
+
+        @Override
+        public String dialectName() {
+            return "unreachable";
+        }
+    }
+
+    /**
+     * Play's {@code DELETE} helper overwrites the request body, so a
+     * DELETE-with-payload has to go through {@code makeRequest}. Mirrors the
+     * copy in {@code ApiConversationsControllerTest}, which carries the full
+     * rationale for the reflection on {@code savedCookies}.
+     */
+    private static play.mvc.Http.Response deleteWithJsonBody(String url, String json) {
+        var req = newRequest();
+        req.method = "DELETE";
+        req.contentType = "application/json";
+        req.url = url;
+        req.path = url;
+        req.querystring = "";
+        req.body = new java.io.ByteArrayInputStream(
+                json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try {
+            var f = play.test.FunctionalTest.class.getDeclaredField("savedCookies");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var cookies = (java.util.Map<String, play.mvc.Http.Cookie>) f.get(null);
+            if (cookies != null) req.cookies = cookies;
+        } catch (Exception _) {
+            // Surfaces as a 401 on the assertions above if it ever shifts.
+        }
+        return makeRequest(req);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     /**
@@ -164,8 +299,8 @@ class ApiConversationsControllerSearchTest extends FunctionalTest {
      * the GET hits the index. Mirrors the existing helper in
      * {@link ApiSubagentRunsControllerTest}.
      */
-    private static long[] commitInFreshTx(Supplier<long[]> block) {
-        var ref = new java.util.concurrent.atomic.AtomicReference<long[]>();
+    private static <T> T commitInFreshTx(Supplier<T> block) {
+        var ref = new java.util.concurrent.atomic.AtomicReference<T>();
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         var t = Thread.ofPlatform().start(() -> {
             try {

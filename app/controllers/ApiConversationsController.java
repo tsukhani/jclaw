@@ -143,7 +143,7 @@ public class ApiConversationsController extends Controller {
     public record DeleteByIdsRequest(List<Long> ids) {}
 
     public record DeleteFilter(String channel, Long agentId, String name, String peer,
-                              Boolean starred) {}
+                              Boolean starred, String q) {}
 
     public record DeleteByFilterRequest(DeleteFilter filter) {}
 
@@ -283,16 +283,7 @@ public class ApiConversationsController extends Controller {
     private static @Nullable List<Long> ftsConversationIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
-            // A term matching more than 500 messages truncates silently, so a common
-            // word under-reports conversations rather than erroring (JCLAW-1064).
-            var messageIds = MessageSearch.searchIds(
-                    LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
-            if (messageIds.isEmpty()) return List.of();
-            @SuppressWarnings("unchecked")
-            var convIds = (List<Long>) JPA.em()
-                    .createQuery("SELECT DISTINCT m.conversation.id FROM Message m WHERE m.id IN :ids")
-                    .setParameter("ids", messageIds)
-                    .getResultList();
+            var convIds = searchConversationIds(q);
             return convIds.isEmpty() ? List.of() : convIds;
         } catch (IOException e) {
             // FTS backend unreachable — surface as "no FTS filter" rather
@@ -304,6 +295,30 @@ public class ApiConversationsController extends Controller {
                             .formatted(q, e.getMessage()));
             return null;
         }
+    }
+
+    /**
+     * Resolve {@code q} to the conversation ids whose messages match, letting an
+     * unreachable index surface as {@link IOException}.
+     *
+     * <p>{@link #ftsConversationIds} is the degrade-open wrapper around this, and
+     * is right for the listing endpoint: a wider result set is harmless to look
+     * at. Callers that act on the scope rather than display it — the bulk delete —
+     * call this directly, because "no FTS constraint" would widen what they
+     * destroy.
+     */
+    private static List<Long> searchConversationIds(String q) throws IOException {
+        // A term matching more than 500 messages truncates silently, so a common
+        // word under-reports conversations rather than erroring (JCLAW-1064).
+        var messageIds = MessageSearch.searchIds(
+                LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
+        if (messageIds.isEmpty()) return List.of();
+        @SuppressWarnings("unchecked")
+        var convIds = (List<Long>) JPA.em()
+                .createQuery("SELECT DISTINCT m.conversation.id FROM Message m WHERE m.id IN :ids")
+                .setParameter("ids", messageIds)
+                .getResultList();
+        return convIds;
     }
 
     /**
@@ -523,12 +538,14 @@ public class ApiConversationsController extends Controller {
      * <ul>
      *   <li>{@code {"ids": [1, 2, 3]}} — delete the listed ids.</li>
      *   <li>{@code {"filter": {"channel": "...", "agentId": ..., "name": "...",
-     *       "peer": "...", "starred": true}}} — delete every row matching the
-     *       filter, using the same predicates as the listing endpoint. Each
-     *       filter field is optional; an empty filter object matches every
-     *       conversation the list would show, mirroring the no-filter semantic
-     *       of GET /api/conversations. Pinned conversations are never in scope
-     *       (see {@link ConversationService#deleteByFilter}).</li>
+     *       "peer": "...", "starred": true, "q": "..."}}} — delete every row
+     *       matching the filter, using the same predicates as the listing
+     *       endpoint, {@code q} included: the page quotes a filtered count in
+     *       its confirm dialog, so every key it can filter by has to narrow the
+     *       delete too. Each field is optional; an empty filter object matches
+     *       every conversation the list would show, mirroring the no-filter
+     *       semantic of GET /api/conversations. Pinned conversations are never
+     *       in scope (see {@link ConversationService#deleteByFilter}).</li>
      * </ul>
      *
      * <p>Rejects with 400 when neither shape is present — guards against an
@@ -565,7 +582,24 @@ public class ApiConversationsController extends Controller {
             String name = stringField(f, "name");
             String peer = stringField(f, "peer");
             Boolean starred = booleanField(f, "starred");
-            int deleted = ConversationService.deleteByFilter(channel, agentId, name, peer, starred);
+            String q = stringField(f, "q");
+            List<Long> ftsIds = null;
+            if (q != null) {
+                try {
+                    ftsIds = searchConversationIds(q);
+                } catch (IOException e) {
+                    // Fail closed where the listing endpoint degrades open: treating
+                    // an unreachable index as "no keyword constraint" would delete
+                    // every row the other filters match, rather than the handful the
+                    // operator counted before confirming.
+                    ApiResponses.errorAndLog(e, 503, ApiResponses.SEARCH_FAILED,
+                            "Search is unavailable, so the scope of this delete cannot be "
+                                    + "resolved. Retry, or drop the q: filter.");
+                    return;
+                }
+            }
+            int deleted = ConversationService.deleteByFilter(channel, agentId, name, peer,
+                    starred, ftsIds);
             renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
             return;
         }

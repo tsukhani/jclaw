@@ -312,6 +312,27 @@ describe('Conversations — delete all with filter scope', () => {
     // resolved to its id.
     expect(deleteBody!.filter).toEqual({ channel: 'web', agentId: 1, peer: 'bob', name: 'hi' })
   })
+
+  it('carries the q keyword into the delete payload', async () => {
+    // The dialog quotes the q-narrowed total. A payload without q would delete
+    // every row the other filters match instead of the keyword-matched subset.
+    const component = await mountSuspended(Harness)
+    await flushPromises()
+
+    await commitFilter(component, 'q:invoice channel:web')
+    await component.findAll('button').find(b => b.text().startsWith('Delete all'))!.trigger('click')
+    await flushPromises()
+
+    const gateInput = document.body.querySelector<HTMLInputElement>('[role="dialog"] input[type="text"]')
+    gateInput!.value = 'delete'
+    gateInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+      .find(b => (b.textContent ?? '').trim() === 'Delete 2')!.click()
+    await vi.waitFor(() => expect(deleteBody).not.toBeNull())
+
+    expect(deleteBody!.filter).toEqual({ q: 'invoice', channel: 'web' })
+  })
 })
 
 describe('Conversations — starred filter scope', () => {

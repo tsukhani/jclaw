@@ -217,7 +217,7 @@ class ApiConversationsRowActionsTest extends FunctionalTest {
         assertIsOk(PUT("/api/conversations/" + ids[0] + "/pin", "application/json", ""));
 
         int deleted = commitInFreshTx(() ->
-                ConversationService.deleteByFilter(null, null, null, null, null));
+                ConversationService.deleteByFilter(null, null, null, null, null, null));
         assertEquals(1, deleted, "only the unpinned conversation is in scope");
 
         assertTrue(commitInFreshTx(() -> Conversation.findById(ids[0]) != null),
@@ -236,7 +236,7 @@ class ApiConversationsRowActionsTest extends FunctionalTest {
         assertIsOk(PUT("/api/conversations/" + ids[0] + "/star", "application/json", ""));
 
         int deleted = commitInFreshTx(() ->
-                ConversationService.deleteByFilter(null, null, null, null, Boolean.TRUE));
+                ConversationService.deleteByFilter(null, null, null, null, Boolean.TRUE, null));
         assertEquals(1, deleted);
 
         assertTrue(commitInFreshTx(() -> Conversation.findById(ids[0]) == null));
