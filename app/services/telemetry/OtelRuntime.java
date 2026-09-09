@@ -186,6 +186,7 @@ public final class OtelRuntime {
         }
         applied = config;
         TelemetryState.enabled = config.enabled();
+        TelemetryDataSource.attach(config.enabled() ? api : null);
     }
 
     /** Flushes what is queued and closes the exporters; a {@code ShutdownJob} component. */
@@ -194,6 +195,7 @@ public final class OtelRuntime {
         if (s == null) return;
         s.getSdkTracerProvider().forceFlush().join(EXPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         s.getSdkMeterProvider().forceFlush().join(EXPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        TelemetryDataSource.attach(null);
         var jvm = jvmMetrics;
         if (jvm != null) {
             jvm.close();
@@ -311,6 +313,7 @@ public final class OtelRuntime {
             applied = new OtelConfig(true, applied.endpoint(), applied.protocol(), applied.headers(),
                     applied.serviceName(), 1.0, applied.metricsInterval());
             TelemetryState.enabled = true;
+            TelemetryDataSource.attach(api);
         }
         try {
             body.run();
