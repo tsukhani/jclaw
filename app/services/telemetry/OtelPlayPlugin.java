@@ -45,6 +45,18 @@ public class OtelPlayPlugin extends PlayPlugin {
             return;
         }
         var route = routePattern(request.method, request.action);
+        if (TelemetryState.agentAttached) {
+            // The agent's own server span reaches this thread through its executor instrumentation;
+            // naming it from the route beats opening a second server span beside it.
+            var current = Span.current();
+            if (current.getSpanContext().isValid()) {
+                current.updateName(request.method + " " + (route != null ? route : request.action));
+                if (route != null) {
+                    current.setAttribute(HttpAttributes.HTTP_ROUTE, route);
+                }
+                return;
+            }
+        }
         var builder = TelemetryState.api.getTracer("jclaw").spanBuilder(request.method + " " + (route != null ? route : request.action))
                 .setSpanKind(SpanKind.SERVER)
                 .setAttribute(HttpAttributes.HTTP_REQUEST_METHOD, request.method)

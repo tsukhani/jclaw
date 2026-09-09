@@ -16,6 +16,7 @@ final class TelemetryState {
 
     static volatile OpenTelemetry api = OpenTelemetry.noop();
     static volatile boolean enabled;
+    static volatile boolean agentAttached;
 
     private TelemetryState() {}
 }

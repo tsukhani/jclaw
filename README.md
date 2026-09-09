@@ -400,6 +400,26 @@ You can also set `JCLAW_PORT` in `.env` alongside `docker-compose.yml` instead o
 
 The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` (or your custom port) once the container is healthy.
 
+### Telemetry (OpenTelemetry)
+
+JClaw exports traces and metrics over OTLP from inside the process: HTTP server spans named from the route, one `turn` span per agent turn with the model call (GenAI semantic conventions), its HTTP call and every JDBC statement beneath it, plus `gen_ai.client.*`, `jclaw.turn.segment.duration` and `jvm.*` metrics. Nothing leaves the process until you turn it on.
+
+1. Run a collector, e.g. `docker run --rm -p 4318:4318 otel/opentelemetry-collector-contrib` with an OTLP receiver.
+2. Settings → System → Telemetry: enable, set the endpoint (default `http://localhost:4318`), press **Send test span**. Endpoint, headers, protocol and sampling all change live; no restart.
+
+**Optional: the OpenTelemetry Java agent.** Attach it when you also want Hibernate, Lucene and every other library the agent knows:
+
+```bash
+# Host install: add to conf/application.conf and restart
+%prod.javaagent.path=/opt/otel/opentelemetry-javaagent.jar
+
+# Container: compose it into the JVM options
+docker run -e JAVA_TOOL_OPTIONS="-javaagent:/opt/otel/opentelemetry-javaagent.jar" \
+           -e OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318 jclaw
+```
+
+With the agent attached its `OTEL_*` settings apply and are read at JVM start; the Telemetry panel says so and its keys become read-only. The app then yields HTTP server, OkHttp, JDBC and JVM telemetry to the agent — its request spans are named from the Play route — and keeps emitting the turn and GenAI spans the agent cannot produce. Verified with agent 2.31.1 beside the framework's own enhancer agent on Netty 4.2.
+
 ### Running Behind a Reverse Proxy
 
 JClaw already sends the right cache headers, and a proxy that rewrites or ignores them is the one remaining way to serve a stale SPA. The app sends `Cache-Control: no-cache` on the HTML shell (so it always revalidates) and `public, max-age=31536000, immutable` on the content-hashed `_nuxt/` chunks (so they never do). That split only works end-to-end if your proxy leaves it alone.

@@ -106,6 +106,7 @@ public final class OtelRuntime {
         }
         if (javaAgentPresent()) {
             agentAttached = true;
+            TelemetryState.agentAttached = true;
             api = GlobalOpenTelemetry.get();
             applied = OtelConfig.load();
             TelemetryState.api = api;
@@ -228,7 +229,8 @@ public final class OtelRuntime {
      * current — the raw client while export is off, so the disabled path adds nothing.
      */
     public static Call.Factory traced(OkHttpClient client) {
-        if (!applied.enabled()) {
+        // The agent instruments OkHttp itself; wrapping as well would double every call.
+        if (!applied.enabled() || agentAttached) {
             return client;
         }
         var a = api;
@@ -239,6 +241,12 @@ public final class OtelRuntime {
             okHttpApi = a;
         }
         return t.createCallFactory(client);
+    }
+
+    /** Flags the agent as attached without one being present, so agent-mode branches can be tested. */
+    public static void agentAttachedForTest(boolean attached) {
+        agentAttached = attached;
+        TelemetryState.agentAttached = attached;
     }
 
     public static boolean isEnabled() {

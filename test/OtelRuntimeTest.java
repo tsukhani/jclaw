@@ -2,6 +2,7 @@ import io.opentelemetry.api.trace.SpanKind;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
 import mockwebserver3.RecordedRequest;
+import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,7 +18,9 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -100,6 +103,21 @@ public class OtelRuntimeTest extends UnitTest {
             var afterOff = targets.subList(Math.min(seenBeforeOff, targets.size()), targets.size());
             assertTrue(afterOff.contains("/v1/metrics"),
                     () -> "the off-swap collects and exports before the leaf goes; after off: " + afterOff);
+        }
+    }
+
+    @Test
+    public void withTheAgentAttachedTheHttpClientIsHandedBackUnwrapped() {
+        assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENDPOINT, "http://127.0.0.1:1"));
+        assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENABLED, "true"));
+        var client = new OkHttpClient();
+        try {
+            assertNotSame(client, OtelRuntime.traced(client), "export on wraps the client");
+            OtelRuntime.agentAttachedForTest(true);
+            assertSame(client, OtelRuntime.traced(client), "the agent instruments OkHttp itself");
+        } finally {
+            OtelRuntime.agentAttachedForTest(false);
+            assertNull(ConfigService.setWithSideEffects(OtelConfig.KEY_ENABLED, "false"));
         }
     }
 

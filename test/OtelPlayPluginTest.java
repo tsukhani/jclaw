@@ -3,7 +3,9 @@ import io.opentelemetry.semconv.HttpAttributes;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.mvc.Http;
 import play.test.FunctionalTest;
+import services.telemetry.OtelPlayPlugin;
 import services.telemetry.OtelRuntime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +41,37 @@ public class OtelPlayPluginTest extends FunctionalTest {
         assertEquals("GET", span.getAttributes().get(HttpAttributes.HTTP_REQUEST_METHOD));
         assertEquals(200L, span.getAttributes().get(HttpAttributes.HTTP_RESPONSE_STATUS_CODE));
         assertTrue(span.hasEnded());
+    }
+
+    @Test
+    public void withTheAgentAttachedTheRequestNamesTheAgentsSpanInsteadOfOpeningItsOwn() {
+        // The hook is driven directly: a FunctionalTest request runs on another thread, and the
+        // agent's context reaches the invocation thread only through the agent's own instrumentation.
+        var request = newRequest();
+        request.method = "GET";
+        request.path = "/api/status";
+        request.action = "ApiController.status";
+        OtelRuntime.agentAttachedForTest(true);
+        Http.Request.current.set(request);
+        try {
+            var spans = OtelRuntime.captureForTest(() -> {
+                var agentSpan = OtelRuntime.tracer().spanBuilder("GET").setSpanKind(SpanKind.SERVER).startSpan();
+                try (var _ = agentSpan.makeCurrent()) {
+                    var plugin = new OtelPlayPlugin();
+                    plugin.beforeActionInvocation(null);
+                    plugin.onActionInvocationFinally();
+                } finally {
+                    agentSpan.end();
+                }
+            });
+            var server = spans.stream().filter(s -> s.getKind() == SpanKind.SERVER).toList();
+            assertEquals(1, server.size(), () -> "one server span, the agent's, not two: " + spans);
+            assertEquals("GET /api/status", server.getFirst().getName(), "renamed from the route");
+            assertEquals("/api/status", server.getFirst().getAttributes().get(HttpAttributes.HTTP_ROUTE));
+        } finally {
+            Http.Request.current.remove();
+            OtelRuntime.agentAttachedForTest(false);
+        }
     }
 
     @Test
