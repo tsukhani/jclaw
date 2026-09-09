@@ -238,6 +238,26 @@
       matchUpdateTypes: ["minor"],
       automerge: false,
     },
+
+    // OpenTelemetry semconv: never automerge, and check the compile by hand.
+    // semconv v1.42.0 deprecated every gen_ai.* convention and moved it to
+    // open-telemetry/semantic-conventions-genai, which has published no release
+    // and has no artifact on Maven Central — so there is nothing to migrate to.
+    // Measured against 1.43.0-alpha: all 53 fields of GenAiIncubatingAttributes
+    // carry @Deprecated, and GenAiSpans plus LatencyTrace use 17 of the
+    // deprecated constants between them (verified 2026-09-09).
+    // They are deprecated, not removed. A later release may delete them, and
+    // that fails the build rather than warning. The catch-all above automerges
+    // every patch, which would land that removal unreviewed, so this rule turns
+    // automerge off for the whole group and a green compile is the gate. Drop it
+    // once a GenAI artifact exists and those two classes move onto it.
+    {
+      matchPackageNames: ["io.opentelemetry.semconv:**"],
+      automerge: false,
+      prBodyNotes: [
+        ":warning: `GenAiSpans` and `LatencyTrace` use 17 `gen_ai.*` constants that are deprecated upstream and may be **removed** in a release. Run `./gradlew compileJava` on this branch before merging — a removal breaks the build rather than warning.",
+      ],
+    },
   ],
 
   customManagers: [
