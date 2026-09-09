@@ -31,6 +31,19 @@ class RestartServiceTest extends UnitTest {
     }
 
     @Test
+    void maintenanceHandoffsCarryTheSubcommandAndItsArguments() {
+        // Restore and repair (JCLAW-1165) ride the same helper: the subcommand and its
+        // arguments sit where "restart" would, and dev mode still spares the Nuxt server.
+        var prod = RestartService.planFor("/opt/jclaw/jclaw.sh", false, false, "restore", List.of("jclaw-1.zip", "--yes"));
+        assertEquals(List.of("/opt/jclaw/jclaw.sh", "restore", "jclaw-1.zip", "--yes"), prod.command());
+        assertEquals("PROD", prod.mode());
+
+        var dev = RestartService.planFor("/src/jclaw/jclaw.sh", true, true, "repair", List.of("--yes"));
+        assertEquals(List.of("/src/jclaw/jclaw.sh", "--dev", "repair", "--yes", "--backend-only"), dev.command());
+        assertTrue(dev.backendOnly());
+    }
+
+    @Test
     void devRestartSparesTheNuxtDevServer() {
         var plan = RestartService.planFor("/src/jclaw/jclaw.sh", true, true);
 

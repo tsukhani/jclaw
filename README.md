@@ -317,6 +317,7 @@ Everything works the same as it would on a native host. The container *is* a Lin
 ./jclaw.sh --dev start    # dev mode (Play autoreload + Nuxt HMR)
 ./jclaw.sh test           # backend + frontend test suites
 ./jclaw.sh status         # check what's running
+./jclaw.sh backup         # online backup of the database into data/backups/
 ./jclaw.sh stop
 ```
 

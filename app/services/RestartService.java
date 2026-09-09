@@ -122,6 +122,15 @@ public final class RestartService {
      * both mode branches are assertable without a live Play in that mode.
      */
     public static Plan planFor(String scriptPath, boolean dev, boolean developerClone) {
+        return planFor(scriptPath, dev, developerClone, "restart", List.of());
+    }
+
+    /**
+     * The same composition for any subcommand that stops and starts the instance —
+     * {@code restore} and {@code repair} (JCLAW-1165) as well as {@code restart}.
+     */
+    public static Plan planFor(String scriptPath, boolean dev, boolean developerClone,
+                               String subcommand, List<String> extraArgs) {
         var args = new ArrayList<String>();
         args.add(scriptPath);
         if (dev) {
@@ -130,10 +139,12 @@ public final class RestartService {
             // page making this request, so the browser could never observe the
             // result. Prod has no second process — one JVM serves the SPA too.
             args.add("--dev");
-            args.add("restart");
+            args.add(subcommand);
+            args.addAll(extraArgs);
             args.add("--backend-only");
         } else {
-            args.add("restart");
+            args.add(subcommand);
+            args.addAll(extraArgs);
         }
 
         return new Plan(List.copyOf(args), dev ? "DEV" : "PROD", dev,
@@ -169,6 +180,26 @@ public final class RestartService {
         // out why the instance went away.
         EventLogger.warn(CATEGORY, "Restarting on operator request — handing off to jclaw.sh",
                 String.join(" ", plan.command()));
+        spawn(plan);
+        return plan;
+    }
+
+    /**
+     * Hand off a database subcommand that must run with this JVM down — the same guards,
+     * the same helper, the same log as a restart. The caller has already logged why.
+     */
+    public static Plan requestMaintenance(String subcommand, List<String> extraArgs) throws IOException {
+        var unavailable = unavailableReason();
+        if (unavailable != null) {
+            throw new IllegalStateException("Cannot run " + subcommand + ": " + unavailable);
+        }
+        var plan = planFor(script().getAbsolutePath(), Play.mode == Play.Mode.DEV, isDeveloperClone(),
+                subcommand, extraArgs);
+        if (spawnerForTest != null) {
+            spawnerForTest.accept(plan);
+            return plan;
+        }
+        EventLogger.warn(CATEGORY, "Handing off to jclaw.sh " + subcommand, String.join(" ", plan.command()));
         spawn(plan);
         return plan;
     }

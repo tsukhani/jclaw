@@ -24,6 +24,7 @@ import {
   ClipboardDocumentCheckIcon,
   ClockIcon,
   CircleStackIcon,
+  ServerStackIcon,
   CommandLineIcon,
   CpuChipIcon,
   DocumentMagnifyingGlassIcon,
@@ -45,6 +46,7 @@ import {
 
 import SettingsApprovalsPanel from './SettingsApprovalsPanel.vue'
 import SettingsChatPanel from './SettingsChatPanel.vue'
+import SettingsDatabasePanel from './SettingsDatabasePanel.vue'
 import SettingsTimezonePanel from './SettingsTimezonePanel.vue'
 import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
 import SettingsImageGenPanel from './SettingsImageGenPanel.vue'
@@ -103,9 +105,11 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
       { id: 'printers', title: 'Printers', icon: PrinterIcon, component: SettingsPrintersPanel },
       { id: 'telemetry', title: 'Telemetry', icon: ChartBarSquareIcon, component: SettingsTelemetryPanel },
-      // Last in the group deliberately: this is the section whose controls take
-      // the instance down, so it shouldn't sit next to the section the rail
-      // opens on by default.
+      // The last two deliberately: their controls take the instance down, so they
+      // shouldn't sit next to the section the rail opens on by default. Database
+      // sits beside Maintenance for that reason (restore and repair restart), while
+      // its health strip stays a glance away (JCLAW-1165).
+      { id: 'database', title: 'Database', icon: ServerStackIcon, component: SettingsDatabasePanel },
       { id: 'maintenance', title: 'Maintenance', icon: WrenchScrewdriverIcon, component: SettingsMaintenancePanel },
     ],
   },

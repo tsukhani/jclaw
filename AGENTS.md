@@ -23,6 +23,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - Rules with their reasons: the sections below. Settled verdicts before re-proposing work: `docs/spikes/`.
 - Config validation lives in `ConfigService.setWithSideEffects` (a non-null return is the 403); `POST /api/config` writes any non-reserved key, so "not in the UI" is no reason to skip it. Never seed a key another selection already implies.
 - The fixed-name agents `main`, `__loadtest__`, `__evaltest__` are provisioned by code — never seed or delete them in tests.
+- Database backup, restore and repair are one engine, `services.database.H2Maintenance`, behind two doors: the Settings panel in the JVM and `jclaw.sh backup|restore|repair|db-clean|db-status`, which runs its `main` on the H2 and Gson jars plus the compiled classes with the app stopped. Keep it on the JDK, H2 and Gson only — `H2MaintenanceTest.theEngineStandsAlone` pins that — and never let it read the clock: callers pass the stamp.
 
 ## Running and verifying
 

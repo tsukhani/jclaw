@@ -280,6 +280,17 @@ POST    /api/system/restart                     ApiSystemController.restart
 GET     /api/telemetry                          ApiTelemetryController.status
 POST    /api/telemetry/test                     ApiTelemetryController.test
 
+# Database backup, restore, repair and cleanup (JCLAW-1165). Backup and cleanup run in
+# this JVM; restore and repair need the database closed, so they hand off to jclaw.sh and
+# ack 202 like restart. The gate accepts an operator session or the CLI's loopback secret.
+GET     /api/system/database                    ApiDatabaseController.status
+POST    /api/system/database/backups            ApiDatabaseController.backup
+GET     /api/system/database/backups/{id}/download ApiDatabaseController.download
+DELETE  /api/system/database/backups/{id}       ApiDatabaseController.delete
+POST    /api/system/database/restore            ApiDatabaseController.restore
+POST    /api/system/database/repair             ApiDatabaseController.repair
+POST    /api/system/database/repair/clean       ApiDatabaseController.clean
+
 # Upgrade. Same handoff shape as restart, but the helper downloads and unpacks
 # the release before it stops anything — so the 202 is followed by minutes of
 # normal service, tracked through the status route rather than a down-then-up poll.

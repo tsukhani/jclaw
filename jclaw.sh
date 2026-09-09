@@ -104,7 +104,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|diagnostics|test|e2e|dist|bundle|backup|restore|repair|db-clean|db-status|completion|shim|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -164,6 +164,16 @@ Commands:
             resolved deps, and a \`./play\` launcher, so the unzipped tree runs
             with only a Java 25 JRE (no Gradle/Play install). Same artifact the
             Dockerfile ships inside the container image.
+  backup    Back up the database (online through the running instance, or from
+            the closed file), into data/backups/. --list shows what is there.
+  restore   Replace the database with a backup zip or a listed backup id. Stops
+            and restarts a running instance; keeps the current file as
+            data/jclaw.mv.db.pre-restore until the next backup.
+  repair    Rebuild a damaged database from what H2's recovery tool can still
+            read, verify it, and keep the damaged file aside. Stops and
+            restarts a running instance.
+  db-clean  Delete the files a successful repair left behind.
+  db-status Database size, free space, health, last backup and repair remnants.
   completion Print a shell completion script (completion <bash|zsh>) so
             \`${INVOKE} <TAB>\` completes subcommands. The installer wires this up;
             run it by hand for dev clones or after an upgrade.
@@ -273,7 +283,7 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|upgrade|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|db-clean|db-status|completion|shim|uninstall|help>
 
 Commands:
   https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
@@ -294,6 +304,16 @@ Commands:
             Your data, workspace, credentials and installed apps are kept, the
             database is backed up first, and a release that fails to come up is
             rolled back automatically. Use --check to look without installing.
+  backup    Back up the database (online through the running instance, or from
+            the closed file), into data/backups/. --list shows what is there.
+  restore   Replace the database with a backup zip or a listed backup id. Stops
+            and restarts a running instance; keeps the current file as
+            data/jclaw.mv.db.pre-restore until the next backup.
+  repair    Rebuild a damaged database from what H2's recovery tool can still
+            read, verify it, and keep the damaged file aside. Stops and
+            restarts a running instance.
+  db-clean  Delete the files a successful repair left behind.
+  db-status Database size, free space, health, last backup and repair remnants.
   completion Print a shell completion script (completion <bash|zsh>) so
             \`${INVOKE} <TAB>\` completes subcommands. The installer wires this up.
   shim      Rewrite the \`jclaw\` command so it points at this install. Written
@@ -342,7 +362,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|uninstall)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|db-clean|db-status|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
@@ -368,6 +388,7 @@ usage_for() {
         status)   usage_status   ;;
         logs)     usage_logs     ;;
         upgrade)  usage_upgrade  ;;
+        backup|restore|repair|db-clean|db-status) usage_database ;;
         loadtest) usage_loadtest ;;
         scrapetest) usage_scrapetest ;;
         evals)    usage_evals    ;;
@@ -802,6 +823,53 @@ Examples:
   ${INVOKE} upgrade --check
   ${INVOKE} upgrade
   ${INVOKE} upgrade --version v0.17.48 --yes
+EOF
+}
+
+usage_database() {
+    cat <<EOF
+Usage: ${INVOKE} backup [--out <dir>] [--list]
+       ${INVOKE} restore <zip | backup id> [--yes]
+       ${INVOKE} repair [--yes] [--clean]
+       ${INVOKE} db-clean [--yes]
+       ${INVOKE} db-status
+
+backup     Write an H2 online backup (a zip of data/jclaw.mv.db) to data/backups/.
+           With the instance running it goes through the API and the running
+           JVM applies the retention count (db.backup.retention, default 7);
+           stopped, the closed file is zipped directly. --out writes the zip
+           elsewhere; --list shows the backups with date and size.
+restore    Replace the database with a backup. The file is validated first —
+           anything that is not an H2 backup is refused and nothing changes.
+           A running instance is stopped and started again; the current file
+           is kept as data/jclaw.mv.db.pre-restore until the next backup.
+repair     The recovery procedure, run for you: H2's Recover tool reads the
+           damaged file into a script, the file and its trace are moved aside,
+           a fresh database is rebuilt from the script (ENUM columns cast back
+           from the ordinals Recover writes), every table's count is checked
+           against the damaged file and the script, the result is compacted,
+           and data/repair-<stamp>.json records what was created. Rows on
+           pages that cannot be read are lost — back up first if you can.
+           Ends by offering to delete the intermediates; --clean accepts.
+db-clean   Delete exactly what the last successful repair's manifest lists,
+           after checking each file's checksum. Refused while the repair was
+           incomplete or the database is not healthy: the damaged file is the
+           only route to another attempt.
+db-status  Size of the data file and its remnants, free space, the health
+           verdict with its reason, the last backup, and any repair remnants.
+
+Options:
+  --yes, -y   Skip the confirmation prompt (for scripted use).
+  --out <dir> backup: write the zip here instead of data/backups/.
+  --list      backup: list the backups and exit.
+  --clean     repair: delete the intermediates after a successful repair
+              without asking.
+
+Examples:
+  ${INVOKE} backup
+  ${INVOKE} backup --list
+  ${INVOKE} restore jclaw-20260909T221800Z.zip
+  ${INVOKE} repair --yes --clean
 EOF
 }
 
@@ -1266,6 +1334,12 @@ UPGRADE_CHECK=false   # `upgrade --check`: report only, change nothing
 UPGRADE_FROM=""
 UPGRADE_TO=""
 UPGRADE_STARTED=""
+DB_BACKUP_OUT=""       # backup --out <dir>
+DB_LIST=""             # backup --list
+DB_CLEAN_AFTER=""      # repair --clean: accept the closing cleanup offer
+DB_RESTORE_TARGET=""   # restore <zip | backup id>
+DB_OP_STARTED=""       # ISO stamp written into logs/database-status.json
+DB_OP_DONE=""          # set once a restore/repair wrote its final status
 # The post-swap critical section: between replacing the tree and confirming the
 # new version answers, a failure leaves an install with new code and no state.
 # upgrade_abort / upgrade_cleanup read these to put it back.
@@ -1354,7 +1428,17 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --clean)
+            # loadtest: delete leftover data; repair: accept the closing cleanup offer.
             LT_CLEAN=true
+            DB_CLEAN_AFTER=true
+            shift
+            ;;
+        --out)
+            DB_BACKUP_OUT="$2"
+            shift 2
+            ;;
+        --list)
+            DB_LIST=true
             shift
             ;;
         --compress)
@@ -1381,7 +1465,7 @@ while [[ $# -gt 0 ]]; do
             HTTPS_INSTALL_CA=true
             shift
             ;;
-        https|no-https|secret|reset|start|stop|restart|status|logs|upgrade|shim|uninstall)
+        https|no-https|secret|reset|start|stop|restart|status|logs|upgrade|shim|uninstall|backup|restore|repair|db-clean|db-status)
             COMMAND="$1"
             shift
             ;;
@@ -1507,6 +1591,12 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         *)
+            # `restore <zip | backup id>` is the one positional argument any command takes.
+            if [[ "$COMMAND" == restore && -z "$DB_RESTORE_TARGET" && "$1" != -* ]]; then
+                DB_RESTORE_TARGET="$1"
+                shift
+                continue
+            fi
             echo "Unknown argument: $1"
             usage
             exit 1
@@ -4183,6 +4273,11 @@ do_completion() {
         no-https "Disable HTTPS"
         secret   "Generate or rotate the application secret"
         reset    "Clear the admin password hash"
+        backup   "Back up the database"
+        restore  "Replace the database with a backup"
+        repair   "Rebuild a damaged database"
+        db-clean "Delete the files a repair left behind"
+        db-status "Database size, health and backups"
     )
     if is_developer_clone; then
         pairs+=(
@@ -5118,6 +5213,340 @@ extract_zip() {
     fi
 }
 
+# ─── Database backup, restore, repair (JCLAW-1165) ───
+#
+# One engine, two doors. The work is services.database.H2Maintenance, compiled with
+# the app; the Settings panel calls it in the JVM, and these subcommands run its
+# main() on the H2 and Gson jars from the framework lib plus the compiled classes —
+# the whole classpath it needs — so restore and repair can run with the app stopped.
+# Backup and status prefer the API when the instance is up, so the CLI and the
+# button take exactly the same code path and the running JVM applies retention.
+
+DB_STATUS_FILE="$SCRIPT_DIR/logs/database-status.json"
+DB_LOG="$SCRIPT_DIR/logs/database.log"
+
+db_engine_classpath() {
+    local h2 gson classes sep=':'
+    [[ "$IS_WINDOWS" == 1 ]] && sep=';'
+    h2=$(locate_h2_jar) || {
+        echo "Error: Could not locate the H2 jar (looked in framework/lib/ and the play install)." >&2
+        return 1
+    }
+    gson=$(ls "$(dirname "$h2")"/gson-*.jar 2>/dev/null | head -1)
+    if [[ -z "$gson" ]]; then
+        echo "Error: Could not locate the Gson jar beside $h2." >&2
+        return 1
+    fi
+    # A dist has precompiled/ only; a source checkout may have both, and either can be
+    # the stale one, so take the tree that actually carries the engine.
+    classes=""
+    local candidate
+    for candidate in "$SCRIPT_DIR/precompiled/java" "$SCRIPT_DIR/build/classes/java/main"; do
+        if [[ -f "$candidate/services/database/H2Maintenance.class" ]]; then
+            classes="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$classes" ]]; then
+        echo "Error: no compiled classes carry the database tools (looked in precompiled/java and build/classes/java/main)." >&2
+        echo "       Run '${INVOKE} restart' once so they are compiled, or './gradlew compileJava' on a source checkout." >&2
+        return 1
+    fi
+    printf '%s\n' "$(native_path "$h2")$sep$(native_path "$gson")$sep$(native_path "$classes")"
+}
+
+# db_engine <command> [args…] — the engine's main() on its own classpath.
+db_engine() {
+    local cp
+    cp=$(db_engine_classpath) || return 1
+    check_java
+    (cd "$SCRIPT_DIR" && java -cp "$cp" services.database.H2Maintenance "$@")
+}
+
+db_backend_running() {
+    [[ -f "$SCRIPT_DIR/server.pid" ]] && kill -0 "$(cat "$SCRIPT_DIR/server.pid")" 2>/dev/null
+}
+
+# The application secret, for the loopback gate the API shares with loadtest.
+db_api_secret() {
+    load_env_file
+    local var_name
+    var_name=$(secret_var_name)
+    printf '%s' "${!var_name:-}"
+}
+
+# db_api <method> <path> — body then a final line with the HTTP status.
+db_api() {
+    local secret
+    secret=$(db_api_secret)
+    if [[ -z "$secret" ]]; then
+        echo "Error: the application secret is not set (certs/.env); it is needed to call the running instance." >&2
+        return 1
+    fi
+    curl -s -w '\n%{http_code}' -H "X-Loadtest-Auth: $secret" -X "$1" "http://localhost:$BACKEND_PORT$2"
+}
+
+db_human() {
+    awk -v b="${1:-0}" 'BEGIN { if (b < 1024) printf "%d B", b; else if (b < 1048576) printf "%.1f KB", b/1024; else if (b < 1073741824) printf "%.1f MB", b/1048576; else printf "%.2f GB", b/1073741824 }'
+}
+
+db_mtime() {
+    stat -c '%y' "$1" 2>/dev/null | cut -d. -f1 || stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$1"
+}
+
+# db_status_json <op> <phase> <message> [backup] — what the panel reads back after the restart.
+db_status_json() {
+    local op="$1" phase="$2" message="$3" backup="${4:-}"
+    mkdir -p "$SCRIPT_DIR/logs"
+    printf '{"op":"%s","phase":"%s","message":"%s","startedAt":"%s","backup":"%s"}\n' \
+        "$op" "$phase" "${message//\"/\'}" "$DB_OP_STARTED" "$backup" \
+        >"$DB_STATUS_FILE.tmp" 2>/dev/null || return 0
+    mv -f "$DB_STATUS_FILE.tmp" "$DB_STATUS_FILE" 2>/dev/null || true
+}
+
+# A restore or repair that dies mid-way must not leave "restoring…" as the last word.
+db_op_trap() {
+    if [[ -z "$DB_OP_DONE" ]]; then
+        db_status_json "$1" failed "Interrupted — see logs/database.log and logs/system.out" "${2:-}"
+    fi
+}
+
+db_confirm() {
+    [[ -n "$ASSUME_YES" ]] && return 0
+    if { : >/dev/tty; } 2>/dev/null; then
+        echo ""
+        echo "$1"
+        printf 'Proceed? [y/N] ' >/dev/tty
+        local ans=''
+        read -r ans </dev/tty 2>/dev/null || ans=''
+        case "$ans" in
+            [Yy]|[Yy][Ee][Ss]) return 0 ;;
+            *) echo "Aborted — nothing was changed."; return 1 ;;
+        esac
+    fi
+    echo "Error: no terminal to confirm on; pass --yes to proceed." >&2
+    return 1
+}
+
+db_stop_instance() {
+    if [[ "$DEV_MODE" == true ]]; then do_stop_dev; else do_stop_prod; fi
+}
+
+db_start_instance() {
+    mkdir -p "$SCRIPT_DIR/logs"
+    if [[ "$DEV_MODE" == true ]]; then do_start_dev; else do_start_prod; fi
+}
+
+do_db_backup() {
+    cd "$SCRIPT_DIR"
+    local backups_dir="${DB_BACKUP_OUT:-$SCRIPT_DIR/data/backups}"
+    if [[ -n "$DB_LIST" ]]; then
+        db_engine list "$backups_dir"
+        return
+    fi
+    mkdir -p "$backups_dir"
+    if db_backend_running; then
+        echo "==> Backing up through the running instance..."
+        local out status body
+        out=$(db_api POST /api/system/database/backups) || exit 1
+        status="${out##*$'\n'}"
+        body="${out%$'\n'*}"
+        if [[ "$status" != "201" ]]; then
+            echo "Error: backup failed (HTTP $status): $body"
+            exit 1
+        fi
+        local id bytes dir
+        id=$(printf '%s' "$body" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+        bytes=$(printf '%s' "$body" | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p')
+        out=$(db_api GET /api/system/database) || exit 1
+        dir=$(printf '%s' "${out%$'\n'*}" | sed -n 's/.*"backupsDir":"\([^"]*\)".*/\1/p')
+        echo "==> $dir/$id ($(db_human "$bytes"))"
+        if [[ -n "$DB_BACKUP_OUT" && "$DB_BACKUP_OUT" != "$dir" ]]; then
+            cp "$dir/$id" "$DB_BACKUP_OUT/$id"
+            echo "==> Copied to $DB_BACKUP_OUT/$id"
+        fi
+    else
+        echo "==> Backing up the closed database file..."
+        db_engine backup "$SCRIPT_DIR/data" "$backups_dir/jclaw-$(date -u +%Y%m%dT%H%M%SZ).zip"
+    fi
+}
+
+do_db_restore() {
+    cd "$SCRIPT_DIR"
+    if [[ -z "$DB_RESTORE_TARGET" ]]; then
+        echo "Error: restore needs a backup zip path or a backup id (see '${INVOKE} backup --list')."
+        exit 1
+    fi
+    local zip="$DB_RESTORE_TARGET"
+    [[ -f "$zip" ]] || zip="$SCRIPT_DIR/data/backups/$DB_RESTORE_TARGET"
+    if [[ ! -f "$zip" ]]; then
+        echo "Error: no such backup: $DB_RESTORE_TARGET"
+        exit 1
+    fi
+    echo "==> Validating $zip..."
+    db_engine validate "$zip" || exit 1
+    local was_running=""
+    db_backend_running && was_running=1
+    local note=""
+    [[ -n "$was_running" ]] && note=" JClaw will be stopped and started again."
+    db_confirm "This replaces the database with the backup from $(db_mtime "$zip").
+Everything written since then is lost. The current file is kept as
+data/jclaw.mv.db.pre-restore until the next successful backup.${note}" || exit 0
+
+    local backup_name
+    backup_name=$(basename "$zip")
+    DB_OP_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    trap 'db_op_trap restore "$backup_name"' EXIT
+    if [[ -n "$was_running" ]]; then
+        db_status_json restore stopping "Stopping JClaw…" "$backup_name"
+        db_stop_instance
+    fi
+    db_status_json restore restoring "Restoring $backup_name…" "$backup_name"
+    echo "==> Restoring..."
+    if ! db_engine restore "$SCRIPT_DIR/data" "$zip" 2>&1 | tee -a "$DB_LOG"; then
+        db_status_json restore failed "Restore failed — see logs/database.log" "$backup_name"
+        DB_OP_DONE=1
+        exit 1
+    fi
+    if [[ -n "$was_running" ]]; then
+        db_status_json restore starting "Starting JClaw…" "$backup_name"
+        db_start_instance
+    fi
+    db_status_json restore done "Restored from $backup_name" "$backup_name"
+    DB_OP_DONE=1
+    echo "==> Done. The database is the backup from $(db_mtime "$zip")."
+}
+
+do_db_repair() {
+    cd "$SCRIPT_DIR"
+    if [[ ! -f "$SCRIPT_DIR/data/jclaw.mv.db" ]]; then
+        echo "Error: no database at data/jclaw.mv.db"
+        exit 1
+    fi
+    local was_running=""
+    db_backend_running && was_running=1
+    local note=""
+    [[ -n "$was_running" ]] && note=" JClaw will be stopped and started again."
+    db_confirm "This rebuilds data/jclaw.mv.db from whatever H2's recovery tool can still read.
+Rows on pages it cannot read are lost. The damaged file and everything the
+repair creates are kept in data/ until you clean them up.${note}" || exit 0
+
+    local stamp
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    DB_OP_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    trap 'db_op_trap repair' EXIT
+    if [[ -n "$was_running" ]]; then
+        db_status_json repair stopping "Stopping JClaw…"
+        db_stop_instance
+    fi
+    db_status_json repair repairing "Recovering and rebuilding the database…"
+    echo "==> Repairing (this reads the whole file twice; a few minutes on a large database)..."
+    local rc=0
+    db_engine repair "$SCRIPT_DIR/data" "$stamp" 2>&1 | tee -a "$DB_LOG" || rc=$?
+    if [[ $rc -ge 2 ]]; then
+        db_status_json repair failed "Repair could not run — see logs/database.log"
+        DB_OP_DONE=1
+        exit 2
+    fi
+    if [[ -n "$was_running" ]]; then
+        db_status_json repair starting "Starting JClaw…"
+        db_start_instance
+    fi
+    if [[ $rc -eq 0 ]]; then
+        db_status_json repair done "Repair complete"
+    else
+        db_status_json repair done "Repair incomplete — the damaged file is kept for another attempt"
+    fi
+    DB_OP_DONE=1
+    echo ""
+    if [[ $rc -ne 0 ]]; then
+        echo "The repair did not recover everything. The damaged file is kept aside for"
+        echo "another attempt, and 'db-clean' stays refused until a repair succeeds."
+        return
+    fi
+    if [[ -n "$DB_CLEAN_AFTER" ]]; then
+        ASSUME_YES=true do_db_clean
+    elif [[ -z "$ASSUME_YES" ]]; then
+        echo "The files the repair created are listed above and kept in data/."
+        do_db_clean
+    else
+        echo "The files the repair created are kept in data/. Once the rebuilt database"
+        echo "has proven healthy, remove them with: ${INVOKE} db-clean"
+    fi
+}
+
+do_db_clean() {
+    cd "$SCRIPT_DIR"
+    if db_backend_running; then
+        # The running instance applies the full gate: repair succeeded, verdict Healthy,
+        # nothing corrupt logged since, every restored table readable.
+        local out status body
+        out=$(db_api POST /api/system/database/repair/clean) || exit 1
+        status="${out##*$'\n'}"
+        body="${out%$'\n'*}"
+        if [[ "$status" != "200" ]]; then
+            echo "Refused: $(printf '%s' "$body" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')"
+            exit 1
+        fi
+        local reclaimed
+        reclaimed=$(printf '%s' "$body" | sed -n 's/.*"reclaimedBytes":\([0-9]*\).*/\1/p')
+        echo "==> Removed the repair files; $(db_human "$reclaimed") reclaimed."
+        return
+    fi
+    db_engine clean "$SCRIPT_DIR/data" --dry-run || exit 1
+    db_confirm "Delete these files? The damaged file goes with them." || exit 0
+    db_engine clean "$SCRIPT_DIR/data"
+}
+
+do_db_status() {
+    cd "$SCRIPT_DIR"
+    if db_backend_running; then
+        local out status body
+        out=$(db_api GET /api/system/database) || exit 1
+        status="${out##*$'\n'}"
+        body="${out%$'\n'*}"
+        if [[ "$status" != "200" ]]; then
+            echo "Error: HTTP $status: $body"
+            exit 1
+        fi
+        if command -v python3 >/dev/null 2>&1; then
+            printf '%s' "$body" | python3 -c '
+import json, sys
+s = json.load(sys.stdin)
+def human(b):
+    b = b or 0
+    for unit in ("B", "KB", "MB"):
+        if b < 1024: return f"{b:.0f} {unit}" if unit == "B" else f"{b:.1f} {unit}"
+        b /= 1024
+    return f"{b:.2f} GB"
+print(f"Verdict:      {s[\"verdict\"]} — {s[\"reason\"]}")
+print(f"Data file:    {human(s[\"dataFileBytes\"])}  (trace {human(s[\"traceFileBytes\"])}, H2 {s[\"h2Version\"]})")
+if s.get("preRestoreBytes"): print(f"Pre-restore:  {human(s[\"preRestoreBytes\"])} (kept until the next backup)")
+print(f"Free space:   {human(s[\"freeBytes\"])}")
+age = s.get("lastBackupAgeSeconds")
+print("Last backup:  " + (f"{s[\"lastBackupAt\"]} ({age // 3600}h {age % 3600 // 60}m ago)" if age is not None else "none"))
+print(f"Backups:      {len(s[\"backups\"])} in {s[\"backupsDir\"]} (retention {s[\"retention\"]}, schedule {s.get(\"schedule\") or \"none\"})")
+r = s.get("repair")
+if r:
+    print(f"Repair {r[\"stamp\"]}: {r[\"summary\"]}; remnants {human(r.get(\"intermediateBytes\") or sum(f[\"bytes\"] for f in r[\"files\"]))} in {len(r[\"files\"])} files")
+    print("Cleanup:      " + ("available (db-clean)" if s["cleanupAvailable"] else "not available — " + (s.get("cleanupUnavailableReason") or "")))
+else:
+    print("Repair remnants: none")
+op = s.get("lastOperation")
+if op and op.get("phase"): print(f"Last {op[\"op\"]}: {op[\"phase\"]} — {op.get(\"message\") or \"\"}")
+'
+        else
+            printf '%s\n' "$body"
+        fi
+        return
+    fi
+    echo "Backend: stopped (health needs a running instance)"
+    db_engine status "$SCRIPT_DIR/data"
+    echo "Free space: $(df -k "$SCRIPT_DIR/data" 2>/dev/null | awk 'NR==2 { printf "%.1f GB", $4/1048576 }')"
+    db_engine list "$SCRIPT_DIR/data/backups"
+}
+
+
 # ─── Execute ───
 
 case "$COMMAND" in
@@ -5180,6 +5609,21 @@ case "$COMMAND" in
         ;;
     upgrade)
         do_upgrade
+        ;;
+    backup)
+        do_db_backup
+        ;;
+    restore)
+        do_db_restore
+        ;;
+    repair)
+        do_db_repair
+        ;;
+    db-clean)
+        do_db_clean
+        ;;
+    db-status)
+        do_db_status
         ;;
     completion)
         do_completion

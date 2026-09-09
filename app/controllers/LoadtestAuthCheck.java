@@ -4,7 +4,6 @@ import play.Play;
 import play.mvc.Before;
 import play.mvc.Controller;
 import play.mvc.Http;
-import utils.ApiResponses;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -55,34 +54,39 @@ public class LoadtestAuthCheck extends Controller {
 
     @Before
     static void checkLoadtestAuth() {
-        var req = Http.Request.current();
-
-        if (!LOOPBACK_ADDRESSES.contains(req.remoteAddress)) {
+        if (!permits(Http.Request.current())) {
             denied();
         }
+    }
 
+    /**
+     * The decision without the response: loopback origin and a header equal to
+     * {@code application.secret}, compared in constant time. {@code ApiDatabaseController}
+     * accepts this or an operator session, so the CLI and the button share one code path.
+     */
+    static boolean permits(Http.Request req) {
+        // Set.of refuses a null lookup outright, and a request built in a FunctionalTest
+        // carries no address; a real request always does.
+        if (req.remoteAddress == null || !LOOPBACK_ADDRESSES.contains(req.remoteAddress)) {
+            return false;
+        }
         var headerVal = req.headers.containsKey(AUTH_HEADER)
                 ? req.headers.get(AUTH_HEADER).value()
                 : null;
         if (headerVal == null) {
-            denied();
-            throw ApiResponses.unreachable();
+            return false;
         }
-
         var expected = Play.configuration.getProperty("application.secret", "");
         if (expected.isEmpty()) {
             // Should never happen in practice — require_application_secret
             // in jclaw.sh blocks startup when APPLICATION_SECRET is unset.
             // Fail closed if it ever does, rather than treat empty == empty
             // as a successful match.
-            denied();
+            return false;
         }
-
         var presented = headerVal.getBytes(StandardCharsets.UTF_8);
         var canonical = expected.getBytes(StandardCharsets.UTF_8);
-        if (!MessageDigest.isEqual(presented, canonical)) {
-            denied();
-        }
+        return MessageDigest.isEqual(presented, canonical);
     }
 
     private static void denied() {
