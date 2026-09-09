@@ -4,7 +4,7 @@ import { CheckIcon, ChevronUpIcon, InformationCircleIcon, PencilIcon, XMarkIcon 
 const { configValue, saveField } = useSettingsConfig()
 
 // Chat config
-const chatMaxToolRounds = computed(() => configValue('chat.maxToolRounds', '10'))
+const chatMaxToolRounds = computed(() => configValue('chat.maxToolRounds', '100'))
 const chatMaxContextMessages = computed(() => configValue('chat.maxContextMessages', '50'))
 
 // Advanced context-management knobs — collapsed by default in the Chat panel.
@@ -56,7 +56,7 @@ async function saveChatField(configKey: string, value: string) {
               v-model="chatFieldEdit"
               type="number"
               min="1"
-              max="50"
+              max="500"
               aria-label="Max tool rounds"
               class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             >
