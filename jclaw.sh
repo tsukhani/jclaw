@@ -2804,33 +2804,50 @@ do_start_prod() {
         # public/spa's mtime is the threshold: the `cp -r` below stamps it at
         # build time (cp doesn't preserve mtimes without -p).
         #
-        # The prunes are load-bearing, not tidiness. `pnpm install` directly
-        # above touches node_modules on every start, so without pruning it the
-        # gate reports stale 100% of the time and silently degrades to the old
-        # unconditional behaviour while appearing to work. .nuxt/.output/.vite
-        # are outputs of the very build being gated, so they'd do the same.
+        # The inputs are the TRACKED files under the two build roots, asked of
+        # git rather than walked with find (JCLAW-1179). Everything the build
+        # itself writes is gitignored — node_modules, .nuxt, .output, .vite,
+        # and the four test-output directories — so enumerating tracked files
+        # excludes all of it by construction. The predecessor pruned a list of
+        # names instead, and the list was wrong: `pnpm test` and the e2e run
+        # left test-report/, coverage/, test-results/ and playwright-report/
+        # newer than the bundle, so running tests forced a rebuild and, with
+        # it, the hard reload this gate exists to prevent.
         #
-        # mtime can't see a change that leaves no newer file (a build-time env
-        # var, say), and a missed input means shipping a frontend change that
-        # never appears — strictly worse than a wasted rebuild. Hence the
-        # escape hatch.
-        #
-        # Both build roots are probed, not just frontend/ (JCLAW-1178).
+        # Both roots are probed, not just frontend/ (JCLAW-1178).
         # components/guide/sections.ts imports every docs/user-guide/*.md with
         # Vite's ?raw, so the guide text is compiled into the bundle from
         # outside frontend/ — probing only frontend/ skipped the rebuild after
         # a guide edit and served the previous text with no warning.
+        #
+        # mtime can't see a change that leaves no newer file (a build-time env
+        # var, say), and a missed input means shipping a frontend change that
+        # never appears — strictly worse than a wasted rebuild. Same reasoning
+        # makes an unreadable file list rebuild rather than skip. Hence both
+        # that fallback and the escape hatch.
         spa_rebuild_reason=""
+        spa_stale_file=""
         if [[ -n "${JCLAW_FORCE_SPA_BUILD:-}" ]]; then
             spa_rebuild_reason="forced by JCLAW_FORCE_SPA_BUILD"
         elif [[ ! -d "$SCRIPT_DIR/public/spa" ]]; then
             spa_rebuild_reason="public/spa is missing"
         else
-            spa_stale_file="$(find "$SCRIPT_DIR/frontend" "$SCRIPT_DIR/docs/user-guide" \
-                \( -name node_modules -o -name .nuxt -o -name .output -o -name .vite \) -prune \
-                -o -type f -newer "$SCRIPT_DIR/public/spa" -print -quit 2>/dev/null)"
+            # `-nt` is a bash builtin, so this stays one process however many
+            # files git lists, and it is false for a tracked-but-deleted path
+            # rather than an error.
+            spa_tracked=0
+            while IFS= read -r -d '' spa_src; do
+                spa_tracked=$((spa_tracked + 1))
+                if [[ "$SCRIPT_DIR/$spa_src" -nt "$SCRIPT_DIR/public/spa" ]]; then
+                    spa_stale_file="$spa_src"
+                    break
+                fi
+            done < <(/usr/bin/git -C "$SCRIPT_DIR" ls-files -z -- frontend docs/user-guide 2>/dev/null)
+
             if [[ -n "$spa_stale_file" ]]; then
-                spa_rebuild_reason="${spa_stale_file#"$SCRIPT_DIR"/} is newer than public/spa"
+                spa_rebuild_reason="$spa_stale_file is newer than public/spa"
+            elif [[ "$spa_tracked" -eq 0 ]]; then
+                spa_rebuild_reason="could not list tracked frontend sources"
             fi
         fi
 

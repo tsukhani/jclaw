@@ -19,15 +19,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The SPA staleness gate in {@code jclaw.sh} decides whether a restart rebuilds the bundle, and
- * it decides from file mtimes under a fixed set of roots. A build input outside those roots is
+ * it decides from the mtimes of the tracked files under a fixed set of roots. A build input outside those roots is
  * invisible to it, so an edit ships nothing while the gate reports "up to date": the guide's
  * markdown was exactly that until JCLAW-1178. This pins that every import escaping
  * {@code frontend/} resolves under a root the gate probes.
  */
 class SpaBuildInputsConformanceTest extends UnitTest {
 
-    /** The roots on the gate's own `find` line, as `$SCRIPT_DIR`-relative paths. */
-    private static final Pattern GATE_ROOT = Pattern.compile("\\$SCRIPT_DIR/([A-Za-z0-9_./-]+)");
+    /** The pathspecs the gate hands `git ls-files`, i.e. the roots it probes for staleness. */
+    private static final Pattern GATE_ROOTS_LINE = Pattern.compile("ls-files -z -- ([^\n]*)");
+    private static final Pattern PATHSPEC = Pattern.compile("[A-Za-z0-9_./-]+");
 
     /** A static import whose specifier climbs out of its own directory. */
     private static final Pattern ESCAPING_IMPORT = Pattern.compile("from\\s+'((?:\\.\\./)+[^']+)'");
@@ -46,15 +47,18 @@ class SpaBuildInputsConformanceTest extends UnitTest {
     /** The directories the gate probes for staleness, read from the script itself. */
     private static List<Path> gateRoots() throws IOException {
         var script = Files.readString(repo().resolve("jclaw.sh"));
-        int start = script.indexOf("spa_stale_file=\"$(find ");
-        assertTrue(start >= 0, "the SPA staleness gate no longer assigns spa_stale_file — update this test with it");
-        var findLine = script.substring(start, script.indexOf('\n', start));
+        var line = GATE_ROOTS_LINE.matcher(script);
+        assertTrue(line.find(), "the SPA staleness gate no longer lists its roots with git ls-files — update this test with it");
         var roots = new ArrayList<Path>();
-        var m = GATE_ROOT.matcher(findLine);
+        var m = PATHSPEC.matcher(line.group(1));
         while (m.find()) {
-            roots.add(repo().resolve(m.group(1)).normalize());
+            // The pathspecs run until the redirect that closes the command.
+            if (m.group().startsWith("2")) {
+                break;
+            }
+            roots.add(repo().resolve(m.group()).normalize());
         }
-        assertFalse(roots.isEmpty(), () -> "no roots parsed from the gate line: " + findLine);
+        assertFalse(roots.isEmpty(), () -> "no roots parsed from the gate line: " + line.group());
         for (var root : roots) {
             assertTrue(Files.isDirectory(root), () -> "the gate probes a directory that does not exist: " + root);
         }
