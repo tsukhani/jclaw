@@ -103,8 +103,8 @@ serve unauthenticated.
 
 ```bash
 uv run serve.py --probe                    # one-shot, no server, no token
-SIDECAR_TOKEN=dev uv run serve.py --port 9531 --model chrome
-curl -s -H 'X-Sidecar-Token: dev' localhost:9531/health
+SIDECAR_TOKEN=dev uv run serve.py --port 9533 --model chrome
+curl -s -H 'X-Sidecar-Token: dev' localhost:9533/health
 ```
 
 The JVM launches it through `LocalSidecarDaemon` and never needs these directly.

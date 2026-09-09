@@ -30,7 +30,7 @@ public final class FetchSidecarManager {
     public static final String CFG_ENABLED = "scrape.impersonate.enabled";
 
     private static final LocalSidecarDaemon DAEMON = new LocalSidecarDaemon(new LocalSidecarDaemon.Config(
-            "sidecar/fetch", "data/fetch-sidecar", "scrape.impersonate", 9531, 180,
+            "sidecar/fetch", "data/fetch-sidecar", "scrape.impersonate", 9533, 180,
             "scrape", "fetch-sidecar", "fetch sidecar",
             "the first launch installs curl_cffi (a few MB); it is not a model download",
             ScrapeSidecarException::new));
