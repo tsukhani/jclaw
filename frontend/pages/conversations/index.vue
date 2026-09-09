@@ -734,6 +734,7 @@ const pinnedColumns = columns.filter(c => c.id !== 'select')
           <span class="text-xs text-fg-muted">{{ pinnedConversations.length }} of {{ MAX_PINNED }}</span>
         </div>
         <DataTable
+          data-testid="pinned-conversations"
           :columns="pinnedColumns"
           :data="pinnedConversations"
           @row-click="(c: Conversation) => navigateTo(`/chat?conversation=${c.id}`)"
@@ -751,6 +752,7 @@ const pinnedColumns = columns.filter(c => c.id !== 'select')
           </h2>
         </div>
         <DataTable
+          data-testid="conversation-list"
           :columns="columns"
           :data="conversations"
           :loading="loading"
