@@ -93,7 +93,8 @@ ENV PATH=$PNPM_HOME/bin:$PATH
 # Play 1.13.x — tsukhani/play1 fork. Exact version is read from
 # .play-version at the jclaw repo root (single source of truth shared
 # with the production Dockerfile and build.gradle.kts).
-# settings.gradle.kts in jclaw does `includeBuild("/opt/play1")`, so we
+# settings.gradle.kts in jclaw resolves the play1 plugin from /opt/play1's
+# flat gradle-plugin-repo (not includeBuild), so we
 # unpack the release zip and symlink `/opt/play-<version>` → `/opt/play1`
 # to match.
 #

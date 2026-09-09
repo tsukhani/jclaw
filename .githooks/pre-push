@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pre-push hook: run the consolidated test suite before a push leaves the
 # laptop. Skips the run when the current HEAD has already been tested (so
-# the two-remote deploy flow — origin + github — only pays the ~30 s cost
+# the two-remote deploy flow — origin + github — only pays the 5–8 min cost
 # once). Cache lives inside $GIT_DIR so it stays local to this clone and
 # is automatically scoped per worktree.
 #

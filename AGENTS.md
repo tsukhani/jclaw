@@ -2,6 +2,69 @@
 
 This file is the canonical, harness-agnostic guide for AI coding agents working in this repository — read by Claude Code, Codex, Cursor, and other coding harnesses. (`CLAUDE.md` points here.)
 
+<!-- bmad:context -->
+<!-- Verified 2026-09-09 against f32b0cbc. Managed by bmad-project-context; edits inside this block are replaced on refresh. Keep anything you want preserved outside the markers. -->
+
+## jclaw
+
+AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SPA and seven Python sidecars the JVM spawns. Personal Edition: one admin operator, no user entity. Tickets are Jira JCLAW; planning lives in `_bmad-output/`; every rule below has its reasons in the sections that follow this block. Terms: a *turn* is one agent invocation, many messages and tool rounds; a *channel* is the origin (web, slack, telegram, whatsapp, voice, app), not a component; a *binding* attaches a channel to an agent; a *harness* is an external ACP coding agent, not this CLI; *Standing Orders* are the workspace files `SystemPromptAssembler` injects.
+
+## Policy
+
+- Never `git push`; `/deploy` is the only push, run from the main checkout on `main`, never a worktree. Never `--no-verify`, never force. Stop at the local commit and report the hash.
+- Never `./jclaw.sh restart|stop`, or kill the server PID, without asking — the instance may be serving live work; a task that mentions a restart is not the approval.
+- Never hand-edit `docs/architecture/` (generated), `skills/**` (vendored), or `workspace/main/*.md` (runtime persona).
+- Commit messages and tags are public on the GitHub mirror: no credentials, customer specifics, or unreleased plans.
+- Don't create worktrees or branches unless asked; work on `main`. Other sessions share this checkout: stage only your own hunks, never `git stash -u`.
+- Ask before reading the `jclaw_api` token out of the Config table; read-only SELECTs on the live H2 (empty credentials, `AUTO_SERVER`) are fine.
+
+## Where things are
+
+- Rules with their reasons: the sections below. Settled verdicts before re-proposing work: `docs/spikes/`.
+- Config validation lives in `ConfigService.setWithSideEffects` (a non-null return is the 403); `POST /api/config` writes any non-reserved key, so "not in the UI" is no reason to skip it. Never seed a key another selection already implies.
+- The fixed-name agents `main`, `__loadtest__`, `__evaltest__` are provisioned by code — never seed or delete them in tests.
+
+## Running and verifying
+
+- Backend tests: `play autotest`, never `play test` (interactive). One class: `./gradlew playAutotest -Ptests=<Class>`, about 30 s; the full suite is 5–8 min. `./jclaw.sh test` runs all five checks to the end and prints the failure at the bottom.
+- A test class runs only if it extends `play.test.UnitTest` or `FunctionalTest`; a plain JUnit class compiles, runs nothing, and the suite stays green — check `test-result/<Class>.class.passed.html` exists. Test sources are the default package: test seams must be `public`.
+- Never pipe the suite (`| tail` returns tail's exit code); redirect to a file and check `test-result/*.failed.html`. Never compile while a run is in flight; `jcmd -l | grep -E "playAutotest|FirePhoque"` first. A `compileJava` that printed `UP-TO-DATE` measured nothing: `--rerun-tasks` when the compile is the evidence.
+- Test classes run concurrently in one JVM: never flip a process-global without its lock (`LuceneTestSync`, `ShellSandboxSync`, `ToolRegistrySync`, `TelemetryTestSync`, `LoadTestHarnessSync`); scope shared-table assertions to your own rows; a "seeded row missing" red is usually the `Fixtures.deleteDatabase` race, not a regression.
+- In a FunctionalTest, seed what your own HTTP request reads with `commitInFreshTx` — the body is already in a transaction and `Tx.run` joins it. Real HTTP against the autotest server 401s `password_unset` until `AuthFixture.seedAdminPassword` runs; the loadtest harness adds a warmup turn.
+- Frontend: `cd frontend && pnpm test` after edits; `pnpm typecheck` is the TS gate, the LSP's `.vue` import errors are false. After a dependency bump, `rm -rf .nuxt node_modules/.vite && pnpm exec nuxi prepare` before believing a green; in a fresh worktree run `nuxi prepare` first or the suite false-REDs with zero tests.
+- `pnpm test --coverage`, never `pnpm test -- --coverage` (vitest reads it as a filename and passes with no coverage). `pnpm test` never runs e2e; `./jclaw.sh e2e` needs a live instance answering `/api/status`.
+- Pre-push runs a wildcard-import grep, `spotlessCheck` and `compileJava` before the suite: `./gradlew spotlessApply` after any import-moving change. A pre-commit `.distignore` warning on a new `app/**.java` is expected — dist ships precompiled — don't edit `.distignore`.
+- Jenkins runs Sonar and coverage but never lint, typecheck or e2e; its release notes are the commit body only when the subject is exactly `Release vX.Y.Z`, which `/deploy` writes.
+- Bumping the fork is two-sided: `.play-version` and `/opt/play1` at the same tag, rebuilt (`framework/src/play/version` is a build artifact); a mismatch fails Gradle configure, which reads as a spotless failure at pre-push. `./gradlew --stop` here does not stop the fork's daemon.
+- Detect a running instance with `./jclaw.sh status` or `lsof -nP -iTCP:9000 -sTCP:LISTEN`, never `ps | grep` (macOS truncates argv) and never bare `lsof -ti :PORT` to kill (it matches the app's own client sockets).
+- A broken `test/` class fails `./jclaw.sh dist|bundle`: precompile compiles tests without running them.
+
+## Conventions that differ from defaults
+
+- Config keys live in the Config DB and are documented in `conf/application.conf`; a key whose absence already means "off" is never seeded.
+- `git grep -P`, never `-E`, for `\b`, `\d`, `\s` — macOS `git grep -E` drops them silently and matches nothing.
+- `jclaw.sh` targets macOS bash 3.2 under `set -euo pipefail`: brace an interpolation before a non-ASCII character, put `|| true` inside `$( )`, use an `EXIT` trap rather than `ERR`.
+- Tool names are `<singular_noun>_<verb>`: `conversation_send`, `subagent_spawn`.
+- Frontend deps are gated on compile and tests, not release age: keep `minimumReleaseAge: 0`, pin Nuxt exactly, smoke `nuxt dev` on a Nuxt bump.
+- A Settings panel reads a sidecar-status endpoint with `useLazyFetch`, never a top-level `await useFetch` — it cold-boots the sidecar and suspends the panel. Tests that remount a page call `clearNuxtData()` in `beforeEach`. Never add a `uv.lock` gate for the sidecars.
+
+## Known pitfalls
+
+- Never `Thread.interrupt()` or `Future.cancel(true)` a thread that touches H2/JPA: the JDK closes the FileChannel and the file DB dies; use a volatile flag. Never park many virtual threads on timed waits (JDK-8373224): schedule on a small platform-thread executor and block on an untimed `get()`.
+- A pool drain destroys the H2 in-memory test DB with its last connection; hold one connection across it (`TelemetryDataSource.switchTo` is the reference).
+- A new NOT NULL entity column needs `@ColumnDefault` — the ALTER fails on populated rows and the create-drop test DB never sees it. Raw-connection DDL must `commit()` explicitly; Hikari runs `autoCommit=false`.
+- `Result` is a `RuntimeException`: a render inside `try {…} catch (Exception)` is swallowed into a 500 — assign in the try, render after it.
+- `Model.find().fetch()` is raw: copy elementwise. Fix a lazy N+1 with `@BatchSize`, not a manual IN query. `FunctionalTest` has no PATCH helper.
+- Bulk and cascade deletes skip `@PostRemove` and orphan Lucene docs — evict explicitly. A Lucene codec-boundary bump: wipe `data/jclaw-lucene/` while pre-v1 rather than add backward-codecs, and verify through the live search endpoint.
+- ArchUnit rules import `build/classes/java/main`, never the running JVM's `CodeSource` — stale precompiled bytecode under FirePhoque manufactures violations.
+- "Zero call sites" is not dead code: a retention Javadoc, `@SuppressWarnings("unused")` or a reflection test marks a deliberate keep. Drop an applied `renameKeyIfPresent` call site, keep the helper.
+- `graphify update .` re-clusters and can dissolve curated communities; recover from the dated backup in `graphify-out/<date>/` and delete `.graphify_labels.json.sig`.
+- JCLAW acceptance criteria forward-reference helpers and tickets that were never built: verify before designing around them.
+- `memory.jpa.vector.queryPrefix` and `memory.recall.minCosine` move together. A CSP, if enabled, must allow `'unsafe-inline'` for `script-src`; Nuxt inlines `window.__NUXT__`. The scrape ladder never escalates a `POLICY_BLOCK`. A task without a pinned model follows its agent's current model.
+- Personal Edition: `findById` without owner scoping is not IDOR, and the agent-reachable `/api/config`, `/api/providers`, `/api/mcp-servers`, `/api/channels` are deliberate — remediate at the seam (SsrfGuard, masking, the dangerous-verb gate), never by blocking the endpoint. Installer paths (Playwright Chromium, `uv run`, the JRE download) were audited and accepted 2026-08-28.
+
+<!-- /bmad:context -->
+
 ## Project Overview
 
 JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java) with a **Nuxt 4** (Vue 3 + TypeScript) SPA frontend. It combines OpenClaw agent orchestration and JavaClaw job scheduling into a single Java-first platform.
@@ -186,7 +249,7 @@ git config core.hooksPath .githooks
 Three hooks. The first two run on the commit/push path, layered by speed:
 
 - **`pre-commit`** — runs `lint-staged` on staged frontend files only (ESLint + Stylelint `--fix`). Target: < 5 s typical. Auto-fixes formatting and re-stages; blocks the commit if a non-fixable rule violates. Short-circuits instantly when no `frontend/**` file is staged, so backend-only commits pay zero cost. Requires `cd frontend && pnpm install` first; before that, the hook fails open with a note.
-- **`pre-push`** — runs the full backend + frontend test suite. Caches per-HEAD so the two-remote deploy flow (origin + github) only pays the ~30 s cost once.
+- **`pre-push`** — runs the full backend + frontend test suite. Caches per-HEAD so the two-remote deploy flow (origin + github) only pays the 5–8 min cost once.
 - **`post-checkout`** — fires `./jclaw.sh init-worktree` when `git worktree add` (or a fresh clone) creates a working tree, seeding its `certs/.env` secret and a deterministic `PLAY_TEST_PORT` so parallel `play autotest` runs across worktrees don't collide. No-op on routine branch switches.
 
 Bypass for a single commit / push (use sparingly):
@@ -207,13 +270,7 @@ git config core.hooksPath .git/hooks
 
 ## Commit and Push Workflow
 
-**Stop at the local commit. Do not push.** When you finish a unit of work:
-
-1. Stage the files that belong to the change.
-2. Create a local commit. The `pre-commit` hook runs here; fix every issue it surfaces and re-commit until the commit succeeds. Never use `--no-verify` to bypass the hook. If a rule is wrong, fix the rule; if a formatting auto-fix modifies files, re-stage and try again.
-3. Stop. Report the commit hash and wait.
-
-**Pushing is the user's job via `/deploy`.** The `/deploy` slash command is the only automation that bumps `application.version`, creates the release commit, and pushes to both remotes (`origin` + `github`). Do not `git push` as part of ordinary coding, and do not combine a final commit with a push in one step. A prior `/deploy` authorises only that release — the next one requires a new explicit invocation.
+The rule itself is in the block above (Policy): stop at the local commit, report the hash, never push — `/deploy` is the only push. The `pre-commit` hook runs at the commit; fix every issue it surfaces and re-commit until it succeeds, and if a rule is wrong, fix the rule rather than bypass it.
 
 Why this matters: every push to `main` triggers the `pre-push` hook's full backend + frontend suite, occupies the two-remote deploy flow, and mutates shared state. Keeping push behind `/deploy` makes releases a deliberate act rather than a side-effect of finishing a task.
 
