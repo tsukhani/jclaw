@@ -107,6 +107,8 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
 
    Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: an unknown value refuses the spawn with a message naming the allowed values rather than silently falling back. Settings → **Subagents** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click.
 
+   **Optionally, pick the model the harness runs with.** By default the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Subagents** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead, and a per-spawn `modelProvider` / `modelId` on `subagent_spawn` — "run this through Codex on `ollama` with `qwen3-coder`" — overrides that for one run. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API — Ollama and OpenRouter do); **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint; **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them; **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's transcript records the override as its first step.
+
 2. **Grant the spawning agent the `acp` capability.** The harness runs as an external process *outside* JClaw's tool gating and workspace confinement, so it's a privileged capability. The **main agent** may always request it; a **custom agent** must have `acpAllowed = true` set on its [Agents](/agents) page. Without the grant, an `acp` spawn is refused on permission. The gate is on the *spawning* agent, so a confined custom agent can't break out by delegating to `acp`.
 
 3. **Spawn with `runtime:"acp"`.** From chat, just ask the agent to delegate to the harness — it emits, for a background run:
@@ -181,8 +183,8 @@ subagent_spawn
   mode              string   "session" (default) | "inline" | (async via async=true)
   context           string   "fresh" (default) | "inherit"
   runtime           string   "native" (default) | "acp"
-  modelProvider     string   override child's provider
-  modelId           string   override child's model
+  modelProvider     string   override child's provider (acp: points the harness at that endpoint — claude/codex only)
+  modelId           string   override child's model (acp: replaces the harness's own default model)
   async             bool     return run id immediately (session mode only)
   runTimeoutSeconds int      idle budget (seconds of inactivity), default subagent.defaultRunTimeoutSeconds (300)
 

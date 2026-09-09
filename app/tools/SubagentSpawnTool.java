@@ -237,6 +237,14 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  (the repo root). */
     public static final String ACP_WORKDIR_KEY = "subagent.acp.workdir";
 
+    /** Settings default for the provider/model an acp harness runs with instead of its own
+     *  default. A spawn's {@link #ARG_MODEL_PROVIDER}/{@link #ARG_MODEL_ID} wins over it; both
+     *  unset means the harness keeps its own model. Bound per harness by {@link HarnessModelBinding}. */
+    public static final String ACP_MODEL_PROVIDER_KEY = "subagent.acp.modelProvider";
+    public static final String ACP_MODEL_ID_KEY = "subagent.acp.modelId";
+    static final String ARG_MODEL_PROVIDER = "modelProvider";
+    static final String ARG_MODEL_ID = "modelId";
+
     @Override
     public String name() { return TOOL_NAME; }
 
@@ -304,10 +312,16 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "renders as a separate row in the operator's sidebar, or "
                         + "\"inline\" to run the child within the parent's conversation "
                         + "as a collapsible nested-turn block."));
-        props.put("modelProvider", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                SchemaKeys.DESCRIPTION, "Optional provider override for the child"));
-        props.put("modelId", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                SchemaKeys.DESCRIPTION, "Optional model id override for the child"));
+        props.put(ARG_MODEL_PROVIDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "Optional provider override for the child (a configured JClaw provider name). With "
+                        + "runtime=\"acp\" the coding harness is pointed at that provider's endpoint — "
+                        + "claude and codex accept this; pi and gemini take modelId only."));
+        props.put(ARG_MODEL_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "Optional model id override for the child. With runtime=\"acp\" it replaces the "
+                        + "harness's own default model (alone, the harness keeps its own endpoint and "
+                        + "login); it also overrides the operator's Settings default for the harness."));
         props.put(ARG_CONTEXT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Context inheritance mode: \"fresh\" (default) for an empty child history, "
@@ -413,7 +427,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // JCLAW-499: register the external-harness command for this run when
         // runtime=acp (already validated above); executeChildRun consumes it.
         if (SubagentAcpRunner.isAcpRuntime(args)) {
-            SubagentAcpRunner.ACP_RUNS.put(runId, SubagentAcpRunner.resolveAcpCommand());
+            SubagentAcpRunner.ACP_RUNS.put(runId, SubagentAcpRunner.resolveAcpLaunch(args));
         }
 
         // JCLAW-268: surface inherit-mode summarization failure as a SUBAGENT_ERROR
@@ -535,7 +549,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // applied to every child of the fan-out.
         var acpError = SubagentAcpRunner.acpRuntimeError(args, parentAgent);
         if (acpError != null) return acpError;
-        final var acpCommand = SubagentAcpRunner.isAcpRuntime(args) ? SubagentAcpRunner.resolveAcpCommand() : null;
+        final var acpLaunch = SubagentAcpRunner.isAcpRuntime(args) ? SubagentAcpRunner.resolveAcpLaunch(args) : null;
 
         var specs = new ArrayList<BatchTaskSpec>();
         for (var el : tasksEl.getAsJsonArray()) {
@@ -599,8 +613,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                     parentConvIdFinal, bootstrap.childConvId(), spec.label());
             EventLogger.recordSubagentSpawn(parentAgent.name, bootstrap.childAgentName(),
                     String.valueOf(runId), fMode, fContext);
-            if (acpCommand != null) {
-                SubagentAcpRunner.ACP_RUNS.put(runId, acpCommand);
+            if (acpLaunch != null) {
+                SubagentAcpRunner.ACP_RUNS.put(runId, acpLaunch);
             }
             SubagentAsyncRunner.dispatchDetachedAsync(runId, bootstrap.childAgentId(), bootstrap.childConvId(),
                     parentAgent.name, fMode, fContext, fTimeout, spec.task(), scopeKey);

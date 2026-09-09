@@ -39,7 +39,32 @@ let configPosts: Record<string, unknown>[] = []
 let addedCommands: string[] = []
 let removedCommands: string[] = []
 
-registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: [] }) })
+let configDeletes: string[] = []
+
+// One configured provider so the acp.model picker has a provider::model option.
+registerEndpoint('/api/config', {
+  method: 'GET',
+  handler: () => ({
+    entries: [
+      { key: 'provider.ollama.baseUrl', value: 'http://localhost:11434/v1' },
+      { key: 'provider.ollama.models', value: JSON.stringify([{ id: 'qwen3.5:9b', name: 'Qwen 3.5 9B' }]) },
+    ],
+  }),
+})
+registerEndpoint('/api/config/subagent.acp.modelProvider', {
+  method: 'DELETE',
+  handler: () => {
+    configDeletes.push('subagent.acp.modelProvider')
+    return { status: 'ok' }
+  },
+})
+registerEndpoint('/api/config/subagent.acp.modelId', {
+  method: 'DELETE',
+  handler: () => {
+    configDeletes.push('subagent.acp.modelId')
+    return { status: 'ok' }
+  },
+})
 registerEndpoint('/api/config', {
   method: 'POST',
   handler: async (event) => {
@@ -83,6 +108,7 @@ registerEndpoint('/api/subagents/acp-harnesses', {
 beforeEach(() => {
   clearNuxtData()
   configPosts = []
+  configDeletes = []
   addedCommands = []
   removedCommands = []
   harnesses = [
@@ -167,5 +193,32 @@ describe('SettingsSubagentsPanel — ACP harness detection', () => {
     await flushPromises()
 
     expect(c.findAll('button').some(b => b.text().includes('aider --message'))).toBe(false)
+  })
+})
+
+describe('SettingsSubagentsPanel — acp harness model override', () => {
+  it('offers the configured provider models and POSTs both acp model keys on pick', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    const select = c.find('select[aria-label="ACP harness model"]')
+    expect(select.exists()).toBe(true)
+    const values = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
+    expect(values).toEqual(['', 'ollama::qwen3.5:9b'])
+
+    await select.setValue('ollama::qwen3.5:9b')
+    await vi.waitFor(() => expect(configPosts.length).toBe(2))
+    expect(configPosts).toContainEqual({ key: 'subagent.acp.modelProvider', value: 'ollama' })
+    expect(configPosts).toContainEqual({ key: 'subagent.acp.modelId', value: 'qwen3.5:9b' })
+  })
+
+  it('picking the harness default DELETEs both acp model keys', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    await c.find('select[aria-label="ACP harness model"]').setValue('')
+    await vi.waitFor(() => expect(configDeletes.length).toBe(2))
+    expect(configDeletes).toEqual(['subagent.acp.modelProvider', 'subagent.acp.modelId'])
+    expect(configPosts).toEqual([])
   })
 })

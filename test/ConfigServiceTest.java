@@ -18,6 +18,24 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
+    void acpModelProviderMustNameAConfiguredProvider() {
+        // POST /api/config reaches this key directly; a typo would otherwise surface only as a
+        // refused acp spawn much later.
+        var key = tools.SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY;
+        var rejected = ConfigService.setWithSideEffects(key, "no-such-provider");
+        assertNotNull(rejected, "an unconfigured provider name must be refused at the write");
+        assertTrue(rejected.contains("no-such-provider") && rejected.contains(key), rejected);
+
+        // The registry lists a provider only once both its baseUrl and apiKey are set.
+        ConfigService.set("provider.acp-cfg-prov.baseUrl", "http://127.0.0.1:1/v1");
+        ConfigService.set("provider.acp-cfg-prov.apiKey", "k");
+        llm.ProviderRegistry.refresh();
+        assertNull(ConfigService.setWithSideEffects(key, "acp-cfg-prov"),
+                "a configured provider name is accepted");
+        assertNull(ConfigService.setWithSideEffects(key, ""), "clearing the key is always accepted");
+    }
+
+    @Test
     void setAndGet() {
         ConfigService.set("test.key", "test-value");
         assertEquals("test-value", ConfigService.get("test.key"));

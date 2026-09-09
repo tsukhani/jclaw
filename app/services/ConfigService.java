@@ -5,6 +5,7 @@ import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import jobs.ToolRegistrationJob;
 import llm.ProviderLocality;
+import llm.ProviderRegistry;
 import memory.JpaMemoryStore;
 import memory.MemoryReranker;
 import memory.MemoryStoreFactory;
@@ -17,10 +18,12 @@ import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.JPA;
+import services.database.DatabaseService;
 import services.telemetry.OtelConfig;
 import services.telemetry.OtelRuntime;
 import services.tts.TtsEngine;
 import services.tts.TtsSidecarManager;
+import tools.SubagentSpawnTool;
 import utils.HttpFactories;
 
 import java.time.Duration;
@@ -256,6 +259,22 @@ public class ConfigService {
         }
         if (key.equals(JpaMemoryStore.KEY_RECALL_MIN_COSINE) && !isCosine(value)) {
             return "memory.recall.minCosine must be a finite number between -1.0 and 1.0.";
+        }
+
+        // The coding harness is pointed at this provider's endpoint at spawn time; a name with
+        // no provider behind it would only surface as a refused spawn much later.
+        if (key.equals(SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY) && value != null && !value.isBlank()
+                && ProviderRegistry.get(value.trim()) == null) {
+            return "Provider '" + value.trim() + "' is not configured. " + key
+                    + " must name a provider from Settings > LLM Providers.";
+        }
+
+        // JCLAW-1165: a schedule that never fires or a retention of zero is silent at read.
+        if (key.startsWith("db.backup.")) {
+            var rejected = DatabaseService.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
         }
 
         // JCLAW-34: a collector URL or sampler ratio that cannot take effect is refused

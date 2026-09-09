@@ -3,10 +3,12 @@ package tools;
 import agents.AgentRunner;
 import agents.DangerousActionGate;
 import com.agentclientprotocol.sdk.client.AcpClient;
+import com.agentclientprotocol.sdk.client.AcpSyncClient;
 import com.agentclientprotocol.sdk.client.transport.AgentParameters;
 import com.agentclientprotocol.sdk.client.transport.StdioAcpClientTransport;
 import com.agentclientprotocol.sdk.spec.AcpSchema;
 import com.google.gson.JsonObject;
+import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
 import models.Message;
@@ -33,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -68,9 +71,13 @@ final class SubagentAcpRunner {
                     SubagentSpawnTool.DEFAULT_ACP_HARNESS);
     private static final Set<String> ACP_MODES = Set.of(SubagentSpawnTool.DEFAULT_ACP_MODE, "json", "rpc");
 
-    /** JCLAW-499: the per-spawn external-harness command for a run, set when
+    /** JCLAW-499: the per-spawn external-harness launch for a run, set when
      *  runtime=acp, consumed once by {@link #executeChildRun}. */
-    static final ConcurrentHashMap<Long, List<String>> ACP_RUNS = new ConcurrentHashMap<>();
+    static final ConcurrentHashMap<Long, AcpLaunch> ACP_RUNS = new ConcurrentHashMap<>();
+
+    /** What a {@code runtime=acp} spawn resolved at validation time: the operator's harness
+     *  command and, when one applies, the provider/model the harness is pinned to. */
+    record AcpLaunch(List<String> command, @Nullable HarnessModel model) {}
 
     /** JCLAW-659: harness-id → adapter registry. JCLAW-660 seeds the {@code pi}
      *  (streaming JSONL) and {@code generic} (line-tail) adapters; JCLAW-667 adds
@@ -160,8 +167,11 @@ final class SubagentAcpRunner {
      */
     static AgentRunner.RunResult executeChildRun(Long runId, Agent childAgent,
                                                  Conversation childConv, String task, boolean inlineMode) {
-        var acpCommand = ACP_RUNS.remove(runId);
-        if (acpCommand != null) {
+        var launch = ACP_RUNS.remove(runId);
+        if (launch != null) {
+            var acpCommand = launch.command();
+            var model = launch.model();
+            var harnessId = resolveHarnessId();
             // JCLAW-669: gate an unsafe-origin run before the process launches (see
             // enforceChannelApproval for the per-channel policy).
             enforceChannelApproval(runId, childAgent, task);
@@ -178,21 +188,30 @@ final class SubagentAcpRunner {
             // mid-run permission prompts through the gate. WebSocket-only harnesses
             // (opencode) and ones whose ACP binary isn't installed fall through to
             // the batch/streaming path below.
-            var acpLaunch = AcpCapabilityCatalog.stdioAcpLaunchCommand(resolveHarnessId());
-            if (acpLaunch != null) {
-                return runAcpSdk(runId, acpLaunch, task, childAgent, workdir);
+            var acpLaunch = AcpCapabilityCatalog.stdioAcpLaunchCommand(harnessId);
+            // The override is bound differently per launch path (see HarnessModelBinding);
+            // one transcript step records which model the run actually asked for. Seq -1
+            // keeps it ahead of the seq-0 channel-approval step in the monitor's order.
+            if (model != null) {
+                dispatchHarnessEvent(runId, new HarnessEvent(HarnessEvent.STEP,
+                        HarnessModelBinding.describe(harnessId, model, acpLaunch != null), null), -1);
             }
+            var env = model == null ? Map.<String, String>of() : HarnessModelBinding.env(harnessId, model);
+            if (acpLaunch != null) {
+                return runAcpSdk(runId, acpLaunch, task, childAgent, workdir, model, env);
+            }
+            var modelArgs = model == null ? List.<String>of() : HarnessModelBinding.wrapperArgs(harnessId, model);
             // JCLAW-660: batch stays one-shot; json/rpc stream the harness output
             // line-by-line through the selected adapter.
             var mode = resolveAcpMode();
             if (SubagentSpawnTool.DEFAULT_ACP_MODE.equals(mode)) {
-                return runAcpBatch(runId, acpCommand, task, workdir);
+                return runAcpBatch(runId, concat(acpCommand, modelArgs), task, workdir, env);
             }
             var adapter = resolveAdapter();
             if (adapter == null) {
                 // No adapter registered for the configured harness — degrade to the
                 // one-shot batch path rather than fail the run.
-                return runAcpBatch(runId, acpCommand, task, workdir);
+                return runAcpBatch(runId, concat(acpCommand, modelArgs), task, workdir, env);
             }
             // JCLAW-665: rpc mode against a harness that advertises a bidirectional
             // session routes the harness's mid-run permission requests through the
@@ -200,9 +219,9 @@ final class SubagentAcpRunner {
             // capability-gated: any non-bidirectional harness — or json mode — falls
             // back to one-way streaming.
             if ("rpc".equals(mode) && adapter.capabilities().bidirectional()) {
-                return runAcpRpc(runId, acpCommand, task, adapter, childAgent, workdir);
+                return runAcpRpc(runId, acpCommand, task, adapter, childAgent, workdir, modelArgs, env);
             }
-            return runAcpStreaming(acpCommand, task, runId, adapter, workdir);
+            return runAcpStreaming(acpCommand, task, runId, adapter, workdir, modelArgs, env);
         }
         if (inlineMode) {
             // JCLAW-267: inline runs in the parent Conversation (queue owned), with
@@ -281,7 +300,7 @@ final class SubagentAcpRunner {
      * records a FAILED outcome.
      */
     private static AgentRunner.RunResult runAcpBatch(Long runId, List<String> command, String task,
-                                                     @Nullable File workdir) {
+                                                     @Nullable File workdir, Map<String, String> env) {
         Process proc = null;
         try {
             // JCLAW-672: batch mode has no streaming adapter; sandbox with the
@@ -291,7 +310,7 @@ final class SubagentAcpRunner {
                     command, workdir, new GenericAdapter(), sandboxTrustedOrigin(runId));
             var pb = new ProcessBuilder(launched);
             if (workdir != null) pb.directory(workdir);
-            SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
+            SubprocessEnv.apply(pb, env);   // JCLAW-779: strip inherited host secrets; the model-override env wins
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill (and the
             // idle/ceiling timeout via requestStop) can force-terminate it and its
@@ -344,8 +363,9 @@ final class SubagentAcpRunner {
      * harness's stderr so the spawn records a FAILED outcome.
      */
     private static AgentRunner.RunResult runAcpStreaming(List<String> command, String task,
-                                                         Long runId, HarnessAdapter adapter, @Nullable File workdir) {
-        var argv = SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task));
+                                                         Long runId, HarnessAdapter adapter, @Nullable File workdir,
+                                                         List<String> modelArgs, Map<String, String> env) {
+        var argv = concat(SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task)), modelArgs);
         // The adapter delivers the task on stdin unless it placed it in the argv.
         boolean taskOnStdin = !argv.contains(task);
         Process proc = null;
@@ -353,7 +373,7 @@ final class SubagentAcpRunner {
             var pb = new ProcessBuilder(
                     HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
             if (workdir != null) pb.directory(workdir);
-            SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
+            SubprocessEnv.apply(pb, env);   // JCLAW-779: strip inherited host secrets; the model-override env wins
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill and the
             // idle/ceiling timeout (via requestStop) can force-terminate it and
@@ -404,8 +424,9 @@ final class SubagentAcpRunner {
      * {@link #runAcpStreaming}.
      */
     private static AgentRunner.RunResult runAcpRpc(Long runId, List<String> command, String task,
-                                                   HarnessAdapter adapter, Agent childAgent, @Nullable File workdir) {
-        var argv = SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task));
+                                                   HarnessAdapter adapter, Agent childAgent, @Nullable File workdir,
+                                                   List<String> modelArgs, Map<String, String> env) {
+        var argv = concat(SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task)), modelArgs);
         boolean taskOnStdin = !argv.contains(task);
         // Route approval prompts to the PARENT conversation — the child's own
         // conversation is channelType="subagent" with no approval surface, so a
@@ -417,7 +438,7 @@ final class SubagentAcpRunner {
             var pb = new ProcessBuilder(
                     HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
             if (workdir != null) pb.directory(workdir);
-            SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
+            SubprocessEnv.apply(pb, env);   // JCLAW-779: strip inherited host secrets; the model-override env wins
             proc = pb.start();
             // JCLAW-664: track the live process so the kill / idle-timeout paths can
             // force-terminate it and its descendants.
@@ -467,19 +488,23 @@ final class SubagentAcpRunner {
      * subprocess and unblocking the blocking {@code prompt()}.
      */
     private static AgentRunner.RunResult runAcpSdk(Long runId, String acpCommand, String task,
-                                                   Agent childAgent, @Nullable File workdir) {
+                                                   Agent childAgent, @Nullable File workdir,
+                                                   @Nullable HarnessModel model, Map<String, String> env) {
         var conversationId = parentConversationId(runId);
         var acc = new ReplyAccumulator();
         var seq = new AtomicInteger(1);   // seq 0 is the channel-approval step (when gated)
+        var harnessId = resolveHarnessId();
 
         // Sandbox the launch command, then hand it to the SDK's stdio transport.
         // No adapter registered for the configured harness: sandbox with the generic
         // (no HOME allowances) profile, as the batch path does.
         var sandboxAdapter = resolveAdapter();
-        var argv = HarnessSandbox.wrap(List.of(acpCommand.strip().split("\\s+")),
+        var launchArgv = concat(List.of(acpCommand.strip().split("\\s+")),
+                model == null ? List.of() : HarnessModelBinding.acpArgs(harnessId, model));
+        var argv = HarnessSandbox.wrap(launchArgv,
                 workdir, sandboxAdapter != null ? sandboxAdapter : new GenericAdapter(),
                 sandboxTrustedOrigin(runId));
-        var params = AgentParameters.builder(argv.get(0)).args(argv.subList(1, argv.size())).build();
+        var params = AgentParameters.builder(argv.get(0)).args(argv.subList(1, argv.size())).env(env).build();
 
         // The acp-core SDK applies its per-request timeout (default 30s) to EVERY
         // request — including prompt(), which in ACP spans the whole agent turn
@@ -533,6 +558,12 @@ final class SubagentAcpRunner {
             client.initialize();
             var cwd = workdir != null ? workdir.getAbsolutePath() : System.getProperty("user.dir");
             var session = client.newSession(new AcpSchema.NewSessionRequest(cwd, List.of()));
+            if (model != null) {
+                var note = selectSessionModel(client, session, model.modelId());
+                synchronized (acc) {
+                    dispatchHarnessEvent(runId, new HarnessEvent(HarnessEvent.STEP, note, null), seq.getAndIncrement());
+                }
+            }
             client.prompt(new AcpSchema.PromptRequest(session.sessionId(),
                     List.of(new AcpSchema.TextContent(task))));
             String reply;
@@ -546,6 +577,42 @@ final class SubagentAcpRunner {
         } finally {
             SubagentRegistry.unregisterCloser(runId);
         }
+    }
+
+    /**
+     * Pin the ACP session to the requested model through the protocol ({@code
+     * session/set_model}) when the harness lists it; a model the harness does not list
+     * — a custom endpoint's model under claude-agent-acp, say — is left to the launch
+     * env and flags already applied. A harness that lists the model but refuses to
+     * switch fails the run: proceeding would silently run on the wrong model.
+     */
+    // acp-core 0.17 deprecates session/set_model for config options, which the SDK delivers only
+    // as async ConfigOptionUpdate notifications; the session response's model state is the one
+    // surface readable before the prompt goes out.
+    @SuppressWarnings("removal")
+    private static String selectSessionModel(AcpSyncClient client, AcpSchema.NewSessionResponse session,
+                                             String modelId) {
+        var models = session.models();
+        var listed = models != null && models.availableModels() != null
+                && models.availableModels().stream().anyMatch(m -> modelId.equals(m.modelId()));
+        if (!listed) {
+            return "harness did not list model " + modelId + " (current: "
+                    + (models == null ? "unknown" : models.currentModelId()) + "); relying on the launch env and flags";
+        }
+        try {
+            client.setSessionModel(new AcpSchema.SetSessionModelRequest(session.sessionId(), modelId));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("harness refused model " + modelId + ": " + e.getMessage(), e);
+        }
+        return "harness switched to model " + modelId + " (session/set_model)";
+    }
+
+    private static List<String> concat(List<String> head, List<String> tail) {
+        if (tail.isEmpty()) return head;
+        var out = new ArrayList<String>(head.size() + tail.size());
+        out.addAll(head);
+        out.addAll(tail);
+        return List.copyOf(out);
     }
 
     /** JCLAW-662: signal terminal once per run so a live monitor stops tailing
@@ -799,7 +866,49 @@ final class SubagentAcpRunner {
             return "Error: '" + SubagentSpawnTool.ACP_MODE_KEY + "' must be one of " + ACP_MODES
                     + SubagentSpawnTool.GOT_LITERAL + mode.strip() + "').";
         }
-        return null;
+        return harnessModelError(args);
+    }
+
+    /**
+     * Validate the model override an acp spawn would launch with — the spawn's own
+     * {@code modelProvider}/{@code modelId} when it names a model, else the Settings default.
+     * Refused up front, like a bad harness id: a provider JClaw has no endpoint for, a
+     * provider without a model, or a harness that cannot take the override (see
+     * {@link HarnessModelBinding#rejection}). Returns the error string, or {@code null}.
+     */
+    private static @Nullable String harnessModelError(JsonObject args) {
+        var requested = requestedModel(args);
+        var provider = requested.provider();
+        var modelId = requested.modelId();
+        if (modelId == null || modelId.isBlank()) {
+            if (!SubagentSpawnTool.notBlank(provider)) return null;
+            var source = requested.fromArgs()
+                    ? "'" + SubagentSpawnTool.ARG_MODEL_PROVIDER + "' needs '" + SubagentSpawnTool.ARG_MODEL_ID + "'"
+                    : "'" + SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY + "' needs '" + SubagentSpawnTool.ACP_MODEL_ID_KEY + "'";
+            return "Error: " + source + " — a provider alone does not name a model for the harness.";
+        }
+        var model = resolveHarnessModel(provider, modelId);
+        if (model.hasEndpoint() && model.baseUrl() == null) {
+            return "Error: model provider '" + provider + "' is not configured (Settings → LLM Providers), "
+                    + "so the coding harness cannot be pointed at it.";
+        }
+        var rejection = HarnessModelBinding.rejection(resolveHarnessId(), model);
+        return rejection == null ? null : "Error: " + rejection;
+    }
+
+    /** The override a spawn asks for: its own args when either names something, else the
+     *  Settings default — the one precedence {@link #harnessModelError} and
+     *  {@link #resolveAcpLaunch} share. */
+    private record RequestedModel(@Nullable String provider, @Nullable String modelId, boolean fromArgs) {}
+
+    private static RequestedModel requestedModel(JsonObject args) {
+        var argProvider = SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_MODEL_PROVIDER);
+        var argModel = SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_MODEL_ID);
+        if (SubagentSpawnTool.notBlank(argModel) || SubagentSpawnTool.notBlank(argProvider)) {
+            return new RequestedModel(argProvider, argModel, true);
+        }
+        return new RequestedModel(ConfigService.get(SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY),
+                ConfigService.get(SubagentSpawnTool.ACP_MODEL_ID_KEY), false);
     }
 
     static boolean isAcpRuntime(JsonObject args) {
@@ -811,6 +920,27 @@ final class SubagentAcpRunner {
         var configured = ConfigService.get(SubagentSpawnTool.ACP_COMMAND_KEY);
         if (configured == null || configured.isBlank()) return List.of();
         return List.of(configured.strip().split("\\s+"));
+    }
+
+    /** The launch a validated ({@link #acpRuntimeError} returned null) acp spawn registers:
+     *  the harness command plus the model override the same precedence resolved. */
+    static AcpLaunch resolveAcpLaunch(JsonObject args) {
+        var requested = requestedModel(args);
+        var modelId = requested.modelId();
+        var model = modelId == null || modelId.isBlank() ? null : resolveHarnessModel(requested.provider(), modelId);
+        return new AcpLaunch(resolveAcpCommand(), model);
+    }
+
+    /** A model-only override when {@code provider} is blank; otherwise the named JClaw
+     *  provider's endpoint and key, left null when no such provider is configured. */
+    private static HarnessModel resolveHarnessModel(@Nullable String provider, String modelId) {
+        if (provider == null || provider.isBlank()) {
+            return new HarnessModel(null, null, null, modelId.strip());
+        }
+        var name = provider.strip();
+        var resolved = ProviderRegistry.get(name);
+        if (resolved == null) return new HarnessModel(name, null, null, modelId.strip());
+        return new HarnessModel(name, resolved.config().baseUrl(), resolved.config().apiKey(), modelId.strip());
     }
 
     /** JCLAW-659: configured harness id, normalized and falling back to

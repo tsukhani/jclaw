@@ -199,6 +199,7 @@ To delegate a subagent to an **external coding harness** (Pi / Claude Code / Cod
 | Key                    | Default    | Meaning                                                                                             |
 |------------------------|------------|-----------------------------------------------------------------------------------------------------|
 | `subagent.acp.command` | *(unset)*  | Absolute path to the harness command run for `subagent_spawn { runtime:"acp" }` (e.g. `/usr/local/bin/pi`). Read from config only, never the model. |
+| `subagent.acp.modelProvider` / `subagent.acp.modelId` | *(unset)* | Provider/model the harness runs with instead of its own default (the `acp.model` picker). Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses refuse the override. A per-spawn `modelProvider` / `modelId` wins over it. |
 
 The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](/agents) page; the main agent always may), and each run is bounded by `subagent.maxWallClockSeconds` (default 1800). See [External coding harness](/guide#subagents-acp-harness) for the full setup.
 
@@ -389,6 +390,65 @@ Hash-based reputation lookups that scan every binary inside a skill before it's 
 Multiple scanners run independently and compose under OR: a skill is rejected if any enabled scanner flags any binary. A scanner is only active when both **enabled** is on *and* its API key is configured. Each row links to the provider's signup page.
 
 Off by default; turn on for environments where users can upload arbitrary skill bundles.
+
+## Database
+
+Everything on this instance — conversations, agents, tasks, memories, config — lives in one H2 data file, `data/jclaw.mv.db`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.
+
+### The health strip
+
+The top of the panel is one line: the **verdict**, the **size** of the data file (with the trace file, a pre-restore copy and any repair remnants added up beside it), **free space** on that volume, how long ago the **last backup** was taken, the **H2 version**, and how long a probe query took. Below it is the reason for the verdict, in words.
+
+| Verdict | What it means |
+|---------|---------------|
+| **Healthy** | Queries answer and H2's trace file shows no read failures in the last seven days. |
+| **Attention** | The trace file has logged read failures — `File corrupted`, `Unable to read the page` — in the last day or week. Pages are going bad. Back up now, then consider Repair. |
+| **Critical** | The probe query failed: the database is closed or unreadable and every request is failing with it. Repair or Restore. |
+
+Attention is the state worth knowing about. On 2026-09-09 the live database turned out to have had damaged pages since July; the trace file had been logging a handful of read failures a day for two months, and nothing surfaced them until a boot-time read of a damaged page closed the database. The verdict reads that file so the warning arrives before the outage does.
+
+### Backups
+
+**Back up now** writes an H2 online backup — a zip containing the data file — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted. Two settings sit under the list:
+
+- **retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
+- **schedule** — a time of day, `HH:mm` in your timezone, for a daily backup. Leave it empty for none. A scheduled backup that fails is shown here and logged to the event log.
+
+Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, and H2's own tools open it.
+
+### Restore
+
+Restore replaces the database with a backup — one from the list, or a zip you upload with **Restore from a file**. The file is checked first: anything that is not an H2 backup is refused with the reason and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
+
+Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The displaced file is kept as `data/jclaw.mv.db.pre-restore` until the next successful backup, so a restore is itself reversible until you have moved on.
+
+### Repair
+
+Repair is the procedure from the September incident, run for you rather than by hand. H2's recovery tool reads the damaged file into a script; the file and its trace are moved aside; a fresh database is rebuilt from the script in the app's mode, with each ENUM column cast back from the ordinals the recovery tool writes; every table's row count is checked against what the damaged file reported before the repair and against what the script staged; the result is compacted; and `data/repair-<stamp>.json` records what was created. The instance restarts around it, and when the page reconnects the panel shows the per-table result.
+
+Two limits are worth knowing:
+
+- **Rows on pages that cannot be read are lost.** The report names the tables that came back short, with how many rows were expected. Back up first if the database still answers.
+- **A loss H2 has already rolled back is invisible.** When the newest chunk of the file is damaged, H2 falls back to an older version silently, and the recovery tool sees that older version too. The repair reads the damaged file read-only before it starts so it can compare; when the file will not open at all there is no reference to compare against, and the report says so.
+
+Repair is shown prominently when the verdict is Attention or Critical and is available at any time — on a healthy file it rebuilds and compacts, which is how a file grown large after a hand rebuild is brought back to size.
+
+### Cleaning up after a repair
+
+Everything a repair creates is kept in `data/` — the damaged file, its trace, the recovery script and dump — because the damaged file is the only route to a second attempt. The panel shows their total size and offers **Clean up repair files** once the repair succeeded and the verdict is Healthy, with no read failure logged since and every restored table readable. Until then the button is disabled with the reason. Cleanup deletes exactly what the manifest lists, after checking each file's checksum, and the manifest last; the live file, the lock, the trace and `backups/` are never touched.
+
+### From the command line
+
+```bash
+jclaw backup                     # online through the running instance, or from the closed file
+jclaw backup --list              # what is in data/backups/
+jclaw restore <zip | backup id>  # validate, stop, swap, start
+jclaw repair                     # stop, recover, rebuild, verify, compact, start; then offer cleanup
+jclaw db-clean                   # delete what the last successful repair left behind
+jclaw db-status                  # the health strip as text
+```
+
+The CLI and the panel share one implementation. With the instance running, `backup` and `db-status` go through the API — the button's code path — so retention and the health verdict come from the running JVM. With the instance stopped, the same engine runs directly against the file on the H2 jar alone, which is what makes `repair` usable when the database will not open. Helper output goes to `logs/database.log`.
 
 ## Maintenance
 

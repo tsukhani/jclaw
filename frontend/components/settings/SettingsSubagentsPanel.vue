@@ -198,17 +198,29 @@ const allModelOptions = computed(() => {
   return opts
 })
 
-async function saveSubagentModel(value: string) {
+// Model the acp coding harness runs with instead of its own default. Unset (the
+// default) leaves the harness on its own model and login; a specific value is
+// bound per harness on the backend (claude/codex: endpoint + model; pi/gemini:
+// model only). A per-spawn modelProvider/modelId still overrides it.
+const acpModelValue = computed(() => {
+  const entries = configData.value?.entries ?? []
+  const p = entries.find(e => e.key === 'subagent.acp.modelProvider')?.value
+  const m = entries.find(e => e.key === 'subagent.acp.modelId')?.value
+  return p && m ? `${p}::${m}` : ''
+})
+
+// Write (or clear) a provider::model pair into a provider-key + model-key couple.
+async function saveModelPair(providerKey: string, modelKey: string, value: string) {
   saving.value = true
   try {
     if (value) {
       const sep = value.indexOf('::')
-      await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.modelProvider', value: value.slice(0, sep) } })
-      await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.modelId', value: value.slice(sep + 2) } })
+      await $fetch('/api/config', { method: 'POST', body: { key: providerKey, value: value.slice(0, sep) } })
+      await $fetch('/api/config', { method: 'POST', body: { key: modelKey, value: value.slice(sep + 2) } })
     }
     else {
-      await $fetch('/api/config/subagent.modelProvider', { method: 'DELETE' })
-      await $fetch('/api/config/subagent.modelId', { method: 'DELETE' })
+      await $fetch(`/api/config/${providerKey}`, { method: 'DELETE' })
+      await $fetch(`/api/config/${modelKey}`, { method: 'DELETE' })
     }
     refresh()
   }
@@ -216,6 +228,9 @@ async function saveSubagentModel(value: string) {
     saving.value = false
   }
 }
+
+const saveSubagentModel = (value: string) => saveModelPair('subagent.modelProvider', 'subagent.modelId', value)
+const saveAcpModel = (value: string) => saveModelPair('subagent.acp.modelProvider', 'subagent.acp.modelId', value)
 </script>
 
 <template>
@@ -628,6 +643,39 @@ async function saveSubagentModel(value: string) {
               {{ customError }}
             </p>
           </div>
+        </div>
+        <!-- Model the acp coding harness runs with. Default = the harness's own
+             model; a specific provider/model is bound per harness on the backend. -->
+        <div class="px-4 py-2.5 flex items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+            acp.model
+            <span class="relative group/tip">
+              <InformationCircleIcon
+                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                aria-hidden="true"
+              />
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                Provider/model the acp coding harness runs with instead of its own default. Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses take neither and refuse the spawn. A per-spawn modelProvider/modelId on subagent_spawn overrides this.
+              </span>
+            </span>
+          </span>
+          <select
+            :value="acpModelValue"
+            aria-label="ACP harness model"
+            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            @change="saveAcpModel(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">
+              Harness default (the CLI's own model and login)
+            </option>
+            <option
+              v-for="o in allModelOptions"
+              :key="o.value"
+              :value="o.value"
+            >
+              {{ o.label }}
+            </option>
+          </select>
         </div>
         <!-- JCLAW-422: model subagents run on. Default (inherit) tracks the
              conversation's model; a specific value pins all fan-outs. -->

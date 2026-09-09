@@ -1,12 +1,15 @@
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.Message;
 import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.AcpCapabilityCatalog;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
@@ -16,6 +19,7 @@ import tools.SubagentSpawnTool;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -134,6 +138,128 @@ class AcpHarnessConfigValidationTest extends UnitTest {
                 "the persisted default-batch acp run must be COMPLETED");
         assertEquals(MARKER + "batch-default", run.outcome,
                 "COMPLETED batch run's outcome is the harness reply");
+    }
+
+    // ─── acp model override (HarnessModelBinding) ────────────────────────────
+
+    @Test
+    void refusesAnOverrideTheHarnessCannotTake() throws Exception {
+        // Default harness (generic) has no model surface: a per-spawn modelId must be
+        // refused up front, naming the harness — never launched and silently ignored.
+        ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, harness.toString());
+        var parent = grantedAgent("p-acp-model-generic");
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"x\",\"runtime\":\"acp\",\"modelId\":\"qwen-test\"}");
+
+        assertTrue(reply.startsWith("Error:") && reply.contains("generic"),
+                "a model override on the generic harness must be refused, naming the harness: " + reply);
+    }
+
+    @Test
+    void refusesAnEndpointOverrideOnAModelOnlyHarness() throws Exception {
+        // pi takes --model but resolves providers itself: a provider override is refused
+        // rather than mistranslated into pi's namespace. The provider exists, so the
+        // refusal is specifically the harness's.
+        ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, harness.toString());
+        ConfigService.set(SubagentSpawnTool.ACP_HARNESS_KEY, "pi");
+        ConfigService.set("provider.acp-test-prov.baseUrl", "http://127.0.0.1:1/v1");
+        ConfigService.set("provider.acp-test-prov.apiKey", "k");
+        llm.ProviderRegistry.refresh();
+        var parent = grantedAgent("p-acp-model-pi-endpoint");
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"x\",\"runtime\":\"acp\",\"modelProvider\":\"acp-test-prov\",\"modelId\":\"m\"}");
+
+        assertTrue(reply.startsWith("Error:") && reply.contains("harness 'pi'") && reply.contains("acp-test-prov"),
+                "pi must refuse a provider override, naming both: " + reply);
+        assertFalse(reply.contains("not configured"),
+                "the refusal must be the harness's, not a missing-provider one: " + reply);
+    }
+
+    @Test
+    void refusesAProviderJclawHasNoEndpointFor() throws Exception {
+        ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, harness.toString());
+        ConfigService.set(SubagentSpawnTool.ACP_HARNESS_KEY, "claude");
+        var parent = grantedAgent("p-acp-model-noprov");
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"x\",\"runtime\":\"acp\",\"modelProvider\":\"no-such-provider\",\"modelId\":\"m\"}");
+
+        assertTrue(reply.startsWith("Error:") && reply.contains("no-such-provider")
+                        && reply.contains("not configured"),
+                "an unconfigured provider must be refused before any launch: " + reply);
+    }
+
+    @Test
+    void settingsDefaultReachesTheHarnessArgv() throws Exception {
+        // pi (batch, no pi-acp adapter on this host) runs the wrapper path: the Settings
+        // default model must land on the argv as --model, and the transcript must carry
+        // the override step. The harness stand-in echoes its argv before the task.
+        Assumptions.assumeTrue(AcpCapabilityCatalog.stdioAcpLaunchCommand("pi") == null,
+                "a pi-acp adapter on PATH would route this run over ACP instead of the wrapper");
+        var argvHarness = Files.createTempFile("jclaw-acp-argv-harness-", ".sh");
+        Files.writeString(argvHarness, "#!/bin/sh\nprintf 'ARGS:%s|' \"$@\"\ncat\n");
+        argvHarness.toFile().setExecutable(true, false);
+        try {
+            ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, argvHarness.toString());
+            ConfigService.set(SubagentSpawnTool.ACP_HARNESS_KEY, "pi");
+            ConfigService.set(SubagentSpawnTool.ACP_MODEL_ID_KEY, "qwen-test");
+            var parent = grantedAgent("p-acp-model-argv");
+            ConversationService.create(parent, "web", "u-acp-model-argv");
+            commitAndReopen();
+
+            var reply = invokeOnVirtualThread(parent.id,
+                    "{\"task\":\"model-default\",\"runtime\":\"acp\"}");
+            var json = JsonParser.parseString(reply).getAsJsonObject();
+
+            assertEquals("COMPLETED", json.get("status").getAsString(), reply);
+            assertEquals("ARGS:--model|ARGS:qwen-test|model-default", json.get("reply").getAsString(),
+                    "the Settings default must reach the harness as --model <id> ahead of the stdin task");
+
+            long runId = Long.parseLong(json.get("run_id").getAsString());
+            JPA.em().clear();
+            SubagentRun run = SubagentRun.findById(runId);
+            assertNotNull(run);
+            List<Message> steps = Message.find("conversation = ?1 AND messageKind = ?2",
+                    run.childConversation, SubagentSpawnTool.MESSAGE_KIND_CODINGRUN_STEP).fetch();
+            assertTrue(steps.stream().anyMatch(m -> m.content.contains("model override qwen-test")),
+                    "the run transcript must record the override: " + steps.stream().map(m -> m.content).toList());
+        } finally {
+            ConfigService.set(SubagentSpawnTool.ACP_MODEL_ID_KEY, "");
+            Files.deleteIfExists(argvHarness);
+        }
+    }
+
+    @Test
+    void spawnArgsWinOverTheSettingsDefault() throws Exception {
+        Assumptions.assumeTrue(AcpCapabilityCatalog.stdioAcpLaunchCommand("pi") == null,
+                "a pi-acp adapter on PATH would route this run over ACP instead of the wrapper");
+        var argvHarness = Files.createTempFile("jclaw-acp-argv-harness-", ".sh");
+        Files.writeString(argvHarness, "#!/bin/sh\nprintf 'ARGS:%s|' \"$@\"\ncat\n");
+        argvHarness.toFile().setExecutable(true, false);
+        try {
+            ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, argvHarness.toString());
+            ConfigService.set(SubagentSpawnTool.ACP_HARNESS_KEY, "pi");
+            ConfigService.set(SubagentSpawnTool.ACP_MODEL_ID_KEY, "settings-model");
+            var parent = grantedAgent("p-acp-model-arg-wins");
+            ConversationService.create(parent, "web", "u-acp-model-arg-wins");
+            commitAndReopen();
+
+            var reply = invokeOnVirtualThread(parent.id,
+                    "{\"task\":\"t\",\"runtime\":\"acp\",\"modelId\":\"spawn-model\"}");
+            var json = JsonParser.parseString(reply).getAsJsonObject();
+
+            assertEquals("COMPLETED", json.get("status").getAsString(), reply);
+            assertEquals("ARGS:--model|ARGS:spawn-model|t", json.get("reply").getAsString(),
+                    "the per-spawn modelId must win over the Settings default");
+        } finally {
+            ConfigService.set(SubagentSpawnTool.ACP_MODEL_ID_KEY, "");
+            Files.deleteIfExists(argvHarness);
+        }
     }
 
     /** A non-main agent explicitly granted the acp capability. */
