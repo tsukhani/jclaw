@@ -492,6 +492,7 @@ final class SubagentAcpRunner {
                                                    @Nullable HarnessModel model, Map<String, String> env) {
         var conversationId = parentConversationId(runId);
         var acc = new ReplyAccumulator();
+        var thoughts = new AcpThoughtCoalescer();
         var seq = new AtomicInteger(1);   // seq 0 is the channel-approval step (when gated)
         var harnessId = resolveHarnessId();
 
@@ -537,9 +538,8 @@ final class SubagentAcpRunner {
                 .clientCapabilities(new AcpSchema.ClientCapabilities())   // decline fs + terminal
                 .sessionUpdateConsumer(n -> {
                     SubagentRegistry.touch(runId);   // harness activity resets the idle clock
-                    var ev = AcpEventMapper.toHarnessEvent(n.update());
-                    if (ev != null) {
-                        synchronized (acc) {   // keep seq + dispatch + fold ordered
+                    synchronized (acc) {   // keep seq + dispatch + fold ordered; the coalescer rides the same lock
+                        for (var ev : thoughts.accept(n.update())) {
                             dispatchHarnessEvent(runId, ev, seq.getAndIncrement());
                             acc.fold(ev);
                         }
@@ -568,6 +568,10 @@ final class SubagentAcpRunner {
                     List.of(new AcpSchema.TextContent(task))));
             String reply;
             synchronized (acc) {
+                for (var ev : thoughts.flush()) {   // reasoning the turn ended on, with no later update to close it
+                    dispatchHarnessEvent(runId, ev, seq.getAndIncrement());
+                    acc.fold(ev);
+                }
                 reply = acc.reply();
             }
             publishRunDone(runId, seq.get(), reply);

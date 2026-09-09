@@ -50,7 +50,7 @@ public final class AcpEventMapper {
         };
     }
 
-    private static String text(ContentBlock content) {
+    static String text(ContentBlock content) {
         return content instanceof TextContent t && t.text() != null ? t.text() : "";
     }
 
