@@ -84,7 +84,7 @@ const repairManifest = {
 }
 
 registerEndpoint('/api/system/database', { method: 'GET', handler: () => status })
-for (const url of ['/api/system/database/backups', '/api/system/database/restore', '/api/system/database/repair', '/api/system/database/repair/clean', '/api/config']) {
+for (const url of ['/api/system/database/backups', '/api/system/database/restore?id=jclaw-20260908T120000Z.zip', '/api/system/database/repair', '/api/system/database/repair/clean', '/api/config']) {
   registerEndpoint(url, {
     method: 'POST',
     handler: async (event) => {
@@ -177,7 +177,7 @@ describe('Settings → Database', () => {
     await settle()
     dialogButton('Restore')!.click()
     await settle()
-    expect(posts).toEqual([{ url: '/api/system/database/restore', body: { id: 'jclaw-20260908T120000Z.zip' } }])
+    expect(posts).toEqual([{ url: '/api/system/database/restore?id=jclaw-20260908T120000Z.zip', body: {} }])
     expect(c.text()).toContain('Waiting for the backend to stop')
   })
 

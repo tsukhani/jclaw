@@ -1340,6 +1340,7 @@ DB_CLEAN_AFTER=""      # repair --clean: accept the closing cleanup offer
 DB_RESTORE_TARGET=""   # restore <zip | backup id>
 DB_OP_STARTED=""       # ISO stamp written into logs/database-status.json
 DB_OP_DONE=""          # set once a restore/repair wrote its final status
+DB_OP_BACKUP=""        # the backup a restore is applying, for the EXIT trap
 # The post-swap critical section: between replacing the tree and confirming the
 # new version answers, a failure leaves an install with new code and no state.
 # upgrade_abort / upgrade_cleanup read these to put it back.
@@ -5395,13 +5396,15 @@ data/jclaw.mv.db.pre-restore until the next successful backup.${note}" || exit 0
 
     local backup_name
     backup_name=$(basename "$zip")
+    DB_OP_BACKUP="$backup_name"
     DB_OP_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    trap 'db_op_trap restore "$backup_name"' EXIT
+    # The trap runs after this function's locals are gone, so it reads the global.
+    trap 'db_op_trap restore "$DB_OP_BACKUP"' EXIT
     if [[ -n "$was_running" ]]; then
         db_status_json restore stopping "Stopping JClaw…" "$backup_name"
         db_stop_instance
     fi
-    db_status_json restore restoring "Restoring $backup_name…" "$backup_name"
+    db_status_json restore restoring "Restoring ${backup_name}…" "$backup_name"
     echo "==> Restoring..."
     if ! db_engine restore "$SCRIPT_DIR/data" "$zip" 2>&1 | tee -a "$DB_LOG"; then
         db_status_json restore failed "Restore failed — see logs/database.log" "$backup_name"

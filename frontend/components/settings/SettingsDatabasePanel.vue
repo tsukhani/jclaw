@@ -172,7 +172,8 @@ async function restoreBackup(b: BackupInfo) {
     variant: 'danger',
   })
   if (!ok) return
-  await handOff('/api/system/database/restore', { id: b.id }, 'restore')
+  // The id travels in the query string: a Play action binds its parameters from there, not from a JSON body.
+  await handOff(`/api/system/database/restore?id=${encodeURIComponent(b.id)}`, {}, 'restore')
 }
 
 async function restoreUpload(event: Event) {
