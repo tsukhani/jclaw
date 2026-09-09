@@ -2814,15 +2814,24 @@ do_start_prod() {
         # var, say), and a missed input means shipping a frontend change that
         # never appears — strictly worse than a wasted rebuild. Hence the
         # escape hatch.
+        #
+        # Both build roots are probed, not just frontend/ (JCLAW-1178).
+        # components/guide/sections.ts imports every docs/user-guide/*.md with
+        # Vite's ?raw, so the guide text is compiled into the bundle from
+        # outside frontend/ — probing only frontend/ skipped the rebuild after
+        # a guide edit and served the previous text with no warning.
         spa_rebuild_reason=""
         if [[ -n "${JCLAW_FORCE_SPA_BUILD:-}" ]]; then
             spa_rebuild_reason="forced by JCLAW_FORCE_SPA_BUILD"
         elif [[ ! -d "$SCRIPT_DIR/public/spa" ]]; then
             spa_rebuild_reason="public/spa is missing"
-        elif [[ -n "$(find . \
+        else
+            spa_stale_file="$(find "$SCRIPT_DIR/frontend" "$SCRIPT_DIR/docs/user-guide" \
                 \( -name node_modules -o -name .nuxt -o -name .output -o -name .vite \) -prune \
-                -o -type f -newer "$SCRIPT_DIR/public/spa" -print -quit 2>/dev/null)" ]]; then
-            spa_rebuild_reason="frontend sources are newer than public/spa"
+                -o -type f -newer "$SCRIPT_DIR/public/spa" -print -quit 2>/dev/null)"
+            if [[ -n "$spa_stale_file" ]]; then
+                spa_rebuild_reason="${spa_stale_file#"$SCRIPT_DIR"/} is newer than public/spa"
+            fi
         fi
 
         if [[ -n "$spa_rebuild_reason" ]]; then
