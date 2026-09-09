@@ -5510,31 +5510,35 @@ do_db_status() {
             exit 1
         fi
         if command -v python3 >/dev/null 2>&1; then
-            printf '%s' "$body" | python3 -c '
-import json, sys
-s = json.load(sys.stdin)
+            DB_STATUS_JSON="$body" python3 - <<'PY'
+import json, os
+s = json.loads(os.environ["DB_STATUS_JSON"])
 def human(b):
     b = b or 0
     for unit in ("B", "KB", "MB"):
-        if b < 1024: return f"{b:.0f} {unit}" if unit == "B" else f"{b:.1f} {unit}"
+        if b < 1024:
+            return f"{b:.0f} {unit}" if unit == "B" else f"{b:.1f} {unit}"
         b /= 1024
     return f"{b:.2f} GB"
-print(f"Verdict:      {s[\"verdict\"]} — {s[\"reason\"]}")
-print(f"Data file:    {human(s[\"dataFileBytes\"])}  (trace {human(s[\"traceFileBytes\"])}, H2 {s[\"h2Version\"]})")
-if s.get("preRestoreBytes"): print(f"Pre-restore:  {human(s[\"preRestoreBytes\"])} (kept until the next backup)")
-print(f"Free space:   {human(s[\"freeBytes\"])}")
+print(f"Verdict:      {s['verdict']} — {s['reason']}")
+print(f"Data file:    {human(s['dataFileBytes'])}  (trace {human(s['traceFileBytes'])}, H2 {s['h2Version']})")
+if s.get("preRestoreBytes"):
+    print(f"Pre-restore:  {human(s['preRestoreBytes'])} (kept until the next backup)")
+print(f"Free space:   {human(s['freeBytes'])}")
 age = s.get("lastBackupAgeSeconds")
-print("Last backup:  " + (f"{s[\"lastBackupAt\"]} ({age // 3600}h {age % 3600 // 60}m ago)" if age is not None else "none"))
-print(f"Backups:      {len(s[\"backups\"])} in {s[\"backupsDir\"]} (retention {s[\"retention\"]}, schedule {s.get(\"schedule\") or \"none\"})")
+print("Last backup:  " + (f"{s['lastBackupAt']} ({age // 3600}h {age % 3600 // 60}m ago)" if age is not None else "none"))
+print(f"Backups:      {len(s['backups'])} in {s['backupsDir']} (retention {s['retention']}, schedule {s.get('schedule') or 'none'})")
 r = s.get("repair")
 if r:
-    print(f"Repair {r[\"stamp\"]}: {r[\"summary\"]}; remnants {human(r.get(\"intermediateBytes\") or sum(f[\"bytes\"] for f in r[\"files\"]))} in {len(r[\"files\"])} files")
+    remnants = sum(f["bytes"] for f in r["files"])
+    print(f"Repair {r['stamp']}: {r['summary']}; remnants {human(remnants)} in {len(r['files'])} files")
     print("Cleanup:      " + ("available (db-clean)" if s["cleanupAvailable"] else "not available — " + (s.get("cleanupUnavailableReason") or "")))
 else:
     print("Repair remnants: none")
 op = s.get("lastOperation")
-if op and op.get("phase"): print(f"Last {op[\"op\"]}: {op[\"phase\"]} — {op.get(\"message\") or \"\"}")
-'
+if op and op.get("phase"):
+    print(f"Last {op['op']}: {op['phase']} — {op.get('message') or ''}")
+PY
         else
             printf '%s\n' "$body"
         fi
