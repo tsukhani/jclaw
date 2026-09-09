@@ -5388,6 +5388,9 @@ do_db_restore() {
     db_engine validate "$zip" || exit 1
     local was_running=""
     db_backend_running && was_running=1
+    # The start after the swap needs what `restart` resolves up front — java, play,
+    # and pnpm on PATH for the SPA gate — so resolve it before anything is stopped.
+    [[ -n "$was_running" ]] && check_prereqs
     local note=""
     [[ -n "$was_running" ]] && note=" JClaw will be stopped and started again."
     db_confirm "This replaces the database with the backup from $(db_mtime "$zip").
@@ -5428,6 +5431,7 @@ do_db_repair() {
     fi
     local was_running=""
     db_backend_running && was_running=1
+    [[ -n "$was_running" ]] && check_prereqs
     local note=""
     [[ -n "$was_running" ]] && note=" JClaw will be stopped and started again."
     db_confirm "This rebuilds data/jclaw.mv.db from whatever H2's recovery tool can still read.
