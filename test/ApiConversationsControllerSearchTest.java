@@ -2,6 +2,7 @@ import models.Agent;
 import models.Conversation;
 import models.Message;
 import models.MessageRole;
+import models.TaskRunMessage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,7 +14,6 @@ import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearchRepository;
 import services.search.MessageSearchTestHooks;
-import models.TaskRunMessage;
 
 import java.io.IOException;
 import java.util.List;
