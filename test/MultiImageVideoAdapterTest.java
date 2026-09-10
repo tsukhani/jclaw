@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * synthetic frame bytes — no ffmpeg. (The dispatcher functional happy-path against a
  * mocked vision model lives with JCLAW-224's routing tests.)
  */
-class MultiImageVideoAdapterTest {
+class MultiImageVideoAdapterTest extends play.test.UnitTest {
 
     private static List<FrameSampler.Frame> fakeFrames() {
         return List.of(
