@@ -214,7 +214,8 @@ class LlmBreakerTest extends UnitTest {
         assertEquals(20, config.minVolume());
         assertEquals(60_000L, config.cooldownMillis());
         assertEquals(3, config.halfOpenPermits());
-        assertFalse(config.slowCallsEnabled(), "slow-call detection is JCLAW-1169, not this story");
+        assertEquals(30_000L, config.slowCallDurationMillis());
+        assertEquals(0.5, config.slowCallRateThreshold(), 1e-9);
     }
 
     @Test
@@ -224,13 +225,17 @@ class LlmBreakerTest extends UnitTest {
                 "llm.breaker.failure-rate", "97",
                 "llm.breaker.min-calls", "999",
                 "llm.breaker.wait-seconds", "7",
-                "llm.breaker.half-open-probes", "5"), LlmResilience::config);
+                "llm.breaker.half-open-probes", "5",
+                "llm.breaker.stall-seconds", "11",
+                "llm.breaker.slow-rate", "80"), LlmResilience::config);
 
         assertEquals(13, config.windowSize());
         assertEquals(0.97, config.failureRateThreshold(), 1e-9);
         assertEquals(999, config.minVolume());
         assertEquals(7_000L, config.cooldownMillis());
         assertEquals(5, config.halfOpenPermits());
+        assertEquals(11_000L, config.slowCallDurationMillis());
+        assertEquals(0.8, config.slowCallRateThreshold(), 1e-9);
     }
 
     private static CircuitBreaker breakerWith(String providerName, Map<String, String> keys) {

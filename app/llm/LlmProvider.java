@@ -553,28 +553,58 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     // split mirrors the SSE event surface and reactive callers want them
     // independent. Bundling into a Callbacks DTO would lose the lambda-literal
     // call-site ergonomics every caller depends on.
+    /**
+     * Streaming chat under this provider's circuit breaker
+     * ({@link LlmResilience#beginStream}). While the breaker is open the failure arrives
+     * through {@code onError} rather than as a throw, so every caller's existing stream
+     * error path handles it; nothing reaches the wire.
+     */
     @SuppressWarnings("java:S107")
     public void chatStream(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                            Consumer<ChatCompletionChunk> onChunk,
                            Runnable onComplete, Consumer<Exception> onError,
                            @Nullable Integer maxTokens, @Nullable String thinkingMode,
                            @Nullable String channel) {
+        var guard = LlmResilience.beginStream(config.name());
+        if (guard == null) {
+            onError.accept(LlmResilience.openBreakerFailure(config.name()));
+            return;
+        }
+        dispatchStream(guard, model, messages, tools, onChunk, onComplete, onError,
+                maxTokens, thinkingMode, channel);
+    }
+
+    /** One whole streaming call, the JCLAW-1076 tools retry included — the unit {@code guard} records a
+     *  single breaker outcome for. Never call it directly: that bypasses the provider's breaker. */
+    @SuppressWarnings("java:S107") // same call surface as chatStream, which this is the body of
+    private void dispatchStream(LlmResilience.StreamGuard guard,
+                                String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                                Consumer<ChatCompletionChunk> onChunk,
+                                Runnable onComplete, Consumer<Exception> onError,
+                                @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                                @Nullable String channel) {
         // JCLAW-882: the streaming dispatch point. Counted here rather than inside
         // the virtual thread below, because the turn binding lives on the calling
         // thread — the stream thread and the provider's IO thread carry none.
         LatencyTrace.countLlmCall();
         var call = GenAiSpans.start(config, GenAiSpans.OPERATION_CHAT, model, true, maxTokens);
+        // JCLAW-1169: the guard is stamped here rather than in GenAiSpans.Call.chunk, which
+        // returns immediately when telemetry is off — the default.
         Consumer<ChatCompletionChunk> observedChunk = chunk -> {
+            guard.chunk();
             call.chunk(chunk);
             onChunk.accept(chunk);
         };
-        // The span ends before the caller's callback: that callback is what releases
-        // whoever is waiting on the stream, and they must not see the latch before the span.
+        // The breaker outcome and the span both land before the caller's callback: that
+        // callback is what releases whoever is waiting on the stream, and they must not see
+        // the latch before either.
         Runnable observedComplete = () -> {
+            guard.succeeded();
             call.succeeded();
             onComplete.run();
         };
         Consumer<Exception> observedError = e -> {
+            guard.failed(e);
             call.failed(e);
             onError.accept(e);
         };
