@@ -323,6 +323,7 @@ GET     /api/logs                               ApiLogsController.list
 GET     /api/subagents/acp-harnesses            ApiAcpHarnessController.list
 POST    /api/subagents/acp-harnesses            ApiAcpHarnessController.add
 DELETE  /api/subagents/acp-harnesses            ApiAcpHarnessController.remove
+GET     /api/subagents/acp-command              ApiAcpHarnessController.commandPreview
 
 # Subagent Runs API (JCLAW-271)
 GET     /api/subagent-runs                      ApiSubagentRunsController.list

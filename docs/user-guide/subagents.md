@@ -97,7 +97,7 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
 
 ### Operator setup
 
-1. **Point JClaw at the harness binary.** Set `subagent.acp.command` (Settings → **Subagents**, or a config key) to the harness command. Use an **absolute path** so it resolves regardless of the server's working directory:
+1. **Point JClaw at the harness binary.** Set `subagent.acp.command` (Settings → **Coding**, or a config key) to the harness command. Use an **absolute path** so it resolves regardless of the server's working directory:
 
    ```text
    subagent.acp.command = /usr/local/bin/pi
@@ -140,7 +140,7 @@ To stop a subagent from spawning grandchildren that spawn great-grandchildren, J
 
 A depth limit of `1` means the top-level agent can spawn children, but those children cannot spawn further children. Bump it for explicit fan-in patterns; keep it conservative for runaway protection.
 
-The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (default 300) and `subagent.defaultYieldTimeoutSeconds` (default 300) — the fallbacks for a spawn or yield that omits its own timeout — the `subagent.acp.command` harness command, and an optional global subagent model (`subagent.modelProvider` / `subagent.modelId`) that pins every child to one model instead of inheriting the parent's.
+The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (default 300) and `subagent.defaultYieldTimeoutSeconds` (default 300) — the fallbacks for a spawn or yield that omits its own timeout — and an optional global subagent model (`subagent.modelProvider` / `subagent.modelId`) that pins every child to one model instead of inheriting the parent's. The harness command and its model override live in Settings → **Coding**.
 
 ## Inspecting what a child did
 

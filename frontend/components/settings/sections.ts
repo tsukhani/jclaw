@@ -24,6 +24,7 @@ import {
   ClipboardDocumentCheckIcon,
   ClockIcon,
   CircleStackIcon,
+  CodeBracketIcon,
   ServerStackIcon,
   CommandLineIcon,
   CpuChipIcon,
@@ -46,6 +47,7 @@ import {
 
 import SettingsApprovalsPanel from './SettingsApprovalsPanel.vue'
 import SettingsChatPanel from './SettingsChatPanel.vue'
+import SettingsCodingPanel from './SettingsCodingPanel.vue'
 import SettingsDatabasePanel from './SettingsDatabasePanel.vue'
 import SettingsTimezonePanel from './SettingsTimezonePanel.vue'
 import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
@@ -147,6 +149,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
     sections: [
       { id: 'chat', title: 'Chat', icon: ChatBubbleOvalLeftEllipsisIcon, component: SettingsChatPanel },
       { id: 'subagents', title: 'Subagents', icon: UserGroupIcon, component: SettingsSubagentsPanel },
+      { id: 'coding', title: 'Coding', icon: CodeBracketIcon, component: SettingsCodingPanel },
       { id: 'tasks', title: 'Tasks', icon: ClipboardDocumentCheckIcon, component: SettingsTasksPanel },
       { id: 'skills', title: 'Skills Promotion', icon: PuzzlePieceIcon, component: SettingsSkillsPanel },
     ],

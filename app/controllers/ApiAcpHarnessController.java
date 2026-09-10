@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AcpHarnessProbe;
+import tools.AcpCommandPreview;
 import utils.ApiResponses;
 
 import java.util.List;
@@ -19,7 +20,7 @@ import static utils.GsonHolder.GSON;
  * ACP coding-harness detection: probes the host PATH for the CLIs the ACP
  * runtime ({@code runtime=acp}) can drive — {@code claude}, {@code pi}, {@code
  * codex}, {@code gemini}, {@code opencode}, plus operator-added custom commands.
- * Surfaced in Settings → Subagents so the operator picks a detected harness
+ * Surfaced in Settings → Coding so the operator picks a detected harness
  * (autofilling {@code subagent.acp.command} + {@code subagent.acp.harness})
  * instead of typing the command by hand. Probed fresh on each call.
  */
@@ -78,6 +79,15 @@ public class ApiAcpHarnessController extends Controller {
         }
         AcpHarnessProbe.removeCustom(command);
         renderJSON(gson.toJson(new HarnessesResponse(toEntries(AcpHarnessProbe.probeAll()))));
+    }
+
+    /** GET /api/subagents/acp-command — what a {@code runtime="acp"} spawn
+     *  launches under the current Settings, so the Coding panel can show the
+     *  model override's flags without storing them in the command. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AcpCommandPreview.class)))
+    @Operation(summary = "Preview the effective ACP harness launch command")
+    public static void commandPreview() {
+        renderJSON(gson.toJson(AcpCommandPreview.current()));
     }
 
     private static List<HarnessEntry> toEntries(List<AcpHarnessProbe.Detected> detected) {
