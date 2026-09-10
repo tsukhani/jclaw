@@ -3,17 +3,20 @@ import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { clearNuxtData } from '#app'
-import SettingsSubagentsPanel from '~/components/settings/SettingsSubagentsPanel.vue'
+import SettingsCodingPanel from '~/components/settings/SettingsCodingPanel.vue'
 import { useProvideSettingsConfig } from '~/composables/useSettingsConfig'
 
 /**
- * ACP harness auto-detection + custom-harness registration in the Subagents
- * settings panel. The panel injects the page-provided settings-config context,
- * so it's wrapped in a provider harness to mount standalone. Covers: detected
- * harnesses render as chips (available clickable, missing disabled); one click
- * fills BOTH subagent.acp.command and subagent.acp.harness; a submitted custom
- * command is probed and, when its binary resolves, becomes a new chip (else an
- * inline error); removing a custom chip deletes it.
+ * The Coding settings panel: ACP harness auto-detection, custom-harness
+ * registration, the harness model override, and the read-only preview of what a
+ * runtime="acp" spawn actually launches. The panel injects the page-provided
+ * settings-config context, so it's wrapped in a provider harness to mount
+ * standalone. Covers: detected harnesses render as chips (available clickable,
+ * missing disabled); one click fills BOTH subagent.acp.command and
+ * subagent.acp.harness; a submitted custom command is probed and, when its
+ * binary resolves, becomes a new chip (else an inline error); removing a custom
+ * chip deletes it; the model override writes both acp model keys; and the launch
+ * preview shows the per-harness flags without them being stored in the command.
  */
 interface DetectedHarness {
   id: string
@@ -27,14 +30,24 @@ interface DetectedHarness {
   acpDetail: string
 }
 
+interface CommandPreview {
+  command: string
+  harness: string
+  effective: string
+  env: string[]
+  rejection: string | null
+  acpAdapter: boolean
+}
+
 const Harness = defineComponent({
   setup() {
     useProvideSettingsConfig()
-    return () => h(SettingsSubagentsPanel)
+    return () => h(SettingsCodingPanel)
   },
 })
 
 let harnesses: DetectedHarness[] = []
+let preview: CommandPreview
 let configPosts: Record<string, unknown>[] = []
 let addedCommands: string[] = []
 let removedCommands: string[] = []
@@ -46,6 +59,7 @@ registerEndpoint('/api/config', {
   method: 'GET',
   handler: () => ({
     entries: [
+      { key: 'subagent.acp.command', value: 'claude -p' },
       { key: 'provider.ollama.baseUrl', value: 'http://localhost:11434/v1' },
       { key: 'provider.ollama.models', value: JSON.stringify([{ id: 'qwen3.5:9b', name: 'Qwen 3.5 9B' }]) },
     ],
@@ -74,10 +88,8 @@ registerEndpoint('/api/config', {
   },
 })
 registerEndpoint('/api/providers', () => [])
-registerEndpoint('/api/agents', () => [
-  { id: 1, name: 'main', enabled: true, isMain: true, modelProvider: 'openai', modelId: 'gpt-4.1' },
-])
 registerEndpoint('/api/subagents/acp-harnesses', { method: 'GET', handler: () => ({ harnesses }) })
+registerEndpoint('/api/subagents/acp-command', { method: 'GET', handler: () => preview })
 registerEndpoint('/api/subagents/acp-harnesses', {
   method: 'POST',
   handler: async (event) => {
@@ -115,9 +127,11 @@ beforeEach(() => {
     { id: 'claude', name: 'Claude Code', command: 'claude -p', harness: 'claude', available: true, reason: 'available', custom: false, acpSupport: 'adapter-missing', acpDetail: 'Needs the claude-code-acp adapter' },
     { id: 'codex', name: 'Codex', command: 'codex exec', harness: 'codex', available: false, reason: 'codex not found on PATH', custom: false, acpSupport: 'none', acpDetail: 'No ACP — runs via the stdin/stdout wrapper' },
   ]
+  // No model override: the launch is the configured command verbatim.
+  preview = { command: 'claude -p', harness: 'claude', effective: 'claude -p', env: [], rejection: null, acpAdapter: false }
 })
 
-describe('SettingsSubagentsPanel — ACP harness detection', () => {
+describe('SettingsCodingPanel — ACP harness detection', () => {
   it('renders a chip per detected harness; available is clickable, missing is disabled', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
@@ -196,7 +210,7 @@ describe('SettingsSubagentsPanel — ACP harness detection', () => {
   })
 })
 
-describe('SettingsSubagentsPanel — acp harness model override', () => {
+describe('SettingsCodingPanel — acp harness model override', () => {
   it('offers the configured provider models and POSTs both acp model keys on pick', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
@@ -220,5 +234,61 @@ describe('SettingsSubagentsPanel — acp harness model override', () => {
     await vi.waitFor(() => expect(configDeletes.length).toBe(2))
     expect(configDeletes).toEqual(['subagent.acp.modelProvider', 'subagent.acp.modelId'])
     expect(configPosts).toEqual([])
+  })
+})
+
+describe('SettingsCodingPanel — effective launch preview', () => {
+  it('stays hidden while the launch is the configured command verbatim', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="acp-launch-preview"]').exists()).toBe(false)
+  })
+
+  it('shows the per-harness model flags and the env the override travels in', async () => {
+    preview = {
+      command: 'claude -p',
+      harness: 'claude',
+      effective: 'claude -p --model qwen3.5:9b',
+      env: ['ANTHROPIC_MODEL', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'],
+      rejection: null,
+      acpAdapter: false,
+    }
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    const row = c.find('[data-testid="acp-launch-preview"]')
+    expect(row.exists()).toBe(true)
+    expect(row.text()).toContain('claude -p --model qwen3.5:9b')
+    // The harness id is what picks --model over -m, so it's named beside the command.
+    expect(row.text()).toContain('harness claude')
+    expect(row.text()).toContain('ANTHROPIC_BASE_URL')
+    // The flags are appended at launch, never written back into the command.
+    expect(configPosts).toEqual([])
+  })
+
+  it('says when real ACP over stdio replaces the configured command', async () => {
+    preview = {
+      command: 'claude -p', harness: 'claude', effective: 'claude-agent-acp',
+      env: ['ANTHROPIC_MODEL'], rejection: null, acpAdapter: true,
+    }
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    const row = c.find('[data-testid="acp-launch-preview"]')
+    expect(row.text()).toContain('claude-agent-acp')
+    expect(row.text()).toContain('replaces the command above')
+  })
+
+  it('surfaces a harness that cannot take the override', async () => {
+    preview = {
+      command: 'opencode run', harness: 'opencode', effective: 'opencode run', env: [],
+      rejection: 'harness \'opencode\' takes no model override from JClaw; set its model in the harness\'s own configuration.',
+      acpAdapter: false,
+    }
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="acp-launch-preview"]').text()).toContain('takes no model override')
   })
 })

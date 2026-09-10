@@ -13,7 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * ACP harness detection endpoint (Settings → Subagents). The built-in probe
+ * ACP harness detection endpoint (Settings → Coding). The built-in probe
  * shells out to claude/pi/codex/…, so real results depend on the host PATH —
  * the detection test pins {@link AcpHarnessProbe#setForTest}. The custom-command
  * tests mint a temp executable (so {@code <script> --version} deterministically
@@ -102,9 +102,23 @@ class ApiAcpHarnessControllerTest extends FunctionalTest {
                 "an unresolved command is not stored");
     }
 
+    /** Shape only: the acp.* keys are process-global and other classes run concurrently,
+     *  so the composition is pinned in AcpCommandPreviewTest instead. */
+    @Test
+    void previewsTheEffectiveLaunchCommand() {
+        var response = GET("/api/subagents/acp-command");
+        assertIsOk(response);
+        assertContentType("application/json", response);
+        var body = getContent(response);
+        for (var field : List.of("\"command\"", "\"harness\"", "\"effective\"", "\"env\"", "\"acpAdapter\"")) {
+            assertTrue(body.contains(field), field + " present: " + body);
+        }
+    }
+
     @Test
     void requiresAuth() {
         POST("/api/auth/logout", "application/json", "{}");
         assertEquals(401, GET("/api/subagents/acp-harnesses").status.intValue());
+        assertEquals(401, GET("/api/subagents/acp-command").status.intValue());
     }
 }

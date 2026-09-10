@@ -194,12 +194,18 @@ Two hard caps that govern [Subagents](/guide#subagents):
 
 Violations emit `SUBAGENT_LIMIT_EXCEEDED` on the [Logs](/logs) page and return a plain-text refusal to the model. Changes apply live; no restart needed.
 
-To delegate a subagent to an **external coding harness** (Pi / Claude Code / Codex CLI) instead of JClaw's native loop, set:
+## Coding
+
+Delegating a subagent to an **external coding harness** (Pi / Claude Code / Codex CLI) instead of JClaw's native loop:
 
 | Key                    | Default    | Meaning                                                                                             |
 |------------------------|------------|-----------------------------------------------------------------------------------------------------|
 | `subagent.acp.command` | *(unset)*  | Absolute path to the harness command run for `subagent_spawn { runtime:"acp" }` (e.g. `/usr/local/bin/pi`). Read from config only, never the model. |
 | `subagent.acp.modelProvider` / `subagent.acp.modelId` | *(unset)* | Provider/model the harness runs with instead of its own default (the `acp.model` picker). Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses refuse the override. A per-spawn `modelProvider` / `modelId` wins over it. |
+
+The **detected** row lists the harness CLIs found on this host's PATH — one click fills `subagent.acp.command` and `subagent.acp.harness` — and accepts a custom command, which is probed before it is stored.
+
+The model override is never written into `subagent.acp.command`: each harness takes it differently (a `--model` flag, an inline TOML provider block, or environment variables), so JClaw appends it at launch and the panel shows the resulting command underneath as **launches**. That line is also where you see a harness whose ACP adapter replaces the configured command entirely.
 
 The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](/agents) page; the main agent always may), and each run is bounded by `subagent.maxWallClockSeconds` (default 1800). See [External coding harness](/guide#subagents-acp-harness) for the full setup.
 

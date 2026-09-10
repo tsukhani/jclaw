@@ -950,6 +950,14 @@ final class SubagentAcpRunner {
                 ConfigService.get(SubagentSpawnTool.ACP_MODEL_ID_KEY), false);
     }
 
+    /** The Settings-default override alone (no spawn args), or {@code null} when
+     *  {@link SubagentSpawnTool#ACP_MODEL_ID_KEY} names no model. */
+    static @Nullable HarnessModel settingsModel() {
+        var modelId = ConfigService.get(SubagentSpawnTool.ACP_MODEL_ID_KEY);
+        if (modelId == null || modelId.isBlank()) return null;
+        return resolveHarnessModel(ConfigService.get(SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY), modelId);
+    }
+
     static boolean isAcpRuntime(JsonObject args) {
         return "acp".equalsIgnoreCase(SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_RUNTIME));
     }
@@ -984,7 +992,7 @@ final class SubagentAcpRunner {
 
     /** JCLAW-659: configured harness id, normalized and falling back to
      *  {@link SubagentSpawnTool#DEFAULT_ACP_HARNESS} when unset or unrecognized. */
-    private static String resolveHarnessId() {
+    static String resolveHarnessId() {
         var configured = ConfigService.get(SubagentSpawnTool.ACP_HARNESS_KEY, SubagentSpawnTool.DEFAULT_ACP_HARNESS);
         if (configured == null || configured.isBlank()) return SubagentSpawnTool.DEFAULT_ACP_HARNESS;
         var id = configured.strip().toLowerCase(Locale.ROOT);
