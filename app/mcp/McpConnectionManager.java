@@ -16,6 +16,8 @@ import play.db.jpa.JPA;
 import services.EventLogger;
 import services.Tx;
 import utils.AppClock;
+import utils.CircuitBreaker;
+import utils.CircuitBreakers;
 
 import java.io.IOException;
 import java.net.URI;
@@ -59,6 +61,13 @@ import java.util.function.Consumer;
  * 1 attempt per 30s") with a 1s initial. Configurable via the
  * {@code backoff*} setters for tests.
  *
+ * <p><b>Two independent guards.</b> The backoff/watchdog loop above is
+ * per-connection and reacts to a transport that died. The JCLAW-1168
+ * circuit breaker in {@link #callTool} is per-call and reacts to a server
+ * that is still connected but not answering — the case the watchdog cannot
+ * see. They compose rather than overlap: a successful reconnect clears the
+ * breaker, and an open breaker never touches the connection.
+ *
  * <p>All status mutations on {@link McpServer} rows go through this
  * class; the admin UI (JCLAW-33) reads them but doesn't write them.
  */
@@ -67,6 +76,8 @@ public final class McpConnectionManager {
     private static final String CLIENT_VERSION_FALLBACK = "0.0.0-dev";
     private static final String CATEGORY_CONNECT = "MCP_CONNECT";
     private static final String CATEGORY_DISCONNECT = "MCP_DISCONNECT";
+    private static final String CATEGORY_BREAKER = "MCP_CIRCUIT_BREAKER";
+    private static final String BREAKER_PREFIX = "mcp:";
     private static final String TIMESTAMP_LAST_DISCONNECTED = "lastDisconnectedAt";
 
     private static volatile long backoffInitialMillis = 1_000L;
@@ -83,6 +94,11 @@ public final class McpConnectionManager {
     @SuppressWarnings("java:S3008") // mutable test hook deliberately not final
     private static volatile Duration firstAttemptRequestTimeout = Duration.ofSeconds(120);
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+
+    /** JCLAW-1168: tighter than the LLM path because every failing call here costs the
+     *  full {@link #DEFAULT_REQUEST_TIMEOUT} — 10 of 20 recent calls failing is enough. */
+    public static final CircuitBreaker.Config BREAKER_CONFIG =
+            CircuitBreaker.Config.of(20, 0.5, 10, 30_000L).withHalfOpenPermits(2);
 
     private static final ConcurrentHashMap<String, Entry> connections = new ConcurrentHashMap<>();
     // Reference is reassigned under synchronized ensureScheduler(); the held
@@ -243,6 +259,9 @@ public final class McpConnectionManager {
             if (pending != null && !pending.isDone()) pending.cancel(false);
             ToolRegistry.unpublishExternal(serverName);
         }
+        // A deleted or reconfigured server keeps no breaker: the registry is what an ops
+        // view enumerates, and a re-add must not inherit the old one's open state.
+        CircuitBreakers.remove(BREAKER_PREFIX + serverName);
         clearAllowlistAndAudit(serverName);
     }
 
@@ -296,15 +315,81 @@ public final class McpConnectionManager {
         return e.client.tools();
     }
 
-    /** Invoke an MCP tool on a connected server. Used by {@link McpToolAdapter}. */
+    /**
+     * Invoke an MCP tool on a connected server. Used by {@link McpToolAdapter}.
+     *
+     * <p>Guarded by this server's {@link #breaker(String) circuit breaker}, so a
+     * hung server costs the {@link #DEFAULT_REQUEST_TIMEOUT} on the calls that
+     * open the breaker and microseconds on the rest of the turn.
+     */
     public static CallToolResult callTool(String serverName, String toolName, JsonObject arguments)
             throws IOException, McpException {
         var entry = connections.get(serverName);
-        if (entry == null || entry.client == null
-                || entry.client.state() != McpClient.State.READY) {
+        var client = entry == null ? null : entry.client;
+        if (client == null || client.state() != McpClient.State.READY) {
             throw new McpException("MCP server '" + serverName + "' not ready");
         }
-        return entry.client.callTool(toolName, arguments);
+        return guardedCall(breaker(serverName), serverName, () -> client.callTool(toolName, arguments));
+    }
+
+    /** One MCP tool call, as {@link #guardedCall} sees it. */
+    @FunctionalInterface
+    public interface McpCall {
+        CallToolResult invoke() throws IOException, McpException;
+    }
+
+    /**
+     * Run {@code call} under {@code breaker}, recording only what is evidence about
+     * the <em>server</em>: an {@link McpException} (JSON-RPC error, protocol violation
+     * or request timeout) and an {@link IOException} record a failure. A returned
+     * {@link CallToolResult#isError()} does not — the tool ran, and its own failure is
+     * tool-level semantics.
+     *
+     * <p>Public so a test can drive the gate against a fake clock without a live server.
+     *
+     * @throws McpException immediately, without invoking {@code call}, while the breaker is open
+     */
+    public static CallToolResult guardedCall(CircuitBreaker breaker, String serverName, McpCall call)
+            throws IOException, McpException {
+        if (!breaker.allowRequest()) {
+            throw new McpException("MCP server '" + serverName
+                    + "' is failing fast: too many recent tool-call failures");
+        }
+        try {
+            var result = call.invoke();
+            breaker.recordSuccess();
+            return result;
+        } catch (IOException | McpException e) {
+            breaker.recordFailure();
+            throw e;
+        }
+    }
+
+    /**
+     * This server's tool-call breaker, created on first use. Per-server by design:
+     * one broken server must not fail-fast a healthy one.
+     */
+    public static CircuitBreaker breaker(String serverName) {
+        return CircuitBreakers.find(BREAKER_PREFIX + serverName)
+                .orElseGet(() -> registerBreaker(serverName));
+    }
+
+    private static CircuitBreaker registerBreaker(String serverName) {
+        var breaker = CircuitBreakers.get(BREAKER_PREFIX + serverName, BREAKER_CONFIG);
+        breaker.setTransitionListener(t -> logBreakerTransition(serverName, t));
+        return breaker;
+    }
+
+    private static void logBreakerTransition(String serverName, CircuitBreaker.Transition t) {
+        var stats = t.stats();
+        switch (t.to()) {
+            case OPEN -> EventLogger.warn(CATEGORY_BREAKER,
+                    "MCP server '%s' tool calls suspended after %d/%d recent failures (%s)"
+                            .formatted(serverName, stats.failures(), stats.samples(), t.reason()));
+            case CLOSED -> EventLogger.info(CATEGORY_BREAKER,
+                    "MCP server '%s' tool calls resumed".formatted(serverName));
+            case HALF_OPEN -> { /* a probe window is not an operator event */ }
+        }
     }
 
     /** Close an MCP client, swallowing any runtime error — used in race-recovery paths. */
@@ -414,6 +499,10 @@ public final class McpConnectionManager {
             entry.status = McpServer.Status.CONNECTED;
             entry.lastError = null;
             entry.attempts = 0;
+            // The watchdog reconnect path never goes through stop(), so clear the breaker
+            // here too: the dead client's failures are no evidence about this fresh one.
+            var breaker = breaker(server.name);
+            if (breaker.state() != CircuitBreaker.State.CLOSED) breaker.reset();
             persistStatus(server.id, McpServer.Status.CONNECTED, null);
             persistTimestamp(server.id, "lastConnectedAt");
             EventLogger.info(CATEGORY_CONNECT,
