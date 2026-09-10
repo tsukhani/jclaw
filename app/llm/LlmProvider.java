@@ -446,6 +446,10 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     /**
      * Synchronous chat with an optional custom timeout (seconds).
      *
+     * <p>Runs under this provider's circuit breaker ({@link LlmResilience#guard}): the whole
+     * call including its retry loop is one recorded outcome, and while the breaker is open
+     * this throws an {@link LlmException.ServerError} without reaching the wire.
+     *
      * @param model          model id to request
      * @param messages       conversation messages in chronological order
      * @param tools          tool definitions exposed to the model; may be null
@@ -467,6 +471,16 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     public ChatResponse chat(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                              @Nullable Integer maxTokens, @Nullable String thinkingMode,
                              @Nullable Integer timeoutSeconds, @Nullable String channel) {
+        return LlmResilience.guard(config.name(), () ->
+                dispatchChat(model, messages, tools, maxTokens, thinkingMode, timeoutSeconds, channel));
+    }
+
+    /** One whole chat call, retry loop included — the unit {@link LlmResilience#guard} records a single
+     *  breaker outcome for. Never call it directly: that bypasses the provider's breaker. */
+    @SuppressWarnings("java:S107") // same call surface as chat(), which this is the body of
+    private ChatResponse dispatchChat(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                                      @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                                      @Nullable Integer timeoutSeconds, @Nullable String channel) {
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
         var json = serializeRequest(request);
         // JCLAW-882: the sync dispatch point. Counted before the wire call so a

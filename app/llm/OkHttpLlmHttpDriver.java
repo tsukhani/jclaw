@@ -111,8 +111,7 @@ final class OkHttpLlmHttpDriver {
                         var body = "";
                         try { body = resp.body().string(); }
                         catch (IOException _) { /* body already consumed or absent */ }
-                        onError.accept(new LlmProvider.LlmException(
-                                "HTTP %d: %s".formatted(resp.code(), sanitizeErrorBody(body, authHeader))));
+                        onError.accept(classify(resp.code(), sanitizeErrorBody(body, authHeader)));
                     } else {
                         onError.accept(t != null ? t
                                 : new LlmProvider.LlmException("SSE failed without cause"));
@@ -136,6 +135,19 @@ final class OkHttpLlmHttpDriver {
             Thread.currentThread().interrupt();
             onError.accept(ie);
         }
+    }
+
+    /**
+     * Classify a non-200 SSE status the way {@code LlmProvider.attemptRequest} classifies a
+     * single-shot one (JCLAW-1166), so a caller can tell a provider fault from a request of
+     * ours. The message is unchanged: {@code ToolCapabilityMemo} matches on its text.
+     */
+    private static LlmProvider.LlmException classify(int status, String body) {
+        var message = "HTTP %d: %s".formatted(status, body);
+        if (status == 429) return new LlmProvider.LlmException.RateLimited(message);
+        if (status >= 500) return new LlmProvider.LlmException.ServerError(message);
+        if (status >= 400) return new LlmProvider.LlmException.ClientError(message);
+        return new LlmProvider.LlmException(message);
     }
 
     private static Optional<Long> parseRetryAfter(String value) {

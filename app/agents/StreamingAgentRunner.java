@@ -391,9 +391,9 @@ final class StreamingAgentRunner {
 
         if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return null;
 
-        // Retry once on transient 5xx errors
-        if (accumulator.error() != null && accumulator.error().getMessage() != null
-                && accumulator.error().getMessage().contains("HTTP 5")) {
+        // Retry once on transient 5xx errors. Matched on the class the driver now attaches
+        // (JCLAW-1167), not on the message: a 4xx whose body quoted "HTTP 5" retried too.
+        if (accumulator.error() instanceof LlmProvider.LlmException.ServerError) {
             EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
             accumulator = primary.chatStreamAccumulate(
                     effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
