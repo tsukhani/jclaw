@@ -164,7 +164,7 @@ public final class H2Maintenance {
                 }
             }
             return new BackupCheck(true, "", entry.getSize());
-        } catch (ZipException e) {
+        } catch (ZipException _) {
             return new BackupCheck(false, "not a zip archive", 0);
         } catch (IOException e) {
             return new BackupCheck(false, "unreadable: " + e.getMessage(), 0);

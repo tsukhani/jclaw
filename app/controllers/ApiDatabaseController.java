@@ -29,6 +29,8 @@ import static utils.GsonHolder.GSON;
  */
 public class ApiDatabaseController extends Controller {
 
+    private static final String NO_SUCH_BACKUP = "No such backup.";
+
     @Before
     static void sessionOrLoopbackSecret() {
         if (LoadtestAuthCheck.permits(Http.Request.current())) {
@@ -75,7 +77,7 @@ public class ApiDatabaseController extends Controller {
     public static void download(String id) {
         var path = DatabaseService.resolveBackup(id == null ? "" : id);
         if (path == null) {
-            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No such backup.");
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_BACKUP);
             return;
         }
         renderBinary(path.toFile(), path.getFileName().toString());
@@ -86,7 +88,7 @@ public class ApiDatabaseController extends Controller {
     public static void delete(String id) {
         try {
             if (!DatabaseService.deleteBackup(id == null ? "" : id)) {
-                ApiResponses.error(404, ApiResponses.NOT_FOUND, "No such backup.");
+                ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_BACKUP);
                 return;
             }
         } catch (IOException e) {
@@ -117,7 +119,7 @@ public class ApiDatabaseController extends Controller {
         } else {
             var path = id == null ? null : DatabaseService.resolveBackup(id);
             if (path == null) {
-                ApiResponses.error(404, ApiResponses.NOT_FOUND, "No such backup.");
+                ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_BACKUP);
                 return;
             }
             var check = H2Maintenance.validateBackup(path);
