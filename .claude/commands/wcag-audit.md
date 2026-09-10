@@ -51,6 +51,18 @@ Audit the JClaw Nuxt frontend (`frontend/`) for **WCAG 2.2 AA**, with particular
 - Build a **typography inventory**: the `@theme` font-size / line-height tokens plus every `text-*`, `text-[...]`, and inline `font-size` across pages/components. Flag body copy below ~16px, `text-xs`/≤12px on meaningful content, weak line-height, and fixed px that won't honor user zoom.
   - **Watch for compound `em` scaling.** A `code { font-size: 0.875em }` rule inside a `pre { font-size: 0.8rem }` multiplies out — that pairing rendered 10.24px in `GuideRenderer.vue`, and neither declaration looks wrong on its own. Compute the product, don't read the declarations.
 - **Layout**: fixed heights/widths on text containers, `overflow-hidden` that can clip text, tap/click targets < 24×24 CSS px (WCAG 2.5.8; 44px ideal), and reflow risks at a 320px viewport. Sum the fixed column widths of any nowrap flex row — that sum, not the declarations, is what overflows.
+  - **Four causes account for essentially every container overflow found here, and none is visible in the markup** — each is a default that only shows up once measured (Phase 2 step 5). Grep for the shapes; the fix is one class:
+
+    | Shape | Why it overflows | Fix |
+    | --- | --- | --- |
+    | `flex-1` on a `select` / `input` / `textarea` | a flex item's `min-width` defaults to `auto`, which for a select is its **widest option**, so `flex-1` can never shrink it to the row | `min-w-0` |
+    | `<fieldset>` | carries a UA `min-width: min-content` that no container sizing overrides | `min-w-0` |
+    | `<table>` sitting directly in a bordered card | a table cannot shrink below its min-content, so it spills past the border | `overflow-x-auto` on the card |
+    | `w-full` on a table already inside `overflow-x-auto` | `w-full` pins the table to the wrapper, so the scroll never engages and `table-fixed` columns compress until cell content overflows | a `min-w-[…]` floor on the table |
+
+    The last two are opposites: adding a wrapper to the fourth shape does nothing, and adding a floor to the third is unnecessary. Check which one you have before reaching for a fix.
+  - **A spilling badge is usually not the bug.** A `shrink-0` element that overflows a flex row is typically the *victim* — some sibling (almost always one of the `flex-1` controls above) refused to shrink and pushed it out. Fix the sibling; the badge needs nothing.
+  - Column ratios that are correct at full width are not the defect when a narrow viewport squeezes them. Prefer a `min-w-[…]` floor plus a scrolling wrapper over re-balancing percentages — and where a `table-fixed` carries a comment explaining why, that layout is load-bearing (`tasks.vue`: an expanded detail row re-balanced every column under auto layout). Leave it.
 - **Color scheme**: information conveyed by color alone (1.4.1); hardcoded hex/hsl/`rgb()` outside the token system (theme-blind values that won't adapt to dark); non-text contrast of borders, icons, and focus rings (≥ 3:1).
   - **Alpha suffixes are the recurring defect here.** A correct per-theme pair (`text-amber-700 dark:text-amber-400`) given an alpha (`/60`–`/80`) blends back toward the surface and fails in *both* themes while looking deliberate. Enumerate `text-<color>/<alpha>` across the tree and compute each at its alpha; the token itself passing proves nothing.
 - Fold in the existing linters: `cd frontend && pnpm lint` (eslint-plugin-vuejs-accessibility) and `pnpm stylelint`. Treat their a11y output as input, not gospel — both have been clean through audits that found real defects.
@@ -92,6 +104,37 @@ Run this from the **worktree**, against its own dev server, so the primary tree'
    ```
    Measure `main.scrollWidth` against `clientWidth`, and look for text spans that have collapsed to zero width.
 
+   **That page-level check is necessary and nowhere near sufficient — run the per-element containment sweep below as well.** A component can sit 125px past the viewport while `document.documentElement.scrollWidth === clientWidth`, because an ancestor scroll container absorbs the spill; measured on 2026-09-10, every one of the offenders found that day reported the page as clean. Page-level scroll and per-element containment are different measurements, the way axe's *incomplete* and Lighthouse's *violations* are different in step 3.
+
+   Compare each element's right edge against its parent's, skipping parents that already scroll (those are doing their job) and anything positioned, hidden or zero-sized. Dedupe by tag+text, because one spilling child drags every wrapper above it into the results:
+   ```js
+   () => {
+     const out = [];
+     for (const el of document.querySelector('main').querySelectorAll('*')) {
+       const cs = getComputedStyle(el);
+       if (cs.display === 'none' || cs.visibility === 'hidden'
+           || cs.position === 'fixed' || cs.position === 'absolute') continue;
+       const r = el.getBoundingClientRect();
+       if (!r.width || !r.height) continue;
+       const p = el.parentElement;
+       if (!p || getComputedStyle(p).overflowX !== 'visible') continue;
+       const spill = Math.round(r.right - p.getBoundingClientRect().right);
+       if (spill > 1) out.push({ spill, tag: el.tagName.toLowerCase(),
+         cls: (el.className || '').toString().slice(0, 50),
+         text: (el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 34) });
+     }
+     const worst = new Map();
+     for (const o of out) {
+       const k = o.tag + '|' + o.text;
+       if (!worst.has(k) || worst.get(k).spill < o.spill) worst.set(k, o);
+     }
+     return [...worst.values()].sort((a, b) => b.spill - a.spill);
+   }
+   ```
+   **Validate it against a known offender before trusting a clean result** — the same rule step 4 applies to the colour parser. A detector that silently matches nothing reports the same empty array as a clean page.
+
+   **Sweep several widths, not one.** Overflow is viewport-dependent in both directions: on the 2026-09-10 run the settings page was clean at 1280px and had four offenders at 820px, while two others appeared only at 640px. Cover a wide desktop, a narrow desktop and a tablet width (1440 / 820 / 640) in addition to the 320px emulation, across every page **and** every `?section=` of Settings — sections mount one at a time, so an unopened panel is unmeasured.
+
 6. Check that a visible focus indicator appears on keyboard focus, and measure its contrast against the adjacent surface (≥ 3:1). Note that scripted `.focus()` does not always trigger `:focus-visible`, so a computed-style diff shows an indicator *exists*, not that it clears 3:1.
 
 7. **When measured values disagree with declared tokens, trust the measured values.**
@@ -103,7 +146,7 @@ If no server can be reached, **say so, continue static-only, and mark the live g
 ## WCAG criteria (emphasis in bold)
 - **1.4.3 Contrast (Minimum, AA)** — text ≥ 4.5:1; large text (≥24px, or ≥18.66px bold) ≥ 3:1 — **both themes**.
 - **1.4.11 Non-text contrast** — UI components, focus rings, icon/border affordances ≥ 3:1.
-- **1.4.4 Resize text · 1.4.12 Text spacing · 1.4.10 Reflow** — **typography & layout** survive 200% zoom and 320px width.
+- **1.4.4 Resize text · 1.4.12 Text spacing · 1.4.10 Reflow** — **typography & layout** survive 200% zoom and 320px width, and no component renders outside the container that bounds it (Phase 2 step 5).
 - **1.4.1 Use of color** — color is not the only signal.
 - **2.4.7 Focus visible · 2.5.8 Target size**.
 - Secondary (report if seen): 1.3.1 info & relationships (headings/labels), 1.1.1 alt text, form-control labels.
@@ -137,7 +180,7 @@ Only the rows the user named. Work in `../jclaw-wcag`; never edit the primary tr
 
 1. **Apply in the order given**, or if none was given, cheapest-cascade first: a base-layer or token rule that fixes many call sites, then component sweeps, then per-element patches.
 2. **Re-measure on the worktree's dev server** — both themes, and at 320px for any reflow row. Report before/after numbers per row. Fixing the worst failures often **uncovers a tier that was hidden behind them** (clearing a set of 4.0:1 links exposed 4.44:1 callout titles that had never appeared in a top-N list); re-sweep until the page is clean, and say so when the tail is a pre-existing failure rather than a regression.
-3. **Confirm the desktop layout is unchanged** for any layout row — measure at 1280 as well as 320.
+3. **Confirm the desktop layout is unchanged** for any layout row — measure at 1280 as well as 320. For a containment row, re-run the Phase 2 step 5 sweep at **every** width that phase used, not just those two: the width that exposed a bleed is frequently neither, and a `min-w-` floor or a scroll wrapper can move a failure to an untested width instead of removing it. Clean at one width is not clean.
 4. **Gate in the worktree** (this is why Phase 0 step 2 exists):
    ```bash
    cd ../jclaw-wcag/frontend && pnpm lint && pnpm stylelint && pnpm typecheck && pnpm test
