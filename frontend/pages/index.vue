@@ -432,6 +432,11 @@ onBeforeUnmount(() => {
       :agents="agents"
     />
 
+    <!-- Circuit Breakers (JCLAW-1170): above Chat Performance on purpose — an open breaker
+         turns calls away in microseconds, so the latency numbers below it improve while the
+         work behind them is failing. Renders nothing until a breaker exists. -->
+    <BreakerStatusSection />
+
     <!-- Chat Performance -->
     <div class="bg-surface-elevated border border-border mb-8">
       <!--

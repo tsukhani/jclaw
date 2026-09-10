@@ -388,6 +388,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/apps
             GET /api/apps/{slug}/files/{uuid}
             GET /api/attachments/{uuid}
+            GET /api/breakers
             GET /api/channels
             GET /api/channels/active
             GET /api/channels/whatsapp/bindings

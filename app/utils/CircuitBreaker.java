@@ -43,7 +43,12 @@ public final class CircuitBreaker {
     public enum Reason {
         FAILURE_RATE, SLOW_CALL_RATE, COOLDOWN_ELAPSED,
         PROBE_SUCCEEDED, PROBE_FAILED, PROBE_SLOW,
-        MANUAL_TRIP, MANUAL_RESET
+        MANUAL_TRIP, MANUAL_RESET;
+
+        /** The two an operator causes, which must never read back as the breaker moving by itself. */
+        public boolean manual() {
+            return this == MANUAL_TRIP || this == MANUAL_RESET;
+        }
     }
 
     private static final byte OK = 0;
@@ -93,8 +98,12 @@ public final class CircuitBreaker {
         }
     }
 
-    /** Point-in-time view of the window, for an ops endpoint or a transition log line. */
-    public record Stats(State state, int samples, int failures, int slowCalls) {
+    /**
+     * Point-in-time view of the window, for an ops endpoint or a transition log line.
+     *
+     * @param reason what moved the breaker into {@code state}; null before it has ever moved
+     */
+    public record Stats(State state, int samples, int failures, int slowCalls, @Nullable Reason reason) {
 
         public double failureRate() {
             return samples == 0 ? 0.0 : (double) failures / samples;
@@ -118,6 +127,7 @@ public final class CircuitBreaker {
     private int slowCalls;            // SLOW samples currently in the window
 
     private State state = State.CLOSED;
+    private @Nullable Reason lastReason;
     private long openedAtNanos;
     private int halfOpenInFlight;     // probes admitted and not yet reported
     private int halfOpenSuccesses;    // probes that came back ok this HALF_OPEN window
@@ -216,7 +226,7 @@ public final class CircuitBreaker {
     }
 
     public synchronized @NonNull Stats stats() {
-        return new Stats(state, count, failures, slowCalls);
+        return new Stats(state, count, failures, slowCalls, lastReason);
     }
 
     public Config config() {
@@ -271,6 +281,7 @@ public final class CircuitBreaker {
     private Transition toOpen(Reason reason) {
         var from = state;
         state = State.OPEN;
+        lastReason = reason;
         openedAtNanos = nanoTime.getAsLong();
         halfOpenInFlight = 0;
         halfOpenSuccesses = 0;
@@ -280,6 +291,7 @@ public final class CircuitBreaker {
     private Transition toClosed(Reason reason) {
         var from = state;
         state = State.CLOSED;
+        lastReason = reason;
         count = 0;
         cursor = 0;
         failures = 0;
@@ -292,6 +304,7 @@ public final class CircuitBreaker {
     private Transition toHalfOpen() {
         var from = state;
         state = State.HALF_OPEN;
+        lastReason = Reason.COOLDOWN_ELAPSED;
         halfOpenInFlight = 0;
         halfOpenSuccesses = 0;
         return new Transition(from, state, Reason.COOLDOWN_ELAPSED, stats());

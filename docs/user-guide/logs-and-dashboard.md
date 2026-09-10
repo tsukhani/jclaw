@@ -2,12 +2,12 @@
 
 Two read-only surfaces give you visibility into what JClaw is doing right now and what it's done lately.
 
-- The [Dashboard](/) — the home page; stats and live panels covering agent/conversation/channel/task counts, chat performance, cost, compression, and recent activity.
+- The [Dashboard](/) — the home page; stats and live panels covering agent/conversation/channel/task counts, chat performance, cost, compression, circuit breakers, and recent activity.
 - The [Logs](/logs) page — a filterable, searchable event stream for everything happening server-side.
 
 ## Dashboard
 
-The [Dashboard](/) is the first thing you see after signing in. Five stat cards at the top, then four panels below — Chat Cost, Chat Performance, Chat Compression, and Recent Activity.
+The [Dashboard](/) is the first thing you see after signing in. Five stat cards at the top, then the panels below — Chat Cost, Circuit Breakers, Chat Performance, Chat Compression, and Recent Activity.
 
 ### Stat cards
 
@@ -23,7 +23,7 @@ The Tasks card's three-way split is intentional — you want to see `RUNNING` ti
 
 ### Refresh cadence
 
-The Tasks and Reminders sub-stats and three of the panels — Chat Cost, Chat Performance, and Recent Activity — refresh in lockstep on a **5-second tick**; Chat Compression is not on the tick, and the Agents, Conversations and Channels cards load once per visit. The page polls in the background as long as it's open, so an operator watching a task fire sees the numbers move without manual reload.
+The Tasks and Reminders sub-stats and three of the panels — Chat Cost, Chat Performance, and Recent Activity — refresh in lockstep on a **5-second tick**; Circuit Breakers polls on its own 10-second tick, Chat Compression is not on a tick at all, and the Agents, Conversations and Channels cards load once per visit. The page polls in the background as long as it's open, so an operator watching a task fire sees the numbers move without manual reload.
 
 ### Chat Cost
 
@@ -34,6 +34,37 @@ Persisted aggregated token usage and dollar cost across your conversations. Head
 - **CSV** — download the per-model breakdown.
 
 When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, etc.), a **Subscription** subsection renders first with the pro-rated monthly fee for the selected window, and per-provider chips let you narrow to one. The **Per-token** subsection below covers everything billed on usage, with its own provider chips and a rollup card per provider (total spend and average $/1M tokens), and a **Combined Total** row sums the two.
+
+### Circuit Breakers
+
+One row per guarded subsystem — an LLM provider (`llm`), an MCP server (`mcp`) — with the state
+its breaker is in, why it is there, and how many of its recent calls failed. The panel is absent
+until a breaker exists; they are created the first time a subsystem is called.
+
+It sits directly above Chat Performance because that is the blind spot it closes. A breaker that
+has opened turns every call away in microseconds, so the latency percentiles below it *improve*
+and the error rate stays flat while the work behind them is failing.
+
+| State         | What it means                                                                        |
+|---------------|---------------------------------------------------------------------------------------|
+| **CLOSED**    | Serving normally. Calls go through and their outcomes feed the failure-rate window.    |
+| **OPEN**      | Not serving. Every call fails immediately without reaching the provider, until the cooldown (`llm.breaker.wait-seconds`) elapses. |
+| **HALF&nbsp;OPEN** | Probing. The next few calls decide whether it closes again or reopens for another cooldown. |
+
+Each row carries a button: **Isolate** on a serving breaker (asks first) and **Restore** on one
+that is not. Isolating is bounded rather than latched — it restarts the ordinary cooldown, so a
+provider that is actually healthy closes itself again rather than staying dark until you remember
+it.
+
+Together they are also the failover drill. Isolate your primary provider, send a turn, watch it
+land on the secondary, then restore — the fallback path exercised end-to-end, on your schedule,
+without a background job spending tokens to rehearse the same thing forever.
+
+Every state change is written to the event log under the `CIRCUIT_BREAKER` category, and a
+breaker you isolated says so in the log rather than reporting a failure rate — an operator's
+decision never reads back as the provider having broken. With OpenTelemetry export on, the same
+transitions arrive as the `jclaw.breaker.transitions` counter and a `circuit_breaker.transition`
+span event; alarm on the transition to `OPEN`, not on the errors underneath it.
 
 ### Chat Performance
 

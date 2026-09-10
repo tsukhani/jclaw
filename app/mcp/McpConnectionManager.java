@@ -13,6 +13,7 @@ import models.EventLog;
 import models.McpServer;
 import play.Play;
 import play.db.jpa.JPA;
+import services.BreakerAlarms;
 import services.EventLogger;
 import services.Tx;
 import utils.AppClock;
@@ -76,7 +77,6 @@ public final class McpConnectionManager {
     private static final String CLIENT_VERSION_FALLBACK = "0.0.0-dev";
     private static final String CATEGORY_CONNECT = "MCP_CONNECT";
     private static final String CATEGORY_DISCONNECT = "MCP_DISCONNECT";
-    private static final String CATEGORY_BREAKER = "MCP_CIRCUIT_BREAKER";
     private static final String BREAKER_PREFIX = "mcp:";
     private static final String TIMESTAMP_LAST_DISCONNECTED = "lastDisconnectedAt";
 
@@ -375,21 +375,11 @@ public final class McpConnectionManager {
     }
 
     private static CircuitBreaker registerBreaker(String serverName) {
-        var breaker = CircuitBreakers.get(BREAKER_PREFIX + serverName, BREAKER_CONFIG);
-        breaker.setTransitionListener(t -> logBreakerTransition(serverName, t));
+        var name = BREAKER_PREFIX + serverName;
+        var breaker = CircuitBreakers.get(name, BREAKER_CONFIG);
+        breaker.setTransitionListener(
+                BreakerAlarms.listener(name, "MCP server '" + serverName + "'"));
         return breaker;
-    }
-
-    private static void logBreakerTransition(String serverName, CircuitBreaker.Transition t) {
-        var stats = t.stats();
-        switch (t.to()) {
-            case OPEN -> EventLogger.warn(CATEGORY_BREAKER,
-                    "MCP server '%s' tool calls suspended after %d/%d recent failures (%s)"
-                            .formatted(serverName, stats.failures(), stats.samples(), t.reason()));
-            case CLOSED -> EventLogger.info(CATEGORY_BREAKER,
-                    "MCP server '%s' tool calls resumed".formatted(serverName));
-            case HALF_OPEN -> { /* a probe window is not an operator event */ }
-        }
     }
 
     /** Close an MCP client, swallowing any runtime error — used in race-recovery paths. */

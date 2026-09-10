@@ -1324,9 +1324,19 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
 
         /** A 5xx: the provider is unwell. */
-        public static final class ServerError extends LlmException {
+        public static class ServerError extends LlmException {
             public ServerError(String message) { super(message); }
             public ServerError(String message, @Nullable Throwable cause) { super(message, cause); }
+        }
+
+        /**
+         * The operator opened this provider's breaker by hand (JCLAW-1170). A
+         * {@code ServerError} so failover and every other 5xx path behave exactly as before,
+         * and a distinct class so an operator's decision is never read back as the provider
+         * having failed.
+         */
+        public static final class ManuallyIsolated extends ServerError {
+            public ManuallyIsolated(String message) { super(message); }
         }
 
         /** A retryable 429 — over the rate, not out of credit. */
