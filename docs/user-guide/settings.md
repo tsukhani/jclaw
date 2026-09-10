@@ -409,16 +409,17 @@ Attention is the state worth knowing about. On 2026-09-09 the live database turn
 
 ### Backups
 
-**Back up now** writes an H2 online backup — a zip containing the data file — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted. Two settings sit under the list:
+**Back up now** writes an H2 online backup — a zip containing the data file — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
 
-- **retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
-- **schedule** — a time of day, `HH:mm` in your timezone, for a daily backup. Leave it empty for none. A scheduled backup that fails is shown here and logged to the event log.
+**Schedule** sits under the list and takes a time of day, in this instance's timezone, for a daily backup. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log.
+
+**retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
 
 Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, and H2's own tools open it.
 
 ### Restore
 
-Restore replaces the database with a backup — one from the list, or a zip you upload with **Restore from a file**. The file is checked first: anything that is not an H2 backup is refused with the reason and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
+Restore replaces the database with a backup — one from the list, or a zip you pick with **Restore from a file…**. The file is checked first: anything that is not an H2 backup is refused with the reason and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
 
 Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The displaced file is kept as `data/jclaw.mv.db.pre-restore` until the next successful backup, so a restore is itself reversible until you have moved on.
 

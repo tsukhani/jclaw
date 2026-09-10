@@ -309,44 +309,83 @@ async function cleanUp() {
   await refresh()
 }
 
-// db.backup.retention and db.backup.schedule are ordinary config rows.
-const editing = ref<'retention' | 'schedule' | null>(null)
-const draft = ref('')
-
-function startEdit(field: 'retention' | 'schedule') {
-  editing.value = field
+// db.backup.retention and db.backup.schedule are ordinary config rows. An empty value
+// deletes the row, which is what "no schedule" is — the key's absence, not a blank value.
+async function writeConfig(key: string, value: string): Promise<boolean> {
   failure.value = null
-  draft.value = field === 'retention' ? String(status.value?.retention ?? 7) : (status.value?.schedule ?? '')
-}
-
-async function saveEdit() {
-  const field = editing.value
-  if (!field) return
-  const key = field === 'retention' ? 'db.backup.retention' : 'db.backup.schedule'
-  const value = String(draft.value).trim()
   try {
-    if (field === 'schedule' && value === '') {
-      await $fetch(`/api/config/${key}`, { method: 'DELETE' })
-    }
-    else {
-      await $fetch('/api/config', { method: 'POST', body: { key, value } })
-    }
-    editing.value = null
+    if (value === '') await $fetch(`/api/config/${key}`, { method: 'DELETE' })
+    else await $fetch('/api/config', { method: 'POST', body: { key, value } })
     await refresh()
+    return true
   }
   catch (e) {
     const data = (e as { data?: { error?: string, message?: string } })?.data
     failure.value = data?.error ?? data?.message ?? (e instanceof Error ? e.message : 'Save failed')
+    return false
   }
 }
 
+const editingRetention = ref(false)
+const retentionDraft = ref('')
+
+function startRetentionEdit() {
+  editingRetention.value = true
+  failure.value = null
+  retentionDraft.value = String(status.value?.retention ?? 7)
+}
+
+async function saveRetention() {
+  // String(): v-model on a number input hands back a number, which has no trim().
+  if (await writeConfig('db.backup.retention', String(retentionDraft.value).trim())) editingRetention.value = false
+}
+
+// The daily backup time. Re-seeded only when the stored value itself changes, so a status
+// refresh landing mid-edit does not overwrite what the operator is still typing.
+const scheduleDraft = ref('')
+watch(() => status.value?.schedule ?? '', (stored) => {
+  scheduleDraft.value = stored
+}, { immediate: true })
+const scheduleDirty = computed(() => scheduleDraft.value !== (status.value?.schedule ?? ''))
+
+async function saveSchedule() {
+  await writeConfig('db.backup.schedule', scheduleDraft.value.trim())
+}
+
+async function turnOffSchedule() {
+  scheduleDraft.value = ''
+  await writeConfig('db.backup.schedule', '')
+}
+
+/** How long a finished restore or repair stays on screen, measured from when it started. */
+const LAST_OP_WINDOW_MS = 15 * 60 * 1000
+
+/**
+ * The outcome `jclaw.sh` left in logs/database-status.json. It exists for the reload the
+ * restart forces, but the file stays until the next operation overwrites it — so show it
+ * while the operation is in flight and briefly after it began, and treat it as history
+ * after that rather than pinning "Repair complete" to the panel for ever. An outcome whose
+ * start time is missing or unreadable counts as old for the same reason. It renders under
+ * the action that produced it, not in the health strip, which reports the database itself.
+ */
 const lastOp = computed(() => {
   const op = status.value?.lastOperation
   if (!op?.phase) return null
-  const verb = op.op === 'restore' ? 'Restore' : op.op === 'repair' ? 'Repair' : 'Maintenance'
   const ok = op.phase === 'done'
   const failed = op.phase === 'failed'
-  return { text: `${verb}: ${op.message ?? op.phase}`, ok, failed, inFlight: !ok && !failed }
+  const inFlight = !ok && !failed
+  if (!inFlight) {
+    const started = op.startedAt ? Date.parse(op.startedAt) : Number.NaN
+    if (Number.isNaN(started) || Date.now() - started > LAST_OP_WINDOW_MS) return null
+  }
+  const verb = op.op === 'restore' ? 'Restore' : op.op === 'repair' ? 'Repair' : 'Maintenance'
+  return {
+    text: `${verb}: ${op.message ?? op.phase}`,
+    ok,
+    failed,
+    inFlight,
+    panel: op.op === 'restore' ? 'backups' : 'repair',
+  }
 })
 </script>
 
@@ -453,14 +492,6 @@ const lastOp = computed(() => {
           First read failure in the window: {{ when(status.firstCorruptionAt) }}.
         </template>
       </div>
-      <div
-        v-if="lastOp"
-        class="px-4 py-2 border-t border-border text-xs"
-        :class="lastOp.failed ? 'text-red-700 dark:text-red-400' : lastOp.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-muted'"
-        data-testid="db-last-op"
-      >
-        {{ lastOp.text }}
-      </div>
     </div>
 
     <!-- Backups -->
@@ -534,22 +565,77 @@ const lastOp = computed(() => {
         </div>
       </div>
 
+      <!-- Schedule: db.backup.schedule, a time of day; the row's absence is "no schedule". -->
+      <div
+        class="px-4 py-2.5 border-t border-border"
+        data-testid="db-schedule"
+      >
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span class="text-xs font-medium text-fg-strong">Schedule</span>
+          <span class="text-xs text-fg-muted">Daily at</span>
+          <input
+            id="db-schedule-time"
+            v-model="scheduleDraft"
+            type="time"
+            aria-label="Daily backup time"
+            class="px-2 py-0.5 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+            @keydown.enter="saveSchedule"
+          >
+          <button
+            class="px-2 py-0.5 text-xs border border-border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="!scheduleDirty"
+            data-testid="db-schedule-save"
+            @click="saveSchedule"
+          >
+            Save
+          </button>
+          <button
+            v-if="status?.schedule"
+            class="px-2 py-0.5 text-xs text-fg-muted hover:text-fg-strong transition-colors"
+            data-testid="db-schedule-off"
+            @click="turnOffSchedule"
+          >
+            Turn off
+          </button>
+        </div>
+        <p
+          class="mt-1.5 text-xs text-fg-muted"
+          data-testid="db-schedule-state"
+        >
+          <template v-if="status?.schedule">
+            Backing up every day at {{ status.schedule }}, in this instance's timezone.
+          </template>
+          <template v-else>
+            No automatic backup — pick a time to back one up every day.
+          </template>
+          <template v-if="status?.scheduledBackupAt">
+            Last scheduled backup {{ when(status.scheduledBackupAt) }}.
+          </template>
+        </p>
+        <p
+          v-if="status?.scheduledBackupError"
+          class="mt-1 text-xs text-red-700 dark:text-red-400"
+        >
+          Last scheduled backup failed: {{ status.scheduledBackupError }}
+        </p>
+      </div>
+
       <div class="px-4 py-2.5 border-t border-border flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
         <div class="flex items-center gap-2">
           <span class="font-mono text-fg-muted">retention</span>
-          <template v-if="editing === 'retention'">
+          <template v-if="editingRetention">
             <input
-              v-model="draft"
+              v-model="retentionDraft"
               type="number"
               min="1"
               aria-label="Backups to keep"
               class="w-16 px-2 py-0.5 bg-muted border border-input text-fg-strong font-mono focus:outline-hidden"
-              @keydown.enter="saveEdit"
-              @keydown.escape="editing = null"
+              @keydown.enter="saveRetention"
+              @keydown.escape="editingRetention = false"
             >
             <button
               class="text-emerald-700 dark:text-emerald-400"
-              @click="saveEdit"
+              @click="saveRetention"
             >
               Save
             </button>
@@ -558,61 +644,43 @@ const lastOp = computed(() => {
             v-else
             class="text-fg-primary hover:underline"
             title="Backups to keep; the oldest is pruned after each new one"
-            @click="startEdit('retention')"
+            @click="startRetentionEdit"
           >
             keep {{ status?.retention ?? 7 }}
           </button>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="font-mono text-fg-muted">schedule</span>
-          <template v-if="editing === 'schedule'">
-            <input
-              v-model="draft"
-              type="text"
-              placeholder="HH:mm"
-              aria-label="Daily backup time"
-              class="w-20 px-2 py-0.5 bg-muted border border-input text-fg-strong font-mono focus:outline-hidden"
-              @keydown.enter="saveEdit"
-              @keydown.escape="editing = null"
-            >
-            <button
-              class="text-emerald-700 dark:text-emerald-400"
-              @click="saveEdit"
-            >
-              Save
-            </button>
-          </template>
-          <button
-            v-else
-            class="text-fg-primary hover:underline"
-            title="Daily backup time in your timezone; empty for none"
-            @click="startEdit('schedule')"
-          >
-            {{ status?.schedule ? `daily at ${status.schedule}` : 'none' }}
-          </button>
-          <span
-            v-if="status?.scheduledBackupError"
-            class="text-red-700 dark:text-red-400"
-          >
-            last scheduled backup failed: {{ status.scheduledBackupError }}
-          </span>
-        </div>
-        <label
-          for="db-restore-upload"
-          class="ml-auto flex items-center gap-2 text-fg-muted"
-        >
-          <span>Restore from a file</span>
+        <!-- The file input carries the picker and stays out of the tab order; the button is
+             the control, so this reads as an action rather than a stray form field. -->
+        <div class="ml-auto">
           <input
             id="db-restore-upload"
             ref="uploadInput"
             type="file"
             accept=".zip"
-            class="text-xs"
-            :disabled="phase !== 'idle' || !status?.maintenanceAvailable"
-            aria-label="Restore from an uploaded backup"
+            class="sr-only"
+            tabindex="-1"
+            aria-hidden="true"
             @change="restoreUpload"
           >
-        </label>
+          <button
+            class="px-2 py-0.5 text-xs border border-border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="phase !== 'idle' || !status?.maintenanceAvailable"
+            :title="status?.maintenanceUnavailableReason ?? 'Restore from a backup zip on this machine'"
+            data-testid="db-restore-upload"
+            @click="uploadInput?.click()"
+          >
+            Restore from a file…
+          </button>
+        </div>
+      </div>
+
+      <div
+        v-if="lastOp && lastOp.panel === 'backups'"
+        class="px-4 py-2 border-t border-border text-xs"
+        :class="lastOp.failed ? 'text-red-700 dark:text-red-400' : lastOp.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-muted'"
+        data-testid="db-last-op"
+      >
+        {{ lastOp.text }}
       </div>
     </div>
 
@@ -648,6 +716,15 @@ const lastOp = computed(() => {
         >
           Repair
         </button>
+      </div>
+
+      <div
+        v-if="lastOp && lastOp.panel === 'repair'"
+        class="px-4 py-2 border-t border-border text-xs"
+        :class="lastOp.failed ? 'text-red-700 dark:text-red-400' : lastOp.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-muted'"
+        data-testid="db-last-op"
+      >
+        {{ lastOp.text }}
       </div>
 
       <div
