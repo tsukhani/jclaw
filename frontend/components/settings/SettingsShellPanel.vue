@@ -78,7 +78,7 @@ async function saveShellField(configKey: string, value: string) {
               v-model="shellAllowlistEdit"
               rows="3"
               aria-label="Shell allowlist"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden resize-none"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden resize-none"
             />
             <div class="flex flex-col gap-1">
               <button

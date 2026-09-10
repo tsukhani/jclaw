@@ -83,7 +83,7 @@ async function saveGeneralField(configKey: string, value: string) {
             <select
               v-model="generalFieldEdit"
               aria-label="Operator timezone"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             >
               <option
                 v-for="z in timezonesPayload.data.value?.timezones ?? []"

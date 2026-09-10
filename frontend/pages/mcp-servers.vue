@@ -536,7 +536,7 @@ function removeHeaderRow(i: number) {
       </form>
     </div>
 
-    <div class="bg-surface-elevated border border-border">
+    <div class="bg-surface-elevated border border-border overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">

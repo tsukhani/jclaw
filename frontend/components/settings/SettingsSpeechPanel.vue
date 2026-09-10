@@ -227,7 +227,7 @@ onUnmounted(() => stopTtsPolling())
         <span class="text-sm font-medium text-fg-strong">Engine</span>
       </div>
 
-      <fieldset>
+      <fieldset class="min-w-0">
         <legend class="sr-only">
           Text-to-speech engine
         </legend>
@@ -294,7 +294,7 @@ onUnmounted(() => stopTtsPolling())
           <select
             :value="activeModelId"
             aria-label="Text-to-speech model"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
             @change="setModel(selectedEngine, ($event.target as HTMLSelectElement).value)"
           >
             <option
@@ -340,7 +340,7 @@ onUnmounted(() => stopTtsPolling())
           <select
             :value="selectedVoice"
             aria-label="Text-to-speech speaker voice"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
             @change="setVoice(($event.target as HTMLSelectElement).value)"
           >
             <option value="">

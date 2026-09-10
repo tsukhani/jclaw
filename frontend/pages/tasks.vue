@@ -1123,14 +1123,14 @@ function zoneForTaskRender(task: Task): string | undefined {
 
     <div
       v-else-if="view === 'table'"
-      class="bg-surface-elevated border border-border"
+      class="bg-surface-elevated border border-border overflow-x-auto"
     >
       <!-- table-fixed + per-column header widths: with auto layout the
            expanded detail row (a wide colspan cell) re-balanced every column
            on expand/collapse. Fixed layout sizes columns from the header row
            alone, so the detail content can't shift them. Widths sum to 100%
            (the select-mode checkbox th keeps its own w-8). -->
-      <table class="w-full text-sm table-fixed">
+      <table class="w-full min-w-[72rem] text-sm table-fixed">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
             <th

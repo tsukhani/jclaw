@@ -274,7 +274,7 @@ function onSearchDragEnd() {
               type="password"
               :placeholder="SEARCH_PROVIDERS[id]!.apiKeyPlaceholder"
               aria-label="API key"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
             >
             <button
               class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
@@ -319,7 +319,7 @@ function onSearchDragEnd() {
               v-model="editValue"
               type="text"
               aria-label="Base URL"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             >
             <button
               class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
@@ -369,7 +369,7 @@ function onSearchDragEnd() {
             :id="`search-recency-filter-${id}`"
             :value="searchRecencyFilter(id)"
             aria-label="Recency filter"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             @change="updateSearchRecencyFilter(id, ($event.target as HTMLSelectElement).value)"
           >
             <option value="hour">

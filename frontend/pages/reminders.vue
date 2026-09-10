@@ -407,7 +407,7 @@ const statusColors: Record<string, string> = {
          so the rows read consistently with the rest of the app. -->
     <section
       v-else-if="view === 'table'"
-      class="bg-surface-elevated border border-border"
+      class="bg-surface-elevated border border-border overflow-x-auto"
     >
       <table class="w-full text-sm">
         <thead>

@@ -383,7 +383,7 @@ onUnmounted(() => stopTranscriptionPolling())
             class="block opacity-70 mt-0.5"
           >Probe: {{ transcriptionState.ffmpegReason }}</span>
         </div>
-        <fieldset class="border-t border-border">
+        <fieldset class="min-w-0 border-t border-border">
           <legend class="sr-only">
             Transcription backend
           </legend>
@@ -488,7 +488,7 @@ onUnmounted(() => stopTranscriptionPolling())
             <select
               :value="selectedLocalModel"
               aria-label="ASR model"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="setLocalModel(($event.target as HTMLSelectElement).value)"
             >
               <option
@@ -563,7 +563,7 @@ onUnmounted(() => stopTranscriptionPolling())
               list="transcription-model-suggestions"
               placeholder="whisper-1 (default)"
               aria-label="Cloud transcription model"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="setTranscriptionModel(($event.target as HTMLInputElement).value.trim())"
             >
             <datalist id="transcription-model-suggestions">
@@ -614,7 +614,7 @@ onUnmounted(() => stopTranscriptionPolling())
         Ordinary voice-note transcription stays local and is unaffected.
       </div>
       <template v-if="diarizationEnabled">
-        <fieldset class="border-t border-border mt-2.5">
+        <fieldset class="min-w-0 border-t border-border mt-2.5">
           <legend class="sr-only">
             Diarization provider
           </legend>
@@ -750,7 +750,7 @@ onUnmounted(() => stopTranscriptionPolling())
             <select
               :value="diarizationModelSelectValue"
               aria-label="Diarization audio model"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="setDiarizationModel(($event.target as HTMLSelectElement).value)"
             >
               <option value="">
@@ -838,7 +838,7 @@ onUnmounted(() => stopTranscriptionPolling())
               id="diarization-emotion-model"
               :value="currentSerRepo"
               aria-label="On-device emotion (SER) model"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="setEmotionModel(($event.target as HTMLSelectElement).value)"
             >
               <option

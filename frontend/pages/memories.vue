@@ -380,7 +380,7 @@ async function exportMemories() {
 
     <div
       v-else
-      class="border border-border bg-surface-elevated"
+      class="border border-border bg-surface-elevated overflow-x-auto"
     >
       <table
         data-testid="memory-table"

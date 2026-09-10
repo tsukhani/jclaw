@@ -491,7 +491,7 @@ function closePeek() {
     <!-- Table -->
     <div
       v-if="!hasNoData"
-      class="bg-surface-elevated border border-border"
+      class="bg-surface-elevated border border-border overflow-x-auto"
     >
       <table class="w-full text-sm">
         <thead>

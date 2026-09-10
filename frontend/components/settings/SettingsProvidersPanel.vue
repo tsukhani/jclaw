@@ -762,7 +762,7 @@ const groupedProviders = computed(() => {
                 v-model="editValue"
                 :type="isSensitive(entry.key) ? 'password' : 'text'"
                 :aria-label="`Edit value for ${entry.key}`"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
@@ -825,7 +825,7 @@ const groupedProviders = computed(() => {
               <select
                 v-model="editValue"
                 :aria-label="`Edit payment modality for ${name}`"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
                 <option
                   v-for="m in supportedModalitiesFor(name)"
@@ -910,7 +910,7 @@ const groupedProviders = computed(() => {
                 step="0.01"
                 min="0"
                 :aria-label="`Edit monthly subscription price for ${name}`"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
@@ -968,7 +968,7 @@ const groupedProviders = computed(() => {
               <input
                 v-model="editValue"
                 :aria-label="`Edit value for ${keepAliveKey(name)}`"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
@@ -1641,7 +1641,7 @@ const groupedProviders = computed(() => {
                 v-model="discoverySearch"
                 placeholder="Search models..."
                 aria-label="Search discovered models"
-                class="flex-1 px-2 py-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden"
+                class="flex-1 min-w-0 px-2 py-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden"
               >
               <select
                 v-model="discoveryFilterThinking"

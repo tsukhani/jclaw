@@ -144,7 +144,7 @@ async function setCaptionModel(value: string) {
     </div>
 
     <template v-if="captionEnabled">
-      <fieldset class="bg-surface-elevated border border-border">
+      <fieldset class="min-w-0 bg-surface-elevated border border-border">
         <legend class="sr-only">
           Image captioning backend
         </legend>
@@ -242,7 +242,7 @@ async function setCaptionModel(value: string) {
           <select
             :value="captionModelSelectValue"
             :aria-label="captionProvider === 'ollama-local' ? 'Ollama vision model' : 'Caption cloud model'"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
             @change="setCaptionModel(($event.target as HTMLSelectElement).value)"
           >
             <option value="">

@@ -244,7 +244,7 @@ async function saveAcpModel(value: string) {
               type="text"
               placeholder="(disabled)"
               aria-label="ACP harness command"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             >
             <button
               class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"

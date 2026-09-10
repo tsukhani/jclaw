@@ -1233,7 +1233,7 @@ defineExpose({ refresh })
             v-if="view === 'table' && subscriptionPerModelAllocated.length > 0"
             class="overflow-x-auto border-t border-border"
           >
-            <table class="w-full text-xs table-fixed">
+            <table class="w-full min-w-[42rem] text-xs table-fixed">
               <thead class="text-fg-muted bg-muted/20">
                 <tr>
                   <!-- Model column gets a fixed 1/4 share so the 6 stat columns
@@ -1528,7 +1528,7 @@ defineExpose({ refresh })
             v-if="view === 'table'"
             class="overflow-x-auto border-t border-border"
           >
-            <table class="w-full text-xs table-fixed">
+            <table class="w-full min-w-[42rem] text-xs table-fixed">
               <thead class="text-fg-muted bg-muted/20">
                 <tr>
                   <th
@@ -1723,7 +1723,7 @@ defineExpose({ refresh })
           v-if="hasPaidData || subscriptionPerModelAllocated.length > 0"
           class="overflow-x-auto pt-6 bg-muted/50"
         >
-          <table class="w-full text-xs table-fixed">
+          <table class="w-full min-w-[42rem] text-xs table-fixed">
             <!-- Explicit colgroup so table-fixed has a column-width source
                  independent of any row. The sr-only thead below applies
                  position:absolute (Tailwind's sr-only is width:1px height:1px

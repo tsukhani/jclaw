@@ -286,7 +286,7 @@ onUnmounted(() => stopImagegenLocalPolling())
       <!-- Each backend is its own group: the radio sits at the top of a card with
              that backend's settings (API key / download / token) directly beneath, so
              it's clear which settings belong to which provider. -->
-      <fieldset class="space-y-3">
+      <fieldset class="min-w-0 space-y-3">
         <legend class="sr-only">
           Image generation backend
         </legend>
@@ -330,7 +330,7 @@ onUnmounted(() => stopImagegenLocalPolling())
                 type="password"
                 aria-label="Black Forest Labs API key"
                 placeholder="Your BFL API key from bfl.ai"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
@@ -442,7 +442,7 @@ onUnmounted(() => stopImagegenLocalPolling())
                 type="password"
                 aria-label="Replicate API key"
                 placeholder="Your Replicate API token from replicate.com"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
@@ -491,7 +491,7 @@ onUnmounted(() => stopImagegenLocalPolling())
               :value="imagegenModel"
               :disabled="saving"
               aria-label="Replicate image model"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="saveField('imagegen.replicate.model', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">
@@ -710,7 +710,7 @@ onUnmounted(() => stopImagegenLocalPolling())
                   type="password"
                   aria-label="Hugging Face token"
                   placeholder="hf_… — higher rate limits and gated models"
-                  class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                  class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
                 >
                 <button
                   class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"

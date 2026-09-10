@@ -234,7 +234,7 @@ onUnmounted(() => stopVideoCapPolling())
     </div>
 
     <template v-if="videogenEnabled">
-      <fieldset class="space-y-3">
+      <fieldset class="min-w-0 space-y-3">
         <legend class="sr-only">
           Video generation backend
         </legend>
@@ -273,7 +273,7 @@ onUnmounted(() => stopVideoCapPolling())
               :value="videogenModel"
               :disabled="saving"
               aria-label="Replicate video model"
-              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               @change="saveField('videogen.cloud.model', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">

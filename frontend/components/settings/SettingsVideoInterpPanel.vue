@@ -293,7 +293,7 @@ async function setVideoModel(value: string) {
 
     <!-- Provider + model picker, when the dedicated model is enabled. -->
     <template v-if="videoEnabled">
-      <fieldset class="bg-surface-elevated border border-border">
+      <fieldset class="min-w-0 bg-surface-elevated border border-border">
         <legend class="sr-only">
           Video interpretation backend
         </legend>
@@ -443,7 +443,7 @@ async function setVideoModel(value: string) {
             :value="videoModelSelectValue"
             aria-label="Video model"
             :disabled="videoModelsLoading"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden disabled:opacity-50"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden disabled:opacity-50"
             @change="setVideoModel(($event.target as HTMLSelectElement).value)"
           >
             <option value="">

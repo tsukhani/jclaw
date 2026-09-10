@@ -124,7 +124,7 @@ async function deleteLoggerLevel(logger: string) {
           list="logging-logger-suggestions"
           placeholder="logger (e.g. play or controllers.ApiChatController)"
           aria-label="Logger name"
-          class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+          class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
           @keyup.enter="addLoggerLevel"
         >
         <datalist id="logging-logger-suggestions">
