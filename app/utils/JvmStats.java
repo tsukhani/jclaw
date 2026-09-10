@@ -47,6 +47,20 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
                        int llmCallsRunning, int llmCallsQueued, int llmCallsMax) {
 
     /**
+     * The reportable share for one raw {@code getProcessCpuLoad()} reading: null when the JVM
+     * declined it, else clamped to 0..1.
+     *
+     * <p>The clamp is not belt-and-braces. The JDK documents the reading as a 0..1 fraction, but
+     * it divides a process-CPU-time delta by an elapsed-wall-time delta, so two samples taken
+     * close together underflow the denominator and overshoot — 469 of 20,000 back-to-back calls
+     * exceeded 1.0, peaking at 2040 (JCLAW-1180). The Performance panel renders this figure as
+     * {@code (c * 100).toFixed(1)}%, so unclamped it would show a CPU share above 100%.
+     */
+    public static @Nullable Double cpuShare(double rawLoad) {
+        return rawLoad < 0 ? null : Math.min(1.0, rawLoad);
+    }
+
+    /**
      * Read every figure from the platform MXBeans.
      *
      * <p>The thread counts are named "platform" deliberately: {@code ThreadMXBean} does
@@ -78,8 +92,7 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
         Long machineMemory = null;
         if (ManagementFactory.getOperatingSystemMXBean()
                 instanceof com.sun.management.OperatingSystemMXBean sun) {
-            var load = sun.getProcessCpuLoad();
-            if (load >= 0) cpu = load;
+            cpu = cpuShare(sun.getProcessCpuLoad());
             // Only a bounded value can be drawn as a proportion, and "352 MB" has no
             // bound until you know the machine it is resident on.
             var total = sun.getTotalMemorySize();

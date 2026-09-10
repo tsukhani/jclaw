@@ -85,6 +85,25 @@ class JvmStatsTest extends UnitTest {
         }
     }
 
+    /**
+     * The overshoot the snapshot assertion above can only catch by luck. Two
+     * {@code getProcessCpuLoad()} samples taken close together underflow the bean's
+     * wall-time denominator; 2040.57 is a reading actually measured that way (JCLAW-1180).
+     */
+    @Test
+    void clampsACpuShareThatOvershootsItsDocumentedCeiling() {
+        assertEquals(1.0, JvmStats.cpuShare(2040.5714285714287));
+        assertEquals(1.0, JvmStats.cpuShare(1.0000001));
+        assertEquals(0.5, JvmStats.cpuShare(0.5), "a reading inside the range is passed through");
+        assertEquals(0.0, JvmStats.cpuShare(0.0), "an idle process is 0, not absent");
+    }
+
+    /** The negative sentinel stays absent — a -1 rendered raw would show as -100%. */
+    @Test
+    void mapsTheUnavailableSentinelToNullRatherThanANumber() {
+        assertNull(JvmStats.cpuShare(-1.0));
+    }
+
     /** GC counters are cumulative; the panel derives a rate from successive samples. */
     @Test
     void accumulatesGcCountersAcrossCollectors() {
