@@ -524,6 +524,9 @@ public class SkillLoader {
             ".properties", ".rb", ".go", ".rs", ".lua", ".sql"
     );
 
+    /** Suffixes marking a file as a stand-in to be copied, not a type of its own. */
+    private static final Set<String> STANDIN_SUFFIXES = Set.of(".example", ".sample", ".template", ".dist");
+
     /** Extensionless filenames that are conventionally plain text. */
     private static final Set<String> KNOWN_TEXT_FILES = Set.of(
             "readme", "makefile", "dockerfile", "license", "changelog",
@@ -540,6 +543,14 @@ public class SkillLoader {
         // 'I' to dotless 'ı', turning LICENSE/Dockerfile/*.INI into non-matches
         // and misclassifying them as binary.
         var lower = name.toLowerCase(Locale.ROOT);
+        // A stand-in carries the type of the name underneath it, so ".env.example" is text
+        // while "payload.exe.example" stays binary and keeps its malware scan.
+        for (var marker : STANDIN_SUFFIXES) {
+            if (lower.endsWith(marker)) {
+                lower = lower.substring(0, lower.length() - marker.length());
+                break;
+            }
+        }
         for (var ext : TEXT_EXTENSIONS) {
             if (lower.endsWith(ext)) return true;
         }

@@ -382,6 +382,27 @@ class AgentSystemTest extends UnitTest {
         assertFalse(SkillLoader.isTextFile("noextension"));
     }
 
+    /** A stand-in is classified as the name underneath it, so the skill file tree offers
+     *  ".env.example" for viewing instead of greying it out as a binary. */
+    @Test
+    void isTextFileSeesThroughAStandInSuffix() {
+        assertTrue(SkillLoader.isTextFile("nas.env.example"));
+        assertTrue(SkillLoader.isTextFile("config.yaml.sample"));
+        assertTrue(SkillLoader.isTextFile("settings.json.template"));
+        assertTrue(SkillLoader.isTextFile("app.conf.dist"));
+        assertTrue(SkillLoader.isTextFile("Makefile.template"), "the extensionless names see through it too");
+    }
+
+    /** The marker must not become a way past the malware scanner, which is handed exactly
+     *  the files this returns false for. */
+    @Test
+    void isTextFileKeepsABinaryStandInBinary() {
+        assertFalse(SkillLoader.isTextFile("payload.exe.example"));
+        assertFalse(SkillLoader.isTextFile("image.png.sample"));
+        assertFalse(SkillLoader.isTextFile("archive.tar.gz.dist"));
+        assertFalse(SkillLoader.isTextFile(".example"), "the bare marker names nothing underneath");
+    }
+
     @Test
     void isTextFileStripsDirectoryFromBasenameLookup() {
         // Path-style input: the base-name fallback only considers the final
