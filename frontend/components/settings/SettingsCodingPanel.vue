@@ -430,10 +430,12 @@ async function saveAcpModel(value: string) {
               </span>
             </span>
           </span>
+          <!-- min-w-0: a flex item's min-width defaults to its content, and a select's
+               content is its widest option, so flex-1 alone overflows the row. -->
           <select
             :value="acpModelValue"
             aria-label="ACP harness model"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             @change="saveAcpModel(($event.target as HTMLSelectElement).value)"
           >
             <option value="">

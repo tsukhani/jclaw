@@ -368,6 +368,14 @@ html.dark .guide-section blockquote {
   overflow-wrap: break-word;
 }
 
+/* The identifiers are always code spans, and the short words above never are, so
+   breaking only code keeps "Admin" intact while letting a 27-character config key
+   fit the guide's ~520px column instead of spilling out of it. */
+.guide-section th code,
+.guide-section td code {
+  overflow-wrap: anywhere;
+}
+
 .guide-section kbd {
   font-family: ui-monospace, monospace;
   font-size: 0.75rem;
