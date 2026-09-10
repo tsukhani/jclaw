@@ -1014,7 +1014,19 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             }
         }
 
-        throw new LlmException("All retries exhausted for " + config.name(), lastException);
+        throw exhausted("All retries exhausted for " + config.name(), lastException);
+    }
+
+    /** The exhausted-retries failure, carrying the last attempt's category: every retryable
+     *  branch reports through {@link AttemptOutcome} rather than throwing, so this is the only
+     *  route a ServerError / RateLimited / Transport has to a caller. */
+    private static LlmException exhausted(String message, @Nullable Exception last) {
+        return switch (last) {
+            case LlmException.RateLimited _ -> new LlmException.RateLimited(message, last);
+            case LlmException.ServerError _ -> new LlmException.ServerError(message, last);
+            case LlmException.Transport _ -> new LlmException.Transport(message, last);
+            case null, default -> new LlmException(message, last);
+        };
     }
 
     /**
@@ -1072,17 +1084,27 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * (clamped) Retry-After and returns an error outcome flagged already-backed-off so the
      * caller records a 429 {@link LlmException} without double-waiting; throws on 4xx; or
      * returns an error outcome on 5xx for the caller to retry.
+     *
+     * <p>Each branch carries its {@link LlmException} subclass, so a caller can tell a
+     * provider fault from a request of ours that will never succeed. Only the
+     * non-retryable branch throws: a thrown {@code LlmException} aborts the retry loop.
      */
     private AttemptOutcome attemptRequest(URI uri, String auth, String json, Duration timeout,
                                           @Nullable String channel, int attempt)
-            throws InterruptedException, IOException {
-        var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout, channel);
+            throws InterruptedException {
+        OkHttpLlmHttpDriver.HttpReply reply;
+        try {
+            reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout, channel);
+        } catch (IOException e) {
+            return new AttemptOutcome(null, new LlmException.Transport(
+                    "Transport failure calling %s: %s".formatted(config.name(), e.getMessage()), e), false);
+        }
 
         if (reply.statusCode() == 200) return new AttemptOutcome(reply.body(), null, false);
 
         if (reply.statusCode() == 429) {
             if (isPermanentQuotaError(reply.body())) {
-                throw new LlmException("HTTP 429 from %s (permanent, not retried): %s".formatted(
+                throw new LlmException.ClientError("HTTP 429 from %s (permanent, not retried): %s".formatted(
                         config.name(), sanitizeErrorBody(reply.body(), config.apiKey())));
             }
             var defaultBackoff = backoffMsFor(attempt) / 1000;
@@ -1095,17 +1117,17 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(config.name(), retryAfter));
             parkForMillis(retryAfter * 1000);
             return new AttemptOutcome(null,
-                    new LlmException("HTTP 429 from %s: rate limited (retry-after %ds)".formatted(
+                    new LlmException.RateLimited("HTTP 429 from %s: rate limited (retry-after %ds)".formatted(
                             config.name(), retryAfter)),
                     true);
         }
 
         if (reply.statusCode() >= 400 && reply.statusCode() < 500) {
-            throw new LlmException("HTTP %d from %s: %s".formatted(
+            throw new LlmException.ClientError("HTTP %d from %s: %s".formatted(
                     reply.statusCode(), config.name(), sanitizeErrorBody(reply.body(), config.apiKey())));
         }
 
-        return new AttemptOutcome(null, new LlmException("HTTP %d from %s: %s".formatted(
+        return new AttemptOutcome(null, new LlmException.ServerError("HTTP %d from %s: %s".formatted(
                 reply.statusCode(), config.name(), sanitizeErrorBody(reply.body(), config.apiKey()))), false);
     }
 
@@ -1240,8 +1262,38 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                 extractProviderMetrics(usageObj));
     }
 
+    /**
+     * A failed provider call. The subclasses name where the fault lies, because a
+     * circuit breaker layered on these calls must not count a request this codebase
+     * got wrong against a provider that is perfectly healthy (JCLAW-1166). Everything
+     * remains an {@code LlmException}, so a {@code catch (LlmException)} — the
+     * retry-abort in {@link #executeWithRetry} and the {@link #chatWithFailover}
+     * trigger — is unaffected by the distinction.
+     */
     public static class LlmException extends RuntimeException {
         public LlmException(String message) { super(message); }
         public LlmException(String message, @Nullable Throwable cause) { super(message, cause); }
+
+        /** A 4xx, or a 429 naming an exhausted balance: our request, and retrying never fixes it. */
+        public static final class ClientError extends LlmException {
+            public ClientError(String message) { super(message); }
+        }
+
+        /** A 5xx: the provider is unwell. */
+        public static final class ServerError extends LlmException {
+            public ServerError(String message) { super(message); }
+            public ServerError(String message, @Nullable Throwable cause) { super(message, cause); }
+        }
+
+        /** A retryable 429 — over the rate, not out of credit. */
+        public static final class RateLimited extends LlmException {
+            public RateLimited(String message) { super(message); }
+            public RateLimited(String message, @Nullable Throwable cause) { super(message, cause); }
+        }
+
+        /** No HTTP answer at all: refused connection, socket timeout, TLS failure. */
+        public static final class Transport extends LlmException {
+            public Transport(String message, @Nullable Throwable cause) { super(message, cause); }
+        }
     }
 }
