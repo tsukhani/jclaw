@@ -113,6 +113,17 @@ public final class LlmResilience {
     }
 
     /**
+     * How long a stream that has produced chunks may go quiet before the sweep abandons it;
+     * 0 disables. Separate from {@code llm.breaker.stall-seconds}, which only decides what the
+     * breaker counts as a slow call: a 30 s gap is evidence about the provider, but a local model
+     * re-evaluating its context mid-answer pauses that long legitimately, and ending the turn on
+     * it would retract nothing and lose the rest of the answer.
+     */
+    private static long stallAbortBudgetNanos() {
+        return PlayConfig.longOr("llm.breaker.stall-abort-seconds", 300) * 1_000_000_000L;
+    }
+
+    /**
      * The fail-fast an open breaker raises, in the one class {@code chatWithFailover} triggers on.
      *
      * <p>An operator's isolation and an autonomous trip are different classes (JCLAW-1170), so a
@@ -183,15 +194,18 @@ public final class LlmResilience {
     public static @Nullable StreamGuard beginStream(String providerName) {
         var breaker = breakerFor(providerName);
         if (!breaker.allowRequest()) return null;
-        var guard = new StreamGuard(breaker, System::nanoTime, firstChunkBudgetNanos());
-        if (guard.stallBudgetNanos > 0L || guard.firstChunkBudgetNanos > 0L) watch(guard);
+        var guard = new StreamGuard(breaker, System::nanoTime, firstChunkBudgetNanos(), stallAbortBudgetNanos());
+        if (guard.stallBudgetNanos > 0L || guard.firstChunkBudgetNanos > 0L || guard.stallAbortNanos > 0L) {
+            watch(guard);
+        }
         return guard;
     }
 
     /** Test seam: the same guard on a caller-supplied monotonic source, so a stall test needs no sleep. */
     public static StreamGuard streamGuardForTest(CircuitBreaker breaker, LongSupplier nanoTime,
-                                                 long firstChunkBudgetMillis) {
-        return new StreamGuard(breaker, nanoTime, firstChunkBudgetMillis * 1_000_000L);
+                                                 long firstChunkBudgetMillis, long stallAbortMillis) {
+        return new StreamGuard(breaker, nanoTime, firstChunkBudgetMillis * 1_000_000L,
+                stallAbortMillis * 1_000_000L);
     }
 
     private static void watch(StreamGuard guard) {
@@ -227,10 +241,13 @@ public final class LlmResilience {
      * provider emitting nothing else resets it for ever.
      *
      * <p>The two are charged differently — a stall mid-answer is a slow call, not a failure, since
-     * the stream did deliver content, while silence throughout is a failure — but both end the
-     * stream. A stream past either budget is holding a socket and a parked thread nothing will
+     * the stream did deliver content, while silence throughout is a failure — and both can end
+     * the stream. A stream past its budget is holding a socket and a parked thread nothing will
      * reclaim, so {@link #onAbandoned} runs on both paths (JCLAW-1183): recording an outcome does
-     * not unpark a thread waiting on the stream's own completion.
+     * not unpark a thread waiting on the stream's own completion. The mid-answer case keeps the
+     * charge and the abort on separate budgets, though: the stall budget only decides what the
+     * breaker counts as slow, and the stream is ended at the larger abort budget, because a gap
+     * that is evidence about the provider is not yet a reason to lose the rest of the answer.
      *
      * <p>A stream that never terminates reports nothing on its own, which would both hide
      * the outage and strand a HALF_OPEN permit for good. {@link #checkDeadlines} is the way
@@ -242,20 +259,24 @@ public final class LlmResilience {
         private final CircuitBreaker breaker;
         private final LongSupplier nanoTime;
         private final long stallBudgetNanos;
+        private final long stallAbortNanos;
         private final long firstChunkBudgetNanos;
         private final long dispatchNanos;
 
-        private final AtomicBoolean reported = new AtomicBoolean();
+        private final AtomicBoolean reported = new AtomicBoolean();   // one breaker outcome
+        private final AtomicBoolean retired = new AtomicBoolean();    // off the sweep, one release at most
         // armed rather than a sentinel stamp: nanoTime's origin is arbitrary and may be 0.
         private volatile boolean armed;
         private volatile long lastChunkNanos;
         private volatile long worstGapNanos;
         private volatile @Nullable LongConsumer abandon;
 
-        private StreamGuard(CircuitBreaker breaker, LongSupplier nanoTime, long firstChunkBudgetNanos) {
+        private StreamGuard(CircuitBreaker breaker, LongSupplier nanoTime, long firstChunkBudgetNanos,
+                            long stallAbortNanos) {
             this.breaker = breaker;
             this.nanoTime = nanoTime;
             this.firstChunkBudgetNanos = firstChunkBudgetNanos;
+            this.stallAbortNanos = stallAbortNanos;
             this.dispatchNanos = nanoTime.getAsLong();
             this.stallBudgetNanos = breaker.config().slowCallsEnabled()
                     ? breaker.config().slowCallDurationMillis() * 1_000_000L
@@ -283,11 +304,13 @@ public final class LlmResilience {
         /** The stream closed cleanly: one success, slow when its worst gap blew the stall budget. */
         public void succeeded() {
             fold(nanoTime.getAsLong());
+            retire();
             if (claim()) breaker.recordSuccess(worstGapNanos / 1_000_000L);
         }
 
         /** The stream failed: one failure, unless it failed on a request this codebase got wrong. */
         public void failed(Throwable error) {
+            retire();
             if (!claim()) return;
             if (error instanceof LlmException.ClientError) {
                 // The 4xx rule from guard(), with the same HALF_OPEN caveat: a provider that
@@ -305,20 +328,30 @@ public final class LlmResilience {
          * @return {@code true} when this call is what recorded the outcome
          */
         public boolean checkDeadlines() {
-            if (reported.get()) return false;
-            return armed ? chargeStall() : chargeSilence();
+            if (retired.get()) return false;
+            return armed ? checkStall() : chargeSilence();
         }
 
-        private boolean chargeStall() {
-            if (stallBudgetNanos == 0L) return false;
+        /**
+         * The charge lands at the stall budget and the stream stays watched; the abort lands at
+         * its own budget. A stream that resumes between the two keeps its turn, charged as slow.
+         */
+        private boolean checkStall() {
             var gap = nanoTime.getAsLong() - lastChunkNanos;
-            if (gap < stallBudgetNanos || !claim()) return false;
-            breaker.recordSuccess(gap / 1_000_000L);
             // Unlike the silent case this charges whether or not anyone installed a release: the
             // stream did deliver content, so the breaker learns something either way.
+            var charged = stallBudgetNanos > 0L && gap >= stallBudgetNanos && claim();
+            if (charged) breaker.recordSuccess(gap / 1_000_000L);
             var release = abandon;
-            if (release != null) release.accept(gap / 1_000_000L);
-            return true;
+            if (stallAbortNanos > 0L && gap >= stallAbortNanos && release != null && retire()) {
+                // An abort budget set under the stall budget still owes the stream its one outcome.
+                if (claim()) {
+                    breaker.recordSuccess(gap / 1_000_000L);
+                    charged = true;
+                }
+                release.accept(gap / 1_000_000L);
+            }
+            return charged;
         }
 
         private boolean chargeSilence() {
@@ -329,6 +362,7 @@ public final class LlmResilience {
             // A failure rather than a slow success: nothing succeeded, and pinning it to the
             // slow-call rate would put the unbounded hang back behind llm.breaker.stall-seconds.
             breaker.recordFailure();
+            retire();
             release.accept(silent / 1_000_000L);
             return true;
         }
@@ -340,7 +374,12 @@ public final class LlmResilience {
         }
 
         private boolean claim() {
-            if (!reported.compareAndSet(false, true)) return false;
+            return reported.compareAndSet(false, true);
+        }
+
+        /** @return {@code true} when this call took the stream off the sweep, so a release runs at most once. */
+        private boolean retire() {
+            if (!retired.compareAndSet(false, true)) return false;
             LIVE.remove(this);
             return true;
         }

@@ -4,6 +4,7 @@ import llm.LlmTypes.ProviderConfig;
 import llm.OpenAiProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 import utils.CircuitBreaker;
 import utils.CircuitBreakers;
@@ -108,6 +109,10 @@ class LlmStreamTransportReleaseTest extends UnitTest {
         // says nothing about tripping — LlmStreamBreakerTest owns that.
         CircuitBreakers.get(LlmResilience.breakerName(name),
                 CircuitBreaker.Config.of(10, 0.5, 5, 60_000L).withSlowCalls(500L, 0.5));
+        // The abort budget is read from the static configuration at dispatch; one second is the
+        // smallest it goes, and the first five-second sweep is past it. Play.configuration is
+        // process-global and play1 runs test classes concurrently, so the window is one call.
+        Play.configuration.setProperty("llm.breaker.stall-abort-seconds", "1");
         try {
             // One chunk arms the inter-chunk budget; everything after it is keepalive comments.
             var provider = new OpenAiProvider(
@@ -131,6 +136,7 @@ class LlmStreamTransportReleaseTest extends UnitTest {
                         secondOutcome.countDown();
                     },
                     null, null, null);
+            Play.configuration.remove("llm.breaker.stall-abort-seconds");
 
             assertTrue(firstOutcome.await(30, TimeUnit.SECONDS),
                     "the stall sweep runs every five seconds and ends the turn");
@@ -149,6 +155,7 @@ class LlmStreamTransportReleaseTest extends UnitTest {
             assertEquals(1, stats.slowCalls(), "a stream that delivered content stalled, it did not fail");
             assertEquals(0, stats.failures());
         } finally {
+            Play.configuration.remove("llm.breaker.stall-abort-seconds");
             CircuitBreakers.remove(LlmResilience.breakerName(name));
         }
     }

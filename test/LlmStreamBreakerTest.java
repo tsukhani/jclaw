@@ -41,6 +41,9 @@ class LlmStreamBreakerTest extends UnitTest {
     /** The llm.breaker.first-chunk-seconds default, spelled out so the boundary cases read as minutes. */
     private static final long FIRST_CHUNK_BUDGET_MS = 600_000L;
 
+    /** The llm.breaker.stall-abort-seconds default: the gap that ends a stream, distinct from the 30 s that charges it. */
+    private static final long STALL_ABORT_BUDGET_MS = 300_000L;
+
     private static final String SSE = """
             data: {"id":"c1","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"Hel"}}]}
 
@@ -115,7 +118,7 @@ class LlmStreamBreakerTest extends UnitTest {
     void aStreamStalledMidWayIsASlowCallEvenThoughItFinished() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
 
         guard.chunk();
         clock.addAndGet(2 * SECOND);
@@ -137,7 +140,7 @@ class LlmStreamBreakerTest extends UnitTest {
     void aLongButSteadyStreamIsNotASlowCall() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
 
         // Ten minutes of generation, a chunk every five seconds: the case an end-to-end
         // slow-call threshold cannot tell apart from the stall above.
@@ -156,7 +159,7 @@ class LlmStreamBreakerTest extends UnitTest {
     void aSlowFirstTokenIsNotAStall() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
 
         // A cold local model loading weights. Nothing has been read off the socket either, so
         // this is the case OkHttp's read timeout already covers; charging it would break
@@ -173,7 +176,7 @@ class LlmStreamBreakerTest extends UnitTest {
     void aStreamStillHangingIsChargedBeforeItEnds() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
 
         guard.chunk();
         clock.addAndGet(20 * SECOND);
@@ -194,19 +197,83 @@ class LlmStreamBreakerTest extends UnitTest {
     void aStalledStreamReleasesItsCallerToo() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
         var releasedAfterMs = new AtomicLong(-1L);
         guard.onAbandoned(releasedAfterMs::set);
 
         guard.chunk();
         clock.addAndGet(40 * SECOND);
         assertTrue(guard.checkDeadlines());
+        assertEquals(1, breaker.stats().slowCalls(), "the charge lands at the stall budget");
+        assertEquals(-1L, releasedAfterMs.get(),
+                "but a 40 s gap is not yet a reason to lose the rest of the answer");
 
-        // JCLAW-1183: the charge alone leaves the transport parked on a socket nothing will
-        // reclaim, whether or not tokens reached the screen first.
-        assertEquals(40_000L, releasedAfterMs.get());
-        assertEquals(1, breaker.stats().slowCalls(), "still a slow call, not a failure");
+        // JCLAW-1183: past the abort budget the charge alone would leave the transport parked
+        // on a socket nothing will reclaim, whether or not tokens reached the screen first.
+        clock.addAndGet(260 * SECOND);
+        assertFalse(guard.checkDeadlines(), "the outcome was recorded at the stall budget");
+        assertEquals(300_000L, releasedAfterMs.get());
+        assertEquals(1, breaker.stats().samples(), "still one outcome, still a slow call, not a failure");
         assertEquals(0, breaker.stats().failures());
+    }
+
+    @Test
+    void aStreamThatResumesBeforeTheAbortBudgetKeepsItsTurn() {
+        var clock = new AtomicLong(CLOCK_ORIGIN);
+        var breaker = stallingBreaker();
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
+        var released = new AtomicBoolean();
+        guard.onAbandoned(_ -> released.set(true));
+
+        // A local model re-evaluating its context mid-answer: a minute of silence, then the rest.
+        guard.chunk();
+        clock.addAndGet(60 * SECOND);
+        assertTrue(guard.checkDeadlines(), "the gap is evidence about the provider");
+        guard.chunk();
+        clock.addAndGet(SECOND);
+        guard.succeeded();
+
+        assertFalse(released.get(), "the answer finished; ending it at 60 s would have lost it");
+        clock.addAndGet(3600 * SECOND);
+        assertFalse(guard.checkDeadlines(), "a finished stream is off the sweep");
+        assertFalse(released.get());
+        assertEquals(1, breaker.stats().samples());
+        assertEquals(1, breaker.stats().slowCalls());
+    }
+
+    @Test
+    void theStallAbortBudgetIsOffWhenItIsZero() {
+        var clock = new AtomicLong(CLOCK_ORIGIN);
+        var breaker = stallingBreaker();
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, 0L);
+        var released = new AtomicBoolean();
+        guard.onAbandoned(_ -> released.set(true));
+
+        guard.chunk();
+        clock.addAndGet(60 * 60 * SECOND);
+        assertTrue(guard.checkDeadlines(), "charged while it hangs, as JCLAW-1169 shipped it");
+        assertFalse(released.get(), "and left to the transport, as JCLAW-1169 shipped it");
+        assertEquals(1, breaker.stats().slowCalls());
+    }
+
+    @Test
+    void anAbortBudgetUnderTheStallBudgetStillRecordsOneOutcome() {
+        var clock = new AtomicLong(CLOCK_ORIGIN);
+        var breaker = stallingBreaker();
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, 10_000L);
+        var releasedAfterMs = new AtomicLong(-1L);
+        guard.onAbandoned(releasedAfterMs::set);
+
+        guard.chunk();
+        clock.addAndGet(15 * SECOND);
+        assertTrue(guard.checkDeadlines(), "the abort is what recorded the outcome here");
+        assertEquals(15_000L, releasedAfterMs.get());
+        assertEquals(1, breaker.stats().samples());
+        assertEquals(0, breaker.stats().slowCalls(), "15 s is under the operator's own 30 s definition of slow");
+
+        clock.addAndGet(3600 * SECOND);
+        guard.succeeded();
+        assertEquals(1, breaker.stats().samples(), "a late completion is not a second outcome");
     }
 
     @Test
@@ -219,7 +286,7 @@ class LlmStreamBreakerTest extends UnitTest {
         breaker.trip();
 
         assertTrue(breaker.allowRequest());
-        var probe = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var probe = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
         assertTrue(breaker.allowRequest());
         assertFalse(breaker.allowRequest(), "both probe permits are out");
 
@@ -238,7 +305,7 @@ class LlmStreamBreakerTest extends UnitTest {
     void aStreamThatNeverProducesAFirstChunkIsChargedAndItsCallerReleased() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
         var releasedAfterMs = new AtomicLong(-1L);
         guard.onAbandoned(releasedAfterMs::set);
 
@@ -261,7 +328,7 @@ class LlmStreamBreakerTest extends UnitTest {
     void anAbandonedStreamThatLaterFinishesIsStillOneOutcome() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
         var releases = new AtomicLong();
         guard.onAbandoned(_ -> releases.incrementAndGet());
 
@@ -283,7 +350,7 @@ class LlmStreamBreakerTest extends UnitTest {
     void aStreamWithNoReleaseInstalledIsLeftToTheTransport() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS, STALL_ABORT_BUDGET_MS);
 
         clock.addAndGet(60 * 60 * SECOND);
         assertFalse(guard.checkDeadlines(),
@@ -295,7 +362,7 @@ class LlmStreamBreakerTest extends UnitTest {
     void theFirstChunkBudgetIsOffWhenItIsZero() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         var breaker = stallingBreaker();
-        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, 0L);
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, 0L, STALL_ABORT_BUDGET_MS);
         var released = new AtomicBoolean();
         guard.onAbandoned(_ -> released.set(true));
 
