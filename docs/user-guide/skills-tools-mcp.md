@@ -147,6 +147,17 @@ Same flow as tools: open [Agents](/agents), open the agent, scroll to **MCP Serv
 
 Each server has an **enabled** toggle. A disabled server keeps its config saved, but agents can't use its tools. Convenient when you want to temporarily silence a noisy server without losing how you set it up.
 
+### When a server stops answering
+
+Two independent guards keep a misbehaving server from taking a whole turn down with it:
+
+- **The connection watchdog** reacts to a transport that died. A STDIO process that exits or an HTTP server that closes the connection is reconnected with a backoff, and the server's row shows the disconnect and the last error.
+- **The circuit breaker** reacts to a server that is still connected but not answering — the case the watchdog cannot see. Every tool call has a 30 s timeout. Three timeouts (or other server-side failures) in a row, or half of the last ten calls, open the server's breaker; for the next 30 s every call to it fails in microseconds with an error the agent can read — `MCP server 'name' is failing fast: too many recent tool-call failures` — instead of costing another 30 s each. Two probe calls then decide whether it closes again. Each server has its own breaker, so one hung server never slows a healthy one.
+
+A tool that runs and reports its own error (a file that does not exist, a query that fails) does not count against the breaker: the server answered, and that is tool-level semantics. A successful reconnect clears a breaker that opened on its own, since the dead client's failures say nothing about the fresh one.
+
+The [Dashboard](/)'s **Circuit Breakers** panel shows every server's breaker and lets you **Isolate** one by hand — useful to take a flaky server out of an agent's reach for a cooldown without disabling it. An isolated server's tool calls fail with `isolated by the operator`, so neither the agent nor the log reads your decision as the server having broken, and a reconnect does not undo it. **Restore** lifts it early.
+
 :::gotcha STDIO servers run with your user's permissions
 A STDIO server is just a subprocess. It inherits the JClaw server's environment and process privileges. Only register servers you trust to run code on your behalf — the same care you'd take installing a CLI from npm.
 :::

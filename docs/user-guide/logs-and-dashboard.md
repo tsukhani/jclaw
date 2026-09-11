@@ -51,6 +51,13 @@ and the error rate stays flat while the work behind them is failing.
 | **OPEN**      | Not serving. Every call fails immediately without reaching the provider, until the cooldown (`llm.breaker.wait-seconds`) elapses. |
 | **HALF&nbsp;OPEN** | Probing. The next few calls decide whether it closes again or reopens for another cooldown. |
 
+The row's reason column says what opened it: **consecutive failures** (three exhausted calls in a
+row, the rule that fires first on a low-traffic install), **failure rate** or **slow call rate**
+(half of the recent window), or **isolated by you**. What each subsystem counts as a failure, and
+the streaming budgets behind a slow call, are described under
+[LLM Providers](/guide#settings-when-a-provider-misbehaves) and
+[MCP Servers](/guide#skills-tools-mcp-when-a-server-stops-answering).
+
 Each row carries a button: **Isolate** on a serving breaker (asks first) and **Restore** on one
 that is not. Isolating is bounded rather than latched — it restarts the ordinary cooldown, so a
 provider that is actually healthy closes itself again rather than staying dark until you remember

@@ -38,6 +38,22 @@ For each provider you can:
 
 If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
 
+### When a provider misbehaves
+
+Every model call runs through the same four-link chain, so a slow or broken provider costs you a bounded amount of time and then gets routed around:
+
+1. **Timeout.** A single HTTP attempt gives up after 180 s.
+2. **Retry.** A failed attempt is retried up to three times with a short backoff (a `Retry-After` header from the provider is honoured, capped). A 4xx — a request JClaw got wrong, or an exhausted balance — is not retried at all.
+3. **Circuit breaker.** Each provider has its own breaker. Three exhausted calls in a row, or half of the last ten, open it; while it is open every call to that provider fails in microseconds instead of spending another retry loop. After 60 s it lets three probe calls through, closes again if they all succeed, and re-opens if one does not. A 4xx never counts against the breaker, so a bug in a prompt cannot trip it on a healthy provider.
+4. **Fallback.** With a second provider configured, a turn whose primary is refused by its breaker runs on the secondary instead. The synchronous path (tool loops) fails over on every round; the streaming path fails over only when the breaker refuses the call *before any token has been sent* — including the continuation round after a tool call — because once tokens have reached the screen another provider cannot silently take over.
+
+Streaming has two hazards a timeout alone cannot see, and each has its own budget:
+
+- **A stream that never starts.** A provider (or a proxy in front of it) that keeps the connection alive with SSE comments while producing nothing resets the read timeout for ever. JClaw abandons a stream that has produced no chunk for **10 minutes**, records it as a failure, ends the turn with an error and hangs up the socket. The budget is generous on purpose: a cold local model loading weights legitimately takes minutes before its first token.
+- **A stream that stalls mid-answer.** A gap of more than **30 s** between chunks marks the call as slow, and enough slow calls open the breaker just as failures do. The stream itself is only ended — turn released, socket closed — after **5 minutes** of silence, because a local model re-evaluating its context mid-generation pauses for tens of seconds and that is not yet a reason to lose the rest of the answer. A stream that resumes in between keeps its turn.
+
+The [Dashboard](/) shows every breaker's state under **Circuit Breakers**, and lets you isolate or restore one by hand — see [Logs & Dashboard](/guide#logs-and-dashboard). The thresholds above are the defaults; each is a `llm.breaker.*` key documented in `conf/application.conf` and takes effect on restart.
+
 ## Search Providers
 
 Web search engines available to the `web_search` tool. Drag rows to **reorder priority** — providers are tried in order, and the next one is tried automatically if the first fails. Each row shows three states:
