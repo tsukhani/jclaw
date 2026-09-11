@@ -7,6 +7,7 @@ import memory.MemoryDecay;
 import memory.MemoryStore;
 import memory.MemoryStoreFactory;
 import models.Agent;
+import models.Conversation;
 import models.Memory;
 import org.jspecify.annotations.Nullable;
 import play.Play;
@@ -179,8 +180,22 @@ public class SystemPromptAssembler {
                                             @Nullable Set<String> disabledTools,
                                             @Nullable String channelType,
                                             float @Nullable [] queryEmbedding) {
+        return assemble(agent, userMessage, disabledTools, channelType, queryEmbedding, null);
+    }
+
+    /**
+     * As the five-arg form, for a turn inside {@code conversation}: the Environment
+     * section names the model the turn actually runs on, which a conversation may
+     * override (JCLAW-108). Pass {@code null} where no conversation exists and the
+     * agent's default is the truth.
+     */
+    public static AssembledPrompt assemble(Agent agent, @Nullable String userMessage,
+                                            @Nullable Set<String> disabledTools,
+                                            @Nullable String channelType,
+                                            float @Nullable [] queryEmbedding,
+                                            @Nullable Conversation conversation) {
         var builder = new SectionedBuilder();
-        var skills = buildPrompt(agent, userMessage, builder, disabledTools, channelType, queryEmbedding);
+        var skills = buildPrompt(agent, userMessage, builder, disabledTools, channelType, queryEmbedding, conversation);
         return new AssembledPrompt(builder.sb.toString(), skills);
     }
 
@@ -272,13 +287,14 @@ public class SystemPromptAssembler {
     private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
                                                            @Nullable Set<String> disabledTools,
                                                            @Nullable String channelType) {
-        return buildPrompt(agent, userMessage, b, disabledTools, channelType, null);
+        return buildPrompt(agent, userMessage, b, disabledTools, channelType, null, null);
     }
 
     private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, @Nullable String userMessage, SectionedBuilder b,
                                                            @Nullable Set<String> disabledTools,
                                                            @Nullable String channelType,
-                                                           float @Nullable [] queryEmbedding) {
+                                                           float @Nullable [] queryEmbedding,
+                                                           @Nullable Conversation conversation) {
         // Loadtest agent: emit only the static behavioral sections (safety,
         // execution bias, channel guidance) so cross-provider tokens-per-sec
         // measurements aren't dragged down by prompt-prefill costs that
@@ -408,11 +424,11 @@ public class SystemPromptAssembler {
         // trade-off for per-channel tuning.
         appendChannelGuidance(b, channelType);
 
-        // 9. Environment info — only JVM-stable, per-agent values, so the section
-        // stays byte-identical within an agent's lifetime and never busts the LLM
-        // prompt-prefix cache (the clock lives in CurrentTimeInjector; see 10 below).
+        // 9. Environment info — JVM-stable values plus the turn's effective model, so
+        // the section is byte-identical for every turn on the same model and never
+        // busts the prompt-prefix cache (the clock lives in CurrentTimeInjector; see 10).
         b.startSection("Environment");
-        appendEnvironmentSection(b.sb, agent);
+        appendEnvironmentSection(b.sb, agent, conversation);
 
         // 9b. Core memories (JCLAW-40) — the agent's high-importance, durable
         // facts, auto-loaded every session. Placed in the cacheable prefix as
@@ -636,11 +652,15 @@ public class SystemPromptAssembler {
                 """);
     }
 
-    private static void appendEnvironmentSection(StringBuilder sb, Agent agent) {
+    private static void appendEnvironmentSection(StringBuilder sb, Agent agent, @Nullable Conversation conversation) {
+        // The model must be told which model it is: a conversation can override the agent's.
+        var modelId = conversation != null ? ModelResolver.effectiveModelId(agent, conversation) : agent.modelId;
+        var provider = conversation != null ? ModelResolver.effectiveModelProvider(agent, conversation) : agent.modelProvider;
         sb.append("\n## Environment\n");
         sb.append("- Agent name: %s\n".formatted(agent.name));
         sb.append("- Agent ID: %d\n".formatted(agent.id));
-        sb.append("- Model: %s\n".formatted(agent.modelId));
+        sb.append("- Model: %s\n".formatted(modelId));
+        sb.append("- Provider: %s\n".formatted(provider));
         sb.append("- JClaw version: %s\n".formatted(
                 Play.configuration != null ? Play.configuration.getProperty("application.version", UNKNOWN) : UNKNOWN));
         sb.append("- Platform: %s (%s)\n".formatted(

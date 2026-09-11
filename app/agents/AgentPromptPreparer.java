@@ -108,7 +108,7 @@ final class AgentPromptPreparer {
             trace.agentId(AgentRunner.agentIdOf(agent));
 
             var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType,
-                    queryEmbedding);
+                    queryEmbedding, conv);
             // JCLAW-38: re-inject the latest compaction summary (if any)
             // into the system prompt so the LLM keeps continuity with
             // turns that have since been dropped from the raw history.
@@ -221,7 +221,7 @@ final class AgentPromptPreparer {
                     "conversation disappeared mid-turn");
             var promptChannel = channelType != null ? channelType : convo.channelType;
             var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, promptChannel,
-                    queryEmbedding);
+                    queryEmbedding, convo);
             // JCLAW-38: re-inject latest compaction summary (if any)
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.

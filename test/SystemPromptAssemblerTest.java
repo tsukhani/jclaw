@@ -2,6 +2,7 @@ import agents.CurrentTimeInjector;
 import agents.SystemPromptAssembler;
 import memory.MemoryStore;
 import models.Agent;
+import models.Conversation;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -164,6 +165,30 @@ class SystemPromptAssemblerTest extends UnitTest {
         assertTrue(env >= 0, "environment header missing");
         assertTrue(marker > env,
                 "cache boundary marker must come after the environment section");
+    }
+
+    @Test
+    void environmentNamesTheConversationsEffectiveModelOverTheAgentDefault() {
+        // JCLAW-1198: a conversation on an overridden model must be told so, or it
+        // introduces itself as the agent's default and researches the wrong model.
+        var agent = newAgent("spa-env-override");
+        var conv = new Conversation();
+        conv.modelProviderOverride = "ollama-cloud";
+        conv.modelIdOverride = "deepseek-v4-flash";
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "web", null, conv).systemPrompt();
+
+        assertTrue(prompt.contains("- Model: deepseek-v4-flash\n- Provider: ollama-cloud\n"), prompt);
+        assertFalse(prompt.contains("- Model: gpt-4.1\n"), "the agent default must not leak into an overridden turn");
+    }
+
+    @Test
+    void environmentNamesTheAgentDefaultWithoutAConversationOrAnOverride() {
+        var agent = newAgent("spa-env-default");
+        var expected = "- Model: gpt-4.1\n- Provider: openrouter\n";
+        assertTrue(SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt().contains(expected),
+                "no conversation: the agent default");
+        assertTrue(SystemPromptAssembler.assemble(agent, null, null, "web", null, new Conversation()).systemPrompt()
+                .contains(expected), "conversation without an override: the agent default");
     }
 
     @Test
