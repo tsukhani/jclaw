@@ -472,6 +472,7 @@ public final class ToolCallLoopRunner {
     public record StreamingTurnContext(Agent agent, Conversation conversation,
                                        @Nullable Long conversationId,
                                        @Nullable List<ToolDef> tools, LlmProvider provider,
+                                       @Nullable LlmProvider secondary,
                                        AgentRunner.StreamingCallbacks cb, @Nullable String thinkingMode,
                                        AtomicBoolean isCancelled, LatencyTrace trace,
                                        LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
@@ -533,7 +534,9 @@ public final class ToolCallLoopRunner {
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());
-        var accumulator = ctx.provider().chatStreamAccumulate(
+        // JCLAW-1184: secondary-aware like round 1, so a breaker that opened between rounds
+        // routes the continuation instead of erroring the turn.
+        var accumulator = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.secondary(),
                 effectiveModelIdForCall, sendMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
                 maxTokens, ctx.thinkingMode(), ctx.channelType());
 
@@ -623,7 +626,7 @@ public final class ToolCallLoopRunner {
                         + "Do not call any more tools. Write the full answer as markdown."));
 
         var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, ctx.tools());
-        var retry = ctx.provider().chatStreamAccumulate(
+        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.secondary(),
                 effectiveModelIdForCall, retryMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
                 retryMaxTokens, ctx.thinkingMode(), ctx.channelType());
         try {

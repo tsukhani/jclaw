@@ -515,8 +515,8 @@ final class StreamingAgentRunner {
         var turnImages = new ArrayList<String>();
         if (!accumulator.toolCalls().isEmpty()) {
             var ctx = new ToolCallLoopRunner.StreamingTurnContext(
-                    agent, conversation, conversation.id, tools, primary, cb, thinkingMode,
-                    isCancelled, trace, turnUsage, turnImages, channelType, sink);
+                    agent, conversation, conversation.id, tools, primary, ProviderRegistry.getSecondary(),
+                    cb, thinkingMode, isCancelled, trace, turnUsage, turnImages, channelType, sink);
             content = ToolCallLoopRunner.handleToolCallsStreaming(
                     ctx, messages, accumulator.toolCalls(), content, 0);
         }

@@ -5,6 +5,7 @@ import agents.ToolCallLoopRunner;
 import agents.ToolRegistry;
 import com.sun.net.httpserver.HttpServer;
 import llm.LlmProvider;
+import llm.LlmResilience;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ModelInfo;
@@ -25,6 +26,7 @@ import services.ConfigService;
 import services.ConversationService;
 import services.SubagentRegistry;
 import services.Tx;
+import utils.CircuitBreakers;
 import utils.LatencyTrace;
 
 import java.lang.reflect.Method;
@@ -307,6 +309,79 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                 "One continuation LLM call should be issued after the tool round");
     }
 
+    // JCLAW-1184: the continuation round is secondary-aware, the way round 1 has been since
+    // JCLAW-1182. Only the breaker-open refusal routes — it fails before any token exists.
+    @Test
+    void streamingContinuationFailsOverWhenThePrimaryBreakerIsOpen() throws Exception {
+        streamingServer = new MockWebServer();
+        streamingServer.start();
+        var secondaryServer = new MockWebServer();
+        secondaryServer.start();
+        secondaryServer.enqueue(sseResponse("""
+                data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"From the secondary."},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """));
+        var primary = openAiProviderForStreamingServer("jclaw1184-primary");
+        var secondary = openAiProviderFor(secondaryServer, "jclaw1184-secondary");
+        try {
+            LlmResilience.breakerFor("jclaw1184-primary").trip();
+            var agent = persistAgent("jclaw1184-failover-agent");
+            var convo = persistConversation(agent);
+            var newTools = new ArrayList<>(originalTools);
+            newTools.add(simpleTool("noop_failover", true, "ok"));
+            ToolRegistry.publish(newTools);
+            play.db.jpa.JPA.em().getTransaction().commit();
+            play.db.jpa.JPA.em().getTransaction().begin();
+
+            String result = invokeHandleToolCallsStreaming(agent, convo, convo.id,
+                    new ArrayList<>(List.of(ChatMessage.user("hi"))), List.of(),
+                    List.of(toolCall("tc1", "noop_failover")), "",
+                    primary, secondary, recordingCallbacks(), "low", 0, new AtomicBoolean(false),
+                    new LatencyTrace(), new LlmProvider.TurnUsage(), new ArrayList<>(), "web",
+                    new ConversationSink(convo));
+
+            assertTrue(result.contains("From the secondary."), "got: " + result);
+            assertEquals(0, streamingServer.getRequestCount(), "an open breaker never reaches the primary's wire");
+            assertEquals(1, secondaryServer.getRequestCount());
+        } finally {
+            secondaryServer.close();
+            CircuitBreakers.remove(LlmResilience.breakerName("jclaw1184-primary"));
+            CircuitBreakers.remove(LlmResilience.breakerName("jclaw1184-secondary"));
+        }
+    }
+
+    @Test
+    void streamingContinuationWithNoSecondaryFailsFastOnAnOpenBreaker() throws Exception {
+        streamingServer = new MockWebServer();
+        streamingServer.start();
+        var primary = openAiProviderForStreamingServer("jclaw1184-alone");
+        try {
+            LlmResilience.breakerFor("jclaw1184-alone").trip();
+            var agent = persistAgent("jclaw1184-alone-agent");
+            var convo = persistConversation(agent);
+            var newTools = new ArrayList<>(originalTools);
+            newTools.add(simpleTool("noop_alone", true, "ok"));
+            ToolRegistry.publish(newTools);
+            play.db.jpa.JPA.em().getTransaction().commit();
+            play.db.jpa.JPA.em().getTransaction().begin();
+
+            String result = invokeHandleToolCallsStreaming(agent, convo, convo.id,
+                    new ArrayList<>(List.of(ChatMessage.user("hi"))), List.of(),
+                    List.of(toolCall("tc1", "noop_alone")), "",
+                    primary, recordingCallbacks(), "low", 0, new AtomicBoolean(false),
+                    new LatencyTrace(), new LlmProvider.TurnUsage(), new ArrayList<>(), "web",
+                    new ConversationSink(convo));
+
+            assertNotNull(result, "today's behaviour: the turn ends with the diagnostic fallback, not a hang");
+            assertEquals(0, streamingServer.getRequestCount(),
+                    "refused before the wire on both the continuation and its synthesis retry");
+        } finally {
+            CircuitBreakers.remove(LlmResilience.breakerName("jclaw1184-alone"));
+        }
+    }
+
     // Streaming: truncation mid-tool-call. Covers lines 334-344.
     @Test
     void streamingTruncationWithPendingToolCallsReturnsTruncationHint() throws Exception {
@@ -567,7 +642,11 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
     }
 
     private OpenAiProvider openAiProviderForStreamingServer(String name) {
-        var baseUrl = streamingServer.url("/").toString();
+        return openAiProviderFor(streamingServer, name);
+    }
+
+    private static OpenAiProvider openAiProviderFor(MockWebServer server, String name) {
+        var baseUrl = server.url("/").toString();
         if (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         var config = new ProviderConfig(name, baseUrl, "sk-test",
                 List.of(new ModelInfo("test-model", "Test", 100000, 4096, false)));
@@ -660,11 +739,30 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                                                           List<String> collectedImages,
                                                           String channelType,
                                                           AgentExecutionSink sink) throws Exception {
+        return invokeHandleToolCallsStreaming(agent, conversation, conversationId, messages, tools, toolCalls,
+                priorContent, provider, null, cb, thinkingMode, round, isCancelled, trace, turnUsage,
+                collectedImages, channelType, sink);
+    }
+
+    @SuppressWarnings("java:S107")
+    private static String invokeHandleToolCallsStreaming(Agent agent, Conversation conversation,
+                                                          Long conversationId,
+                                                          List<ChatMessage> messages, List<ToolDef> tools,
+                                                          List<ToolCall> toolCalls, String priorContent,
+                                                          LlmProvider provider, LlmProvider secondary,
+                                                          AgentRunner.StreamingCallbacks cb,
+                                                          String thinkingMode,
+                                                          int round, AtomicBoolean isCancelled,
+                                                          LatencyTrace trace,
+                                                          LlmProvider.TurnUsage turnUsage,
+                                                          List<String> collectedImages,
+                                                          String channelType,
+                                                          AgentExecutionSink sink) throws Exception {
 
         // JCLAW-831: the stable per-turn state now rides in a StreamingTurnContext
         // record; only messages / toolCalls / priorContent / round stay positional.
         var ctx = new ToolCallLoopRunner.StreamingTurnContext(
-                agent, conversation, conversationId, tools, provider, cb, thinkingMode,
+                agent, conversation, conversationId, tools, provider, secondary, cb, thinkingMode,
                 isCancelled, trace, turnUsage, collectedImages, channelType, sink);
 
         Method m = ToolCallLoopRunner.class.getDeclaredMethod(
