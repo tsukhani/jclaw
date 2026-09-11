@@ -214,11 +214,24 @@ describe('useAgentModel', () => {
     expect(put.agent).toBeNull()
   })
 
-  it('pending picks are dropped once a conversation opens or the agent changes', async () => {
+  it('pending picks keep speaking for the header until the new conversation\'s row arrives', async () => {
     const { api, deps } = await mountAgentModel({ selectedConvoId: ref(null) })
     await api.onModelKeyChange('anthropic::opus')
     expect(api.pendingOverrides.value).not.toBeNull()
-    deps.selectedConvoId.value = 5 // the server persisted them on the conversation the message created
+    // The init frame assigns the id first; the list refresh with the persisted override lands later.
+    deps.selectedConvoId.value = 5
+    await vi.waitFor(() => expect(api.pendingOverrides.value).toBeNull()) // nothing more to send
+    expect(api.selectedModelKey.value).toBe('anthropic::opus') // but the header still shows the pick
+    expect(api.sessionOverrides.value).toEqual({ model: true, thinking: false })
+    deps.conversations.value = [{ id: 5, modelProviderOverride: 'anthropic', modelIdOverride: 'opus' } as unknown as Conversation]
+    await vi.waitFor(() => expect(api.selectedModelKey.value).toBe('anthropic::opus'))
+    expect(api.sessionOverrides.value).toEqual({ model: true, thinking: false }) // now from the row
+  })
+
+  it('pending picks are dropped when the agent changes', async () => {
+    const { api, deps } = await mountAgentModel({ selectedConvoId: ref(null) })
+    await api.onModelKeyChange('anthropic::opus')
+    deps.selectedAgentId.value = 2
     await vi.waitFor(() => expect(api.pendingOverrides.value).toBeNull())
   })
 

@@ -70,8 +70,10 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   const { agents, selectedAgentId, selectedConvoId, conversations, providers, refreshConversations } = deps
 
   // Fresh-chat picks. They apply to the conversation the next message creates, so
-  // they die with a change of agent and once a conversation is open (the server
-  // has persisted them on it by then).
+  // they die with a change of agent, and once that conversation's row has arrived
+  // (it carries them as overrides by then). Not on the id alone: the init frame
+  // assigns the id before the list refresh lands, and dropping the picks there
+  // showed the agent default in the header while the first reply streamed.
   const pendingModel = ref<{ providerName: string, modelId: string } | null>(null)
   const pendingThinking = ref<string | null>(null)
   const overrideError = ref<string | null>(null)
@@ -80,9 +82,6 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     pendingThinking.value = null
   }
   watch(selectedAgentId, clearPending)
-  watch(selectedConvoId, (id) => {
-    if (id != null) clearPending()
-  })
 
   // The currently selected agent object
   const selectedAgent = computed(() => agents.value?.find(a => a.id === selectedAgentId.value))
@@ -102,6 +101,12 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     if (!Array.isArray(list)) return null
     return list.find(c => c.id === selectedConvoId.value) ?? null
   })
+  watch(currentConversation, (row) => {
+    if (row) clearPending()
+  })
+
+  /** True until the open conversation's row is loaded — the window a fresh-chat pick still speaks for. */
+  const pendingApplies = computed(() => currentConversation.value == null)
 
   /**
    * Effective (provider, modelId) for the currently open conversation.
@@ -116,7 +121,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     if (conv?.modelProviderOverride && conv?.modelIdOverride) {
       return { providerName: conv.modelProviderOverride, modelId: conv.modelIdOverride }
     }
-    if (selectedConvoId.value == null && pendingModel.value) return pendingModel.value
+    if (pendingApplies.value && pendingModel.value) return pendingModel.value
     return {
       providerName: selectedAgent.value?.modelProvider ?? null,
       modelId: selectedAgent.value?.modelId ?? null,
@@ -129,9 +134,9 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
    * still intersects with what the effective model advertises.
    */
   const effectiveThinking = computed<string | null>(() => {
-    const override = selectedConvoId.value != null
-      ? currentConversation.value?.thinkingModeOverride ?? null
-      : pendingThinking.value
+    const override = pendingApplies.value
+      ? pendingThinking.value
+      : currentConversation.value?.thinkingModeOverride ?? null
     if (override != null) return override === 'off' ? null : override
     const mode = selectedAgent.value?.thinkingMode
     return typeof mode === 'string' && mode.length > 0 ? mode : null
@@ -435,7 +440,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   }
 
   const sessionOverrides = computed(() => {
-    if (selectedConvoId.value == null) {
+    if (pendingApplies.value) {
       return { model: pendingModel.value != null, thinking: pendingThinking.value != null }
     }
     const conv = currentConversation.value

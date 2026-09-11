@@ -76,13 +76,12 @@ test.describe('UAT-15 chat', () => {
     const picker = page.getByRole('button', { name: /^Model / })
     const current = (await picker.textContent()) ?? ''
     await picker.click()
-    // The first model that is not the current one, whatever this install offers; its id
-    // is the last token of the option's text.
+    // The first model that is not the current one, whatever this install offers; the
+    // option's last span carries the model id.
     const options = page.getByRole('dialog').getByRole('button')
     let picked: string | null = null
     for (let i = 0; i < await options.count(); i++) {
-      const text = (await options.nth(i).textContent())?.trim() ?? ''
-      const id = text.split(/\s+/).pop() ?? ''
+      const id = (await options.nth(i).locator('span').last().textContent())?.trim() ?? ''
       if (id && !current.includes(id)) {
         await options.nth(i).click()
         picked = id
