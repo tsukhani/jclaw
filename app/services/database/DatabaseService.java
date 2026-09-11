@@ -217,11 +217,47 @@ public final class DatabaseService {
         return !today.equals(lastRun) && !now.toLocalTime().isBefore(at);
     }
 
+    /**
+     * The day a fresh process should treat as already backed up (JCLAW-1195): today, when the
+     * newest of this service's own backups was written today at or after {@code schedule};
+     * otherwise null. The in-memory marker dies with the process, so without this every
+     * restart after the scheduled time re-ran the backup and pruned the real one.
+     */
+    public static @Nullable LocalDate lastRunFromBackups(List<BackupInfo> backups, @Nullable String schedule,
+                                                         ZonedDateTime now) {
+        if (schedule == null || !SCHEDULE.matcher(schedule).matches()) {
+            return null;
+        }
+        var at = LocalTime.parse(schedule);
+        return backups.stream()
+                .filter(b -> b.id().startsWith(BACKUP_PREFIX))
+                .map(b -> ZonedDateTime.ofInstant(Instant.parse(b.createdAt()), now.getZone()))
+                .filter(t -> t.toLocalDate().equals(now.toLocalDate()) && !t.toLocalTime().isBefore(at))
+                .map(ZonedDateTime::toLocalDate)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** Forget the in-process schedule marker, as a restart would. */
+    public static void resetScheduleMarkerForTest() {
+        lastScheduledRun = null;
+        lastScheduledAt = null;
+    }
+
     /** Called every minute by {@code DatabaseBackupScheduleJob}; runs the backup when it is due. */
     public static void runScheduledBackupIfDue() {
         var now = ZonedDateTime.ofInstant(AppClock.now(), TimezoneResolver.appZone());
-        if (!isDue(schedule(), now, lastScheduledRun)) {
+        var schedule = schedule();
+        if (!isDue(schedule, now, lastScheduledRun)) {
             return;
+        }
+        if (lastScheduledRun == null) {
+            // First due tick since boot: was today's backup written before this process came up?
+            var seeded = lastRunFromBackups(listBackups(), schedule, now);
+            if (seeded != null) {
+                lastScheduledRun = seeded;
+                return;
+            }
         }
         lastScheduledRun = now.toLocalDate();
         lastScheduledAt = now.toInstant();

@@ -93,6 +93,53 @@ class DatabaseServiceTest extends UnitTest {
     }
 
     @Test
+    void aRestartSeedsTodaysRunFromTheNewestBackupOnDisk() {
+        // JCLAW-1195: the marker lives in memory, so a process that comes up after the scheduled
+        // time must read the directory before deciding today has not run.
+        var zone = ZoneId.of("Asia/Singapore");
+        var now = ZonedDateTime.of(2026, 9, 11, 16, 13, 0, 0, zone);
+        var backup = (java.util.function.Function<String, DatabaseService.BackupInfo>) stampUtc ->
+                new DatabaseService.BackupInfo("jclaw-" + stampUtc + ".zip", 1, Instant.parse(
+                        stampUtc.substring(0, 4) + "-" + stampUtc.substring(4, 6) + "-" + stampUtc.substring(6, 11)
+                        + ":" + stampUtc.substring(11, 13) + ":" + stampUtc.substring(13, 15) + "Z").toString());
+
+        var ranAt0900 = List.of(backup.apply("20260911T010054Z"));          // 09:00:54 local
+        assertEquals(now.toLocalDate(), DatabaseService.lastRunFromBackups(ranAt0900, "09:00", now),
+                "a backup written today at the scheduled time counts as today's run");
+        assertNull(DatabaseService.lastRunFromBackups(List.of(backup.apply("20260910T010054Z")), "09:00", now),
+                "yesterday's backup does not cover today");
+        assertNull(DatabaseService.lastRunFromBackups(List.of(backup.apply("20260911T003000Z")), "09:00", now),
+                "a backup before the scheduled time leaves the scheduled run to fire");
+        assertNull(DatabaseService.lastRunFromBackups(List.of(), "09:00", now), "no backup: catch up");
+        assertNull(DatabaseService.lastRunFromBackups(ranAt0900, null, now), "no schedule: nothing to seed");
+        var upload = new DatabaseService.BackupInfo("upload.zip", 1, now.toInstant().toString());
+        assertNull(DatabaseService.lastRunFromBackups(List.of(upload), "09:00", now),
+                "an upload in the directory is not one of this service's runs");
+        assertEquals(now.toLocalDate(), DatabaseService.lastRunFromBackups(List.of(upload, ranAt0900.getFirst()), "09:00", now),
+                "the newest own backup decides, not the newest file");
+    }
+
+    @Test
+    void aRestartAfterTodaysBackupDoesNotWriteAnother() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("backups"));
+        DatabaseService.backupsDirForTest = dir;
+        var fixed = Instant.parse("2026-09-11T12:00:00Z");
+        // Written a minute before "now": the same local day in every zone the resolver can pick.
+        touch(dir, "jclaw-20260911T115900Z.zip", fixed.minusSeconds(60));
+        DatabaseService.resetScheduleMarkerForTest();
+        services.ConfigService.set(DatabaseService.KEY_SCHEDULE, "00:00");
+        try {
+            assertEquals("00:00", DatabaseService.schedule(), "the schedule must be live, or the tick is not due and the test proves nothing");
+            utils.AppClock.runWith(java.time.Clock.fixed(fixed, ZoneId.of("UTC")),
+                    DatabaseService::runScheduledBackupIfDue);
+            assertEquals(1, Files.list(dir).count(), "the restart must not add a backup");
+        } finally {
+            services.ConfigService.set(DatabaseService.KEY_SCHEDULE, "");
+            DatabaseService.resetScheduleMarkerForTest();
+        }
+    }
+
+    @Test
     void theConfigGateRefusesWhatWouldBeSilentAtRead() {
         assertNull(DatabaseService.rejectionFor(DatabaseService.KEY_RETENTION, "7"));
         assertNotNull(DatabaseService.rejectionFor(DatabaseService.KEY_RETENTION, "0"));

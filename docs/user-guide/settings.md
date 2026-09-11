@@ -433,7 +433,7 @@ Attention is the state worth knowing about. On 2026-09-09 the live database turn
 
 **Back up now** writes an H2 online backup — a zip containing the data file — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
 
-**Schedule** sits under the list and takes a time of day, in this instance's timezone, for a daily backup. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log.
+**Schedule** sits under the list and takes a time of day, in this instance's timezone, for a daily backup. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log. The schedule counts a day as done once a backup has been written at or after its time, so restarting the instance later that day does not write another; an instance that was down at the scheduled time catches up once, on its first minute back up.
 
 **retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
 
