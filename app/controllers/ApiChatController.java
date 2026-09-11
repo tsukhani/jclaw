@@ -190,6 +190,21 @@ public class ApiChatController extends Controller {
      * a 400 with nothing created; the agent row is never touched.
      */
     private static Conversation createWithOverrides(Agent agent, String username, PendingOverrides o) {
+        rejectInvalidOverrides(agent, o);
+        return Tx.run(() -> {
+            var conversation = ConversationService.create(agent, "web", username);
+            if (o.modelProvider() != null) {
+                ConversationService.setModelOverride(conversation, o.modelProvider(), o.modelId());
+            }
+            if (o.thinkingMode() != null) {
+                ConversationService.setThinkingOverride(conversation, o.thinkingMode());
+            }
+            return conversation;
+        });
+    }
+
+    /** Renders a 400 and throws for a pick the provider or model cannot honour; returns for a good one. */
+    private static void rejectInvalidOverrides(Agent agent, PendingOverrides o) {
         if (o.modelProvider() != null) {
             var provider = ProviderRegistry.get(o.modelProvider());
             if (provider == null) {
@@ -213,16 +228,6 @@ public class ApiChatController extends Controller {
                 throw ApiResponses.unreachable();
             }
         }
-        return Tx.run(() -> {
-            var conversation = ConversationService.create(agent, "web", username);
-            if (o.modelProvider() != null) {
-                ConversationService.setModelOverride(conversation, o.modelProvider(), o.modelId());
-            }
-            if (o.thinkingMode() != null) {
-                ConversationService.setThinkingOverride(conversation, o.thinkingMode());
-            }
-            return conversation;
-        });
     }
 
     private static List<AttachmentService.Input> parseAttachments(JsonObject body) {

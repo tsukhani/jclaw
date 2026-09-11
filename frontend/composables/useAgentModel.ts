@@ -63,6 +63,11 @@ export interface UseAgentModel {
   overrideError: Ref<string | null>
 }
 
+function describeRejection(err: unknown): string {
+  const data = (err as { data?: { message?: string } })?.data
+  return data?.message ?? (err instanceof Error ? err.message : 'The change was rejected.')
+}
+
 export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   const { agents, selectedAgentId, selectedConvoId, conversations, providers, refreshConversations } = deps
 
@@ -351,11 +356,6 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     }
     detachMenuTrackingListeners()
   })
-
-  function describeRejection(err: unknown): string {
-    const data = (err as { data?: { message?: string } })?.data
-    return data?.message ?? (err instanceof Error ? err.message : 'The change was rejected.')
-  }
 
   /**
    * Thinking change (JCLAW-1196): 'off' or a level. With a conversation open it is

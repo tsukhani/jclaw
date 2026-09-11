@@ -974,11 +974,6 @@ public final class Commands {
                 + "Older messages will be trimmed on the next turn.";
     }
 
-    /** Agent-default view, kept for callers with no conversation in hand. */
-    private static String renderThinkingSelection(Agent agent, ModelInfo m) {
-        return renderThinkingSelection(agent, null, m);
-    }
-
     private static String renderThinkingSelection(Agent agent, @Nullable Conversation current, ModelInfo m) {
         var mode = ModelOverrideResolver.thinkingMode(current, agent);
         var scope = ModelOverrideResolver.hasThinkingOverride(current) ? ", conversation override" : "";

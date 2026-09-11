@@ -56,6 +56,7 @@ public class ApiConversationsController extends Controller {
     private static final String PINNED = "pinned";
     private static final String CHANNEL_TYPE = "channelType";
     private static final String CREATED_AT = "createdAt";
+    private static final String THINKING_MODE = "thinkingMode";
     // Conversation.preview is @Column(length = 100), so a longer name cannot be stored.
     private static final int MAX_NAME_LENGTH = 100;
 
@@ -728,11 +729,11 @@ public class ApiConversationsController extends Controller {
             throw ApiResponses.unreachable();
         }
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("thinkingMode") || body.get("thinkingMode").isJsonNull()) {
+        if (body == null || !body.has(THINKING_MODE) || body.get(THINKING_MODE).isJsonNull()) {
             badRequest();
             throw ApiResponses.unreachable();
         }
-        var mode = body.get("thinkingMode").getAsString();
+        var mode = body.get(THINKING_MODE).getAsString();
         if (mode == null || mode.isBlank()) {
             badRequest();
             throw ApiResponses.unreachable();

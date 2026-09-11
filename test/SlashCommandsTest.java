@@ -1118,9 +1118,9 @@ class SlashCommandsTest extends UnitTest {
 
     private String renderThinkingSelection(Agent agent, llm.LlmTypes.ModelInfo m) throws Exception {
         var meth = Commands.class.getDeclaredMethod(
-                "renderThinkingSelection", Agent.class, llm.LlmTypes.ModelInfo.class);
+                "renderThinkingSelection", Agent.class, models.Conversation.class, llm.LlmTypes.ModelInfo.class);
         meth.setAccessible(true);
-        return (String) meth.invoke(null, agent, m);
+        return (String) meth.invoke(null, agent, null, m);
     }
 
     @Test
