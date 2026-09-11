@@ -398,7 +398,10 @@ final class StreamingAgentRunner {
 
         // Retry once on transient 5xx errors. Matched on the class the driver now attaches
         // (JCLAW-1167), not on the message: a 4xx whose body quoted "HTTP 5" retried too.
-        if (accumulator.error() instanceof LlmProvider.LlmException.ServerError) {
+        // JCLAW-1188: a breaker's refusal is not transient — retrying re-enters the same open
+        // breaker and can spend a HALF_OPEN permit the first refusal was waiting on.
+        if (accumulator.error() instanceof LlmProvider.LlmException.ServerError
+                && !(accumulator.error() instanceof LlmProvider.LlmException.BreakerOpen)) {
             EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
             accumulator = LlmProvider.chatStreamAccumulateWithFailover(
                     primary, secondary, effectiveModelIdForCall, messages, tools,

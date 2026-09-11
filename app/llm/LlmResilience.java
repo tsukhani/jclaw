@@ -131,12 +131,12 @@ public final class LlmResilience {
      * The distinction lasts only as long as the manual trip does: once the cooldown elapses and a
      * probe fails, the breaker is open on evidence and reports the ordinary failure.
      */
-    public static LlmException.ServerError openBreakerFailure(String providerName) {
+    public static LlmException.BreakerOpen openBreakerFailure(String providerName) {
         if (breakerFor(providerName).stats().reason() == CircuitBreaker.Reason.MANUAL_TRIP) {
             return new LlmException.ManuallyIsolated("Circuit breaker for " + providerName
                     + " was opened by the operator: not calling it until it is restored");
         }
-        return new LlmException.ServerError(
+        return new LlmException.BreakerOpen(
                 "Circuit breaker open for " + providerName + ": not calling it until it recovers");
     }
 

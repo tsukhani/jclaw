@@ -1,6 +1,8 @@
 import agents.AgentRunner;
+import llm.LlmResilience;
 import models.Agent;
 import models.Conversation;
+import models.EventLog;
 import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
@@ -12,6 +14,8 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
+import services.EventLogger;
+import utils.CircuitBreakers;
 
 import java.nio.file.Files;
 import java.util.List;
@@ -215,6 +219,63 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 "persisted assistant content must match the streamed payload");
     }
 
+    // ─── JCLAW-1188: a breaker's refusal is not a transient 5xx ─────────
+
+    @Test
+    void runStreamingRetriesOnceOnATransient5xx() throws Exception {
+        // The positive control for the case below: the retry rule and its log line are real.
+        var calls = new AtomicInteger();
+        startStatusServer(500, calls);
+        configureProvider("jclaw1188-flaky");
+        var agent = persistAgent("jclaw1188-flaky-agent", "jclaw1188-flaky", "test-model");
+        var convo = persistConversation(agent, "web", "u-1188-flaky");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        try {
+            var harness = streamAndAwait(agent, convo, "say hi");
+            assertTrue(harness.terminated.await(60, TimeUnit.SECONDS));
+            assertEquals(2, calls.get(), "one attempt and one retry reach the wire");
+            assertEquals(1, retryLogLines(agent), "and the retry is announced once");
+        } finally {
+            CircuitBreakers.remove(LlmResilience.breakerName("jclaw1188-flaky"));
+        }
+    }
+
+    @Test
+    void runStreamingDoesNotRetryIntoAnOpenBreaker() throws Exception {
+        var calls = new AtomicInteger();
+        startStatusServer(500, calls);
+        configureProvider("jclaw1188-open");
+        var agent = persistAgent("jclaw1188-open-agent", "jclaw1188-open", "test-model");
+        var convo = persistConversation(agent, "web", "u-1188-open");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        try {
+            LlmResilience.breakerFor("jclaw1188-open").trip();
+            var harness = streamAndAwait(agent, convo, "say hi");
+            assertTrue(harness.terminated.await(60, TimeUnit.SECONDS));
+            assertEquals(0, calls.get(), "refused before the wire");
+            assertEquals(0, retryLogLines(agent),
+                    "a refusal is not a transient error: no second refusal, no misleading log line");
+        } finally {
+            CircuitBreakers.remove(LlmResilience.breakerName("jclaw1188-open"));
+        }
+    }
+
+    /**
+     * Event-log rows are batched and the runner flushes its own on the stream thread after the
+     * terminal callback, so the line can be mid-commit when the harness returns; poll briefly.
+     */
+    private static long retryLogLines(Agent agent) throws InterruptedException {
+        var deadline = System.nanoTime() + 5_000_000_000L;
+        while (true) {
+            EventLogger.flush();
+            var count = EventLog.count("agentId = ?1 AND message LIKE ?2", agent.name, "Retrying streaming%");
+            if (count > 0 || System.nanoTime() >= deadline) return count;
+            Thread.sleep(100);
+        }
+    }
+
     // ─── Audio-format-rejection → transcript re-stream recovery ─────────
 
     @Test
@@ -405,11 +466,29 @@ class AgentRunnerStreamingPathTest extends UnitTest {
     }
 
     private void configureProvider() {
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        configureProvider("test-provider");
+    }
+
+    private void configureProvider(String name) {
+        ConfigService.set("provider." + name + ".baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider." + name + ".apiKey", "sk-test");
+        ConfigService.set("provider." + name + ".models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
+    }
+
+    /** Answers every chat completion with {@code status} and counts them. */
+    private void startStatusServer(int status, AtomicInteger calls) throws Exception {
+        llmServer = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.createContext("/chat/completions", exchange -> {
+            calls.incrementAndGet();
+            var bytes = "{\"error\":{\"message\":\"boom\"}}".getBytes();
+            exchange.sendResponseHeaders(status, bytes.length);
+            try (var os = exchange.getResponseBody()) { os.write(bytes); }
+        });
+        llmServer.start();
+        port = llmServer.getAddress().getPort();
     }
 
     private void configureAudioProvider() {

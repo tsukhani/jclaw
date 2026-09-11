@@ -90,7 +90,8 @@ class LlmStreamFailoverTest extends UnitTest {
 
         var accumulator = stream(primary, secondary);
 
-        var error = assertInstanceOf(LlmException.ServerError.class, accumulator.error());
+        // JCLAW-1188: a refusal has its own class, so a retry-on-5xx rule can leave it alone.
+        var error = assertInstanceOf(LlmException.BreakerOpen.class, accumulator.error());
         assertTrue(error.getMessage().contains("jclaw1182-both-secondary"),
                 "the failure the user sees is the secondary's, so the hop happened exactly once");
         assertEquals(0, server(primary).getRequestCount());

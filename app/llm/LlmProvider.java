@@ -1413,12 +1413,21 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
 
         /**
-         * The operator opened this provider's breaker by hand (JCLAW-1170). A
+         * The provider's circuit breaker refused the call before the wire (JCLAW-1188). A
          * {@code ServerError} so failover and every other 5xx path behave exactly as before,
-         * and a distinct class so an operator's decision is never read back as the provider
-         * having failed.
+         * and a distinct class so a retry-on-5xx rule can tell a refusal from a wire failure:
+         * retrying a refusal re-enters the same open breaker and can spend a HALF_OPEN permit.
          */
-        public static final class ManuallyIsolated extends ServerError {
+        public static class BreakerOpen extends ServerError {
+            public BreakerOpen(String message) { super(message); }
+        }
+
+        /**
+         * The operator opened this provider's breaker by hand (JCLAW-1170): a refusal, and a
+         * distinct class so an operator's decision is never read back as the provider having
+         * failed.
+         */
+        public static final class ManuallyIsolated extends BreakerOpen {
             public ManuallyIsolated(String message) { super(message); }
         }
 

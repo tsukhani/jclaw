@@ -159,8 +159,8 @@ class LlmBreakerTest extends UnitTest {
             var failure = failingChat(name, transport);
 
             assertEquals(0, transport.attempts.get());
-            assertInstanceOf(LlmException.ServerError.class, failure,
-                    "chatWithFailover triggers on LlmException, so the fail-fast must be one");
+            assertInstanceOf(LlmException.BreakerOpen.class, failure,
+                    "a ServerError, so chatWithFailover triggers; its own class, so a retry rule can skip it");
         } finally {
             forget(name);
         }
