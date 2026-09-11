@@ -4,6 +4,7 @@ import agents.AgentRunner;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.LlmResilience;
 import llm.LlmTypes;
 import llm.ProviderRegistry;
 import models.Agent;
@@ -50,6 +51,20 @@ import static utils.GsonHolder.GSON;
 public class ApiChatController extends Controller {
 
     private static final Gson gson = GSON;
+
+    private static final Duration CHAT_STREAM_FLOOR = Duration.ofMinutes(10);
+    private static final Duration CHAT_STREAM_MARGIN = Duration.ofMinutes(2);
+
+    /**
+     * Hard ceiling on one chat stream. Derived from the first-chunk budget rather than fixed
+     * (JCLAW-1192): the sweep abandons a silent stream just past that budget, and a ceiling
+     * that fell first cut the browser off with "client disconnect" a few seconds before the
+     * abandonment it was about to receive. Never under the ten minutes it always was.
+     */
+    public static Duration chatStreamTimeout() {
+        var derived = LlmResilience.firstChunkBudget().plus(CHAT_STREAM_MARGIN);
+        return derived.compareTo(CHAT_STREAM_FLOOR) > 0 ? derived : CHAT_STREAM_FLOOR;
+    }
 
     // JSON body keys (request input + per-attachment metadata) and SSE/response payload keys.
     private static final String KEY_AGENT_ID = "agentId";
@@ -303,7 +318,7 @@ public class ApiChatController extends Controller {
 
         SseStream sse = openSSE()
                 .heartbeat(Duration.ofSeconds(30))
-                .timeout(Duration.ofMinutes(10));
+                .timeout(chatStreamTimeout());
 
         // Bridge SSE close (heartbeat-write fail, explicit close, or 10-min
         // timeout) into the AgentRunner cancellation flag. /stop also flips

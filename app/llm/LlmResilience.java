@@ -8,6 +8,7 @@ import utils.CircuitBreaker;
 import utils.CircuitBreakers;
 import utils.PlayConfig;
 
+import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -109,7 +110,16 @@ public final class LlmResilience {
      * backstop at all here, because SSE keepalive comments are reads and reset it (JCLAW-1181).
      */
     private static long firstChunkBudgetNanos() {
-        return PlayConfig.longOr("llm.breaker.first-chunk-seconds", 600) * 1_000_000_000L;
+        return firstChunkBudget().toNanos();
+    }
+
+    /**
+     * The first-chunk budget as configured. Public because the web chat stream's own ceiling is
+     * derived from it (JCLAW-1192): a client cut before this budget elapses reads "client
+     * disconnect" instead of the abandonment the sweep was about to deliver.
+     */
+    public static Duration firstChunkBudget() {
+        return Duration.ofSeconds(PlayConfig.longOr("llm.breaker.first-chunk-seconds", 600));
     }
 
     /**
