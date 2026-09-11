@@ -590,7 +590,11 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         var call = GenAiSpans.start(config, GenAiSpans.OPERATION_CHAT, model, true, maxTokens);
         // JCLAW-1169: the guard is stamped here rather than in GenAiSpans.Call.chunk, which
         // returns immediately when telemetry is off — the default.
+        // JCLAW-1181: a stream the sweep abandoned for silence has already ended its caller's
+        // turn, so anything the provider produces afterwards is addressed to nobody.
+        var settled = new AtomicBoolean();
         Consumer<ChatCompletionChunk> observedChunk = chunk -> {
+            if (settled.get()) return;
             guard.chunk();
             call.chunk(chunk);
             onChunk.accept(chunk);
@@ -599,15 +603,21 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // callback is what releases whoever is waiting on the stream, and they must not see
         // the latch before either.
         Runnable observedComplete = () -> {
+            if (!settled.compareAndSet(false, true)) return;
             guard.succeeded();
             call.succeeded();
             onComplete.run();
         };
         Consumer<Exception> observedError = e -> {
+            if (!settled.compareAndSet(false, true)) return;
             guard.failed(e);
             call.failed(e);
             onError.accept(e);
         };
+        // The transport's own thread stays parked in streamSse's untimed await; this is what
+        // gets the turn off the accumulator's latch.
+        guard.onAbandoned(silentMillis ->
+                observedError.accept(LlmResilience.noFirstChunkFailure(config.name(), silentMillis)));
         // The transport runs on its own virtual thread, which inherits no OTel context; the
         // wrap carries the span so the HTTP client span nests under it.
         Thread.ofVirtual().name("llm-stream").start(call.context().wrap(() ->

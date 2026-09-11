@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -96,6 +97,17 @@ public final class LlmResilience {
     }
 
     /**
+     * How long a stream may produce nothing at all before the sweep abandons it; 0 disables.
+     *
+     * <p>Generous, and separate from the inter-chunk budget: a cold local model loading weights
+     * legitimately takes minutes before its first token, while OkHttp's read timeout is no
+     * backstop at all here, because SSE keepalive comments are reads and reset it (JCLAW-1181).
+     */
+    private static long firstChunkBudgetNanos() {
+        return PlayConfig.longOr("llm.breaker.first-chunk-seconds", 600) * 1_000_000_000L;
+    }
+
+    /**
      * The fail-fast an open breaker raises, in the one class {@code chatWithFailover} triggers on.
      *
      * <p>An operator's isolation and an autonomous trip are different classes (JCLAW-1170), so a
@@ -110,6 +122,17 @@ public final class LlmResilience {
         }
         return new LlmException.ServerError(
                 "Circuit breaker open for " + providerName + ": not calling it until it recovers");
+    }
+
+    /**
+     * The failure a stream abandoned before its first chunk is ended with (JCLAW-1181).
+     *
+     * <p>Deliberately not a {@link LlmException.ServerError}: {@code StreamingAgentRunner}
+     * re-streams once on that class, which would buy the caller a second full budget of silence.
+     */
+    public static LlmException noFirstChunkFailure(String providerName, long silentMillis) {
+        return new LlmException("No response from %s after %d s: abandoning the stream"
+                .formatted(providerName, silentMillis / 1000L));
     }
 
     /**
@@ -153,14 +176,15 @@ public final class LlmResilience {
     public static @Nullable StreamGuard beginStream(String providerName) {
         var breaker = breakerFor(providerName);
         if (!breaker.allowRequest()) return null;
-        var guard = new StreamGuard(breaker, System::nanoTime);
-        if (guard.stallBudgetNanos > 0L) watch(guard);
+        var guard = new StreamGuard(breaker, System::nanoTime, firstChunkBudgetNanos());
+        if (guard.stallBudgetNanos > 0L || guard.firstChunkBudgetNanos > 0L) watch(guard);
         return guard;
     }
 
     /** Test seam: the same guard on a caller-supplied monotonic source, so a stall test needs no sleep. */
-    public static StreamGuard streamGuardForTest(CircuitBreaker breaker, LongSupplier nanoTime) {
-        return new StreamGuard(breaker, nanoTime);
+    public static StreamGuard streamGuardForTest(CircuitBreaker breaker, LongSupplier nanoTime,
+                                                 long firstChunkBudgetMillis) {
+        return new StreamGuard(breaker, nanoTime, firstChunkBudgetMillis * 1_000_000L);
     }
 
     private static void watch(StreamGuard guard) {
@@ -174,7 +198,7 @@ public final class LlmResilience {
     // scheduleWithFixedDelay drops the task for good on the first throw, so nothing may escape.
     private static void sweep() {
         try {
-            LIVE.forEach(StreamGuard::checkStall);
+            LIVE.forEach(StreamGuard::checkDeadlines);
         } catch (RuntimeException e) {
             Logger.warn(e, "Stalled-stream sweep failed");
         }
@@ -188,15 +212,21 @@ public final class LlmResilience {
      * them is the gap between chunks, so that is what is folded into the slow-call
      * duration the breaker sees.
      *
-     * <p>The gap is armed by the first chunk, not by the dispatch: before anything has
-     * streamed no byte has arrived either, which is the case OkHttp's 180s read timeout
-     * already fails. Timing out a cold local model still loading weights would be a
-     * regression, not a stall. What the read timeout cannot see is the provider that
-     * keeps the socket busy while producing nothing useful — every read resets it — and
-     * that is the case this measures.
+     * <p>Two budgets, because a stream that has not started and a stream that has stopped are
+     * different facts. Before the first chunk the deadline runs from the dispatch and is generous,
+     * since a cold local model loading weights legitimately takes minutes; after it, the gap
+     * between chunks is what is measured. JCLAW-1181: the pre-stream case needs its own budget
+     * because OkHttp's read timeout does not cover it — SSE keepalive comments are reads, so a
+     * provider emitting nothing else resets it for ever.
+     *
+     * <p>The two are charged differently. A stall mid-answer is a slow call, not a failure — the
+     * stream did deliver content — and its caller is left alone, because tokens already on the
+     * user's screen cannot be retracted. Silence throughout is a failure, and the sweep ends the
+     * turn as well as charging it: {@link #onAbandoned} is what releases the caller, since
+     * recording an outcome does not unpark a thread waiting on the stream's own completion.
      *
      * <p>A stream that never terminates reports nothing on its own, which would both hide
-     * the outage and strand a HALF_OPEN permit for good. {@link #checkStall} is the way
+     * the outage and strand a HALF_OPEN permit for good. {@link #checkDeadlines} is the way
      * out, called from the sweep rather than from the stream's own thread: that thread is
      * parked inside the transport's untimed await for the whole stall.
      */
@@ -205,19 +235,33 @@ public final class LlmResilience {
         private final CircuitBreaker breaker;
         private final LongSupplier nanoTime;
         private final long stallBudgetNanos;
+        private final long firstChunkBudgetNanos;
+        private final long dispatchNanos;
 
         private final AtomicBoolean reported = new AtomicBoolean();
         // armed rather than a sentinel stamp: nanoTime's origin is arbitrary and may be 0.
         private volatile boolean armed;
         private volatile long lastChunkNanos;
         private volatile long worstGapNanos;
+        private volatile @Nullable LongConsumer abandon;
 
-        private StreamGuard(CircuitBreaker breaker, LongSupplier nanoTime) {
+        private StreamGuard(CircuitBreaker breaker, LongSupplier nanoTime, long firstChunkBudgetNanos) {
             this.breaker = breaker;
             this.nanoTime = nanoTime;
+            this.firstChunkBudgetNanos = firstChunkBudgetNanos;
+            this.dispatchNanos = nanoTime.getAsLong();
             this.stallBudgetNanos = breaker.config().slowCallsEnabled()
                     ? breaker.config().slowCallDurationMillis() * 1_000_000L
                     : 0L;
+        }
+
+        /**
+         * Install what ends the caller's turn when the sweep abandons this stream, given the
+         * milliseconds of silence. Until the dispatch installs it the sweep leaves the stream
+         * alone: an outcome recorded with nobody to release trades a hang for a quieter hang.
+         */
+        public void onAbandoned(LongConsumer abandon) {
+            this.abandon = abandon;
         }
 
         /** A chunk reached the caller: fold the gap since the previous one and re-arm. */
@@ -247,16 +291,33 @@ public final class LlmResilience {
         }
 
         /**
-         * Charge a stream that has gone quiet past the budget while it is still in flight,
-         * so an outage of streams that never end still opens the breaker.
+         * Charge a stream that is past one of its budgets while it is still in flight, so an
+         * outage of streams that never end still opens the breaker.
          *
          * @return {@code true} when this call is what recorded the outcome
          */
-        public boolean checkStall() {
-            if (stallBudgetNanos == 0L || !armed || reported.get()) return false;
+        public boolean checkDeadlines() {
+            if (reported.get()) return false;
+            return armed ? chargeStall() : chargeSilence();
+        }
+
+        private boolean chargeStall() {
+            if (stallBudgetNanos == 0L) return false;
             var gap = nanoTime.getAsLong() - lastChunkNanos;
             if (gap < stallBudgetNanos || !claim()) return false;
             breaker.recordSuccess(gap / 1_000_000L);
+            return true;
+        }
+
+        private boolean chargeSilence() {
+            var release = abandon;
+            if (firstChunkBudgetNanos == 0L || release == null) return false;
+            var silent = nanoTime.getAsLong() - dispatchNanos;
+            if (silent < firstChunkBudgetNanos || !claim()) return false;
+            // A failure rather than a slow success: nothing succeeded, and pinning it to the
+            // slow-call rate would put the unbounded hang back behind llm.breaker.stall-seconds.
+            breaker.recordFailure();
+            release.accept(silent / 1_000_000L);
             return true;
         }
 
