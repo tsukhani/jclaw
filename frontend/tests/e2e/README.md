@@ -53,6 +53,7 @@ and the eval suites.
 | UAT-13/14 Apps & guide | `apps-guide.uat.spec.ts` | Hosted apps, cache headers, guide chapters |
 | UAT-15 Chat | `chat.uat.spec.ts` | Mocked stream: tokens, tool calls, error recovery |
 | UAT-16 Accessibility | `accessibility.uat.spec.ts` | axe-core, serious+critical only |
+| UAT-17 Circuit breakers | `breakers.uat.spec.ts` | Registry rows mirrored on the dashboard, grouped by subsystem; read-only |
 | Page smoke | `pages.smoke.spec.ts` | Pre-existing; ten top-level pages |
 | Prompt caching | `prompt-caching.uat.spec.ts` | Pre-existing; cached-token badge |
 

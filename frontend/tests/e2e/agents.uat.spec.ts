@@ -94,6 +94,54 @@ test.describe('UAT-4 agent lifecycle', () => {
     expect((await res.json()).description).toBe('Updated by UAT.')
   })
 
+  test('a fallback on the agent\'s own provider is rejected with 400', async ({ request }) => {
+    const { modelProvider, modelId } = await borrowModelConfig(request)
+    const res = await request.put(`/api/agents/${agentId}`, {
+      data: { name: agentName, modelProvider, modelId, fallbackProvider: modelProvider, fallbackModelId: modelId },
+    })
+    expect(res.status(), await res.text()).toBe(400)
+  })
+
+  test('a fallback provider and model round-trip, and the editor shows them', async ({ page, request }) => {
+    // JCLAW-1190: the pair is optional, but when set it must name a second
+    // configured provider with a registered model. Skip rather than fail on an
+    // install with only one provider — that is a valid configuration, not drift.
+    const { modelProvider, modelId } = await borrowModelConfig(request)
+    const providers = await (await request.get('/api/providers')).json() as Array<{ name: string }>
+    let fallback: { provider: string, modelId: string } | null = null
+    for (const p of providers.filter(p => p.name !== modelProvider)) {
+      const { models } = await (await request.get(`/api/providers/${p.name}/models`)).json() as { models: Array<{ id: string }> }
+      if (models[0]) {
+        fallback = { provider: p.name, modelId: models[0].id }
+        break
+      }
+    }
+    test.skip(fallback === null, 'no second provider with a registered model on this install')
+
+    const res = await request.put(`/api/agents/${agentId}`, {
+      data: { name: agentName, modelProvider, modelId, fallbackProvider: fallback!.provider, fallbackModelId: fallback!.modelId },
+    })
+    expect(res.status(), await res.text()).toBe(200)
+    const saved = await res.json()
+    expect(saved.fallbackProvider).toBe(fallback!.provider)
+    expect(saved.fallbackModelId).toBe(fallback!.modelId)
+
+    await gotoPage(page, `/agents/${agentName}`)
+    await expect(page.getByLabel('Fallback Provider')).toHaveValue(fallback!.provider)
+    await expect(page.getByLabel('Fallback Model')).toHaveValue(fallback!.modelId)
+  })
+
+  test('clearing either half of the fallback clears both', async ({ request }) => {
+    const { modelProvider, modelId } = await borrowModelConfig(request)
+    const res = await request.put(`/api/agents/${agentId}`, {
+      data: { name: agentName, modelProvider, modelId, fallbackModelId: null },
+    })
+    expect(res.status(), await res.text()).toBe(200)
+    const saved = await res.json()
+    expect(saved.fallbackProvider).toBeNull()
+    expect(saved.fallbackModelId).toBeNull()
+  })
+
   test('delete the agent and confirm it is gone', async ({ request }) => {
     const del = await request.delete(`/api/agents/${agentId}`)
     expect(del.ok(), await del.text()).toBeTruthy()
