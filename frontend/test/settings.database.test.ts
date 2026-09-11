@@ -146,6 +146,10 @@ describe('Settings → Database', () => {
     expect(text).toContain('2 h ago')
     expect(text).toContain('2.5.250')
     expect(text).toContain('jclaw-20260909T120000Z.zip')
+    // Short month, 12-hour clock, seconds only when non-zero — the Tasks/Reminders shape. The
+    // hour depends on the machine's zone; the day does not for a noon-UTC instant.
+    expect(text).toMatch(/9 Sept 2026 · \d{1,2}(:\d{2}(:\d{2})?)? [ap]m/)
+    expect(text).not.toMatch(/09\/09\/2026/)
   })
 
   it('reads Attention with its reason and lifts Repair when the trace shows read failures', async () => {

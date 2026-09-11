@@ -3,6 +3,7 @@
 // Backup and cleanup run in the JVM. Restore and repair need the database closed, so
 // they hand off to `jclaw.sh` the way Restart does and this page watches the backend
 // go down and come back; the outcome is read from /api/system/database on return.
+import { formatDateTime } from '~/utils/schedule'
 import { ArrowDownTrayIcon, ArrowPathIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { formatSize } from '~/utils/format'
 
@@ -115,9 +116,9 @@ function age(seconds: number | null): string {
   return `${Math.round(seconds / 86400)} days ago`
 }
 
+/** Same shape as the Tasks and Reminders columns: "11 Sept 2026 · 7:25:04 pm", in the browser's zone. */
 function when(iso: string): string {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
+  return formatDateTime(iso)
 }
 
 /** Size line: the data file, plus what else data/ is carrying, as one figure with its parts. */
