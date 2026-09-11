@@ -225,4 +225,22 @@ class ArchitectureTest extends UnitTest {
                         + "never an entity");
         rule.check(APP_CLASSES);
     }
+
+    /**
+     * JCLAW-999: {@code services.discovery} is a leaf under {@code services}, not a peer that
+     * calls back up. Its strategies used to reach into {@code ModelDiscoveryService} for parsing
+     * and ranking, so the two packages formed a cycle nothing caught. A package-slice
+     * {@code freeOfCycles} rule over {@code services} is not viable here: 16 of its 19
+     * subpackages import top-level services classes such as {@code ConfigService} and
+     * {@code EventLogger}, so the boundary is pinned at the one class that dispatches into
+     * the subpackage.
+     */
+    @Test
+    void discoveryNeverCallsBackIntoModelDiscoveryService() {
+        ArchRule rule = noClasses().that().resideInAPackage("services.discovery")
+                .should().dependOnClassesThat().haveFullyQualifiedName("services.ModelDiscoveryService")
+                .because("the discovery strategies are dispatched by ModelDiscoveryService; "
+                        + "shared parsing and ranking live in services.discovery (JCLAW-999)");
+        rule.check(APP_CLASSES);
+    }
 }

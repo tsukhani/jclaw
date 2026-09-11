@@ -1,7 +1,7 @@
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.ModelDiscoveryService;
+import services.discovery.ModelCatalogParser;
 
 import java.util.Set;
 
@@ -32,7 +32,7 @@ class ModelDiscoveryModelShapeTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"data":[{"id":"vendor/model","context_length":128000}]}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseModels(json).get(0);
+        var model = ModelCatalogParser.parseModels(json).get(0);
         assertEquals(EXPECTED_KEYS, model.keySet());
     }
 
@@ -41,7 +41,7 @@ class ModelDiscoveryModelShapeTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"data":[{"id":"qwen3-32b","type":"llm","max_context_length":131072}]}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseLmStudioNativeResponse(json).get(0);
+        var model = ModelCatalogParser.parseLmStudioNativeResponse(json).get(0);
         assertEquals(EXPECTED_KEYS, model.keySet());
         // The previously-dropped video keys are present and default to false.
         assertEquals(false, model.get("supportsVideo"));
@@ -53,7 +53,7 @@ class ModelDiscoveryModelShapeTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"model_info":{"glm.context_length":131072},"capabilities":["completion"]}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseOllamaShow("glm-5", json);
+        var model = ModelCatalogParser.parseOllamaShow("glm-5", json);
         assertEquals(EXPECTED_KEYS, model.keySet());
         assertEquals(false, model.get("supportsVideo"));
         assertEquals(false, model.get("videoDetectedFromProvider"));
@@ -68,7 +68,7 @@ class ModelDiscoveryModelShapeTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"model_info":{"llama.context_length":131072},"capabilities":["completion"]}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseOllamaShow("dolphin3:8b", json);
+        var model = ModelCatalogParser.parseOllamaShow("dolphin3:8b", json);
         assertEquals(false, model.get("supportsTools"));
         assertEquals(true, model.get("toolsDetectedFromProvider"),
                 "a capability list that omits tools is an authoritative no");
@@ -79,7 +79,7 @@ class ModelDiscoveryModelShapeTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"model_info":{"qwen3.context_length":40960},"capabilities":["completion","tools"]}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseOllamaShow("qwen3:8b", json);
+        var model = ModelCatalogParser.parseOllamaShow("qwen3:8b", json);
         assertEquals(true, model.get("supportsTools"));
         assertEquals(true, model.get("toolsDetectedFromProvider"));
     }
@@ -92,7 +92,7 @@ class ModelDiscoveryModelShapeTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"data":[{"id":"some-cloud-model"}]}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseModels(json).get(0);
+        var model = ModelCatalogParser.parseModels(json).get(0);
         assertEquals(true, model.get("supportsTools"));
         assertEquals(false, model.get("toolsDetectedFromProvider"),
                 "defaulted, not reported — the UI must not lock this one");

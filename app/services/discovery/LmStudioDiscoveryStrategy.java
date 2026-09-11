@@ -3,8 +3,6 @@ package services.discovery;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
 import org.jspecify.annotations.Nullable;
-import services.ModelDiscoveryService;
-import services.ModelDiscoveryService.DiscoveryResult;
 import utils.HttpFactories;
 import utils.HttpKeys;
 
@@ -33,7 +31,7 @@ public final class LmStudioDiscoveryStrategy implements DiscoveryStrategy {
         var models = fetchNative(baseUrl, apiKey);
         if (models == null) return FALLBACK.discover(providerName, baseUrl, apiKey);
 
-        ModelDiscoveryService.sortByRankThenName(models);
+        LeaderboardRanker.sortByRankThenName(models);
         return new DiscoveryResult.Ok(models);
     }
 
@@ -41,7 +39,7 @@ public final class LmStudioDiscoveryStrategy implements DiscoveryStrategy {
     @SuppressWarnings("java:S1168") // null means "fall back to OpenAI-compat"; an empty list is a valid catalog
     private static @Nullable List<Map<String, Object>> fetchNative(String baseUrl, String apiKey) {
         try {
-            var nativeBase = ModelDiscoveryService.stripV1Suffix(baseUrl);
+            var nativeBase = ModelCatalogParser.stripV1Suffix(baseUrl);
             var url = nativeBase + "/api/v0/models";
             var req = new Request.Builder()
                     .url(url)
@@ -61,7 +59,7 @@ public final class LmStudioDiscoveryStrategy implements DiscoveryStrategy {
             if (statusCode != 200) return null;
 
             var body = JsonParser.parseString(responseBody).getAsJsonObject();
-            return ModelDiscoveryService.parseLmStudioNativeResponse(body);
+            return ModelCatalogParser.parseLmStudioNativeResponse(body);
         } catch (Exception _) {
             return null;
         }

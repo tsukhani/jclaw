@@ -7,8 +7,6 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
-import services.ModelDiscoveryService;
-import services.ModelDiscoveryService.DiscoveryResult;
 import utils.HttpFactories;
 import utils.HttpKeys;
 
@@ -29,7 +27,7 @@ import java.util.concurrent.TimeUnit;
  * dozens of models discovers in one round-trip's worth of wall time rather than N.
  *
  * <p>The {@code capabilities} array also distinguishes chat-capable models from
- * embedding-only ones — {@code ModelDiscoveryService.parseOllamaShow} drops
+ * embedding-only ones — {@code ModelCatalogParser.parseOllamaShow} drops
  * entries whose capabilities lack {@code "completion"} (JCLAW-183).
  */
 public final class OllamaDiscoveryStrategy implements DiscoveryStrategy {
@@ -38,7 +36,7 @@ public final class OllamaDiscoveryStrategy implements DiscoveryStrategy {
     @SuppressWarnings("java:S1193") // Catches Exception broadly; instanceof InterruptedException restores interrupt status defensively
     public DiscoveryResult discover(String providerName, String baseUrl, String apiKey) {
         try {
-            var nativeBase = ModelDiscoveryService.stripV1Suffix(baseUrl);
+            var nativeBase = ModelCatalogParser.stripV1Suffix(baseUrl);
             var tagsResult = fetchTags(nativeBase, apiKey);
             if (tagsResult.error() != null) return tagsResult.error();
             var modelIds = tagsResult.resolvedModelIds();
@@ -54,7 +52,7 @@ public final class OllamaDiscoveryStrategy implements DiscoveryStrategy {
                         "No chat-capable models discovered for provider " + providerName);
             }
 
-            ModelDiscoveryService.applyLeaderboardAndSort(providerName, results);
+            LeaderboardRanker.applyLeaderboardAndSort(providerName, results);
 
             return new DiscoveryResult.Ok(results);
 
@@ -111,14 +109,14 @@ public final class OllamaDiscoveryStrategy implements DiscoveryStrategy {
                     null);
         }
         var tagsBody = JsonParser.parseString(tagsResponseBody).getAsJsonObject();
-        return new TagsResult(null, ModelDiscoveryService.extractTagIds(tagsBody));
+        return new TagsResult(null, ModelCatalogParser.extractTagIds(tagsBody));
     }
 
     /**
      * Fan out {@code /api/show} calls on virtual threads, one per model id.
      * Per-future timeouts and parse failures are logged and skipped — the
      * caller only sees the survivors. Models filtered out by
-     * {@code ModelDiscoveryService.parseOllamaShow} (no {@code "completion"}
+     * {@code ModelCatalogParser.parseOllamaShow} (no {@code "completion"}
      * capability) are also absent from the return.
      */
     private static List<Map<String, Object>> fanOutShow(
@@ -176,7 +174,7 @@ public final class OllamaDiscoveryStrategy implements DiscoveryStrategy {
                 responseBody = resp.body().string();
             }
             if (statusCode != 200) return null;
-            return ModelDiscoveryService.parseOllamaShow(id, JsonParser.parseString(responseBody).getAsJsonObject());
+            return ModelCatalogParser.parseOllamaShow(id, JsonParser.parseString(responseBody).getAsJsonObject());
         } catch (Exception _) {
             return null;
         }

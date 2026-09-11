@@ -1,6 +1,5 @@
 package services.discovery;
 
-import services.ModelDiscoveryService.DiscoveryResult;
 
 import java.util.Map;
 

@@ -8,6 +8,7 @@ import models.Config;
 import okhttp3.Request;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import services.discovery.ModelCatalogParser;
 import utils.GsonHolder;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -365,7 +366,7 @@ public final class PricingRefreshService {
 
     /** Delegate to the canonical helper to keep one source of truth on id normalization. */
     private static String stripVersionSuffix(String id) {
-        return ModelDiscoveryService.stripVersionSuffix(id);
+        return ModelCatalogParser.stripVersionSuffix(id);
     }
 
     /** Read a per-token price from LiteLLM and convert to JClaw's per-million convention. */

@@ -6,8 +6,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import play.test.UnitTest;
 import services.ModelDiscoveryService;
+import services.discovery.DiscoveryResult;
 import services.discovery.DiscoveryStrategy;
 import services.discovery.LmStudioDiscoveryStrategy;
+import services.discovery.ModelCatalogParser;
 import services.discovery.OllamaDiscoveryStrategy;
 import services.discovery.OpenAiCompatDiscoveryStrategy;
 
@@ -21,34 +23,34 @@ class ModelDiscoveryServiceTest extends UnitTest {
 
     @Test
     void stripVariantRemovesSuffix() {
-        assertEquals("openai/gpt-4", ModelDiscoveryService.stripVariant("openai/gpt-4:extended"));
+        assertEquals("openai/gpt-4", ModelCatalogParser.stripVariant("openai/gpt-4:extended"));
     }
 
     @Test
     void stripVariantPreservesIdWithoutVariant() {
-        assertEquals("openai/gpt-4", ModelDiscoveryService.stripVariant("openai/gpt-4"));
+        assertEquals("openai/gpt-4", ModelCatalogParser.stripVariant("openai/gpt-4"));
     }
 
     @Test
     void stripVariantHandlesMultipleColons() {
-        assertEquals("vendor/model", ModelDiscoveryService.stripVariant("vendor/model:v1:extra"));
+        assertEquals("vendor/model", ModelCatalogParser.stripVariant("vendor/model:v1:extra"));
     }
 
     // --- stripVersionSuffix ---
 
     @Test
     void stripVersionSuffixRemovesDateSuffix() {
-        assertEquals("openai/gpt-4", ModelDiscoveryService.stripVersionSuffix("openai/gpt-4-20250101"));
+        assertEquals("openai/gpt-4", ModelCatalogParser.stripVersionSuffix("openai/gpt-4-20250101"));
     }
 
     @Test
     void stripVersionSuffixRemovesShortSuffix() {
-        assertEquals("openai/gpt-4", ModelDiscoveryService.stripVersionSuffix("openai/gpt-4-0125"));
+        assertEquals("openai/gpt-4", ModelCatalogParser.stripVersionSuffix("openai/gpt-4-0125"));
     }
 
     @Test
     void stripVersionSuffixPreservesCleanId() {
-        assertEquals("openai/gpt-4", ModelDiscoveryService.stripVersionSuffix("openai/gpt-4"));
+        assertEquals("openai/gpt-4", ModelCatalogParser.stripVersionSuffix("openai/gpt-4"));
     }
 
     @Test
@@ -57,9 +59,9 @@ class ModelDiscoveryServiceTest extends UnitTest {
         // regex only handled contiguous dates and 3-4 digit version pins,
         // missing this shape entirely. Required for LiteLLM id lookups
         // (JCLAW-28 follow-up: PricingRefreshService).
-        assertEquals("gpt-4o", ModelDiscoveryService.stripVersionSuffix("gpt-4o-2024-08-06"));
+        assertEquals("gpt-4o", ModelCatalogParser.stripVersionSuffix("gpt-4o-2024-08-06"));
         assertEquals("openai/gpt-4o-mini",
-                ModelDiscoveryService.stripVersionSuffix("openai/gpt-4o-mini-2024-07-18"));
+                ModelCatalogParser.stripVersionSuffix("openai/gpt-4o-mini-2024-07-18"));
     }
 
     // --- detectThinkingSupport ---
@@ -69,7 +71,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "some-model", "supported_parameters": ["reasoning", "temperature"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        var result = ModelCatalogParser.detectThinkingSupport(obj);
         assertTrue(result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -79,7 +81,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "some-model", "supported_parameters": ["temperature", "top_p"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        var result = ModelCatalogParser.detectThinkingSupport(obj);
         assertFalse(result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -89,7 +91,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "openai/o1-preview"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        var result = ModelCatalogParser.detectThinkingSupport(obj);
         assertTrue(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -99,7 +101,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "deepseek/deepseek-r1"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        var result = ModelCatalogParser.detectThinkingSupport(obj);
         assertTrue(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -109,7 +111,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "vendor/some-regular-model"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        var result = ModelCatalogParser.detectThinkingSupport(obj);
         assertFalse(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -126,7 +128,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 {"id": "deepseek/deepseek-r1",
                  "architecture": {"instruct_type": "deepseek-r1"}}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAlwaysThinks(obj);
+        var result = ModelCatalogParser.detectAlwaysThinks(obj);
         assertTrue(result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -137,7 +139,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 {"id": "deepseek/deepseek-r1",
                  "architecture": {"instruct_type": "DeepSeek-R1"}}
                 """).getAsJsonObject();
-        assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed());
+        assertTrue(ModelCatalogParser.detectAlwaysThinks(obj).confirmed());
     }
 
     @Test
@@ -147,7 +149,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 "openai/o1", "openai/o1-mini", "openai/o1-preview"
         )) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
-            var result = ModelDiscoveryService.detectAlwaysThinks(obj);
+            var result = ModelCatalogParser.detectAlwaysThinks(obj);
             assertTrue(result.confirmed(), id + " should match");
             assertFalse(result.fromProvider(), id + " is name-pattern, not provider");
         }
@@ -157,7 +159,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     void detectAlwaysThinksMatchesO3Family() {
         for (var id : java.util.List.of("o3", "o3-mini", "o3-pro", "openai/o3-mini")) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
-            assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+            assertTrue(ModelCatalogParser.detectAlwaysThinks(obj).confirmed(),
                     id + " should match");
         }
     }
@@ -165,7 +167,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     @Test
     void detectAlwaysThinksMatchesO4Mini() {
         var obj = JsonParser.parseString("{\"id\": \"openai/o4-mini\"}").getAsJsonObject();
-        assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed());
+        assertTrue(ModelCatalogParser.detectAlwaysThinks(obj).confirmed());
     }
 
     @Test
@@ -175,7 +177,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 "deepseek-r1:latest", "deepseek-r1-distill-llama-70b"
         )) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
-            assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+            assertTrue(ModelCatalogParser.detectAlwaysThinks(obj).confirmed(),
                     id + " should match");
         }
     }
@@ -184,7 +186,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     void detectAlwaysThinksMatchesQwq() {
         for (var id : java.util.List.of("qwq", "qwen/qwq-32b", "qwq:latest")) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
-            assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+            assertTrue(ModelCatalogParser.detectAlwaysThinks(obj).confirmed(),
                     id + " should match");
         }
     }
@@ -199,7 +201,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 "claude-opus-4", "claude-haiku-4-1"
         )) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
-            assertFalse(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+            assertFalse(ModelCatalogParser.detectAlwaysThinks(obj).confirmed(),
                     id + " must not match");
         }
     }
@@ -210,7 +212,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         // not o-series reasoning architecture).
         for (var id : java.util.List.of("gpt-4o", "gpt-4o-mini", "openai/gpt-4o")) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
-            assertFalse(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+            assertFalse(ModelCatalogParser.detectAlwaysThinks(obj).confirmed(),
                     id + " must not match");
         }
     }
@@ -227,7 +229,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 "kimi-k2.5"
         )) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
-            assertFalse(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+            assertFalse(ModelCatalogParser.detectAlwaysThinks(obj).confirmed(),
                     id + " is hybrid, must not match");
         }
     }
@@ -237,7 +239,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "vendor/some-regular-model"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAlwaysThinks(obj);
+        var result = ModelCatalogParser.detectAlwaysThinks(obj);
         assertFalse(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -258,7 +260,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     })
     void detectVisionFromArchitecture(String label, String json, boolean expectedConfirmed) {
         var obj = JsonParser.parseString(json).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertEquals(expectedConfirmed, result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -270,7 +272,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "llava:13b", "capabilities": ["completion", "vision"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertTrue(result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -281,7 +283,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "openai/gpt-4o"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertTrue(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -291,7 +293,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "anthropic/claude-sonnet-4-6"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertTrue(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -301,7 +303,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "vendor/plain-text-model"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertFalse(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -323,7 +325,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     })
     void detectAudioConfirmed(String label, String json, boolean expectedFromProvider) {
         var obj = JsonParser.parseString(json).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        var result = ModelCatalogParser.detectAudioSupport(obj);
         assertTrue(result.confirmed());
         assertEquals(expectedFromProvider, result.fromProvider());
     }
@@ -333,7 +335,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "vendor/text-only"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        var result = ModelCatalogParser.detectAudioSupport(obj);
         assertFalse(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -355,7 +357,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     })
     void detectVideoConfirmed(String label, String json, boolean expectedFromProvider) {
         var obj = JsonParser.parseString(json).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVideoSupport(obj);
+        var result = ModelCatalogParser.detectVideoSupport(obj);
         assertTrue(result.confirmed());
         assertEquals(expectedFromProvider, result.fromProvider());
     }
@@ -366,7 +368,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "openai/gpt-4o"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVideoSupport(obj);
+        var result = ModelCatalogParser.detectVideoSupport(obj);
         assertFalse(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -382,7 +384,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "gpt-4o-mini-audio-preview"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        var result = ModelCatalogParser.detectAudioSupport(obj);
         assertTrue(result.confirmed(),
                 "audio-preview suffix must be detected even with -mini- in the middle");
         assertFalse(result.fromProvider());
@@ -399,7 +401,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id": "audio-preview-classifier"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        var result = ModelCatalogParser.detectAudioSupport(obj);
         assertFalse(result.confirmed(),
                 "non-dash-prefixed audio-preview substring must not trip the detector");
         assertFalse(result.fromProvider());
@@ -412,7 +414,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"pricing": {"prompt": "0.000003", "completion": "0.000015"}}
                 """).getAsJsonObject();
-        double price = ModelDiscoveryService.inferPrice(obj, "prompt");
+        double price = ModelCatalogParser.inferPrice(obj, "prompt");
         assertEquals(3.0, price, 0.001);
     }
 
@@ -428,7 +430,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     })
     void inferPriceReturnsMinusOneForAbsentPrice(String label, String json, String field) {
         var obj = JsonParser.parseString(json).getAsJsonObject();
-        double price = ModelDiscoveryService.inferPrice(obj, field);
+        double price = ModelCatalogParser.inferPrice(obj, field);
         assertEquals(-1, price, 0.001);
     }
 
@@ -440,9 +442,9 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"pricing": {"input": 0.32, "output": 1.28, "cached_input": 0.2}}
                 """).getAsJsonObject();
-        assertEquals(0.32, ModelDiscoveryService.inferPrice(obj, "prompt"), 0.0001);
-        assertEquals(1.28, ModelDiscoveryService.inferPrice(obj, "completion"), 0.0001);
-        assertEquals(0.2, ModelDiscoveryService.inferPrice(obj, "input_cache_read"), 0.0001);
+        assertEquals(0.32, ModelCatalogParser.inferPrice(obj, "prompt"), 0.0001);
+        assertEquals(1.28, ModelCatalogParser.inferPrice(obj, "completion"), 0.0001);
+        assertEquals(0.2, ModelCatalogParser.inferPrice(obj, "input_cache_read"), 0.0001);
     }
 
     @Test
@@ -452,7 +454,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"pricing": {"input": 0.32, "output": 1.28}}
                 """).getAsJsonObject();
-        assertEquals(-1, ModelDiscoveryService.inferPrice(obj, "input_cache_write"), 0.0001);
+        assertEquals(-1, ModelCatalogParser.inferPrice(obj, "input_cache_write"), 0.0001);
     }
 
     @Test
@@ -462,7 +464,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"pricing": {"prompt": "0.000003", "input": 99}}
                 """).getAsJsonObject();
-        assertEquals(3.0, ModelDiscoveryService.inferPrice(obj, "prompt"), 0.0001);
+        assertEquals(3.0, ModelCatalogParser.inferPrice(obj, "prompt"), 0.0001);
     }
 
     // --- parseModels ---
@@ -475,7 +477,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     {"id": "model-2", "name": "Model Two", "context_length": 32000}
                 ]}
                 """).getAsJsonObject();
-        var models = ModelDiscoveryService.parseModels(json);
+        var models = ModelCatalogParser.parseModels(json);
         assertEquals(2, models.size());
         assertEquals("model-1", models.get(0).get("id"));
         assertEquals("Model One", models.get(0).get("name"));
@@ -489,7 +491,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     {"id": "alt-model", "context_window": 8000}
                 ]}
                 """).getAsJsonObject();
-        var models = ModelDiscoveryService.parseModels(json);
+        var models = ModelCatalogParser.parseModels(json);
         assertEquals(1, models.size());
         assertEquals("alt-model", models.get(0).get("id"));
         assertEquals(8000, models.get(0).get("contextWindow"));
@@ -503,7 +505,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     {"id": "valid", "name": "Valid"}
                 ]}
                 """).getAsJsonObject();
-        var models = ModelDiscoveryService.parseModels(json);
+        var models = ModelCatalogParser.parseModels(json);
         assertEquals(1, models.size());
         assertEquals("valid", models.get(0).get("id"));
     }
@@ -513,7 +515,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"data": []}
                 """).getAsJsonObject();
-        var models = ModelDiscoveryService.parseModels(json);
+        var models = ModelCatalogParser.parseModels(json);
         assertTrue(models.isEmpty());
     }
 
@@ -536,7 +538,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "context_length": 131072}
                 ]
                 """);
-        var models = ModelDiscoveryService.parseModels(json);
+        var models = ModelCatalogParser.parseModels(json);
         assertEquals(2, models.size());
         assertEquals("moonshotai/Kimi-K2.5", models.get(0).get("id"));
         assertEquals(262144, models.get(0).get("contextWindow"));
@@ -547,8 +549,8 @@ class ModelDiscoveryServiceTest extends UnitTest {
     void parseModelsHandlesNullInput() {
         // Defensive: parseModels never throws on null/JsonNull, just returns
         // empty so callers see "0 models" rather than crashing through a NPE.
-        assertTrue(ModelDiscoveryService.parseModels(null).isEmpty());
-        assertTrue(ModelDiscoveryService.parseModels(com.google.gson.JsonNull.INSTANCE).isEmpty());
+        assertTrue(ModelCatalogParser.parseModels(null).isEmpty());
+        assertTrue(ModelCatalogParser.parseModels(com.google.gson.JsonNull.INSTANCE).isEmpty());
     }
 
     @Test
@@ -556,7 +558,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"status": "ok"}
                 """).getAsJsonObject();
-        var models = ModelDiscoveryService.parseModels(json);
+        var models = ModelCatalogParser.parseModels(json);
         assertTrue(models.isEmpty());
     }
 
@@ -565,7 +567,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"data": [{"id": "vendor/model-name"}]}
                 """).getAsJsonObject();
-        var models = ModelDiscoveryService.parseModels(json);
+        var models = ModelCatalogParser.parseModels(json);
         assertEquals(1, models.size());
         assertEquals("model-name", models.get(0).get("name"));
     }
@@ -574,16 +576,16 @@ class ModelDiscoveryServiceTest extends UnitTest {
 
     @Test
     void stripV1SuffixRemovesTrailingV1() {
-        assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com/v1"));
-        assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com/v1/"));
-        assertEquals("http://localhost:11434", ModelDiscoveryService.stripV1Suffix("http://localhost:11434/v1"));
+        assertEquals("https://ollama.com", ModelCatalogParser.stripV1Suffix("https://ollama.com/v1"));
+        assertEquals("https://ollama.com", ModelCatalogParser.stripV1Suffix("https://ollama.com/v1/"));
+        assertEquals("http://localhost:11434", ModelCatalogParser.stripV1Suffix("http://localhost:11434/v1"));
     }
 
     @Test
     void stripV1SuffixLeavesUrlsWithoutV1Untouched() {
-        assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com"));
-        assertEquals("https://example.com/api", ModelDiscoveryService.stripV1Suffix("https://example.com/api"));
-        assertEquals("", ModelDiscoveryService.stripV1Suffix(null));
+        assertEquals("https://ollama.com", ModelCatalogParser.stripV1Suffix("https://ollama.com"));
+        assertEquals("https://example.com/api", ModelCatalogParser.stripV1Suffix("https://example.com/api"));
+        assertEquals("", ModelCatalogParser.stripV1Suffix(null));
     }
 
     @Test
@@ -595,7 +597,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                   {"name":"glm-5"}
                 ]}
                 """).getAsJsonObject();
-        var ids = ModelDiscoveryService.extractTagIds(json);
+        var ids = ModelCatalogParser.extractTagIds(json);
         assertEquals(3, ids.size());
         assertEquals("kimi-k2.5", ids.get(0));
         assertEquals("gpt-oss:20b", ids.get(1));
@@ -608,7 +610,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"models":[{"model":"qwen3-next:80b"}]}
                 """).getAsJsonObject();
-        var ids = ModelDiscoveryService.extractTagIds(json);
+        var ids = ModelCatalogParser.extractTagIds(json);
         assertEquals(1, ids.size());
         assertEquals("qwen3-next:80b", ids.get(0));
     }
@@ -616,7 +618,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     @Test
     void extractTagIdsReturnsEmptyWhenModelsKeyMissing() {
         var json = JsonParser.parseString("{}").getAsJsonObject();
-        assertTrue(ModelDiscoveryService.extractTagIds(json).isEmpty());
+        assertTrue(ModelCatalogParser.extractTagIds(json).isEmpty());
     }
 
     @Test
@@ -632,7 +634,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                   }
                 }
                 """).getAsJsonObject();
-        assertEquals(262144, ModelDiscoveryService.extractOllamaContextLength(json));
+        assertEquals(262144, ModelCatalogParser.extractOllamaContextLength(json));
     }
 
     @Test
@@ -641,7 +643,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"model_info": {"glm.context_length": 202752}}
                 """).getAsJsonObject();
-        assertEquals(202752, ModelDiscoveryService.extractOllamaContextLength(json));
+        assertEquals(202752, ModelCatalogParser.extractOllamaContextLength(json));
     }
 
     @Test
@@ -649,12 +651,12 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"model_info": {"general.architecture": "mystery"}}
                 """).getAsJsonObject();
-        assertEquals(0, ModelDiscoveryService.extractOllamaContextLength(json));
+        assertEquals(0, ModelCatalogParser.extractOllamaContextLength(json));
     }
 
     @Test
     void extractOllamaContextLengthReturnsZeroWhenNoModelInfo() {
-        assertEquals(0, ModelDiscoveryService.extractOllamaContextLength(JsonParser.parseString("{}").getAsJsonObject()));
+        assertEquals(0, ModelCatalogParser.extractOllamaContextLength(JsonParser.parseString("{}").getAsJsonObject()));
     }
 
     @Test
@@ -670,7 +672,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                   "capabilities": ["vision", "thinking", "completion", "tools"]
                 }
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseOllamaShow("kimi-k2.5", json);
+        var model = ModelCatalogParser.parseOllamaShow("kimi-k2.5", json);
 
         assertEquals("kimi-k2.5", model.get("id"));
         assertEquals("kimi-k2.5", model.get("name"));
@@ -690,7 +692,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"model_info": {"mystery.context_length": 32768}}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseOllamaShow("mystery-model", json);
+        var model = ModelCatalogParser.parseOllamaShow("mystery-model", json);
         assertEquals(32768, model.get("contextWindow"));
         assertEquals(false, model.get("supportsThinking"));
         assertEquals(false, model.get("thinkingDetectedFromProvider"));
@@ -701,7 +703,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"capabilities": ["completion"]}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseOllamaShow("unknown-model", json);
+        var model = ModelCatalogParser.parseOllamaShow("unknown-model", json);
         assertEquals(0, model.get("contextWindow"));
     }
 
@@ -713,7 +715,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"id": "glm-5", "capabilities": ["thinking", "completion"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectThinkingSupport(json);
+        var result = ModelCatalogParser.detectThinkingSupport(json);
         assertTrue(result.confirmed(), "thinking should be detected from capabilities array");
         assertTrue(result.fromProvider(), "detection should be marked as provider-confirmed");
     }
@@ -731,7 +733,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                   "capabilities": ["embedding"]
                 }
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseOllamaShow("nomic-embed-text:latest", json);
+        var model = ModelCatalogParser.parseOllamaShow("nomic-embed-text:latest", json);
         assertNull(model, "embedding-only Ollama model should be filtered out");
     }
 
@@ -743,7 +745,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"model_info": {"family.context_length": 8192}, "capabilities": []}
                 """).getAsJsonObject();
-        var model = ModelDiscoveryService.parseOllamaShow("opaque-model", json);
+        var model = ModelCatalogParser.parseOllamaShow("opaque-model", json);
         assertNotNull(model, "empty capabilities array must not trigger the filter");
         assertEquals(8192, model.get("contextWindow"));
     }
@@ -767,7 +769,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 }
                 """).getAsJsonObject();
 
-        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+        var models = ModelCatalogParser.parseLmStudioNativeResponse(json);
 
         assertEquals(3, models.size(), "should keep 3 chat-capable models, drop 3 non-chat");
         var ids = models.stream().map(m -> m.get("id").toString()).toList();
@@ -788,7 +790,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 {"data": [{"id": "google/gemma-4-e4b", "type": "vlm", "max_context_length": 131072}]}
                 """).getAsJsonObject();
 
-        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+        var models = ModelCatalogParser.parseLmStudioNativeResponse(json);
 
         assertEquals(1, models.size());
         var m = models.get(0);
@@ -807,7 +809,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 {"data": [{"id": "openai/gpt-oss-20b", "type": "llm"}]}
                 """).getAsJsonObject();
 
-        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+        var models = ModelCatalogParser.parseLmStudioNativeResponse(json);
 
         assertEquals(1, models.size());
         var m = models.get(0);
@@ -822,7 +824,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"data": [{"id": "", "type": "llm"}, {"type": "llm"}, {"id": "valid", "type": "llm"}]}
                 """).getAsJsonObject();
-        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+        var models = ModelCatalogParser.parseLmStudioNativeResponse(json);
         assertEquals(1, models.size());
         assertEquals("valid", models.get(0).get("id"));
     }
@@ -830,7 +832,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
     @Test
     void parseLmStudioNativeResponseHandlesMissingDataArray() {
         var json = JsonParser.parseString("{}").getAsJsonObject();
-        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+        var models = ModelCatalogParser.parseLmStudioNativeResponse(json);
         assertTrue(models.isEmpty());
     }
 
@@ -865,9 +867,9 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     """));
             var result = ModelDiscoveryService.discover(
                     "openai", baseUrlOf(server), "sk-test");
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+            assertTrue(result instanceof DiscoveryResult.Ok,
                     "happy path should produce Ok: " + result);
-            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            var ok = (DiscoveryResult.Ok) result;
             // Embedding model dropped by the id heuristic.
             assertEquals(2, ok.models().size(),
                     "embedding-model entry must be filtered out by EmbeddingModelFilter");
@@ -886,7 +888,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     """));
             var result = ModelDiscoveryService.discover(
                     "togetherai", baseUrlOf(server), "sk-test");
-            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            var ok = (DiscoveryResult.Ok) result;
             assertEquals(1, ok.models().size());
             assertEquals("moonshotai/Kimi-K2.5", ok.models().get(0).get("id"));
         }
@@ -899,9 +901,9 @@ class ModelDiscoveryServiceTest extends UnitTest {
             server.enqueue(jsonResponse(401, "{\"error\":\"bad key\"}"));
             var result = ModelDiscoveryService.discover(
                     "openai", baseUrlOf(server), "sk-bad");
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error,
+            assertTrue(result instanceof DiscoveryResult.Error,
                     "upstream non-200 must surface as Error: " + result);
-            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            var err = (DiscoveryResult.Error) result;
             assertEquals(502, err.statusCode());
             assertTrue(err.message().contains("401"),
                     "error message must echo the upstream status: " + err.message());
@@ -915,9 +917,9 @@ class ModelDiscoveryServiceTest extends UnitTest {
         // MockWebServer is needed — the rejection is synchronous.
         var result = ModelDiscoveryService.discover(
                 "evil", "http://169.254.169.254/v1", "sk-test");
-        assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error,
+        assertTrue(result instanceof DiscoveryResult.Error,
                 "metadata base URL must be rejected: " + result);
-        var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+        var err = (DiscoveryResult.Error) result;
         assertEquals(400, err.statusCode());
         assertTrue(err.message().contains("SSRF guard"),
                 "must identify the guard: " + err.message());
@@ -932,7 +934,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
             server.enqueue(jsonResponse(200, "{\"data\":[{\"id\":\"gpt-4.1\"}]}"));
             var result = ModelDiscoveryService.discover(
                     "local", baseUrlOf(server), "sk-test");
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+            assertTrue(result instanceof DiscoveryResult.Ok,
                     "loopback base URL must be allowed: " + result);
         }
     }
@@ -946,7 +948,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
             server.enqueue(jsonResponse(403, "{\"leak\":\"SUPER_SECRET_UPSTREAM_BODY\"}"));
             var result = ModelDiscoveryService.discover(
                     "openai", baseUrlOf(server), "sk-bad");
-            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            var err = (DiscoveryResult.Error) result;
             assertTrue(err.message().contains("403"), "must carry status: " + err.message());
             assertFalse(err.message().contains("SUPER_SECRET_UPSTREAM_BODY"),
                     "must NOT reflect the upstream body: " + err.message());
@@ -960,8 +962,8 @@ class ModelDiscoveryServiceTest extends UnitTest {
             server.enqueue(jsonResponse(200, "not-json{"));
             var result = ModelDiscoveryService.discover(
                     "openai", baseUrlOf(server), "sk-test");
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error);
-            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            assertTrue(result instanceof DiscoveryResult.Error);
+            var err = (DiscoveryResult.Error) result;
             assertEquals(502, err.statusCode());
             assertTrue(err.message().toLowerCase().contains("invalid json"),
                     "malformed body must produce 'Invalid JSON' message: " + err.message());
@@ -976,7 +978,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
             server.enqueue(jsonResponse(200, "{\"data\":[]}"));
             var url = baseUrlOf(server) + "/"; // force the trailing-slash branch
             var result = ModelDiscoveryService.discover("openai", url, "sk-test");
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok);
+            assertTrue(result instanceof DiscoveryResult.Ok);
         }
     }
 
@@ -997,9 +999,9 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     """));
             var result = ModelDiscoveryService.discover(
                     "ollama-local", baseUrlOf(server), "sk-test");
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+            assertTrue(result instanceof DiscoveryResult.Ok,
                     "ollama happy path must be Ok: " + result);
-            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            var ok = (DiscoveryResult.Ok) result;
             assertEquals(1, ok.models().size());
             assertEquals("glm-5", ok.models().get(0).get("id"));
             assertEquals(131072, ok.models().get(0).get("contextWindow"));
@@ -1014,8 +1016,8 @@ class ModelDiscoveryServiceTest extends UnitTest {
             server.enqueue(jsonResponse(503, "boom"));
             var result = ModelDiscoveryService.discover(
                     "ollama-local", baseUrlOf(server), null);
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error);
-            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            assertTrue(result instanceof DiscoveryResult.Error);
+            var err = (DiscoveryResult.Error) result;
             assertEquals(502, err.statusCode());
             assertTrue(err.message().contains("/api/tags"),
                     "error message must identify the failing endpoint: " + err.message());
@@ -1029,8 +1031,8 @@ class ModelDiscoveryServiceTest extends UnitTest {
             server.enqueue(jsonResponse(200, "{\"models\":[]}"));
             var result = ModelDiscoveryService.discover(
                     "ollama-cloud", baseUrlOf(server), null);
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok);
-            assertTrue(((ModelDiscoveryService.DiscoveryResult.Ok) result).models().isEmpty());
+            assertTrue(result instanceof DiscoveryResult.Ok);
+            assertTrue(((DiscoveryResult.Ok) result).models().isEmpty());
         }
     }
 
@@ -1051,8 +1053,8 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     """));
             var result = ModelDiscoveryService.discover(
                     "ollama-local", baseUrlOf(server), null);
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error);
-            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            assertTrue(result instanceof DiscoveryResult.Error);
+            var err = (DiscoveryResult.Error) result;
             assertTrue(err.message().toLowerCase().contains("no chat-capable"),
                     "expected 'No chat-capable models' tag, got: " + err.message());
         }
@@ -1070,9 +1072,9 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     """));
             var result = ModelDiscoveryService.discover(
                     "lm-studio-local", baseUrlOf(server), null);
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+            assertTrue(result instanceof DiscoveryResult.Ok,
                     "lm-studio native path must be Ok: " + result);
-            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            var ok = (DiscoveryResult.Ok) result;
             assertEquals(2, ok.models().size());
         }
     }
@@ -1090,9 +1092,9 @@ class ModelDiscoveryServiceTest extends UnitTest {
                     """));
             var result = ModelDiscoveryService.discover(
                     "lm-studio-fallback", baseUrlOf(server), null);
-            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+            assertTrue(result instanceof DiscoveryResult.Ok,
                     "fallback path must yield Ok: " + result);
-            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            var ok = (DiscoveryResult.Ok) result;
             assertEquals(1, ok.models().size());
             assertEquals("qwen3-32b", ok.models().get(0).get("id"));
         }
@@ -1152,8 +1154,8 @@ class ModelDiscoveryServiceTest extends UnitTest {
             try {
                 var result = ModelDiscoveryService.discover(
                         providerName, baseUrlOf(modelsServer), "sk-test");
-                assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok);
-                var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+                assertTrue(result instanceof DiscoveryResult.Ok);
+                var ok = (DiscoveryResult.Ok) result;
                 // gpt-5 ranked 1, claude ranked 2, unknown unranked (sorted last alphabetically).
                 assertEquals("openai/gpt-5", ok.models().get(0).get("id"));
                 assertEquals(1, ok.models().get(0).get("leaderboardRank"));
@@ -1201,7 +1203,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
             try {
                 var result = ModelDiscoveryService.discover(
                         providerName, baseUrlOf(modelsServer), "sk-test");
-                var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+                var ok = (DiscoveryResult.Ok) result;
                 // HTML leaderboard parsed → gpt-5 ranked first.
                 assertEquals("openai/gpt-5", ok.models().get(0).get("id"));
                 assertEquals(1, ok.models().get(0).get("leaderboardRank"));
@@ -1233,7 +1235,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
             try {
                 var result = ModelDiscoveryService.discover(
                         providerName, baseUrlOf(modelsServer), "sk-test");
-                var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+                var ok = (DiscoveryResult.Ok) result;
                 assertEquals(2, ok.models().size());
                 // Alphabetical order, no rankings.
                 assertEquals("anthropic/claude-opus-4-6", ok.models().get(0).get("id"));
@@ -1257,7 +1259,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                           "max_completion_tokens": 8192,
                           "max_tokens": 16384}]}
                 """).getAsJsonObject();
-        var models = ModelDiscoveryService.parseModels(json);
+        var models = ModelCatalogParser.parseModels(json);
         assertEquals(4096, models.get(0).get("maxTokens"));
     }
 
@@ -1266,7 +1268,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"data":[{"id":"x", "max_completion_tokens": 8192}]}
                 """).getAsJsonObject();
-        assertEquals(8192, ModelDiscoveryService.parseModels(json).get(0).get("maxTokens"));
+        assertEquals(8192, ModelCatalogParser.parseModels(json).get(0).get("maxTokens"));
     }
 
     @Test
@@ -1274,7 +1276,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 {"data":[{"id":"x", "max_tokens": 16384}]}
                 """).getAsJsonObject();
-        assertEquals(16384, ModelDiscoveryService.parseModels(json).get(0).get("maxTokens"));
+        assertEquals(16384, ModelCatalogParser.parseModels(json).get(0).get("maxTokens"));
     }
 
     @Test
@@ -1283,7 +1285,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 {"data":[{"id":"x",
                           "pricing":{"prompt":"0","completion":"0"}}]}
                 """).getAsJsonObject();
-        assertEquals(true, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
+        assertEquals(true, ModelCatalogParser.parseModels(json).get(0).get("isFree"));
     }
 
     @Test
@@ -1292,7 +1294,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 {"data":[{"id":"x",
                           "pricing":{"prompt":"0.000001","completion":"0"}}]}
                 """).getAsJsonObject();
-        assertEquals(false, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
+        assertEquals(false, ModelCatalogParser.parseModels(json).get(0).get("isFree"));
     }
 
     @Test
@@ -1302,7 +1304,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                           "pricing":{"prompt":"NaN","completion":"0"}}]}
                 """).getAsJsonObject();
         // NumberFormatException short-circuits to false in inferIsFree.
-        assertEquals(false, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
+        assertEquals(false, ModelCatalogParser.parseModels(json).get(0).get("isFree"));
     }
 
     @Test
@@ -1313,7 +1315,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 [{"id":"Qwen/Qwen3.7-Plus","pricing":{"input":0.32,"output":1.28}}]
                 """);
-        var model = ModelDiscoveryService.parseModels(json).get(0);
+        var model = ModelCatalogParser.parseModels(json).get(0);
         assertEquals(0.32, ((Number) model.get("promptPrice")).doubleValue(), 0.0001);
         assertEquals(1.28, ((Number) model.get("completionPrice")).doubleValue(), 0.0001);
     }
@@ -1325,7 +1327,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("""
                 [{"id":"free/model","pricing":{"input":0,"output":0}}]
                 """);
-        assertEquals(true, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
+        assertEquals(true, ModelCatalogParser.parseModels(json).get(0).get("isFree"));
     }
 
     @Test
@@ -1336,7 +1338,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 {"pricing":{"prompt":"not-a-number"}}
                 """).getAsJsonObject();
         // NumberFormatException swallowed → fall through to -1.
-        assertEquals(-1, ModelDiscoveryService.inferPrice(obj, "prompt"), 0.001);
+        assertEquals(-1, ModelCatalogParser.inferPrice(obj, "prompt"), 0.001);
     }
 
     @Test
@@ -1345,7 +1347,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"local/vl-model","capabilities":["completion","vision"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertTrue(result.confirmed());
         assertTrue(result.fromProvider(),
                 "capabilities array is a provider-confirmed signal");
@@ -1357,7 +1359,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"local/text-only","capabilities":["completion"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertFalse(result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -1370,7 +1372,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"openai/gpt-4o"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertTrue(result.confirmed());
         assertFalse(result.fromProvider(),
                 "id-heuristic is not a provider-confirmed signal");
@@ -1383,7 +1385,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"vendor/totally-unknown-model"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertFalse(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -1393,7 +1395,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"local/voice","capabilities":["audio","completion"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        var result = ModelCatalogParser.detectAudioSupport(obj);
         assertTrue(result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -1403,7 +1405,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"local/text","capabilities":["completion"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        var result = ModelCatalogParser.detectAudioSupport(obj);
         assertFalse(result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -1413,7 +1415,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"vendor/text-only"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        var result = ModelCatalogParser.detectAudioSupport(obj);
         assertFalse(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -1423,7 +1425,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"local/think","capabilities":["thinking"]}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        var result = ModelCatalogParser.detectThinkingSupport(obj);
         assertTrue(result.confirmed());
         assertTrue(result.fromProvider());
     }
@@ -1433,7 +1435,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var obj = JsonParser.parseString("""
                 {"id":"vendor/no-thinking"}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        var result = ModelCatalogParser.detectThinkingSupport(obj);
         assertFalse(result.confirmed());
         assertFalse(result.fromProvider());
     }
@@ -1446,7 +1448,7 @@ class ModelDiscoveryServiceTest extends UnitTest {
                 {"id":"vendor/legacy",
                  "architecture":{"modality":"text->text"}}
                 """).getAsJsonObject();
-        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        var result = ModelCatalogParser.detectVisionSupport(obj);
         assertFalse(result.confirmed());
         assertTrue(result.fromProvider(),
                 "legacy modality string is still a provider-confirmed signal");

@@ -5,8 +5,6 @@ import com.google.gson.JsonSyntaxException;
 import okhttp3.Request;
 import play.Logger;
 import services.EmbeddingModelFilter;
-import services.ModelDiscoveryService;
-import services.ModelDiscoveryService.DiscoveryResult;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.Strings;
@@ -60,7 +58,7 @@ public final class OpenAiCompatDiscoveryStrategy implements DiscoveryStrategy {
             // not OpenAI's wrapped `{data: [...]}` shape; parseModels
             // accepts either via JsonElement detection.
             var body = JsonParser.parseString(responseBody);
-            var models = ModelDiscoveryService.parseModels(body);
+            var models = ModelCatalogParser.parseModels(body);
 
             // JCLAW-183 Tier 3: drop entries whose id matches a non-chat
             // pattern. Safe to apply universally — chat-model ids never
@@ -68,7 +66,7 @@ public final class OpenAiCompatDiscoveryStrategy implements DiscoveryStrategy {
             // filter checks for.
             models.removeIf(m -> EmbeddingModelFilter.isLikelyNonChat((String) m.get(KEY_ID)));
 
-            ModelDiscoveryService.applyLeaderboardAndSort(providerName, models);
+            LeaderboardRanker.applyLeaderboardAndSort(providerName, models);
 
             return new DiscoveryResult.Ok(models);
 
