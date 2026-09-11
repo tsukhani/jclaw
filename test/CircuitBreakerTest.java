@@ -140,7 +140,7 @@ class CircuitBreakerTest extends UnitTest {
         nanos.advanceMillis(1_000);
         var c = cb.admit();
         assertTrue(c.probe());
-        assertTrue(a.probeWindow() != c.probeWindow(), "a fresh HALF_OPEN window has a fresh stamp");
+        assertNotEquals(a.probeWindow(), c.probeWindow(), "a fresh HALF_OPEN window has a fresh stamp");
 
         // A's outcome lands now — with the MCP tuning the cooldown equals the request timeout,
         // so this is reachable. It is evidence about the server, not about this window's probes.
@@ -313,7 +313,7 @@ class CircuitBreakerTest extends UnitTest {
     }
 
     @Test
-    void listenerIsDispatchedWithoutHoldingTheMonitor() throws InterruptedException {
+    void listenerIsDispatchedWithoutHoldingTheMonitor() {
         // The listener writes to the database (EventLogger); holding the monitor across
         // that would block every allowRequest() on the protected path.
         var cb = new CircuitBreaker(CircuitBreaker.Config.of(1, 1.0, 1, 60_000));
@@ -327,7 +327,7 @@ class CircuitBreakerTest extends UnitTest {
             probe.start();
             try {
                 probed.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         });

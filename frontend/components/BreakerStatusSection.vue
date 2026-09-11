@@ -82,7 +82,7 @@ function why(b: Breaker) {
   if (b.manual) return b.state === 'CLOSED' ? 'restored by you' : 'isolated by you'
   if (b.state === 'CLOSED') return b.samples ? `${b.samples} recent calls` : 'no calls yet'
   if (b.state === 'HALF_OPEN') return 'probing — the next calls decide'
-  return `tripped on ${b.reason?.toLowerCase().replace(/_/g, ' ') ?? 'failures'}`
+  return `tripped on ${b.reason?.toLowerCase().replaceAll('_', ' ') ?? 'failures'}`
 }
 
 async function isolate(b: Breaker) {
