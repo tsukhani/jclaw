@@ -301,12 +301,15 @@ final class StreamingAgentRunner {
         // tool-loop continuations use the same effective id.
         var effectiveModelIdForCall = Objects.requireNonNull(
                 ModelResolver.effectiveModelId(agent, conversation), "agent has no model configured");
+        // JCLAW-1190: resolved once per turn; round 1 and every continuation round share it.
+        var fallback = ModelResolver.fallbackFor(agent);
         // Round-1 stream, with a transient-5xx retry and (JCLAW) an audio-format-rejection →
         // Whisper-transcript re-stream. When the audio fallback fires it rewrites the message to the
         // transcript and returns it, so the tool-call continuation loop below reuses the rewritten
         // (no-longer-audio) messages rather than re-sending the rejected audio.
         var round1 = streamRound1WithAudioFallback(primary, effectiveModelIdForCall, messages, tools, cb,
-                maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, supportsAudioForStream);
+                maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, supportsAudioForStream,
+                fallback);
         if (round1 == null) return; // canceled mid-stream
         var accumulator = round1.accumulator();
         messages = round1.messages();
@@ -332,7 +335,7 @@ final class StreamingAgentRunner {
             return;
         }
 
-        var post = runPostAccumulatorToolLoop(accumulator, agent, conversation, primary, channelType, messages, tools,
+        var post = runPostAccumulatorToolLoop(accumulator, agent, conversation, primary, fallback, channelType, messages, tools,
                 cb, thinkingMode, isCancelled, trace, turnUsage, sink);
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
@@ -388,10 +391,10 @@ final class StreamingAgentRunner {
             @Nullable List<ToolDef> tools,
             AgentRunner.StreamingCallbacks cb, @Nullable Integer maxTokens,
             @Nullable String thinkingMode, @Nullable String channelType,
-            AtomicBoolean isCancelled, Agent agent) throws InterruptedException {
-        var secondary = ProviderRegistry.getSecondary();
+            AtomicBoolean isCancelled, Agent agent, LlmProvider.@Nullable Fallback fallback)
+            throws InterruptedException {
         var accumulator = LlmProvider.chatStreamAccumulateWithFailover(
-                primary, secondary, effectiveModelIdForCall, messages, tools,
+                primary, fallback, effectiveModelIdForCall, messages, tools,
                 cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode, channelType);
 
         if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return null;
@@ -404,7 +407,7 @@ final class StreamingAgentRunner {
                 && !(accumulator.error() instanceof LlmProvider.LlmException.BreakerOpen)) {
             EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
             accumulator = LlmProvider.chatStreamAccumulateWithFailover(
-                    primary, secondary, effectiveModelIdForCall, messages, tools,
+                    primary, fallback, effectiveModelIdForCall, messages, tools,
                     cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode, channelType);
             if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return null;
         }
@@ -436,9 +439,9 @@ final class StreamingAgentRunner {
             @Nullable String thinkingMode, @Nullable String channelType,
             AtomicBoolean isCancelled, Agent agent, Conversation conversation,
             AgentPromptPreparer.PreparedPrologue prepared,
-            boolean supportsAudio) throws InterruptedException {
+            boolean supportsAudio, LlmProvider.@Nullable Fallback fallback) throws InterruptedException {
         var acc = streamFirstRoundWithRetry(primary, effectiveModelId, messages, tools, cb, maxTokens,
-                thinkingMode, channelType, isCancelled, agent);
+                thinkingMode, channelType, isCancelled, agent, fallback);
         if (acc == null) return null;
 
         if (prepared.audioBearers().isEmpty()) return new StreamRound1(acc, messages); // no audio → no log
@@ -457,7 +460,7 @@ final class StreamingAgentRunner {
                     "Provider %s rejected the audio format; retrying with a Whisper transcript"
                             .formatted(primary.config().name()));
             var retry = streamFirstRoundWithRetry(primary, effectiveModelId, rewritten, tools, cb, maxTokens,
-                    thinkingMode, channelType, isCancelled, agent);
+                    thinkingMode, channelType, isCancelled, agent, fallback);
             if (retry == null) return null;
             AudioRetryStrategy.logAudioPassthroughOutcome(agent, conversation, primary,
                     retry.error() == null ? "downgraded" : OUTCOME_ERROR,
@@ -489,6 +492,7 @@ final class StreamingAgentRunner {
     private static StreamingPostAccumulator runPostAccumulatorToolLoop(LlmProvider.StreamAccumulator accumulator,
                                                                         Agent agent, Conversation conversation,
                                                                         LlmProvider primary,
+                                                                        LlmProvider.@Nullable Fallback fallback,
                                                                         @Nullable String channelType,
                                                                         List<ChatMessage> messages,
                                                                         @Nullable List<ToolDef> tools,
@@ -518,7 +522,7 @@ final class StreamingAgentRunner {
         var turnImages = new ArrayList<String>();
         if (!accumulator.toolCalls().isEmpty()) {
             var ctx = new ToolCallLoopRunner.StreamingTurnContext(
-                    agent, conversation, conversation.id, tools, primary, ProviderRegistry.getSecondary(),
+                    agent, conversation, conversation.id, tools, primary, fallback,
                     cb, thinkingMode, isCancelled, trace, turnUsage, turnImages, channelType, sink);
             content = ToolCallLoopRunner.handleToolCallsStreaming(
                     ctx, messages, accumulator.toolCalls(), content, 0);

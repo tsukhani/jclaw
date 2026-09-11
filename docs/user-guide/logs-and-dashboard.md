@@ -63,9 +63,10 @@ that is not. Isolating is bounded rather than latched — it restarts the ordina
 provider that is actually healthy closes itself again rather than staying dark until you remember
 it.
 
-Together they are also the failover drill. Isolate your primary provider, send a turn, watch it
-land on the secondary, then restore — the fallback path exercised end-to-end, on your schedule,
-without a background job spending tokens to rehearse the same thing forever.
+Together they are also the failover drill. Isolate an agent's provider, send it a turn, watch it
+land on the fallback provider and model set on that agent, then restore — the fallback path
+exercised end-to-end, on your schedule, without a background job spending tokens to rehearse the
+same thing forever. An agent with no fallback set answers the drill with a fast, clean failure.
 
 Every state change is written to the event log under the `CIRCUIT_BREAKER` category, and a
 breaker you isolated says so in the log rather than reporting a failure rate — an operator's

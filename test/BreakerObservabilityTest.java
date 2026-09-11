@@ -185,7 +185,8 @@ class BreakerObservabilityTest extends UnitTest {
             var client = new OkHttpClient.Builder().addInterceptor(transport).build();
             var response = HttpFactories.callWith(client, () -> LlmProvider.chatWithFailover(
                     LlmProvider.forConfig(new ProviderConfig(primaryName, UNROUTABLE, "k", List.of())),
-                    LlmProvider.forConfig(new ProviderConfig(secondaryName, UNROUTABLE, "k", List.of())),
+                    new LlmProvider.Fallback(
+                            LlmProvider.forConfig(new ProviderConfig(secondaryName, UNROUTABLE, "k", List.of())), "m"),
                     "m", List.of(ChatMessage.user("hi")), List.of(), 16, null, "test"));
 
             assertEquals(1, transport.attempts.get(),

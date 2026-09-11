@@ -74,7 +74,8 @@ class LlmProviderFailoverTest extends UnitTest {
         var secondary = openAiPointingAt(secondaryServer, "secondary");
 
         ChatResponse result = LlmProvider.chatWithFailover(
-                primary, secondary, "test-model", List.of(), List.of(), null, null, "web");
+                primary, new LlmProvider.Fallback(secondary, "fallback-model"),
+                "test-model", List.of(), List.of(), null, null, "web");
 
         assertEquals("from-primary", result.id(),
                 "happy path must return the primary's response");
@@ -103,7 +104,8 @@ class LlmProviderFailoverTest extends UnitTest {
         var secondary = openAiPointingAt(secondaryServer, "secondary");
 
         ChatResponse result = LlmProvider.chatWithFailover(
-                primary, secondary, "test-model", List.of(), List.of(), null, null, "web");
+                primary, new LlmProvider.Fallback(secondary, "fallback-model"),
+                "test-model", List.of(), List.of(), null, null, "web");
 
         assertEquals("from-secondary", result.id(),
                 "failover must return the secondary's response on LlmException");
@@ -111,6 +113,27 @@ class LlmProviderFailoverTest extends UnitTest {
                 "primary contacted at least once before failover");
         assertEquals(1, secondaryServer.getRequestCount(),
                 "secondary called exactly once on failover");
+        // JCLAW-1190: the fallback is asked for its own model, not the primary's — the live
+        // drill that motivated this sent a model id the fallback had never heard of.
+        var sent = secondaryServer.takeRequest().getBody().utf8();
+        assertTrue(sent.contains("\"model\":\"fallback-model\""), () -> "fallback request: " + sent);
+    }
+
+    @Test
+    void aFallbackThatResolvesToThePrimaryIsNoFallback() throws Exception {
+        primaryServer = new MockWebServer();
+        primaryServer.start();
+        for (var i = 0; i < 4; i++) {
+            primaryServer.enqueue(jsonResponse(500, "{\"error\":\"primary synthetic\"}"));
+        }
+        var primary = openAiPointingAt(primaryServer, "primary");
+        // A conversation-level provider override can make the effective primary the agent's own
+        // fallback provider; covering for itself would just fail the same way twice.
+        var self = new LlmProvider.Fallback(openAiPointingAt(primaryServer, "primary"), "other-model");
+
+        assertThrows(LlmProvider.LlmException.class, () -> LlmProvider.chatWithFailover(
+                primary, self, "test-model", List.of(), List.of(), null, null, "web"));
+        assertEquals(4, primaryServer.getRequestCount(), "one retry loop, no second pass on the same provider");
     }
 
     @Test

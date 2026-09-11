@@ -54,7 +54,7 @@ final class AgentPromptPreparer {
     record PreparedData(
         List<ChatMessage> messages,
         LlmProvider primary,
-        @Nullable LlmProvider secondary,
+        LlmProvider.@Nullable Fallback fallback,
         List<ToolDef> tools,
         List<VisionAudioAssembler.AudioBearer> audioBearers,
         List<VisionAudioAssembler.ImageBearer> imageBearers,
@@ -132,7 +132,7 @@ final class AgentPromptPreparer {
                 sink.appendAssistantMessage(error, null);
                 return Optional.empty();
             }
-            var secondary = ProviderRegistry.getSecondary();
+            var fallback = ModelResolver.fallbackFor(agent);
 
             // Conversation-aware overload: lazy-load MCP tool schemas
             // based on which servers the model has discovered via
@@ -142,7 +142,7 @@ final class AgentPromptPreparer {
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
 
-            return Optional.of(new PreparedData(hydration.messages(), primary, secondary, tools,
+            return Optional.of(new PreparedData(hydration.messages(), primary, fallback, tools,
                     hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers()));
         });
     }
@@ -192,7 +192,7 @@ final class AgentPromptPreparer {
         // CurrentTimeInjector). Must mirror applyMediaRewrite's placement: last,
         // after compaction/trim/media, since each of those rebuilds the list.
         finalMessages = CurrentTimeInjector.inject(finalMessages);
-        return new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers(), prepared.imageBearers(), prepared.videoBearers());
+        return new PreparedData(finalMessages, prepared.primary(), prepared.fallback(), prepared.tools(), prepared.audioBearers(), prepared.imageBearers(), prepared.videoBearers());
     }
 
     /**

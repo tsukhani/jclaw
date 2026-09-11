@@ -130,7 +130,7 @@ public final class ToolCallLoopRunner {
     static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation,
                                          @Nullable Long conversationId,
                                          List<ChatMessage> messages, List<ToolDef> tools,
-                                         LlmProvider primary, @Nullable LlmProvider secondary,
+                                         LlmProvider primary, LlmProvider.@Nullable Fallback fallback,
                                          List<VisionAudioAssembler.AudioBearer> audioBearers,
                                          List<VisionAudioAssembler.ImageBearer> imageBearers,
                                          AgentExecutionSink sink, @Nullable Long taskRunId) {
@@ -154,7 +154,7 @@ public final class ToolCallLoopRunner {
             // or mid-tool-call (would orphan partial side effects).
             AgentRunner.checkSubagentCancel(conversation);
             AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
-            var attempt = invokeOneRound(agent, conversation, primary, secondary, effectiveModelId, thinkingMode,
+            var attempt = invokeOneRound(agent, conversation, primary, fallback, effectiveModelId, thinkingMode,
                     currentMessages, tools, audioBearers, imageBearers, audioState, visionState, supportsAudioInitially);
             if (attempt.retry()) {
                 currentMessages = attempt.retryMessages();
@@ -227,7 +227,7 @@ public final class ToolCallLoopRunner {
      */
     @SuppressWarnings("java:S107") // Round invocation surface mirrors the loop's per-round state
     private static RoundAttempt invokeOneRound(Agent agent, Conversation conversation, LlmProvider primary,
-                                                @Nullable LlmProvider secondary, String effectiveModelId,
+                                                LlmProvider.@Nullable Fallback fallback, String effectiveModelId,
                                                 @Nullable String thinkingMode,
                                                 ArrayList<ChatMessage> currentMessages, List<ToolDef> tools,
                                                 List<VisionAudioAssembler.AudioBearer> audioBearers,
@@ -243,8 +243,8 @@ public final class ToolCallLoopRunner {
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, sendMessages, tools);
         ChatResponse response;
         try {
-            response = (secondary != null)
-                    ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, sendMessages, tools, maxTokens, thinkingMode, conversation.channelType)
+            response = (fallback != null)
+                    ? LlmProvider.chatWithFailover(primary, fallback, effectiveModelId, sendMessages, tools, maxTokens, thinkingMode, conversation.channelType)
                     : primary.chat(effectiveModelId, sendMessages, tools, maxTokens, thinkingMode, conversation.channelType);
         } catch (Exception e) {
             var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, imageBearers,
@@ -472,7 +472,7 @@ public final class ToolCallLoopRunner {
     public record StreamingTurnContext(Agent agent, Conversation conversation,
                                        @Nullable Long conversationId,
                                        @Nullable List<ToolDef> tools, LlmProvider provider,
-                                       @Nullable LlmProvider secondary,
+                                       LlmProvider.@Nullable Fallback fallback,
                                        AgentRunner.StreamingCallbacks cb, @Nullable String thinkingMode,
                                        AtomicBoolean isCancelled, LatencyTrace trace,
                                        LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
@@ -536,7 +536,7 @@ public final class ToolCallLoopRunner {
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());
         // JCLAW-1184: secondary-aware like round 1, so a breaker that opened between rounds
         // routes the continuation instead of erroring the turn.
-        var accumulator = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.secondary(),
+        var accumulator = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
                 effectiveModelIdForCall, sendMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
                 maxTokens, ctx.thinkingMode(), ctx.channelType());
 
@@ -626,7 +626,7 @@ public final class ToolCallLoopRunner {
                         + "Do not call any more tools. Write the full answer as markdown."));
 
         var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, ctx.tools());
-        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.secondary(),
+        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
                 effectiveModelIdForCall, retryMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
                 retryMaxTokens, ctx.thinkingMode(), ctx.channelType());
         try {

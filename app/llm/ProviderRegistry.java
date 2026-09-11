@@ -68,14 +68,14 @@ public final class ProviderRegistry {
         return new ArrayList<>(cache.values());
     }
 
+    /**
+     * The first configured provider, for an agent whose own is missing. There is deliberately no
+     * "secondary" beside it (JCLAW-1190): a turn's fallback is the pair the operator set on the
+     * agent, never whichever provider happens to sort next.
+     */
     public static @Nullable LlmProvider getPrimary() {
         var providers = listAll();
         return providers.isEmpty() ? null : providers.getFirst();
-    }
-
-    public static @Nullable LlmProvider getSecondary() {
-        var providers = listAll();
-        return providers.size() > 1 ? providers.get(1) : null;
     }
 
     private static void refreshIfNeeded() {
@@ -126,7 +126,7 @@ public final class ProviderRegistry {
         for (var c : allConfigs) configMap.put(c.key, c.value);
 
         // Sort provider names so ordering is stable regardless of the source
-        // HashMap's bucket layout: getPrimary()/getSecondary() must not shift when
+        // HashMap's bucket layout: getPrimary() must not shift when
         // an unrelated config key resizes the map and reshuffles key iteration.
         var providerNames = new ArrayList<>(configMap.keySet().stream()
                 .filter(k -> k.startsWith(CONFIG_KEY_PREFIX) && k.endsWith(".baseUrl"))
@@ -143,7 +143,7 @@ public final class ProviderRegistry {
             providerNames.addFirst(primary.trim());
         }
 
-        // LinkedHashMap preserves the order established above so getPrimary()/getSecondary() are deterministic.
+        // LinkedHashMap preserves the order established above so getPrimary() is deterministic.
         var newCache = new LinkedHashMap<String, LlmProvider>();
         for (var name : providerNames) {
             if (IMAGE_ONLY_PROVIDERS.contains(name)) continue; // image-gen only — not a chat provider

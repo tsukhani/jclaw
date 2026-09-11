@@ -80,6 +80,9 @@ interface AgentForm {
   modelId: string
   enabled: boolean
   thinkingMode: string
+  /** JCLAW-1190: '' means no fallback; the pair is sent as null/null then. */
+  fallbackProvider: string
+  fallbackModelId: string
 }
 const form = ref<AgentForm>({
   name: '',
@@ -88,6 +91,8 @@ const form = ref<AgentForm>({
   modelId: '',
   enabled: true,
   thinkingMode: '',
+  fallbackProvider: '',
+  fallbackModelId: '',
 })
 // Snapshot of the agent form at load time (or after a successful save). See
 // formDirty below — together they gate the Save button so it's only active
@@ -391,6 +396,8 @@ const agentNameId = useId()
 const agentDescriptionId = useId()
 const agentProviderId = useId()
 const agentModelId = useId()
+const agentFallbackProviderId = useId()
+const agentFallbackModelId = useId()
 const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
 const agentMemoryProviderId = useId()
@@ -689,6 +696,16 @@ const availableModels = computed(() => {
   return provider?.models ?? []
 })
 
+// JCLAW-1190: providers an agent may fall back to — any configured one but its own — and
+// the models registered on the chosen one.
+const fallbackProviders = computed(() =>
+  providers.value.filter(p => p.name !== form.value.modelProvider),
+)
+const fallbackAvailableModels = computed(() => {
+  const provider = providers.value.find(p => p.name === form.value.fallbackProvider)
+  return provider?.models ?? []
+})
+
 // JCLAW-534: models for the per-agent autocapture extractor-model override.
 const autocaptureAvailableModels = computed(() => {
   const provider = providers.value.find(p => p.name === memoryAutocaptureProvider.value)
@@ -736,6 +753,8 @@ function newAgent() {
     modelId: defaultModel,
     enabled: true,
     thinkingMode: '',
+    fallbackProvider: '',
+    fallbackModelId: '',
   }
   formBaseline.value = { ...form.value }
   creating.value = true
@@ -755,6 +774,8 @@ function editAgent(agent: Agent) {
     modelId: agent.modelId,
     enabled: agent.enabled,
     thinkingMode: agent.thinkingMode ?? '',
+    fallbackProvider: agent.fallbackProvider ?? '',
+    fallbackModelId: agent.fallbackModelId ?? '',
   }
   formBaseline.value = { ...form.value }
   void nextTick(() => {
@@ -821,6 +842,25 @@ watch(() => [form.value.modelProvider, form.value.modelId], () => {
   if (form.value.thinkingMode) {
     const levels = effectiveThinkingLevels(selectedModel.value)
     if (!levels.includes(form.value.thinkingMode)) form.value.thinkingMode = ''
+  }
+})
+
+// JCLAW-1190: the fallback model belongs to the fallback provider. Swapping the provider
+// picks that provider's first model; choosing "None" clears the model; and moving the
+// primary onto the fallback provider drops the fallback, which the backend would reject.
+watch(() => form.value.fallbackProvider, (provider) => {
+  if (populatingForm.value) return
+  if (!provider) {
+    form.value.fallbackModelId = ''
+    return
+  }
+  if (!fallbackAvailableModels.value.some(m => m.id === form.value.fallbackModelId)) {
+    form.value.fallbackModelId = fallbackAvailableModels.value[0]?.id ?? ''
+  }
+})
+watch(() => form.value.modelProvider, (provider) => {
+  if (!populatingForm.value && provider && provider === form.value.fallbackProvider) {
+    form.value.fallbackProvider = ''
   }
 })
 
@@ -1278,6 +1318,9 @@ async function saveAgent() {
       thinkingMode: form.value.thinkingMode || null,
       // Blank description clears the column; backend also strips/trims.
       description: form.value.description.trim() || null,
+      // JCLAW-1190: "None" is null/null; the backend refuses half a pair.
+      fallbackProvider: form.value.fallbackProvider || null,
+      fallbackModelId: form.value.fallbackProvider ? form.value.fallbackModelId || null : null,
     }
     if (creating.value) {
       await $fetch('/api/agents', { method: 'POST', body: payload })
@@ -1704,7 +1747,52 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </option>
             </select>
           </label>
+          <label
+            :for="agentFallbackProviderId"
+            class="block"
+          >
+            <span class="block text-xs text-fg-muted mb-1">Fallback Provider</span>
+            <select
+              :id="agentFallbackProviderId"
+              v-model="form.fallbackProvider"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
+            >
+              <option value="">
+                None
+              </option>
+              <option
+                v-for="p in fallbackProviders"
+                :key="p.name"
+                :value="p.name"
+              >
+                {{ p.name }}
+              </option>
+            </select>
+          </label>
+          <label
+            :for="agentFallbackModelId"
+            class="block"
+          >
+            <span class="block text-xs text-fg-muted mb-1">Fallback Model</span>
+            <select
+              :id="agentFallbackModelId"
+              v-model="form.fallbackModelId"
+              :disabled="!form.fallbackProvider"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50"
+            >
+              <option
+                v-for="m in fallbackAvailableModels"
+                :key="m.id"
+                :value="m.id"
+              >
+                {{ m.name || m.id }}
+              </option>
+            </select>
+          </label>
         </div>
+        <p class="mt-2 text-xs text-fg-muted">
+          A fallback is where a turn goes when the default provider's circuit breaker refuses it. Optional; leave it at None to fail fast instead.
+        </p>
         <ModelCapabilityPills
           :model="selectedModel"
           :thinking-mode="form.thinkingMode"

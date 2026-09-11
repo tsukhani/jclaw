@@ -148,6 +148,17 @@ public class Agent extends TimestampedModel {
     @Column(name = "memory_autocapture_model")
     public String memoryAutocaptureModel;
 
+    /**
+     * JCLAW-1190: the provider and model a turn moves to when this agent's primary is refused
+     * by its circuit breaker. Both null — the default — means no fallback: the turn fails fast.
+     * Set together; the model is the operator's choice on that provider, never the primary's id.
+     */
+    @Column(name = "fallback_provider")
+    public String fallbackProvider;
+
+    @Column(name = "fallback_model_id")
+    public String fallbackModelId;
+
     // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
     // JPA entities off-heap (no session replication, no caching). The
     // Serializable on GenericModel is incidental — fields are JPA-tracked.

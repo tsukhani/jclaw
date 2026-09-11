@@ -255,7 +255,7 @@ class LlmClientTest extends UnitTest {
         ProviderRegistry.refresh();
 
         assertNotNull(ProviderRegistry.getPrimary());
-        assertNotNull(ProviderRegistry.getSecondary());
+        assertEquals(2, ProviderRegistry.listAll().size());
     }
 
     // ─── mergeToolCallChunks (JCLAW-120) ─────────────────────────────

@@ -473,7 +473,7 @@ public class AgentRunner {
             Tx.run(() -> sink.appendAssistantMessage(error, null));
             return new ToolCallLoopRunner.LoopOutcome(error);
         }
-        var secondary = ProviderRegistry.getSecondary();
+        var fallback = ModelResolver.fallbackFor(agent);
 
         EventLogger.info("llm", agent.name, null,
                 "Task fire: calling %s / %s".formatted(
@@ -490,7 +490,7 @@ public class AgentRunner {
         final var loopMessages = messages;
         var outcome = DangerousActionGate.withFireOrigin(taskFireOrigin(taskRunId), () ->
                 ToolCallLoopRunner.callWithToolLoop(
-                        agent, stubConv, null, loopMessages, tools, primary, secondary,
+                        agent, stubConv, null, loopMessages, tools, primary, fallback,
                         new ArrayList<>(), new ArrayList<>(), sink, taskRunId)); // fires carry no attachments
 
         final var response = outcome.content();
@@ -572,7 +572,7 @@ public class AgentRunner {
             trace.mark(LatencyTrace.PROLOGUE_DONE);
             // LLM call loop — no transaction open, JDBC connection back in pool
             var outcome = ToolCallLoopRunner.callWithToolLoop(agent, conversation, conversationId,
-                    prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary(),
+                    prepared.messages(), prepared.tools(), prepared.primary(), prepared.fallback(),
                     prepared.audioBearers(), prepared.imageBearers(), sink, null);  // JCLAW-414: chat path is not task-cancellable
             var response = outcome.content();
             var truncated = outcome.truncated();

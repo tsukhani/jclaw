@@ -68,6 +68,9 @@ class LlmStreamFailoverTest extends UnitTest {
         assertNull(accumulator.error());
         assertEquals("from-secondary", accumulator.content());
         assertEquals(0, server(primary).getRequestCount());
+        // JCLAW-1190: the fallback streams its own model, not the primary's.
+        var sent = server(secondary).takeRequest().getBody().utf8();
+        assertTrue(sent.contains("\"model\":\"x-fallback\""), () -> "fallback request: " + sent);
     }
 
     @Test
@@ -129,8 +132,9 @@ class LlmStreamFailoverTest extends UnitTest {
 
     private LlmProvider.StreamAccumulator stream(LlmProvider primary, @Nullable LlmProvider secondary)
             throws InterruptedException {
+        var fallback = secondary == null ? null : new LlmProvider.Fallback(secondary, "x-fallback");
         var accumulator = LlmProvider.chatStreamAccumulateWithFailover(
-                primary, secondary, "x", List.of(ChatMessage.user("hi")), null,
+                primary, fallback, "x", List.of(ChatMessage.user("hi")), null,
                 _ -> { }, _ -> { }, null, null, null);
         assertTrue(accumulator.awaitCompletion(10_000), "the stream should settle well inside 10s");
         return accumulator;

@@ -31,6 +31,9 @@ export interface Agent {
   /** JCLAW-534: effective extractor provider/model — the agent's default when inherited, else the override. */
   memoryAutocaptureProvider: string
   memoryAutocaptureModel: string
+  /** JCLAW-1190: where a turn goes when the primary's breaker refuses it; both null means no fallback. */
+  fallbackProvider: string | null
+  fallbackModelId: string | null
 }
 
 /**

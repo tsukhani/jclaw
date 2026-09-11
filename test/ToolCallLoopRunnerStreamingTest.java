@@ -690,13 +690,13 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
     private static ToolCallLoopRunner.LoopOutcome invokeCallWithToolLoop(
             Agent agent, Conversation conversation, Long conversationId,
             List<ChatMessage> messages, List<ToolDef> tools,
-            LlmProvider primary, LlmProvider secondary,
+            LlmProvider primary, LlmProvider.Fallback secondary,
             List<agents.VisionAudioAssembler.AudioBearer> audioBearers) throws Exception {
 
         Method m = ToolCallLoopRunner.class.getDeclaredMethod(
                 "callWithToolLoop",
                 Agent.class, Conversation.class, Long.class,
-                List.class, List.class, LlmProvider.class, LlmProvider.class,
+                List.class, List.class, LlmProvider.class, LlmProvider.Fallback.class,
                 List.class, List.class, AgentExecutionSink.class, Long.class);  // JCLAW-216: audioBearers + imageBearers; JCLAW-414: trailing taskRunId
         m.setAccessible(true);
 
@@ -761,8 +761,9 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
 
         // JCLAW-831: the stable per-turn state now rides in a StreamingTurnContext
         // record; only messages / toolCalls / priorContent / round stay positional.
+        var fallback = secondary == null ? null : new LlmProvider.Fallback(secondary, "test-model");
         var ctx = new ToolCallLoopRunner.StreamingTurnContext(
-                agent, conversation, conversationId, tools, provider, secondary, cb, thinkingMode,
+                agent, conversation, conversationId, tools, provider, fallback, cb, thinkingMode,
                 isCancelled, trace, turnUsage, collectedImages, channelType, sink);
 
         Method m = ToolCallLoopRunner.class.getDeclaredMethod(

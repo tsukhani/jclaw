@@ -80,6 +80,7 @@ function setupAgentsApi(opts?: {
       compressionTargetRatio: 0.3, acpAllowed: false,
       memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
       memoryAutocaptureProvider: 'ollama-cloud', memoryAutocaptureModel: 'kimi-k2.5',
+      fallbackProvider: null, fallbackModelId: null,
       createdAt: '2026-04-01T10:00:00Z',
       updatedAt: '2026-04-22T10:00:00Z',
     },
@@ -99,6 +100,7 @@ function setupAgentsApi(opts?: {
       compressionTargetRatio: 0.3, acpAllowed: false,
       memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
       memoryAutocaptureProvider: 'openai', memoryAutocaptureModel: 'gpt-4',
+      fallbackProvider: null, fallbackModelId: null,
       createdAt: '2026-04-10T10:00:00Z',
       updatedAt: '2026-04-20T10:00:00Z',
     },
@@ -302,6 +304,78 @@ describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
       modelId: 'gpt-4',
       enabled: true,
     })
+  })
+
+  // JCLAW-1190: the fallback pair rides the ordinary Save; None is null/null on the wire.
+  it('PUTs the chosen fallback provider and its first model when Save is clicked', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    const fallbackProvider = component.findAll('label')
+      .find(l => l.text().includes('Fallback Provider'))!.find('select')
+    // The helper's own provider is openai, so it must not be offered as its own fallback.
+    expect(fallbackProvider.findAll('option').map(o => o.text().trim())).toEqual(['None', 'ollama-cloud'])
+    await fallbackProvider.setValue('ollama-cloud')
+    await flushPromises()
+
+    const fallbackModel = component.findAll('label')
+      .find(l => l.text().includes('Fallback Model'))!.find('select')
+    expect((fallbackModel.element as HTMLSelectElement).value).toBe('kimi-k2.5')
+
+    const saveBtn = component.findAll('button').find(b => (b.attributes('title') ?? '') === 'Save')
+    await saveBtn!.trigger('click')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+    expect(putBody).toMatchObject({ fallbackProvider: 'ollama-cloud', fallbackModelId: 'kimi-k2.5' })
+  })
+
+  it('PUTs null for both halves when the fallback is set back to None', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupAgentsApi({
+      agents: [
+        {
+          id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4', enabled: true, isMain: false,
+          providerConfigured: true, thinkingMode: null, compressionEnabled: false, compressionJson: false,
+          compressionCode: false, compressionText: false, compressionTargetRatio: 0.3, acpAllowed: false,
+          memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
+          memoryAutocaptureProvider: 'openai', memoryAutocaptureModel: 'gpt-4',
+          fallbackProvider: 'ollama-cloud', fallbackModelId: 'kimi-k2.5',
+          createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
+        },
+      ],
+    })
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    const fallbackProvider = component.findAll('label')
+      .find(l => l.text().includes('Fallback Provider'))!.find('select')
+    expect((fallbackProvider.element as HTMLSelectElement).value).toBe('ollama-cloud')
+    await fallbackProvider.setValue('')
+    await flushPromises()
+
+    const saveBtn = component.findAll('button').find(b => (b.attributes('title') ?? '') === 'Save')
+    await saveBtn!.trigger('click')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+    expect(putBody).toMatchObject({ fallbackProvider: null, fallbackModelId: null })
   })
 
   it('PUTs a partial { compressionEnabled } immediately when the Content Compression toggle is clicked', async () => {

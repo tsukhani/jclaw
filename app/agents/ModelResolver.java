@@ -2,9 +2,11 @@ package agents;
 
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
+import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
+import services.EventLogger;
 import services.ModelOverrideResolver;
 
 import java.util.Optional;
@@ -62,6 +64,24 @@ public final class ModelResolver {
     /** Companion to {@link #effectiveModelId} — returns the effective provider name. */
     public static @Nullable String effectiveModelProvider(@Nullable Agent agent, Conversation conv) {
         return ModelOverrideResolver.provider(conv, agent);
+    }
+
+    /**
+     * The operator's fallback for {@code agent} (JCLAW-1190): where a turn goes when the
+     * primary's breaker refuses it. Null when none is set, or when the chosen provider has since
+     * lost its configuration — logged, so a fallback that silently stopped existing is visible.
+     * Not subject to the conversation override: the fallback is the agent's, and a per-turn
+     * provider override that lands on it is handled by the failover entry points.
+     */
+    public static LlmProvider.@Nullable Fallback fallbackFor(@Nullable Agent agent) {
+        if (agent == null || agent.fallbackProvider == null || agent.fallbackModelId == null) return null;
+        var provider = ProviderRegistry.get(agent.fallbackProvider);
+        if (provider == null) {
+            EventLogger.warn("llm", agent.name, null,
+                    "Fallback provider '%s' is not configured; the agent has no fallback".formatted(agent.fallbackProvider));
+            return null;
+        }
+        return new LlmProvider.Fallback(provider, agent.fallbackModelId);
     }
 
     /**

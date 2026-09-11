@@ -867,11 +867,29 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     // ─── Failover (static utility) ───────────────────────────────────────
 
+    /**
+     * Where a turn goes when its primary fails it (JCLAW-1190): the provider the operator chose
+     * on the agent and the model registered there. The model is part of the choice rather than
+     * derived, because the primary's model id need not exist on the fallback — the live drill
+     * that motivated this landed on a local server that had never heard of the model it was sent.
+     */
+    public record Fallback(LlmProvider provider, String modelId) {
+
+        /** A fallback that resolves to the primary itself is no fallback: it is the provider that just failed. */
+        public boolean coversFor(LlmProvider primary) {
+            return !provider.config().name().equals(primary.config().name());
+        }
+
+        String describe() {
+            return provider.config().name() + " / " + modelId;
+        }
+    }
+
     // S107: failover wraps two providers around the standard 6-arg chat call;
     // pushing the chat tuple into a DTO would force every caller of the
     // primary {@link #chat} path to pre-build one, which they don't.
     @SuppressWarnings("java:S107")
-    public static ChatResponse chatWithFailover(LlmProvider primary, @Nullable LlmProvider secondary,
+    public static ChatResponse chatWithFailover(LlmProvider primary, @Nullable Fallback fallback,
                                                  String model, List<ChatMessage> messages,
                                                  @Nullable List<ToolDef> tools,
                                                  @Nullable Integer maxTokens,
@@ -880,10 +898,10 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         try {
             return primary.chat(model, messages, tools, maxTokens, thinkingMode, channel);
         } catch (LlmException e) {
-            if (secondary != null) {
+            if (fallback != null && fallback.coversFor(primary)) {
                 EventLogger.warn("llm", "Failing over from %s to %s: %s"
-                        .formatted(primary.config().name(), secondary.config().name(), e.getMessage()));
-                return secondary.chat(model, messages, tools, maxTokens, thinkingMode, channel);
+                        .formatted(primary.config().name(), fallback.describe(), e.getMessage()));
+                return fallback.provider().chat(fallback.modelId(), messages, tools, maxTokens, thinkingMode, channel);
             }
             throw e;
         }
@@ -899,28 +917,27 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      *
      * <p>The admission is taken once and handed to whichever provider runs it, so asking whether
      * the primary is open never spends the HALF_OPEN probe the question would otherwise cost. The
-     * secondary takes its own admission through the public entry, which fails fast when its
+     * fallback takes its own admission through the public entry, which fails fast when its
      * breaker is open too rather than bouncing back to the primary.
      */
-    @SuppressWarnings("java:S107") // chatStreamAccumulate's call surface plus the two providers
+    @SuppressWarnings("java:S107") // chatStreamAccumulate's call surface plus the fallback
     public static StreamAccumulator chatStreamAccumulateWithFailover(
-            LlmProvider primary, @Nullable LlmProvider secondary,
+            LlmProvider primary, @Nullable Fallback fallback,
             String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
             Consumer<String> onToken, Consumer<String> onReasoning,
             @Nullable Integer maxTokens, @Nullable String thinkingMode, @Nullable String channel) {
         var admission = LlmResilience.beginStream(primary.config().name());
-        // A registry secondary that resolves to the primary itself — the agent pinned the provider
-        // that happens to sit second — is the breaker that just refused, not a fallback.
-        if (admission != null || secondary == null
-                || secondary.config().name().equals(primary.config().name())) {
+        // A conversation-level provider override can make the effective primary the agent's own
+        // fallback; then the fallback is the breaker that just refused, not somewhere to go.
+        if (admission != null || fallback == null || !fallback.coversFor(primary)) {
             return primary.chatStreamAccumulate(admission, model, messages, tools, onToken,
                     onReasoning, maxTokens, thinkingMode, channel);
         }
         EventLogger.warn("llm", "Failing over from %s to %s: %s".formatted(
-                primary.config().name(), secondary.config().name(),
+                primary.config().name(), fallback.describe(),
                 LlmResilience.openBreakerFailure(primary.config().name()).getMessage()));
-        return secondary.chatStreamAccumulate(model, messages, tools, onToken, onReasoning,
-                maxTokens, thinkingMode, channel);
+        return fallback.provider().chatStreamAccumulate(fallback.modelId(), messages, tools, onToken,
+                onReasoning, maxTokens, thinkingMode, channel);
     }
 
     // ─── Shared internals ────────────────────────────────────────────────

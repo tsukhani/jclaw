@@ -192,6 +192,102 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     // =====================
+    // Fallback provider and model (JCLAW-1190)
+    // =====================
+
+    /** Register a second provider with one model, so a fallback onto it validates. */
+    private void seedFallbackProvider() {
+        services.ConfigService.set("provider.together.baseUrl", "https://api.together.xyz/v1");
+        services.ConfigService.set("provider.together.apiKey", "sk-test");
+        services.ConfigService.set("provider.together.models",
+                "[{\"id\":\"fb-model\",\"name\":\"Fallback\",\"contextWindow\":8000,\"maxTokens\":512}]");
+        llm.ProviderRegistry.refresh();
+    }
+
+    @Test
+    void createWithFallbackRoundTripsThePair() {
+        login();
+        seedFallbackProvider();
+        var resp = POST("/api/agents", "application/json", """
+                {"name": "with-fallback", "modelProvider": "openrouter", "modelId": "gpt-4.1",
+                 "fallbackProvider": "together", "fallbackModelId": "fb-model"}
+                """);
+        assertIsOk(resp);
+        var created = JsonParser.parseString(getContent(resp)).getAsJsonObject();
+        assertEquals("together", created.get("fallbackProvider").getAsString());
+        assertEquals("fb-model", created.get("fallbackModelId").getAsString());
+
+        var fetched = JsonParser.parseString(getContent(GET("/api/agents/" + created.get("id").getAsLong())))
+                .getAsJsonObject();
+        assertEquals("together", fetched.get("fallbackProvider").getAsString());
+        assertEquals("fb-model", fetched.get("fallbackModelId").getAsString());
+    }
+
+    @Test
+    void createWithoutFallbackLeavesBothNull() {
+        login();
+        var id = createAgent("no-fallback");
+        var fetched = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertTrue(fetched.get("fallbackProvider").isJsonNull());
+        assertTrue(fetched.get("fallbackModelId").isJsonNull());
+    }
+
+    @Test
+    void createRejectsAFallbackThatIsNotAValidPair() {
+        login();
+        seedFallbackProvider();
+        // Same provider as the primary: covering for itself is no fallback.
+        assertStatus(400, POST("/api/agents", "application/json", """
+                {"name": "self-fallback", "modelProvider": "together", "modelId": "fb-model",
+                 "fallbackProvider": "together", "fallbackModelId": "fb-model"}
+                """));
+        // A model the fallback provider does not have registered.
+        assertStatus(400, POST("/api/agents", "application/json", """
+                {"name": "bad-model", "modelProvider": "openrouter", "modelId": "gpt-4.1",
+                 "fallbackProvider": "together", "fallbackModelId": "nope-model"}
+                """));
+        // Half a pair.
+        assertStatus(400, POST("/api/agents", "application/json", """
+                {"name": "half-pair", "modelProvider": "openrouter", "modelId": "gpt-4.1",
+                 "fallbackProvider": "together"}
+                """));
+    }
+
+    @Test
+    void updateClearsTheFallbackWhenEitherHalfIsNulled() {
+        login();
+        seedFallbackProvider();
+        var created = JsonParser.parseString(getContent(POST("/api/agents", "application/json", """
+                {"name": "clearing", "modelProvider": "openrouter", "modelId": "gpt-4.1",
+                 "fallbackProvider": "together", "fallbackModelId": "fb-model"}
+                """))).getAsJsonObject();
+        var id = created.get("id").getAsLong();
+
+        var updated = JsonParser.parseString(getContent(PUT("/api/agents/" + id, "application/json",
+                "{\"fallbackProvider\": null}"))).getAsJsonObject();
+        assertTrue(updated.get("fallbackProvider").isJsonNull(), "clearing the provider clears the pair");
+        assertTrue(updated.get("fallbackModelId").isJsonNull());
+    }
+
+    @Test
+    void updateRejectsMovingThePrimaryOntoItsOwnFallback() {
+        login();
+        seedFallbackProvider();
+        var created = JsonParser.parseString(getContent(POST("/api/agents", "application/json", """
+                {"name": "moving", "modelProvider": "openrouter", "modelId": "gpt-4.1",
+                 "fallbackProvider": "together", "fallbackModelId": "fb-model"}
+                """))).getAsJsonObject();
+        var id = created.get("id").getAsLong();
+
+        // The stored pair is re-checked against the new primary even when the body never names it.
+        assertStatus(400, PUT("/api/agents/" + id, "application/json",
+                "{\"modelProvider\": \"together\", \"modelId\": \"fb-model\"}"));
+        // Clearing the fallback in the same request is the way through.
+        assertIsOk(PUT("/api/agents/" + id, "application/json",
+                "{\"modelProvider\": \"together\", \"modelId\": \"fb-model\", \"fallbackProvider\": null, \"fallbackModelId\": null}"));
+    }
+
+    // =====================
     // Workspace file endpoints
     // =====================
 

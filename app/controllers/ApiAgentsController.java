@@ -58,6 +58,8 @@ public class ApiAgentsController extends Controller {
     private static final String KEY_MEMORY_AUTOCAPTURE_ENABLED = "memoryAutocaptureEnabled";
     private static final String KEY_MEMORY_AUTOCAPTURE_PROVIDER = "memoryAutocaptureProvider";
     private static final String KEY_MEMORY_AUTOCAPTURE_MODEL = "memoryAutocaptureModel";
+    private static final String KEY_FALLBACK_PROVIDER = "fallbackProvider";
+    private static final String KEY_FALLBACK_MODEL_ID = "fallbackModelId";
 
     /**
      * Slug regex enforced on every {@code name} received from the public
@@ -146,7 +148,9 @@ public class ApiAgentsController extends Controller {
                              boolean memoryAutocaptureEnabled,
                              boolean memoryAutocaptureModelInherited,
                              String memoryAutocaptureProvider,
-                             String memoryAutocaptureModel) {
+                             String memoryAutocaptureModel,
+                             @Nullable String fallbackProvider,
+                             @Nullable String fallbackModelId) {
         static AgentView of(Agent a) {
             return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
         }
@@ -176,7 +180,9 @@ public class ApiAgentsController extends Controller {
                     a.memoryAutocaptureEnabled,
                     a.memoryAutocaptureProvider == null && a.memoryAutocaptureModel == null,
                     a.autocaptureProviderEffective(),
-                    a.autocaptureModelEffective());
+                    a.autocaptureModelEffective(),
+                    a.fallbackProvider,
+                    a.fallbackModelId);
         }
     }
 
@@ -344,9 +350,65 @@ public class ApiAgentsController extends Controller {
         var modelId = requireString(body, KEY_MODEL_ID);
         var thinkingMode = readOptionalString(body, KEY_THINKING_MODE);
         var description = readOptionalString(body, KEY_DESCRIPTION);
+        var fallbackProvider = readOptionalString(body, KEY_FALLBACK_PROVIDER);
+        var fallbackModelId = readOptionalString(body, KEY_FALLBACK_MODEL_ID);
+        validateFallback(modelProvider, fallbackProvider, fallbackModelId);
 
         var agent = AgentService.create(name, modelProvider, modelId, thinkingMode, description);
+        if (fallbackProvider != null) {
+            agent.fallbackProvider = fallbackProvider;
+            agent.fallbackModelId = fallbackModelId;
+            agent.save();
+        }
         renderJSON(gson.toJson(AgentView.of(agent)));
+    }
+
+    /**
+     * JCLAW-1190: a fallback is optional, but when set it is a pair — a provider that is not the
+     * agent's own, and a model registered on it. Checked before anything is applied so a 400
+     * never leaves a half-written agent behind.
+     */
+    private static void validateFallback(String modelProvider, @Nullable String fallbackProvider,
+                                         @Nullable String fallbackModelId) {
+        if (fallbackProvider == null && fallbackModelId == null) return;
+        if (fallbackProvider == null || fallbackModelId == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "'fallbackProvider' and 'fallbackModelId' go together: set both or neither");
+            throw ApiResponses.unreachable();
+        }
+        if (fallbackProvider.equals(modelProvider)) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "The fallback provider must differ from the agent's provider '" + modelProvider + "'");
+            throw ApiResponses.unreachable();
+        }
+        if (!AgentService.isProviderConfigured(fallbackProvider, fallbackModelId)) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "Model '%s' is not registered on provider '%s'".formatted(fallbackModelId, fallbackProvider));
+            throw ApiResponses.unreachable();
+        }
+    }
+
+    /**
+     * JCLAW-1190: apply the fallback pair present in {@code body} under the partial-PUT
+     * convention. Clearing either half clears both; a body that names neither still has the
+     * stored pair re-checked against the (possibly new) primary.
+     */
+    private static void applyFallbackSettings(Agent agent, JsonObject body, String modelProvider) {
+        if (!body.has(KEY_FALLBACK_PROVIDER) && !body.has(KEY_FALLBACK_MODEL_ID)) {
+            validateFallback(modelProvider, agent.fallbackProvider, agent.fallbackModelId);
+            return;
+        }
+        var provider = body.has(KEY_FALLBACK_PROVIDER)
+                ? readOptionalString(body, KEY_FALLBACK_PROVIDER) : agent.fallbackProvider;
+        var modelId = body.has(KEY_FALLBACK_MODEL_ID)
+                ? readOptionalString(body, KEY_FALLBACK_MODEL_ID) : agent.fallbackModelId;
+        if (provider == null || modelId == null) {
+            provider = null;
+            modelId = null;
+        }
+        validateFallback(modelProvider, provider, modelId);
+        agent.fallbackProvider = provider;
+        agent.fallbackModelId = modelId;
     }
 
     /**
@@ -430,6 +492,7 @@ public class ApiAgentsController extends Controller {
         }
 
         applyMemorySettings(agent, body);
+        applyFallbackSettings(agent, body, modelProvider);
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);

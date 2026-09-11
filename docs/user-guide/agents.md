@@ -25,6 +25,8 @@ Click **New Agent** at the top of the page, or click any existing row to edit it
 | **Description**      | A short blurb shown under the name. Optional but useful when you have many agents.                             |
 | **Default Provider** | Which model provider to use. Must be configured in [Settings → LLM Providers](/guide#settings) first.          |
 | **Default Model**    | The specific model id within that provider. The capability pills (thinking / vision / audio / video / no tools) update to reflect what that model supports. |
+| **Fallback Provider** | Optional. Where a turn goes when the default provider's circuit breaker refuses it — any configured provider other than the default. Leave it at **None** and a refused turn fails fast instead. See [When a provider misbehaves](/guide#settings-when-a-provider-misbehaves). |
+| **Fallback Model**   | The model to use on the fallback provider. It is your choice, not the default model's id: the fallback need not offer the same models. Set together with the provider. |
 
 ### System prompt
 
