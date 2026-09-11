@@ -36,7 +36,7 @@ The model picker in the header and the **Think** pill in the composer change the
 
 - On a fresh chat, the header shows the agent's defaults. Pick a different model or change Think and the picks are held until your first message, which starts the conversation with them applied.
 - With a conversation open, a pick takes effect on the next turn of that conversation.
-- Whenever the conversation differs from the agent's defaults, a strip appears under the header — **This conversation overrides the agent defaults** — listing each override beside the default it replaces (**Model: … (default …)**, **Thinking: … (default …)**), with a **Reset to agent defaults** button that puts the conversation back on them. On a fresh chat it reads **Next conversation**, meaning the picks apply to the conversation you are about to start.
+- Nothing in the page flags that a conversation is off the agent's defaults; the header simply shows what is in force. To drop picks made on a fresh chat before sending, reload the page. To put an open conversation back on the defaults, use `/model reset` and `/think reset`.
 - A pick the server refuses (a model the provider no longer lists, a level the model does not offer) shows its reason in the composer, where attachment errors appear, rather than failing silently.
 
 Switching to a model that does not offer the current thinking level turns thinking off for the conversation rather than sending a level the model would reject.

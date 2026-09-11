@@ -57,13 +57,10 @@ export interface UseAgentModel {
   onModelKeyChange: (key: string) => Promise<void>
   /** The reasoning level in force for the open conversation or the pending pick; null when off. */
   currentThinkingLevel: ComputedRef<string | null>
-  /** Which facets the open conversation, or the pending pick on a fresh chat, overrides. */
-  sessionOverrides: ComputedRef<{ model: boolean, thinking: boolean }>
   /** What the next fresh-chat message must carry, or null when nothing was picked. */
   pendingOverrides: ComputedRef<PendingOverrides | null>
-  /** The last rejected override write, for the header to show; null once one succeeds. */
+  /** The last rejected override write, for the composer to show; null once one succeeds. */
   overrideError: Ref<string | null>
-  resetSessionOverrides: () => Promise<void>
 }
 
 export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
@@ -439,17 +436,6 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     }
   }
 
-  const sessionOverrides = computed(() => {
-    if (pendingApplies.value) {
-      return { model: pendingModel.value != null, thinking: pendingThinking.value != null }
-    }
-    const conv = currentConversation.value
-    return {
-      model: !!(conv?.modelProviderOverride && conv?.modelIdOverride),
-      thinking: conv?.thinkingModeOverride != null,
-    }
-  })
-
   const pendingOverrides = computed<PendingOverrides | null>(() => {
     if (selectedConvoId.value != null) return null
     const o: PendingOverrides = {}
@@ -460,25 +446,6 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     if (pendingThinking.value) o.thinkingMode = pendingThinking.value
     return Object.keys(o).length ? o : null
   })
-
-  /** Back to the agent's defaults: drop the pending picks, or clear the open conversation's overrides. */
-  async function resetSessionOverrides() {
-    const convoId = selectedConvoId.value
-    if (convoId == null) {
-      clearPending()
-      return
-    }
-    const facets = sessionOverrides.value
-    try {
-      if (facets.model) await $fetch(`/api/conversations/${convoId}/model-override`, { method: 'DELETE' })
-      if (facets.thinking) await $fetch(`/api/conversations/${convoId}/thinking-override`, { method: 'DELETE' })
-      overrideError.value = null
-    }
-    catch (err) {
-      overrideError.value = describeRejection(err)
-    }
-    refreshConversations()
-  }
 
   return {
     selectedAgent,
@@ -503,9 +470,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     setThinkingLevel,
     onModelKeyChange,
     currentThinkingLevel: effectiveThinking,
-    sessionOverrides,
     pendingOverrides,
     overrideError,
-    resetSessionOverrides,
   }
 }

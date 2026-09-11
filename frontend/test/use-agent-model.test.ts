@@ -27,32 +27,17 @@ const PROVIDERS: Provider[] = [
 
 // Record PUT bodies so the write-path tests can assert what was sent. `agent` must stay
 // null in every case: JCLAW-1196 moved every pick off the agent row.
-const put = vi.hoisted(() => ({ agent: null as unknown, override: null as unknown, thinking: null as unknown, deleted: [] as string[] }))
+const put = vi.hoisted(() => ({ agent: null as unknown, override: null as unknown, thinking: null as unknown }))
 
 beforeEach(() => {
   put.agent = null
   put.override = null
   put.thinking = null
-  put.deleted = []
   registerEndpoint('/api/conversations/5/thinking-override', {
     method: 'PUT',
     handler: async (event) => {
       const { readBody } = await import('h3')
       put.thinking = await readBody(event)
-      return {}
-    },
-  })
-  registerEndpoint('/api/conversations/5/thinking-override', {
-    method: 'DELETE',
-    handler: () => {
-      put.deleted.push('thinking')
-      return {}
-    },
-  })
-  registerEndpoint('/api/conversations/5/model-override', {
-    method: 'DELETE',
-    handler: () => {
-      put.deleted.push('model')
       return {}
     },
   })
@@ -160,7 +145,6 @@ describe('useAgentModel', () => {
     expect(api.pendingOverrides.value).toEqual({ thinkingMode: 'high' })
     expect(api.thinkingActive.value).toBe(true)
     expect(api.currentThinkingLevel.value).toBe('high')
-    expect(api.sessionOverrides.value).toEqual({ model: false, thinking: true })
     expect(put.agent).toBeNull()
     expect(put.thinking).toBeNull()
   })
@@ -169,16 +153,6 @@ describe('useAgentModel', () => {
     const conv = { id: 5, thinkingModeOverride: 'off' } as unknown as Conversation
     const { api } = await mountAgentModel({ selectedConvoId: ref(5), conversations: ref([conv]), agents: ref([agent({ thinkingMode: 'high' })]) })
     expect(api.thinkingActive.value).toBe(false)
-    expect(api.sessionOverrides.value).toEqual({ model: false, thinking: true })
-  })
-
-  it('resetSessionOverrides clears exactly the facets the open conversation overrides', async () => {
-    const conv = { id: 5, modelProviderOverride: 'anthropic', modelIdOverride: 'opus', thinkingModeOverride: 'low' } as unknown as Conversation
-    const { api, deps } = await mountAgentModel({ selectedConvoId: ref(5), conversations: ref([conv]) })
-    expect(api.sessionOverrides.value).toEqual({ model: true, thinking: true })
-    await api.resetSessionOverrides()
-    expect(put.deleted.sort()).toEqual(['model', 'thinking'])
-    expect(deps.refreshConversations).toHaveBeenCalled()
   })
 
   it('onModelKeyChange writes a conversation override when a conversation is open', async () => {
@@ -194,7 +168,6 @@ describe('useAgentModel', () => {
     await api.onModelKeyChange('anthropic::opus')
     expect(api.pendingOverrides.value).toEqual({ modelProvider: 'anthropic', modelId: 'opus' })
     expect(api.selectedModelKey.value).toBe('anthropic::opus') // the header follows the pick
-    expect(api.sessionOverrides.value).toEqual({ model: true, thinking: false })
     expect(put.agent).toBeNull()
     expect(put.override).toBeNull()
   })
@@ -222,10 +195,8 @@ describe('useAgentModel', () => {
     deps.selectedConvoId.value = 5
     await vi.waitFor(() => expect(api.pendingOverrides.value).toBeNull()) // nothing more to send
     expect(api.selectedModelKey.value).toBe('anthropic::opus') // but the header still shows the pick
-    expect(api.sessionOverrides.value).toEqual({ model: true, thinking: false })
     deps.conversations.value = [{ id: 5, modelProviderOverride: 'anthropic', modelIdOverride: 'opus' } as unknown as Conversation]
     await vi.waitFor(() => expect(api.selectedModelKey.value).toBe('anthropic::opus'))
-    expect(api.sessionOverrides.value).toEqual({ model: true, thinking: false }) // now from the row
   })
 
   it('pending picks are dropped when the agent changes', async () => {

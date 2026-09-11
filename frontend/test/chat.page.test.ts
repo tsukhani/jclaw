@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { clearNuxtData } from '#app'
 import Chat from '~/pages/chat.vue'
 
 /**
@@ -423,58 +422,6 @@ describe('Chat page — subagent transcript read-only mode (JCLAW-274)', () => {
     expect(component.find('[data-testid="subagent-transcript-banner"]').exists()).toBe(false)
     const textarea = component.find('textarea').element as HTMLTextAreaElement
     expect(textarea.disabled).toBe(false)
-  })
-})
-
-describe('Chat page — session overrides strip (JCLAW-1196)', () => {
-  it('lists every override beside its default under the header and resets them from there', async () => {
-    // Earlier tests cached an empty conversations list under the same useFetch key.
-    clearNuxtData()
-    setupBaseChatApi()
-    const conv = {
-      id: 77, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
-      peerId: 'admin', messageCount: 1, preview: 'overridden',
-      createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:00Z',
-      modelProviderOverride: 'ollama-cloud', modelIdOverride: 'kimi-k2.5', thinkingModeOverride: 'off',
-    }
-    registerEndpoint('/api/conversations', () => [conv])
-    registerEndpoint('/api/conversations/77', () => conv)
-    registerEndpoint('/api/conversations/77/messages', () => [])
-    const deleted: string[] = []
-    registerEndpoint('/api/conversations/77/model-override', {
-      method: 'DELETE',
-      handler: () => {
-        deleted.push('model')
-        return {}
-      },
-    })
-    registerEndpoint('/api/conversations/77/thinking-override', {
-      method: 'DELETE',
-      handler: () => {
-        deleted.push('thinking')
-        return {}
-      },
-    })
-
-    const component = await mountSuspended(Chat)
-    await flushPromises()
-    expect(component.find('[data-testid="session-overrides"]').exists()).toBe(false)
-
-    const vm = component.vm as unknown as { resolveAndLoadConversation: (id: number) => Promise<boolean> }
-    await vm.resolveAndLoadConversation(77)
-    await flushPromises()
-
-    // One strip under the header: every override beside the default it replaces, and one reset.
-    const strip = component.find('[data-testid="session-overrides"]')
-    expect(strip.exists()).toBe(true)
-    const text = strip.text().replace(/\s+/g, '')
-    expect(text).toContain('Thisconversationoverridestheagentdefaults')
-    expect(text).toContain('Model:KimiK2.5(ollama-cloud)(defaultKimiK2.5(ollama-cloud))')
-    expect(text).toContain('Thinking:off(defaultoff)')
-    const reset = strip.find('[data-testid="session-override-reset"]')
-    expect(reset.text()).toBe('Reset to agent defaults')
-    await reset.trigger('click')
-    await vi.waitFor(() => expect(deleted.sort()).toEqual(['model', 'thinking']))
   })
 })
 

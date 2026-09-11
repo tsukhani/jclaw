@@ -163,10 +163,8 @@ const {
   setThinkingLevel,
   onModelKeyChange,
   currentThinkingLevel,
-  sessionOverrides,
   pendingOverrides,
   overrideError,
-  resetSessionOverrides,
 } = useAgentModel({
   agents,
   selectedAgentId,
@@ -463,30 +461,6 @@ const {
   pendingOverrides,
 })
 
-// JCLAW-1196: a strip under the header lists every way this conversation (or the next
-// one, on a fresh chat) departs from the agent's defaults, each beside the default it
-// replaces, with one reset. Its own row rather than tags on the controls or text in
-// the header: the header is centred around the picker and has no room, and tags on
-// the picker and Think pill read as clutter.
-function modelLabel(providerName: string | null | undefined, modelId: string | null | undefined): string {
-  if (!providerName || !modelId) return '—'
-  const name = providers.value.find(p => p.name === providerName)?.models.find(m => m.id === modelId)?.name
-  return `${name && name !== modelId ? name : modelId} (${providerName})`
-}
-const overrideRows = computed(() => {
-  const a = selectedAgent.value
-  if (!a) return []
-  const rows: Array<{ facet: string, now: string, was: string }> = []
-  if (sessionOverrides.value.model) {
-    const [providerName, modelId] = selectedModelKey.value.split('::')
-    rows.push({ facet: 'Model', now: modelLabel(providerName, modelId), was: modelLabel(a.modelProvider, a.modelId) })
-  }
-  if (sessionOverrides.value.thinking) {
-    rows.push({ facet: 'Thinking', now: currentThinkingLevel.value ?? 'off', was: a.thinkingMode ?? 'off' })
-  }
-  return rows
-})
-
 // Live "Prefilling… / Generating…" indicator with a running elapsed timer for
 // the in-flight turn (useStreamProgress). `producing` flips true on the model's
 // first sign of output — a reasoning or content delta, OR a tool call — which
@@ -734,34 +708,6 @@ function exportConversation() {
           />
         </span>
       </div>
-      <div
-        v-if="overrideRows.length"
-        data-testid="session-overrides"
-        class="px-3 py-1.5 border-b border-neutral-300 dark:border-neutral-700 bg-amber-500/5 flex items-center gap-x-4 gap-y-1 flex-wrap text-xs text-fg-muted"
-      >
-        <span class="font-medium text-amber-800 dark:text-amber-300 shrink-0">
-          {{ isEmptyChat ? 'Next conversation' : 'This conversation' }} overrides the agent defaults
-        </span>
-        <span
-          v-for="row in overrideRows"
-          :key="row.facet"
-          class="inline-flex items-center gap-1.5 min-w-0"
-        >
-          <span class="text-fg-primary">{{ row.facet }}:</span>
-          <span class="text-fg-strong font-medium truncate">{{ row.now }}</span>
-          <span class="truncate">(default {{ row.was }})</span>
-        </span>
-        <button
-          type="button"
-          data-testid="session-override-reset"
-          class="ml-auto shrink-0 px-2 py-0.5 border border-amber-500/40 text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 transition-colors"
-          title="Clear this conversation's overrides. The agent page is unchanged either way."
-          @click="resetSessionOverrides"
-        >
-          Reset to agent defaults
-        </button>
-      </div>
-
       <!--
         Body wrapper: a flex-col with a pair of spacers (top + bottom)
         that reflow between 0 and 1fr. When the chat is empty the
