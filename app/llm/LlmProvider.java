@@ -25,6 +25,7 @@ import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
 import llm.ToolCallChunkMerger.ToolCallBuilder;
+import models.Agent;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
@@ -874,6 +875,22 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * that motivated this landed on a local server that had never heard of the model it was sent.
      */
     public record Fallback(LlmProvider provider, String modelId) {
+
+        /**
+         * The operator's fallback for {@code agent}: null when none is set, or when the chosen
+         * provider has since lost its configuration — logged, so a fallback that silently
+         * stopped existing is visible.
+         */
+        public static @Nullable Fallback forAgent(@Nullable Agent agent) {
+            if (agent == null || agent.fallbackProvider == null || agent.fallbackModelId == null) return null;
+            var provider = ProviderRegistry.get(agent.fallbackProvider);
+            if (provider == null) {
+                EventLogger.warn("llm", agent.name, null,
+                        "Fallback provider '%s' is not configured; the agent has no fallback".formatted(agent.fallbackProvider));
+                return null;
+            }
+            return new Fallback(provider, agent.fallbackModelId);
+        }
 
         /** A fallback that resolves to the primary itself is no fallback: it is the provider that just failed. */
         public boolean coversFor(LlmProvider primary) {

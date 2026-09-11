@@ -5,11 +5,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
+import llm.LlmResilience;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.ChannelType;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.ConfigService;
 import services.ConversationService;
@@ -18,6 +20,7 @@ import services.LoadTestRunner;
 import services.SessionCompactor;
 import services.Tx;
 import utils.CircuitBreaker;
+import utils.CircuitBreakers;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -157,7 +160,35 @@ public final class MemoryAutoCapture {
     // this process-global one (play1 runs unit + functional tests concurrently).
     private static final CircuitBreaker SHARED_BREAKER = new CircuitBreaker(20, 0.5, 5, 30_000L);
 
-    public record ExtractContext(LlmProvider provider, String modelId, String channelType) {}
+    /**
+     * @param fallback where the extraction goes when {@code provider}'s breaker refuses it
+     *                 (JCLAW-1193): the agent's fallback, unless the agent has its own
+     *                 auto-capture override, in which case that override is the whole choice
+     */
+    public record ExtractContext(LlmProvider provider, String modelId, String channelType,
+                                 LlmProvider.@Nullable Fallback fallback) {}
+
+    /** The agent's fallback for an extraction, or null when an auto-capture override is the whole choice. Public for the test tree. */
+    public static LlmProvider.@Nullable Fallback resolveFallback(Agent agent) {
+        return agent.memoryAutocaptureProvider == null ? LlmProvider.Fallback.forAgent(agent) : null;
+    }
+
+    /**
+     * JCLAW-1193: a background extraction must not spend a HALF_OPEN permit the next user turn
+     * is waiting on — and a failed one re-opens a breaker the user's probe had just passed.
+     * The user's turn is the probe; capture stands aside until the breaker has decided.
+     */
+    public static boolean providerIsProbing(LlmProvider provider) {
+        return CircuitBreakers.find(LlmResilience.breakerName(provider.config().name()))
+                .map(b -> b.state() == CircuitBreaker.State.HALF_OPEN)
+                .orElse(false);
+    }
+
+    /** One extraction or judge call under the context's provider, failing over when its breaker refuses. */
+    public static String chatText(ExtractContext ctx, List<ChatMessage> msgs, int maxOutput) {
+        return SessionCompactor.firstChoiceText(LlmProvider.chatWithFailover(
+                ctx.provider(), ctx.fallback(), ctx.modelId(), msgs, List.of(), maxOutput, null, ctx.channelType()));
+    }
 
     /**
      * Resolve the provider, model and channel for a capture, or {@code null} when the
@@ -190,7 +221,7 @@ public final class MemoryAutoCapture {
                     "Auto-capture skipped: no LLM provider available");
             return null;
         }
-        return new ExtractContext(provider, resolveModelId(agent), conv.channelType);
+        return new ExtractContext(provider, resolveModelId(agent), conv.channelType, resolveFallback(agent));
     }
 
     // ─── Async entry point (hooked from AgentRunner) ─────────────────────────
@@ -223,15 +254,19 @@ public final class MemoryAutoCapture {
                 // during the LLM call below.
                 var ctx = Tx.run(() -> resolveExtractContext(agent, conversationId, agentName));
                 if (ctx == null) return;
+                if (providerIsProbing(ctx.provider())) {
+                    EventLogger.info(EVENT_CATEGORY, agentName, ctx.channelType(),
+                            "Auto-capture skipped: provider %s is probing its circuit breaker; the next turn is the probe"
+                                    .formatted(ctx.provider().config().name()));
+                    return;
+                }
 
                 int maxOutput = ConfigService.getInt("memory.autocapture.maxTokens", 1024);
-                Extractor extractor = msgs -> SessionCompactor.firstChoiceText(
-                        ctx.provider().chat(ctx.modelId(), msgs, List.of(), maxOutput, null, ctx.channelType()));
+                Extractor extractor = msgs -> chatText(ctx, msgs, maxOutput);
                 // JCLAW-525: the consolidation judge rides the same (cheap)
                 // capture model — it sees only short memory texts.
                 int judgeOutput = ConfigService.getInt("memory.consolidation.maxTokens", 512);
-                Consolidator consolidator = msgs -> SessionCompactor.firstChoiceText(
-                        ctx.provider().chat(ctx.modelId(), msgs, List.of(), judgeOutput, null, ctx.channelType()));
+                Consolidator consolidator = msgs -> chatText(ctx, msgs, judgeOutput);
 
                 capture(agentKey, agentName, userMessage, assistantResponse, extractor, consolidator, SHARED_BREAKER);
             } catch (Exception e) {
@@ -272,13 +307,11 @@ public final class MemoryAutoCapture {
         if (provider == null) {
             return CaptureResult.skipped("no_provider");
         }
-        var modelId = resolveModelId(agent);
+        var ctx = new ExtractContext(provider, resolveModelId(agent), null, resolveFallback(agent));
         int maxOutput = ConfigService.getInt("memory.autocapture.maxTokens", 1024);
         int judgeOutput = ConfigService.getInt("memory.consolidation.maxTokens", 512);
-        Extractor extractor = msgs -> SessionCompactor.firstChoiceText(
-                provider.chat(modelId, msgs, List.of(), maxOutput, null, null));
-        Consolidator consolidator = msgs -> SessionCompactor.firstChoiceText(
-                provider.chat(modelId, msgs, List.of(), judgeOutput, null, null));
+        Extractor extractor = msgs -> chatText(ctx, msgs, maxOutput);
+        Consolidator consolidator = msgs -> chatText(ctx, msgs, judgeOutput);
         return capture(String.valueOf(agent.id), agent.name, userMessage, assistantResponse,
                 extractor, consolidator, SHARED_BREAKER);
     }

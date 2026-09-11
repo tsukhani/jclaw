@@ -2,11 +2,9 @@ package agents;
 
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
-import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
-import services.EventLogger;
 import services.ModelOverrideResolver;
 
 import java.util.Optional;
@@ -74,14 +72,7 @@ public final class ModelResolver {
      * provider override that lands on it is handled by the failover entry points.
      */
     public static LlmProvider.@Nullable Fallback fallbackFor(@Nullable Agent agent) {
-        if (agent == null || agent.fallbackProvider == null || agent.fallbackModelId == null) return null;
-        var provider = ProviderRegistry.get(agent.fallbackProvider);
-        if (provider == null) {
-            EventLogger.warn("llm", agent.name, null,
-                    "Fallback provider '%s' is not configured; the agent has no fallback".formatted(agent.fallbackProvider));
-            return null;
-        }
-        return new LlmProvider.Fallback(provider, agent.fallbackModelId);
+        return LlmProvider.Fallback.forAgent(agent);
     }
 
     /**
