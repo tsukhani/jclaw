@@ -51,6 +51,7 @@ function healthy(over: Record<string, unknown> = {}) {
     backupsDir: '/srv/jclaw/data/backups',
     retention: 7,
     schedule: null,
+    timezone: 'Asia/Singapore',
     scheduledBackupAt: null,
     scheduledBackupError: null,
     repair: null,
@@ -146,9 +147,9 @@ describe('Settings → Database', () => {
     expect(text).toContain('2 h ago')
     expect(text).toContain('2.5.250')
     expect(text).toContain('jclaw-20260909T120000Z.zip')
-    // Short month, 12-hour clock, seconds only when non-zero — the Tasks/Reminders shape. The
-    // hour depends on the machine's zone; the day does not for a noon-UTC instant.
-    expect(text).toMatch(/9 Sept 2026 · \d{1,2}(:\d{2}(:\d{2})?)? [ap]m/)
+    // Short month, 12-hour clock, zero minute dropped — the Tasks/Reminders shape — rendered in
+    // the instance's zone from the payload, not the browser's: noon UTC is 8 pm in Singapore.
+    expect(text).toContain('9 Sept 2026 · 8 pm')
     expect(text).not.toMatch(/09\/09\/2026/)
   })
 

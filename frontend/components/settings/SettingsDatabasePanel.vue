@@ -62,6 +62,8 @@ interface DatabaseStatus {
   backupsDir: string
   retention: number
   schedule: string | null
+  /** The zone the schedule runs in — app.timezone, else the server's; the list renders in it too. */
+  timezone: string
   scheduledBackupAt: string | null
   scheduledBackupError: string | null
   repair: RepairManifest | null
@@ -116,9 +118,9 @@ function age(seconds: number | null): string {
   return `${Math.round(seconds / 86400)} days ago`
 }
 
-/** Same shape as the Tasks and Reminders columns: "11 Sept 2026 · 7:25:04 pm", in the browser's zone. */
+/** Same shape as the Tasks and Reminders columns, "11 Sept 2026 · 7:25:04 pm", in the instance's zone. */
 function when(iso: string): string {
-  return formatDateTime(iso)
+  return formatDateTime(iso, status.value?.timezone ?? null)
 }
 
 /** Size line: the data file, plus what else data/ is carrying, as one figure with its parts. */
@@ -604,7 +606,7 @@ const lastOp = computed(() => {
           data-testid="db-schedule-state"
         >
           <template v-if="status?.schedule">
-            Backing up every day at {{ status.schedule }}, in this instance's timezone.
+            Backing up every day at {{ status.schedule }} ({{ status.timezone }}, this instance's timezone; the times above are in it too).
           </template>
           <template v-else>
             No automatic backup — pick a time to back one up every day.
