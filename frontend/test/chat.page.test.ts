@@ -426,8 +426,8 @@ describe('Chat page — subagent transcript read-only mode (JCLAW-274)', () => {
   })
 })
 
-describe('Chat page — session override tags (JCLAW-1196)', () => {
-  it('tags the overridden control and resets the conversation to the agent defaults from the composer', async () => {
+describe('Chat page — session overrides strip (JCLAW-1196)', () => {
+  it('lists every override beside its default under the header and resets them from there', async () => {
     // Earlier tests cached an empty conversations list under the same useFetch key.
     clearNuxtData()
     setupBaseChatApi()
@@ -458,16 +458,20 @@ describe('Chat page — session override tags (JCLAW-1196)', () => {
 
     const component = await mountSuspended(Chat)
     await flushPromises()
-    expect(component.find('[data-testid="session-override-tag"]').exists()).toBe(false)
-    expect(component.find('[data-testid="session-override-reset"]').exists()).toBe(false)
+    expect(component.find('[data-testid="session-overrides"]').exists()).toBe(false)
 
     const vm = component.vm as unknown as { resolveAndLoadConversation: (id: number) => Promise<boolean> }
     await vm.resolveAndLoadConversation(77)
     await flushPromises()
 
-    // The tag sits on the control that departs from the default; the reset lives in the composer.
-    expect(component.find('[data-testid="session-override-tag"]').text()).toBe('session')
-    const reset = component.find('[data-testid="session-override-reset"]')
+    // One strip under the header: every override beside the default it replaces, and one reset.
+    const strip = component.find('[data-testid="session-overrides"]')
+    expect(strip.exists()).toBe(true)
+    const text = strip.text().replace(/\s+/g, '')
+    expect(text).toContain('Thisconversationoverridestheagentdefaults')
+    expect(text).toContain('Model:KimiK2.5(ollama-cloud)(defaultKimiK2.5(ollama-cloud))')
+    expect(text).toContain('Thinking:off(defaultoff)')
+    const reset = strip.find('[data-testid="session-override-reset"]')
     expect(reset.text()).toBe('Reset to agent defaults')
     await reset.trigger('click')
     await vi.waitFor(() => expect(deleted.sort()).toEqual(['model', 'thinking']))

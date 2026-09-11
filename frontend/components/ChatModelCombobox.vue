@@ -20,11 +20,6 @@ const props = defineProps<{
   modelKey: string
   /** Status dot colour. Defaults to the running-well emerald. */
   statusTone?: 'ok' | 'busy' | 'offline'
-  /** JCLAW-1196: 'session' when the open conversation overrides the agent's model,
-   *  'next' when a fresh-chat pick will; null when the agent default is in force. */
-  sessionTag?: 'session' | 'next' | null
-  /** Tooltip for the tag: what the agent default is and how to get back to it. */
-  sessionTitle?: string
 }>()
 
 const emit = defineEmits<(e: 'update:modelKey', key: string) => void>()
@@ -136,12 +131,6 @@ function onCloseAutoFocus(event: Event) {
           v-if="current"
           class="text-sm text-fg-muted truncate"
         >{{ current.sublabel }}</span>
-        <span
-          v-if="sessionTag"
-          data-testid="session-override-tag"
-          class="shrink-0 rounded border border-amber-500/50 bg-amber-500/10 px-1 py-px text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300"
-          :title="sessionTitle"
-        >{{ sessionTag }}</span>
         <ChevronDown class="w-4 h-4 text-fg-muted shrink-0" />
       </button>
     </PopoverTrigger>

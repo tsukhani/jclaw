@@ -90,7 +90,8 @@ test.describe('UAT-15 chat', () => {
     }
     test.skip(picked === null, 'this install offers a single model')
 
-    await expect(page.getByTestId('session-override-tag')).toHaveText('next')
+    await expect(page.getByTestId('session-overrides')).toContainText('Next conversation overrides the agent defaults')
+    await expect(page.getByTestId('session-overrides')).toContainText('Model:')
     await expect(page.getByTestId('session-override-reset')).toBeVisible()
     await page.getByPlaceholder('Send a message...').fill('uat pending pick')
     await page.getByRole('button', { name: 'Send' }).click()

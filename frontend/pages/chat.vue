@@ -463,19 +463,29 @@ const {
   pendingOverrides,
 })
 
-// JCLAW-1196: the controls that depart from the agent's defaults carry a small tag —
-// "session" on an open conversation, "next" for a fresh-chat pick that applies to the
-// conversation about to start — and the composer offers one reset back to the defaults.
-// Tags rather than a header sentence: the picker is centred and the header has no room.
-const sessionTag = computed(() => (isEmptyChat.value ? 'next' : 'session'))
-const sessionOverrideTitle = computed(() => {
+// JCLAW-1196: a strip under the header lists every way this conversation (or the next
+// one, on a fresh chat) departs from the agent's defaults, each beside the default it
+// replaces, with one reset. Its own row rather than tags on the controls or text in
+// the header: the header is centred around the picker and has no room, and tags on
+// the picker and Think pill read as clutter.
+function modelLabel(providerName: string | null | undefined, modelId: string | null | undefined): string {
+  if (!providerName || !modelId) return '—'
+  const name = providers.value.find(p => p.name === providerName)?.models.find(m => m.id === modelId)?.name
+  return `${name && name !== modelId ? name : modelId} (${providerName})`
+}
+const overrideRows = computed(() => {
   const a = selectedAgent.value
-  if (!a) return ''
-  const thinking = a.thinkingMode ? `thinking ${a.thinkingMode}` : 'thinking off'
-  return `Overrides the agent default (${a.modelProvider}/${a.modelId}, ${thinking}). Reset to agent defaults returns to it; the agent page is unchanged either way.`
+  if (!a) return []
+  const rows: Array<{ facet: string, now: string, was: string }> = []
+  if (sessionOverrides.value.model) {
+    const [providerName, modelId] = selectedModelKey.value.split('::')
+    rows.push({ facet: 'Model', now: modelLabel(providerName, modelId), was: modelLabel(a.modelProvider, a.modelId) })
+  }
+  if (sessionOverrides.value.thinking) {
+    rows.push({ facet: 'Thinking', now: currentThinkingLevel.value ?? 'off', was: a.thinkingMode ?? 'off' })
+  }
+  return rows
 })
-const thinkPillTitle = computed(() =>
-  sessionOverrides.value.thinking ? `${thinkingPillTitle.value} ${sessionOverrideTitle.value}` : thinkingPillTitle.value)
 
 // Live "Prefilling… / Generating…" indicator with a running elapsed timer for
 // the in-flight turn (useStreamProgress). `producing` flips true on the model's
@@ -705,8 +715,6 @@ function exportConversation() {
             :providers="providers"
             :model-key="selectedModelKey"
             :status-tone="streaming ? 'busy' : (selectedAgent?.providerConfigured === false ? 'offline' : 'ok')"
-            :session-tag="sessionOverrides.model ? sessionTag : null"
-            :session-title="sessionOverrideTitle"
             @update:model-key="onModelPicked"
           />
         </div>
@@ -725,6 +733,33 @@ function exportConversation() {
             :turn-count="conversationCostSummary?.turnCount ?? null"
           />
         </span>
+      </div>
+      <div
+        v-if="overrideRows.length"
+        data-testid="session-overrides"
+        class="px-3 py-1.5 border-b border-neutral-300 dark:border-neutral-700 bg-amber-500/5 flex items-center gap-x-4 gap-y-1 flex-wrap text-xs text-fg-muted"
+      >
+        <span class="font-medium text-amber-800 dark:text-amber-300 shrink-0">
+          {{ isEmptyChat ? 'Next conversation' : 'This conversation' }} overrides the agent defaults
+        </span>
+        <span
+          v-for="row in overrideRows"
+          :key="row.facet"
+          class="inline-flex items-center gap-1.5 min-w-0"
+        >
+          <span class="text-fg-primary">{{ row.facet }}:</span>
+          <span class="text-fg-strong font-medium truncate">{{ row.now }}</span>
+          <span class="truncate">(default {{ row.was }})</span>
+        </span>
+        <button
+          type="button"
+          data-testid="session-override-reset"
+          class="ml-auto shrink-0 px-2 py-0.5 border border-amber-500/40 text-amber-800 dark:text-amber-300 hover:bg-amber-500/10 transition-colors"
+          title="Clear this conversation's overrides. The agent page is unchanged either way."
+          @click="resetSessionOverrides"
+        >
+          Reset to agent defaults
+        </button>
       </div>
 
       <!--
@@ -1227,7 +1262,7 @@ function exportConversation() {
                   :aria-disabled="thinkingPillInert"
                   :aria-haspopup="thinkingActive && thinkingLevels.length > 1 ? 'menu' : undefined"
                   :aria-expanded="thinkingMenuOpen"
-                  :title="thinkPillTitle"
+                  :title="thinkingPillTitle"
                   @click="toggleThinkingPill"
                   @mouseenter="openThinkingMenu"
                   @mouseleave="scheduleCloseThinkingMenu"
@@ -1240,21 +1275,6 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                   Think
-                  <span
-                    v-if="sessionOverrides.thinking"
-                    data-testid="thinking-override-tag"
-                    class="shrink-0 rounded border border-amber-500/50 bg-amber-500/10 px-1 py-px text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300"
-                  >{{ sessionTag }}</span>
-                </button>
-                <button
-                  v-if="sessionOverrides.model || sessionOverrides.thinking"
-                  type="button"
-                  data-testid="session-override-reset"
-                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 transition-colors"
-                  :title="sessionOverrideTitle"
-                  @click="resetSessionOverrides"
-                >
-                  Reset to agent defaults
                 </button>
                 <!--
                   Vision pill: capability indicator only. Shown when the model
