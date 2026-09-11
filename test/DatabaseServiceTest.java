@@ -104,8 +104,10 @@ class DatabaseServiceTest extends UnitTest {
                         + ":" + stampUtc.substring(11, 13) + ":" + stampUtc.substring(13, 15) + "Z").toString());
 
         var ranAt0900 = List.of(backup.apply("20260911T010054Z"));          // 09:00:54 local
-        assertEquals(now.toLocalDate(), DatabaseService.lastRunFromBackups(ranAt0900, "09:00", now),
-                "a backup written today at the scheduled time counts as today's run");
+        var seeded = DatabaseService.lastRunFromBackups(ranAt0900, "09:00", now);
+        assertNotNull(seeded, "a backup written today at the scheduled time counts as today's run");
+        assertEquals(now.toLocalDate(), seeded.toLocalDate());
+        assertEquals(Instant.parse("2026-09-11T01:00:54Z"), seeded.toInstant(), "and its time is what the panel reports");
         assertNull(DatabaseService.lastRunFromBackups(List.of(backup.apply("20260910T010054Z")), "09:00", now),
                 "yesterday's backup does not cover today");
         assertNull(DatabaseService.lastRunFromBackups(List.of(backup.apply("20260911T003000Z")), "09:00", now),
@@ -115,8 +117,9 @@ class DatabaseServiceTest extends UnitTest {
         var upload = new DatabaseService.BackupInfo("upload.zip", 1, now.toInstant().toString());
         assertNull(DatabaseService.lastRunFromBackups(List.of(upload), "09:00", now),
                 "an upload in the directory is not one of this service's runs");
-        assertEquals(now.toLocalDate(), DatabaseService.lastRunFromBackups(List.of(upload, ranAt0900.getFirst()), "09:00", now),
-                "the newest own backup decides, not the newest file");
+        var ownWins = DatabaseService.lastRunFromBackups(List.of(upload, ranAt0900.getFirst()), "09:00", now);
+        assertNotNull(ownWins, "the newest own backup decides, not the newest file");
+        assertEquals(now.toLocalDate(), ownWins.toLocalDate());
     }
 
     @Test

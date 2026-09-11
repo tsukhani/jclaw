@@ -218,13 +218,13 @@ public final class DatabaseService {
     }
 
     /**
-     * The day a fresh process should treat as already backed up (JCLAW-1195): today, when the
-     * newest of this service's own backups was written today at or after {@code schedule};
+     * The backup a fresh process should treat as today's scheduled run (JCLAW-1195): the newest
+     * of this service's own backups when it was written today at or after {@code schedule};
      * otherwise null. The in-memory marker dies with the process, so without this every
      * restart after the scheduled time re-ran the backup and pruned the real one.
      */
-    public static @Nullable LocalDate lastRunFromBackups(List<BackupInfo> backups, @Nullable String schedule,
-                                                         ZonedDateTime now) {
+    public static @Nullable ZonedDateTime lastRunFromBackups(List<BackupInfo> backups, @Nullable String schedule,
+                                                             ZonedDateTime now) {
         if (schedule == null || !SCHEDULE.matcher(schedule).matches()) {
             return null;
         }
@@ -233,7 +233,6 @@ public final class DatabaseService {
                 .filter(b -> b.id().startsWith(BACKUP_PREFIX))
                 .map(b -> ZonedDateTime.ofInstant(Instant.parse(b.createdAt()), now.getZone()))
                 .filter(t -> t.toLocalDate().equals(now.toLocalDate()) && !t.toLocalTime().isBefore(at))
-                .map(ZonedDateTime::toLocalDate)
                 .findFirst()
                 .orElse(null);
     }
@@ -255,7 +254,8 @@ public final class DatabaseService {
             // First due tick since boot: was today's backup written before this process came up?
             var seeded = lastRunFromBackups(listBackups(), schedule, now);
             if (seeded != null) {
-                lastScheduledRun = seeded;
+                lastScheduledRun = seeded.toLocalDate();
+                lastScheduledAt = seeded.toInstant();
                 return;
             }
         }
