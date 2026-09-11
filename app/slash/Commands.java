@@ -90,6 +90,7 @@ public final class Commands {
         COMPACT("/compact", "Summarize older turns to free context"),
         HELP("/help", "Show available commands"),
         MODEL("/model", "Show current model and its capabilities"),
+        THINK("/think", "Set reasoning effort for this conversation"),
         USAGE("/usage", "Show context usage for this conversation"),
         STOP("/stop", "Interrupt the current generation"),
         SUBAGENT("/subagent", "Inspect, kill, or read transcripts of subagent runs"),
@@ -116,7 +117,8 @@ public final class Commands {
             • /reset — clear the LLM's memory for this conversation (keeps the thread)
             • /compact — summarize older turns to free context (optional: /compact focus-hint)
             • /help — show this message
-            • /model — show current model and its capabilities
+            • /model — show current model and its capabilities (/model NAME switches this conversation)
+            • /think — reasoning effort for this conversation (/think off, /think level, /think reset)
             • /usage — show context usage for this conversation
             • /stop — interrupt the current generation
             • /subagent — inspect, kill, or read transcripts (list, info ID, log ID, kill ID, history ID)
@@ -287,6 +289,7 @@ public final class Commands {
             case COMPACT -> executeCompact(agent, channelType, current, args);
             case HELP -> executeHelp(agent, channelType, current);
             case MODEL -> executeModel(agent, channelType, current, args);
+            case THINK -> executeThink(agent, channelType, current, args);
             case USAGE -> executeUsage(agent, channelType, current);
             case STOP -> executeStop(agent, channelType, current);
             case SUBAGENT -> executeSubagent(agent, channelType, current, args);
@@ -683,6 +686,11 @@ public final class Commands {
     /** Tx-wrap response build, persist a canned assistant message, and emit the SLASH_COMMAND event log. */
     private static Result persistAndLogModel(Agent agent, String channelType, @Nullable Conversation current,
                                              String logPrefix, Supplier<String> build) {
+        return persistAndLog(agent, channelType, current, logPrefix, build, Command.MODEL);
+    }
+
+    private static Result persistAndLog(Agent agent, String channelType, @Nullable Conversation current,
+                                        String logPrefix, Supplier<String> build, Command command) {
         var responseText = Tx.run(() -> {
             var text = build.get();
             persistCannedResponseInTx(current, text);
@@ -690,7 +698,70 @@ public final class Commands {
         });
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 logPrefix + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
-        return new Result(current, responseText, Command.MODEL);
+        return new Result(current, responseText, command);
+    }
+
+    // ---- /think (JCLAW-1196): the conversation's reasoning effort, never the agent's default ----
+
+    private static Result executeThink(Agent agent, String channelType, @Nullable Conversation current,
+                                       @Nullable String args) {
+        var trimmed = args == null ? "" : args.strip();
+        return persistAndLog(agent, channelType, current, "/think" + (trimmed.isEmpty() ? "" : " " + trimmed),
+                () -> performThink(agent, current, trimmed), Command.THINK);
+    }
+
+    /** Body of {@code /think}: no argument reports, {@code reset} clears, anything else sets. */
+    public static String performThink(@Nullable Agent agent, @Nullable Conversation current, String args) {
+        if (agent == null) return "No agent bound to this conversation.";
+        if (args.isEmpty()) return buildThinkResponse(agent, current);
+        if (current == null) return "No active conversation — cannot change thinking without a target.";
+        var managed = (Conversation) Conversation.findById(current.id);
+        if (managed == null) return "Conversation disappeared mid-change — try again.";
+        if (args.equalsIgnoreCase("reset")) {
+            boolean hadOverride = managed.thinkingModeOverride != null;
+            ConversationService.setThinkingOverride(managed, null);
+            return hadOverride
+                    ? "Cleared the conversation's thinking override. Reverted to agent default ("
+                            + describeAgentThinking(agent) + ")."
+                    : "This conversation had no thinking override. The agent default ("
+                            + describeAgentThinking(agent) + ") remains in effect.";
+        }
+        var mode = args.toLowerCase(java.util.Locale.ROOT);
+        var rejection = ConversationService.thinkingOverrideRejection(
+                ModelOverrideResolver.provider(current, agent), ModelOverrideResolver.modelId(current, agent), mode);
+        if (rejection != null) {
+            return rejection + " Use `/think off`, `/think <level>` or `/think reset`; `/model` lists the levels.";
+        }
+        ConversationService.setThinkingOverride(managed, mode);
+        var what = Conversation.THINKING_OFF.equals(mode)
+                ? "Thinking is off for this conversation."
+                : "Thinking effort for this conversation is now `" + mode + "`.";
+        return what + "\nAgent default (" + describeAgentThinking(agent)
+                + ") is unchanged. Use `/think reset` to revert this conversation.";
+    }
+
+    static String buildThinkResponse(Agent agent, @Nullable Conversation current) {
+        var model = resolveModel(agent, current);
+        var effective = ModelOverrideResolver.thinkingMode(current, agent);
+        var sb = new StringBuilder("Thinking: ");
+        if (model.isEmpty() || !model.get().supportsThinking()) {
+            sb.append("not supported by ").append(effectiveProviderName(agent, current))
+                    .append('/').append(effectiveModelIdFor(agent, current));
+        } else {
+            sb.append(effective == null ? "off" : "effort " + effective);
+            var levels = model.get().effectiveThinkingLevels();
+            if (!levels.isEmpty()) sb.append("\nLevels: ").append(String.join(", ", levels));
+        }
+        if (ModelOverrideResolver.hasThinkingOverride(current)) {
+            sb.append("\n(Conversation override active — agent default is ")
+                    .append(describeAgentThinking(agent)).append(')');
+        }
+        sb.append("\nUse `/think off`, `/think <level>` or `/think reset`.");
+        return sb.toString();
+    }
+
+    private static String describeAgentThinking(Agent agent) {
+        return agent.thinkingMode == null || agent.thinkingMode.isBlank() ? "off" : agent.thinkingMode;
     }
 
     /**
@@ -771,7 +842,7 @@ public final class Commands {
         }
         var m = model.get();
         var thinkingLine = m.supportsThinking()
-                ? CAP_SUPPORTED + renderThinkingSelection(agent, m)
+                ? CAP_SUPPORTED + renderThinkingSelection(agent, current, m)
                 : CAP_NOT_SUPPORTED;
         var sb = new StringBuilder();
         sb.append("Model: ").append(providerName).append('/').append(modelId).append('\n');
@@ -903,14 +974,21 @@ public final class Commands {
                 + "Older messages will be trimmed on the next turn.";
     }
 
+    /** Agent-default view, kept for callers with no conversation in hand. */
     private static String renderThinkingSelection(Agent agent, ModelInfo m) {
-        if (agent.thinkingMode == null || agent.thinkingMode.isBlank()) return " (not currently enabled)";
+        return renderThinkingSelection(agent, null, m);
+    }
+
+    private static String renderThinkingSelection(Agent agent, @Nullable Conversation current, ModelInfo m) {
+        var mode = ModelOverrideResolver.thinkingMode(current, agent);
+        var scope = ModelOverrideResolver.hasThinkingOverride(current) ? ", conversation override" : "";
+        if (mode == null || mode.isBlank()) return " (not currently enabled" + scope + ")";
         var levels = m.thinkingLevels();
-        if (levels != null && !levels.isEmpty() && !levels.contains(agent.thinkingMode)) {
-            return " (current setting %s is not advertised by this model — effectively off)"
-                    .formatted(agent.thinkingMode);
+        if (levels != null && !levels.isEmpty() && !levels.contains(mode)) {
+            return " (current setting %s is not advertised by this model — effectively off%s)"
+                    .formatted(mode, scope);
         }
-        return " (effort: %s)".formatted(agent.thinkingMode);
+        return " (effort: %s%s)".formatted(mode, scope);
     }
 
     private static String formatPricing(ModelInfo m) {

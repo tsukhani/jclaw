@@ -25,12 +25,37 @@ const PROVIDERS: Provider[] = [
   },
 ]
 
-// Record PUT bodies so the write-path tests can assert what was sent.
-const put = vi.hoisted(() => ({ agent: null as unknown, override: null as unknown }))
+// Record PUT bodies so the write-path tests can assert what was sent. `agent` must stay
+// null in every case: JCLAW-1196 moved every pick off the agent row.
+const put = vi.hoisted(() => ({ agent: null as unknown, override: null as unknown, thinking: null as unknown, deleted: [] as string[] }))
 
 beforeEach(() => {
   put.agent = null
   put.override = null
+  put.thinking = null
+  put.deleted = []
+  registerEndpoint('/api/conversations/5/thinking-override', {
+    method: 'PUT',
+    handler: async (event) => {
+      const { readBody } = await import('h3')
+      put.thinking = await readBody(event)
+      return {}
+    },
+  })
+  registerEndpoint('/api/conversations/5/thinking-override', {
+    method: 'DELETE',
+    handler: () => {
+      put.deleted.push('thinking')
+      return {}
+    },
+  })
+  registerEndpoint('/api/conversations/5/model-override', {
+    method: 'DELETE',
+    handler: () => {
+      put.deleted.push('model')
+      return {}
+    },
+  })
   registerEndpoint('/api/agents/1', {
     method: 'PUT',
     handler: async (event) => {
@@ -60,7 +85,6 @@ async function mountAgentModel(over: Partial<UseAgentModelDeps> = {}) {
     selectedConvoId: ref<number | null>(null),
     conversations: ref<Conversation[]>([]),
     providers: ref<Provider[]>(PROVIDERS),
-    refreshAgents: vi.fn(),
     refreshConversations: vi.fn(),
     ...over,
   }
@@ -105,26 +129,56 @@ describe('useAgentModel', () => {
     expect(api.thinkingActive.value).toBe(false)
   })
 
-  it('toggleThinkingPill turns thinking on with a level and PUTs the agent', async () => {
-    const { api, deps } = await mountAgentModel({ agents: ref([agent({ thinkingMode: null })]) })
+  it('toggleThinkingPill turns thinking on for the open conversation, not the agent', async () => {
+    const { api, deps } = await mountAgentModel({ selectedConvoId: ref(5), agents: ref([agent({ thinkingMode: null })]) })
     api.toggleThinkingPill()
-    await vi.waitFor(() => expect(deps.refreshAgents).toHaveBeenCalled())
-    expect(put.agent).toEqual({ thinkingMode: 'medium' }) // session default
+    await vi.waitFor(() => expect(deps.refreshConversations).toHaveBeenCalled())
+    expect(put.thinking).toEqual({ thinkingMode: 'medium' }) // session default
+    expect(put.agent).toBeNull()
   })
 
-  it('toggleThinkingPill turns thinking off when already active', async () => {
-    const { api, deps } = await mountAgentModel({ agents: ref([agent({ thinkingMode: 'high' })]) })
+  it('toggleThinkingPill turns thinking off for the open conversation when active', async () => {
+    const { api, deps } = await mountAgentModel({ selectedConvoId: ref(5), agents: ref([agent({ thinkingMode: 'high' })]) })
     api.toggleThinkingPill()
-    await vi.waitFor(() => expect(deps.refreshAgents).toHaveBeenCalled())
-    expect(put.agent).toEqual({ thinkingMode: null })
+    await vi.waitFor(() => expect(deps.refreshConversations).toHaveBeenCalled())
+    expect(put.thinking).toEqual({ thinkingMode: 'off' })
+    expect(put.agent).toBeNull()
   })
 
-  it('setThinkingLevel writes the level and closes the menu', async () => {
-    const { api, deps } = await mountAgentModel({ agents: ref([agent({ thinkingMode: 'low' })]) })
+  it('setThinkingLevel writes the level to the open conversation and closes the menu', async () => {
+    const { api, deps } = await mountAgentModel({ selectedConvoId: ref(5), agents: ref([agent({ thinkingMode: 'low' })]) })
     api.setThinkingLevel('high')
     expect(api.thinkingMenuOpen.value).toBe(false)
-    await vi.waitFor(() => expect(deps.refreshAgents).toHaveBeenCalled())
-    expect(put.agent).toEqual({ thinkingMode: 'high' })
+    await vi.waitFor(() => expect(deps.refreshConversations).toHaveBeenCalled())
+    expect(put.thinking).toEqual({ thinkingMode: 'high' })
+    expect(put.agent).toBeNull()
+  })
+
+  it('on a fresh chat a thinking pick is held for the first message and shown as active', async () => {
+    const { api } = await mountAgentModel({ selectedConvoId: ref(null), agents: ref([agent({ thinkingMode: null })]) })
+    api.setThinkingLevel('high')
+    expect(api.pendingOverrides.value).toEqual({ thinkingMode: 'high' })
+    expect(api.thinkingActive.value).toBe(true)
+    expect(api.currentThinkingLevel.value).toBe('high')
+    expect(api.sessionOverrides.value).toEqual({ model: false, thinking: true })
+    expect(put.agent).toBeNull()
+    expect(put.thinking).toBeNull()
+  })
+
+  it('a conversation thinking override beats the agent default, and off means off', async () => {
+    const conv = { id: 5, thinkingModeOverride: 'off' } as unknown as Conversation
+    const { api } = await mountAgentModel({ selectedConvoId: ref(5), conversations: ref([conv]), agents: ref([agent({ thinkingMode: 'high' })]) })
+    expect(api.thinkingActive.value).toBe(false)
+    expect(api.sessionOverrides.value).toEqual({ model: false, thinking: true })
+  })
+
+  it('resetSessionOverrides clears exactly the facets the open conversation overrides', async () => {
+    const conv = { id: 5, modelProviderOverride: 'anthropic', modelIdOverride: 'opus', thinkingModeOverride: 'low' } as unknown as Conversation
+    const { api, deps } = await mountAgentModel({ selectedConvoId: ref(5), conversations: ref([conv]) })
+    expect(api.sessionOverrides.value).toEqual({ model: true, thinking: true })
+    await api.resetSessionOverrides()
+    expect(put.deleted.sort()).toEqual(['model', 'thinking'])
+    expect(deps.refreshConversations).toHaveBeenCalled()
   })
 
   it('onModelKeyChange writes a conversation override when a conversation is open', async () => {
@@ -135,23 +189,37 @@ describe('useAgentModel', () => {
     expect(put.agent).toBeNull() // agent default untouched
   })
 
-  it('onModelKeyChange mutates the agent default when no conversation is open', async () => {
-    const { api, deps } = await mountAgentModel({ selectedConvoId: ref(null) })
-    api.onModelKeyChange('anthropic::opus')
-    await vi.waitFor(() => expect(deps.refreshAgents).toHaveBeenCalled())
-    expect(put.agent).toMatchObject({ modelProvider: 'anthropic', modelId: 'opus' })
+  it('onModelKeyChange on a fresh chat holds the pick for the first message and leaves the agent alone', async () => {
+    const { api } = await mountAgentModel({ selectedConvoId: ref(null) })
+    await api.onModelKeyChange('anthropic::opus')
+    expect(api.pendingOverrides.value).toEqual({ modelProvider: 'anthropic', modelId: 'opus' })
+    expect(api.selectedModelKey.value).toBe('anthropic::opus') // the header follows the pick
+    expect(api.sessionOverrides.value).toEqual({ model: true, thinking: false })
+    expect(put.agent).toBeNull()
     expect(put.override).toBeNull()
   })
 
-  it('clears an incompatible thinking level when switching to a non-thinking model', async () => {
-    // Agent on a thinking model at level "high"; switch to gpt-3 (no thinking).
-    const { api } = await mountAgentModel({
-      selectedConvoId: ref(null),
-      agents: ref([agent({ thinkingMode: 'high' })]),
-    })
-    api.onModelKeyChange('openai::gpt-3')
-    await vi.waitFor(() => expect(put.agent).not.toBeNull())
-    expect(put.agent).toMatchObject({ modelProvider: 'openai', modelId: 'gpt-3', thinkingMode: null })
+  it('a fresh-chat pick whose model lacks the current level makes the off explicit', async () => {
+    // Agent at "medium"; glm-5.3-flash advertises low/high/max only.
+    const { api } = await mountAgentModel({ selectedConvoId: ref(null), agents: ref([agent({ thinkingMode: 'medium' })]) })
+    await api.onModelKeyChange('ollama-cloud::glm-5.3-flash')
+    expect(api.pendingOverrides.value).toEqual({ modelProvider: 'ollama-cloud', modelId: 'glm-5.3-flash', thinkingMode: 'off' })
+    expect(put.agent).toBeNull()
+  })
+
+  it('a fresh-chat pick of a non-thinking model needs no thinking override at all', async () => {
+    const { api } = await mountAgentModel({ selectedConvoId: ref(null), agents: ref([agent({ thinkingMode: 'high' })]) })
+    await api.onModelKeyChange('openai::gpt-3')
+    expect(api.pendingOverrides.value).toEqual({ modelProvider: 'openai', modelId: 'gpt-3' })
+    expect(put.agent).toBeNull()
+  })
+
+  it('pending picks are dropped once a conversation opens or the agent changes', async () => {
+    const { api, deps } = await mountAgentModel({ selectedConvoId: ref(null) })
+    await api.onModelKeyChange('anthropic::opus')
+    expect(api.pendingOverrides.value).not.toBeNull()
+    deps.selectedConvoId.value = 5 // the server persisted them on the conversation the message created
+    await vi.waitFor(() => expect(api.pendingOverrides.value).toBeNull())
   })
 
   it('opens the thinking menu only when thinking is active and supported', async () => {
@@ -197,11 +265,13 @@ describe('useAgentModel', () => {
     // The regression this guards: the lock used to bar setThinkingLevel outright,
     // which left these models pinned to the vendor default with no way down.
     const { api, deps } = await mountAgentModel({
+      selectedConvoId: ref(5),
       agents: ref([agent({ modelProvider: 'ollama-cloud', modelId: 'glm-5.3-flash', thinkingMode: null })]),
     })
     api.setThinkingLevel('max')
-    await vi.waitFor(() => expect(deps.refreshAgents).toHaveBeenCalled())
-    expect(put.agent).toEqual({ thinkingMode: 'max' })
+    await vi.waitFor(() => expect(deps.refreshConversations).toHaveBeenCalled())
+    expect(put.thinking).toEqual({ thinkingMode: 'max' })
+    expect(put.agent).toBeNull()
   })
 
   it('still refuses to toggle thinking off on a locked model', async () => {

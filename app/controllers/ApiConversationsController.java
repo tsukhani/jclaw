@@ -24,6 +24,7 @@ import play.mvc.With;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
+import services.ModelOverrideResolver;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import utils.ApiResponses;
@@ -63,6 +64,7 @@ public class ApiConversationsController extends Controller {
                                    long messageCount, String preview,
                                    boolean starred, boolean pinned,
                                    String modelProviderOverride, String modelIdOverride,
+                                   String thinkingModeOverride,
                                    Long parentConversationId,
                                    long compactionCount) {}
 
@@ -710,6 +712,54 @@ public class ApiConversationsController extends Controller {
         renderJSON(gson.toJson(new StatusResponse("cleared")));
     }
 
+    /** Body of {@code PUT /api/conversations/{id}/thinking-override}. */
+    public record ThinkingOverrideResponse(String thinkingMode) {}
+
+    /**
+     * PUT /api/conversations/{id}/thinking-override — set the conversation-scoped thinking
+     * mode (JCLAW-1196): {@code "off"} or a level the effective model advertises. The agent's
+     * default is untouched; DELETE clears it.
+     */
+    @SuppressWarnings("java:S2259")
+    public static void setThinkingOverride(Long id) {
+        Conversation conversation = ConversationService.findById(id);
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null || !body.has("thinkingMode") || body.get("thinkingMode").isJsonNull()) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
+        var mode = body.get("thinkingMode").getAsString();
+        if (mode == null || mode.isBlank()) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
+        var agent = conversation.agent;
+        var rejection = ConversationService.thinkingOverrideRejection(
+                ModelOverrideResolver.provider(conversation, agent),
+                ModelOverrideResolver.modelId(conversation, agent), mode);
+        if (rejection != null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, rejection);
+            return;
+        }
+        ConversationService.setThinkingOverride(conversation, mode);
+        renderJSON(gson.toJson(new ThinkingOverrideResponse(mode)));
+    }
+
+    /** DELETE /api/conversations/{id}/thinking-override — back to the agent's default. */
+    public static void clearThinkingOverride(Long id) {
+        Conversation conversation = ConversationService.findById(id);
+        if (conversation == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        ConversationService.setThinkingOverride(conversation, null);
+        renderJSON(gson.toJson(new StatusResponse("cleared")));
+    }
+
     /**
      * PUT /api/conversations/{id}/name
      *
@@ -867,6 +917,7 @@ public class ApiConversationsController extends Controller {
         // a persisted override.
         map.put("modelProviderOverride", c.modelProviderOverride);
         map.put("modelIdOverride", c.modelIdOverride);
+        map.put("thinkingModeOverride", c.thinkingModeOverride);
         // JCLAW-267: surface the parent-conversation FK so the sidebar can
         // render a "child of parent X" badge for session-mode subagent
         // conversations (they live as their own rows alongside top-level

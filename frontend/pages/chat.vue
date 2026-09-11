@@ -162,13 +162,17 @@ const {
   scheduleCloseThinkingMenu,
   setThinkingLevel,
   onModelKeyChange,
+  currentThinkingLevel,
+  sessionOverrides,
+  pendingOverrides,
+  overrideError,
+  resetSessionOverrides,
 } = useAgentModel({
   agents,
   selectedAgentId,
   selectedConvoId,
   conversations,
   providers,
-  refreshAgents,
   refreshConversations,
 })
 const input = ref('')
@@ -456,6 +460,22 @@ const {
   reconcileMessageIds,
   refreshConversations,
   refreshAgents,
+  pendingOverrides,
+})
+
+// JCLAW-1196: the header marker that says this conversation (or the next one, on a
+// fresh chat) has departed from the agent's defaults, and what it would return to.
+const sessionOverrideFacets = computed(() => {
+  const facets: string[] = []
+  if (sessionOverrides.value.model) facets.push('model')
+  if (sessionOverrides.value.thinking) facets.push('thinking')
+  return facets.join(' and ')
+})
+const sessionOverrideTitle = computed(() => {
+  const a = selectedAgent.value
+  if (!a) return ''
+  const thinking = a.thinkingMode ? `thinking ${a.thinkingMode}` : 'thinking off'
+  return `Agent default: ${a.modelProvider}/${a.modelId}, ${thinking}. Reset returns to it; the agent page is unchanged either way.`
 })
 
 // Live "Prefilling… / Generating…" indicator with a running elapsed timer for
@@ -690,6 +710,27 @@ function exportConversation() {
           />
         </div>
         <span class="ml-auto flex items-center gap-2">
+          <span
+            v-if="overrideError"
+            class="text-xs text-red-600 dark:text-red-400 max-w-64 truncate"
+            data-testid="override-error"
+            :title="overrideError"
+          >{{ overrideError }}</span>
+          <span
+            v-if="sessionOverrides.model || sessionOverrides.thinking"
+            class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] whitespace-nowrap border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+            data-testid="session-override"
+            :title="sessionOverrideTitle"
+          >
+            <span>{{ isEmptyChat ? 'Next conversation' : 'This conversation' }} overrides the agent's {{ sessionOverrideFacets }}</span>
+            <button
+              type="button"
+              class="underline decoration-dotted hover:text-fg-strong"
+              @click="resetSessionOverrides"
+            >
+              Reset
+            </button>
+          </span>
           <ChatContextMeter
             v-if="!isEmptyChat"
             :prompt-tokens="latestAssistantUsage?.prompt ?? 0"
@@ -1351,7 +1392,7 @@ function exportConversation() {
                   role="menuitem"
                   type="button"
                   class="px-3 py-1.5 text-xs font-medium text-left whitespace-nowrap transition-colors"
-                  :class="selectedAgent?.thinkingMode === level
+                  :class="currentThinkingLevel === level
                     ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25'
                     : 'text-fg-muted hover:text-fg-strong hover:bg-muted'"
                   @click="setThinkingLevel(level)"

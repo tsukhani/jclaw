@@ -1,4 +1,5 @@
 import { onUnmounted, ref, triggerRef, nextTick, type Ref, type ShallowRef } from 'vue'
+import type { PendingOverrides } from '~/composables/useAgentModel'
 import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import type { UploadedAttachment } from '~/composables/useChatAttachments'
 import type { Message, MessageAttachment, ToolCall } from '~/types/api'
@@ -74,6 +75,8 @@ export interface UseChatStreamDeps {
   startImageProgressPolling: () => void
   startVideoPolling: () => void
   reconcileMessageIds: () => Promise<void>
+  /** JCLAW-1196: picks made on a fresh chat, carried by the message that creates its conversation. */
+  pendingOverrides?: { readonly value: PendingOverrides | null }
   refreshConversations: () => Promise<void> | void
   refreshAgents: () => Promise<void> | void
 }
@@ -507,6 +510,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
           conversationId: selectedConvoId.value,
           message: text,
           attachments: uploaded,
+          ...(selectedConvoId.value == null ? (deps.pendingOverrides?.value ?? {}) : {}),
         }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)

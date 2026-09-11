@@ -61,6 +61,24 @@ public final class ModelOverrideResolver {
         return agent != null ? agent.modelProvider : null;
     }
 
+    /**
+     * Effective thinking mode (JCLAW-1196): the conversation's override when set —
+     * {@link Conversation#THINKING_OFF} resolving to {@code null} — else the agent's
+     * default. Callers still intersect the result with the model's advertised levels.
+     */
+    public static @Nullable String thinkingMode(@Nullable Conversation conversation, @Nullable Agent agent) {
+        if (conversation != null && conversation.thinkingModeOverride != null) {
+            return Conversation.THINKING_OFF.equals(conversation.thinkingModeOverride)
+                    ? null : conversation.thinkingModeOverride;
+        }
+        return agent != null ? agent.thinkingMode : null;
+    }
+
+    /** True when the conversation carries a thinking override, including an explicit off. */
+    public static boolean hasThinkingOverride(@Nullable Conversation conversation) {
+        return conversation != null && conversation.thinkingModeOverride != null;
+    }
+
     /** Effective model id. See {@link #resolve} for precedence. */
     public static @Nullable String modelId(@Nullable Conversation conversation, @Nullable Agent agent) {
         if (conversation != null && hasOverride(conversation)) {

@@ -126,6 +126,38 @@ public class ConversationService {
     }
 
     /**
+     * Set or clear the conversation-scoped thinking override (JCLAW-1196). Same transaction
+     * contract as {@link #setModelOverride}; does not count as activity.
+     *
+     * @param mode {@link Conversation#THINKING_OFF}, an effort level, or null to clear
+     */
+    public static void setThinkingOverride(Conversation conversation, @Nullable String mode) {
+        applyWithoutTouchingActivity(conversation, JPA.em()
+                .createQuery("UPDATE Conversation c SET c.thinkingModeOverride = :mode WHERE c.id = :id")
+                .setParameter("mode", mode));
+    }
+
+    /**
+     * Why {@code mode} cannot be a thinking override for the model {@code provider}/{@code modelId}
+     * resolves to, or null when it can. {@link Conversation#THINKING_OFF} is always allowed; a
+     * level must be one the model advertises.
+     */
+    public static @Nullable String thinkingOverrideRejection(@Nullable String provider, @Nullable String modelId,
+                                                             String mode) {
+        if (Conversation.THINKING_OFF.equals(mode)) return null;
+        var p = provider != null ? llm.ProviderRegistry.get(provider) : null;
+        if (p == null) return "Provider '" + provider + "' is not configured.";
+        var model = p.config().models().stream().filter(m -> m.id().equals(modelId)).findFirst();
+        if (model.isEmpty()) return "Provider '" + provider + "' has no model with id '" + modelId + "'.";
+        if (!model.get().supportsThinking()) return "Model '" + modelId + "' does not support thinking.";
+        var levels = model.get().effectiveThinkingLevels();
+        if (!levels.contains(mode)) {
+            return "Model '" + modelId + "' advertises thinking levels " + levels + ", not '" + mode + "'.";
+        }
+        return null;
+    }
+
+    /**
      * Run a bound {@code UPDATE Conversation} that must not count as activity,
      * then re-sync the managed entity.
      *

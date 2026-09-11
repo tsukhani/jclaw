@@ -158,6 +158,9 @@ export interface Conversation {
   modelProviderOverride?: string | null
   /** Companion to modelProviderOverride — see type docs above. */
   modelIdOverride?: string | null
+  /** Conversation-scoped thinking override (JCLAW-1196): null inherits the agent default,
+   *  'off' turns reasoning off, otherwise an effort level. */
+  thinkingModeOverride?: string | null
   /** JCLAW-267: parent Conversation id when this row is the child end of a
    *  session-mode subagent spawn. The sidebar uses this to render a
    *  "subagent of parent N" hint so operators can distinguish delegated

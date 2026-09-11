@@ -30,6 +30,17 @@ If you regret a message, hover over it: you'll see **Edit & resubmit** and **Del
 
 To hear a reply, hover it and click the **speaker icon** — text-to-speech streams the answer aloud sentence by sentence, using the engine you pick in [Settings → Speech](/guide#settings).
 
+## Model and thinking for this conversation
+
+The model picker in the header and the **Think** pill in the composer change the conversation you are in, never the agent. The agent's default provider, model and thinking mode live on the [Agents](/guide#agents) page and are what every new conversation starts from; a pick here is an override scoped to one conversation, the same as `/model` and `/think` on Telegram, Slack and WhatsApp.
+
+- On a fresh chat, the header shows the agent's defaults. Pick a different model or change Think and the picks are held until your first message, which starts the conversation with them applied.
+- With a conversation open, a pick takes effect on the next turn of that conversation.
+- Whenever the conversation differs from the agent's defaults, a marker between the model picker and the context meter says so — **This conversation overrides the agent's model and thinking** — and its **Reset** puts the conversation back on the defaults. On a fresh chat it reads **Next conversation** instead.
+- A pick the server refuses (a model the provider no longer lists, a level the model does not offer) shows its reason beside the marker rather than failing silently.
+
+Switching to a model that does not offer the current thinking level turns thinking off for the conversation rather than sending a level the model would reject.
+
 ## Attachments
 
 Click the paperclip in the composer to attach files. JClaw supports:
@@ -39,7 +50,7 @@ Click the paperclip in the composer to attach files. JClaw supports:
 - **Voice notes** — recorded directly in the composer (microphone button) or attached. Audio-capable models receive the audio; other models receive a transcript (see [Settings → Transcription](/guide#settings)).
 - **Video** — clips attached in the composer. Models that support video natively watch the clip directly; otherwise JClaw interprets it for them — a dedicated video-interpretation model summarizes the clip, or, failing that, frames are sampled and sent to a vision model as images, or captioned into a timestamped text summary for text-only models. Tune the sampling in [Settings → Video Interpretation](/guide#settings).
 
-**Vision**, **Audio** and **Video** capability pills appear in the composer footer only when the active model advertises that input natively — so you can tell at a glance whether the model will see the file or just a transcript, description, or summary. Beside them, for reasoning-capable models, the **Think** pill toggles thinking for the turn and opens the reasoning-level picker.
+**Vision**, **Audio** and **Video** capability pills appear in the composer footer only when the active model advertises that input natively — so you can tell at a glance whether the model will see the file or just a transcript, description, or summary. Beside them, for reasoning-capable models, the **Think** pill toggles thinking for this conversation and opens the reasoning-level picker — see [Model and thinking for this conversation](/guide#chat-model-and-thinking-for-this-conversation).
 
 ## Voice mode
 
@@ -56,6 +67,7 @@ Type `/` at the start of a message to access these built-in commands. A menu ope
 | `/compact`        | Summarize older turns to free context. Optional focus hint: `/compact focus on the auth refactor`.            |
 | `/help`           | Show the list of available commands.                                                                          |
 | `/model`          | Show the current model and its capabilities. `/model <provider>/<id>` sets a per-conversation override. `/model reset` clears the override. |
+| `/think`          | Show the reasoning effort in force for this conversation. `/think off`, `/think <level>` (one the model advertises) set a per-conversation override; `/think reset` clears it. The agent's default is untouched. |
 | `/usage`          | Show how much of the model's context window the current conversation occupies.                                |
 | `/stop`           | Interrupt the current generation. (Same as clicking the Stop button.)                                          |
 | `/subagent`       | Inspect, kill, or read transcripts of subagent runs spawned from this conversation. See [Subagents](/guide#subagents). |

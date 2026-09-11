@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { resolveThinkingLock, type ThinkingLock } from '~/utils/thinking-lock'
 import { effectiveThinkingLevels, type Provider, type ProviderModel } from '~/composables/useProviders'
 import type { Agent, Conversation } from '~/types/api'
@@ -8,8 +8,10 @@ import type { Agent, Conversation } from '~/types/api'
  * stage 5a; behaviour extracted verbatim from pages/chat.vue). Owns the model
  * resolution chain (selectedAgent → effectiveModel → selectedModelInfo → the
  * capability pills + thinking-level state), the teleported thinking-level menu's
- * positioning/lifecycle, and the writes that push a model/thinking change back
- * to the agent (or a JCLAW-108 per-conversation override).
+ * positioning/lifecycle, and the conversation-scoped writes a model or thinking
+ * pick makes (JCLAW-108, JCLAW-1196). Nothing here writes to the agent row: a
+ * pick with a conversation open is that conversation's override, and a pick on
+ * a fresh chat is held as a pending override the first message carries.
  *
  * `selectedAgentId` stays a page-level ref passed in (it's cross-coupled with
  * `selectedConvoId` — effectiveModel needs both — and the template v-models it),
@@ -21,8 +23,14 @@ export interface UseAgentModelDeps {
   selectedConvoId: Ref<number | null>
   conversations: Ref<Conversation[] | null | undefined>
   providers: Ref<Provider[]>
-  refreshAgents: () => Promise<void> | void
   refreshConversations: () => Promise<void> | void
+}
+
+/** Picks made on a fresh chat before its first message; sent with that message (JCLAW-1196). */
+export interface PendingOverrides {
+  modelProvider?: string
+  modelId?: string
+  thinkingMode?: string
 }
 
 export interface UseAgentModel {
@@ -47,10 +55,34 @@ export interface UseAgentModel {
   scheduleCloseThinkingMenu: () => void
   setThinkingLevel: (level: string) => void
   onModelKeyChange: (key: string) => Promise<void>
+  /** The reasoning level in force for the open conversation or the pending pick; null when off. */
+  currentThinkingLevel: ComputedRef<string | null>
+  /** Which facets the open conversation, or the pending pick on a fresh chat, overrides. */
+  sessionOverrides: ComputedRef<{ model: boolean, thinking: boolean }>
+  /** What the next fresh-chat message must carry, or null when nothing was picked. */
+  pendingOverrides: ComputedRef<PendingOverrides | null>
+  /** The last rejected override write, for the header to show; null once one succeeds. */
+  overrideError: Ref<string | null>
+  resetSessionOverrides: () => Promise<void>
 }
 
 export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
-  const { agents, selectedAgentId, selectedConvoId, conversations, providers, refreshAgents, refreshConversations } = deps
+  const { agents, selectedAgentId, selectedConvoId, conversations, providers, refreshConversations } = deps
+
+  // Fresh-chat picks. They apply to the conversation the next message creates, so
+  // they die with a change of agent and once a conversation is open (the server
+  // has persisted them on it by then).
+  const pendingModel = ref<{ providerName: string, modelId: string } | null>(null)
+  const pendingThinking = ref<string | null>(null)
+  const overrideError = ref<string | null>(null)
+  function clearPending() {
+    pendingModel.value = null
+    pendingThinking.value = null
+  }
+  watch(selectedAgentId, clearPending)
+  watch(selectedConvoId, (id) => {
+    if (id != null) clearPending()
+  })
 
   // The currently selected agent object
   const selectedAgent = computed(() => agents.value?.find(a => a.id === selectedAgentId.value))
@@ -84,10 +116,25 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     if (conv?.modelProviderOverride && conv?.modelIdOverride) {
       return { providerName: conv.modelProviderOverride, modelId: conv.modelIdOverride }
     }
+    if (selectedConvoId.value == null && pendingModel.value) return pendingModel.value
     return {
       providerName: selectedAgent.value?.modelProvider ?? null,
       modelId: selectedAgent.value?.modelId ?? null,
     }
+  })
+
+  /**
+   * Effective thinking level (JCLAW-1196): the open conversation's override, else the
+   * pending pick on a fresh chat, else the agent default. Null means off; the server
+   * still intersects with what the effective model advertises.
+   */
+  const effectiveThinking = computed<string | null>(() => {
+    const override = selectedConvoId.value != null
+      ? currentConversation.value?.thinkingModeOverride ?? null
+      : pendingThinking.value
+    if (override != null) return override === 'off' ? null : override
+    const mode = selectedAgent.value?.thinkingMode
+    return typeof mode === 'string' && mode.length > 0 ? mode : null
   })
 
   /**
@@ -161,8 +208,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   // off would contradict both the pill and the request the backend actually sends.
   const thinkingActive = computed(() => {
     if (thinkingLock.value.locked) return true
-    const mode = selectedAgent.value?.thinkingMode
-    return typeof mode === 'string' && mode.length > 0
+    return effectiveThinking.value != null
   })
 
   // A locked pill still opens the level menu, so it is only truly inoperable when
@@ -203,7 +249,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     // is a no-op. Choosing a LEVEL is still allowed; only this toggle is barred.
     if (thinkingLock.value.locked) return
     if (thinkingActive.value) {
-      updateAgentSetting({ thinkingMode: null })
+      void applyThinking('off')
     }
     else {
       // Prefer the session-remembered level if it's still a valid option on this
@@ -211,7 +257,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
       // send an invalid enum value the backend would have to defensively reject.
       const levels = thinkingLevels.value
       const next = levels.includes(lastThinkingLevel.value) ? lastThinkingLevel.value : levels[0]
-      if (next) updateAgentSetting({ thinkingMode: next })
+      if (next) void applyThinking(next)
     }
   }
 
@@ -291,7 +337,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   function setThinkingLevel(level: string) {
     if (!thinkingSupported.value) return
     lastThinkingLevel.value = level
-    updateAgentSetting({ thinkingMode: level })
+    void applyThinking(level)
     thinkingMenuOpen.value = false
     detachMenuTrackingListeners()
   }
@@ -304,14 +350,33 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     detachMenuTrackingListeners()
   })
 
-  // Sync model or thinking mode change back to the agent
-  async function updateAgentSetting(updates: Partial<Agent>) {
-    if (!selectedAgentId.value) return
-    try {
-      await $fetch(`/api/agents/${selectedAgentId.value}`, { method: 'PUT', body: updates })
-      refreshAgents()
+  function describeRejection(err: unknown): string {
+    const data = (err as { data?: { message?: string } })?.data
+    return data?.message ?? (err instanceof Error ? err.message : 'The change was rejected.')
+  }
+
+  /**
+   * Thinking change (JCLAW-1196): 'off' or a level. With a conversation open it is
+   * that conversation's override; on a fresh chat it is held for the first message.
+   */
+  async function applyThinking(mode: string) {
+    const convoId = selectedConvoId.value
+    if (convoId == null) {
+      pendingThinking.value = mode
+      return
     }
-    catch { /* ignore */ }
+    try {
+      await $fetch(`/api/conversations/${convoId}/thinking-override`, {
+        method: 'PUT',
+        body: { thinkingMode: mode },
+      })
+      overrideError.value = null
+      refreshConversations()
+    }
+    catch (err) {
+      overrideError.value = describeRejection(err)
+      refreshConversations()
+    }
   }
 
   /**
@@ -322,10 +387,10 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
    * the Agent row. This keeps mid-chat model switches bounded to the current
    * conversation — matching the `/model NAME` slash command's semantics.
    *
-   * When no conversation is open (the user is about to start a fresh one),
-   * falls back to the pre-JCLAW-108 behavior of mutating the agent's default
-   * model. This preserves the settings-page flow where editing the agent from
-   * here is the intent.
+   * JCLAW-1196: with no conversation open the pick is held as a pending
+   * override that the first message carries, so a fresh chat never writes
+   * the agent's default either. The agent detail page is the only place
+   * defaults change.
    */
   async function onModelKeyChange(key: string) {
     const sepIdx = key.indexOf('::')
@@ -344,31 +409,70 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
           method: 'PUT',
           body: { modelProvider, modelId },
         })
+        overrideError.value = null
         refreshConversations()
       }
       catch (err) {
         // Server rejected (unknown provider/model) or network error. Refetch
-        // to realign the dropdown with persisted state.
+        // to realign the dropdown with persisted state, and say why.
+        overrideError.value = describeRejection(err)
         refreshConversations()
-        throw err
       }
       return
     }
 
-    // No conversation open — fall back to mutating the agent default.
+    // No conversation open — hold the pick for the first message.
     const provider = providers.value.find(p => p.name === modelProvider)
     const model = provider?.models.find(m => m.id === modelId) ?? null
-    const updates: Partial<Agent> = { modelProvider, modelId }
-    // If the new model doesn't advertise the current thinking level, clear it in
-    // the same PUT so the backend doesn't have to normalize the mismatch. The
-    // backend also collapses unknown levels to null defensively, but sending the
-    // cleared value keeps the optimistic UI and the persisted state aligned.
+    pendingModel.value = { providerName: modelProvider, modelId }
+    // A level the new model does not advertise would be silently dropped server-side;
+    // make the off explicit so the pill reflects what the turn will actually do.
     const nextLevels = effectiveThinkingLevels(model)
-    const current = selectedAgent.value?.thinkingMode
-    if (current && !nextLevels.includes(current)) {
-      updates.thinkingMode = null
+    const current = effectiveThinking.value
+    if (current && nextLevels.length && !nextLevels.includes(current)) {
+      pendingThinking.value = 'off'
     }
-    updateAgentSetting(updates)
+  }
+
+  const sessionOverrides = computed(() => {
+    if (selectedConvoId.value == null) {
+      return { model: pendingModel.value != null, thinking: pendingThinking.value != null }
+    }
+    const conv = currentConversation.value
+    return {
+      model: !!(conv?.modelProviderOverride && conv?.modelIdOverride),
+      thinking: conv?.thinkingModeOverride != null,
+    }
+  })
+
+  const pendingOverrides = computed<PendingOverrides | null>(() => {
+    if (selectedConvoId.value != null) return null
+    const o: PendingOverrides = {}
+    if (pendingModel.value) {
+      o.modelProvider = pendingModel.value.providerName
+      o.modelId = pendingModel.value.modelId
+    }
+    if (pendingThinking.value) o.thinkingMode = pendingThinking.value
+    return Object.keys(o).length ? o : null
+  })
+
+  /** Back to the agent's defaults: drop the pending picks, or clear the open conversation's overrides. */
+  async function resetSessionOverrides() {
+    const convoId = selectedConvoId.value
+    if (convoId == null) {
+      clearPending()
+      return
+    }
+    const facets = sessionOverrides.value
+    try {
+      if (facets.model) await $fetch(`/api/conversations/${convoId}/model-override`, { method: 'DELETE' })
+      if (facets.thinking) await $fetch(`/api/conversations/${convoId}/thinking-override`, { method: 'DELETE' })
+      overrideError.value = null
+    }
+    catch (err) {
+      overrideError.value = describeRejection(err)
+    }
+    refreshConversations()
   }
 
   return {
@@ -393,5 +497,10 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     scheduleCloseThinkingMenu,
     setThinkingLevel,
     onModelKeyChange,
+    currentThinkingLevel: effectiveThinking,
+    sessionOverrides,
+    pendingOverrides,
+    overrideError,
+    resetSessionOverrides,
   }
 }

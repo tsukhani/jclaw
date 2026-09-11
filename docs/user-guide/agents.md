@@ -137,6 +137,8 @@ Each agent row shows a strip of capability pills derived from the chosen model; 
 
 Only the **thinking** pill is clickable: clicking it toggles the agent's reasoning mode on or off and saves it immediately. The other pills are informational. A model that always thinks shows a locked-on thinking pill that can't be toggled.
 
+This page is the only place the defaults change. The model picker and Think pill in [Chat](/guide#chat-model-and-thinking-for-this-conversation), and `/model` and `/think` on the other channels, override them for one conversation and leave the agent as it is here.
+
 ## Tips and gotchas
 
 :::tip Start with one agent

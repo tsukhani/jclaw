@@ -57,6 +57,51 @@ test.describe('UAT-15 chat', () => {
     await expect(page.getByText('Hello from the UAT suite.')).toBeVisible({ timeout: 15_000 })
   })
 
+  test('a model picked on a fresh chat rides with the first message and leaves the agent untouched', async ({ page, request }) => {
+    // JCLAW-1196: the pick is a conversation override the first message carries, not
+    // a write to the agent row — compare the agents list before and after.
+    const before = await (await request.get('/api/agents')).json()
+    let sent: Record<string, unknown> | null = null
+    await page.route('**/api/chat/stream', (route) => {
+      sent = route.request().postDataJSON()
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: sse([{ type: 'init', conversationId: 990002 }, { type: 'complete', content: 'pending pick acknowledged' }]),
+      })
+    })
+
+    await gotoPage(page, '/chat')
+    await page.getByRole('button', { name: 'New conversation' }).click()
+    const picker = page.getByRole('button', { name: /^Model / })
+    const current = (await picker.textContent()) ?? ''
+    await picker.click()
+    // The first model that is not the current one, whatever this install offers; its id
+    // is the last token of the option's text.
+    const options = page.getByRole('dialog').getByRole('button')
+    let picked: string | null = null
+    for (let i = 0; i < await options.count(); i++) {
+      const text = (await options.nth(i).textContent())?.trim() ?? ''
+      const id = text.split(/\s+/).pop() ?? ''
+      if (id && !current.includes(id)) {
+        await options.nth(i).click()
+        picked = id
+        break
+      }
+    }
+    test.skip(picked === null, 'this install offers a single model')
+
+    await expect(page.getByTestId('session-override')).toContainText('Next conversation overrides the agent\'s model')
+    await page.getByPlaceholder('Send a message...').fill('uat pending pick')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await expect(page.getByText('pending pick acknowledged')).toBeVisible({ timeout: 15_000 })
+
+    await expect.poll(() => sent).not.toBeNull()
+    expect(sent).toMatchObject({ conversationId: null, modelId: picked })
+    const after = await (await request.get('/api/agents')).json()
+    expect(after).toEqual(before)
+  })
+
   test('the sent message appears in the transcript', async ({ page }) => {
     await page.route('**/api/chat/stream', route => route.fulfill({
       status: 200,

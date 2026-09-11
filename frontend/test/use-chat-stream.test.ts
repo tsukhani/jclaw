@@ -123,6 +123,28 @@ describe('useChatStream', () => {
     expect(deps.refreshAgents).toHaveBeenCalled()
   })
 
+  it('sends fresh-chat picks with the first message and never with a follow-up (JCLAW-1196)', async () => {
+    const pending = ref<{ modelProvider?: string, modelId?: string, thinkingMode?: string } | null>(
+      { modelProvider: 'anthropic', modelId: 'opus', thinkingMode: 'high' })
+    const deps = makeDeps({ input: ref('first'), pendingOverrides: pending })
+    const fetchSpy = streamWith(['data: {"type":"init","conversationId":42}\n', 'data: {"type":"complete","content":"ok"}\n'])
+    const { api } = await mountStream(deps)
+    await api.sendMessage()
+    await flushPromises()
+    const first = JSON.parse(String(fetchSpy.mock.calls.find(c => String(c[0]).includes('/api/chat/stream'))![1]!.body))
+    expect(first).toMatchObject({ conversationId: null, modelProvider: 'anthropic', modelId: 'opus', thinkingMode: 'high' })
+
+    // The conversation now carries the overrides; a follow-up names it and sends no picks.
+    deps.input.value = 'second'
+    fetchSpy.mockClear()
+    await api.sendMessage()
+    await flushPromises()
+    const second = JSON.parse(String(fetchSpy.mock.calls.find(c => String(c[0]).includes('/api/chat/stream'))![1]!.body))
+    expect(second.conversationId).toBe(42)
+    expect(second).not.toHaveProperty('modelProvider')
+    expect(second).not.toHaveProperty('thinkingMode')
+  })
+
   it('stamps the reasoning→content transition (collapses the thinking card once)', async () => {
     const deps = makeDeps({ input: ref('think then answer') })
     streamWith([

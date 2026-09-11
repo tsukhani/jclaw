@@ -68,6 +68,7 @@ class SlashCommandsTest extends UnitTest {
         assertEquals(Commands.Command.COMPACT, Commands.parse("/compact").orElseThrow());
         assertEquals(Commands.Command.HELP, Commands.parse("/help").orElseThrow());
         assertEquals(Commands.Command.MODEL, Commands.parse("/model").orElseThrow());
+        assertEquals(Commands.Command.THINK, Commands.parse("/think").orElseThrow());
         assertEquals(Commands.Command.USAGE, Commands.parse("/usage").orElseThrow());
         assertEquals(Commands.Command.STOP, Commands.parse("/stop").orElseThrow());
     }
@@ -1542,5 +1543,62 @@ class SlashCommandsTest extends UnitTest {
         var messages = ConversationService.loadRecentMessages(convo);
         assertTrue(messages.stream().anyMatch(m -> m.content != null && m.content.contains("Body to copy.")),
                 "reply persisted into the conversation");
+    }
+
+    // ── JCLAW-1196: /think is conversation-scoped, like /model ──────────
+
+    private static final String THINKING_MODEL_JSON =
+            "{\"id\":\"gpt-4.1\",\"contextWindow\":128000,\"supportsThinking\":true,\"thinkingLevels\":[\"low\",\"high\"]}";
+
+    @Test
+    void thinkSetsALevelForTheConversationAndLeavesTheAgentAlone() {
+        seedProvider("openrouter", "gpt-4.1", THINKING_MODEL_JSON);
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.handle("/think high", agent, "web", "admin", convo).orElseThrow();
+
+        assertEquals("high", ConversationService.findById(convo.id).thinkingModeOverride);
+        assertEquals(agent.thinkingMode, AgentService.findById(agent.id).thinkingMode, "agent default untouched");
+        assertTrue(result.responseText().contains("now `high`"), result.responseText());
+        assertEquals(Commands.Command.THINK, result.command());
+    }
+
+    @Test
+    void thinkRejectsALevelTheModelDoesNotAdvertise() {
+        seedProvider("openrouter", "gpt-4.1", THINKING_MODEL_JSON);
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.handle("/think medium", agent, "web", "admin", convo).orElseThrow();
+
+        assertNull(ConversationService.findById(convo.id).thinkingModeOverride);
+        assertTrue(result.responseText().contains("advertises thinking levels"), result.responseText());
+    }
+
+    @Test
+    void thinkOffThenResetRoundTrips() {
+        seedProvider("openrouter", "gpt-4.1", THINKING_MODEL_JSON);
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var off = Commands.handle("/think off", agent, "web", "admin", convo).orElseThrow();
+        assertEquals("off", ConversationService.findById(convo.id).thinkingModeOverride);
+        assertTrue(off.responseText().contains("off for this conversation"), off.responseText());
+
+        var reset = Commands.handle("/think reset", agent, "web", "admin", convo).orElseThrow();
+        assertNull(ConversationService.findById(convo.id).thinkingModeOverride);
+        assertTrue(reset.responseText().contains("Cleared"), reset.responseText());
+    }
+
+    @Test
+    void thinkAndModelBothReportTheConversationsOverride() {
+        seedProvider("openrouter", "gpt-4.1", THINKING_MODEL_JSON);
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        Commands.handle("/think low", agent, "web", "admin", convo).orElseThrow();
+
+        var think = Commands.handle("/think", agent, "web", "admin", convo).orElseThrow().responseText();
+        assertTrue(think.contains("effort low"), think);
+        assertTrue(think.contains("Conversation override active"), think);
+
+        var model = Commands.handle("/model", agent, "web", "admin", convo).orElseThrow().responseText();
+        assertTrue(model.contains("effort: low, conversation override"), model);
     }
 }

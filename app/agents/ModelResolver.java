@@ -99,11 +99,12 @@ public final class ModelResolver {
      */
     public static @Nullable String resolveThinkingMode(Agent agent, Conversation conv,
                                                        LlmProvider provider) {
-        if (agent.thinkingMode == null || agent.thinkingMode.isBlank()) return null;
+        var mode = ModelOverrideResolver.thinkingMode(conv, agent);
+        if (mode == null || mode.isBlank()) return null;
         return resolveModelInfo(agent, conv, provider)
                 .filter(ModelInfo::supportsThinking)
-                .filter(m -> m.effectiveThinkingLevels().contains(agent.thinkingMode))
-                .map(_ -> agent.thinkingMode)
+                .filter(m -> m.effectiveThinkingLevels().contains(mode))
+                .map(_ -> mode)
                 .orElse(null);
     }
 }

@@ -797,6 +797,57 @@ class ApiConversationsControllerTest extends FunctionalTest {
         assertTrue(persisted, "override fields must persist on conversation row");
     }
 
+    // --- JCLAW-1196: PUT/DELETE /api/conversations/{id}/thinking-override ---
+
+    private static final String THINKING_MODEL_JSON =
+            "[{\"id\":\"gpt-4.1\",\"name\":\"GPT-4.1\",\"contextWindow\":1000,\"maxTokens\":100,"
+                    + "\"supportsThinking\":true,\"thinkingLevels\":[\"low\",\"high\"]}]";
+
+    @Test
+    void setThinkingOverrideReturns404ForUnknownConversation() {
+        login();
+        var resp = PUT("/api/conversations/999999/thinking-override", "application/json",
+                "{\"thinkingMode\":\"low\"}");
+        assertEquals(404, resp.status.intValue());
+    }
+
+    @Test
+    void setThinkingOverrideReturns400ForMissingMode() {
+        login();
+        Long convoId = createConversationForOverride("think-400-missing");
+        var resp = PUT("/api/conversations/" + convoId + "/thinking-override", "application/json", "{}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void setThinkingOverrideRejectsALevelTheModelDoesNotAdvertise() {
+        login();
+        seedOpenRouterProvider(THINKING_MODEL_JSON);
+        Long convoId = createConversationForOverride("think-400-level");
+        var resp = PUT("/api/conversations/" + convoId + "/thinking-override", "application/json",
+                "{\"thinkingMode\":\"medium\"}");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).contains("advertises thinking levels"), getContent(resp));
+    }
+
+    @Test
+    void thinkingOverridePersistsALevelThenOffThenClears() {
+        login();
+        seedOpenRouterProvider(THINKING_MODEL_JSON);
+        Long convoId = createConversationForOverride("think-ok");
+
+        assertIsOk(PUT("/api/conversations/" + convoId + "/thinking-override", "application/json",
+                "{\"thinkingMode\":\"high\"}"));
+        assertEquals("high", commitInFreshTx(() -> ((Conversation) Conversation.findById(convoId)).thinkingModeOverride));
+
+        assertIsOk(PUT("/api/conversations/" + convoId + "/thinking-override", "application/json",
+                "{\"thinkingMode\":\"off\"}"));
+        assertEquals("off", commitInFreshTx(() -> ((Conversation) Conversation.findById(convoId)).thinkingModeOverride));
+
+        assertIsOk(DELETE("/api/conversations/" + convoId + "/thinking-override"));
+        assertNull(commitInFreshTx(() -> ((Conversation) Conversation.findById(convoId)).thinkingModeOverride));
+    }
+
     private void seedOpenRouterProvider(String modelsJson) {
         commitInFreshTx(() -> {
             services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");

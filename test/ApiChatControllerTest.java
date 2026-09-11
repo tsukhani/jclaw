@@ -5,11 +5,13 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.Tx;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.HashMap;
+import java.util.function.Supplier;
 
 /**
  * Functional HTTP tests for {@code ApiChatController}: send, streamChat, and
@@ -746,5 +748,102 @@ class ApiChatControllerTest extends FunctionalTest {
         assertIsOk(response);
         assertTrue(getContent(response).contains("\"agentName\":\"send-slash-null-conv\""),
                 "an explicit null conversationId must still resolve the agent: " + getContent(response));
+    }
+
+    // ── JCLAW-1196: picks made on a fresh chat land on the conversation, never the agent ──
+
+    private static String extractConversationId(String json) {
+        var m = java.util.regex.Pattern.compile("\"conversationId\":(\\d+)").matcher(json);
+        return m.find() ? m.group(1) : null;
+    }
+
+    @Test
+    void sendAppliesAFreshChatsThinkingPickToTheConversationItCreates() {
+        login();
+        var agentId = createAgent("send-pending-think");
+        var body = """
+                {"agentId": %s, "message": "hello", "thinkingMode": "off"}
+                """.formatted(agentId);
+        var response = POST("/api/chat/send", "application/json", body);
+        assertIsOk(response);
+        var convoId = Long.valueOf(extractConversationId(getContent(response)));
+
+        var row = commitInFreshTx(() -> (models.Conversation) models.Conversation.findById(convoId));
+        assertEquals("off", row.thinkingModeOverride);
+        assertNull(row.modelProviderOverride, "no model pick was sent");
+        var agent = commitInFreshTx(() -> (models.Agent) models.Agent.findById(Long.valueOf(agentId)));
+        assertNull(agent.thinkingMode, "the agent's default is never written from the chat page");
+    }
+
+    @Test
+    void sendAppliesAFreshChatsModelPickAndKeepsTheAgentDefault() {
+        login();
+        var agentId = createAgent("send-pending-model");
+        commitInFreshTx(() -> {
+            // A closed loopback port: the turn fails fast without the network, and the
+            // conversation it created is what this test is about.
+            services.ConfigService.set("provider.jclaw1196-alt.baseUrl", "http://127.0.0.1:9/v1");
+            services.ConfigService.set("provider.jclaw1196-alt.apiKey", "sk-test");
+            services.ConfigService.set("provider.jclaw1196-alt.models",
+                    "[{\"id\":\"other\",\"contextWindow\":1000,\"supportsThinking\":true}]");
+            return null;
+        });
+        llm.ProviderRegistry.refresh();
+        var body = """
+                {"agentId": %s, "message": "hello", "modelProvider": "jclaw1196-alt", "modelId": "other", "thinkingMode": "high"}
+                """.formatted(agentId);
+        var response = POST("/api/chat/send", "application/json", body);
+        assertIsOk(response);
+        var convoId = Long.valueOf(extractConversationId(getContent(response)));
+
+        var row = commitInFreshTx(() -> (models.Conversation) models.Conversation.findById(convoId));
+        assertEquals("jclaw1196-alt", row.modelProviderOverride);
+        assertEquals("other", row.modelIdOverride);
+        assertEquals("high", row.thinkingModeOverride);
+        var agent = commitInFreshTx(() -> (models.Agent) models.Agent.findById(Long.valueOf(agentId)));
+        assertEquals("openrouter", agent.modelProvider);
+        assertEquals("gpt-4.1", agent.modelId);
+    }
+
+    /** A bad pick is a 400 before anything is created — on send and, before the SSE opens, on stream. */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "sendUnknownModel      | /api/chat/send   | \"modelProvider\": \"openrouter\", \"modelId\": \"no-such-model\"",
+            "sendHalfAPick         | /api/chat/send   | \"modelProvider\": \"openrouter\"",
+            "streamUnknownModel    | /api/chat/stream | \"modelProvider\": \"openrouter\", \"modelId\": \"no-such-model\"",
+            "streamBadThinkingMode | /api/chat/stream | \"thinkingMode\": \"maximum-overdrive\""
+    })
+    void aBadFreshChatPickIsRejectedWithNothingCreated(String label, String endpoint, String fields) {
+        login();
+        var agentId = createAgent("pending-" + label);
+        var body = "{\"agentId\": " + agentId + ", \"message\": \"hello\", " + fields + "}";
+        var response = POST(endpoint, "application/json", body);
+        assertEquals(400, response.status.intValue(), getContent(response));
+        Long created = commitInFreshTx(() -> models.Conversation.count("agent.id = ?1", Long.valueOf(agentId)));
+        assertEquals(0L, created, "a rejected pick must not leave a conversation behind");
+    }
+
+    private static <T> T commitInFreshTx(Supplier<T> block) {
+        // FunctionalTest's carrier thread runs inside an ambient JPA tx that
+        // doesn't commit until the test returns, so inline Tx.run writes are
+        // invisible to the in-process HTTP request handler. Spawn a virtual
+        // thread to open a fresh tx that commits before the GET fires.
+        var ref = new java.util.concurrent.atomic.AtomicReference<T>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return ref.get();
     }
 }

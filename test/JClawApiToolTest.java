@@ -360,6 +360,7 @@ class JClawApiToolTest extends UnitTest {
             DELETE /api/conversations/{id}/model-override
             DELETE /api/conversations/{id}/pin
             DELETE /api/conversations/{id}/star
+            DELETE /api/conversations/{id}/thinking-override
             DELETE /api/logging/levels/{logger}
             DELETE /api/mcp-servers/{id}
             DELETE /api/metrics/compression
@@ -504,6 +505,7 @@ class JClawApiToolTest extends UnitTest {
             PUT /api/conversations/{id}/name
             PUT /api/conversations/{id}/pin
             PUT /api/conversations/{id}/star
+            PUT /api/conversations/{id}/thinking-override
             PUT /api/mcp-servers/{id}
             PUT /api/printers/default
             PUT /api/prompts/{id}

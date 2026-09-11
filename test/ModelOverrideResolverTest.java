@@ -97,4 +97,26 @@ class ModelOverrideResolverTest extends UnitTest {
         assertEquals("anthropic", r.provider());
         assertEquals("claude-opus-4", r.modelId());
     }
+
+    @Test
+    void thinkingOverrideWinsAndOffResolvesToNull() {
+        // JCLAW-1196: null inherits, "off" is an explicit off, anything else is a level.
+        var agent = new Agent();
+        agent.thinkingMode = "high";
+        var inherits = new Conversation();
+        assertEquals("high", ModelOverrideResolver.thinkingMode(inherits, agent));
+        assertFalse(ModelOverrideResolver.hasThinkingOverride(inherits));
+
+        var level = new Conversation();
+        level.thinkingModeOverride = "low";
+        assertEquals("low", ModelOverrideResolver.thinkingMode(level, agent));
+        assertTrue(ModelOverrideResolver.hasThinkingOverride(level));
+
+        var off = new Conversation();
+        off.thinkingModeOverride = Conversation.THINKING_OFF;
+        assertNull(ModelOverrideResolver.thinkingMode(off, agent), "an explicit off beats the agent's level");
+        assertTrue(ModelOverrideResolver.hasThinkingOverride(off));
+
+        assertNull(ModelOverrideResolver.thinkingMode(null, null));
+    }
 }

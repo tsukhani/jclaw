@@ -1,11 +1,11 @@
 package controllers;
 
 import agents.AgentRunner;
+import agents.ModelResolver;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmResilience;
-import llm.LlmTypes;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
@@ -21,6 +21,7 @@ import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
+import services.ModelOverrideResolver;
 import services.Tx;
 import services.UploadStaging;
 import slash.Commands;
@@ -110,7 +111,15 @@ public class ApiChatController extends Controller {
 
     /** Validated prologue shared by send() and streamChat(). */
     private record ChatContext(Agent agent, String message, @Nullable Long conversationId, String username,
-                                List<AttachmentService.Input> attachments) {}
+                                List<AttachmentService.Input> attachments, @Nullable PendingOverrides overrides) {}
+
+    /**
+     * Model and thinking picks made on a fresh web chat before its first message (JCLAW-1196).
+     * Applied as conversation overrides on the conversation that message creates; ignored
+     * when the request names an existing conversation, whose overrides are set directly.
+     */
+    private record PendingOverrides(@Nullable String modelProvider, @Nullable String modelId,
+                                    @Nullable String thinkingMode) {}
 
     /**
      * Parse and validate the common fields from a chat request body.
@@ -151,8 +160,69 @@ public class ApiChatController extends Controller {
                 ? body.get(KEY_CONVERSATION_ID).getAsLong() : null;
 
         var attachments = parseAttachments(body);
+        var overrides = conversationId == null ? parseOverrides(body) : null;
 
-        return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments);
+        return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments, overrides);
+    }
+
+    private static @Nullable String optionalString(JsonObject body, String key) {
+        if (!body.has(key) || body.get(key).isJsonNull()) return null;
+        var v = body.get(key).getAsString();
+        return v == null || v.isBlank() ? null : v;
+    }
+
+    private static @Nullable PendingOverrides parseOverrides(JsonObject body) {
+        var provider = optionalString(body, "modelProvider");
+        var modelId = optionalString(body, "modelId");
+        var thinking = optionalString(body, "thinkingMode");
+        if (provider == null && modelId == null && thinking == null) return null;
+        if ((provider == null) != (modelId == null)) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "'modelProvider' and 'modelId' go together: send both or neither");
+            throw ApiResponses.unreachable();
+        }
+        return new PendingOverrides(provider, modelId, thinking);
+    }
+
+    /**
+     * Create the conversation a fresh web chat's first message starts, carrying the picks the
+     * operator made before sending as conversation overrides. Validated first so a bad pick is
+     * a 400 with nothing created; the agent row is never touched.
+     */
+    private static Conversation createWithOverrides(Agent agent, String username, PendingOverrides o) {
+        if (o.modelProvider() != null) {
+            var provider = ProviderRegistry.get(o.modelProvider());
+            if (provider == null) {
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                        "Provider '" + o.modelProvider() + "' is not configured.");
+                throw ApiResponses.unreachable();
+            }
+            var known = provider.config().models().stream().anyMatch(m -> m.id().equals(o.modelId()));
+            if (!known) {
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                        "Provider '" + o.modelProvider() + "' has no model with id '" + o.modelId() + "'.");
+                throw ApiResponses.unreachable();
+            }
+        }
+        if (o.thinkingMode() != null) {
+            var effProvider = o.modelProvider() != null ? o.modelProvider() : agent.modelProvider;
+            var effModel = o.modelId() != null ? o.modelId() : agent.modelId;
+            var rejection = ConversationService.thinkingOverrideRejection(effProvider, effModel, o.thinkingMode());
+            if (rejection != null) {
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST, rejection);
+                throw ApiResponses.unreachable();
+            }
+        }
+        return Tx.run(() -> {
+            var conversation = ConversationService.create(agent, "web", username);
+            if (o.modelProvider() != null) {
+                ConversationService.setModelOverride(conversation, o.modelProvider(), o.modelId());
+            }
+            if (o.thinkingMode() != null) {
+                ConversationService.setThinkingOverride(conversation, o.thinkingMode());
+            }
+            return conversation;
+        });
     }
 
     private static List<AttachmentService.Input> parseAttachments(JsonObject body) {
@@ -230,6 +300,8 @@ public class ApiChatController extends Controller {
                 notFound();
                 throw ApiResponses.unreachable();
             }
+        } else if (ctx.overrides() != null) {
+            conversation = createWithOverrides(ctx.agent(), ctx.username(), ctx.overrides());
         } else {
             conversation = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
         }
@@ -313,8 +385,12 @@ public class ApiChatController extends Controller {
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
         var agent = ctx.agent();
         var messageText = ctx.message();
-        var conversationId = ctx.conversationId();
         var username = ctx.username();
+        // A fresh chat's picks land on the conversation before the stream opens, so a bad
+        // pick is an ordinary 400 rather than an error frame.
+        var conversationId = ctx.overrides() != null && ctx.conversationId() == null
+                ? createWithOverrides(agent, username, ctx.overrides()).id
+                : ctx.conversationId();
 
         SseStream sse = openSSE()
                 .heartbeat(Duration.ofSeconds(30))
@@ -473,20 +549,13 @@ public class ApiChatController extends Controller {
 
     private static void sendInitFrame(SseStream sse, Agent agent, Conversation conversation) {
         var initData = new HashMap<>(Map.of("type", "init", KEY_CONVERSATION_ID, conversation.id));
-        // Use the agent's persisted thinking mode, gated by the model's
-        // current capability — same semantics as AgentRunner so the UI
-        // reflects what the LLM will actually receive.
-        if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
-            var provider = ProviderRegistry.get(agent.modelProvider);
-            if (provider != null) {
-                boolean valid = provider.config().models().stream()
-                        .filter(m -> m.id().equals(agent.modelId))
-                        .findFirst()
-                        .filter(LlmTypes.ModelInfo::supportsThinking)
-                        .map(m -> m.effectiveThinkingLevels().contains(agent.thinkingMode))
-                        .orElse(false);
-                if (valid) initData.put("thinkingMode", agent.thinkingMode);
-            }
+        // The same resolution AgentRunner applies — conversation override, then agent default,
+        // gated by the effective model's capability — so the UI reflects what the LLM receives.
+        var providerName = ModelOverrideResolver.provider(conversation, agent);
+        var provider = providerName != null ? ProviderRegistry.get(providerName) : null;
+        if (provider != null) {
+            var mode = ModelResolver.resolveThinkingMode(agent, conversation, provider);
+            if (mode != null) initData.put("thinkingMode", mode);
         }
         sse.send(initData);
     }

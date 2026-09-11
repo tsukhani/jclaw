@@ -149,6 +149,18 @@ public class Conversation extends TimestampedModel {
     @Column(name = "model_id_override")
     public String modelIdOverride;
 
+    /** {@link #thinkingModeOverride} value that turns reasoning off for the conversation. */
+    public static final String THINKING_OFF = "off";
+
+    /**
+     * Conversation-scoped thinking override (JCLAW-1196): null inherits the agent's
+     * {@code thinkingMode}, {@link #THINKING_OFF} turns reasoning off, anything else is an
+     * effort level. Written by the web Think pill and {@code /think}; cleared by
+     * {@code /think reset} or the composer's reset.
+     */
+    @Column(name = "thinking_mode_override")
+    public String thinkingModeOverride;
+
     /**
      * Optional parent conversation (JCLAW-264). Set when this Conversation
      * belongs to a subagent spawned from another conversation; null for
