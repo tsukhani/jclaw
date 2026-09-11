@@ -426,8 +426,8 @@ describe('Chat page — subagent transcript read-only mode (JCLAW-274)', () => {
   })
 })
 
-describe('Chat page — session override indicator (JCLAW-1196)', () => {
-  it('names what the open conversation overrides and resets it to the agent defaults', async () => {
+describe('Chat page — session override tags (JCLAW-1196)', () => {
+  it('tags the overridden control and resets the conversation to the agent defaults from the composer', async () => {
     // Earlier tests cached an empty conversations list under the same useFetch key.
     clearNuxtData()
     setupBaseChatApi()
@@ -458,17 +458,18 @@ describe('Chat page — session override indicator (JCLAW-1196)', () => {
 
     const component = await mountSuspended(Chat)
     await flushPromises()
-    expect(component.find('[data-testid="session-override"]').exists()).toBe(false)
+    expect(component.find('[data-testid="session-override-tag"]').exists()).toBe(false)
+    expect(component.find('[data-testid="session-override-reset"]').exists()).toBe(false)
 
     const vm = component.vm as unknown as { resolveAndLoadConversation: (id: number) => Promise<boolean> }
     await vm.resolveAndLoadConversation(77)
     await flushPromises()
 
-    const badge = component.find('[data-testid="session-override"]')
-    expect(badge.exists()).toBe(true)
-    expect(badge.text()).toContain('This conversation overrides the agent\'s model and thinking')
-
-    await badge.find('button').trigger('click')
+    // The tag sits on the control that departs from the default; the reset lives in the composer.
+    expect(component.find('[data-testid="session-override-tag"]').text()).toBe('session')
+    const reset = component.find('[data-testid="session-override-reset"]')
+    expect(reset.text()).toBe('Reset to agent defaults')
+    await reset.trigger('click')
     await vi.waitFor(() => expect(deleted.sort()).toEqual(['model', 'thinking']))
   })
 })

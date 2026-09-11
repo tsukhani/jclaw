@@ -463,20 +463,19 @@ const {
   pendingOverrides,
 })
 
-// JCLAW-1196: the header marker that says this conversation (or the next one, on a
-// fresh chat) has departed from the agent's defaults, and what it would return to.
-const sessionOverrideFacets = computed(() => {
-  const facets: string[] = []
-  if (sessionOverrides.value.model) facets.push('model')
-  if (sessionOverrides.value.thinking) facets.push('thinking')
-  return facets.join(' and ')
-})
+// JCLAW-1196: the controls that depart from the agent's defaults carry a small tag —
+// "session" on an open conversation, "next" for a fresh-chat pick that applies to the
+// conversation about to start — and the composer offers one reset back to the defaults.
+// Tags rather than a header sentence: the picker is centred and the header has no room.
+const sessionTag = computed(() => (isEmptyChat.value ? 'next' : 'session'))
 const sessionOverrideTitle = computed(() => {
   const a = selectedAgent.value
   if (!a) return ''
   const thinking = a.thinkingMode ? `thinking ${a.thinkingMode}` : 'thinking off'
-  return `Agent default: ${a.modelProvider}/${a.modelId}, ${thinking}. Reset returns to it; the agent page is unchanged either way.`
+  return `Overrides the agent default (${a.modelProvider}/${a.modelId}, ${thinking}). Reset to agent defaults returns to it; the agent page is unchanged either way.`
 })
+const thinkPillTitle = computed(() =>
+  sessionOverrides.value.thinking ? `${thinkingPillTitle.value} ${sessionOverrideTitle.value}` : thinkingPillTitle.value)
 
 // Live "Prefilling… / Generating…" indicator with a running elapsed timer for
 // the in-flight turn (useStreamProgress). `producing` flips true on the model's
@@ -706,31 +705,12 @@ function exportConversation() {
             :providers="providers"
             :model-key="selectedModelKey"
             :status-tone="streaming ? 'busy' : (selectedAgent?.providerConfigured === false ? 'offline' : 'ok')"
+            :session-tag="sessionOverrides.model ? sessionTag : null"
+            :session-title="sessionOverrideTitle"
             @update:model-key="onModelPicked"
           />
         </div>
         <span class="ml-auto flex items-center gap-2">
-          <span
-            v-if="overrideError"
-            class="text-xs text-red-600 dark:text-red-400 max-w-64 truncate"
-            data-testid="override-error"
-            :title="overrideError"
-          >{{ overrideError }}</span>
-          <span
-            v-if="sessionOverrides.model || sessionOverrides.thinking"
-            class="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] whitespace-nowrap border border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
-            data-testid="session-override"
-            :title="sessionOverrideTitle"
-          >
-            <span>{{ isEmptyChat ? 'Next conversation' : 'This conversation' }} overrides the agent's {{ sessionOverrideFacets }}</span>
-            <button
-              type="button"
-              class="underline decoration-dotted hover:text-fg-strong"
-              @click="resetSessionOverrides"
-            >
-              Reset
-            </button>
-          </span>
           <ChatContextMeter
             v-if="!isEmptyChat"
             :prompt-tokens="latestAssistantUsage?.prompt ?? 0"
@@ -1100,6 +1080,24 @@ function exportConversation() {
                 </button>
               </span>
               <span
+                v-if="overrideError"
+                data-testid="override-error"
+                class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-[11px] text-red-700 dark:text-red-300"
+              >
+                <span>{{ overrideError }}</span>
+                <button
+                  type="button"
+                  class="text-red-700 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
+                  title="Dismiss"
+                  @click="overrideError = null"
+                >
+                  <XMarkIcon
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                </button>
+              </span>
+              <span
                 v-if="attachError"
                 class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-[11px] text-red-700 dark:text-red-300"
               >
@@ -1229,7 +1227,7 @@ function exportConversation() {
                   :aria-disabled="thinkingPillInert"
                   :aria-haspopup="thinkingActive && thinkingLevels.length > 1 ? 'menu' : undefined"
                   :aria-expanded="thinkingMenuOpen"
-                  :title="thinkingPillTitle"
+                  :title="thinkPillTitle"
                   @click="toggleThinkingPill"
                   @mouseenter="openThinkingMenu"
                   @mouseleave="scheduleCloseThinkingMenu"
@@ -1242,6 +1240,21 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                   Think
+                  <span
+                    v-if="sessionOverrides.thinking"
+                    data-testid="thinking-override-tag"
+                    class="shrink-0 rounded border border-amber-500/50 bg-amber-500/10 px-1 py-px text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-300"
+                  >{{ sessionTag }}</span>
+                </button>
+                <button
+                  v-if="sessionOverrides.model || sessionOverrides.thinking"
+                  type="button"
+                  data-testid="session-override-reset"
+                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 transition-colors"
+                  :title="sessionOverrideTitle"
+                  @click="resetSessionOverrides"
+                >
+                  Reset to agent defaults
                 </button>
                 <!--
                   Vision pill: capability indicator only. Shown when the model
