@@ -1,5 +1,6 @@
 import llm.LlmProvider;
 import llm.LlmProvider.LlmException;
+import llm.LlmResilience;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ProviderConfig;
 import okhttp3.Interceptor;
@@ -7,8 +8,10 @@ import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import utils.CircuitBreakers;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -34,9 +37,18 @@ class LlmExceptionClassificationTest extends UnitTest {
 
     private static final String UNROUTABLE = "http://llm-classification.invalid/v1";
 
+    private static final String PROVIDER = "jclaw1166-classify";
+
     private static LlmProvider provider() {
         return LlmProvider.forConfig(
-                new ProviderConfig("jclaw1166-classify", UNROUTABLE, "test-key", List.of()));
+                new ProviderConfig(PROVIDER, UNROUTABLE, "test-key", List.of()));
+    }
+
+    /** Every case here is an exhausted chat, and three in a row open the provider's breaker
+     *  (JCLAW-1167), which would answer the fourth case before the canned transport does. */
+    @BeforeEach
+    void forgetTheBreaker() {
+        CircuitBreakers.remove(LlmResilience.breakerName(PROVIDER));
     }
 
     /** Drive one {@code chat()} against a canned status/body; returns the failure and the attempt count. */

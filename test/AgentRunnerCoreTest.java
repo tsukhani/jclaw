@@ -67,7 +67,7 @@ class AgentRunnerCoreTest extends UnitTest {
         startLlmServer(simpleResponse("Hello, I am your assistant!"));
         configureProvider();
 
-        var agent = createAgent("simple-agent", "test-provider", "test-model");
+        var agent = createAgent("simple-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         // Commit so virtual thread transactions can see the rows
@@ -134,7 +134,7 @@ class AgentRunnerCoreTest extends UnitTest {
         // Register the datetime tool so execute() finds it
         new jobs.ToolRegistrationJob().doJob();
 
-        var agent = createAgent("tool-agent", "test-provider", "test-model");
+        var agent = createAgent("tool-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -164,7 +164,7 @@ class AgentRunnerCoreTest extends UnitTest {
         });
         configureProvider();
 
-        var agent = createAgent("trunc-agent", "test-provider", "test-model");
+        var agent = createAgent("trunc-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -198,7 +198,7 @@ class AgentRunnerCoreTest extends UnitTest {
         });
         configureProvider();
 
-        var agent = createAgent("empty-tc-trunc-agent", "test-provider", "test-model");
+        var agent = createAgent("empty-tc-trunc-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -246,7 +246,7 @@ class AgentRunnerCoreTest extends UnitTest {
         configureProvider();
         new jobs.ToolRegistrationJob().doJob();
 
-        var agent = createAgent("loop-agent", "test-provider", "test-model");
+        var agent = createAgent("loop-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -273,7 +273,7 @@ class AgentRunnerCoreTest extends UnitTest {
         });
         configureProvider();
 
-        var agent = createAgent("queue-agent", "test-provider", "test-model");
+        var agent = createAgent("queue-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -323,7 +323,7 @@ class AgentRunnerCoreTest extends UnitTest {
         });
         configureProvider();
 
-        var agent = createAgent("max-tokens-agent", "test-provider", "test-model");
+        var agent = createAgent("max-tokens-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -356,7 +356,7 @@ class AgentRunnerCoreTest extends UnitTest {
         configureProvider();
         new jobs.ToolRegistrationJob().doJob();
 
-        var agent = createAgent("bad-json-agent", "test-provider", "test-model");
+        var agent = createAgent("bad-json-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -380,7 +380,7 @@ class AgentRunnerCoreTest extends UnitTest {
         });
         configureProvider();
 
-        var agent = createAgent("error-agent", "test-provider", "test-model");
+        var agent = createAgent("error-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -400,7 +400,7 @@ class AgentRunnerCoreTest extends UnitTest {
         startLlmServer(capturingHandler(captured, simpleResponse("ok")));
         configureProvider(); // contextWindow=100000, maxTokens=4096 — tiny prompt fits easily
 
-        var agent = createAgent("fit-agent", "test-provider", "test-model");
+        var agent = createAgent("fit-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -420,13 +420,13 @@ class AgentRunnerCoreTest extends UnitTest {
         // Pathological config: maxTokens equal to contextWindow — the bug
         // pattern that produced the OpenRouter 400. Any prompt at all pushes
         // promptTokens + maxTokens > contextWindow.
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        ConfigService.set("provider.core-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.core-provider.apiKey", "sk-test");
+        ConfigService.set("provider.core-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":2000,\"maxTokens\":2000}]");
         llm.ProviderRegistry.refresh();
 
-        var agent = createAgent("clamp-agent", "test-provider", "test-model");
+        var agent = createAgent("clamp-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -460,13 +460,13 @@ class AgentRunnerCoreTest extends UnitTest {
             exchange.getResponseBody().write(resp.getBytes());
             exchange.close();
         });
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        ConfigService.set("provider.core-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.core-provider.apiKey", "sk-test");
+        ConfigService.set("provider.core-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":0}]");
         llm.ProviderRegistry.refresh();
 
-        var agent = createAgent("nocap-agent", "test-provider", "test-model");
+        var agent = createAgent("nocap-agent", "core-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "user1");
 
         JPA.em().getTransaction().commit();
@@ -524,9 +524,9 @@ class AgentRunnerCoreTest extends UnitTest {
     }
 
     private void configureProvider() {
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        ConfigService.set("provider.core-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.core-provider.apiKey", "sk-test");
+        ConfigService.set("provider.core-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
     }

@@ -127,7 +127,7 @@ class AgentRunnerErrorEnvelopeTest extends UnitTest {
         });
         configureProvider();
 
-        var agent = createAgent("envelope-5xx", "test-provider", "test-model");
+        var agent = createAgent("envelope-5xx", "envelope-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "u-5xx");
 
         JPA.em().getTransaction().commit();
@@ -170,7 +170,7 @@ class AgentRunnerErrorEnvelopeTest extends UnitTest {
         });
         configureProvider();
 
-        var agent = createAgent("envelope-empty-choices", "test-provider", "test-model");
+        var agent = createAgent("envelope-empty-choices", "envelope-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "u-empty-choices");
 
         JPA.em().getTransaction().commit();
@@ -198,7 +198,7 @@ class AgentRunnerErrorEnvelopeTest extends UnitTest {
         });
         configureProvider();
 
-        var agent = createAgent("envelope-persist", "test-provider", "test-model");
+        var agent = createAgent("envelope-persist", "envelope-provider", "test-model");
         var convo = ConversationService.create(agent, "web", "u-persist");
 
         JPA.em().getTransaction().commit();
@@ -295,9 +295,9 @@ class AgentRunnerErrorEnvelopeTest extends UnitTest {
     }
 
     private void configureProvider() {
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        ConfigService.set("provider.envelope-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.envelope-provider.apiKey", "sk-test");
+        ConfigService.set("provider.envelope-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
     }

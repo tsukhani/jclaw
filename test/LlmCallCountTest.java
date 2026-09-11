@@ -1,8 +1,11 @@
 import llm.LlmProvider;
+import llm.LlmResilience;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ProviderConfig;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import utils.CircuitBreakers;
 import utils.LatencyStats;
 import utils.LatencyTrace;
 
@@ -25,9 +28,18 @@ class LlmCallCountTest extends UnitTest {
     /** Refused on connect, so the provider path runs end-to-end without a network wait. */
     private static final String DEAD_PROVIDER_URL = "http://127.0.0.1:1/v1";
 
+    private static final String DEAD_PROVIDER = "jclaw882-unreachable";
+
     private static LlmProvider deadProvider() {
         return LlmProvider.forConfig(
-                new ProviderConfig("jclaw882-unreachable", DEAD_PROVIDER_URL, "test-key", List.of()));
+                new ProviderConfig(DEAD_PROVIDER, DEAD_PROVIDER_URL, "test-key", List.of()));
+    }
+
+    /** Every dispatch here fails, and three in a row open the provider's breaker (JCLAW-1167);
+     *  the count is taken after admission, so a refused dispatch would count nothing. */
+    @BeforeEach
+    void forgetTheBreaker() {
+        CircuitBreakers.remove(LlmResilience.breakerName(DEAD_PROVIDER));
     }
 
     /** A finished trace's per-turn value for {@code segment}: {@code sum_ms} is the

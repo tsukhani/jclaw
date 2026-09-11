@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * JCLAW-265 tests: subagent_spawn tool.
  *
  * <p>Each test stands up an in-process HTTP mock as the LLM, points a
- * test-provider at it via ConfigService, registers the tools, then drives
+ * spawn-provider at it via ConfigService, registers the tools, then drives
  * SubagentSpawnTool.execute directly on a virtual thread. The VT pattern
  * mirrors AgentRunnerCoreTest — the tool spawns the child run on its own
  * VT and awaits a Future, which requires that parent + child rows be
@@ -82,7 +82,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Async child reply: done."));
         configureProvider();
 
-        var parent = createAgent("p-task-async", "test-provider", "test-model");
+        var parent = createAgent("p-task-async", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-task-async");
         commitAndReopen();
 
@@ -125,7 +125,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("BATCH_CHILD_OK"));
         configureProvider();
 
-        var parent = createAgent("p-batch", "test-provider", "test-model");
+        var parent = createAgent("p-batch", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-batch");
         commitAndReopen();
 
@@ -178,7 +178,7 @@ class SubagentSpawnToolTest extends UnitTest {
         });
         configureProvider();
 
-        var parent = createAgent("p-inherit-batch", "test-provider", "test-model");
+        var parent = createAgent("p-inherit-batch", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-inherit-batch");
         // Seed prior turns so summarization is attempted (snapshot is non-empty).
         ConversationService.appendUserMessage(parentConv, "first user message");
@@ -230,7 +230,7 @@ class SubagentSpawnToolTest extends UnitTest {
     void batchFanOutRejectedOverBreadthCap() {
         // JCLAW-498: a fan-out larger than the breadth cap (default 5) is rejected
         // up front — no children spawned. Synchronous: no LLM mock needed.
-        var parent = createAgent("p-batch-cap", "test-provider", "test-model");
+        var parent = createAgent("p-batch-cap", "spawn-provider", "test-model");
         var spawnTool = new SubagentSpawnTool();
         var result = agents.ToolContext.withScope(null, 7777L, () ->
                 spawnTool.execute("{\"tasks\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"],\"mode\":\"session\"}", parent));
@@ -245,7 +245,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // accepted on batch but rejected on single. Both paths now reject an
         // unknown mode identically. Synchronous: the rejection precedes any spawn,
         // so no LLM mock is needed.
-        var parent = createAgent("p-batch-mode", "test-provider", "test-model");
+        var parent = createAgent("p-batch-mode", "spawn-provider", "test-model");
         var spawnTool = new SubagentSpawnTool();
 
         // The SAME typo mode down both paths must yield the SAME rejection.
@@ -278,7 +278,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // the task on stdin and captures stdout as the reply. `cat` is the stub
         // harness here — it echoes stdin straight back to stdout.
         ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "cat");
-        var parent = createAgent("p-acp", "test-provider", "test-model");
+        var parent = createAgent("p-acp", "spawn-provider", "test-model");
         // JCLAW-500: acp is now a gated capability — grant it so this non-main
         // agent may run the external harness.
         parent.acpAllowed = true;
@@ -300,7 +300,7 @@ class SubagentSpawnToolTest extends UnitTest {
         ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "");
         // JCLAW-500: grant acp so the spawn clears the permission gate and the
         // rejection under test is specifically the missing-harness one.
-        var parent = createAgent("p-acp-none", "test-provider", "test-model");
+        var parent = createAgent("p-acp-none", "spawn-provider", "test-model");
         parent.acpAllowed = true;
         parent.save();
         var tool = new SubagentSpawnTool();
@@ -318,7 +318,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // cannot request it — even when a harness command IS configured (so the
         // only possible rejection reason is permission).
         ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "cat");
-        var parent = createAgent("p-acp-deny", "test-provider", "test-model");
+        var parent = createAgent("p-acp-deny", "spawn-provider", "test-model");
         // acpAllowed defaults false for a custom agent — no grant.
         var tool = new SubagentSpawnTool();
         var result = tool.execute("{\"task\":\"x\",\"runtime\":\"acp\"}", parent);
@@ -360,7 +360,7 @@ class SubagentSpawnToolTest extends UnitTest {
 
             // Non-main parent with the MCP handle explicitly enabled (the operator
             // opt-in shape). A bare non-main agent would have it default-disabled.
-            var parent = createAgent("p-mcp", "test-provider", "test-model");
+            var parent = createAgent("p-mcp", "spawn-provider", "test-model");
             var grant = mcp.McpGrants.newRow(parent, mcpHandle);
             grant.enabled = true;
             grant.save();
@@ -399,7 +399,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // Non-main parent with the shell "exec" tool explicitly disabled. exec is
         // enabled by default for non-main agents (only browser/jclaw_api are
         // seeded off), so a fresh clone would otherwise re-enable it.
-        var parent = createAgent("p-restrict", "test-provider", "test-model");
+        var parent = createAgent("p-restrict", "spawn-provider", "test-model");
         var deny = new AgentToolConfig();
         deny.agent = parent;
         deny.toolName = "exec";
@@ -432,13 +432,13 @@ class SubagentSpawnToolTest extends UnitTest {
         configureProvider();
         // Spawning parent restricts exec; the target does not — the target is
         // more capable, so naming it as the child must be rejected.
-        var parent = createAgent("p-narrow", "test-provider", "test-model");
+        var parent = createAgent("p-narrow", "spawn-provider", "test-model");
         var deny = new AgentToolConfig();
         deny.agent = parent;
         deny.toolName = "exec";
         deny.enabled = false;
         deny.save();
-        var target = createAgent("a-wide", "test-provider", "test-model"); // exec enabled
+        var target = createAgent("a-wide", "spawn-provider", "test-model"); // exec enabled
         ConversationService.create(parent, "web", "u-narrow");
         commitAndReopen();
         ToolRegistry.invalidateDisabledToolsCache(parent);
@@ -566,9 +566,9 @@ class SubagentSpawnToolTest extends UnitTest {
     void timeoutCapturesPartialReply() {
         // AC5: on a timeout, the child's last assistant message is surfaced to the
         // parent (reply) instead of an empty string, so partial work isn't lost.
-        var parent = createAgent("p-partial", "test-provider", "test-model");
+        var parent = createAgent("p-partial", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-partial");
-        var childAgent = createAgent("c-partial", "test-provider", "test-model");
+        var childAgent = createAgent("c-partial", "spawn-provider", "test-model");
         var childConv = ConversationService.create(childAgent, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = new SubagentRun();
         run.parentAgent = parent;
@@ -642,7 +642,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: done."));
         configureProvider();
 
-        var parent = createAgent("p-happy", "test-provider", "test-model");
+        var parent = createAgent("p-happy", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-happy");
 
         commitAndReopen();
@@ -697,7 +697,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: done."));
         configureProvider();
 
-        var parent = createAgent("p-events", "test-provider", "test-model");
+        var parent = createAgent("p-events", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-events");
 
         commitAndReopen();
@@ -740,7 +740,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(exchange -> { exchange.sendResponseHeaders(500, 0); exchange.close(); });
         configureProvider();
 
-        var parent = createAgent("p-fail", "test-provider", "test-model");
+        var parent = createAgent("p-fail", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-fail");
 
         commitAndReopen();
@@ -770,7 +770,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // the unchecked-throw branch by spawning with no parent conversation
         // (forcing the early error return), then assert the audit + events
         // for the "could not resolve parent" path are coherent.
-        var parent = createAgent("p-noconv", "test-provider", "test-model");
+        var parent = createAgent("p-noconv", "spawn-provider", "test-model");
         // Deliberately no conversation row for the parent agent.
         commitAndReopen();
 
@@ -800,7 +800,7 @@ class SubagentSpawnToolTest extends UnitTest {
         });
         configureProvider();
 
-        var parent = createAgent("p-timeout", "test-provider", "test-model");
+        var parent = createAgent("p-timeout", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-timeout");
         commitAndReopen();
 
@@ -836,8 +836,8 @@ class SubagentSpawnToolTest extends UnitTest {
         // We set the Config row explicitly so the test exercises the
         // DB-backed read path rather than relying on the in-code fallback.
         ConfigService.set(SubagentSpawnTool.DEPTH_LIMIT_KEY, "1");
-        var root = createAgent("p-depth-root", "test-provider", "test-model");
-        var child = createAgent("p-depth-child", "test-provider", "test-model");
+        var root = createAgent("p-depth-root", "spawn-provider", "test-model");
+        var child = createAgent("p-depth-child", "spawn-provider", "test-model");
         child.parentAgent = root;
         child.save();
         ConversationService.create(child, "web", "u-depth");
@@ -873,12 +873,12 @@ class SubagentSpawnToolTest extends UnitTest {
         // sixth spawn attempt is refused. Sets the Config row explicitly so
         // the test exercises the DB-backed read path.
         ConfigService.set(SubagentSpawnTool.BREADTH_LIMIT_KEY, "5");
-        var parent = createAgent("p-breadth", "test-provider", "test-model");
+        var parent = createAgent("p-breadth", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-breadth");
         // Seed RUNNING rows. Each needs a distinct child Agent + Conversation
         // because of the not-null FKs; use cheap clones via AgentService.create.
         for (int i = 0; i < 5; i++) {
-            var childAgent = createAgent("p-breadth-c" + i, "test-provider", "test-model");
+            var childAgent = createAgent("p-breadth-c" + i, "spawn-provider", "test-model");
             childAgent.parentAgent = parent;
             childAgent.save();
             var childConv = ConversationService.create(childAgent,
@@ -927,13 +927,13 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: override path."));
         configureProviderWithTwoModels();
 
-        var parent = createAgent("p-override", "test-provider", "test-model");
+        var parent = createAgent("p-override", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-override");
 
         commitAndReopen();
 
         var reply = invokeOnVirtualThread(parent.id,
-                "{\"task\":\"with override\",\"modelProvider\":\"test-provider\",\"modelId\":\"test-model-alt\"}");
+                "{\"task\":\"with override\",\"modelProvider\":\"spawn-provider\",\"modelId\":\"test-model-alt\"}");
         EventLogger.flush();
 
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
@@ -947,14 +947,14 @@ class SubagentSpawnToolTest extends UnitTest {
 
         // Child Conversation carries the override.
         Conversation childConv = Conversation.findById(run.childConversation.id);
-        assertEquals("test-provider", childConv.modelProviderOverride,
+        assertEquals("spawn-provider", childConv.modelProviderOverride,
                 "child Conversation must record the per-spawn provider override");
         assertEquals("test-model-alt", childConv.modelIdOverride,
                 "child Conversation must record the per-spawn modelId override");
 
         // Child Agent inherits the parent's defaults — NOT the override.
         Agent childAgent = Agent.findById(run.childAgent.id);
-        assertEquals("test-provider", childAgent.modelProvider,
+        assertEquals("spawn-provider", childAgent.modelProvider,
                 "child Agent provider must equal the parent's default");
         assertEquals("test-model", childAgent.modelId,
                 "child Agent modelId must equal the parent's default, not the per-spawn override");
@@ -969,7 +969,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: no override."));
         configureProvider();
 
-        var parent = createAgent("p-no-override", "test-provider", "test-model");
+        var parent = createAgent("p-no-override", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-no-override");
 
         commitAndReopen();
@@ -992,7 +992,7 @@ class SubagentSpawnToolTest extends UnitTest {
                 "no per-spawn override means modelIdOverride stays null");
 
         Agent childAgent = Agent.findById(run.childAgent.id);
-        assertEquals("test-provider", childAgent.modelProvider);
+        assertEquals("spawn-provider", childAgent.modelProvider);
         assertEquals("test-model", childAgent.modelId);
     }
 
@@ -1008,7 +1008,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: fresh."));
         configureProvider();
 
-        var parent = createAgent("p-fresh", "test-provider", "test-model");
+        var parent = createAgent("p-fresh", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-fresh");
         // Parent has browser explicitly enabled — this is what we DON'T want
         // the fresh-mode child to inherit. The default for non-main agents is
@@ -1073,7 +1073,7 @@ class SubagentSpawnToolTest extends UnitTest {
         });
         configureProvider();
 
-        var parent = createAgent("p-inherit", "test-provider", "test-model");
+        var parent = createAgent("p-inherit", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-inherit");
         // Seed three prior turns so SessionCompactor.snapshotParentMessages
         // returns a non-empty list — summarization is otherwise skipped.
@@ -1173,7 +1173,7 @@ class SubagentSpawnToolTest extends UnitTest {
         });
         configureProvider();
 
-        var parent = createAgent("p-degrade", "test-provider", "test-model");
+        var parent = createAgent("p-degrade", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-degrade");
         // Need at least one prior turn so the summarize call is attempted at
         // all (snapshotParentMessages returns empty for a brand-new conv).
@@ -1234,7 +1234,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: empty parent."));
         configureProvider();
 
-        var parent = createAgent("p-empty", "test-provider", "test-model");
+        var parent = createAgent("p-empty", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-empty");
         // Deliberately NO appendUserMessage — parent conversation is empty.
 
@@ -1269,7 +1269,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // be rejected up-front rather than silently defaulting.
         startLlmServer(simpleResponse("never called"));
         configureProvider();
-        var parent = createAgent("p-bad-ctx", "test-provider", "test-model");
+        var parent = createAgent("p-bad-ctx", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-bad-ctx");
 
         commitAndReopen();
@@ -1297,7 +1297,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: inline."));
         configureProvider();
 
-        var parent = createAgent("p-inline", "test-provider", "test-model");
+        var parent = createAgent("p-inline", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-inline");
 
         commitAndReopen();
@@ -1358,7 +1358,7 @@ class SubagentSpawnToolTest extends UnitTest {
     void invalidModeValueIsRejectedWithClearError() throws Exception {
         // Defensive: any mode value other than "session" or "inline" must be
         // rejected up-front rather than silently defaulting.
-        var parent = createAgent("p-bad-mode", "test-provider", "test-model");
+        var parent = createAgent("p-bad-mode", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-bad-mode");
 
         commitAndReopen();
@@ -1382,7 +1382,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: session default."));
         configureProvider();
 
-        var parent = createAgent("p-session-default", "test-provider", "test-model");
+        var parent = createAgent("p-session-default", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-session-default");
 
         commitAndReopen();
@@ -1416,7 +1416,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: ok."));
         configureProvider();
 
-        var parent = createAgent("p-ok", "test-provider", "test-model");
+        var parent = createAgent("p-ok", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-ok");
 
         commitAndReopen();
@@ -1448,7 +1448,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: async done."));
         configureProvider();
 
-        var parent = createAgent("p-async-ok", "test-provider", "test-model");
+        var parent = createAgent("p-async-ok", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-async-ok");
 
         commitAndReopen();
@@ -1527,9 +1527,9 @@ class SubagentSpawnToolTest extends UnitTest {
         //
         // We still bootstrap a real SubagentRun row + parent Conversation so
         // the announce path has a real target to write into.
-        var parent = createAgent("p-async-fail", "test-provider", "test-model");
+        var parent = createAgent("p-async-fail", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-async-fail");
-        var childAgent = createAgent("p-async-fail-child", "test-provider", "test-model");
+        var childAgent = createAgent("p-async-fail-child", "spawn-provider", "test-model");
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
@@ -1603,7 +1603,7 @@ class SubagentSpawnToolTest extends UnitTest {
         });
         configureProvider();
 
-        var parent = createAgent("p-async-timeout", "test-provider", "test-model");
+        var parent = createAgent("p-async-timeout", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-async-timeout");
 
         commitAndReopen();
@@ -1653,7 +1653,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // before the child finishes leaves a half-written nested block).
         // The tool rejects this combination up-front with a clear error and
         // does not insert a SubagentRun row.
-        var parent = createAgent("p-async-inline", "test-provider", "test-model");
+        var parent = createAgent("p-async-inline", "spawn-provider", "test-model");
         ConversationService.create(parent, "web", "u-async-inline");
 
         commitAndReopen();
@@ -1679,7 +1679,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse(longReply));
         configureProvider();
 
-        var parent = createAgent("p-async-truncate", "test-provider", "test-model");
+        var parent = createAgent("p-async-truncate", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-async-truncate");
 
         commitAndReopen();
@@ -1726,7 +1726,7 @@ class SubagentSpawnToolTest extends UnitTest {
         startLlmServer(simpleResponse("Subagent reply: async."));
         configureProvider();
 
-        var parent = createAgent("p-async-llm-filter", "test-provider", "test-model");
+        var parent = createAgent("p-async-llm-filter", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-async-llm-filter");
 
         commitAndReopen();
@@ -1754,8 +1754,8 @@ class SubagentSpawnToolTest extends UnitTest {
         // FileChannel close-on-interrupt is the bug we're fixing — the
         // production code must never interrupt the carrier thread, and
         // this test must not assert it does).
-        var parent = createAgent("p-kill-flag", "test-provider", "test-model");
-        var child = createAgent("c-kill-flag", "test-provider", "test-model");
+        var parent = createAgent("p-kill-flag", "spawn-provider", "test-model");
+        var child = createAgent("c-kill-flag", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-kill-flag");
         var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = Tx.run(() -> {
@@ -1810,8 +1810,8 @@ class SubagentSpawnToolTest extends UnitTest {
         // and observes whether its interrupt flag fired after a kill. With
         // the JCLAW-291 design, the kill is cooperative — the VT's interrupt
         // flag MUST stay clear.
-        var parent = createAgent("p-no-int", "test-provider", "test-model");
-        var child = createAgent("c-no-int", "test-provider", "test-model");
+        var parent = createAgent("p-no-int", "spawn-provider", "test-model");
+        var child = createAgent("c-no-int", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-no-int");
         var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var run = Tx.run(() -> {
@@ -1873,8 +1873,8 @@ class SubagentSpawnToolTest extends UnitTest {
         // conversation tied to a RUNNING SubagentRun whose flag has been
         // flipped. The checkpoint must throw RunCancelledException carrying
         // the run id.
-        var parent = createAgent("p-ckpt", "test-provider", "test-model");
-        var child = createAgent("c-ckpt", "test-provider", "test-model");
+        var parent = createAgent("p-ckpt", "spawn-provider", "test-model");
+        var child = createAgent("c-ckpt", "spawn-provider", "test-model");
         var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
         var parentConvForRun = ConversationService.create(parent, "web", "u-ckpt-parent");
         var run = Tx.run(() -> {
@@ -1984,9 +1984,9 @@ class SubagentSpawnToolTest extends UnitTest {
         // RunCancelledException (the runner's checkpoint observed the kill
         // flag). The catch must NOT overwrite the registry-stamped KILLED
         // status, NOT post an announce Message, NOT emit SUBAGENT_ERROR.
-        var parent = createAgent("p-cancel-clean", "test-provider", "test-model");
+        var parent = createAgent("p-cancel-clean", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-cancel-clean");
-        var child = createAgent("c-cancel-clean", "test-provider", "test-model");
+        var child = createAgent("c-cancel-clean", "spawn-provider", "test-model");
         child.parentAgent = parent;
         child.save();
         var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
@@ -2048,9 +2048,9 @@ class SubagentSpawnToolTest extends UnitTest {
         // duplicates asyncSpawnFailureAnnouncesError in spirit but lives
         // under the JCLAW-291 block so a future cleanup doesn't drop the
         // coverage alongside other cancel tests.
-        var parent = createAgent("p-fail-regression", "test-provider", "test-model");
+        var parent = createAgent("p-fail-regression", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-fail-regression");
-        var childAgent = createAgent("c-fail-regression", "test-provider", "test-model");
+        var childAgent = createAgent("c-fail-regression", "spawn-provider", "test-model");
         childAgent.parentAgent = parent;
         childAgent.save();
         var childConv = ConversationService.create(childAgent,
@@ -2123,9 +2123,9 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     private void configureProvider() {
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        ConfigService.set("provider.spawn-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.spawn-provider.apiKey", "sk-test");
+        ConfigService.set("provider.spawn-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
     }
@@ -2133,9 +2133,9 @@ class SubagentSpawnToolTest extends UnitTest {
     /** Same provider, two models — exercises the per-spawn override resolution
      *  without standing up a second mock server. */
     private void configureProviderWithTwoModels() {
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        ConfigService.set("provider.spawn-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.spawn-provider.apiKey", "sk-test");
+        ConfigService.set("provider.spawn-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096},"
                         + "{\"id\":\"test-model-alt\",\"name\":\"Test Alt\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
