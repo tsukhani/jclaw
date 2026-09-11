@@ -17,9 +17,9 @@ import java.util.List;
  * out as deferred work. The ticket described this as "streaming" but
  * the failover utility is actually called from
  * {@link agents.ToolCallLoopRunner#callWithToolLoop} (the synchronous
- * tool-call loop); the streaming path receives a secondary parameter
- * but doesn't currently use it for failover. Tests target the static
- * utility directly so its three branches are exercised without
+ * tool-call loop); the streaming path got its own, narrower entry in
+ * JCLAW-1182 — see {@code LlmStreamFailoverTest}. Tests target the
+ * static utility directly so its three branches are exercised without
  * standing up the loop scaffolding.
  *
  * <p>Three branches in {@code chatWithFailover}:

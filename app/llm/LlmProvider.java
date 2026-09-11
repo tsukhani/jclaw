@@ -565,7 +565,22 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                            Runnable onComplete, Consumer<Exception> onError,
                            @Nullable Integer maxTokens, @Nullable String thinkingMode,
                            @Nullable String channel) {
-        var guard = LlmResilience.beginStream(config.name());
+        chatStream(LlmResilience.beginStream(config.name()), model, messages, tools,
+                onChunk, onComplete, onError, maxTokens, thinkingMode, channel);
+    }
+
+    /**
+     * {@link #chatStream} on an admission already taken from this provider's breaker; {@code null}
+     * means it was refused. Split out for {@link #chatStreamAccumulateWithFailover}, which has to
+     * know whether the primary admits the stream without spending a second HALF_OPEN probe to ask.
+     */
+    @SuppressWarnings("java:S107") // same call surface as chatStream, plus the admission
+    private void chatStream(LlmResilience.@Nullable StreamGuard guard,
+                            String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                            Consumer<ChatCompletionChunk> onChunk,
+                            Runnable onComplete, Consumer<Exception> onError,
+                            @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                            @Nullable String channel) {
         if (guard == null) {
             onError.accept(LlmResilience.openBreakerFailure(config.name()));
             return;
@@ -692,6 +707,20 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                                                    @Nullable Integer maxTokens,
                                                    @Nullable String thinkingMode,
                                                    @Nullable String channel) {
+        return chatStreamAccumulate(LlmResilience.beginStream(config.name()), model, messages, tools,
+                onToken, onReasoning, maxTokens, thinkingMode, channel);
+    }
+
+    /** {@link #chatStreamAccumulate} on an admission already taken from this provider's breaker. */
+    @SuppressWarnings("java:S107") // same call surface as chatStreamAccumulate, plus the admission
+    private StreamAccumulator chatStreamAccumulate(LlmResilience.@Nullable StreamGuard guard,
+                                                   String model, List<ChatMessage> messages,
+                                                   @Nullable List<ToolDef> tools,
+                                                   Consumer<String> onToken,
+                                                   Consumer<String> onReasoning,
+                                                   @Nullable Integer maxTokens,
+                                                   @Nullable String thinkingMode,
+                                                   @Nullable String channel) {
         var accumulator = new StreamAccumulator();
         accumulator.promptTokenEstimate = TokenUsageEstimator.estimateChatRequest(model, messages, tools);
         var contentBuilder = new StringBuilder();
@@ -701,7 +730,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // trace so the cache-served half of the counter stays attributable.
         var trace = LatencyTrace.current();
 
-        chatStream(model, messages, tools,
+        chatStream(guard, model, messages, tools,
                 chunk -> accumulateChunk(chunk, accumulator, contentBuilder, toolCallAccumulator,
                         onToken, onReasoning),
                 () -> {
@@ -848,6 +877,40 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             }
             throw e;
         }
+    }
+
+    /**
+     * Streaming twin of {@link #chatWithFailover}, narrowed to the one case where switching
+     * providers is safe (JCLAW-1182): the primary's breaker turning the call away before any
+     * token exists. General mid-stream failover is deliberately not offered — once tokens have
+     * reached the user another provider cannot silently take over, and re-answering from the top
+     * duplicates visible output. So this is "do not start on a provider already known to be
+     * open", not "recover from one that broke mid-answer".
+     *
+     * <p>The admission is taken once and handed to whichever provider runs it, so asking whether
+     * the primary is open never spends the HALF_OPEN probe the question would otherwise cost. The
+     * secondary takes its own admission through the public entry, which fails fast when its
+     * breaker is open too rather than bouncing back to the primary.
+     */
+    @SuppressWarnings("java:S107") // chatStreamAccumulate's call surface plus the two providers
+    public static StreamAccumulator chatStreamAccumulateWithFailover(
+            LlmProvider primary, @Nullable LlmProvider secondary,
+            String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+            Consumer<String> onToken, Consumer<String> onReasoning,
+            @Nullable Integer maxTokens, @Nullable String thinkingMode, @Nullable String channel) {
+        var admission = LlmResilience.beginStream(primary.config().name());
+        // A registry secondary that resolves to the primary itself — the agent pinned the provider
+        // that happens to sit second — is the breaker that just refused, not a fallback.
+        if (admission != null || secondary == null
+                || secondary.config().name().equals(primary.config().name())) {
+            return primary.chatStreamAccumulate(admission, model, messages, tools, onToken,
+                    onReasoning, maxTokens, thinkingMode, channel);
+        }
+        EventLogger.warn("llm", "Failing over from %s to %s: %s".formatted(
+                primary.config().name(), secondary.config().name(),
+                LlmResilience.openBreakerFailure(primary.config().name()).getMessage()));
+        return secondary.chatStreamAccumulate(model, messages, tools, onToken, onReasoning,
+                maxTokens, thinkingMode, channel);
     }
 
     // ─── Shared internals ────────────────────────────────────────────────

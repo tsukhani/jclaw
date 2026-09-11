@@ -377,6 +377,10 @@ final class StreamingAgentRunner {
     /**
      * Run the round-1 streaming call and retry once on transient HTTP 5xx errors.
      * Returns {@code null} when cancellation fired during either await.
+     *
+     * <p>JCLAW-1182: the dispatch is secondary-aware, the way the synchronous loop's has been
+     * since JCLAW-300. Only the breaker-open case fails over, and it is the only one that can:
+     * it refuses before any token exists, so the user never sees the switch.
      */
     @SuppressWarnings("java:S107") // Streaming first-round invocation needs the full call surface
     private static LlmProvider.@Nullable StreamAccumulator streamFirstRoundWithRetry(
@@ -385,9 +389,10 @@ final class StreamingAgentRunner {
             AgentRunner.StreamingCallbacks cb, @Nullable Integer maxTokens,
             @Nullable String thinkingMode, @Nullable String channelType,
             AtomicBoolean isCancelled, Agent agent) throws InterruptedException {
-        var accumulator = primary.chatStreamAccumulate(
-                effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
-                maxTokens, thinkingMode, channelType);
+        var secondary = ProviderRegistry.getSecondary();
+        var accumulator = LlmProvider.chatStreamAccumulateWithFailover(
+                primary, secondary, effectiveModelIdForCall, messages, tools,
+                cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode, channelType);
 
         if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return null;
 
@@ -395,9 +400,9 @@ final class StreamingAgentRunner {
         // (JCLAW-1167), not on the message: a 4xx whose body quoted "HTTP 5" retried too.
         if (accumulator.error() instanceof LlmProvider.LlmException.ServerError) {
             EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
-            accumulator = primary.chatStreamAccumulate(
-                    effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
-                    maxTokens, thinkingMode, channelType);
+            accumulator = LlmProvider.chatStreamAccumulateWithFailover(
+                    primary, secondary, effectiveModelIdForCall, messages, tools,
+                    cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode, channelType);
             if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return null;
         }
         return accumulator;
