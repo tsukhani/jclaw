@@ -191,6 +191,25 @@ class LlmStreamBreakerTest extends UnitTest {
     }
 
     @Test
+    void aStalledStreamReleasesItsCallerToo() {
+        var clock = new AtomicLong(CLOCK_ORIGIN);
+        var breaker = stallingBreaker();
+        var guard = LlmResilience.streamGuardForTest(breaker, clock::get, FIRST_CHUNK_BUDGET_MS);
+        var releasedAfterMs = new AtomicLong(-1L);
+        guard.onAbandoned(releasedAfterMs::set);
+
+        guard.chunk();
+        clock.addAndGet(40 * SECOND);
+        assertTrue(guard.checkDeadlines());
+
+        // JCLAW-1183: the charge alone leaves the transport parked on a socket nothing will
+        // reclaim, whether or not tokens reached the screen first.
+        assertEquals(40_000L, releasedAfterMs.get());
+        assertEquals(1, breaker.stats().slowCalls(), "still a slow call, not a failure");
+        assertEquals(0, breaker.stats().failures());
+    }
+
+    @Test
     void aStalledProbeDoesNotStrandItsHalfOpenPermit() {
         var clock = new AtomicLong(CLOCK_ORIGIN);
         // Cooldown 0, so the only thing between OPEN and a fresh probe is a reported outcome.

@@ -49,6 +49,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -629,25 +630,33 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             call.failed(e);
             onError.accept(e);
         };
-        // The transport's own thread stays parked in streamSse's untimed await; this is what
-        // gets the turn off the accumulator's latch.
-        guard.onAbandoned(silentMillis ->
-                observedError.accept(LlmResilience.noFirstChunkFailure(config.name(), silentMillis)));
+        // JCLAW-1183: the transport's own thread is parked in streamSse's untimed await, and only
+        // aborting its call gets it — and its socket — back. Settle first: the abort arrives as an
+        // onFailure, and whichever outcome reaches the latch first is the one the caller reads.
+        var cancelTransport = new AtomicReference<Runnable>();
+        guard.onAbandoned(quietMillis -> {
+            observedError.accept(LlmResilience.abandonedStreamFailure(config.name(), quietMillis));
+            // Null until the stream thread has an in-flight call to abort, which is the one
+            // state where there is no socket to give back.
+            var abortCall = cancelTransport.get();
+            if (abortCall != null) abortCall.run();
+        });
         // The transport runs on its own virtual thread, which inherits no OTel context; the
         // wrap carries the span so the HTTP client span nests under it.
         Thread.ofVirtual().name("llm-stream").start(call.context().wrap(() ->
                 streamOnce(model, messages, tools, observedChunk, observedComplete, observedError,
-                        maxTokens, thinkingMode, channel, true)));
+                        cancelTransport::set, maxTokens, thinkingMode, channel, true)));
     }
 
     /**
      * One streaming attempt. {@code mayRetryWithoutTools} is false on the retry,
      * so a tools-unsupported error can be handled at most once (JCLAW-1076).
      */
-    @SuppressWarnings("java:S107") // same shape as chatStream, plus the retry latch
+    @SuppressWarnings("java:S107") // same shape as chatStream, plus the cancel handle and the retry latch
     private void streamOnce(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                             Consumer<ChatCompletionChunk> onChunk,
                             Runnable onComplete, Consumer<Exception> onError,
+                            Consumer<Runnable> publishCancel,
                             @Nullable Integer maxTokens, @Nullable String thinkingMode,
                             @Nullable String channel,
                             boolean mayRetryWithoutTools) {
@@ -662,7 +671,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             if (retryable) {
                 ToolCapabilityMemo.record(config.name(), model);
                 streamOnce(model, messages, List.of(), onChunk, onComplete, onError,
-                        maxTokens, thinkingMode, channel, false);
+                        publishCancel, maxTokens, thinkingMode, channel, false);
                 return;
             }
             onError.accept(t instanceof Exception ex ? ex : new LlmException("Stream error", t));
@@ -688,6 +697,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                     },
                     onComplete,
                     handleFailure,
+                    publishCancel,
                     channel);
         } catch (Exception e) {
             handleFailure.accept(e);

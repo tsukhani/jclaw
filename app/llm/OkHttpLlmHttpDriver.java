@@ -82,10 +82,17 @@ final class OkHttpLlmHttpDriver {
      * overall stream. The {@link okhttp3.Call#timeout()} per-call override
      * doesn't compose with EventSource the way it does with single-shot
      * {@code execute()}.
+     *
+     * <p>{@code publishCancel} receives the abort for the in-flight call as soon as there is one
+     * (JCLAW-1183). It is what lets a watcher on another thread release this one, which is
+     * otherwise reachable only by interrupting it — barred here, because this thread's retry path
+     * writes to H2 and the JDK closes a file database's channel on interrupt. Cancelling surfaces
+     * as {@code onFailure}, so the await below unwinds through the ordinary path.
      */
+    @SuppressWarnings("java:S107") // the SSE callback surface plus the cancel handle it publishes
     static void streamSse(URI uri, String authHeader, String jsonBody,
                           Consumer<String> onEvent, Runnable onComplete, Consumer<Throwable> onError,
-                          @Nullable String channel) {
+                          Consumer<Runnable> publishCancel, @Nullable String channel) {
         var builder = new Request.Builder()
                 .url(uri.toString())
                 .header(HttpKeys.AUTHORIZATION, authHeader)
@@ -124,6 +131,7 @@ final class OkHttpLlmHttpDriver {
 
         var eventSource = EventSources.createFactory(OtelRuntime.traced(HttpFactories.llmStreaming()))
                 .newEventSource(req, listener);
+        publishCancel.accept(eventSource::cancel);
         try {
             done.await();
         } catch (InterruptedException ie) {

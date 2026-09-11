@@ -125,14 +125,16 @@ public final class LlmResilience {
     }
 
     /**
-     * The failure a stream abandoned before its first chunk is ended with (JCLAW-1181).
+     * The failure an abandoned stream is ended with, whether it went quiet before its first
+     * chunk or after one (JCLAW-1181, JCLAW-1183). {@code quietMillis} is how long it had
+     * produced nothing, which is also what separates the two budgets in the message.
      *
      * <p>Deliberately not a {@link LlmException.ServerError}: {@code StreamingAgentRunner}
      * re-streams once on that class, which would buy the caller a second full budget of silence.
      */
-    public static LlmException noFirstChunkFailure(String providerName, long silentMillis) {
-        return new LlmException("No response from %s after %d s: abandoning the stream"
-                .formatted(providerName, silentMillis / 1000L));
+    public static LlmException abandonedStreamFailure(String providerName, long quietMillis) {
+        return new LlmException("No response from %s for %d s: abandoning the stream"
+                .formatted(providerName, quietMillis / 1000L));
     }
 
     /**
@@ -219,11 +221,11 @@ public final class LlmResilience {
      * because OkHttp's read timeout does not cover it — SSE keepalive comments are reads, so a
      * provider emitting nothing else resets it for ever.
      *
-     * <p>The two are charged differently. A stall mid-answer is a slow call, not a failure — the
-     * stream did deliver content — and its caller is left alone, because tokens already on the
-     * user's screen cannot be retracted. Silence throughout is a failure, and the sweep ends the
-     * turn as well as charging it: {@link #onAbandoned} is what releases the caller, since
-     * recording an outcome does not unpark a thread waiting on the stream's own completion.
+     * <p>The two are charged differently — a stall mid-answer is a slow call, not a failure, since
+     * the stream did deliver content, while silence throughout is a failure — but both end the
+     * stream. A stream past either budget is holding a socket and a parked thread nothing will
+     * reclaim, so {@link #onAbandoned} runs on both paths (JCLAW-1183): recording an outcome does
+     * not unpark a thread waiting on the stream's own completion.
      *
      * <p>A stream that never terminates reports nothing on its own, which would both hide
      * the outage and strand a HALF_OPEN permit for good. {@link #checkDeadlines} is the way
@@ -256,9 +258,10 @@ public final class LlmResilience {
         }
 
         /**
-         * Install what ends the caller's turn when the sweep abandons this stream, given the
-         * milliseconds of silence. Until the dispatch installs it the sweep leaves the stream
-         * alone: an outcome recorded with nobody to release trades a hang for a quieter hang.
+         * Install what ends the caller's turn and aborts the transport when the sweep abandons
+         * this stream, given the milliseconds it had been quiet. Until the dispatch installs it a
+         * stream that has produced nothing is left alone: an outcome recorded with nobody to
+         * release trades a hang for a quieter hang.
          */
         public void onAbandoned(LongConsumer abandon) {
             this.abandon = abandon;
@@ -306,6 +309,10 @@ public final class LlmResilience {
             var gap = nanoTime.getAsLong() - lastChunkNanos;
             if (gap < stallBudgetNanos || !claim()) return false;
             breaker.recordSuccess(gap / 1_000_000L);
+            // Unlike the silent case this charges whether or not anyone installed a release: the
+            // stream did deliver content, so the breaker learns something either way.
+            var release = abandon;
+            if (release != null) release.accept(gap / 1_000_000L);
             return true;
         }
 
