@@ -35,6 +35,33 @@ const { confirm } = useConfirm()
 const breakers = computed(() => data.value ?? [])
 const degraded = computed(() => breakers.value.filter(b => b.state !== 'CLOSED').length)
 
+const GROUPS: ReadonlyArray<{ subsystem: string, title: string }> = [
+  { subsystem: 'llm', title: 'LLM providers' },
+  { subsystem: 'mcp', title: 'MCP servers' },
+]
+const SERVING_RANK: Record<Breaker['state'], number> = { OPEN: 0, HALF_OPEN: 1, CLOSED: 2 }
+
+/**
+ * One section per subsystem, providers first because a provider breaker affects every turn
+ * on it and there are few; within a section the breakers that are not serving come first, so
+ * an open one is never buried under a dozen idle servers. A subsystem the panel does not know
+ * still renders, under its own prefix, rather than vanishing.
+ */
+const groups = computed(() => {
+  const known = new Set(GROUPS.map(g => g.subsystem))
+  const extra = [...new Set(breakers.value.map(b => b.subsystem))]
+    .filter(s => !known.has(s))
+    .map(s => ({ subsystem: s, title: s }))
+  return [...GROUPS, ...extra]
+    .map(g => ({
+      ...g,
+      rows: breakers.value
+        .filter(b => b.subsystem === g.subsystem)
+        .sort((a, b) => SERVING_RANK[a.state] - SERVING_RANK[b.state] || a.target.localeCompare(b.target)),
+    }))
+    .filter(g => g.rows.length)
+})
+
 let timer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
   timer = setInterval(() => refresh(), REFRESH_MS)
@@ -98,37 +125,45 @@ async function restore(b: Breaker) {
       </span>
     </div>
 
-    <div class="divide-y divide-border">
-      <div
-        v-for="b in breakers"
-        :key="b.name"
-        class="px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5"
-        :data-testid="`breaker-row-${b.name}`"
-      >
-        <span
-          class="px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider shrink-0"
-          :class="stateClass(b.state)"
-        >{{ b.state.replace('_', ' ') }}</span>
-        <span class="text-sm text-fg-strong font-mono truncate">{{ b.target }}</span>
-        <span class="text-[10px] uppercase tracking-wider text-fg-muted shrink-0">{{ b.subsystem }}</span>
-        <span class="text-xs text-fg-muted">{{ why(b) }}</span>
-        <span
-          v-if="b.samples"
-          class="text-xs text-fg-muted font-mono"
-        >{{ b.failures }}/{{ b.samples }} failed</span>
-        <span
-          v-if="b.slowCalls"
-          class="text-xs text-fg-muted font-mono"
-        >{{ b.slowCalls }} slow</span>
-        <button
-          type="button"
-          class="ml-auto px-2 py-1 text-xs border border-border text-fg-strong hover:bg-muted/40 transition-colors disabled:opacity-50"
-          :disabled="loading"
-          @click="b.state === 'CLOSED' ? isolate(b) : restore(b)"
+    <section
+      v-for="g in groups"
+      :key="g.subsystem"
+      :data-testid="`breaker-group-${g.subsystem}`"
+    >
+      <h3 class="px-4 py-1.5 text-[10px] font-medium uppercase tracking-wider text-fg-muted bg-muted/30 border-b border-border">
+        {{ g.title }}
+      </h3>
+      <div class="divide-y divide-border border-b border-border last:border-b-0">
+        <div
+          v-for="b in g.rows"
+          :key="b.name"
+          class="px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5"
+          :data-testid="`breaker-row-${b.name}`"
         >
-          {{ b.state === 'CLOSED' ? 'Isolate' : 'Restore' }}
-        </button>
+          <span
+            class="px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider shrink-0"
+            :class="stateClass(b.state)"
+          >{{ b.state.replace('_', ' ') }}</span>
+          <span class="text-sm text-fg-strong font-mono truncate">{{ b.target }}</span>
+          <span class="text-xs text-fg-muted">{{ why(b) }}</span>
+          <span
+            v-if="b.samples"
+            class="text-xs text-fg-muted font-mono"
+          >{{ b.failures }}/{{ b.samples }} failed</span>
+          <span
+            v-if="b.slowCalls"
+            class="text-xs text-fg-muted font-mono"
+          >{{ b.slowCalls }} slow</span>
+          <button
+            type="button"
+            class="ml-auto px-2 py-1 text-xs border border-border text-fg-strong hover:bg-muted/40 transition-colors disabled:opacity-50"
+            :disabled="loading"
+            @click="b.state === 'CLOSED' ? isolate(b) : restore(b)"
+          >
+            {{ b.state === 'CLOSED' ? 'Isolate' : 'Restore' }}
+          </button>
+        </div>
       </div>
-    </div>
+    </section>
   </div>
 </template>

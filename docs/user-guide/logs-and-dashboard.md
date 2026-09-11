@@ -37,9 +37,11 @@ When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, et
 
 ### Circuit Breakers
 
-One row per guarded subsystem — an LLM provider (`llm`), an MCP server (`mcp`) — with the state
-its breaker is in, why it is there, and how many of its recent calls failed. The panel is absent
-until a breaker exists; they are created the first time a subsystem is called.
+Two groups — **LLM providers** first, then **MCP servers** — with one row per breaker showing
+the state it is in, why it is there, and how many of its recent calls failed. Within each group
+the breakers that are not serving sit at the top, so an open one is never buried under a dozen
+idle servers. The panel is absent until a breaker exists; they are created the first time a
+subsystem is called.
 
 It sits directly above Chat Performance because that is the blind spot it closes. A breaker that
 has opened turns every call away in microseconds, so the latency percentiles below it *improve*

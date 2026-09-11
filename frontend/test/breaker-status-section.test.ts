@@ -56,6 +56,26 @@ describe('BreakerStatusSection', () => {
     expect(wrapper.findAll('button').filter(b => b.text() === 'Restore')).toHaveLength(2)
   })
 
+  it('groups providers before servers and floats the breakers that are not serving', async () => {
+    registerEndpoint('/api/breakers', () => [
+      breaker({ name: 'mcp:alpha', subsystem: 'mcp', target: 'alpha', samples: 0 }),
+      breaker({ name: 'mcp:zulu', subsystem: 'mcp', target: 'zulu', state: 'OPEN', samples: 10, failures: 6, reason: 'FAILURE_RATE' }),
+      breaker({ name: 'llm:openai', target: 'openai' }),
+      breaker({ name: 'llm:anthropic', target: 'anthropic', state: 'HALF_OPEN', reason: 'COOLDOWN_ELAPSED' }),
+    ])
+    const wrapper = await mountSuspended(BreakerStatusSection)
+    await flushPromises()
+
+    const groups = wrapper.findAll('section')
+    expect(groups.map(g => g.find('h3').text())).toEqual(['LLM providers', 'MCP servers'])
+    // Registry order is alphabetical; the panel puts the ones that need attention first.
+    const rowsOf = (g: typeof groups[number]) => g.findAll('[data-testid^="breaker-row-"]').map(r => r.attributes('data-testid'))
+    expect(rowsOf(groups[0]!)).toEqual(['breaker-row-llm:anthropic', 'breaker-row-llm:openai'])
+    expect(rowsOf(groups[1]!)).toEqual(['breaker-row-mcp:zulu', 'breaker-row-mcp:alpha'])
+    // The group heading carries the subsystem now; the rows no longer repeat it.
+    expect(groups[0]!.find('[data-testid="breaker-row-llm:openai"]').text()).not.toMatch(/\bllm\b/)
+  })
+
   it('reports an operator isolation as a decision, not as a provider fault', async () => {
     registerEndpoint('/api/breakers', () => [
       breaker({ state: 'OPEN', samples: 0, failures: 0, reason: 'MANUAL_TRIP', manual: true }),
