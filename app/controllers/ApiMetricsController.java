@@ -724,6 +724,7 @@ public class ApiMetricsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void cleanLoadtest() {
         LoadTestRunner.cleanupConversations();
+        LoadTestRunner.forgetMockBreaker();
         renderJSON(GSON.toJson(new StatusResponse("cleaned")));
     }
 

@@ -2,6 +2,7 @@ package services;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.LlmResilience;
 import llm.ProviderRegistry;
 import models.Agent;
 import okhttp3.MediaType;
@@ -19,6 +20,7 @@ import play.mvc.CookieDataCodec;
 import play.mvc.Scope;
 import services.search.LuceneIndexer;
 import utils.AppClock;
+import utils.CircuitBreakers;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.LatencyStats;
@@ -1070,6 +1072,17 @@ public final class LoadTestRunner {
         } catch (Throwable e) {
             Logger.warn("Loadtest disable failed: %s", e.getMessage());
         }
+        forgetMockBreaker();
+    }
+
+    /**
+     * Drop the mock provider's circuit breaker from the registry (JCLAW-1194). The first mock
+     * call mints {@code llm:loadtest-mock} like any provider, and the dashboard would show it
+     * until restart for a provider that no longer exists. Only the mock's: a real provider's
+     * window describes something the operator is using.
+     */
+    public static void forgetMockBreaker() {
+        CircuitBreakers.remove(LlmResilience.breakerName(LOADTEST_PROVIDER));
     }
 
     /**

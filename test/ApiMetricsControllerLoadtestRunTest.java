@@ -1,5 +1,6 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.LlmResilience;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,8 @@ import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.LoadTestHarness;
+import services.LoadTestRunner;
+import utils.CircuitBreakers;
 
 import java.net.ServerSocket;
 import java.util.HashMap;
@@ -107,6 +110,34 @@ class ApiMetricsControllerLoadtestRunTest extends FunctionalTest {
         assertEquals(1, turn1.get("count").getAsInt());
         assertEquals(2, turn2.get("turn").getAsInt());
         assertEquals(1, turn2.get("count").getAsInt());
+
+        // JCLAW-1194: the run minted the mock provider's breaker; teardown must not leave it
+        // on the dashboard as a row for a provider that no longer exists.
+        assertFalse(CircuitBreakers.snapshot().containsKey(LlmResilience.breakerName(LoadTestRunner.LOADTEST_PROVIDER)),
+                "mock breaker must be gone after the run: " + CircuitBreakers.snapshot().keySet());
+    }
+
+    @Test
+    void teardownAndCleanForgetTheMockBreakerAndOnlyThat() {
+        var mock = LlmResilience.breakerName(LoadTestRunner.LOADTEST_PROVIDER);
+        var real = LlmResilience.breakerName("jclaw1194-real");
+        try {
+            LlmResilience.breakerFor(LoadTestRunner.LOADTEST_PROVIDER);
+            LlmResilience.breakerFor("jclaw1194-real");
+            LoadTestRunner.disable();
+            assertFalse(CircuitBreakers.snapshot().containsKey(mock), "disable() must forget the mock breaker");
+            assertTrue(CircuitBreakers.snapshot().containsKey(real), "a real provider's breaker is not the harness's to drop");
+
+            // The --clean recovery path, for a run the server died partway through.
+            LlmResilience.breakerFor(LoadTestRunner.LOADTEST_PROVIDER);
+            var response = DELETE(authedLoadtestRequest(), "/api/metrics/loadtest/data");
+            assertEquals(200, response.status.intValue(), getContent(response));
+            assertFalse(CircuitBreakers.snapshot().containsKey(mock), "--clean must forget the mock breaker");
+            assertTrue(CircuitBreakers.snapshot().containsKey(real));
+        } finally {
+            CircuitBreakers.remove(real);
+            CircuitBreakers.remove(mock);
+        }
     }
 
     /**
