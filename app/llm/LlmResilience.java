@@ -71,16 +71,21 @@ public final class LlmResilience {
      *
      * <p>The slow-call rule reaches only the streaming path: {@link #guard} reports through
      * {@link CircuitBreaker#recordSuccess()}, which carries no duration and is never slow.
+     *
+     * <p>Sized for a single-operator install, where one exhausted chat can be a twelve-minute
+     * retry loop and a day's traffic is a few dozen calls: a small window, a low minimum, and a
+     * streak rule that opens on the present rather than on the window's history.
      */
     public static CircuitBreaker.Config config() {
         return CircuitBreaker.Config.of(
-                        PlayConfig.intOr("llm.breaker.window", 100),
+                        PlayConfig.intOr("llm.breaker.window", 10),
                         PlayConfig.intOr("llm.breaker.failure-rate", 50) / 100.0,
-                        PlayConfig.intOr("llm.breaker.min-calls", 20),
+                        PlayConfig.intOr("llm.breaker.min-calls", 3),
                         PlayConfig.longOr("llm.breaker.wait-seconds", 60) * 1000L)
                 .withHalfOpenPermits(PlayConfig.intOr("llm.breaker.half-open-probes", 3))
                 .withSlowCalls(PlayConfig.longOr("llm.breaker.stall-seconds", 30) * 1000L,
-                        PlayConfig.intOr("llm.breaker.slow-rate", 50) / 100.0);
+                        PlayConfig.intOr("llm.breaker.slow-rate", 50) / 100.0)
+                .withConsecutiveFailures(PlayConfig.intOr("llm.breaker.consecutive-failures", 3));
     }
 
     public static CircuitBreaker breakerFor(String providerName) {

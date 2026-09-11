@@ -95,10 +95,10 @@ public final class McpConnectionManager {
     private static volatile Duration firstAttemptRequestTimeout = Duration.ofSeconds(120);
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
-    /** JCLAW-1168: tighter than the LLM path because every failing call here costs the
-     *  full {@link #DEFAULT_REQUEST_TIMEOUT} — 10 of 20 recent calls failing is enough. */
+    /** JCLAW-1168: every failing call here costs the full {@link #DEFAULT_REQUEST_TIMEOUT}, and a
+     *  turn rarely makes ten calls to one server, so three timeouts in a row is what opens it. */
     public static final CircuitBreaker.Config BREAKER_CONFIG =
-            CircuitBreaker.Config.of(20, 0.5, 10, 30_000L).withHalfOpenPermits(2);
+            CircuitBreaker.Config.of(10, 0.5, 3, 30_000L).withHalfOpenPermits(2).withConsecutiveFailures(3);
 
     private static final ConcurrentHashMap<String, Entry> connections = new ConcurrentHashMap<>();
     // Reference is reassigned under synchronized ensureScheduler(); the held

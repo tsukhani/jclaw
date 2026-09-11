@@ -90,6 +90,38 @@ class CircuitBreakerTest extends UnitTest {
         var cb = new CircuitBreaker(20, 0.5, 5, 30_000L);
         assertEquals(1, cb.config().halfOpenPermits());
         assertFalse(cb.config().slowCallsEnabled());
+        assertEquals(0, cb.config().consecutiveFailures());
+    }
+
+    // --- consecutive failures -----------------------------------------------
+
+    @Test
+    void aStreakOpensTheBreakerWhileTheRateIsStillBelowThreshold() {
+        var cb = new CircuitBreaker(CircuitBreaker.Config.of(100, 0.5, 100, 60_000).withConsecutiveFailures(3));
+        for (var i = 0; i < 50; i++) cb.recordSuccess();
+        cb.recordFailure();
+        cb.recordFailure();
+        assertEquals(CircuitBreaker.State.CLOSED, cb.state());
+
+        cb.recordFailure();  // 3 in a row; 3/53 is nowhere near 0.5 and minVolume is unmet
+        var stats = cb.stats();
+        assertEquals(CircuitBreaker.State.OPEN, stats.state());
+        assertEquals(CircuitBreaker.Reason.CONSECUTIVE_FAILURES, stats.reason());
+    }
+
+    @Test
+    void aSuccessOrASlowCallBreaksTheStreak() {
+        var cb = new CircuitBreaker(CircuitBreaker.Config.of(100, 0.5, 100, 60_000)
+                .withConsecutiveFailures(3).withSlowCalls(1_000L, 0.9));
+        cb.recordFailure();
+        cb.recordFailure();
+        cb.recordSuccess();
+        cb.recordFailure();
+        cb.recordFailure();
+        cb.recordSuccess(5_000L);  // slow, but it answered
+        cb.recordFailure();
+        cb.recordFailure();
+        assertEquals(CircuitBreaker.State.CLOSED, cb.state(), "never three failures back to back");
     }
 
     // --- half-open permits ---------------------------------------------------

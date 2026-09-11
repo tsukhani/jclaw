@@ -132,12 +132,12 @@ class LlmBreakerTest extends UnitTest {
         var name = "jclaw1167-lowtraffic";
         try {
             // A garbage 200 is a provider fault chat() raises after a single attempt, so this
-            // drives exactly one outcome per chat without spending the retry loop 20 times.
-            for (var i = 0; i < 19; i++) {
+            // drives exactly one outcome per chat without spending the retry loop each time.
+            for (var i = 0; i < 2; i++) {
                 assertInstanceOf(LlmException.class, failingChat(name, new Canned(200, GARBAGE_BODY)));
             }
             assertEquals(CircuitBreaker.State.CLOSED, LlmResilience.breakerFor(name).state(),
-                    "19 outcomes is under the 20-call minimum, so no rate is evaluated yet");
+                    "two outcomes is under both the 3-call minimum and the 3-failure streak");
 
             failingChat(name, new Canned(200, GARBAGE_BODY));
             assertEquals(CircuitBreaker.State.OPEN, LlmResilience.breakerFor(name).state(),
@@ -209,13 +209,34 @@ class LlmBreakerTest extends UnitTest {
     void theDefaultsAreTheOnesApplicationConfDocuments() {
         var config = LlmResilience.config();
 
-        assertEquals(100, config.windowSize());
+        assertEquals(10, config.windowSize());
         assertEquals(0.5, config.failureRateThreshold(), 1e-9);
-        assertEquals(20, config.minVolume());
+        assertEquals(3, config.minVolume());
         assertEquals(60_000L, config.cooldownMillis());
         assertEquals(3, config.halfOpenPermits());
         assertEquals(30_000L, config.slowCallDurationMillis());
         assertEquals(0.5, config.slowCallRateThreshold(), 1e-9);
+        assertEquals(3, config.consecutiveFailures());
+    }
+
+    @Test
+    void aWarmWindowDoesNotHideAnOutageFromTheStreakRule() {
+        var name = "jclaw1167-warm";
+        try {
+            // A day of successes, then the provider dies. The rate rule alone would need as
+            // many failures as there are successes; the streak opens on the present.
+            for (var i = 0; i < 10; i++) chat(name, new Canned(200, GOOD_BODY));
+            for (var i = 0; i < 2; i++) failingChat(name, new Canned(200, GARBAGE_BODY));
+            assertEquals(CircuitBreaker.State.CLOSED, LlmResilience.breakerFor(name).state());
+
+            failingChat(name, new Canned(200, GARBAGE_BODY));
+            var stats = LlmResilience.breakerFor(name).stats();
+            assertEquals(CircuitBreaker.State.OPEN, stats.state());
+            assertEquals(CircuitBreaker.Reason.CONSECUTIVE_FAILURES, stats.reason());
+            assertTrue(stats.failureRate() < 0.5, "the rate rule had not moved: " + stats);
+        } finally {
+            forget(name);
+        }
     }
 
     @Test
@@ -227,7 +248,8 @@ class LlmBreakerTest extends UnitTest {
                 "llm.breaker.wait-seconds", "7",
                 "llm.breaker.half-open-probes", "5",
                 "llm.breaker.stall-seconds", "11",
-                "llm.breaker.slow-rate", "80"), LlmResilience::config);
+                "llm.breaker.slow-rate", "80",
+                "llm.breaker.consecutive-failures", "0"), LlmResilience::config);
 
         assertEquals(13, config.windowSize());
         assertEquals(0.97, config.failureRateThreshold(), 1e-9);
@@ -236,6 +258,7 @@ class LlmBreakerTest extends UnitTest {
         assertEquals(5, config.halfOpenPermits());
         assertEquals(11_000L, config.slowCallDurationMillis());
         assertEquals(0.8, config.slowCallRateThreshold(), 1e-9);
+        assertEquals(0, config.consecutiveFailures(), "zero switches the streak rule off");
     }
 
     private static CircuitBreaker breakerWith(String providerName, Map<String, String> keys) {

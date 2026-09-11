@@ -39,10 +39,15 @@ class McpCircuitBreakerTest extends UnitTest {
     @Test
     void timedOutCallsOpenTheBreakerAndLaterCallsNeverReachTheServer() {
         var breaker = freshBreaker(new FakeNanos());
-        driveFailures(breaker, 10, () -> {
+        driveFailures(breaker, 2, () -> {
             throw new McpException("Request tools/call timed out after PT30S");
         });
-        assertEquals(CircuitBreaker.State.OPEN, breaker.state());
+        assertEquals(CircuitBreaker.State.CLOSED, breaker.state(), "two timeouts is a minute of a turn");
+        driveFailures(breaker, 1, () -> {
+            throw new McpException("Request tools/call timed out after PT30S");
+        });
+        assertEquals(CircuitBreaker.State.OPEN, breaker.state(),
+                "the third opens it: a turn rarely makes ten calls to one server, so ten was never reached");
 
         var invocations = new AtomicInteger();
         assertThrows(McpException.class, () ->
@@ -120,10 +125,11 @@ class McpCircuitBreakerTest extends UnitTest {
         try {
             var config = McpConnectionManager.breaker(name).config();
             assertTrue(CircuitBreakers.find("mcp:" + name).isPresent());
-            assertEquals(20, config.windowSize());
-            assertEquals(10, config.minVolume());
+            assertEquals(10, config.windowSize());
+            assertEquals(3, config.minVolume());
             assertEquals(30_000L, config.cooldownMillis());
             assertEquals(2, config.halfOpenPermits());
+            assertEquals(3, config.consecutiveFailures());
         } finally {
             // What McpConnectionManager.stop() does when a server is deleted or reconfigured.
             assertTrue(CircuitBreakers.remove("mcp:" + name));

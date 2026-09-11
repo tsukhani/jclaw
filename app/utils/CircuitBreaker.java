@@ -11,9 +11,16 @@ import java.util.function.LongSupplier;
  * Minimal thread-safe circuit breaker for guarding a failure-prone subsystem
  * (e.g. a background LLM extraction call, a provider chat call, an MCP server).
  * Trips OPEN when the failure rate — or, when configured, the slow-call rate —
- * over a rolling window of recent outcomes exceeds a threshold; after a cooldown
- * it admits a bounded number of probes (HALF_OPEN) and closes once they all
- * succeed, or re-opens on the first one that does not.
+ * over a rolling window of recent outcomes exceeds a threshold, or when a run of
+ * consecutive failures reaches {@link Config#consecutiveFailures()}; after a
+ * cooldown it admits a bounded number of probes (HALF_OPEN) and closes once they
+ * all succeed, or re-opens on the first one that does not.
+ *
+ * <p>The consecutive-failure rule exists for low-traffic callers. A rate over a
+ * window measures history: from a window full of successes a 50% threshold needs
+ * as many failures as there are successes before it moves, and when one failure
+ * is a twelve-minute retry loop that is hours of a dead dependency. A streak
+ * trips on the present instead.
  *
  * <p>Built for fire-and-forget callers: {@link #allowRequest()} is cheap and
  * never blocks, so an open breaker degrades the protected work to a no-op rather
@@ -41,7 +48,7 @@ public final class CircuitBreaker {
 
     /** Why the breaker moved. Carried on a {@link Transition} so a listener can log it. */
     public enum Reason {
-        FAILURE_RATE, SLOW_CALL_RATE, COOLDOWN_ELAPSED,
+        FAILURE_RATE, SLOW_CALL_RATE, CONSECUTIVE_FAILURES, COOLDOWN_ELAPSED,
         PROBE_SUCCEEDED, PROBE_FAILED, PROBE_SLOW,
         MANUAL_TRIP, MANUAL_RESET;
 
@@ -66,9 +73,11 @@ public final class CircuitBreaker {
      * @param halfOpenPermits        probes admitted per HALF_OPEN window; all must succeed to close
      * @param slowCallDurationMillis a recorded duration at or above this is slow; 0 disables
      * @param slowCallRateThreshold  trip OPEN when slow/samples reaches this; 0 disables
+     * @param consecutiveFailures    trip OPEN on this many failures in a row, whatever the rate; 0 disables
      */
     public record Config(int windowSize, double failureRateThreshold, int minVolume, long cooldownMillis,
-                         int halfOpenPermits, long slowCallDurationMillis, double slowCallRateThreshold) {
+                         int halfOpenPermits, long slowCallDurationMillis, double slowCallRateThreshold,
+                         int consecutiveFailures) {
 
         public Config {
             if (windowSize < 1) throw new IllegalArgumentException("windowSize must be >= 1");
@@ -76,21 +85,27 @@ public final class CircuitBreaker {
             cooldownMillis = Math.max(0L, cooldownMillis);
             halfOpenPermits = Math.max(1, halfOpenPermits);
             slowCallDurationMillis = Math.max(0L, slowCallDurationMillis);
+            consecutiveFailures = Math.max(0, consecutiveFailures);
         }
 
-        /** The pre-JCLAW-1171 shape: one half-open probe, no slow-call detection. */
+        /** The pre-JCLAW-1171 shape: one half-open probe, no slow-call detection, no streak rule. */
         public static Config of(int windowSize, double failureRateThreshold, int minVolume, long cooldownMillis) {
-            return new Config(windowSize, failureRateThreshold, minVolume, cooldownMillis, 1, 0L, 0.0);
+            return new Config(windowSize, failureRateThreshold, minVolume, cooldownMillis, 1, 0L, 0.0, 0);
         }
 
         public Config withHalfOpenPermits(int permits) {
             return new Config(windowSize, failureRateThreshold, minVolume, cooldownMillis,
-                    permits, slowCallDurationMillis, slowCallRateThreshold);
+                    permits, slowCallDurationMillis, slowCallRateThreshold, consecutiveFailures);
         }
 
         public Config withSlowCalls(long durationMillis, double rateThreshold) {
             return new Config(windowSize, failureRateThreshold, minVolume, cooldownMillis,
-                    halfOpenPermits, durationMillis, rateThreshold);
+                    halfOpenPermits, durationMillis, rateThreshold, consecutiveFailures);
+        }
+
+        public Config withConsecutiveFailures(int failures) {
+            return new Config(windowSize, failureRateThreshold, minVolume, cooldownMillis,
+                    halfOpenPermits, slowCallDurationMillis, slowCallRateThreshold, failures);
         }
 
         public boolean slowCallsEnabled() {
@@ -125,6 +140,7 @@ public final class CircuitBreaker {
     private int cursor;               // next write index
     private int failures;             // FAIL samples currently in the window
     private int slowCalls;            // SLOW samples currently in the window
+    private int streak;               // FAIL samples in a row, ending at the newest
 
     private State state = State.CLOSED;
     private @Nullable Reason lastReason;
@@ -238,7 +254,14 @@ public final class CircuitBreaker {
             return probeReported(outcome);
         }
         push(outcome);
-        if (outcome == OK || state != State.CLOSED || count < config.minVolume()) {
+        streak = outcome == FAIL ? streak + 1 : 0;
+        if (outcome == OK || state != State.CLOSED) {
+            return null;
+        }
+        if (config.consecutiveFailures() > 0 && streak >= config.consecutiveFailures()) {
+            return toOpen(Reason.CONSECUTIVE_FAILURES);
+        }
+        if (count < config.minVolume()) {
             return null;
         }
         if ((double) failures / count >= config.failureRateThreshold()) {
@@ -283,6 +306,7 @@ public final class CircuitBreaker {
         state = State.OPEN;
         lastReason = reason;
         openedAtNanos = nanoTime.getAsLong();
+        streak = 0;
         halfOpenInFlight = 0;
         halfOpenSuccesses = 0;
         return new Transition(from, state, reason, stats());
@@ -296,6 +320,7 @@ public final class CircuitBreaker {
         cursor = 0;
         failures = 0;
         slowCalls = 0;
+        streak = 0;
         halfOpenInFlight = 0;
         halfOpenSuccesses = 0;
         return new Transition(from, state, reason, stats());
