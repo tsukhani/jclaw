@@ -352,22 +352,23 @@ public final class McpConnectionManager {
      */
     public static CallToolResult guardedCall(CircuitBreaker breaker, String serverName, McpCall call)
             throws IOException, McpException {
-        if (!breaker.allowRequest()) throw openBreakerFailure(breaker, serverName);
+        var admission = breaker.admit();
+        if (!admission.allowed()) throw openBreakerFailure(breaker, serverName);
         var reported = false;
         try {
             var result = call.invoke();
-            breaker.recordSuccess();
+            breaker.recordSuccess(0L, admission.probeWindow());
             reported = true;
             return result;
         } catch (IOException | McpException e) {
-            breaker.recordFailure();
+            breaker.recordFailure(admission.probeWindow());
             reported = true;
             throw e;
         } finally {
             // JCLAW-1185: a HALF_OPEN probe holds a permit until it reports. A throwable this
             // method does not classify — a parse failure on a reply that did arrive — must still
             // hand it back, or the breaker can never gather the successes it needs to close.
-            if (!reported && breaker.state() == CircuitBreaker.State.HALF_OPEN) breaker.recordSuccess();
+            if (!reported && admission.probe()) breaker.recordSuccess(0L, admission.probeWindow());
         }
     }
 

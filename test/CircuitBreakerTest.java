@@ -124,6 +124,68 @@ class CircuitBreakerTest extends UnitTest {
         assertEquals(CircuitBreaker.State.CLOSED, cb.state(), "never three failures back to back");
     }
 
+    // --- probe windows (JCLAW-1186) ------------------------------------------
+
+    @Test
+    void aProbeFromAnEarlierWindowNeitherClosesNorReopensTheCurrentOne() {
+        var nanos = new FakeNanos();
+        var cb = openedBreaker(CircuitBreaker.Config.of(4, 0.5, 1, 1_000).withHalfOpenPermits(2), nanos);
+        nanos.advanceMillis(1_000);
+        var a = cb.admit();
+        var b = cb.admit();
+        assertTrue(a.probe() && b.probe());
+        cb.recordFailure(b.probeWindow());   // re-opens it while A is still out
+        assertEquals(CircuitBreaker.State.OPEN, cb.state());
+
+        nanos.advanceMillis(1_000);
+        var c = cb.admit();
+        assertTrue(c.probe());
+        assertTrue(a.probeWindow() != c.probeWindow(), "a fresh HALF_OPEN window has a fresh stamp");
+
+        // A's outcome lands now — with the MCP tuning the cooldown equals the request timeout,
+        // so this is reachable. It is evidence about the server, not about this window's probes.
+        cb.recordSuccess(0L, a.probeWindow());
+        assertEquals(CircuitBreaker.State.HALF_OPEN, cb.state(), "a stale success does not close it");
+        cb.recordFailure(a.probeWindow());
+        assertEquals(CircuitBreaker.State.HALF_OPEN, cb.state(), "a stale failure does not re-open it");
+
+        cb.recordSuccess(0L, c.probeWindow());
+        assertEquals(CircuitBreaker.State.HALF_OPEN, cb.state(), "one of two permits has reported");
+        var d = cb.admit();
+        assertTrue(d.allowed(), "the stale reports consumed none of this window's permits");
+        cb.recordSuccess(0L, d.probeWindow());
+        assertEquals(CircuitBreaker.State.CLOSED, cb.state());
+    }
+
+    @Test
+    void aCallAdmittedWhileClosedIsNotAProbeWhenItReportsDuringHalfOpen() {
+        var nanos = new FakeNanos();
+        var cb = new CircuitBreaker(CircuitBreaker.Config.of(4, 0.5, 1, 1_000), nanos);
+        var early = cb.admit();
+        assertFalse(early.probe());
+        cb.recordFailure();
+        assertEquals(CircuitBreaker.State.OPEN, cb.state());
+
+        nanos.advanceMillis(1_000);
+        var probe = cb.admit();
+        assertTrue(probe.probe());
+        cb.recordSuccess(0L, early.probeWindow());
+        assertEquals(CircuitBreaker.State.HALF_OPEN, cb.state(), "the early call's success is not the probe's");
+        cb.recordSuccess(0L, probe.probeWindow());
+        assertEquals(CircuitBreaker.State.CLOSED, cb.state());
+    }
+
+    @Test
+    void aTokenLessReportStillCountsAgainstTheCurrentWindow() {
+        // MemoryAutoCapture and the older tests: allowRequest() and recordSuccess() with no stamp.
+        var nanos = new FakeNanos();
+        var cb = openedBreaker(CircuitBreaker.Config.of(4, 0.5, 1, 1_000), nanos);
+        nanos.advanceMillis(1_000);
+        assertTrue(cb.allowRequest());
+        cb.recordSuccess();
+        assertEquals(CircuitBreaker.State.CLOSED, cb.state());
+    }
+
     // --- half-open permits ---------------------------------------------------
 
     @Test

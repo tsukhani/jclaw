@@ -26,6 +26,9 @@ import java.util.function.LongSupplier;
  * never blocks, so an open breaker degrades the protected work to a no-op rather
  * than queueing or throwing. Callers report the outcome back via
  * {@link #recordSuccess()} / {@link #recordSuccess(long)} / {@link #recordFailure()}.
+ * A caller that can hold state across the call should use {@link #admit()} and the
+ * stamped reports instead, so a probe whose outcome lands after the breaker has
+ * re-opened and re-entered HALF_OPEN is not counted against the new window.
  *
  * <p>The window is a fixed-size ring of outcomes (ok / slow / fail). A rate is
  * only evaluated once at least {@code minVolume} samples have accrued, so a
@@ -131,6 +134,29 @@ public final class CircuitBreaker {
 
     public record Transition(State from, State to, Reason reason, Stats stats) {}
 
+    /**
+     * The answer to {@link #admit()}.
+     *
+     * @param allowed     whether the call may proceed
+     * @param probeWindow the HALF_OPEN window that admitted it, to be carried back on the
+     *                    report; {@link #NOT_A_PROBE} for a call admitted while CLOSED or refused
+     */
+    public record Admission(boolean allowed, int probeWindow) {
+
+        public static final int NOT_A_PROBE = 0;
+
+        static final Admission PLAIN = new Admission(true, NOT_A_PROBE);
+        static final Admission REFUSED = new Admission(false, NOT_A_PROBE);
+
+        /** Whether this admission holds a HALF_OPEN permit that an outcome must hand back. */
+        public boolean probe() {
+            return probeWindow != NOT_A_PROBE;
+        }
+    }
+
+    /** The stamp a token-less report carries: it counts against whatever HALF_OPEN window is current. */
+    public static final int ANY_WINDOW = -1;
+
     private final Config config;
     private final LongSupplier nanoTime;
     private final long cooldownNanos;
@@ -147,6 +173,7 @@ public final class CircuitBreaker {
     private long openedAtNanos;
     private int halfOpenInFlight;     // probes admitted and not yet reported
     private int halfOpenSuccesses;    // probes that came back ok this HALF_OPEN window
+    private int probeWindow;          // HALF_OPEN entries so far; the stamp on a probe's admission
 
     private volatile @Nullable Consumer<Transition> listener;
 
@@ -181,20 +208,31 @@ public final class CircuitBreaker {
      *         {@link Config#halfOpenPermits()}.
      */
     public boolean allowRequest() {
+        return admit().allowed();
+    }
+
+    /**
+     * {@link #allowRequest()} with the stamp a HALF_OPEN permit needs (JCLAW-1186): report the
+     * outcome through {@link #recordSuccess(long, int)} or {@link #recordFailure(int)} with
+     * {@link Admission#probeWindow()}, and a probe that reports after the breaker has re-opened
+     * and re-entered HALF_OPEN is pushed as an ordinary sample rather than counted as one of
+     * the new window's probes.
+     */
+    public Admission admit() {
         Transition transition = null;
-        boolean allowed;
+        Admission admission;
         synchronized (this) {
             if (state == State.OPEN && nanoTime.getAsLong() - openedAtNanos >= cooldownNanos) {
                 transition = toHalfOpen();
             }
-            allowed = switch (state) {
-                case CLOSED -> true;
-                case HALF_OPEN -> takePermit();
-                case OPEN -> false;
+            admission = switch (state) {
+                case CLOSED -> Admission.PLAIN;
+                case HALF_OPEN -> takePermit() ? new Admission(true, probeWindow) : Admission.REFUSED;
+                case OPEN -> Admission.REFUSED;
             };
         }
         dispatch(transition);
-        return allowed;
+        return admission;
     }
 
     public void recordSuccess() {
@@ -203,18 +241,28 @@ public final class CircuitBreaker {
 
     /** @param durationMillis how long the call took; at or above the threshold it is a slow call, not a failure. */
     public void recordSuccess(long durationMillis) {
+        recordSuccess(durationMillis, ANY_WINDOW);
+    }
+
+    /** @param probeWindow the {@link Admission#probeWindow()} the call was admitted with */
+    public void recordSuccess(long durationMillis, int probeWindow) {
         var slow = config.slowCallsEnabled() && durationMillis >= config.slowCallDurationMillis();
         Transition transition;
         synchronized (this) {
-            transition = recordOutcome(slow ? SLOW : OK);
+            transition = recordOutcome(slow ? SLOW : OK, probeWindow);
         }
         dispatch(transition);
     }
 
     public void recordFailure() {
+        recordFailure(ANY_WINDOW);
+    }
+
+    /** @param probeWindow the {@link Admission#probeWindow()} the call was admitted with */
+    public void recordFailure(int probeWindow) {
         Transition transition;
         synchronized (this) {
-            transition = recordOutcome(FAIL);
+            transition = recordOutcome(FAIL, probeWindow);
         }
         dispatch(transition);
     }
@@ -249,10 +297,12 @@ public final class CircuitBreaker {
         return config;
     }
 
-    private @Nullable Transition recordOutcome(byte outcome) {
-        if (state == State.HALF_OPEN) {
+    private @Nullable Transition recordOutcome(byte outcome, int window) {
+        if (state == State.HALF_OPEN && (window == ANY_WINDOW || window == probeWindow)) {
             return probeReported(outcome);
         }
+        // Stamped with another window, or with none from a call admitted while CLOSED: evidence
+        // about the subsystem, but not about this window's probes.
         push(outcome);
         streak = outcome == FAIL ? streak + 1 : 0;
         if (outcome == OK || state != State.CLOSED) {
@@ -330,6 +380,7 @@ public final class CircuitBreaker {
         var from = state;
         state = State.HALF_OPEN;
         lastReason = Reason.COOLDOWN_ELAPSED;
+        probeWindow++;
         halfOpenInFlight = 0;
         halfOpenSuccesses = 0;
         return new Transition(from, state, Reason.COOLDOWN_ELAPSED, stats());

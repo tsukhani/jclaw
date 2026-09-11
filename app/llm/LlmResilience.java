@@ -162,18 +162,19 @@ public final class LlmResilience {
      */
     public static <T> T guard(String providerName, Supplier<T> call) {
         var breaker = breakerFor(providerName);
-        if (!breaker.allowRequest()) throw openBreakerFailure(providerName);
+        var admission = breaker.admit();
+        if (!admission.allowed()) throw openBreakerFailure(providerName);
         var reported = false;
         try {
             var result = call.get();
-            breaker.recordSuccess();
+            breaker.recordSuccess(0L, admission.probeWindow());
             reported = true;
             return result;
         } catch (LlmException e) {
             // JCLAW-1166: a ClientError is a request this codebase got wrong, so charging it to
             // the provider would trip the breaker on our own bug rather than on an outage.
             if (!(e instanceof LlmException.ClientError)) {
-                breaker.recordFailure();
+                breaker.recordFailure(admission.probeWindow());
                 reported = true;
             }
             throw e;
@@ -181,7 +182,7 @@ public final class LlmResilience {
             // A HALF_OPEN probe holds a permit until it reports an outcome; stranding one
             // wedges the breaker shut for good, since nothing re-enters HALF_OPEN from
             // HALF_OPEN. A provider that answered 4xx is answering, so report success.
-            if (!reported && breaker.state() == CircuitBreaker.State.HALF_OPEN) breaker.recordSuccess();
+            if (!reported && admission.probe()) breaker.recordSuccess(0L, admission.probeWindow());
         }
     }
 
@@ -193,19 +194,25 @@ public final class LlmResilience {
      */
     public static @Nullable StreamGuard beginStream(String providerName) {
         var breaker = breakerFor(providerName);
-        if (!breaker.allowRequest()) return null;
-        var guard = new StreamGuard(breaker, System::nanoTime, firstChunkBudgetNanos(), stallAbortBudgetNanos());
+        var admission = breaker.admit();
+        if (!admission.allowed()) return null;
+        var guard = new StreamGuard(breaker, System::nanoTime, firstChunkBudgetNanos(), stallAbortBudgetNanos(),
+                admission.probeWindow());
         if (guard.stallBudgetNanos > 0L || guard.firstChunkBudgetNanos > 0L || guard.stallAbortNanos > 0L) {
             watch(guard);
         }
         return guard;
     }
 
-    /** Test seam: the same guard on a caller-supplied monotonic source, so a stall test needs no sleep. */
+    /**
+     * Test seam: the same guard on a caller-supplied monotonic source, so a stall test needs no
+     * sleep. It reports token-less, against whichever HALF_OPEN window is current, so a test can
+     * take the permit with {@code allowRequest()} itself.
+     */
     public static StreamGuard streamGuardForTest(CircuitBreaker breaker, LongSupplier nanoTime,
                                                  long firstChunkBudgetMillis, long stallAbortMillis) {
         return new StreamGuard(breaker, nanoTime, firstChunkBudgetMillis * 1_000_000L,
-                stallAbortMillis * 1_000_000L);
+                stallAbortMillis * 1_000_000L, CircuitBreaker.ANY_WINDOW);
     }
 
     private static void watch(StreamGuard guard) {
@@ -262,6 +269,7 @@ public final class LlmResilience {
         private final long stallAbortNanos;
         private final long firstChunkBudgetNanos;
         private final long dispatchNanos;
+        private final int probeWindow;
 
         private final AtomicBoolean reported = new AtomicBoolean();   // one breaker outcome
         private final AtomicBoolean retired = new AtomicBoolean();    // off the sweep, one release at most
@@ -272,11 +280,12 @@ public final class LlmResilience {
         private volatile @Nullable LongConsumer abandon;
 
         private StreamGuard(CircuitBreaker breaker, LongSupplier nanoTime, long firstChunkBudgetNanos,
-                            long stallAbortNanos) {
+                            long stallAbortNanos, int probeWindow) {
             this.breaker = breaker;
             this.nanoTime = nanoTime;
             this.firstChunkBudgetNanos = firstChunkBudgetNanos;
             this.stallAbortNanos = stallAbortNanos;
+            this.probeWindow = probeWindow;
             this.dispatchNanos = nanoTime.getAsLong();
             this.stallBudgetNanos = breaker.config().slowCallsEnabled()
                     ? breaker.config().slowCallDurationMillis() * 1_000_000L
@@ -305,7 +314,7 @@ public final class LlmResilience {
         public void succeeded() {
             fold(nanoTime.getAsLong());
             retire();
-            if (claim()) breaker.recordSuccess(worstGapNanos / 1_000_000L);
+            if (claim()) breaker.recordSuccess(worstGapNanos / 1_000_000L, probeWindow);
         }
 
         /** The stream failed: one failure, unless it failed on a request this codebase got wrong. */
@@ -315,10 +324,16 @@ public final class LlmResilience {
             if (error instanceof LlmException.ClientError) {
                 // The 4xx rule from guard(), with the same HALF_OPEN caveat: a provider that
                 // answered is answering, and its probe must hand the permit back either way.
-                if (breaker.state() == CircuitBreaker.State.HALF_OPEN) breaker.recordSuccess();
+                if (holdsPermit()) breaker.recordSuccess(0L, probeWindow);
                 return;
             }
-            breaker.recordFailure();
+            breaker.recordFailure(probeWindow);
+        }
+
+        private boolean holdsPermit() {
+            return probeWindow == CircuitBreaker.ANY_WINDOW
+                    ? breaker.state() == CircuitBreaker.State.HALF_OPEN
+                    : probeWindow != CircuitBreaker.Admission.NOT_A_PROBE;
         }
 
         /**
@@ -341,12 +356,12 @@ public final class LlmResilience {
             // Unlike the silent case this charges whether or not anyone installed a release: the
             // stream did deliver content, so the breaker learns something either way.
             var charged = stallBudgetNanos > 0L && gap >= stallBudgetNanos && claim();
-            if (charged) breaker.recordSuccess(gap / 1_000_000L);
+            if (charged) breaker.recordSuccess(gap / 1_000_000L, probeWindow);
             var release = abandon;
             if (stallAbortNanos > 0L && gap >= stallAbortNanos && release != null && retire()) {
                 // An abort budget set under the stall budget still owes the stream its one outcome.
                 if (claim()) {
-                    breaker.recordSuccess(gap / 1_000_000L);
+                    breaker.recordSuccess(gap / 1_000_000L, probeWindow);
                     charged = true;
                 }
                 release.accept(gap / 1_000_000L);
@@ -361,7 +376,7 @@ public final class LlmResilience {
             if (silent < firstChunkBudgetNanos || !claim()) return false;
             // A failure rather than a slow success: nothing succeeded, and pinning it to the
             // slow-call rate would put the unbounded hang back behind llm.breaker.stall-seconds.
-            breaker.recordFailure();
+            breaker.recordFailure(probeWindow);
             retire();
             release.accept(silent / 1_000_000L);
             return true;
