@@ -490,11 +490,12 @@ public final class McpConnectionManager {
             return;
         }
 
-        // JCLAW-288: the first attempt gets cold-cache install headroom (see
+        // JCLAW-288: the first attempt's handshake gets cold-cache install headroom (see
         // firstAttemptRequestTimeout); by the second the cache is warm or there's a real
-        // problem, and a long timeout would only delay the failure signal.
-        var requestTimeout = (attempt == 0) ? firstAttemptRequestTimeout : DEFAULT_REQUEST_TIMEOUT;
-        var client = new McpClient(server.name, transport, clientVersion(), requestTimeout);
+        // problem, and a long timeout would only delay the failure signal. JCLAW-1191: the
+        // headroom is the handshake's alone — every tool call gets the steady-state budget.
+        var handshakeTimeout = (attempt == 0) ? firstAttemptRequestTimeout : DEFAULT_REQUEST_TIMEOUT;
+        var client = new McpClient(server.name, transport, clientVersion(), handshakeTimeout, DEFAULT_REQUEST_TIMEOUT);
         client.onToolsChanged(tools -> republishTools(server.name, tools));
         try {
             client.connect();

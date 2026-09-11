@@ -49,6 +49,9 @@ public class McpClient implements AutoCloseable {
     private final String name;
     private final McpTransport transport;
     private final String clientVersion;
+    /** Budget for the connect handshake — initialize and the first tools/list — which a cold server may take minutes to answer. */
+    private final Duration handshakeTimeout;
+    /** Budget for every request after the handshake, tool calls included. */
     private final Duration requestTimeout;
 
     private final AtomicLong nextId = new AtomicLong(1);
@@ -69,12 +72,27 @@ public class McpClient implements AutoCloseable {
         this(name, transport, clientVersion, DEFAULT_REQUEST_TIMEOUT);
     }
 
-    /** Takes ownership of {@code transport}: {@link #close()} closes it. */
+    /** One budget for the handshake and every request alike. */
     @MustBeClosed
     public McpClient(String name, McpTransport transport, String clientVersion, Duration requestTimeout) {
+        this(name, transport, clientVersion, requestTimeout, requestTimeout);
+    }
+
+    /**
+     * Takes ownership of {@code transport}: {@link #close()} closes it.
+     *
+     * <p>JCLAW-1191: the two budgets are separate because a cold server legitimately takes
+     * minutes to answer its first request, but a tool call that takes minutes is a hung server —
+     * and a client that kept the handshake budget for every request made the per-server breaker
+     * wait three of them before it could fail fast.
+     */
+    @MustBeClosed
+    public McpClient(String name, McpTransport transport, String clientVersion,
+                     Duration handshakeTimeout, Duration requestTimeout) {
         this.name = name;
         this.transport = transport;
         this.clientVersion = clientVersion;
+        this.handshakeTimeout = handshakeTimeout;
         this.requestTimeout = requestTimeout;
     }
 
@@ -104,7 +122,7 @@ public class McpClient implements AutoCloseable {
             transport.start(this::onInbound, this::onTransportError);
             doInitialize();
             sendNotification("notifications/initialized", null);
-            cachedTools = fetchTools();
+            cachedTools = fetchTools(handshakeTimeout);
             state.set(State.READY);
         } catch (RuntimeException | IOException e) {
             lastError = e.getMessage();
@@ -159,15 +177,15 @@ public class McpClient implements AutoCloseable {
         info.addProperty("name", CLIENT_NAME);
         info.addProperty("version", clientVersion);
         params.add("clientInfo", info);
-        var resp = sendRequest("initialize", params);
+        var resp = sendRequest("initialize", params, handshakeTimeout);
         if (resp.isError()) {
             throw new McpException(resp.error().code(),
                     "initialize failed: " + resp.error().message());
         }
     }
 
-    private List<McpToolDef> fetchTools() throws IOException, McpException {
-        var resp = sendRequest("tools/list", new JsonObject());
+    private List<McpToolDef> fetchTools(Duration timeout) throws IOException, McpException {
+        var resp = sendRequest("tools/list", new JsonObject(), timeout);
         if (resp.isError()) {
             throw new McpException(resp.error().code(),
                     "tools/list failed: " + resp.error().message());
@@ -184,6 +202,11 @@ public class McpClient implements AutoCloseable {
     }
 
     private JsonRpc.Response sendRequest(String method, Object params) throws IOException, McpException {
+        return sendRequest(method, params, requestTimeout);
+    }
+
+    private JsonRpc.Response sendRequest(String method, Object params, Duration timeout)
+            throws IOException, McpException {
         var id = nextId.getAndIncrement();
         var req = new JsonRpc.Request(id, method, params);
         var future = new CompletableFuture<JsonRpc.Response>();
@@ -195,10 +218,10 @@ public class McpClient implements AutoCloseable {
             throw e;
         }
         try {
-            return future.get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             pending.remove(id);
-            throw new McpException("Request " + method + " timed out after " + requestTimeout, e);
+            throw new McpException("Request " + method + " timed out after " + timeout, e);
         } catch (InterruptedException e) {
             pending.remove(id);
             Thread.currentThread().interrupt();
@@ -238,7 +261,7 @@ public class McpClient implements AutoCloseable {
             // Refresh out-of-band; never block the read thread on a network round-trip.
             Thread.startVirtualThread(() -> {
                 try {
-                    var refreshed = fetchTools();
+                    var refreshed = fetchTools(requestTimeout);
                     cachedTools = refreshed;
                     onToolsChanged.accept(refreshed);
                 } catch (Exception e) {

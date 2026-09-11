@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -85,6 +86,24 @@ class McpClientTest extends UnitTest {
     }
 
     // ==================== callTool ====================
+
+    // JCLAW-1191: the generous first-connect budget belongs to the handshake alone. A client
+    // that kept it for every request made a hung server cost two minutes per tool call.
+    @Test
+    void aToolCallUsesTheRequestBudgetNotTheHandshakeBudget() throws Exception {
+        transport = new FakeTransport();
+        try (var client = new McpClient("test", transport, "0.0.1", Duration.ofSeconds(30), Duration.ofMillis(300))) {
+            completeHandshake(client);
+
+            // The server never answers the call.
+            var t0 = System.nanoTime();
+            var ex = assertThrows(McpException.class, () -> client.callTool("echo", new JsonObject()));
+            var elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+
+            assertTrue(ex.getMessage().contains("timed out after PT0.3S"), ex.getMessage());
+            assertTrue(elapsedMs < 5_000, "the 30 s handshake budget must not apply to a tool call: " + elapsedMs + " ms");
+        }
+    }
 
     @Test
     void callToolReturnsTextContent() throws Exception {
