@@ -347,22 +347,52 @@ public final class McpConnectionManager {
      *
      * <p>Public so a test can drive the gate against a fake clock without a live server.
      *
-     * @throws McpException immediately, without invoking {@code call}, while the breaker is open
+     * @throws McpException immediately, without invoking {@code call}, while the breaker is open;
+     *                      {@link McpException.ManuallyIsolated} when the operator opened it
      */
     public static CallToolResult guardedCall(CircuitBreaker breaker, String serverName, McpCall call)
             throws IOException, McpException {
-        if (!breaker.allowRequest()) {
-            throw new McpException("MCP server '" + serverName
-                    + "' is failing fast: too many recent tool-call failures");
-        }
+        if (!breaker.allowRequest()) throw openBreakerFailure(breaker, serverName);
+        var reported = false;
         try {
             var result = call.invoke();
             breaker.recordSuccess();
+            reported = true;
             return result;
         } catch (IOException | McpException e) {
             breaker.recordFailure();
+            reported = true;
             throw e;
+        } finally {
+            // JCLAW-1185: a HALF_OPEN probe holds a permit until it reports. A throwable this
+            // method does not classify — a parse failure on a reply that did arrive — must still
+            // hand it back, or the breaker can never gather the successes it needs to close.
+            if (!reported && breaker.state() == CircuitBreaker.State.HALF_OPEN) breaker.recordSuccess();
         }
+    }
+
+    /** JCLAW-1187: an operator's isolation is a different fact from the server failing, and says so. */
+    private static McpException openBreakerFailure(CircuitBreaker breaker, String serverName) {
+        if (breaker.stats().reason() == CircuitBreaker.Reason.MANUAL_TRIP) {
+            return new McpException.ManuallyIsolated("MCP server '" + serverName
+                    + "' was isolated by the operator: not calling it until it is restored");
+        }
+        return new McpException("MCP server '" + serverName
+                + "' is failing fast: too many recent tool-call failures");
+    }
+
+    /**
+     * What a successful (re)connect does to the server's breaker: the dead client's failures
+     * are no evidence about the fresh one, so an autonomous open is cleared — but an operator's
+     * trip is the operator's to lift (JCLAW-1187). Public so a test can drive it without a
+     * live server.
+     */
+    public static void clearUnlessIsolated(CircuitBreaker breaker) {
+        var stats = breaker.stats();
+        if (stats.state() == CircuitBreaker.State.CLOSED || stats.reason() == CircuitBreaker.Reason.MANUAL_TRIP) {
+            return;
+        }
+        breaker.reset();
     }
 
     /**
@@ -489,10 +519,8 @@ public final class McpConnectionManager {
             entry.status = McpServer.Status.CONNECTED;
             entry.lastError = null;
             entry.attempts = 0;
-            // The watchdog reconnect path never goes through stop(), so clear the breaker
-            // here too: the dead client's failures are no evidence about this fresh one.
-            var breaker = breaker(server.name);
-            if (breaker.state() != CircuitBreaker.State.CLOSED) breaker.reset();
+            // The watchdog reconnect path never goes through stop(), so clear the breaker here too.
+            clearUnlessIsolated(breaker(server.name));
             persistStatus(server.id, McpServer.Status.CONNECTED, null);
             persistTimestamp(server.id, "lastConnectedAt");
             EventLogger.info(CATEGORY_CONNECT,

@@ -96,6 +96,58 @@ class McpCircuitBreakerTest extends UnitTest {
     }
 
     @Test
+    void anUnclassifiedProbeFailureHandsItsPermitBack() throws Exception {
+        var nanos = new FakeNanos();
+        var breaker = freshBreaker(nanos);
+        driveFailures(breaker, 3, () -> { throw new McpException("hung"); });
+        nanos.advanceMillis(30_000);
+
+        // JCLAW-1185: a reply that arrived but did not parse is neither of the two exceptions
+        // the gate classifies. Before the fix its permit stayed out, and with two permits the
+        // breaker could gather at most one success — never the two it needs to close.
+        assertThrows(IllegalStateException.class, () -> McpConnectionManager.guardedCall(
+                breaker, "hung", () -> { throw new IllegalStateException("unparseable result"); }));
+        assertEquals(CircuitBreaker.State.HALF_OPEN, breaker.state());
+
+        McpConnectionManager.guardedCall(breaker, "hung", () -> OK);
+        assertEquals(CircuitBreaker.State.CLOSED, breaker.state(),
+                "the server answered the first probe, so it counted as one; the second closes it");
+    }
+
+    @Test
+    void aManualTripIsReportedAsTheOperatorsDecision() {
+        var breaker = freshBreaker(new FakeNanos());
+        breaker.trip();
+
+        var isolated = assertThrows(McpException.ManuallyIsolated.class,
+                () -> McpConnectionManager.guardedCall(breaker, "github", () -> OK));
+        assertTrue(isolated.getMessage().contains("isolated by the operator"), isolated.getMessage());
+
+        // The distinction lasts as long as the trip does: opened on evidence, it says so.
+        breaker.reset();
+        driveFailures(breaker, 3, () -> { throw new McpException("hung"); });
+        var tripped = assertThrows(McpException.class,
+                () -> McpConnectionManager.guardedCall(breaker, "github", () -> OK));
+        assertFalse(tripped instanceof McpException.ManuallyIsolated);
+        assertTrue(tripped.getMessage().contains("failing fast"), tripped.getMessage());
+    }
+
+    @Test
+    void aReconnectClearsAnAutonomousOpenButNotAnOperatorsTrip() {
+        var breaker = freshBreaker(new FakeNanos());
+        driveFailures(breaker, 3, () -> { throw new McpException("hung"); });
+        assertEquals(CircuitBreaker.State.OPEN, breaker.state());
+        McpConnectionManager.clearUnlessIsolated(breaker);
+        assertEquals(CircuitBreaker.State.CLOSED, breaker.state(),
+                "the dead client's failures are no evidence about the fresh one");
+
+        breaker.trip();
+        McpConnectionManager.clearUnlessIsolated(breaker);
+        assertEquals(CircuitBreaker.State.OPEN, breaker.state(), "the operator's trip is the operator's to lift");
+        assertEquals(CircuitBreaker.Reason.MANUAL_TRIP, breaker.stats().reason());
+    }
+
+    @Test
     void oneServersBreakerLeavesEveryOtherServerAlone() throws Exception {
         // play1 runs test classes concurrently in one JVM — own these names, then drop them.
         var broken = "McpCircuitBreakerTest-broken";
