@@ -13,6 +13,8 @@ import type { Message } from '~/types/api'
 export interface UseChatUsageMeter {
   shouldShowModelSwitchIndicator: (idx: number) => boolean
   latestAssistantUsage: ComputedRef<MessageUsage | null>
+  /** What the context meter fills with: the latest turn's final call, not its per-round sum. */
+  contextPromptTokens: ComputedRef<number>
   conversationCumulativeTokens: ComputedRef<number>
   conversationCostSummary: Ref<{ label: string, tooltip: string, turnCount: number } | null>
 }
@@ -61,6 +63,13 @@ export function useChatUsageMeter(
       if (m?.role === 'assistant' && m.usage) return m.usage
     }
     return null
+  })
+
+  // JCLAW-1201: `prompt` sums every call of a tool turn, so on an 8-round turn it read as
+  // 8x the context. Rows persisted before the field exists fall back to the sum.
+  const contextPromptTokens = computed(() => {
+    const u = latestAssistantUsage.value
+    return u?.lastPrompt ?? u?.prompt ?? 0
   })
 
   /**
@@ -120,6 +129,7 @@ export function useChatUsageMeter(
   return {
     shouldShowModelSwitchIndicator,
     latestAssistantUsage,
+    contextPromptTokens,
     conversationCumulativeTokens,
     conversationCostSummary,
   }

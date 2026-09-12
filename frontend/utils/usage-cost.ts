@@ -18,6 +18,8 @@
 
 export interface MessageUsage {
   prompt: number
+  /** JCLAW-1201: prompt tokens of the turn's final model call, the context actually occupied. `prompt` is the sum across every call of the turn. */
+  lastPrompt?: number
   completion: number
   total: number
   reasoning: number

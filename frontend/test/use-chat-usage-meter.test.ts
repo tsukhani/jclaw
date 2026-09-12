@@ -42,6 +42,13 @@ describe('useChatUsageMeter', () => {
     expect(api.latestAssistantUsage.value).toBeNull()
   })
 
+  it('contextPromptTokens prefers the final call over the per-turn sum (JCLAW-1201)', () => {
+    const { api } = mountMeter([assistant({ prompt: 247_000, lastPrompt: 40_000, completion: 5 })])
+    expect(api.contextPromptTokens.value).toBe(40_000)
+    const legacy = mountMeter([assistant({ prompt: 30_000, completion: 5 })])
+    expect(legacy.api.contextPromptTokens.value).toBe(30_000)
+  })
+
   it('conversationCumulativeTokens sums prompt + completion across assistant turns', () => {
     const { api } = mountMeter([
       assistant({ prompt: 10, completion: 5 }),

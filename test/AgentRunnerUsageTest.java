@@ -29,6 +29,7 @@ class AgentRunnerUsageTest extends UnitTest {
         t.addRound(roundWithUsage(new Usage(150, 800, 950, 0, 25, 0)));
 
         assertEquals(450, t.promptTokens());
+        assertEquals(150, t.lastPromptTokens(), "JCLAW-1201: the final round's prompt, not the sum");
         assertEquals(860, t.completionTokens());
         assertEquals(1310, t.totalTokens());
         assertEquals(20, t.reasoningTokens());
@@ -65,6 +66,7 @@ class AgentRunnerUsageTest extends UnitTest {
         assertTrue(t.hasJtokkitUsage());
         assertEquals(100, t.promptTokens(), "provider usage remains authoritative");
         assertEquals(45, t.jtokkitPromptTokens());
+        assertEquals(45, t.lastJtokkitPromptTokens());
         assertEquals(12, t.jtokkitCompletionTokens());
         assertEquals(57, t.jtokkitTotalTokens());
     }
@@ -100,6 +102,7 @@ class AgentRunnerUsageTest extends UnitTest {
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(300, obj.get("prompt").getAsInt());
+        assertEquals(200, obj.get("lastPrompt").getAsInt(), "JCLAW-1201: the meter's fill is the final call");
         assertEquals(810, obj.get("completion").getAsInt());
         assertEquals(1110, obj.get("total").getAsInt());
         assertEquals(20, obj.get("reasoning").getAsInt());

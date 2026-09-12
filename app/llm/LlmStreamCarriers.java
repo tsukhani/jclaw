@@ -266,6 +266,9 @@ interface LlmStreamCarriers {
         boolean hasJtokkitUsage;
         int jtokkitPromptTokens;
         int jtokkitCompletionTokens;
+        /** Prompt tokens of the most recent round only (JCLAW-1201): the context a turn ends on, where the sums above are what it cost. */
+        int lastPromptTokens;
+        int lastJtokkitPromptTokens;
         int jtokkitReasoningTokens;
         int jtokkitTotalTokens;
         @Nullable String jtokkitEncoding;
@@ -300,6 +303,7 @@ interface LlmStreamCarriers {
             if (u != null) {
                 hasProviderUsage = true;
                 promptTokens += u.promptTokens();
+                lastPromptTokens = u.promptTokens();
                 completionTokens += u.completionTokens();
                 totalTokens += u.totalTokens();
                 reasoningTokens += u.reasoningTokens();
@@ -325,6 +329,7 @@ interface LlmStreamCarriers {
             hasJtokkitUsage = true;
             if (acc.promptTokenEstimate != null) {
                 jtokkitPromptTokens += acc.promptTokenEstimate.promptTokens();
+                lastJtokkitPromptTokens = acc.promptTokenEstimate.promptTokens();
                 noteJtokkitEncoding(acc.promptTokenEstimate.encodingName(), acc.promptTokenEstimate.modelMatched());
             }
             if (acc.completionTokenEstimate != null) {
@@ -373,6 +378,8 @@ interface LlmStreamCarriers {
         // the former direct field access; the counters are only read after the
         // turn's rounds have all folded in.
         public int promptTokens() { return promptTokens; }
+        public int lastPromptTokens() { return lastPromptTokens; }
+        public int lastJtokkitPromptTokens() { return lastJtokkitPromptTokens; }
         public int completionTokens() { return completionTokens; }
         public int totalTokens() { return totalTokens; }
         public int reasoningTokens() { return reasoningTokens; }

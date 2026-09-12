@@ -102,6 +102,8 @@ public final class UsageMetricsBuilder {
         var providerUsage = turnUsage.hasProviderUsage();
         var usageMap = new JsonObject();
         usageMap.addProperty("prompt", providerUsage ? turnUsage.promptTokens() : turnUsage.jtokkitPromptTokens());
+        // JCLAW-1201: the context meter fills with the final call, not the per-round sum above.
+        usageMap.addProperty("lastPrompt", providerUsage ? turnUsage.lastPromptTokens() : turnUsage.lastJtokkitPromptTokens());
         usageMap.addProperty("completion", providerUsage ? turnUsage.completionTokens() : turnUsage.jtokkitCompletionTokens());
         usageMap.addProperty("total", providerUsage ? turnUsage.totalTokens() : turnUsage.jtokkitTotalTokens());
         usageMap.addProperty("reasoning", effectiveReasoningTokens(turnUsage));

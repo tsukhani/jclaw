@@ -265,6 +265,7 @@ const {
 const {
   shouldShowModelSwitchIndicator,
   latestAssistantUsage,
+  contextPromptTokens,
   conversationCumulativeTokens,
   conversationCostSummary,
 } = useChatUsageMeter(displayMessages, streaming)
@@ -695,7 +696,7 @@ function exportConversation() {
         <span class="ml-auto flex items-center gap-2">
           <ChatContextMeter
             v-if="!isEmptyChat"
-            :prompt-tokens="latestAssistantUsage?.prompt ?? 0"
+            :prompt-tokens="contextPromptTokens"
             :completion-tokens="latestAssistantUsage?.completion ?? 0"
             :reasoning-tokens="latestAssistantUsage?.reasoning ?? 0"
             :cached-tokens="latestAssistantUsage?.cached ?? 0"
