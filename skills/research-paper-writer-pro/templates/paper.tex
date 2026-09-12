@@ -1,0 +1,208 @@
+% House-style research paper template (research-paper-writer-pro v2).
+% A4, 11pt, single column, Palatino text and math, author–year APA references,
+% numbered propositions and equations, booktabs tables, figures with captions below.
+% Build: latexmk -pdf -interaction=nonstopmode paper.tex   (bibtex runs automatically)
+
+\documentclass[11pt,a4paper]{article}
+
+% ---- Typography ----------------------------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amsthm}          % before newpxmath, which supplies the AMS symbol set itself
+\usepackage{newpxtext,newpxmath}     % Palatino text + matching math
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+\usepackage{parskip}                 % space between paragraphs, no first-line indent
+\usepackage{booktabs}
+\usepackage{array}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}  % ragged text columns for tables
+\usepackage{graphicx}
+\usepackage[font=small,labelfont=bf,labelsep=colon]{caption}
+\usepackage{xcolor}
+\usepackage{csquotes}
+\usepackage{enumitem}
+
+% ---- References: APA author–year in text, alphabetical list (BibTeX) -----
+% apacite + BibTeX builds on any TeX Live. biblatex-apa (style=apa, backend=biber) is the
+% exact-APA-7 alternative when a working biber exists; swap this block, \citep->\parencite,
+% \citet->\textcite, and \bibliography->\printbibliography.
+\usepackage[natbibapa]{apacite}
+\bibliographystyle{apacite}
+\AtBeginDocument{\setlength{\bibitemsep}{0.45\baselineskip}}   % air between entries
+
+% ---- Running head and page numbers ---------------------------------------
+\newcommand{\shorttitle}{Short running title}
+\newcommand{\shortauthor}{A. Author}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small\shorttitle}
+\rhead{\small\shortauthor}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\setlength{\headheight}{14pt}
+
+% ---- Links: one navy for internal, citation and URL links ----------------
+\usepackage[hidelinks]{hyperref}
+\definecolor{linknavy}{RGB}{0,0,112}
+\hypersetup{colorlinks=true,linkcolor=linknavy,citecolor=linknavy,urlcolor=linknavy}
+\AtBeginDocument{%
+  \urlstyle{same}%                                   URLs in the text face, not monospace
+  \renewcommand{\doiprefix}{}%                      APA 7 prints the DOI as a bare link
+  \renewcommand{\doi}[1]{\href{https://doi.org/#1}{https://doi.org/#1}}}
+
+% ---- Numbered environments (bold label, italic body for results) ---------
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}
+\newtheorem{corollary}{Corollary}
+\newtheorem{lemma}{Lemma}
+\newtheorem{theorem}{Theorem}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{assumption}{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+% ---- Title block ---------------------------------------------------------
+\title{\bfseries Main Title of the Paper\\[0.5ex]
+  {\large\mdseries A Subtitle Stating the Contribution or Framing}}
+\author{Author Name\\[0.3ex]
+  {\normalsize Affiliation, City, Country}\\[0.3ex]
+  {\normalsize\href{mailto:author@example.org}{author@example.org}}}
+\date{\normalsize \today}
+
+\begin{document}
+\maketitle
+\thispagestyle{plain}   % page number, no running head, on the title page
+
+\begin{abstract}
+\noindent One paragraph of 200--300 words. State the problem, the approach, each
+result as a conditional statement, the worked application, and what the
+contribution is and is not. No citations, no undefined symbols.
+\end{abstract}
+
+\noindent\textbf{Keywords:} first keyword; second keyword; third keyword; fourth keyword
+
+\section{Introduction}
+
+Open with the question in one or two plain sentences. Situate it in the literature
+with author--year citations in parentheses \citep{jervis1978, harsanyi1988}, or
+in the sentence: \citet{sastry2024} argue that compute is a governance lever.
+State the narrower question this paper answers, in italics if it is a single
+sentence. Then list the contributions (``The framework makes three contributions.
+First, \ldots'') and close with what the contributions are and are not.
+
+\section{Research design and theoretical foundations}
+
+\subsection{Research design}
+
+Say what kind of paper this is and why the theories were selected. Give the
+analytical procedure as numbered steps in prose (``The analytical procedure has
+four steps. The first \ldots'').
+
+\subsection{Foundations}
+
+Introduce notation in displayed, numbered equations and refer to them by number:
+\begin{equation}
+  U_i = \pi_i - \alpha\,\pi_j, \qquad \alpha = \frac{k}{1+k} \in [0,1).
+  \label{eq:positional}
+\end{equation}
+Equation~\eqref{eq:positional} is then cited by number, never by ``the equation above''.
+
+\section{Framework and units of analysis}
+
+Define every object and level of analysis before any result. A table that maps
+mechanisms to their inputs, implications and open empirical questions belongs
+here (Table~\ref{tab:mechanisms}).
+
+\begin{table}[t]
+  \centering
+  \caption{Mechanisms, assumptions, and inferential boundaries.}
+  \label{tab:mechanisms}
+  \small
+  \begin{tabular}{@{}L{2.4cm}L{3.1cm}L{3.9cm}L{3.9cm}@{}}
+    \toprule
+    Mechanism & Formal inputs & Conditional implication & Additional empirical question \\
+    \midrule
+    First mechanism & Inputs named as symbols & What follows, stated as a bound & What would have to be measured \\
+    Second mechanism & \ldots & \ldots & \ldots \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Formal analysis}
+
+\subsection{First result}
+
+\begin{proposition}[Descriptive name]
+\label{prop:first}
+State the result with every quantifier and assumption inside the statement. Bound
+its scope in the last sentence (``This is a bound on \ldots, not an estimate of
+\ldots'').
+\end{proposition}
+
+Follow each result with plain prose on what it does and does not establish.
+Illustrate with a figure whose numbers are declared illustrative
+(Figure~\ref{fig:first}).
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/fig1.pdf}
+  \caption{Illustrative upper bounds on the quantity of interest with $d = 150$.
+  These are bounds, not estimates.}
+  \label{fig:first}
+\end{figure}
+
+\begin{corollary}[A joint condition]
+\label{cor:joint}
+A corollary reads the same way: statement first, scope last.
+\end{corollary}
+
+\section{Interpretation}
+
+Connect the results to each other by number (``Corollary~\ref{cor:joint} identifies
+\ldots; Proposition~\ref{prop:first} identifies a different \ldots'') and say which
+mistaken substitutions the separation prevents.
+
+\section{Worked application}
+
+\subsection{Define the activity before assigning parameters}
+
+\subsection{A numerical diagnostic, not a calibration}
+
+All numbers assumed; say so in the table caption.
+
+\section{Empirical development and falsifiable implications}
+
+\subsection{Separate the tests}
+
+\subsection{Identification and the observation model}
+
+\subsection{Discriminating implications}
+
+\section{Discussion and conclusion}
+
+Restate what the framework distinguishes, what it does not claim, and the
+empirical priorities in order.
+
+\section*{Data, code, and AI assistance}
+
+Name the scripts that produced every figure and table, where they live, and what
+AI assistance was used for.
+
+\appendix
+\section{Proofs and supplementary derivations}
+
+\subsection{Proof of Proposition~\ref{prop:first}}
+
+\begin{proof}
+Proofs go here, one subsection per result. The box closes each proof.
+\end{proof}
+
+\section*{Numerical illustration and reproducibility}
+
+Parameters and seeds for every figure, so a reader can regenerate them.
+
+\bibliography{references}
+
+\end{document}
