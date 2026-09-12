@@ -167,7 +167,7 @@ public final class ToolCallLoopRunner {
                     audioBearers, imageBearers, audioState, visionState);
 
             var roundOutcome = handleSyncRoundResponse(attempt.okResponse(), agent, conversation, conversationId, primary,
-                    currentMessages, tools, sink, round, taskRunId);
+                    fallback, currentMessages, tools, sink, round, taskRunId);
             if (roundOutcome != null) return roundOutcome;
         }
 
@@ -351,6 +351,60 @@ public final class ToolCallLoopRunner {
     }
 
     /**
+     * Sync twin of {@link #recoverEmptyReply} (JCLAW-1203): a first reply that hit the output
+     * cap with no content spent the budget reasoning, so retry with reasoning off, then on
+     * the fallback model, before reporting the cut. A failing retry call is logged and
+     * treated as empty rather than aborting the turn.
+     */
+    @SuppressWarnings("java:S107")
+    private static LoopOutcome recoverEmptySyncReply(Agent agent, Conversation conversation, LlmProvider primary,
+                                                     LlmProvider.@Nullable Fallback fallback,
+                                                     ArrayList<ChatMessage> currentMessages,
+                                                     @Nullable List<ToolDef> tools, @Nullable String finishReason) {
+        EventLogger.warn("llm", agent.name, conversation.channelType,
+                "Reply stopped with no content on the first call (finish_reason=%s) — retrying with reasoning off"
+                        .formatted(finishReason));
+        var retryMessages = new ArrayList<>(currentMessages);
+        retryMessages.add(ChatMessage.user(ANSWER_NUDGE));
+        var modelId = Objects.requireNonNull(
+                ModelResolver.effectiveModelId(agent, conversation), "agent has no model configured");
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, retryMessages, tools);
+
+        var retry = syncRetry(agent, primary, modelId, retryMessages, tools, maxTokens, conversation.channelType);
+        if (retry != null) return retry;
+        if (fallback != null) {
+            EventLogger.warn("llm", agent.name, conversation.channelType,
+                    "Synthesis retry also empty — retrying on fallback %s / %s"
+                            .formatted(fallback.provider().config().name(), fallback.modelId()));
+            var second = syncRetry(agent, fallback.provider(), fallback.modelId(), retryMessages, tools, maxTokens,
+                    conversation.channelType);
+            if (second != null) return second;
+        }
+        EventLogger.warn("llm", agent.name, conversation.channelType,
+                "Every synthesis retry returned empty content — emitting diagnostic fallback");
+        return new LoopOutcome("*[The model stopped before writing an answer. "
+                + "Try again with thinking off or a larger output budget.]*", true);
+    }
+
+    /** One reasoning-off retry on {@code provider}; null when it answered nothing or failed. */
+    private static @Nullable LoopOutcome syncRetry(Agent agent, LlmProvider provider, String modelId,
+                                                   List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                                                   @Nullable Integer maxTokens, @Nullable String channel) {
+        try {
+            var response = provider.chat(modelId, messages, tools, maxTokens, null, channel);
+            if (response == null || response.choices() == null || response.choices().isEmpty()) return null;
+            var choice = response.choices().getFirst();
+            var text = MessageHydrator.contentAsString(choice.message().content());
+            if (text == null || text.isBlank()) return null;
+            return new LoopOutcome(text, TruncationDiagnostics.isTruncationFinish(choice.finishReason()));
+        } catch (Exception e) {
+            EventLogger.warn("llm", agent.name, channel,
+                    "Synthesis retry on %s failed: %s".formatted(provider.config().name(), e.getMessage()));
+            return null;
+        }
+    }
+
+    /**
      * Process a successful per-round {@link ChatResponse}: either return
      * a terminal {@link LoopOutcome} (no tool calls, truncation, or
      * yield) or execute the tool calls and return {@code null} so the
@@ -361,6 +415,7 @@ public final class ToolCallLoopRunner {
                                                        ChatResponse response, Agent agent,
                                                        Conversation conversation,
                                                        @Nullable Long conversationId, LlmProvider primary,
+                                                       LlmProvider.@Nullable Fallback fallback,
                                                        ArrayList<ChatMessage> currentMessages,
                                                        @Nullable List<ToolDef> tools,
                                                        AgentExecutionSink sink, int round,
@@ -377,7 +432,12 @@ public final class ToolCallLoopRunner {
             if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
                 TruncationDiagnostics.logEmptyToolCallsTruncation("callWithToolLoop", agent, conversation, primary,
                         conversation.channelType, choice.finishReason(), currentMessages, tools);
-                return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()), true);
+                var text = MessageHydrator.contentAsString(assistantMsg.content());
+                if (text == null || text.isBlank()) {
+                    return recoverEmptySyncReply(agent, conversation, primary, fallback, currentMessages, tools,
+                            choice.finishReason());
+                }
+                return new LoopOutcome(text, true);
             }
             return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()));
         }
@@ -615,6 +675,18 @@ public final class ToolCallLoopRunner {
     /** Chars of reasoning quoted when the model reasoned but never answered. */
     private static final int REASONING_TAIL_CHARS = 240;
 
+    /** Nudge for a first call that stopped with no content: there are no tool results to point at. */
+    private static final String ANSWER_NUDGE = "Write the full answer now as markdown. Keep any reasoning brief.";
+
+    /** Outcome of the synthesis retries: the content that answered, the cancelled-turn reply, or neither. */
+    record SynthesisRecovery(@Nullable String content, boolean truncated, @Nullable String cancelled) {
+        static final SynthesisRecovery EMPTY = new SynthesisRecovery(null, false, null);
+        static SynthesisRecovery answered(String content, @Nullable String finishReason) {
+            return new SynthesisRecovery(content, TruncationDiagnostics.isTruncationFinish(finishReason), null);
+        }
+        static SynthesisRecovery cancelledWith(String reply) { return new SynthesisRecovery(null, false, reply); }
+    }
+
     /**
      * Recover from an empty continuation (JCLAW-1199), then emit a labeled diagnostic.
      * Retry one repeats the synthesis nudge with reasoning off: the usual shape is a
@@ -629,39 +701,10 @@ public final class ToolCallLoopRunner {
         EventLogger.warn("llm", ctx.agent().name, null,
                 "Empty continuation after tool calls in round %d (%s) — retrying with synthesis nudge, reasoning off"
                         .formatted(round + 1, describeEmpty(empty)));
-        ctx.cb().onStatus().accept("Synthesizing response (retry)...");
+        var recovery = retrySynthesis(ctx, currentMessages, SYNTHESIS_NUDGE, priorContent, round);
+        if (recovery.cancelled() != null) return recovery.cancelled();
+        if (recovery.content() != null) return withImages(ctx, recovery.content());
 
-        var retryMessages = new ArrayList<>(currentMessages);
-        retryMessages.add(ChatMessage.user(SYNTHESIS_NUDGE));
-        var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, ctx.tools());
-
-        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
-                effectiveModelIdForCall, retryMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
-                retryMaxTokens, null, ctx.channelType());
-        var cancelled = awaitOrCancel(ctx, retry, priorContent, round);
-        if (cancelled != null) return cancelled;
-        ctx.turnUsage().addRound(retry);
-        if (hasContent(retry)) return withImages(ctx, retry.content());
-
-        var last = retry;
-        var fallback = ctx.fallback();
-        if (fallback != null) {
-            EventLogger.warn("llm", ctx.agent().name, null,
-                    "Synthesis retry also empty (%s) — retrying on fallback %s"
-                            .formatted(describeEmpty(retry), fallback.provider().config().name() + " / " + fallback.modelId()));
-            ctx.cb().onStatus().accept("Synthesizing response (fallback model)...");
-            var second = fallback.provider().chatStreamAccumulate(fallback.modelId(), retryMessages, ctx.tools(),
-                    ctx.cb().onToken(), ctx.cb().onReasoning(), retryMaxTokens, null, ctx.channelType());
-            cancelled = awaitOrCancel(ctx, second, priorContent, round);
-            if (cancelled != null) return cancelled;
-            ctx.turnUsage().addRound(second);
-            if (hasContent(second)) return withImages(ctx, second.content());
-            last = second;
-        }
-
-        EventLogger.warn("llm", ctx.agent().name, null,
-                "Every synthesis retry returned empty content (%s) — emitting diagnostic fallback"
-                        .formatted(describeEmpty(last)));
         // No LLM content to dedupe against — prepend every collected image unchanged.
         var fallbackPrefix = ctx.collectedImages().isEmpty() ? ""
                 : String.join("\n\n", ctx.collectedImages()) + "\n\n";
@@ -674,6 +717,69 @@ public final class ToolCallLoopRunner {
                 + fallbackSuffix;
         ctx.cb().onToken().accept(fallbackText);
         return fallbackText;
+    }
+
+    /**
+     * A first call that stopped with no content (JCLAW-1203): the same retries as an empty
+     * continuation, with a nudge that does not point at tool results.
+     */
+    static SynthesisRecovery recoverEmptyReply(StreamingTurnContext ctx, List<ChatMessage> messages,
+                                               LlmProvider.StreamAccumulator empty) {
+        EventLogger.warn("llm", ctx.agent().name, ctx.channelType(),
+                "Reply stopped with no content on the first call (%s) — retrying with reasoning off"
+                        .formatted(describeEmpty(empty)));
+        return retrySynthesis(ctx, messages, ANSWER_NUDGE, "", 0);
+    }
+
+    /** What the reader sees when every retry of a first call came back empty. */
+    static String emptyReplyDiagnostic(StreamingTurnContext ctx) {
+        var tail = reasoningTail(ctx.turnUsage().reasoningText());
+        return "*[The model stopped before writing an answer"
+                + (tail.isEmpty() ? "" : " — its reasoning ended with: \u201c" + tail + "\u201d")
+                + ". Try again with thinking off or a larger output budget.]*";
+    }
+
+    /**
+     * The retries shared by both empty shapes: the nudge with reasoning off on the primary
+     * (an always-thinking model gets its lowest rung), then the agent's fallback model when
+     * configured. Each attempt counts in the turn's usage.
+     */
+    private static SynthesisRecovery retrySynthesis(StreamingTurnContext ctx, List<ChatMessage> base, String nudge,
+                                                    String priorContent, int round) {
+        ctx.cb().onStatus().accept("Synthesizing response (retry)...");
+        var retryMessages = new ArrayList<>(base);
+        retryMessages.add(ChatMessage.user(nudge));
+        var modelId = Objects.requireNonNull(
+                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), "agent has no model configured");
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, ctx.tools());
+
+        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
+                modelId, retryMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
+                maxTokens, null, ctx.channelType());
+        var cancelled = awaitOrCancel(ctx, retry, priorContent, round);
+        if (cancelled != null) return SynthesisRecovery.cancelledWith(cancelled);
+        ctx.turnUsage().addRound(retry);
+        if (hasContent(retry)) return SynthesisRecovery.answered(retry.content(), retry.finishReason());
+
+        var last = retry;
+        var fallback = ctx.fallback();
+        if (fallback != null) {
+            EventLogger.warn("llm", ctx.agent().name, null,
+                    "Synthesis retry also empty (%s) — retrying on fallback %s"
+                            .formatted(describeEmpty(retry), fallback.provider().config().name() + " / " + fallback.modelId()));
+            ctx.cb().onStatus().accept("Synthesizing response (fallback model)...");
+            var second = fallback.provider().chatStreamAccumulate(fallback.modelId(), retryMessages, ctx.tools(),
+                    ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, null, ctx.channelType());
+            cancelled = awaitOrCancel(ctx, second, priorContent, round);
+            if (cancelled != null) return SynthesisRecovery.cancelledWith(cancelled);
+            ctx.turnUsage().addRound(second);
+            if (hasContent(second)) return SynthesisRecovery.answered(second.content(), second.finishReason());
+            last = second;
+        }
+        EventLogger.warn("llm", ctx.agent().name, null,
+                "Every synthesis retry returned empty content (%s) — emitting diagnostic fallback"
+                        .formatted(describeEmpty(last)));
+        return SynthesisRecovery.EMPTY;
     }
 
     /** Waits for {@code acc}; returns the cancelled-turn reply when the operator stopped the turn, else null. */

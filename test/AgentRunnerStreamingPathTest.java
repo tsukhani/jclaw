@@ -364,6 +364,81 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 "persisted assistant Message must carry truncated=true on length finish_reason");
     }
 
+    // JCLAW-1203: a first call cut off while still reasoning is retried with reasoning off.
+    private static final String REASONING_ONLY_LENGTH = """
+            data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"reasoning_content":"Planning the answer, but then ("},"finish_reason":null}]}
+
+            data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":""},"finish_reason":"length"}]}
+
+            data: [DONE]
+
+            """;
+
+    @Test
+    void runStreamingRecoversAFirstReplyThatStoppedWhileReasoning() throws Exception {
+        var bodies = new CopyOnWriteArrayList<String>();
+        startSseSequenceServer(bodies, REASONING_ONLY_LENGTH, """
+                data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"Answer as content."},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """);
+        configureThinkingProvider();
+        var agent = persistAgent("stream-reason-cut", "test-provider", "test-model");
+        agent.thinkingMode = "high";
+        agent.save();
+        var convo = persistConversation(agent, "web", "u-reason-cut");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var harness = streamAndAwait(agent, convo, "write a long answer");
+        assertTrue(harness.terminated.await(60, TimeUnit.SECONDS), "must terminate");
+        assertNotNull(harness.completed.get());
+        assertTrue(harness.completed.get().contains("Answer as content."),
+                "the reasoning-off retry's content is the reply, got: " + harness.completed.get());
+        assertEquals(2, bodies.size(), "first call + one retry");
+        assertTrue(bodies.get(0).contains("\"reasoning_effort\":\"high\""), "the first call carried the agent's level");
+        assertTrue(bodies.get(1).contains("\"reasoning_effort\":\"none\""),
+                "the retry sends the explicit off-signal for a thinking-capable model, got: " + bodies.get(1));
+        assertTrue(bodies.get(1).contains("Write the full answer now"), "the retry carries the answer nudge");
+
+        JPA.em().clear();
+        Message lastAssistant = null;
+        for (var m : ConversationService.loadRecentMessages(ConversationService.findById(convo.id))) {
+            if (MessageRole.ASSISTANT.value.equals(m.role)) lastAssistant = m;
+        }
+        assertNotNull(lastAssistant);
+        assertEquals("Answer as content.", lastAssistant.content);
+        assertFalse(lastAssistant.truncated, "a recovered reply is not marked truncated");
+    }
+
+    @Test
+    void runStreamingReportsTheReasoningTailWhenEveryRetryIsEmpty() throws Exception {
+        var bodies = new CopyOnWriteArrayList<String>();
+        startSseSequenceServer(bodies, REASONING_ONLY_LENGTH, REASONING_ONLY_LENGTH);
+        configureThinkingProvider();
+        var agent = persistAgent("stream-reason-cut-twice", "test-provider", "test-model");
+        var convo = persistConversation(agent, "web", "u-reason-cut-twice");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var harness = streamAndAwait(agent, convo, "write a long answer");
+        assertTrue(harness.terminated.await(60, TimeUnit.SECONDS), "must terminate");
+        assertEquals(2, bodies.size(), "first call + one retry; no fallback configured");
+        var reply = harness.completed.get();
+        assertNotNull(reply);
+        assertTrue(reply.contains("stopped before writing an answer") && reply.contains("but then ("),
+                "the diagnostic quotes the reasoning tail, got: " + reply);
+
+        JPA.em().clear();
+        Message lastAssistant = null;
+        for (var m : ConversationService.loadRecentMessages(ConversationService.findById(convo.id))) {
+            if (MessageRole.ASSISTANT.value.equals(m.role)) lastAssistant = m;
+        }
+        assertNotNull(lastAssistant);
+        assertTrue(lastAssistant.truncated, "still marked truncated when nothing recovered");
+    }
+
     // ─── runStreaming on web conversation with conversationId=null ──────
 
     @Test
@@ -463,6 +538,34 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         });
         llmServer.start();
         port = llmServer.getAddress().getPort();
+    }
+
+    /** Answers successive chat completions with successive SSE bodies and records each request body. */
+    private void startSseSequenceServer(List<String> requestBodies, String... sseBodies) throws Exception {
+        var next = new AtomicInteger(0);
+        llmServer = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.createContext("/chat/completions", exchange -> {
+            requestBodies.add(new String(exchange.getRequestBody().readAllBytes()));
+            var body = sseBodies[Math.min(next.getAndIncrement(), sseBodies.length - 1)];
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            var bytes = body.getBytes();
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (var os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+        llmServer.start();
+        port = llmServer.getAddress().getPort();
+    }
+
+    /** As configureProvider, with a model that advertises reasoning so the level reaches the wire. */
+    private void configureThinkingProvider() {
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.test-provider.apiKey", "sk-test");
+        ConfigService.set("provider.test-provider.models",
+                "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096,\"supportsThinking\":true}]");
+        llm.ProviderRegistry.refresh();
     }
 
     private void configureProvider() {

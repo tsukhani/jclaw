@@ -514,6 +514,19 @@ final class StreamingAgentRunner {
             TruncationDiagnostics.logEmptyToolCallsTruncation("streamLlmLoop", agent, conversation, primary,
                     channelType, accumulator.finishReason(), messages, tools);
         }
+        if (replyTruncated && (content == null || content.isBlank())) {
+            // JCLAW-1203: nothing to mark — the output budget went to reasoning. Recover as an
+            // empty continuation would; only when every retry is empty report the cut.
+            var ctx = new ToolCallLoopRunner.StreamingTurnContext(
+                    agent, conversation, conversation.id, tools, primary, fallback,
+                    cb, thinkingMode, isCancelled, trace, turnUsage, new ArrayList<>(), channelType, sink);
+            var recovery = ToolCallLoopRunner.recoverEmptyReply(ctx, messages, accumulator);
+            if (recovery.cancelled() != null) return new StreamingPostAccumulator(recovery.cancelled(), false);
+            if (recovery.content() != null) return new StreamingPostAccumulator(recovery.content(), recovery.truncated());
+            var note = ToolCallLoopRunner.emptyReplyDiagnostic(ctx);
+            cb.onToken().accept(note);
+            return new StreamingPostAccumulator(note, true);
+        }
 
         // Handle tool calls if present. JCLAW-104: the image collector lives
         // at turn scope (not per recursion level) so a screenshot captured

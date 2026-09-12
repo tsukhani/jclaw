@@ -136,6 +136,41 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                 "Loop should issue exactly two LLM calls - one rejected, one retried");
     }
 
+    // JCLAW-1203, sync path: a first reply that hit the cap with no content is retried with reasoning off.
+    @Test
+    void syncReplyThatStoppedWhileReasoningIsRetriedWithReasoningOff() throws Exception {
+        var bodies = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        startSyncLlmServer(exchange -> {
+            bodies.add(new String(exchange.getRequestBody().readAllBytes()));
+            String body = bodies.size() == 1
+                    ? """
+                        {"choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"length"}],
+                         "usage":{"prompt_tokens":10,"completion_tokens":5}}"""
+                    : """
+                        {"choices":[{"index":0,"message":{"role":"assistant","content":"Answer after the retry."},"finish_reason":"stop"}],
+                         "usage":{"prompt_tokens":10,"completion_tokens":5}}""";
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            byte[] bytes = body.getBytes();
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        var provider = openAiProviderForSyncServer("sync-reason-cut");
+        var agent = persistAgent("sync-reason-cut-agent");
+        var convo = persistConversation(agent);
+        play.db.jpa.JPA.em().getTransaction().commit();
+        play.db.jpa.JPA.em().getTransaction().begin();
+
+        var outcome = invokeCallWithToolLoop(agent, convo, convo.id,
+                List.of(ChatMessage.system("sys"), ChatMessage.user("write a long answer")), List.of(),
+                provider, null, List.of());
+
+        assertEquals("Answer after the retry.", outcome.content());
+        assertFalse(outcome.truncated(), "a recovered reply is not marked truncated");
+        assertEquals(2, bodies.size(), "first call + one retry");
+        assertTrue(bodies.get(1).contains("Write the full answer now"), "the retry carries the answer nudge");
+    }
+
     // Sync loop: audio-format rejection but no transcript available.
     // Covers lines 124, 129-133.
     @Test
