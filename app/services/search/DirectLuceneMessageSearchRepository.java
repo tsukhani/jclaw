@@ -28,6 +28,7 @@ import services.Tx;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.function.Function;
 
@@ -311,7 +312,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * usable tokens (e.g. all stopwords).
      */
     private static @Nullable Query buildContentQuery(String query, boolean requireAll) throws IOException {
-        var terms = analyzeToTerms(query);
+        var terms = distinctCapped(analyzeToTerms(query));
         if (terms.isEmpty()) return null;
         var occur = requireAll ? BooleanClause.Occur.MUST : BooleanClause.Occur.SHOULD;
         var b = new BooleanQuery.Builder();
@@ -323,6 +324,23 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
             b.add(tq, occur);
         }
         return b.build();
+    }
+
+    /**
+     * Cap on distinct query terms. Each term is one clause of the content query and Lucene
+     * refuses a BooleanQuery past 1024 clauses; a 16k-character user message produced more
+     * than that and recall failed outright (JCLAW-1200). A long message opens with its ask,
+     * so the first terms are kept; the rest is quoted material that only dilutes the ranking.
+     */
+    static final int MAX_QUERY_TERMS = 256;
+
+    private static List<String> distinctCapped(List<String> terms) {
+        var kept = new LinkedHashSet<String>();
+        for (var t : terms) {
+            if (kept.size() >= MAX_QUERY_TERMS) break;
+            kept.add(t);
+        }
+        return new ArrayList<>(kept);
     }
 
     /** Run {@link #CONTENT_ANALYZER} over {@code text} and collect the emitted

@@ -156,6 +156,19 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
     }
 
     @Test
+    void longQueryIsCappedInsteadOfOverflowingLucenesClauseLimit() throws Exception {
+        // JCLAW-1200: a 20k-char message yields thousands of distinct terms; uncapped, the
+        // OR query trips TooManyClauses (1024) and the turn silently runs with no memories.
+        var aId = makeAgent("agentLong");
+        var mem = seedMemory(aId, "shared widget knowledge");
+        var sb = new StringBuilder("please recall the widget notes ");
+        for (int i = 0; sb.length() < 20_000; i++) sb.append("filler").append(i).append(' ');
+
+        var hits = repo.searchMemoryIds(String.valueOf(aId), sb.toString(), 10);
+        assertEquals(List.of(mem), hits.stream().map(s -> s.id()).toList());
+    }
+
+    @Test
     void prefixMatchesPossessiveAndPartialTerms() throws Exception {
         // Query tokens match as PREFIXES, so a partial term surfaces its longer forms.
         // Since JCLAW-1052 only the "pho" case actually needs the prefix: the analyzer's
