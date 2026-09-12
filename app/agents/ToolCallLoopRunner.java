@@ -576,7 +576,7 @@ public final class ToolCallLoopRunner {
         // even when the user clearly wants synthesis. Retry once with an explicit synthesis
         // nudge before giving up and emitting a diagnostic fallback.
         if (accumulator.content() == null || accumulator.content().isBlank()) {
-            return retryEmptyContinuation(ctx, round, currentMessages, effectiveModelIdForCall, priorContent);
+            return retryEmptyContinuation(ctx, round, currentMessages, effectiveModelIdForCall, priorContent, accumulator);
         }
 
         return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), accumulator.content())
@@ -607,56 +607,105 @@ public final class ToolCallLoopRunner {
         return truncMsg;
     }
 
+    private static final String SYNTHESIS_NUDGE =
+            "Synthesize the final response for me now using the tool results above. "
+                    + "Do not call any more tools. Write the full answer as markdown.";
+    /** Chars of reasoning quoted when the model reasoned but never answered. */
+    private static final int REASONING_TAIL_CHARS = 240;
+
     /**
-     * Retry once with an explicit synthesis nudge after an empty
-     * continuation. If the retry also returns empty, emit a labeled
-     * diagnostic fallback so the user knows why the chat went silent.
+     * Recover from an empty continuation (JCLAW-1199), then emit a labeled diagnostic.
+     * Retry one repeats the synthesis nudge with reasoning off: the usual shape is a
+     * reasoning-capable model spending its whole output budget thinking and stopping
+     * mid-thought before any content. Retry two goes to the agent's fallback model when
+     * one is configured. Every retry counts in the turn's usage.
      */
     private static String retryEmptyContinuation(StreamingTurnContext ctx, int round,
                                                  ArrayList<ChatMessage> currentMessages,
-                                                 String effectiveModelIdForCall, String priorContent) {
+                                                 String effectiveModelIdForCall, String priorContent,
+                                                 LlmProvider.StreamAccumulator empty) {
         EventLogger.warn("llm", ctx.agent().name, null,
-                "Empty continuation after tool calls in round %d — retrying with synthesis nudge"
-                        .formatted(round + 1));
+                "Empty continuation after tool calls in round %d (%s) — retrying with synthesis nudge, reasoning off"
+                        .formatted(round + 1, describeEmpty(empty)));
         ctx.cb().onStatus().accept("Synthesizing response (retry)...");
 
         var retryMessages = new ArrayList<>(currentMessages);
-        retryMessages.add(ChatMessage.user(
-                "Synthesize the final response for me now using the tool results above. "
-                        + "Do not call any more tools. Write the full answer as markdown."));
-
+        retryMessages.add(ChatMessage.user(SYNTHESIS_NUDGE));
         var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, ctx.tools());
+
         var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
                 effectiveModelIdForCall, retryMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
-                retryMaxTokens, ctx.thinkingMode(), ctx.channelType());
-        try {
-            if (!CancellationManager.awaitAccumulatorOrCancel(retry, ctx.isCancelled(), ctx.agent(), null, ctx.cb()))
-                return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-            return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
-        }
-
-        // Retry round is a real LLM call — its usage counts too (JCLAW-76).
+                retryMaxTokens, null, ctx.channelType());
+        var cancelled = awaitOrCancel(ctx, retry, priorContent, round);
+        if (cancelled != null) return cancelled;
         ctx.turnUsage().addRound(retry);
+        if (hasContent(retry)) return withImages(ctx, retry.content());
 
-        if (retry.content() != null && !retry.content().isBlank()) {
-            return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), retry.content())
-                    + retry.content()
-                    + MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), retry.content(), ctx.channelType());
+        var last = retry;
+        var fallback = ctx.fallback();
+        if (fallback != null) {
+            EventLogger.warn("llm", ctx.agent().name, null,
+                    "Synthesis retry also empty (%s) — retrying on fallback %s"
+                            .formatted(describeEmpty(retry), fallback.provider().config().name() + " / " + fallback.modelId()));
+            ctx.cb().onStatus().accept("Synthesizing response (fallback model)...");
+            var second = fallback.provider().chatStreamAccumulate(fallback.modelId(), retryMessages, ctx.tools(),
+                    ctx.cb().onToken(), ctx.cb().onReasoning(), retryMaxTokens, null, ctx.channelType());
+            cancelled = awaitOrCancel(ctx, second, priorContent, round);
+            if (cancelled != null) return cancelled;
+            ctx.turnUsage().addRound(second);
+            if (hasContent(second)) return withImages(ctx, second.content());
+            last = second;
         }
 
-        // Retry also empty — emit a labeled diagnostic so the user knows why.
         EventLogger.warn("llm", ctx.agent().name, null,
-                "Retry also returned empty content — emitting diagnostic fallback");
+                "Every synthesis retry returned empty content (%s) — emitting diagnostic fallback"
+                        .formatted(describeEmpty(last)));
         // No LLM content to dedupe against — prepend every collected image unchanged.
         var fallbackPrefix = ctx.collectedImages().isEmpty() ? ""
                 : String.join("\n\n", ctx.collectedImages()) + "\n\n";
         var fallbackSuffix = MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), "", ctx.channelType());
-        var fallback = fallbackPrefix
-                + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*"
+        var tail = reasoningTail(ctx.turnUsage().reasoningText());
+        var fallbackText = fallbackPrefix
+                + "*[The model returned no synthesis after tool calls"
+                + (tail.isEmpty() ? "" : " — its reasoning ended with: \u201c" + tail + "\u201d")
+                + ". Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*"
                 + fallbackSuffix;
-        ctx.cb().onToken().accept(fallback);
-        return fallback;
+        ctx.cb().onToken().accept(fallbackText);
+        return fallbackText;
+    }
+
+    /** Waits for {@code acc}; returns the cancelled-turn reply when the operator stopped the turn, else null. */
+    private static @Nullable String awaitOrCancel(StreamingTurnContext ctx, LlmProvider.StreamAccumulator acc,
+                                                  String priorContent, int round) {
+        try {
+            if (CancellationManager.awaitAccumulatorOrCancel(acc, ctx.isCancelled(), ctx.agent(), null, ctx.cb())) return null;
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
+        return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
+    }
+
+    private static boolean hasContent(LlmProvider.StreamAccumulator acc) {
+        return acc.content() != null && !acc.content().isBlank();
+    }
+
+    private static String withImages(StreamingTurnContext ctx, String content) {
+        return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), content)
+                + content
+                + MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), content, ctx.channelType());
+    }
+
+    /** What the log needs to tell a reasoning-only stop from a parse failure from a silent model. */
+    private static String describeEmpty(LlmProvider.StreamAccumulator acc) {
+        var calls = acc.toolCalls();
+        return "finish_reason=%s, reasoning_chars=%d, tool_call_fragments=%d".formatted(
+                acc.finishReason(), acc.reasoningChars(), calls == null ? 0 : calls.size());
+    }
+
+    private static String reasoningTail(@Nullable String reasoning) {
+        if (reasoning == null) return "";
+        var trimmed = reasoning.strip();
+        if (trimmed.length() <= REASONING_TAIL_CHARS) return trimmed;
+        return "\u2026" + trimmed.substring(trimmed.length() - REASONING_TAIL_CHARS);
     }
 }

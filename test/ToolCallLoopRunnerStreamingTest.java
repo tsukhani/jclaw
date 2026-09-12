@@ -473,16 +473,106 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
 
     // Streaming: empty continuation + empty retry emits diagnostic fallback.
     // Covers lines 394-404.
+    // JCLAW-1199: an empty continuation whose reasoning was cut mid-thought. Retry one
+    // repeats the nudge with reasoning off; the model then answers as content.
+    @Test
+    void streamingEmptyContinuationRetriesWithReasoningOffAndReturnsThatContent() throws Exception {
+        streamingServer = new MockWebServer();
+        streamingServer.start();
+        streamingServer.enqueue(sseResponse(REASONING_ONLY_LENGTH_BODY));
+        streamingServer.enqueue(sseResponse("""
+                data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"Answer as content."},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """));
+
+        var provider = openAiProviderForStreamingServer("reasoning-cut");
+        var agent = persistAgent("reasoning-cut-agent");
+        var convo = persistConversation(agent);
+
+        var newTools = new ArrayList<>(originalTools);
+        newTools.add(simpleTool("noop_stream", true, "ok"));
+        ToolRegistry.publish(newTools);
+
+        play.db.jpa.JPA.em().getTransaction().commit();
+        play.db.jpa.JPA.em().getTransaction().begin();
+
+        var turnUsage = new LlmProvider.TurnUsage();
+        String result = invokeHandleToolCallsStreaming(agent, convo, convo.id,
+                new ArrayList<>(List.of(ChatMessage.user("hi"))), List.of(),
+                List.of(toolCall("tc1", "noop_stream")), "",
+                provider, recordingCallbacks(), "low", 0, new AtomicBoolean(false), new LatencyTrace(), turnUsage,
+                new ArrayList<>(), "web", new ConversationSink(convo));
+
+        assertTrue(result.contains("Answer as content."), "the retry's content is the reply, got: " + result);
+        assertEquals(2, streamingServer.getRequestCount(), "continuation + one retry");
+        var first = streamingServer.takeRequest().getBody().utf8();
+        var second = streamingServer.takeRequest().getBody().utf8();
+        assertTrue(first.contains("\"reasoning_effort\":\"low\""), "the continuation carried the turn's thinking level");
+        assertFalse(second.contains("reasoning_effort"), "the retry must run with reasoning off, got: " + second);
+        assertTrue(second.contains("Do not call any more tools"), "the retry carries the synthesis nudge");
+        assertTrue(turnUsage.reasoningText() != null && turnUsage.reasoningText().contains("but then ("),
+                "the cut reasoning is kept on the turn");
+    }
+
+    // JCLAW-1199: both primary attempts empty, so the synthesis goes to the fallback model.
+    @Test
+    void streamingEmptyRetriesFallBackToTheSecondaryModel() throws Exception {
+        streamingServer = new MockWebServer();
+        streamingServer.start();
+        streamingServer.enqueue(sseResponse(REASONING_ONLY_LENGTH_BODY));
+        streamingServer.enqueue(sseResponse(REASONING_ONLY_LENGTH_BODY));
+        var secondaryServer = new MockWebServer();
+        secondaryServer.start();
+        try {
+            secondaryServer.enqueue(sseResponse("""
+                    data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"Fallback wrote it."},"finish_reason":"stop"}]}
+
+                    data: [DONE]
+
+                    """));
+
+            var provider = openAiProviderForStreamingServer("empty-primary");
+            var secondary = openAiProviderFor(secondaryServer, "empty-secondary");
+            var agent = persistAgent("empty-primary-agent");
+            var convo = persistConversation(agent);
+
+            var newTools = new ArrayList<>(originalTools);
+            newTools.add(simpleTool("noop_stream", true, "ok"));
+            ToolRegistry.publish(newTools);
+
+            play.db.jpa.JPA.em().getTransaction().commit();
+            play.db.jpa.JPA.em().getTransaction().begin();
+
+            String result = invokeHandleToolCallsStreaming(agent, convo, convo.id,
+                    new ArrayList<>(List.of(ChatMessage.user("hi"))), List.of(),
+                    List.of(toolCall("tc1", "noop_stream")), "",
+                    provider, secondary, recordingCallbacks(), "low", 0, new AtomicBoolean(false), new LatencyTrace(),
+                    new LlmProvider.TurnUsage(), new ArrayList<>(), "web", new ConversationSink(convo));
+
+            assertTrue(result.contains("Fallback wrote it."), "the fallback's content is the reply, got: " + result);
+            assertEquals(2, streamingServer.getRequestCount(), "primary: continuation + reasoning-off retry");
+            assertEquals(1, secondaryServer.getRequestCount(), "then one call on the fallback");
+        } finally {
+            secondaryServer.close();
+        }
+    }
+
+    private static final String REASONING_ONLY_LENGTH_BODY = """
+            data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"reasoning_content":"Planning the answer, but then ("},"finish_reason":null}]}
+
+            data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":""},"finish_reason":"length"}]}
+
+            data: [DONE]
+
+            """;
+
     @Test
     void streamingEmptyContinuationAndEmptyRetryEmitsDiagnosticFallback() throws Exception {
         streamingServer = new MockWebServer();
         streamingServer.start();
-        var emptyBody = """
-                data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}]}
-
-                data: [DONE]
-
-                """;
+        var emptyBody = REASONING_ONLY_LENGTH_BODY;
         streamingServer.enqueue(sseResponse(emptyBody));
         streamingServer.enqueue(sseResponse(emptyBody));
 
@@ -510,8 +600,10 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
 
         assertTrue(result.contains("no synthesis after tool calls"),
                 "Empty-then-empty must emit the diagnostic fallback, got: " + result);
+        assertTrue(result.contains("its reasoning ended with") && result.contains("but then ("),
+                "JCLAW-1199: the diagnostic quotes the reasoning tail, got: " + result);
         assertEquals(2, streamingServer.getRequestCount(),
-                "Empty-then-empty path must hit the LLM exactly twice (round + retry)");
+                "Empty-then-empty with no fallback must hit the LLM exactly twice (round + retry)");
     }
 
     // Sync loop: full pipeline returns YIELDED_RESPONSE when the tool emits
