@@ -83,6 +83,8 @@ When the agent decides to call a tool, you'll see a tool-call chip in its messag
 
 Reasoning-capable models (the ones that surface their internal thought before answering) render their reasoning in a separate, distinctively-styled block above the final reply. Reasoning collapses by default; click to expand. You can copy the reasoning text on its own.
 
+Tool results are kept in full in the conversation history, but what the model sees on later turns is trimmed: a long result from an earlier turn (4,000 characters or more by default) is replaced by a one-line stub naming the tool, the original size and a `ccr_retrieve` handle, and the agent fetches the full text back with that handle when it needs it. The current turn's results are always sent whole. The thresholds are in [Settings → Chat](/guide#settings-chat).
+
 ## Per-message usage
 
 Every assistant message carries a small **tok/s** badge. Hover it for the full accounting of that turn: prompt, thinking and cached tokens, completion, speed, wall-clock time, and the computed dollar cost.

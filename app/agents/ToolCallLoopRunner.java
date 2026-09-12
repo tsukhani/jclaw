@@ -238,7 +238,8 @@ public final class ToolCallLoopRunner {
         // inside the loop — right before the call. Ephemeral view: the caller's
         // currentMessages keeps the originals for retries, yield detection and
         // the next round's appends.
-        var sendMessages = CompressionPipeline.compress(currentMessages, agent, conversation);
+        var sendMessages = CompressionPipeline.compress(
+                ToolResultPruner.prune(currentMessages, agent, conversation), agent, conversation);
         // Recompute per-round so the clamp tracks the growing history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, sendMessages, tools);
         ChatResponse response;
@@ -530,7 +531,8 @@ public final class ToolCallLoopRunner {
                 ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), "agent has no model configured");
         // JCLAW-465: compress tool outputs (incl. this turn's) before the
         // continuation call. Ephemeral — currentMessages keeps the originals.
-        var sendMessages = CompressionPipeline.compress(currentMessages, ctx.agent(), ctx.conversation());
+        var sendMessages = CompressionPipeline.compress(
+                ToolResultPruner.prune(currentMessages, ctx.agent(), ctx.conversation()), ctx.agent(), ctx.conversation());
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());

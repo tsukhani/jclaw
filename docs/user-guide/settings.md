@@ -197,6 +197,9 @@ An **Advanced — context window & compaction** collapsible reveals four lower-l
 | `compactionReserveTokens`    | 15000   | Tokens reserved at the end of the context window for the assistant reply. Auto-compaction triggers when the next prompt would exceed `contextWindow − reserve`. Larger reserve = compaction fires sooner. |
 | `compactionMinTurns`         | 10      | Minimum messages in the to-summarize prefix before auto-compaction will run. Below this, the gate skips and trim drops oldest instead. Manual `/compact` uses a relaxed threshold (2). |
 | `compactionKeepMessages`     | 10      | Minimum messages kept verbatim at the end of the conversation after compaction. Smaller keep = more aggressive summarization. |
+| `pruneToolResults`           | true    | Replace tool results from *earlier* turns that exceed `pruneToolResultsMinChars` with a one-line stub carrying a `ccr_retrieve` handle, regardless of how full the context window is. The agent can fetch the full text back with that handle; stored history is untouched. |
+| `pruneToolResultsMinChars`   | 4000    | Only tool results at least this long are stubbed. |
+| `pruneToolResultsProtectRecent` | 12   | The newest messages are never stubbed, in addition to the whole current turn. |
 | `jtokkit.safetyMultiplier.unmatched` | 1.4× | Fudge factor applied to jtokkit's token estimate when the model uses a fallback encoding (Kimi, DeepSeek, Gemma, Qwen, GLM). Higher = trim/compact earlier, safer. OpenAI-family models use 1.0× regardless. This is the global cold-start default: a per-provider `jtokkit.safetyMultiplier.<provider>` or per-model `jtokkit.safetyMultiplier.<provider>.<model>` key overrides it, and the tokenizer calibration job writes the per-model ones automatically from observed provider-vs-jtokkit deltas. |
 
 ## Subagents

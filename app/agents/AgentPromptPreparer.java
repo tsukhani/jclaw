@@ -165,7 +165,8 @@ final class AgentPromptPreparer {
         // compaction so the budget check sees the smaller payload. No-op
         // unless chat.compression.enabled=true. When compaction fires it
         // rebuilds from originals; trimToContextWindow below stays the net.
-        var compressedMessages = CompressionPipeline.compress(prepared.messages(), agent, conversation);
+        var compressedMessages = CompressionPipeline.compress(
+                ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
         var compactedMessages = CompactionGate.maybeCompactAndRebuild(
                 agent, conversationId, userMessage, null,
                 prepared.primary(), compressedMessages, prepared.tools());
@@ -251,7 +252,8 @@ final class AgentPromptPreparer {
         // trimToContextWindow below stays as a drop-oldest fallback for
         // when compaction is skipped or fails.
         // JCLAW-465: same content-aware compression hook on the streaming path.
-        var compressedMessages = CompressionPipeline.compress(prepared.messages(), agent, conversation);
+        var compressedMessages = CompressionPipeline.compress(
+                ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
         var compactedMessages = CompactionGate.maybeCompactAndRebuild(
                 agent, conversation.id, userMessage, prepared.disabledTools(),
                 primary, compressedMessages, prepared.tools());
