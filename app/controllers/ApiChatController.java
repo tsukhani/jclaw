@@ -28,6 +28,7 @@ import slash.Commands;
 import tools.SubagentSpawnTool;
 import utils.ApiResponses;
 import utils.AppClock;
+import utils.InactivityTimer;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
 
@@ -56,11 +57,16 @@ public class ApiChatController extends Controller {
     private static final Duration CHAT_STREAM_FLOOR = Duration.ofMinutes(10);
     private static final Duration CHAT_STREAM_MARGIN = Duration.ofMinutes(2);
 
+    /** A token stream re-arms the inactivity timer at most this often. */
+    private static final Duration CHAT_STREAM_REARM_MIN = Duration.ofSeconds(5);
+
     /**
-     * Hard ceiling on one chat stream. Derived from the first-chunk budget rather than fixed
-     * (JCLAW-1192): the sweep abandons a silent stream just past that budget, and a ceiling
-     * that fell first cut the browser off with "client disconnect" a few seconds before the
-     * abandonment it was about to receive. Never under the ten minutes it always was.
+     * How long one chat stream may go without a frame before it is closed. Derived from the
+     * first-chunk budget rather than fixed (JCLAW-1192): the sweep abandons a silent stream
+     * just past that budget, and a ceiling that fell first cut the browser off with "client
+     * disconnect" a few seconds before the abandonment it was about to receive. Never under
+     * the ten minutes it always was. Since JCLAW-1204 this is an inactivity budget, not a
+     * cap on the turn: a 41-round tool loop that keeps emitting frames is never cut by it.
      */
     public static Duration chatStreamTimeout() {
         var derived = LlmResilience.firstChunkBudget().plus(CHAT_STREAM_MARGIN);
@@ -397,22 +403,38 @@ public class ApiChatController extends Controller {
                 ? createWithOverrides(agent, username, ctx.overrides()).id
                 : ctx.conversationId();
 
-        SseStream sse = openSSE()
-                .heartbeat(Duration.ofSeconds(30))
-                .timeout(chatStreamTimeout());
+        // Heartbeat well inside the fork's 30 s QUIC idle window, so an HTTP/3 connection
+        // survives a silent tool call (JCLAW-1204).
+        SseStream sse = openSSE().heartbeat(Duration.ofSeconds(15));
+        var close = new StreamCloseState(new AtomicBoolean(false), new AtomicBoolean(false));
+        var idle = InactivityTimer.start(chatStreamTimeout(), CHAT_STREAM_REARM_MIN, () -> {
+            close.idleTimedOut().set(true);
+            EventLogger.warn("llm", agent.name, "web",
+                    "Chat stream saw no frame for %s — closing it and cancelling the turn".formatted(chatStreamTimeout()));
+            sse.close();
+        });
 
-        // Bridge SSE close (heartbeat-write fail, explicit close, or 10-min
-        // timeout) into the AgentRunner cancellation flag. /stop also flips
-        // this flag via ConversationQueue, so AgentRunner sees one unified
-        // signal regardless of source.
+        // Bridge SSE close (heartbeat-write fail, explicit close, or the inactivity
+        // timeout) into the AgentRunner cancellation flag. /stop also flips this flag
+        // via ConversationQueue, so AgentRunner sees one unified signal regardless of
+        // source; the log line here is what tells the sources apart.
         var cancelled = new AtomicBoolean(false);
-        sse.onClose(() -> cancelled.set(true));
+        sse.onClose(() -> {
+            idle.cancel();
+            cancelled.set(true);
+            if (!close.finished().get() && !close.idleTimedOut().get()) {
+                EventLogger.info("llm", agent.name, "web",
+                        "Chat stream closed by the client before the turn finished — cancelling the turn");
+            }
+        });
 
+        close.finished().set(true); // a slash command answers and closes inside the call below
         if (handleStreamingSlashCommand(sse, agent, messageText, conversationId, username)) {
             return;
         }
+        close.finished().set(false);
 
-        var callbacks = buildStreamingCallbacks(sse, agent);
+        var callbacks = buildStreamingCallbacks(sse, agent, idle, close);
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
                 cancelled, callbacks, acceptedAtNs, ctx.attachments());
 
@@ -474,7 +496,11 @@ public class ApiChatController extends Controller {
         return Tx.run(() -> ConversationService.findOrCreate(agent, "web", username));
     }
 
-    private static AgentRunner.StreamingCallbacks buildStreamingCallbacks(SseStream sse, Agent agent) {
+    /** Why a stream closed: the turn finished normally, or the inactivity timer closed it. Anything else is the client. */
+    private record StreamCloseState(AtomicBoolean finished, AtomicBoolean idleTimedOut) {}
+
+    private static AgentRunner.StreamingCallbacks buildStreamingCallbacks(SseStream sse, Agent agent,
+                                                                          InactivityTimer idle, StreamCloseState close) {
         // Switch SSE payload shape on the first token only (includes a timestamp
         // field the frontend uses for TTFT visualization). Subsequent tokens take
         // a leaner shape. This is purely a wire-format decision — trace-side
@@ -502,11 +528,13 @@ public class ApiChatController extends Controller {
         var cbRef = new AtomicReference<AgentRunner.StreamingCallbacks>();
         var callbacks = new AgentRunner.StreamingCallbacks(
                 conversation -> {
+                    idle.touch();
                     sendInitFrame(sse, agent, conversation);
                     convIdRef.set(conversation.id);
                     SubagentSpawnTool.registerChatCallbacks(conversation.id, cbRef.get());
                 },
                 token -> {
+                    idle.touch();
                     if (firstToken.compareAndSet(true, false)) {
                         // First-token path keeps the timestamp field for TTFT
                         // visualization. Fires once per turn, so the extra
@@ -518,9 +546,18 @@ public class ApiChatController extends Controller {
                         tokenCoalescer.accept(token);
                     }
                 },
-                reasoningCoalescer::accept,
-                status -> sse.send(Map.of("type", "status", KEY_CONTENT, status)),
-                ev -> sendToolCallFrame(sse, ev),
+                reasoning -> {
+                    idle.touch();
+                    reasoningCoalescer.accept(reasoning);
+                },
+                status -> {
+                    idle.touch();
+                    sse.send(Map.of("type", "status", KEY_CONTENT, status));
+                },
+                ev -> {
+                    idle.touch();
+                    sendToolCallFrame(sse, ev);
+                },
                 content -> {
                     // JCLAW-200: drain coalescer buffers before the terminal
                     // frame so any tail tokens reach the client. No-op when
@@ -528,6 +565,7 @@ public class ApiChatController extends Controller {
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
                     SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
+                    close.finished().set(true);
                     sse.send(Map.of("type", "complete", KEY_CONTENT, content));
                     sse.close();
                 },
@@ -535,6 +573,7 @@ public class ApiChatController extends Controller {
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
                     SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
+                    close.finished().set(true);
                     sse.send(Map.of("type", "error", KEY_CONTENT, "An error occurred: " + error.getMessage()));
                     sse.close();
                     EventLogger.error("channel", agent.name, "web",
