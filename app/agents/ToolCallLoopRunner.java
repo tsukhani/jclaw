@@ -71,6 +71,7 @@ public final class ToolCallLoopRunner {
 
     /** Passthrough-outcome tag for the audio/image structured logs (AudioRetryStrategy / ImageRetryStrategy). */
     private static final String OUTCOME_ERROR = "error";
+    private static final String NO_MODEL_CONFIGURED = "agent has no model configured";
 
     /**
      * The tool names this turn actually put in front of the model, for the dispatch
@@ -141,7 +142,7 @@ public final class ToolCallLoopRunner {
         var currentMessages = new ArrayList<>(messages);
         var thinkingMode = ModelResolver.resolveThinkingMode(agent, conversation, primary);
         var effectiveModelId = Objects.requireNonNull(
-                ModelResolver.effectiveModelId(agent, conversation), "agent has no model configured");
+                ModelResolver.effectiveModelId(agent, conversation), NO_MODEL_CONFIGURED);
         var modelInfoForOutcome = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioInitially = modelInfoForOutcome != null && modelInfoForOutcome.supportsAudio();
         var audioState = new AudioRetryState(!supportsAudioInitially && !audioBearers.isEmpty());
@@ -367,7 +368,7 @@ public final class ToolCallLoopRunner {
         var retryMessages = new ArrayList<>(currentMessages);
         retryMessages.add(ChatMessage.user(ANSWER_NUDGE));
         var modelId = Objects.requireNonNull(
-                ModelResolver.effectiveModelId(agent, conversation), "agent has no model configured");
+                ModelResolver.effectiveModelId(agent, conversation), NO_MODEL_CONFIGURED);
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, retryMessages, tools);
 
         var retry = syncRetry(agent, primary, modelId, retryMessages, tools, maxTokens, conversation.channelType);
@@ -588,7 +589,7 @@ public final class ToolCallLoopRunner {
         // Continue with streaming after tool results. JCLAW-108: effective
         // model id honors conversation override, same as the round-1 call.
         var effectiveModelIdForCall = Objects.requireNonNull(
-                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), "agent has no model configured");
+                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
         // JCLAW-465: compress tool outputs (incl. this turn's) before the
         // continuation call. Ephemeral — currentMessages keeps the originals.
         var sendMessages = CompressionPipeline.compress(
@@ -638,7 +639,7 @@ public final class ToolCallLoopRunner {
         // even when the user clearly wants synthesis. Retry once with an explicit synthesis
         // nudge before giving up and emitting a diagnostic fallback.
         if (accumulator.content() == null || accumulator.content().isBlank()) {
-            return retryEmptyContinuation(ctx, round, currentMessages, effectiveModelIdForCall, priorContent, accumulator);
+            return retryEmptyContinuation(ctx, round, currentMessages, priorContent, accumulator);
         }
 
         return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), accumulator.content())
@@ -695,8 +696,7 @@ public final class ToolCallLoopRunner {
      * one is configured. Every retry counts in the turn's usage.
      */
     private static String retryEmptyContinuation(StreamingTurnContext ctx, int round,
-                                                 ArrayList<ChatMessage> currentMessages,
-                                                 String effectiveModelIdForCall, String priorContent,
+                                                 ArrayList<ChatMessage> currentMessages, String priorContent,
                                                  LlmProvider.StreamAccumulator empty) {
         EventLogger.warn("llm", ctx.agent().name, null,
                 "Empty continuation after tool calls in round %d (%s) — retrying with synthesis nudge, reasoning off"
@@ -750,7 +750,7 @@ public final class ToolCallLoopRunner {
         var retryMessages = new ArrayList<>(base);
         retryMessages.add(ChatMessage.user(nudge));
         var modelId = Objects.requireNonNull(
-                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), "agent has no model configured");
+                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), retryMessages, ctx.tools());
 
         var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
