@@ -295,6 +295,55 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void listReturnsSpawnLabelAndNullWhenUnlabelled() {
+        login();
+        var ids = commitInFreshTx(() -> {
+            var p = AgentService.create("api-label-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-label-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            var labelled = persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+            SubagentRun run = SubagentRun.findById(labelled);
+            run.label = "summarize the release notes";
+            run.save();
+            var unlabelled = persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+            return new long[]{p.id, labelled, unlabelled};
+        });
+
+        var body = getContent(GET("/api/subagent-runs?parentAgentId=" + ids[0]));
+        assertEquals("\"summarize the release notes\"", fieldOfRun(body, ids[1], "label"),
+                "labelled run carries its label: " + body);
+        assertEquals("null", fieldOfRun(body, ids[2], "label"),
+                "unlabelled run carries a null label: " + body);
+    }
+
+    @Test
+    void sortsByParentConversationThenNewestStartedFirst() {
+        login();
+        var ids = commitInFreshTx(() -> {
+            var p = AgentService.create("sort-conv-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("sort-conv-c", "openrouter", "gpt-4.1");
+            var pcLow = ConversationService.create(p, "web", "u-low");
+            var pcHigh = ConversationService.create(p, "web", "u-high");
+            var cc = ConversationService.create(c, "subagent", null);
+            // Interleaved inserts so neither id order nor insert order matches the expected order.
+            var lowNewer = persistRunStartedAt(p, c, pcLow, cc, Instant.parse("2026-03-01T00:00:00Z"));
+            var highOlder = persistRunStartedAt(p, c, pcHigh, cc, Instant.parse("2026-01-01T00:00:00Z"));
+            var lowOlder = persistRunStartedAt(p, c, pcLow, cc, Instant.parse("2026-02-01T00:00:00Z"));
+            var highNewer = persistRunStartedAt(p, c, pcHigh, cc, Instant.parse("2026-04-01T00:00:00Z"));
+            return new long[]{p.id, lowNewer, lowOlder, highNewer, highOlder};
+        });
+
+        var desc = getContent(GET("/api/subagent-runs?parentAgentId=" + ids[0]
+                + "&sort=conversation&dir=desc&limit=500"));
+        assertRunOrder(desc, ids[3], ids[4], ids[1], ids[2]);
+
+        var asc = getContent(GET("/api/subagent-runs?parentAgentId=" + ids[0]
+                + "&sort=conversation&dir=asc&limit=500"));
+        assertRunOrder(asc, ids[1], ids[2], ids[3], ids[4]);
+    }
+
+    @Test
     void unknownSortColumnFallsBackToDefaultOrderNot400() {
         login();
         commitInFreshTx(() -> {
@@ -754,6 +803,30 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
                 "run " + id + " should carry mode '" + expectedMode + "': " + body);
     }
 
+    /** Raw JSON value of {@code field} inside the run object whose id is {@code id}. */
+    private static String fieldOfRun(String body, long id, String field) {
+        int at = body.indexOf("\"id\":" + id + ",");
+        assertTrue(at >= 0, "run id " + id + " present in body: " + body);
+        int end = body.indexOf('}', at);
+        var marker = "\"" + field + "\":";
+        int fieldAt = body.indexOf(marker, at);
+        assertTrue(fieldAt >= 0 && fieldAt < end, field + " inside run " + id + ": " + body);
+        int valueAt = fieldAt + marker.length();
+        int valueEnd = body.charAt(valueAt) == '"'
+                ? body.indexOf('"', valueAt + 1) + 1
+                : body.indexOf(',', valueAt);
+        return body.substring(valueAt, valueEnd);
+    }
+
+    private static void assertRunOrder(String body, long... expected) {
+        int previous = -1;
+        for (long id : expected) {
+            int at = body.indexOf("\"id\":" + id + ",");
+            assertTrue(at > previous, "run " + id + " out of order in: " + body);
+            previous = at;
+        }
+    }
+
     // ── helpers ───────────────────────────────────────────────────────
 
     /**
@@ -798,6 +871,21 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
             run.endedAt = Instant.now();
             run.outcome = "seeded " + status.name().toLowerCase();
         }
+        run.save();
+        return run.id;
+    }
+
+    private static long persistRunStartedAt(Agent p, Agent c, Conversation pc, Conversation cc,
+                                            Instant startedAt) {
+        var run = new SubagentRun();
+        run.parentAgent = p;
+        run.childAgent = c;
+        run.parentConversation = pc;
+        run.childConversation = cc;
+        run.status = SubagentRun.Status.COMPLETED;
+        run.startedAt = startedAt;
+        run.endedAt = startedAt;
+        run.outcome = "seeded completed";
         run.save();
         return run.id;
     }

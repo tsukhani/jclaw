@@ -69,7 +69,7 @@ public class ApiSubagentRunsController extends Controller {
     public record SubagentRunView(Long id, @Nullable Long parentAgentId, @Nullable String parentAgentName,
                                   @Nullable Long childAgentId, @Nullable String childAgentName,
                                   @Nullable Long parentConversationId, @Nullable Long childConversationId,
-                                  @Nullable String mode, @Nullable String status, @Nullable String startedAt,
+                                  @Nullable String label, @Nullable String mode, @Nullable String status, @Nullable String startedAt,
                                   @Nullable String endedAt, String outcome, String workdir) {}
 
     public record KillRequest(String reason) {}
@@ -240,6 +240,7 @@ public class ApiSubagentRunsController extends Controller {
                 r.childAgent != null ? r.childAgent.name : null,
                 r.parentConversation != null ? r.parentConversation.id : null,
                 r.childConversation != null ? r.childConversation.id : null,
+                r.label,
                 modeByRunId.get(r.id),
                 r.status != null ? r.status.name() : null,
                 r.startedAt != null ? r.startedAt.toString() : null,
@@ -455,6 +456,11 @@ public class ApiSubagentRunsController extends Controller {
      * first); a stable id tiebreak keeps paging deterministic.
      */
     private static String orderByClause(String sort, String dir) {
+        if ("conversation".equals(sort)) {
+            // dir orders the conversation groups only; runs inside a group stay newest first.
+            String direction = "asc".equalsIgnoreCase(dir) ? "ASC" : "DESC";
+            return "ORDER BY r.parentConversation.id " + direction + ", " + COL_STARTED_AT + " DESC, r.id ASC";
+        }
         String col = switch (sort == null ? "" : sort) {
             case "id" -> "r.id";
             case "parent" -> "r.parentAgent.name";
