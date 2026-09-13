@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDownIcon } from '@heroicons/vue/24/outline'
+import { ChevronDownIcon, GlobeAltIcon, WrenchScrewdriverIcon } from '@heroicons/vue/24/outline'
 import type { ToolCall, ToolCallResultChip } from '~/types/api'
 
 // JCLAW-170: the tool-calls accordion for an assistant turn. Card-level collapse
@@ -65,14 +65,31 @@ function extraChipCountForCall(tc: ToolCall): number {
  *  the transcript; clicking through to copy the full result happens via the
  *  larger UX, not the per-call peek. */
 function truncatedToolResultText(tc: ToolCall): string {
-  const text = (tc.resultText ?? '').trim()
+  const text = readableResultText((tc.resultText ?? '').trim())
   if (!text) return ''
   if (text.length <= MAX_RESULT_TEXT_PREVIEW) return text
   return text.slice(0, MAX_RESULT_TEXT_PREVIEW) + '…'
 }
 
+// A JSON result is pretty-printed, and a string spanning lines keeps its line breaks rather than showing `\n` escapes.
+function readableResultText(text: string): string {
+  if (!text.startsWith('{') && !text.startsWith('[')) return text
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  }
+  catch {
+    return text
+  }
+  return JSON.stringify(parsed, null, 2).replace(/"(?:[^"\\]|\\.)*"/g, (token) => {
+    const value = JSON.parse(token) as string
+    return value.includes('\n') ? `"${value}"` : token
+  })
+}
+
+// Checks the raw text, so a collapsed row never parses its result.
 function toolCallHasExpandableBody(tc: ToolCall): boolean {
-  return chipsForToolCall(tc).length > 0 || !!truncatedToolResultText(tc)
+  return chipsForToolCall(tc).length > 0 || !!tc.resultText?.trim()
 }
 
 function chipTitle(chip: ToolCallResultChip): string {

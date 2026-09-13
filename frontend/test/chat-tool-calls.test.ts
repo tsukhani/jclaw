@@ -35,4 +35,24 @@ describe('ChatToolCalls (JCLAW-170)', () => {
     const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: [call], collapsed: false } })
     expect(c.find('pre').text()).toContain('the full tool output')
   })
+  it('draws the header icon beside its chevron, and the globe for a result chip without a favicon', async () => {
+    const call = tc({ _expanded: true, resultStructured: { results: [{ title: 'Cats', url: 'https://example.com/cats' }] } as ToolCall['resultStructured'] })
+    const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: [call], collapsed: false } })
+    expect(c.findAll('button[title="Collapse tool calls"] svg')).toHaveLength(2)
+    expect(c.find('a[href="https://example.com/cats"] img').exists()).toBe(false)
+    expect(c.find('a[href="https://example.com/cats"] svg').exists()).toBe(true)
+  })
+  it('pretty-prints a JSON result and keeps the line breaks of a multi-line string', async () => {
+    const resultText = JSON.stringify({ results: [{ run_id: '7', reply: 'First line.\n\nSecond "quoted" line.' }], count: 1 })
+    const call = tc({ name: 'subagent_yield', arguments: '{"all":true}', resultText, _expanded: true })
+    const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: [call], collapsed: false } })
+    expect(c.find('pre').element.textContent).toBe(
+      '{\n  "results": [\n    {\n      "run_id": "7",\n      "reply": "First line.\n\nSecond "quoted" line."\n    }\n  ],\n  "count": 1\n}',
+    )
+  })
+  it('leaves a result that is not JSON exactly as the tool returned it', async () => {
+    const resultText = '{not json}\nexit code 0 \\n stays escaped'
+    const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: [tc({ resultText, _expanded: true })], collapsed: false } })
+    expect(c.find('pre').element.textContent).toBe(resultText)
+  })
 })
