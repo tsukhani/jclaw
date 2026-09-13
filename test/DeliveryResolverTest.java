@@ -87,6 +87,37 @@ class DeliveryResolverTest extends UnitTest {
         assertEquals("999", recent.peerId);
     }
 
+    @Test
+    void theCallingConversationWinsOverAMoreRecentOne() throws Exception {
+        var calling = persistConversation("web", "admin");
+        Thread.sleep(10);
+        persistConversation("telegram", "999");
+
+        assertEquals("web:" + calling.id,
+                agents.ToolContext.withConversation(calling.id, () -> DeliveryResolver.inferSpec(agent).orElse(null)),
+                "a chat turn's own conversation must win over one updated more recently (JCLAW-1211)");
+        assertEquals("telegram:999", DeliveryResolver.inferSpec(agent).orElse(null),
+                "outside a tool dispatch the most recently updated conversation still wins");
+    }
+
+    @Test
+    void aCallingConversationOfAnotherAgentIsIgnored() {
+        var otherAgent = persistAgent("delivery-resolver-other-agent");
+        var foreign = Tx.run(() -> {
+            var c = new Conversation();
+            c.agent = otherAgent;
+            c.channelType = "web";
+            c.peerId = "admin";
+            c.save();
+            return c;
+        });
+        persistConversation("telegram", "999");
+
+        assertEquals("telegram:999",
+                agents.ToolContext.withConversation(foreign.id, () -> DeliveryResolver.inferSpec(agent).orElse(null)),
+                "a bound conversation belonging to another agent must not be used");
+    }
+
     // === Helpers ===
 
     private Agent persistAgent(String name) {

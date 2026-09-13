@@ -1,34 +1,35 @@
 package tools;
 
+import agents.ToolContext;
 import models.Agent;
 import models.Conversation;
 import services.DeliveryDispatcher;
 import services.Tx;
 
+import java.util.Objects;
 import java.util.Optional;
 
 /**
  * JCLAW-726: Pure Fabrication owning "which conversation is the agent
  * operating on, and how do I address it" inference. The single source shared
- * by {@link TaskTool} (a created task's default output {@code delivery} target)
- * and {@link MessageTool} (a mid-turn send's channel + peer).
+ * by {@link TaskTool} (a created task's default output {@code delivery} target),
+ * {@link MessageTool} (a mid-turn send's channel + peer) and
+ * {@link SubagentChildBootstrap} (a spawned run's parent conversation).
  *
- * <p>Both tools previously carried their own copy of the
+ * <p>These previously carried their own copy of the
  * most-recently-updated-conversation lookup and had to be "kept agreeing" by
- * hand. Routing both through {@link #mostRecentConversation} makes that
- * agreement structural: change "most-recently-updated wins" here and both
- * surfaces move together.
+ * hand. Routing them through {@link #operatingConversation} makes that
+ * agreement structural: change the rule here and every surface moves together.
  */
 public final class DeliveryResolver {
 
     private DeliveryResolver() {}
 
     /**
-     * The agent's most-recently-updated {@link Conversation} — "the channel
-     * I'm operating on". Empty when the agent has no conversations (headless
-     * task creation via API, a freshly-spawned agent with no chat history).
-     * Runs in the caller's JPA transaction when there is one (via
-     * {@link Tx#run}), else opens its own.
+     * The agent's most-recently-updated {@link Conversation}. Empty when the
+     * agent has no conversations (headless task creation via API, a
+     * freshly-spawned agent with no chat history). Runs in the caller's JPA
+     * transaction when there is one (via {@link Tx#run}), else opens its own.
      */
     public static Optional<Conversation> mostRecentConversation(Agent agent) {
         return Tx.run(() -> Optional.ofNullable((Conversation) Conversation.find(
@@ -36,8 +37,30 @@ public final class DeliveryResolver {
     }
 
     /**
-     * Infer a {@code "<channelType>:<target>"} delivery spec from the agent's
-     * most-recently-updated conversation, or empty when none is usable. The
+     * "The conversation I'm operating on": the one the calling chat turn runs in
+     * ({@link #callingConversation}), else {@link #mostRecentConversation}. Recency
+     * alone picks whichever of the agent's chats was touched last, not the one it is
+     * answering (JCLAW-1211).
+     */
+    public static Optional<Conversation> operatingConversation(Agent agent) {
+        return callingConversation(agent).or(() -> mostRecentConversation(agent));
+    }
+
+    /**
+     * The conversation bound to the current tool dispatch
+     * ({@link ToolContext#conversationId}) when it belongs to {@code agent}; empty in
+     * a task fire, which binds none, and outside a tool dispatch.
+     */
+    public static Optional<Conversation> callingConversation(Agent agent) {
+        var id = ToolContext.conversationId();
+        if (id == null) return Optional.empty();
+        return Tx.run(() -> Optional.ofNullable((Conversation) Conversation.findById(id))
+                .filter(c -> c.agent != null && Objects.equals(c.agent.id, agent.id)));
+    }
+
+    /**
+     * Infer a {@code "<channelType>:<target>"} delivery spec from
+     * {@link #operatingConversation}, or empty when none is usable. The
      * {@code target} is:
      * <ul>
      *   <li>{@link Conversation#id} for the {@code web} channel, because web
@@ -49,12 +72,12 @@ public final class DeliveryResolver {
      *       {@link services.DeliveryDispatcher} parses.</li>
      * </ul>
      *
-     * <p>Empty when the agent has no conversation, the most-recent conversation
-     * is on a non-deliverable channel, or the required target field is absent
-     * (no peerId on a non-web channel).
+     * <p>Empty when the agent has no conversation, that conversation is on a
+     * non-deliverable channel, or the required target field is absent (no peerId
+     * on a non-web channel).
      */
     public static Optional<String> inferSpec(Agent agent) {
-        return mostRecentConversation(agent).flatMap(DeliveryResolver::specFor);
+        return operatingConversation(agent).flatMap(DeliveryResolver::specFor);
     }
 
     private static Optional<String> specFor(Conversation conv) {

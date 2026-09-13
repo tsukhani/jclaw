@@ -693,6 +693,51 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void spawnFromAChatTurnNestsUnderThatConversationNotTheNewestOne() throws Exception {
+        // JCLAW-1211: the run's parent is the spawning turn's conversation, even when another is newer.
+        startLlmServer(simpleResponse("Subagent reply: done."));
+        configureProvider();
+
+        var parent = createAgent("p-calling", "spawn-provider", "test-model");
+        var calling = ConversationService.create(parent, "web", "u-calling");
+        Thread.sleep(10);
+        var newer = ConversationService.create(parent, "web", "u-newer");
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThreadInConversation(parent.id, calling.id,
+                "{\"task\":\"investigate X\",\"label\":\"calling-parent\"}");
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString(), reply);
+
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(parsed.get("run_id").getAsString()));
+        assertEquals(calling.id, run.parentConversation.id,
+                "the run's parent must be the spawning conversation, not the more recently updated #" + newer.id);
+        Conversation childConv = Conversation.findById(run.childConversation.id);
+        assertEquals(calling.id, childConv.parentConversation.id);
+    }
+
+    /** {@link #invokeOnVirtualThread} with the conversation bound the way ParallelToolExecutor binds a chat turn's. */
+    private String invokeOnVirtualThreadInConversation(Long parentAgentId, Long conversationId, String argsJson)
+            throws Exception {
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
+                resultRef.set(agents.ToolContext.withConversation(conversationId,
+                        () -> new SubagentSpawnTool().execute(argsJson, parent)));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "subagent_spawn must complete within 30s");
+        if (errorRef.get() != null) throw errorRef.get();
+        return resultRef.get();
+    }
+
+    @Test
     void happyPathEmitsLifecycleEventsWithCorrectDetails() throws Exception {
         startLlmServer(simpleResponse("Subagent reply: done."));
         configureProvider();

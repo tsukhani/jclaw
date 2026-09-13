@@ -530,12 +530,9 @@ final class SubagentChildBootstrap {
     static @Nullable Conversation resolveParentConversation(Long parentAgentId) {
         var parent = (Agent) Agent.findById(parentAgentId);
         if (parent == null) return null;
-        // Pick the most recently-updated conversation that ISN'T a subagent
-        // child of someone else (a subagent calling spawn nests under its own
-        // parent conversation, which is itself an existing Conversation row —
-        // no special-case needed; channelType="subagent" simply means "I'm a
-        // child of someone" and we still want that as the parent for a nested
-        // spawn).
-        return Conversation.find("agent = ?1 ORDER BY updatedAt DESC", parent).first();
+        // The spawning turn's own conversation, else the most recently updated one (a task fire
+        // binds none). A subagent calling spawn nests under its own child conversation, which is
+        // itself an existing Conversation row, so no special case is needed.
+        return DeliveryResolver.operatingConversation(parent).orElse(null);
     }
 }

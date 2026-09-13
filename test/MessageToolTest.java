@@ -199,6 +199,67 @@ class MessageToolTest extends UnitTest {
     }
 
     @Test
+    void sendFromAChatTurnLandsInThatConversationNotTheNewestOne() throws Exception {
+        // JCLAW-1211: two web chats with the same agent; the more recently updated one must not capture the send.
+        var calling = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+        Thread.sleep(10);
+        var newer = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+
+        var result = invokeToolInConversation(agent.id, calling.id,
+                "{\"action\":\"send\",\"message\":\"download started\"}");
+
+        assertEquals("sent", JsonParser.parseString(result).getAsJsonObject().get("action").getAsString(), result);
+        assertEquals(1L, subagentSendCount(calling.id), "the send must land in the calling conversation");
+        assertEquals(0L, subagentSendCount(newer.id), "the more recently updated conversation must not receive it");
+    }
+
+    @Test
+    void sendFromASubagentTurnLandsInTheConversationThatSpawnedIt() throws Exception {
+        var spawning = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+        var child = AgentService.create("msg-test-child", "openrouter", "gpt-4.1");
+        var childConv = Tx.run(() -> {
+            var c = ConversationService.create(child, "web", "admin");
+            c.parentConversation = spawning;
+            c.save();
+            return c;
+        });
+        Thread.sleep(10);
+        var newer = Tx.run(() -> ConversationService.create(agent, "web", "admin"));
+
+        var result = invokeToolInConversation(child.id, childConv.id,
+                "{\"action\":\"send\",\"message\":\"45%\"}");
+
+        assertEquals("sent", JsonParser.parseString(result).getAsJsonObject().get("action").getAsString(), result);
+        assertEquals(1L, subagentSendCount(spawning.id), "a subagent's send must reach the conversation that spawned it");
+        assertEquals(0L, subagentSendCount(newer.id));
+    }
+
+    private static long subagentSendCount(Long conversationId) {
+        return Tx.run(() -> models.Message.count("conversation.id = ?1 AND messageKind = ?2",
+                conversationId, "subagent_send"));
+    }
+
+    /** {@link #invokeTool} with the conversation bound the way ParallelToolExecutor binds a chat turn's. */
+    private String invokeToolInConversation(Long callerAgentId, Long conversationId, String argsJson) throws Exception {
+        commitAndReopen();
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
+                resultRef.set(agents.ToolContext.withConversation(conversationId,
+                        () -> new MessageTool().execute(argsJson, caller)));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(10_000);
+        assertFalse(thread.isAlive(), "message tool must complete within 10s");
+        if (errorRef.get() != null) throw errorRef.get();
+        return resultRef.get();
+    }
+
+    @Test
     void inferenceFromSlackConversationWithoutPeerAndNoBindingErrorsNotConfigured() throws Exception {
         // Inference picks channelType="slack" from the active conversation; the null
         // peerId leaves no conversation target, so JCLAW-425 falls back to the agent's

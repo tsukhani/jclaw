@@ -418,12 +418,12 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         String channel = explicitChannel;
         String target = explicitTarget;
-        // Channel inference: when the channel isn't given, read it off the calling
-        // agent's most-recently-updated conversation ("the channel I'm operating on").
-        // Subagents inherit the parent's channel at spawn (JCLAW-327 AC-5). The
-        // most-recent-conversation lookup is shared with TaskTool via DeliveryResolver.
+        // Channel inference: when the channel isn't given, read it off the conversation the
+        // calling turn runs in, else the agent's most-recently-updated one ("the channel I'm
+        // operating on"). Subagents inherit the parent's channel at spawn (JCLAW-327 AC-5). The
+        // lookup is shared with TaskTool via DeliveryResolver.
         if (channel == null || channel.isBlank()) {
-            var conv = DeliveryResolver.mostRecentConversation(agent).orElse(null);
+            var conv = DeliveryResolver.operatingConversation(agent).orElse(null);
             if (conv == null) {
                 return "Error: no active conversation for agent '" + agent.name
                         + "'; pass explicit 'channel' and 'target' to send anyway.";
@@ -435,12 +435,14 @@ public class MessageTool implements ToolRegistry.Tool {
         //     authoritative "telegram channel setting", with NO dependency on a prior
         //     conversation, so a proactive send (e.g. a scheduled task firing in a
         //     web/internal context) reaches the user even with zero telegram history.
-        //   - slack / whatsapp: the most-recent conversation peer on that channel
-        //     (reply where the user is), then — JCLAW-425 — the agent's per-agent
-        //     binding destination as a fallback, so a proactive send from an agent
-        //     with no chat history on that channel still reaches the owner.
-        //   - web: the most-recent conversation peer (also identifies the
-        //     conversation the dispatcher fires back to); no binding fallback.
+        //   - slack / whatsapp: the calling conversation's peer when it is on that channel,
+        //     else the most-recent conversation peer on that channel (reply where the user
+        //     is), then — JCLAW-425 — the agent's per-agent binding destination as a
+        //     fallback, so a proactive send from an agent with no chat history on that
+        //     channel still reaches the owner.
+        //   - web: the calling conversation's id, which the dispatcher routes to exactly;
+        //     else the most-recent conversation peer, which it resolves by recency. No
+        //     binding fallback.
         if (target == null || target.isBlank()) {
             if ("telegram".equalsIgnoreCase(channel)) {
                 var binding = TelegramBinding.findByAgentOrAncestor(agent);
@@ -451,9 +453,17 @@ public class MessageTool implements ToolRegistry.Tool {
                 }
                 target = binding.telegramUserId;
             } else {
-                var cConv = (Conversation) Conversation.find(
-                        "agent = ?1 AND channelType = ?2 ORDER BY updatedAt DESC", agent, channel).first();
-                if (cConv != null) target = cConv.peerId;
+                final var targetChannel = channel;
+                var calling = DeliveryResolver.callingConversation(agent)
+                        .filter(c -> c.channelType != null && c.channelType.equalsIgnoreCase(targetChannel))
+                        .orElse(null);
+                if (calling != null) {
+                    target = "web".equalsIgnoreCase(channel) ? String.valueOf(calling.id) : calling.peerId;
+                } else {
+                    var cConv = (Conversation) Conversation.find(
+                            "agent = ?1 AND channelType = ?2 ORDER BY updatedAt DESC", agent, channel).first();
+                    if (cConv != null) target = cConv.peerId;
+                }
                 // JCLAW-425: no live conversation peer — fall back to the agent's
                 // authoritative per-agent destination for slack/whatsapp (null for
                 // web, or when no binding/destination is configured).
@@ -464,9 +474,8 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         // Target is required for external channels (telegram/slack/whatsapp)
         // because it's the platform-specific peer id (chat id / channel id /
-        // phone number). Web is routed by the dispatcher to the calling
-        // agent's parent-chain root conversation, so target is unused there
-        // and we don't require it.
+        // phone number). Without one, web falls back to the dispatcher's walk to
+        // the calling agent's parent-chain root conversation, so we don't require it.
         var needsTarget = channel != null && !"web".equalsIgnoreCase(channel);
         if (needsTarget && (target == null || target.isBlank())) {
             return noDestinationError(agent, channel);
@@ -651,11 +660,11 @@ public class MessageTool implements ToolRegistry.Tool {
     }
 
     /** Chat id for a Telegram action: explicit {@code target} wins, else the
-     *  peer of the agent's most-recently-updated conversation (the same shared
+     *  peer of the conversation the agent is operating on (the same shared
      *  {@link DeliveryResolver} lookup the {@code send} inference rule uses). */
     private static @Nullable String resolveChatId(Agent agent, @Nullable String explicitTarget) {
         if (explicitTarget != null && !explicitTarget.isBlank()) return explicitTarget;
-        return DeliveryResolver.mostRecentConversation(agent).map(c -> c.peerId).orElse(null);
+        return DeliveryResolver.operatingConversation(agent).map(c -> c.peerId).orElse(null);
     }
 
     /** Per-action capability toggle, read from {@code play.Play.configuration}
