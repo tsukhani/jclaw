@@ -83,10 +83,22 @@ type SortColumn = 'id' | 'parent' | 'conversation' | 'child' | 'status' | 'start
 const sortBy = ref<SortColumn>('conversation')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
+const filterBar = ref<{ removeKey: (key: string) => void } | null>(null)
+const clearConversationFilterButton = ref<HTMLButtonElement | null>(null)
+
+// A parentConversation token left in the bar would re-apply its id on the bar's next edit.
+function clearConversationFilter() {
+  filterBar.value?.removeKey('parentConversation')
+  parentConversationFilter.value = ''
+}
+
 function applyConversationFilter(conversationId: number) {
+  filterBar.value?.removeKey('parentConversation')
   parentConversationFilter.value = String(conversationId)
   page.value = 1
   selectedIds.value = new Set()
+  // The funnel that held focus unmounts once its filter applies.
+  void nextTick(() => clearConversationFilterButton.value?.focus())
 }
 
 const url = computed(() => {
@@ -144,16 +156,24 @@ const runs = ref<SubagentRun[]>([])
 // all matching" count, neither of which can come from runs.length.
 const total = ref(0)
 const loading = ref(false)
+// The sort the rows on screen came back in, which lags sortBy until the refetch lands.
+const loadedSort = ref<SortColumn | null>(null)
+let latestRefresh = 0
 async function refresh() {
+  const request = ++latestRefresh
+  const requestSort = sortBy.value
   loading.value = true
   try {
     const res = await $fetch.raw<SubagentRun[]>(url.value)
+    // A poll started under the previous url can land after the request for the new one.
+    if (request !== latestRefresh) return
     runs.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
     total.value = headerTotal ? Number.parseInt(headerTotal, 10) : runs.value.length
+    loadedSort.value = requestSort
   }
   finally {
-    loading.value = false
+    if (request === latestRefresh) loading.value = false
   }
 }
 await refresh()
@@ -195,7 +215,7 @@ function sortArrow(col: SortColumn): string {
 }
 
 // Headers only make sense while the server orders by conversation; a group split across pages restarts on the next.
-const groupedByConversation = computed(() => sortBy.value === 'conversation')
+const groupedByConversation = computed(() => loadedSort.value === 'conversation')
 interface RunGroup { key: string, conversationId: number | null, runs: SubagentRun[] }
 const runGroups = computed<RunGroup[]>(() => {
   if (!groupedByConversation.value) return [{ key: 'all', conversationId: null, runs: runs.value }]
@@ -476,6 +496,7 @@ function closePeek() {
     >
       <div class="flex-1 min-w-[280px]">
         <FilterBar
+          ref="filterBar"
           storage-key="subagents"
           placeholder="Filter... (e.g., q:radarr status:COMPLETED parentAgent:42)"
           :filter-keys="['q', 'parentAgent', 'status', 'since', 'parentConversation']"
@@ -497,10 +518,11 @@ function closePeek() {
         <span class="text-xs text-fg-muted">Conversation</span>
         <span class="font-mono">#{{ parentConversationFilter }}</span>
         <button
+          ref="clearConversationFilterButton"
           type="button"
           class="text-fg-muted hover:text-fg-strong text-xs leading-none"
           aria-label="Clear conversation filter"
-          @click="parentConversationFilter = ''"
+          @click="clearConversationFilter"
         >
           ×
         </button>

@@ -14,7 +14,7 @@ const props = defineProps<{
   agentId: number | null
 }>()
 
-const { messages, loaded, failed } = useSubagentTranscript(props.childConversationId, () => props.status)
+const { messages, loaded, failed, retry } = useSubagentTranscript(props.childConversationId, () => props.status)
 
 const displayMessages = computed(() => messages.value.filter(m => shouldDisplayMessage(m, false)))
 
@@ -70,18 +70,33 @@ onMounted(scrollToBottom)
     data-testid="subagent-transcript-panel"
     class="subagent-transcript flex flex-col rounded-xl border border-border bg-surface-elevated"
   >
+    <!-- The only scroller in an expanded chip; no overscroll-contain, so a wheel at its end reaches the stack. -->
     <div
       ref="scrollEl"
       data-testid="subagent-transcript-scroll"
-      class="max-h-96 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-3"
+      class="max-h-[min(24rem,40vh)] overflow-y-auto overflow-x-hidden px-3 py-3"
       @scroll="onScroll"
     >
-      <p
+      <div
         v-if="!loaded"
-        class="text-sm italic text-fg-muted"
+        class="flex items-center gap-3"
       >
-        {{ failed ? 'Could not load this transcript.' : 'Loading transcript…' }}
-      </p>
+        <p
+          role="status"
+          class="text-sm italic text-fg-muted"
+        >
+          {{ failed ? 'Could not load this transcript.' : 'Loading transcript…' }}
+        </p>
+        <button
+          v-if="failed"
+          type="button"
+          data-testid="subagent-transcript-retry"
+          class="text-xs text-fg-muted underline underline-offset-2 hover:text-fg-strong"
+          @click="retry"
+        >
+          Retry
+        </button>
+      </div>
       <p
         v-else-if="!displayMessages.length"
         data-testid="subagent-transcript-empty"

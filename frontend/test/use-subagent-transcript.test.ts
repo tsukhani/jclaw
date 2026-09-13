@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import type { Message } from '~/types/api'
 import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
 import { useSubagentTranscript, type UseSubagentTranscript } from '~/composables/useSubagentTranscript'
@@ -16,10 +16,16 @@ function row(id: number, o: Record<string, unknown> = {}) {
 
 // Each test serves its own conversation id: the transcript cache is module-level by design.
 function serve(convoId: number, initial: unknown[]) {
-  const server = { rows: [...initial], calls: 0 }
-  registerEndpoint(`/api/conversations/${convoId}/messages`, () => {
+  const server = { rows: [...initial], calls: 0, gate: null as Promise<void> | null }
+  registerEndpoint(`/api/conversations/${convoId}/messages`, async (event) => {
+    if (server.gate) await server.gate
     server.calls++
-    return structuredClone(server.rows)
+    const { getQuery } = await import('h3')
+    const query = getQuery(event)
+    // The endpoint's paging: 200 rows unless asked, 500 at most, oldest first.
+    const limit = Math.min(Number(query.limit) || 200, 500)
+    const offset = Number(query.offset) || 0
+    return structuredClone(server.rows.slice(offset, offset + limit))
   })
   return server
 }
@@ -167,26 +173,51 @@ describe('useSubagentTranscript', () => {
     second.wrapper.unmount()
   })
 
-  it('fetches a finished run only when the cache lacks its final messages', async () => {
-    const done = serve(108, [row(1)])
-    const firstDone = mountTranscript(108, 'COMPLETED')
-    await vi.waitFor(() => expect(firstDone.api.loaded.value).toBe(true))
-    firstDone.wrapper.unmount()
-    const againDone = mountTranscript(108, 'COMPLETED')
-    await flushPromises()
-    expect(done.calls).toBe(1)
-    expect(ids(againDone.api)).toEqual([1])
-    againDone.wrapper.unmount()
+  it('refetches a finished run on every mount, so a reply a killed child persisted late still lands', async () => {
+    const server = serve(108, [row(1)])
+    const first = mountTranscript(108, 'KILLED')
+    await vi.waitFor(() => expect(first.api.loaded.value).toBe(true))
+    first.wrapper.unmount()
 
-    // Cached while RUNNING, then the run ended while no panel was mounted to see it.
-    const ended = serve(109, [row(1)])
-    const running = mountTranscript(109, 'RUNNING')
-    await vi.waitFor(() => expect(running.api.loaded.value).toBe(true))
-    running.wrapper.unmount()
-    ended.rows.push(row(2))
-    const failed = mountTranscript(109, 'FAILED')
-    await vi.waitFor(() => expect(ids(failed.api)).toEqual([1, 2]))
-    expect(ended.calls).toBe(2)
-    failed.wrapper.unmount()
+    server.rows.push(row(2))
+    const again = mountTranscript(108, 'KILLED')
+    expect(ids(again.api)).toEqual([1])
+    await vi.waitFor(() => expect(ids(again.api)).toEqual([1, 2]))
+    expect(server.calls).toBe(2)
+    again.wrapper.unmount()
+  })
+
+  it('reads every page of a long transcript and hydrates a turn that spans two pages', async () => {
+    const rows = Array.from({ length: 1100 }, (_, i) => row(i + 1))
+    rows[499] = row(500, { content: null, toolCalls: [{ id: 'c9', function: { name: 'web_search', arguments: '{}' } }] })
+    rows[500] = row(501, { role: 'tool', content: 'paged result', toolResults: 'c9' })
+    const server = serve(110, rows)
+    const { api, wrapper } = mountTranscript(110, 'COMPLETED')
+
+    await vi.waitFor(() => expect(api.messages.value).toHaveLength(1100))
+    expect(server.calls).toBe(3)
+    expect(api.messages.value.at(-1)!.id).toBe(1100)
+    const carrying = api.messages.value.filter(m => m.toolCalls?.some(tc => tc.id === 'c9'))
+    expect(carrying.map(m => m.id)).toEqual([502])
+    expect(carrying[0]!.toolCalls![0]!.resultText).toBe('paged result')
+    wrapper.unmount()
+  })
+
+  it('sends no request queued behind an in-flight poll once the panel has unmounted', async () => {
+    const server = serve(111, [row(1)])
+    let release!: () => void
+    server.gate = new Promise((resolve) => {
+      release = resolve
+    })
+    const { api, status, wrapper } = mountTranscript(111, 'RUNNING')
+    await flushPromises()
+
+    status.value = 'COMPLETED'
+    await nextTick()
+    wrapper.unmount()
+    release()
+    await vi.waitFor(() => expect(api.loaded.value).toBe(true))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(server.calls).toBe(1)
   })
 })

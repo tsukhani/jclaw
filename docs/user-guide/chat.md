@@ -114,9 +114,11 @@ Every subagent run the conversation spawns into its own child conversation gets 
 
 Each chip shows the run's label, or the subagent's name when the run has no label, and the run's status in the colours the [Subagents](/subagents) page uses: a pulsing blue dot for **Running**, then green for **Completed**, red for **Failed**, yellow for **Killed** and orange for **Timed out**. The status updates in place when the run ends. An async run's result still arrives as an announce card.
 
-Click the arrow on a chip to expand it and read that run's transcript in place, read-only. While the run is still going, new messages appear as the subagent writes them. Collapse the chip and expand it again and the transcript you had loaded shows straight away. **Open full transcript** at the bottom of the panel opens the child conversation as a full page.
+Click the arrow on a chip to expand it and read that run's transcript in place, read-only. While the run is still going, new messages appear as the subagent writes them. Collapse the chip and expand it again and the transcript you had loaded shows straight away, then catches up with anything written since. If a transcript fails to load, **Retry** in the panel fetches it again. **Open full transcript** at the bottom of the panel opens the child conversation as a full page.
 
 The **✕** on a chip closes it. A closed chip stays hidden until you load the conversation again, by switching to another conversation and back or by reloading the page.
+
+The stack holds a conversation's newest 100 runs. When a conversation has spawned more, **View all N on the Subagents page** under the stack opens the full list, filtered to that conversation.
 
 ## Subagent transcripts are read-only
 

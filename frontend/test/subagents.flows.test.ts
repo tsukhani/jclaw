@@ -53,6 +53,17 @@ let listRows: unknown[] = []
 let totalCount = 0
 let capturedQueries: Record<string, unknown>[] = []
 let deleteBody: Record<string, unknown> | null = null
+let rowsFor: ((query: Record<string, unknown>) => unknown[]) | null = null
+let listGate: { when: (query: Record<string, unknown>) => boolean, promise: Promise<void> } | null = null
+
+/** Holds every list response whose query matches until the returned release is called. */
+function gateList(when: (query: Record<string, unknown>) => boolean): () => void {
+  let release!: () => void
+  listGate = { when, promise: new Promise<void>((resolve) => {
+    release = resolve
+  }) }
+  return release
+}
 
 registerEndpoint('/api/agents', () => [
   { id: 1, name: 'main', enabled: true, isMain: true, modelProvider: 'openai', modelId: 'gpt-4.1' },
@@ -62,9 +73,11 @@ registerEndpoint('/api/subagent-runs', {
   method: 'GET',
   handler: async (event) => {
     const { getQuery } = await import('h3')
-    capturedQueries.push({ ...getQuery(event) })
+    const query = { ...getQuery(event) }
+    capturedQueries.push(query)
+    if (listGate?.when(query)) await listGate.promise
     event.node.res.setHeader('x-total-count', String(totalCount))
-    return listRows
+    return rowsFor ? rowsFor(query) : listRows
   },
 })
 registerEndpoint('/api/subagent-runs', {
@@ -89,6 +102,8 @@ beforeEach(() => {
   totalCount = 2
   capturedQueries = []
   deleteBody = null
+  rowsFor = null
+  listGate = null
 })
 
 afterEach(() => {
@@ -324,12 +339,30 @@ describe('Subagents — grouping by parent conversation', () => {
 
     await component.findAll('button').find(b => b.text().startsWith('Started'))!.trigger('click')
     await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ sort: 'started' }))
-    expect(groupHeaders(component)).toEqual([])
+    await vi.waitFor(() => expect(groupHeaders(component)).toEqual([]))
     expect(component.text()).toContain('#30')
 
     await component.findAll('button').find(b => b.text().startsWith('Conversation'))!.trigger('click')
     await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ sort: 'conversation', dir: 'desc' }))
-    expect(groupHeaders(component)).toEqual(['Conversation #9', 'Conversation #5'])
+    await vi.waitFor(() => expect(groupHeaders(component)).toEqual(['Conversation #9', 'Conversation #5']))
+  })
+
+  it('groups only once the conversation-sorted rows have arrived, not over rows still in another order', async () => {
+    listRows = [run({ id: 30, parentConversationId: 9 }), run({ id: 21 }), run({ id: 29, parentConversationId: 9 }), run({ id: 20 })]
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+    await component.findAll('button').find(b => b.text().startsWith('Started'))!.trigger('click')
+    await vi.waitFor(() => expect(groupHeaders(component)).toEqual([]))
+
+    const release = gateList(query => query.sort === 'conversation')
+    await component.findAll('button').find(b => b.text().startsWith('Conversation'))!.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ sort: 'conversation' }))
+    await flushPromises()
+    expect(groupHeaders(component)).toEqual([])
+
+    listRows = [run({ id: 30, parentConversationId: 9 }), run({ id: 29, parentConversationId: 9 }), run({ id: 21 }), run({ id: 20 })]
+    release()
+    await vi.waitFor(() => expect(groupHeaders(component)).toEqual(['Conversation #9', 'Conversation #5']))
   })
 })
 
@@ -356,6 +389,72 @@ describe('Subagents — parent conversation filter', () => {
 
     await commitFilter(component, 'status:COMPLETED')
     await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ status: 'COMPLETED', parentConversationId: '5' }))
+  })
+
+  it('clearing the conversation chip also drops the bar token, so the next bar edit does not restore the filter', async () => {
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+    await commitFilter(component, 'parentConversation:5')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ parentConversationId: '5' }))
+
+    await component.find('button[aria-label="Clear conversation filter"]').trigger('click')
+    expect(component.find('button[aria-label="Remove filter parentConversation: 5"]').exists()).toBe(false)
+
+    await commitFilter(component, 'status:COMPLETED')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ status: 'COMPLETED' }))
+    expect(capturedQueries.at(-1)).not.toHaveProperty('parentConversationId')
+  })
+
+  it('a column funnel replaces a conversation filter typed in the bar, and a later bar edit keeps the funnel\'s', async () => {
+    listRows = [run(), run({ id: 12, parentConversationId: 8, childConversationId: 7 })]
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+    await commitFilter(component, 'parentConversation:5')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ parentConversationId: '5' }))
+
+    await component.find('button[aria-label="Show only runs from conversation #8"]').trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ parentConversationId: '8' }))
+
+    await commitFilter(component, 'status:COMPLETED')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ status: 'COMPLETED', parentConversationId: '8' }))
+  })
+
+  it('moves focus to the clear control when the funnel that held it applies its filter', async () => {
+    const component = await mountSuspended(Subagents, { attachTo: document.body })
+    await flushPromises()
+    const funnel = component.find('button[aria-label="Show only runs from conversation #5"]')
+    const funnelEl = funnel.element as HTMLButtonElement
+    funnelEl.focus()
+
+    await funnel.trigger('click')
+    await vi.waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Clear conversation filter'))
+    component.unmount()
+  })
+
+  it('ignores a list response that lands after a newer request for another view', async () => {
+    totalCount = 42
+    let staleServed = false
+    rowsFor = (query) => {
+      if (query.offset !== '20') return listRows
+      staleServed = true
+      return [run({ id: 40, parentConversationId: 9, childAgentName: 'stale-page-child' })]
+    }
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    const release = gateList(query => query.offset === '20')
+    await component.findAll('button').find(b => b.text() === 'Next')!.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('20'))
+    await component.find('button[aria-label="Show only runs from conversation #5"]').trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ parentConversationId: '5', offset: '0' }))
+    await flushPromises()
+
+    release()
+    await vi.waitFor(() => expect(staleServed).toBe(true))
+    for (let i = 0; i < 5; i++) await flushPromises()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(component.text()).not.toContain('stale-page-child')
+    expect(component.text()).toContain('main-sub-abc')
   })
 
   it('removing the parentConversation token from the bar clears the filter (JCLAW-1208)', async () => {

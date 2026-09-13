@@ -10,6 +10,7 @@ import {
 
 const bus = vi.hoisted(() => ({
   handlers: [] as Array<{ type: string, handler: (data: unknown, type: string) => void }>,
+  openHandlers: [] as Array<() => void>,
 }))
 
 vi.mock('~/composables/useEventBus', () => ({
@@ -18,6 +19,9 @@ vi.mock('~/composables/useEventBus', () => ({
     off: vi.fn(),
     onEvent: (type: string, handler: (data: unknown, type: string) => void) => {
       bus.handlers.push({ type, handler })
+    },
+    onOpen: (handler: () => void) => {
+      bus.openHandlers.push(handler)
     },
   }),
 }))
@@ -38,13 +42,17 @@ function runEvent(runId: number, parentConversationId: number | null, status: Su
   return { runId, parentConversationId, childConversationId: 100 + runId, childAgentId: 90 + runId, status, label: null }
 }
 
-/** Serves /api/subagent-runs per parent conversation and records each request's query. */
-function serve(rowsFor: (parentConversationId: number) => unknown[] | Promise<unknown[]>) {
+/** Serves /api/subagent-runs per parent conversation, ordered and cut as the server does, and records each query. */
+function serve(rowsFor: (parentConversationId: number) => Array<{ id: number }> | Promise<Array<{ id: number }>>) {
   const requests: URLSearchParams[] = []
-  registerEndpoint('/api/subagent-runs', (event) => {
+  registerEndpoint('/api/subagent-runs', async (event) => {
     const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
     requests.push(url.searchParams)
-    return rowsFor(Number(url.searchParams.get('parentConversationId')))
+    const rows = [...await rowsFor(Number(url.searchParams.get('parentConversationId')))]
+    const desc = url.searchParams.get('dir') === 'desc'
+    rows.sort((a, b) => (desc ? b.id - a.id : a.id - b.id))
+    event.node.res.setHeader('x-total-count', String(rows.length))
+    return rows.slice(0, Number(url.searchParams.get('limit')) || 100)
   })
   return requests
 }
@@ -74,6 +82,7 @@ async function mountChips(convoId: number | null = 5) {
 
 beforeEach(() => {
   bus.handlers.length = 0
+  bus.openHandlers.length = 0
 })
 
 afterEach(() => {
@@ -82,19 +91,49 @@ afterEach(() => {
 })
 
 describe('useChatSubagentChips', () => {
-  it('asks for every run of the conversation in start order and keeps only those with their own transcript', async () => {
+  it('asks for the conversation\'s newest runs, shows them in spawn order and keeps only those with their own transcript', async () => {
     const requests = serve(() => [run(1, 6), run(2, 5), run(3, null), run(4, 7, 'COMPLETED', 'Summarise the logs')])
-    const { chips } = await mountChips()
+    const { chips, allRunsTotal } = await mountChips()
 
     expect(requests[0]!.get('parentConversationId')).toBe('5')
-    expect(requests[0]!.get('sort')).toBe('started')
-    expect(requests[0]!.get('dir')).toBe('asc')
+    expect(requests[0]!.get('sort')).toBe('id')
+    expect(requests[0]!.get('dir')).toBe('desc')
     expect(requests[0]!.get('limit')).toBe('100')
     expect(requests[0]!.has('status')).toBe(false)
     expect(chips.value).toEqual([
       { id: 1, label: null, childAgentName: 'main-sub-1', childAgentId: 91, childConversationId: 6, status: 'RUNNING' },
       { id: 4, label: 'Summarise the logs', childAgentName: 'main-sub-4', childAgentId: 94, childConversationId: 7, status: 'COMPLETED' },
     ])
+    expect(allRunsTotal.value).toBeNull()
+  })
+
+  it('keeps the newest 100 runs of a longer conversation, including one just spawned, and reports the full count', async () => {
+    let rows = Array.from({ length: 100 }, (_, i) => run(i + 1, 1000 + i, 'COMPLETED'))
+    serve(() => rows)
+    const { ids, allRunsTotal } = await mountChips()
+    expect(allRunsTotal.value).toBeNull()
+
+    rows = [...rows, run(101, 1100)]
+    emitBus('subagentrun.started', runEvent(101, 5))
+    await vi.waitFor(() => expect(ids().at(-1)).toBe(101))
+    expect(ids()).toHaveLength(100)
+    expect(ids()[0]).toBe(2)
+    expect(allRunsTotal.value).toBe(101)
+  })
+
+  it('refetches when the event stream reconnects or the tab becomes visible, recovering a spawn whose event was missed', async () => {
+    let rows = [run(1, 6, 'COMPLETED')]
+    const requests = serve(() => rows)
+    const { ids } = await mountChips()
+
+    rows = [run(1, 6, 'COMPLETED'), run(2, 7)]
+    for (const handler of bus.openHandlers) handler()
+    await vi.waitFor(() => expect(ids()).toEqual([1, 2]))
+
+    rows = [...rows, run(3, 8)]
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.waitFor(() => expect(ids()).toEqual([1, 2, 3]))
+    expect(requests).toHaveLength(3)
   })
 
   it('picks up a spawn from a run event for the open conversation while no turn streams, ignoring other conversations', async () => {

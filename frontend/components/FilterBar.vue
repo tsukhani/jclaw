@@ -98,6 +98,15 @@ function clearAll() {
   emit('update:filters', filters.value)
 }
 
+// Lets a page that also sets a key from outside the bar drop its token, so the two never disagree.
+function removeKey(key: string) {
+  if (!filters.value.some(f => f.key === key)) return
+  filters.value = filters.value.filter(f => f.key !== key)
+  emit('update:filters', filters.value)
+}
+
+defineExpose({ removeKey })
+
 // ── Saved views (localStorage) ──────────────────────────────────────────────
 const savedViewsKey = computed(() => `jclaw-filters-${props.storageKey}`)
 

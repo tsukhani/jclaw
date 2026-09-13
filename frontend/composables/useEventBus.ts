@@ -13,6 +13,7 @@
 type EventHandler = (data: unknown, type: string) => void
 
 const handlers = new Map<string, Set<EventHandler>>()
+const openHandlers = new Set<() => void>()
 let eventSource: EventSource | null = null
 let connected = false
 let reconnectAttempts = 0
@@ -28,6 +29,15 @@ function connect() {
   connected = true
 
   eventSource = new EventSource('/api/events')
+
+  eventSource.onopen = () => {
+    for (const handler of openHandlers) {
+      try {
+        handler()
+      }
+      catch { /* ignore handler errors */ }
+    }
+  }
 
   eventSource.onmessage = (e) => {
     // Successful message — reset backoff counter
@@ -103,5 +113,16 @@ export function useEventBus() {
     }
   }
 
-  return { on, off, onEvent }
+  /**
+   * Register a handler run each time the stream (re)connects, removed on unmount like
+   * {@link onEvent}. Events published while the stream was down are not replayed.
+   */
+  function onOpen(handler: () => void) {
+    openHandlers.add(handler)
+    if (getCurrentInstance()) {
+      onUnmounted(() => openHandlers.delete(handler))
+    }
+  }
+
+  return { on, off, onEvent, onOpen }
 }

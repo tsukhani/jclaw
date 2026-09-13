@@ -17,23 +17,24 @@ import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
 
 /**
  * A subagent run's child transcript for the panel an expanded chip shows (JCLAW-1205): loaded
- * once, refetched every 5 s while the run is RUNNING and the tab is visible, fetched once more
- * when the run ends so its last messages land, and merged by server id.
+ * on every mount, refetched every 5 s while the run is RUNNING and the tab is visible, fetched
+ * once more when the run ends so its last messages land, and merged by server id.
  */
 export interface UseSubagentTranscript {
   messages: ShallowRef<Message[]>
   loaded: Ref<boolean>
   failed: Ref<boolean>
+  retry: () => Promise<void>
 }
 
 interface CachedTranscript {
   messages: ShallowRef<Message[]>
   loaded: Ref<boolean>
-  /** A fetch began after the run ended, so the cache already holds its last messages. */
-  settled: boolean
 }
 
 const POLL_INTERVAL_MS = 5000
+// The messages endpoint's largest page.
+const PAGE_SIZE = 500
 
 // Module-level because collapsing a chip unmounts its panel, and a re-expand must show what was loaded.
 const cache = new Map<number, CachedTranscript>()
@@ -41,10 +42,22 @@ const cache = new Map<number, CachedTranscript>()
 function cachedTranscript(id: number): CachedTranscript {
   let entry = cache.get(id)
   if (!entry) {
-    entry = { messages: shallowRef<Message[]>([]), loaded: ref(false), settled: false }
+    entry = { messages: shallowRef<Message[]>([]), loaded: ref(false) }
     cache.set(id, entry)
   }
   return entry
+}
+
+// Every page, because hydration needs a turn's tool rows beside its assistant row.
+async function fetchAllMessages(conversationId: number): Promise<Message[]> {
+  const rows: Message[] = []
+  for (;;) {
+    const page = await $fetch<Message[]>(`/api/conversations/${conversationId}/messages`, {
+      query: { limit: PAGE_SIZE, offset: rows.length },
+    }) ?? []
+    rows.push(...page)
+    if (page.length < PAGE_SIZE) return rows
+  }
 }
 
 function applyToolCallDefaults(m: Message): void {
@@ -116,15 +129,13 @@ export function useSubagentTranscript(
   const failed = ref(false)
   let timer: ReturnType<typeof setInterval> | undefined
   let inFlight: Promise<void> | null = null
+  let active = true
 
   async function fetchOnce(): Promise<void> {
-    const runEnded = toValue(status) !== 'RUNNING'
     try {
-      const fresh = await $fetch<Message[]>(`/api/conversations/${childConversationId}/messages`) ?? []
-      merge(entry, fresh)
+      merge(entry, await fetchAllMessages(childConversationId))
       entry.loaded.value = true
       failed.value = false
-      if (runEnded) entry.settled = true
     }
     catch (e) {
       console.error('Failed to load subagent transcript:', e)
@@ -135,6 +146,7 @@ export function useSubagentTranscript(
   // Waits out a fetch already under way: the final fetch must start after the run ended, not join one that began before.
   async function load(): Promise<void> {
     while (inFlight) await inFlight
+    if (!active) return
     inFlight = fetchOnce().finally(() => {
       inFlight = null
     })
@@ -162,13 +174,21 @@ export function useSubagentTranscript(
     if (was === 'RUNNING') void load()
   })
 
+  // Always fetch: a killed or timed-out child can still persist the reply that was in flight.
   onMounted(() => {
-    const running = toValue(status) === 'RUNNING'
-    if (running) startPolling()
-    if (running || !entry.settled) void load()
+    if (toValue(status) === 'RUNNING') startPolling()
+    void load()
   })
 
-  onUnmounted(stopPolling)
+  onUnmounted(() => {
+    active = false
+    stopPolling()
+  })
 
-  return { messages: entry.messages, loaded: entry.loaded, failed }
+  function retry(): Promise<void> {
+    failed.value = false
+    return load()
+  }
+
+  return { messages: entry.messages, loaded: entry.loaded, failed, retry }
 }

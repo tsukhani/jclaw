@@ -124,6 +124,41 @@ describe('useChatScroll', () => {
     expect(bodies[0]!.scrollTop).toBe(0)
   })
 
+  it('keeps a reader at the bottom when the viewport shrinks, and leaves one reading above it alone', async () => {
+    let onResize: (() => void) | undefined
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) {
+        onResize = callback
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    const { api } = mountScroll()
+    const el = document.createElement('div')
+    const layout = (box: { scrollTop: number, scrollHeight: number, clientHeight: number }) => {
+      for (const [key, value] of Object.entries(box)) {
+        Object.defineProperty(el, key, { configurable: true, writable: true, value })
+      }
+    }
+    api.messagesEl.value = el
+    await nextTick()
+
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    // An expanded subagent chip above takes 80 px; the browser keeps scrollTop.
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 120 })
+    onResize!()
+    expect(el.scrollTop).toBe(1000)
+
+    layout({ scrollTop: 300, scrollHeight: 1000, clientHeight: 120 })
+    el.dispatchEvent(new Event('scroll'))
+    layout({ scrollTop: 300, scrollHeight: 1000, clientHeight: 60 })
+    onResize!()
+    expect(el.scrollTop).toBe(300)
+  })
+
   it('cancels the pending frame on unmount', () => {
     const cancel = globalThis.cancelAnimationFrame as unknown as ReturnType<typeof vi.fn>
     const { wrapper, api } = mountScroll()

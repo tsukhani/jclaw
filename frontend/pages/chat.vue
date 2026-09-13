@@ -264,10 +264,17 @@ const {
 
 const {
   chips: subagentChips,
+  allRunsTotal: subagentAllRunsTotal,
   expandedIds: expandedSubagentChipIds,
   toggleExpanded: toggleSubagentChip,
   closeChip: closeSubagentChip,
 } = useChatSubagentChips(selectedConvoId, streaming)
+
+// Closing the last chip unmounts the stack, focused close button and all.
+function onCloseSubagentChip(id: number) {
+  closeSubagentChip(id)
+  if (!subagentChips.value.length) focusInput()
+}
 
 // Token-usage + cost meter (latest-turn usage, cumulative tokens, running cost
 // recomputed only when idle, and the JCLAW-108 model-switch divider predicate)
@@ -823,8 +830,10 @@ function exportConversation() {
           v-if="selectedConvoId && subagentChips.length"
           :runs="subagentChips"
           :expanded-ids="expandedSubagentChipIds"
+          :conversation-id="selectedConvoId"
+          :all-runs-total="subagentAllRunsTotal"
           @toggle="toggleSubagentChip"
-          @close="closeSubagentChip"
+          @close="onCloseSubagentChip"
         >
           <template #expanded="{ run }">
             <ChatSubagentTranscriptPanel

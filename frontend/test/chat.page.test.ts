@@ -481,11 +481,11 @@ describe('Chat page — subagent chip stack', () => {
     registerEndpoint('/api/conversations/603/messages', () => [
       { id: 920, role: 'assistant', content: 'downloads summarised', createdAt: '2026-09-13T09:45:10Z' },
     ])
-    // 7 is an inline run: it writes into the parent conversation itself, so it gets no chip.
+    // 7 is an inline run: it writes into the parent conversation itself, so it gets no chip. Newest first, as requested.
     registerEndpoint('/api/subagent-runs', (event) => {
       const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
       return url.searchParams.get('parentConversationId') === '601'
-        ? [subagentRun(6, 602, 'RUNNING'), subagentRun(7, 601, 'RUNNING'), subagentRun(8, 603, 'COMPLETED', 'Summarise the downloads')]
+        ? [subagentRun(8, 603, 'COMPLETED', 'Summarise the downloads'), subagentRun(7, 601, 'RUNNING'), subagentRun(6, 602, 'RUNNING')]
         : []
     })
   }
@@ -509,7 +509,7 @@ describe('Chat page — subagent chip stack', () => {
     expect(chips[0]!.find('[data-testid="subagent-chip-status"]').text()).toBe('Running')
     expect(chips[0]!.find('.animate-pulse').exists()).toBe(true)
     expect(chips[1]!.find('[data-testid="subagent-chip-label"]').text()).toBe('Summarise the downloads')
-    expect(chips[1]!.find('[data-testid="subagent-chip-label"]').attributes('title')).toBe('main-sub-8')
+    expect(chips[1]!.find('[data-testid="subagent-chip-label"]').attributes('title')).toBe('Summarise the downloads · main-sub-8')
     expect(chips[1]!.find('[data-testid="subagent-chip-status"]').text()).toBe('Completed')
     expect(chips[1]!.find('.animate-pulse').exists()).toBe(false)
     expect(component.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
@@ -555,6 +555,27 @@ describe('Chat page — subagent chip stack', () => {
     await chips()[1]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
     expect(panels()).toHaveLength(0)
     expect(component.text()).not.toContain('downloads summarised')
+  })
+
+  it('hands focus to the next chip on close, and to the composer when the last chip closes', async () => {
+    setupParentConversation()
+    const component = await mountSuspended(Chat, { attachTo: document.body })
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(601)
+    await flushPromises()
+    const firstClose = () => component.find('[data-testid="subagent-chip-close"]')
+
+    await firstClose().trigger('click')
+    await flushPromises()
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Expand Summarise the downloads (main-sub-8)')
+
+    await firstClose().trigger('click')
+    await flushPromises()
+    await new Promise(r => setTimeout(r, 0))
+    expect(component.find('[data-testid="subagent-stack"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(component.find('textarea').element)
+    component.unmount()
   })
 })
 

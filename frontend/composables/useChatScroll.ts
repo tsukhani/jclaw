@@ -58,9 +58,36 @@ export function useChatScroll(
     })
   })
 
+  // A viewport that shrinks (an expanded subagent chip above it) keeps scrollTop, dropping a reader off the bottom.
+  const BOTTOM_SLACK_PX = 24
+  let pinnedToBottom = true
+  function trackPinned(e: Event) {
+    const el = e.currentTarget as HTMLElement
+    pinnedToBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
+  }
+  const resizeObserver = typeof ResizeObserver === 'undefined'
+    ? null
+    : new ResizeObserver(() => {
+        const el = messagesEl.value
+        if (pinnedToBottom && el) el.scrollTop = el.scrollHeight
+      })
+  watch(messagesEl, (el, prev) => {
+    if (!resizeObserver) return
+    if (prev instanceof HTMLElement) {
+      prev.removeEventListener('scroll', trackPinned)
+      resizeObserver.unobserve(prev)
+    }
+    if (el instanceof HTMLElement) {
+      el.addEventListener('scroll', trackPinned, { passive: true })
+      resizeObserver.observe(el)
+    }
+  })
+
   onUnmounted(() => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf)
     if (reasoningScrollRaf) cancelAnimationFrame(reasoningScrollRaf)
+    resizeObserver?.disconnect()
+    if (messagesEl.value instanceof HTMLElement) messagesEl.value.removeEventListener('scroll', trackPinned)
   })
 
   return { messagesEl, scrollToBottom }

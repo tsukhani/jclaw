@@ -7,6 +7,7 @@ import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
 function row(id: number, o: Record<string, unknown> = {}) {
@@ -67,6 +68,27 @@ describe('ChatSubagentTranscriptPanel', () => {
     serve(202, [row(1)])
     const { wrapper } = await mountPanel(202, 'COMPLETED')
     expect(wrapper.find('[data-testid="subagent-transcript-full"]').attributes('href')).toBe('/chat?conversation=202')
+    // The one scroller, bounded by the viewport so the link beneath it stays on screen.
+    expect(wrapper.find('[data-testid="subagent-transcript-scroll"]').classes()).toContain('max-h-[min(24rem,40vh)]')
+  })
+
+  it('announces a failed load and retries it on request, since a finished run is never polled', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    let fail = true
+    registerEndpoint('/api/conversations/211/messages', async () => {
+      if (fail) {
+        const { createError } = await import('h3')
+        throw createError({ statusCode: 503 })
+      }
+      return [row(1, { content: 'back again' })]
+    })
+    const { wrapper } = await mountPanel(211, 'COMPLETED')
+    await vi.waitFor(() => expect(wrapper.find('[role="status"]').text()).toBe('Could not load this transcript.'))
+
+    fail = false
+    await wrapper.find('[data-testid="subagent-transcript-retry"]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('back again'))
+    expect(wrapper.find('[data-testid="subagent-transcript-retry"]').exists()).toBe(false)
   })
 
   it('shows a placeholder for an empty transcript', async () => {
