@@ -69,6 +69,13 @@ function close(index: number) {
   if (neighbour) void nextTick(() => toggleButtons.get(neighbour.id)?.focus())
 }
 
+// A chip expanded low in the stack would open its panel below the scroller's fold.
+watch(() => props.expandedIds, (now, was) => {
+  const opened = [...now].filter(id => !was.has(id)).at(-1)
+  const row = opened == null ? null : toggleButtons.get(opened)?.closest('li')
+  if (typeof row?.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' })
+}, { flush: 'post' })
+
 const announcement = ref('')
 const lastStatus = new Map<number, SubagentRunStatus>()
 watch(() => props.runs.map(r => r.status), () => {
@@ -79,7 +86,13 @@ watch(() => props.runs.map(r => r.status), () => {
     }
     lastStatus.set(run.id, run.status)
   }
-  if (ended.length) announcement.value = ended.join('. ')
+  if (!ended.length) return
+  // A live region ignores a write of the text it already holds, so a repeat is cleared first.
+  const text = ended.join('. ')
+  announcement.value = ''
+  void nextTick(() => {
+    announcement.value = text
+  })
 }, { immediate: true })
 </script>
 
@@ -97,6 +110,7 @@ watch(() => props.runs.map(r => r.status), () => {
     </p>
     <!-- max-h-36 fits four minimized rows; an expanded chip needs room for its transcript. -->
     <ul
+      v-if="runs.length"
       aria-label="Subagents spawned in this conversation"
       class="flex flex-col gap-1 overflow-y-auto overscroll-contain"
       :class="expandedIds.size ? 'max-h-[50vh]' : 'max-h-36'"

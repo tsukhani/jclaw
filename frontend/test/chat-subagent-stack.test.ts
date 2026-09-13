@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onUnmounted, ref, type PropType } from 'vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import type { SubagentChip, SubagentRunStatus } from '~/composables/useChatSubagentChips'
@@ -152,8 +153,53 @@ describe('ChatSubagentStack', () => {
     expect(announcer().text()).toBe('')
 
     runs.value = [chip(1, 'KILLED', 'Watch the downloads'), chip(2, 'COMPLETED'), chip(3, 'FAILED')]
-    await nextTick()
+    await flushPromises()
     expect(announcer().text()).toBe('Watch the downloads: Killed')
+  })
+
+  it('announces a second ending worded the same as the first', async () => {
+    const { wrapper, runs } = await mountStack([chip(1, 'RUNNING', 'Fetch'), chip(2, 'RUNNING', 'Fetch')])
+    const announcer = wrapper.find('[data-testid="subagent-stack-announcer"]').element
+    const written: string[] = []
+    const observer = new MutationObserver((records) => {
+      for (const record of records) record.addedNodes.forEach(node => written.push(node.textContent ?? ''))
+    })
+    observer.observe(announcer, { childList: true, characterData: true, subtree: true })
+
+    runs.value = [chip(1, 'FAILED', 'Fetch'), chip(2, 'RUNNING', 'Fetch')]
+    await flushPromises()
+    runs.value = [chip(1, 'FAILED', 'Fetch'), chip(2, 'FAILED', 'Fetch')]
+    await flushPromises()
+    observer.disconnect()
+    expect(written.filter(text => text === 'Fetch: Failed')).toHaveLength(2)
+  })
+
+  it('scrolls a chip it expands into view within the stack, and not on collapse', async () => {
+    const proto = Element.prototype as { scrollIntoView?: (options?: ScrollIntoViewOptions) => void }
+    const original = Object.getOwnPropertyDescriptor(proto, 'scrollIntoView')
+    const scrolled: Array<{ el: Element, options: unknown }> = []
+    proto.scrollIntoView = function (this: Element, options?: ScrollIntoViewOptions) {
+      scrolled.push({ el: this, options })
+    }
+    try {
+      const { wrapper } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')])
+      const rows = () => wrapper.findAll('[data-testid="subagent-chip"]')
+      await rows()[1]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
+      expect(scrolled).toEqual([{ el: rows()[1]!.element, options: { block: 'nearest' } }])
+
+      await rows()[1]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
+      expect(scrolled).toHaveLength(1)
+    }
+    finally {
+      if (original) Object.defineProperty(proto, 'scrollIntoView', original)
+      else delete proto.scrollIntoView
+    }
+  })
+
+  it('keeps the link to every run when no chip is left to show', async () => {
+    const { wrapper } = await mountStack([], { conversationId: 5, allRunsTotal: 150 })
+    expect(wrapper.find('ul').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="subagent-stack-all-runs"]').text()).toBe('View all 150 on the Subagents page')
   })
 
   it('links to every run on the Subagents page when the chip list was cut short', async () => {

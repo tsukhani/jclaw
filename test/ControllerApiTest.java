@@ -3,8 +3,15 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Functional HTTP tests for the 8 API controllers that previously had zero coverage:
@@ -559,6 +566,43 @@ class ControllerApiTest extends FunctionalTest {
         // reaches the controller (a missing route would give 404).
         var response = GET("/api/events");
         assertEquals(401, response.status.intValue());
+    }
+
+    /**
+     * The fork sends response headers with the first chunk, and an EventSource fires its open event
+     * on the headers, so the stream must write at once rather than at its first 30 s heartbeat. The
+     * chunk handler stands in for a client that disconnects after one frame, which closes the stream
+     * and lets the request finish.
+     */
+    @Test
+    void eventsStreamWritesAFrameAsSoonAsItOpens() {
+        var login = POST("/api/auth/login", "application/json", """
+                {"username": "admin", "password": "changeme"}
+                """);
+        assertIsOk(login);
+        var request = newRequest();
+        request.method = "GET";
+        request.url = "/api/events";
+        request.path = "/api/events";
+        request.querystring = "";
+        request.body = new ByteArrayInputStream(new byte[0]);
+        request.cookies = login.cookies;
+        var response = new Http.Response();
+        response.out = new ByteArrayOutputStream();
+        var firstFrame = new AtomicReference<String>();
+        response.onWriteChunk(chunk -> {
+            firstFrame.compareAndSet(null, new String((byte[]) chunk, StandardCharsets.UTF_8));
+            throw new IllegalStateException("client disconnected");
+        });
+
+        long started = System.nanoTime();
+        makeRequest(request, response);
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        assertEquals(200, response.status.intValue());
+        assertTrue(firstFrame.get() != null && firstFrame.get().startsWith(":"),
+                "the first frame must be the open comment, not a bus event: " + firstFrame.get());
+        assertTrue(elapsedMs < 10_000, "the first frame took " + elapsedMs + " ms, a heartbeat's wait");
     }
 
     // =====================

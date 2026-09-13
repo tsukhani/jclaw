@@ -30,6 +30,8 @@ public class ApiEventsController extends Controller {
     @NoTransaction
     public static void stream() {
         SseStream sse = openSSE().heartbeat(Duration.ofSeconds(30)).timeout(Duration.ofHours(24));
+        // The fork sends the response headers with the first chunk, so without this the browser's open event waits for a heartbeat.
+        sse.sendComment("open");
         Runnable unsubscribe = NotificationBus.subscribe(sse::sendRaw);
         sse.onClose(unsubscribe::run);
         await(sse.completion());

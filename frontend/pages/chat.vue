@@ -270,10 +270,14 @@ const {
   closeChip: closeSubagentChip,
 } = useChatSubagentChips(selectedConvoId, streaming)
 
-// Closing the last chip unmounts the stack, focused close button and all.
+// Closing the last chip unmounts its focused close button; the composer is disabled mid-stream and in a read-only transcript.
 function onCloseSubagentChip(id: number) {
   closeSubagentChip(id)
-  if (!subagentChips.value.length) focusInput()
+  if (subagentChips.value.length) return
+  void nextTick(() => {
+    if (chatInput.value && !chatInput.value.disabled) chatInput.value.focus()
+    else messagesEl.value?.focus()
+  })
 }
 
 // Token-usage + cost meter (latest-turn usage, cumulative tokens, running cost
@@ -827,7 +831,7 @@ function exportConversation() {
 
         <!-- Outside the scroll container, so the subagent chips stay pinned while the transcript scrolls. -->
         <ChatSubagentStack
-          v-if="selectedConvoId && subagentChips.length"
+          v-if="selectedConvoId && (subagentChips.length || subagentAllRunsTotal)"
           :runs="subagentChips"
           :expanded-ids="expandedSubagentChipIds"
           :conversation-id="selectedConvoId"
@@ -886,6 +890,8 @@ function exportConversation() {
         <div
           v-if="!isEmptyChat"
           ref="messagesEl"
+          data-testid="chat-messages-scroll"
+          tabindex="-1"
           class="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-6"
         >
           <!--

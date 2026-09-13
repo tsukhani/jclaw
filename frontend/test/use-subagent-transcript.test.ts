@@ -16,7 +16,7 @@ function row(id: number, o: Record<string, unknown> = {}) {
 
 // Each test serves its own conversation id: the transcript cache is module-level by design.
 function serve(convoId: number, initial: unknown[]) {
-  const server = { rows: [...initial], calls: 0, gate: null as Promise<void> | null }
+  const server = { rows: [...initial], calls: 0, offsets: [] as number[], gate: null as Promise<void> | null }
   registerEndpoint(`/api/conversations/${convoId}/messages`, async (event) => {
     if (server.gate) await server.gate
     server.calls++
@@ -25,6 +25,7 @@ function serve(convoId: number, initial: unknown[]) {
     // The endpoint's paging: 200 rows unless asked, 500 at most, oldest first.
     const limit = Math.min(Number(query.limit) || 200, 500)
     const offset = Number(query.offset) || 0
+    server.offsets.push(offset)
     return structuredClone(server.rows.slice(offset, offset + limit))
   })
   return server
@@ -219,5 +220,67 @@ describe('useSubagentTranscript', () => {
     await vi.waitFor(() => expect(api.loaded.value).toBe(true))
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(server.calls).toBe(1)
+  })
+
+  it('requests no further page once the panel unmounts part way through a long transcript, and merges none of it', async () => {
+    const server = serve(112, Array.from({ length: 700 }, (_, i) => row(i + 1)))
+    let release!: () => void
+    server.gate = new Promise((resolve) => {
+      release = resolve
+    })
+    const { api, wrapper } = mountTranscript(112, 'COMPLETED')
+    await flushPromises()
+
+    wrapper.unmount()
+    release()
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(server.calls).toBe(1)
+    expect(api.messages.value).toHaveLength(0)
+    expect(api.loaded.value).toBe(false)
+  })
+
+  it('polls from a recent offset rather than from the start once the transcript has loaded', async () => {
+    fakePollTimer()
+    const server = serve(113, [row(1, { role: 'user', content: 'go' }), row(2), row(3)])
+    const { api, wrapper } = mountTranscript(113, 'RUNNING')
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 2, 3]))
+
+    server.rows.push(row(4))
+    vi.advanceTimersByTime(5000)
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 2, 3, 4]))
+    expect(server.offsets).toEqual([0, 2])
+    wrapper.unmount()
+  })
+
+  it('starts a poll early enough to hydrate a result that arrives for a call shown earlier', async () => {
+    fakePollTimer()
+    const server = serve(114, [
+      row(1, { role: 'user', content: 'go' }),
+      row(2, { content: 'first I will look around' }),
+      row(3, { content: 'searching now', toolCalls: [{ id: 'c1', function: { name: 'web_search', arguments: '{}' } }] }),
+    ])
+    const { api, wrapper } = mountTranscript(114, 'RUNNING')
+    await vi.waitFor(() => expect(api.messages.value[2]?.toolCalls).toHaveLength(1))
+    expect(api.messages.value[2]!.toolCalls![0]!.resultText).toBeNull()
+
+    server.rows.push(row(4, { role: 'tool', content: 'found it', toolResults: 'c1' }), row(5, { content: 'done' }))
+    vi.advanceTimersByTime(5000)
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 2, 3, 4, 5]))
+    expect(server.offsets).toEqual([0, 1])
+    expect(api.messages.value[2]!.toolCalls![0]!.resultText).toBe('found it')
+    wrapper.unmount()
+  })
+
+  it('falls back to a full fetch when the rows at the offset are not the ones cached', async () => {
+    fakePollTimer()
+    const server = serve(115, [row(1), row(2), row(3)])
+    const { api, wrapper } = mountTranscript(115, 'RUNNING')
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 2, 3]))
+
+    server.rows = [row(1), row(3), row(4)]
+    vi.advanceTimersByTime(5000)
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 3, 4]))
+    expect(server.offsets).toEqual([0, 2, 0])
+    wrapper.unmount()
   })
 })

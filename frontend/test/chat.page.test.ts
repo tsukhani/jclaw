@@ -577,6 +577,48 @@ describe('Chat page — subagent chip stack', () => {
     expect(document.activeElement).toBe(component.find('textarea').element)
     component.unmount()
   })
+
+  it('hands focus to the transcript when the last chip closes while the composer is disabled', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations/501', () => ({
+      id: 501, agentId: 99, agentName: 'helper-subagent', channelType: 'subagent',
+      peerId: null, messageCount: 1, preview: 'subagent task',
+      createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:01Z',
+    }))
+    registerEndpoint('/api/conversations/501/messages', () => [
+      { id: 700, role: 'user', content: 'Subagent task instructions', createdAt: '2026-05-15T10:00:00Z' },
+    ])
+    registerEndpoint('/api/subagent-runs', (event) => {
+      const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
+      return url.searchParams.get('parentConversationId') === '501' ? [subagentRun(9, 502, 'RUNNING')] : []
+    })
+    const component = await mountSuspended(Chat, { attachTo: document.body })
+    await flushPromises()
+    const vm = component.vm as unknown as { resolveAndLoadConversation: (id: number) => Promise<boolean> }
+    await vm.resolveAndLoadConversation(501)
+    await vi.waitFor(() => expect(component.find('[data-testid="subagent-chip"]').exists()).toBe(true))
+    expect((component.find('textarea').element as HTMLTextAreaElement).disabled).toBe(true)
+
+    await component.find('[data-testid="subagent-chip-close"]').trigger('click')
+    await flushPromises()
+    expect(document.activeElement).toBe(component.find('[data-testid="chat-messages-scroll"]').element)
+    component.unmount()
+  })
+
+  it('keeps the link to every run after the last chip closes when the chip list was cut short', async () => {
+    setupParentConversation()
+    registerEndpoint('/api/subagent-runs', (event) => {
+      const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
+      event.node.res.setHeader('x-total-count', '150')
+      return url.searchParams.get('parentConversationId') === '601' ? [subagentRun(6, 602, 'RUNNING')] : []
+    })
+    const { component } = await mountParentConversation()
+    await component.find('[data-testid="subagent-chip-close"]').trigger('click')
+    await flushPromises()
+
+    expect(component.findAll('[data-testid="subagent-chip"]')).toHaveLength(0)
+    expect(component.find('[data-testid="subagent-stack-all-runs"]').text()).toBe('View all 150 on the Subagents page')
+  })
 })
 
 describe('Chat page — composer focus on entry', () => {

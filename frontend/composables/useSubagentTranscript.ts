@@ -16,20 +16,24 @@ import type { Message, MessageAttachment, ToolCall } from '~/types/api'
 import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
 
 /**
- * A subagent run's child transcript for the panel an expanded chip shows (JCLAW-1205): loaded
- * on every mount, refetched every 5 s while the run is RUNNING and the tab is visible, fetched
- * once more when the run ends so its last messages land, and merged by server id.
+ * A subagent run's child transcript for the panel an expanded chip shows (JCLAW-1205): loaded in
+ * full on every mount, refetched from a recent offset every 5 s while the run is RUNNING and the
+ * tab is visible, fetched in full once more when the run ends so its last messages land, and
+ * merged by server id.
  */
 export interface UseSubagentTranscript {
   messages: ShallowRef<Message[]>
   loaded: Ref<boolean>
   failed: Ref<boolean>
+  /** Bumped when a fetch changes the transcript; a collapse toggle does not bump it. */
+  revision: Ref<number>
   retry: () => Promise<void>
 }
 
 interface CachedTranscript {
   messages: ShallowRef<Message[]>
   loaded: Ref<boolean>
+  revision: Ref<number>
 }
 
 const POLL_INTERVAL_MS = 5000
@@ -42,22 +46,41 @@ const cache = new Map<number, CachedTranscript>()
 function cachedTranscript(id: number): CachedTranscript {
   let entry = cache.get(id)
   if (!entry) {
-    entry = { messages: shallowRef<Message[]>([]), loaded: ref(false) }
+    entry = { messages: shallowRef<Message[]>([]), loaded: ref(false), revision: ref(0) }
     cache.set(id, entry)
   }
   return entry
 }
 
-// Every page, because hydration needs a turn's tool rows beside its assistant row.
-async function fetchAllMessages(conversationId: number): Promise<Message[]> {
+// Null when the panel went away between pages: a collapsed chip sends nothing more, and half a window is never merged.
+async function fetchMessagesFrom(conversationId: number, offset: number, active: () => boolean): Promise<Message[] | null> {
   const rows: Message[] = []
   for (;;) {
     const page = await $fetch<Message[]>(`/api/conversations/${conversationId}/messages`, {
-      query: { limit: PAGE_SIZE, offset: rows.length },
+      query: { limit: PAGE_SIZE, offset: offset + rows.length },
     }) ?? []
     rows.push(...page)
     if (page.length < PAGE_SIZE) return rows
+    if (!active()) return null
   }
+}
+
+// Hydration carries calls forward to the next assistant row with content, so a window can only begin
+// just after such a row, and no later than the first row still waiting on a call's result.
+function incrementalStart(shown: Message[]): number {
+  let limit = shown.findIndex(m => m.toolCalls?.some(tc => tc.resultText == null))
+  if (limit < 0) limit = shown.length
+  for (let i = limit; i > 0; i--) {
+    const before = shown[i - 1]!
+    if (before.role === 'assistant' && before.content) return i
+  }
+  return 0
+}
+
+// The endpoint's offset counts every row, tool rows included, in the order the cache holds them;
+// a deleted row or two rows sharing a timestamp breaks that, which the ids reveal.
+function linesUp(shown: Message[], rows: Message[], offset: number): boolean {
+  return rows.length > 0 && rows.every((m, i) => offset + i >= shown.length || m.id === shown[offset + i]!.id)
 }
 
 function applyToolCallDefaults(m: Message): void {
@@ -100,25 +123,31 @@ function syncHydratedFields(shown: Message, fresh: Message): boolean {
   return changed
 }
 
-function merge(entry: CachedTranscript, fresh: Message[]): void {
+// `fresh` holds the server's rows from cache index `from` on; from 0 it replaces the list in server order.
+function merge(entry: CachedTranscript, fresh: Message[], from: number): void {
   hydrateToolCalls(fresh as unknown as Array<Record<string, unknown>>)
-  const freshById = new Map<number, Message>()
-  for (const m of fresh) {
-    if (typeof m.id === 'number') freshById.set(m.id, m)
-  }
-  const shown = entry.messages.value
+  const prev = entry.messages.value
+  const shownById = new Map(prev.map(m => [m.id, m]))
+  const seen = new Set<number>()
+  const additions: Message[] = []
+  const window: Message[] = []
   let changed = false
-  for (const m of shown) {
-    const match = typeof m.id === 'number' ? freshById.get(m.id) : undefined
-    if (match && syncHydratedFields(m, match)) changed = true
+  for (const m of fresh) {
+    if (typeof m.id !== 'number' || seen.has(m.id)) continue
+    seen.add(m.id)
+    const shown = shownById.get(m.id)
+    if (!shown) additions.push(m)
+    else if (syncHydratedFields(shown, m)) changed = true
+    window.push(shown ?? m)
   }
-  const shownIds = new Set(shown.map(m => m.id))
-  const additions = fresh.filter(m => typeof m.id === 'number' && !shownIds.has(m.id))
   additions.forEach(applyToolCallDefaults)
   // Additions only: re-collapsing every row would fold a thinking card the reader just opened.
   initCollapsedState(additions)
-  if (additions.length) entry.messages.value = [...shown, ...additions]
+  const next = [...prev.slice(0, from), ...window]
+  if (next.length !== prev.length || next.some((m, i) => m !== prev[i])) entry.messages.value = next
   else if (changed) triggerRef(entry.messages)
+  else return
+  entry.revision.value++
 }
 
 export function useSubagentTranscript(
@@ -130,10 +159,25 @@ export function useSubagentTranscript(
   let timer: ReturnType<typeof setInterval> | undefined
   let inFlight: Promise<void> | null = null
   let active = true
+  const isActive = () => active
 
-  async function fetchOnce(): Promise<void> {
+  async function fetchOnce(full: boolean): Promise<void> {
     try {
-      merge(entry, await fetchAllMessages(childConversationId))
+      const start = full ? 0 : incrementalStart(entry.messages.value)
+      if (start > 0) {
+        // One row before the window anchors the offset to a row the cache already holds.
+        const rows = await fetchMessagesFrom(childConversationId, start - 1, isActive)
+        if (!rows) return
+        if (linesUp(entry.messages.value, rows, start - 1)) {
+          merge(entry, rows.slice(1), start)
+          failed.value = false
+          return
+        }
+        if (!active) return
+      }
+      const rows = await fetchMessagesFrom(childConversationId, 0, isActive)
+      if (!rows) return
+      merge(entry, rows, 0)
       entry.loaded.value = true
       failed.value = false
     }
@@ -144,10 +188,10 @@ export function useSubagentTranscript(
   }
 
   // Waits out a fetch already under way: the final fetch must start after the run ended, not join one that began before.
-  async function load(): Promise<void> {
+  async function load(full: boolean): Promise<void> {
     while (inFlight) await inFlight
     if (!active) return
-    inFlight = fetchOnce().finally(() => {
+    inFlight = fetchOnce(full).finally(() => {
       inFlight = null
     })
     await inFlight
@@ -156,7 +200,7 @@ export function useSubagentTranscript(
   function startPolling() {
     timer ??= setInterval(() => {
       if (inFlight || document.hidden) return
-      void load()
+      void load(false)
     }, POLL_INTERVAL_MS)
   }
 
@@ -171,13 +215,13 @@ export function useSubagentTranscript(
       return
     }
     stopPolling()
-    if (was === 'RUNNING') void load()
+    if (was === 'RUNNING') void load(true)
   })
 
   // Always fetch: a killed or timed-out child can still persist the reply that was in flight.
   onMounted(() => {
     if (toValue(status) === 'RUNNING') startPolling()
-    void load()
+    void load(true)
   })
 
   onUnmounted(() => {
@@ -185,10 +229,10 @@ export function useSubagentTranscript(
     stopPolling()
   })
 
+  // `failed` stays set until a fetch succeeds, so a Retry control stays mounted while it runs.
   function retry(): Promise<void> {
-    failed.value = false
-    return load()
+    return load(true)
   }
 
-  return { messages: entry.messages, loaded: entry.loaded, failed, retry }
+  return { messages: entry.messages, loaded: entry.loaded, failed, revision: entry.revision, retry }
 }

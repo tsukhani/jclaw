@@ -61,25 +61,35 @@ export function useChatScroll(
   // A viewport that shrinks (an expanded subagent chip above it) keeps scrollTop, dropping a reader off the bottom.
   const BOTTOM_SLACK_PX = 24
   let pinnedToBottom = true
-  function trackPinned(e: Event) {
-    const el = e.currentTarget as HTMLElement
-    pinnedToBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
+  function atBottom(el: HTMLElement): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
   }
+  function trackPinned(e: Event) {
+    pinnedToBottom = atBottom(e.currentTarget as HTMLElement)
+  }
+  // The content is observed too: a card opened in place grows it without a scroll event, leaving the reader above the bottom.
   const resizeObserver = typeof ResizeObserver === 'undefined'
     ? null
-    : new ResizeObserver(() => {
+    : new ResizeObserver((entries) => {
         const el = messagesEl.value
-        if (pinnedToBottom && el) el.scrollTop = el.scrollHeight
+        if (!el) return
+        if (pinnedToBottom && entries.some(entry => entry.target === el)) el.scrollTop = el.scrollHeight
+        pinnedToBottom = atBottom(el)
       })
+  let observedContent: Element | null = null
   watch(messagesEl, (el, prev) => {
     if (!resizeObserver) return
     if (prev instanceof HTMLElement) {
       prev.removeEventListener('scroll', trackPinned)
       resizeObserver.unobserve(prev)
     }
+    if (observedContent) resizeObserver.unobserve(observedContent)
+    observedContent = null
     if (el instanceof HTMLElement) {
       el.addEventListener('scroll', trackPinned, { passive: true })
       resizeObserver.observe(el)
+      observedContent = el.firstElementChild
+      if (observedContent) resizeObserver.observe(observedContent)
     }
   })
 

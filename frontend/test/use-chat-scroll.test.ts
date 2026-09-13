@@ -58,6 +58,36 @@ function fakeViewport(bodies: Array<{ scrollTop: number, scrollHeight: number }>
   } as unknown as HTMLElement
 }
 
+/** A ResizeObserver whose callback the test fires with the targets that changed size. */
+function stubResizeObserver() {
+  const probe = { fire: (_targets: Element[]) => {}, observed: [] as Element[] }
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: (entries: Array<{ target: Element }>) => void) {
+      probe.fire = targets => callback(targets.map(target => ({ target })))
+    }
+
+    observe(target: Element) {
+      probe.observed.push(target)
+    }
+
+    unobserve() {}
+    disconnect() {}
+  })
+  return probe
+}
+
+/** A viewport holding the one content rail chat.vue renders, with a settable layout box. */
+function viewportWithContent() {
+  const el = document.createElement('div')
+  const content = el.appendChild(document.createElement('div'))
+  const layout = (box: { scrollTop: number, scrollHeight: number, clientHeight: number }) => {
+    for (const [key, value] of Object.entries(box)) {
+      Object.defineProperty(el, key, { configurable: true, writable: true, value })
+    }
+  }
+  return { el, content, layout }
+}
+
 describe('useChatScroll', () => {
   it('pins the viewport to its bottom on the next frame', () => {
     const { api } = mountScroll()
@@ -125,23 +155,9 @@ describe('useChatScroll', () => {
   })
 
   it('keeps a reader at the bottom when the viewport shrinks, and leaves one reading above it alone', async () => {
-    let onResize: (() => void) | undefined
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(callback: () => void) {
-        onResize = callback
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    })
+    const resize = stubResizeObserver()
     const { api } = mountScroll()
-    const el = document.createElement('div')
-    const layout = (box: { scrollTop: number, scrollHeight: number, clientHeight: number }) => {
-      for (const [key, value] of Object.entries(box)) {
-        Object.defineProperty(el, key, { configurable: true, writable: true, value })
-      }
-    }
+    const { el, layout } = viewportWithContent()
     api.messagesEl.value = el
     await nextTick()
 
@@ -149,14 +165,52 @@ describe('useChatScroll', () => {
     el.dispatchEvent(new Event('scroll'))
     // An expanded subagent chip above takes 80 px; the browser keeps scrollTop.
     layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 120 })
-    onResize!()
+    resize.fire([el])
     expect(el.scrollTop).toBe(1000)
 
     layout({ scrollTop: 300, scrollHeight: 1000, clientHeight: 120 })
     el.dispatchEvent(new Event('scroll'))
     layout({ scrollTop: 300, scrollHeight: 1000, clientHeight: 60 })
-    onResize!()
+    resize.fire([el])
     expect(el.scrollTop).toBe(300)
+  })
+
+  it('does not snap a reader whose content grew in place when the viewport then shrinks', async () => {
+    const resize = stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, content, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+    expect(resize.observed).toEqual([el, content])
+
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    // A Thinking card opened on the last message: 400 px more below the fold, and no scroll event.
+    layout({ scrollTop: 800, scrollHeight: 1400, clientHeight: 200 })
+    resize.fire([content])
+    layout({ scrollTop: 800, scrollHeight: 1400, clientHeight: 120 })
+    resize.fire([el])
+    expect(el.scrollTop).toBe(800)
+  })
+
+  it('stays pinned through streamed growth that scrollToBottom follows', async () => {
+    const resize = stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, content, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    layout({ scrollTop: 800, scrollHeight: 1400, clientHeight: 200 })
+    api.scrollToBottom()
+    flushRaf()
+    // The frame's scroll lands before its resize observations; the browser clamps it to the new bottom.
+    layout({ scrollTop: 1200, scrollHeight: 1400, clientHeight: 200 })
+    resize.fire([content])
+    layout({ scrollTop: 1200, scrollHeight: 1400, clientHeight: 120 })
+    resize.fire([el])
+    expect(el.scrollTop).toBe(1400)
   })
 
   it('cancels the pending frame on unmount', () => {

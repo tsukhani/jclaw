@@ -58,14 +58,18 @@ export function useChatSubagentChips(
       allRunsTotal.value = null
       return
     }
-    let rows: SubagentRunRow[]
+    let newest: SubagentRunRow[]
+    let running: SubagentRunRow[]
     let total: number
     try {
-      // Newest first, so a conversation past the limit loses its oldest runs, never the ones still going.
-      const res = await $fetch.raw<SubagentRunRow[]>('/api/subagent-runs', {
-        query: { parentConversationId: convoId, sort: 'id', dir: 'desc', limit: SUBAGENT_CHIP_RUN_LIMIT },
-      })
-      rows = res._data ?? []
+      // The newest window drops old runs past the limit, still-RUNNING ones included, so those are fetched on their own.
+      const query = { parentConversationId: convoId, sort: 'id', dir: 'desc', limit: SUBAGENT_CHIP_RUN_LIMIT }
+      const [res, runningRes] = await Promise.all([
+        $fetch.raw<SubagentRunRow[]>('/api/subagent-runs', { query }),
+        $fetch<SubagentRunRow[]>('/api/subagent-runs', { query: { ...query, status: 'RUNNING' } }),
+      ])
+      newest = res._data ?? []
+      running = runningRes ?? []
       total = Number.parseInt(res.headers.get('x-total-count') ?? '', 10)
     }
     catch (e) {
@@ -74,9 +78,10 @@ export function useChatSubagentChips(
     }
     // An event and a poll can overlap, and the operator can switch conversations mid-request.
     if (request !== latestRequest || selectedConvoId.value !== convoId) return
-    allRunsTotal.value = total > rows.length ? total : null
+    allRunsTotal.value = total > newest.length ? total : null
+    const rows = [...new Map([...running, ...newest].map(r => [r.id, r])).values()].sort((a, b) => a.id - b.id)
     // Inline runs write into this same conversation and already render in its transcript.
-    runs.value = [...rows].reverse().flatMap(r =>
+    runs.value = rows.flatMap(r =>
       r.childConversationId != null && r.childConversationId !== convoId
         ? [{
             id: r.id,

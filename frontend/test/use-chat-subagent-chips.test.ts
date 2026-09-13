@@ -42,13 +42,19 @@ function runEvent(runId: number, parentConversationId: number | null, status: Su
   return { runId, parentConversationId, childConversationId: 100 + runId, childAgentId: 90 + runId, status, label: null }
 }
 
-/** Serves /api/subagent-runs per parent conversation, ordered and cut as the server does, and records each query. */
-function serve(rowsFor: (parentConversationId: number) => Array<{ id: number }> | Promise<Array<{ id: number }>>) {
+type RunRow = { id: number, status: SubagentRunStatus }
+
+// The status=RUNNING queries, kept apart so `requests` counts one per refresh.
+const runningRequests: URLSearchParams[] = []
+
+/** Serves /api/subagent-runs per parent conversation, filtered, ordered and cut as the server does, and records each query. */
+function serve(rowsFor: (parentConversationId: number) => RunRow[] | Promise<RunRow[]>) {
   const requests: URLSearchParams[] = []
   registerEndpoint('/api/subagent-runs', async (event) => {
     const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
-    requests.push(url.searchParams)
-    const rows = [...await rowsFor(Number(url.searchParams.get('parentConversationId')))]
+    const status = url.searchParams.get('status')
+    ;(status ? runningRequests : requests).push(url.searchParams)
+    const rows = (await rowsFor(Number(url.searchParams.get('parentConversationId')))).filter(r => !status || r.status === status)
     const desc = url.searchParams.get('dir') === 'desc'
     rows.sort((a, b) => (desc ? b.id - a.id : a.id - b.id))
     event.node.res.setHeader('x-total-count', String(rows.length))
@@ -83,6 +89,7 @@ async function mountChips(convoId: number | null = 5) {
 beforeEach(() => {
   bus.handlers.length = 0
   bus.openHandlers.length = 0
+  runningRequests.length = 0
 })
 
 afterEach(() => {
@@ -118,6 +125,19 @@ describe('useChatSubagentChips', () => {
     await vi.waitFor(() => expect(ids().at(-1)).toBe(101))
     expect(ids()).toHaveLength(100)
     expect(ids()[0]).toBe(2)
+    expect(allRunsTotal.value).toBe(101)
+  })
+
+  it('keeps a chip for an old run still RUNNING once 100 newer runs push it out of the newest window', async () => {
+    serve(() => [run(1, 1000), ...Array.from({ length: 100 }, (_, i) => run(i + 2, 1001 + i, 'COMPLETED'))])
+    const { ids, allRunsTotal } = await mountChips()
+
+    expect(runningRequests).toHaveLength(1)
+    expect(runningRequests[0]!.get('parentConversationId')).toBe('5')
+    expect(runningRequests[0]!.get('status')).toBe('RUNNING')
+    expect(ids()).toHaveLength(101)
+    expect(ids()[0]).toBe(1)
+    expect(ids().at(-1)).toBe(101)
     expect(allRunsTotal.value).toBe(101)
   })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import { useChatMessageActions } from '~/composables/useChatMessageActions'
 import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
@@ -14,7 +14,7 @@ const props = defineProps<{
   agentId: number | null
 }>()
 
-const { messages, loaded, failed, retry } = useSubagentTranscript(props.childConversationId, () => props.status)
+const { messages, loaded, failed, revision, retry } = useSubagentTranscript(props.childConversationId, () => props.status)
 
 const displayMessages = computed(() => messages.value.filter(m => shouldDisplayMessage(m, false)))
 
@@ -58,11 +58,27 @@ function scrollToBottom() {
   if (el) el.scrollTop = el.scrollHeight
 }
 
-watch(() => displayMessages.value.length, () => {
+// The revision, not the row count: a call's result can land on a row already shown, and the reader's own toggles must not scroll.
+watch(revision, () => {
   if (followBottom) scrollToBottom()
 }, { flush: 'post' })
 
 onMounted(scrollToBottom)
+
+const retrying = ref(false)
+
+// A retry that succeeds unmounts its control, so a keyboard user's focus moves to the scroller rather than the page body.
+async function onRetry(event: Event) {
+  if (retrying.value) return
+  const hadFocus = document.activeElement === event.currentTarget
+  retrying.value = true
+  await retry()
+  retrying.value = false
+  if (hadFocus && !failed.value) {
+    await nextTick()
+    scrollEl.value?.focus()
+  }
+}
 </script>
 
 <template>
@@ -74,6 +90,7 @@ onMounted(scrollToBottom)
     <div
       ref="scrollEl"
       data-testid="subagent-transcript-scroll"
+      tabindex="-1"
       class="max-h-[min(24rem,40vh)] overflow-y-auto overflow-x-hidden px-3 py-3"
       @scroll="onScroll"
     >
@@ -85,14 +102,16 @@ onMounted(scrollToBottom)
           role="status"
           class="text-sm italic text-fg-muted"
         >
-          {{ failed ? 'Could not load this transcript.' : 'Loading transcript…' }}
+          {{ failed && !retrying ? 'Could not load this transcript.' : 'Loading transcript…' }}
         </p>
         <button
           v-if="failed"
           type="button"
           data-testid="subagent-transcript-retry"
+          :aria-disabled="retrying"
+          :aria-busy="retrying"
           class="text-xs text-fg-muted underline underline-offset-2 hover:text-fg-strong"
-          @click="retry"
+          @click="onRetry"
         >
           Retry
         </button>
@@ -138,11 +157,30 @@ onMounted(scrollToBottom)
         />
       </div>
     </div>
-    <div class="flex justify-end border-t border-border-subtle px-3 py-1.5 text-xs">
+    <div class="flex items-center gap-3 border-t border-border-subtle px-3 py-1.5 text-xs">
+      <!-- Mounted from the start, so a refresh that fails after the first load is announced. -->
+      <p
+        role="status"
+        data-testid="subagent-transcript-stale"
+        class="text-fg-muted"
+      >
+        {{ loaded && failed ? (retrying ? 'Refreshing transcript…' : 'Could not refresh this transcript.') : '' }}
+      </p>
+      <button
+        v-if="loaded && failed"
+        type="button"
+        data-testid="subagent-transcript-refresh-retry"
+        :aria-disabled="retrying"
+        :aria-busy="retrying"
+        class="text-fg-muted underline underline-offset-2 hover:text-fg-strong"
+        @click="onRetry"
+      >
+        Retry
+      </button>
       <NuxtLink
         :to="`/chat?conversation=${childConversationId}`"
         data-testid="subagent-transcript-full"
-        class="text-fg-muted underline-offset-2 hover:text-fg-strong hover:underline"
+        class="ml-auto text-fg-muted underline-offset-2 hover:text-fg-strong hover:underline"
       >
         Open full transcript
       </NuxtLink>

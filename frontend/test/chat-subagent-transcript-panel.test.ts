@@ -17,20 +17,37 @@ function row(id: number, o: Record<string, unknown> = {}) {
 // Each test serves its own conversation id: the transcript cache is module-level by design.
 function serve(convoId: number, initial: unknown[]) {
   const server = { rows: [...initial], calls: 0, gate: null as Promise<void> | null }
-  registerEndpoint(`/api/conversations/${convoId}/messages`, async () => {
+  registerEndpoint(`/api/conversations/${convoId}/messages`, async (event) => {
     if (server.gate) await server.gate
     server.calls++
-    return structuredClone(server.rows)
+    const { getQuery } = await import('h3')
+    const query = getQuery(event)
+    const offset = Number(query.offset) || 0
+    return structuredClone(server.rows.slice(offset, offset + (Number(query.limit) || 200)))
   })
   return server
 }
 
-async function mountPanel(convoId: number, initial: SubagentRunStatus = 'RUNNING') {
+async function mountPanel(convoId: number, initial: SubagentRunStatus = 'RUNNING', attach = false) {
   const status = ref<SubagentRunStatus>(initial)
   const wrapper = await mountSuspended(defineComponent({
     setup: () => () => h(ChatSubagentTranscriptPanel, { childConversationId: convoId, status: status.value, agentId: null }),
-  }))
+  }), attach ? { attachTo: document.body } : {})
   return { wrapper, status }
+}
+
+// Fails every request while `fail` is set, and holds each one while `gate` is.
+function serveFlaky(convoId: number, rows: unknown[]) {
+  const server = { fail: false, gate: null as Promise<void> | null }
+  registerEndpoint(`/api/conversations/${convoId}/messages`, async () => {
+    if (server.gate) await server.gate
+    if (server.fail) {
+      const { createError } = await import('h3')
+      throw createError({ statusCode: 503 })
+    }
+    return structuredClone(rows)
+  })
+  return server
 }
 
 function occurrences(text: string, needle: string) {
@@ -213,5 +230,74 @@ describe('ChatSubagentTranscriptPanel', () => {
     await flushPromises()
     expect(deleted).toBe(false)
     expect(wrapper.text()).toContain('keep me')
+  })
+
+  it('follows a call result that lands on a row already shown, when the reader is at the bottom', async () => {
+    const server = serve(212, [
+      row(1, { role: 'user', content: 'go' }),
+      row(2, { content: 'searching now', toolCalls: [{ id: 'c1', function: { name: 'web_search', arguments: '{}' } }] }),
+    ])
+    const { wrapper, status } = await mountPanel(212, 'RUNNING')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('searching now'))
+    const scroller = wrapper.find('[data-testid="subagent-transcript-scroll"]')
+    const el = scroller.element as HTMLElement
+    let height = 1000
+    fakeLayout(el, { scrollTop: 800, scrollHeight: () => height, clientHeight: 200 })
+    await scroller.trigger('scroll')
+
+    // The tool row is never displayed, so the displayed row count does not change.
+    height = 1400
+    server.rows.push(row(3, { role: 'tool', content: 'found it', toolResults: 'c1' }))
+    status.value = 'COMPLETED'
+    await vi.waitFor(() => expect(el.scrollTop).toBe(1400))
+  })
+
+  it('keeps what loaded and offers a retry when a later refresh fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const rows = [row(1, { content: 'first reply' })]
+    const server = serveFlaky(213, rows)
+    const { wrapper, status } = await mountPanel(213, 'RUNNING')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('first reply'))
+    const stale = () => wrapper.find('[data-testid="subagent-transcript-stale"]')
+    expect(stale().attributes('role')).toBe('status')
+    expect(stale().text()).toBe('')
+
+    server.fail = true
+    rows.push(row(2, { content: 'last reply' }))
+    status.value = 'COMPLETED'
+    await vi.waitFor(() => expect(stale().text()).toBe('Could not refresh this transcript.'))
+    expect(wrapper.text()).toContain('first reply')
+
+    server.fail = false
+    await wrapper.find('[data-testid="subagent-transcript-refresh-retry"]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('last reply'))
+    expect(stale().text()).toBe('')
+    expect(wrapper.find('[data-testid="subagent-transcript-refresh-retry"]').exists()).toBe(false)
+  })
+
+  it('keeps Retry focused while it runs, then hands focus to the transcript when it succeeds', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const server = serveFlaky(214, [row(1, { content: 'back again' })])
+    server.fail = true
+    const { wrapper } = await mountPanel(214, 'COMPLETED', true)
+    const retry = () => wrapper.find('[data-testid="subagent-transcript-retry"]')
+    await vi.waitFor(() => expect(retry().exists()).toBe(true))
+
+    let release!: () => void
+    server.gate = new Promise((resolve) => {
+      release = resolve
+    })
+    server.fail = false
+    const button = retry().element as HTMLElement
+    button.focus()
+    await retry().trigger('click')
+    expect(retry().element).toBe(button)
+    expect(button.getAttribute('aria-busy')).toBe('true')
+    expect(document.activeElement).toBe(button)
+
+    release()
+    await vi.waitFor(() => expect(wrapper.text()).toContain('back again'))
+    await vi.waitFor(() => expect(document.activeElement).toBe(wrapper.find('[data-testid="subagent-transcript-scroll"]').element))
+    wrapper.unmount()
   })
 })
