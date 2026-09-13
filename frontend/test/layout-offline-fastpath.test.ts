@@ -4,7 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import DefaultLayout from '~/layouts/default.vue'
 
-const OFFLINE_BANNER = 'API is unreachable'
+const OFFLINE_BANNER = 'The JClaw server isn\'t responding'
 // Mirrors POLL_BASE_MS in layouts/default.vue.
 const BASE_MS = 10_000
 
@@ -56,6 +56,8 @@ describe('default layout — navigator.onLine fast path for the API dot', () => 
     // No timer advanced here — if this passes only after the poll fires, the
     // fast path is not wired and the dot stays green for the whole interval.
     expect(layout!.text()).toContain(OFFLINE_BANNER)
+    // The test origin is plain http, where the per-host connection cap applies.
+    expect(layout!.text()).toContain('If several JClaw tabs are open')
   })
 
   it('re-probes the backend on link recovery rather than assuming it is up', async () => {

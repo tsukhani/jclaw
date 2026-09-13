@@ -76,6 +76,11 @@ const frameworkVersionMatch = computed<'match' | 'mismatch' | 'unknown'>(() => {
   return frameworkVersion.value === expectedFrameworkVersion.value ? 'match' : 'mismatch'
 })
 const apiOnline = ref(false)
+// Plain http caps a browser at 6 connections per host and each tab's /api/events stream holds
+// one, so a 7th tab's probe times out; JClaw's https port serves HTTP/2, which has no such cap.
+const offlineMessage = location.protocol === 'http:'
+  ? 'The JClaw server isn\'t responding. If several JClaw tabs are open, close a few, then Retry.'
+  : 'The JClaw server isn\'t responding.'
 
 const updateAvailable = ref(false)
 const latestVersion = ref('')
@@ -765,12 +770,12 @@ const navGroups: NavGroup[] = [
       </header>
 
       <!-- Status banners. Gated on statusProbed: apiOnline starts false, so
-           without it every page load flashed "API is unreachable" for the ~20ms
+           without it every page load flashed the offline banner for the ~20ms
            until /api/status answered — a false error, and one that shifted the
            whole page down 41px and back (CLS). -->
       <StatusBanner
         v-if="statusProbed && !apiOnline"
-        message="API is unreachable. Some features may be unavailable."
+        :message="offlineMessage"
         variant="error"
         action-text="Retry"
         @action="retryStatus"
