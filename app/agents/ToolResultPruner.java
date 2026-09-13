@@ -47,7 +47,7 @@ public final class ToolResultPruner {
      */
     public static List<ChatMessage> prune(List<ChatMessage> messages, int minChars, int protectRecent,
                                           @Nullable Agent agent, @Nullable Conversation conversation) {
-        int cutoff = Math.clamp(messages.size() - protectRecent, 0, lastUserIndex(messages));
+        int cutoff = Math.clamp((long) messages.size() - protectRecent, 0, lastUserIndex(messages));
         List<ChatMessage> out = null;
         int stubbed = 0;
         long elided = 0;

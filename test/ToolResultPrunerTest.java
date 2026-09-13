@@ -86,6 +86,16 @@ class ToolResultPrunerTest extends UnitTest {
     }
 
     @Test
+    void aHugeNegativeProtectRecentWidensInsteadOfWrappingToNothingPruned() {
+        var messages = List.of(ChatMessage.user("a"), tool("c1", "t", BIG), ChatMessage.user("b"));
+
+        var pruned = ToolResultPruner.prune(messages, 4_000, Integer.MIN_VALUE, null, null);
+
+        assertTrue(((String) pruned.get(1).content()).startsWith(ToolResultPruner.STUB_MARKER),
+                "size - MIN_VALUE computed in int wraps negative and clamps the cutoff to 0");
+    }
+
+    @Test
     void aStubResolvesToTheOriginalThroughTheRetrieveTool() {
         new jobs.ToolRegistrationJob().doJob();
         Agent agent = AgentService.create("prune-agent", "openrouter", "gpt-4.1");
