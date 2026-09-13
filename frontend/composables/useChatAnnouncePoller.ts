@@ -1,4 +1,4 @@
-import { computed, onMounted, onUnmounted, triggerRef, type ComputedRef, type Ref, type ShallowRef } from 'vue'
+import { onMounted, onUnmounted, triggerRef, type Ref, type ShallowRef } from 'vue'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import { backfillServerIds } from '~/utils/message-reconcile'
@@ -137,7 +137,6 @@ export interface UseChatAnnouncePollerDeps {
 }
 
 export interface UseChatAnnouncePoller {
-  announcedSubagentCount: ComputedRef<number>
   hasPendingAsyncAnnounce: () => boolean
   hasRecentTaskCreate: () => boolean
   pollForAnnounce: () => Promise<void>
@@ -147,15 +146,6 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
   const { messages, selectedConvoId, streaming, initSubagentCollapsedState } = deps
 
   let announcePollTimer: ReturnType<typeof setInterval> | undefined
-
-  /**
-   * JCLAW-326: count of subagent runs that have produced an announce row in
-   * the current conversation. Drives the "View N subagents in this
-   * conversation" banner; 0 hides the banner. Counts unique run-ids rather
-   * than raw announce messages so a hypothetical duplicate (re-render race)
-   * doesn't inflate the figure.
-   */
-  const announcedSubagentCount = computed(() => collectAnnouncedRunIds(messages.value).size)
 
   /**
    * True when the open conversation has at least one async-spawn tool result
@@ -307,7 +297,6 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
   })
 
   return {
-    announcedSubagentCount,
     hasPendingAsyncAnnounce,
     hasRecentTaskCreate,
     pollForAnnounce,

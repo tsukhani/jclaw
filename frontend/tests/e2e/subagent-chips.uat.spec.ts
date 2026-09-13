@@ -176,7 +176,8 @@ test.describe('UAT-18 chat subagent chips', () => {
     await expect(unlabelled).toHaveAttribute('title', 'e2e-uat-child-completed')
 
     await expect(page.getByTestId('subagent-stack')).not.toContainText('e2e-uat-child-inline')
-    await expect(page.getByTestId('subagent-stack-all-runs')).toHaveCount(0)
+    // The inline run gets no chip but is still one of the runs the header counts.
+    await expect(page.getByTestId('subagent-stack-count')).toHaveText('6 subagents spawned in this conversation')
     expect(guard.unexpected()).toEqual([])
     expect(guard.writes()).toEqual([])
   })
@@ -280,7 +281,7 @@ test.describe('UAT-18 chat subagent chips', () => {
     expect(guard.writes()).toEqual([])
   })
 
-  test('a View all link appears when the conversation has more runs than the chips show', async ({ page, request }) => {
+  test('the header counts every run the conversation spawned and links to them on the Subagents page', async ({ page, request }) => {
     const parentId = 990150
     const guard = await stubChat(page, request, {
       parentId,
@@ -294,8 +295,41 @@ test.describe('UAT-18 chat subagent chips', () => {
 
     await gotoPage(page, `/chat?conversation=${parentId}`)
     await expect(page.getByTestId('subagent-chip')).toHaveCount(2)
-    await expect(page.getByRole('link', { name: 'View all 250 on the Subagents page' }))
+    await expect(page.getByTestId('subagent-stack-count')).toHaveText('250 subagents spawned in this conversation')
+    await expect(page.getByRole('link', { name: 'View list →' }))
       .toHaveAttribute('href', `/subagents?parentConversationId=${parentId}`)
+    expect(guard.unexpected()).toEqual([])
+    expect(guard.writes()).toEqual([])
+  })
+
+  test('one transcript opens at a time, and the header collapses the whole list', async ({ page, request }) => {
+    const parentId = 990160
+    const guard = await stubChat(page, request, {
+      parentId,
+      runs: [
+        { id: 990561, label: 'e2e-uat first', childAgentName: 'e2e-uat-child-first', childConversationId: 990161, status: 'COMPLETED' },
+        { id: 990562, label: 'e2e-uat second', childAgentName: 'e2e-uat-child-second', childConversationId: 990162, status: 'COMPLETED' },
+      ],
+      transcripts: new Map([
+        [990161, [message(990961, 'assistant', 'e2e-uat first answer')]],
+        [990162, [message(990962, 'assistant', 'e2e-uat second answer')]],
+      ]),
+    })
+
+    await gotoPage(page, `/chat?conversation=${parentId}`)
+    await page.getByRole('button', { name: 'Expand e2e-uat first (e2e-uat-child-first)' }).click()
+    await expect(page.getByText('e2e-uat first answer')).toBeVisible()
+    await page.getByRole('button', { name: 'Expand e2e-uat second (e2e-uat-child-second)' }).click()
+    await expect(page.getByText('e2e-uat second answer')).toBeVisible()
+    await expect(page.getByTestId('subagent-transcript-panel')).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Expand e2e-uat first (e2e-uat-child-first)' }))
+      .toHaveAttribute('aria-expanded', 'false')
+
+    await page.getByRole('button', { name: 'Collapse the subagent list' }).click()
+    await expect(page.getByTestId('subagent-chip')).toHaveCount(0)
+    await expect(page.getByTestId('subagent-stack-count')).toHaveText('2 subagents spawned in this conversation')
+    await page.getByRole('button', { name: 'Expand the subagent list' }).click()
+    await expect(page.getByTestId('subagent-chip')).toHaveCount(2)
     expect(guard.unexpected()).toEqual([])
     expect(guard.writes()).toEqual([])
   })

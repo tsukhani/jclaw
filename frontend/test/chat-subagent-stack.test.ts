@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onUnmounted, ref, type PropType } from 'vue'
@@ -15,10 +15,25 @@ afterEach(() => {
   for (const wrapper of mounted.splice(0)) wrapper.unmount()
 })
 
+/** Records every scrollIntoView call until restore() puts the prototype back. */
+function captureScrollIntoView() {
+  const proto = Element.prototype as { scrollIntoView?: (options?: ScrollIntoViewOptions) => void }
+  const original = Object.getOwnPropertyDescriptor(proto, 'scrollIntoView')
+  const scrolled: Array<{ el: Element, options: unknown }> = []
+  proto.scrollIntoView = function (this: Element, options?: ScrollIntoViewOptions) {
+    scrolled.push({ el: this, options })
+  }
+  const restore = () => {
+    if (original) Object.defineProperty(proto, 'scrollIntoView', original)
+    else delete proto.scrollIntoView
+  }
+  return { scrolled, restore }
+}
+
 /** Mounts the stack wired the way chat.vue wires it, with a probe in the expanded slot. */
-async function mountStack(initial: SubagentChip[], extra: { conversationId?: number, allRunsTotal?: number | null } = {}) {
+async function mountStack(initial: SubagentChip[], extra: { conversationId?: number, runsTotal?: number } = {}) {
   const runs = ref(initial)
-  const expandedIds = ref(new Set<number>())
+  const expandedId = ref<number | null>(null)
   const closedIds = ref(new Set<number>())
   const probe = { unmounts: 0 }
   const Probe = defineComponent({
@@ -34,15 +49,15 @@ async function mountStack(initial: SubagentChip[], extra: { conversationId?: num
     setup() {
       return () => h(ChatSubagentStack, {
         runs: runs.value.filter(r => !closedIds.value.has(r.id)),
-        expandedIds: expandedIds.value,
-        ...extra,
+        expandedId: expandedId.value,
+        conversationId: extra.conversationId ?? 5,
+        runsTotal: extra.runsTotal ?? initial.length,
         onToggle: (id: number) => {
-          const next = new Set(expandedIds.value)
-          if (!next.delete(id)) next.add(id)
-          expandedIds.value = next
+          expandedId.value = expandedId.value === id ? null : id
         },
         onClose: (id: number) => {
           closedIds.value = new Set(closedIds.value).add(id)
+          if (expandedId.value === id) expandedId.value = null
         },
       }, { expanded: ({ run }: { run: SubagentChip }) => h(Probe, { run }) })
     },
@@ -91,6 +106,48 @@ describe('ChatSubagentStack', () => {
     expect(toggles[1]!.attributes('aria-label')).toBe('Expand main-sub-2')
   })
 
+  it('heads the list with the run count and a link to the conversation\'s runs on the Subagents page', async () => {
+    const { wrapper } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')], { conversationId: 7, runsTotal: 3 })
+    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('3 subagents spawned in this conversation')
+    const link = wrapper.find('[data-testid="subagent-stack-view-list"]')
+    expect(link.attributes('href')).toBe('/subagents?parentConversationId=7')
+    expect(link.text()).toBe('View list →')
+
+    const { wrapper: single } = await mountStack([chip(3, 'RUNNING')], { runsTotal: 1 })
+    expect(single.find('[data-testid="subagent-stack-count"]').text()).toBe('1 subagent spawned in this conversation')
+  })
+
+  it('collapses the whole list from the header and opens it again, unmounting an open transcript meanwhile', async () => {
+    const { wrapper, probe } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')])
+    const toggle = () => wrapper.find('[data-testid="subagent-stack-toggle"]')
+    expect(toggle().attributes('aria-expanded')).toBe('true')
+    expect(toggle().attributes('aria-label')).toBe('Collapse the subagent list')
+    expect(toggle().attributes('aria-controls')).toBe('subagent-stack-list')
+    expect(document.getElementById('subagent-stack-list')).not.toBeNull()
+    await wrapper.findAll('[data-testid="subagent-chip-toggle"]')[0]!.trigger('click')
+    expect(wrapper.find('[data-testid="slot-probe"]').exists()).toBe(true)
+
+    await toggle().trigger('click')
+    expect(wrapper.findAll('[data-testid="subagent-chip"]')).toHaveLength(0)
+    expect(probe.unmounts).toBe(1)
+    expect(toggle().attributes('aria-expanded')).toBe('false')
+    expect(toggle().attributes('aria-label')).toBe('Expand the subagent list')
+    expect(toggle().attributes('aria-controls')).toBeUndefined()
+    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('2 subagents spawned in this conversation')
+
+    await toggle().trigger('click')
+    expect(wrapper.findAll('[data-testid="subagent-chip"]')).toHaveLength(2)
+    expect(wrapper.find('[data-testid="slot-probe"]').text()).toBe('transcript 601')
+  })
+
+  it('keeps the header and its link, with no list toggle, when no chip is left to show', async () => {
+    const { wrapper } = await mountStack([], { runsTotal: 2 })
+    expect(wrapper.find('ul').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="subagent-stack-toggle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('2 subagents spawned in this conversation')
+    expect(wrapper.find('[data-testid="subagent-stack-view-list"]').exists()).toBe(true)
+  })
+
   it('mounts the expanded slot beneath the one chip expanded and unmounts it on collapse', async () => {
     const { wrapper, probe } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')])
     const rows = () => wrapper.findAll('[data-testid="subagent-chip"]')
@@ -129,7 +186,7 @@ describe('ChatSubagentStack', () => {
     expect(probe.unmounts).toBe(1)
   })
 
-  it('hands focus to the next chip on close, or the previous one when the last row closes', async () => {
+  it('hands focus to the next chip on close, the previous one when the last row closes, and the header link after the final chip', async () => {
     const { wrapper } = await mountStack([chip(1, 'RUNNING'), chip(2, 'RUNNING'), chip(3, 'COMPLETED')])
     const closeButton = (id: number) => wrapper.find(`[aria-label="Close main-sub-${id}"]`)
 
@@ -140,6 +197,10 @@ describe('ChatSubagentStack', () => {
     await closeButton(3).trigger('click')
     await nextTick()
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Expand main-sub-2')
+
+    await closeButton(2).trigger('click')
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('[data-testid="subagent-stack-view-list"]').element)
   })
 
   it('announces a run that ends, but not a chip that arrives already finished', async () => {
@@ -175,12 +236,7 @@ describe('ChatSubagentStack', () => {
   })
 
   it('scrolls a chip it expands into view within the stack, and not on collapse', async () => {
-    const proto = Element.prototype as { scrollIntoView?: (options?: ScrollIntoViewOptions) => void }
-    const original = Object.getOwnPropertyDescriptor(proto, 'scrollIntoView')
-    const scrolled: Array<{ el: Element, options: unknown }> = []
-    proto.scrollIntoView = function (this: Element, options?: ScrollIntoViewOptions) {
-      scrolled.push({ el: this, options })
-    }
+    const { scrolled, restore } = captureScrollIntoView()
     try {
       const { wrapper } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')])
       const rows = () => wrapper.findAll('[data-testid="subagent-chip"]')
@@ -191,24 +247,48 @@ describe('ChatSubagentStack', () => {
       expect(scrolled).toHaveLength(1)
     }
     finally {
-      if (original) Object.defineProperty(proto, 'scrollIntoView', original)
-      else delete proto.scrollIntoView
+      restore()
     }
   })
 
-  it('keeps the link to every run when no chip is left to show', async () => {
-    const { wrapper } = await mountStack([], { conversationId: 5, allRunsTotal: 150 })
-    expect(wrapper.find('ul').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="subagent-stack-all-runs"]').text()).toBe('View all 150 on the Subagents page')
-  })
+  it('keeps an expanded chip in view as its transcript grows, and again when the list reopens', async () => {
+    const { scrolled, restore } = captureScrollIntoView()
+    const resize = { fire: () => {}, observed: [] as Element[] }
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: (entries: Array<{ target: Element }>) => void) {
+        resize.fire = () => callback(resize.observed.map(target => ({ target })))
+      }
 
-  it('links to every run on the Subagents page when the chip list was cut short', async () => {
-    const { wrapper } = await mountStack([chip(1, 'RUNNING')], { conversationId: 5, allRunsTotal: 150 })
-    const link = wrapper.find('[data-testid="subagent-stack-all-runs"]')
-    expect(link.attributes('href')).toBe('/subagents?parentConversationId=5')
-    expect(link.text()).toBe('View all 150 on the Subagents page')
+      observe(target: Element) {
+        resize.observed.push(target)
+      }
 
-    const { wrapper: complete } = await mountStack([chip(2, 'RUNNING')], { conversationId: 5, allRunsTotal: null })
-    expect(complete.find('[data-testid="subagent-stack-all-runs"]').exists()).toBe(false)
+      unobserve() {}
+      disconnect() {
+        resize.observed = []
+      }
+    })
+    try {
+      const { wrapper } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')])
+      const row = (i: number) => wrapper.findAll('[data-testid="subagent-chip"]')[i]!.element
+      const listToggle = () => wrapper.find('[data-testid="subagent-stack-toggle"]')
+
+      await wrapper.findAll('[data-testid="subagent-chip-toggle"]')[1]!.trigger('click')
+      expect(resize.observed).toEqual([row(1)])
+      // The transcript arrives and the row grows.
+      resize.fire()
+      expect(scrolled.map(s => s.el)).toEqual([row(1), row(1)])
+
+      await listToggle().trigger('click')
+      expect(resize.observed).toEqual([])
+      await listToggle().trigger('click')
+      expect(resize.observed).toEqual([row(1)])
+      expect(scrolled).toHaveLength(3)
+      expect(scrolled.at(-1)!.el).toBe(row(1))
+    }
+    finally {
+      vi.unstubAllGlobals()
+      restore()
+    }
   })
 })

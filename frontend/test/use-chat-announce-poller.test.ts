@@ -40,17 +40,6 @@ async function mountPoller(over: Partial<UseChatAnnouncePollerDeps> = {}) {
 }
 
 describe('useChatAnnouncePoller', () => {
-  it('counts unique announced subagent run-ids', async () => {
-    const { api } = await mountPoller({
-      messages: shallowRef([
-        msg({ messageKind: 'subagent_announce', metadata: { runId: 1 } } as Partial<Message>),
-        msg({ messageKind: 'subagent_announce', metadata: { runId: 2 } } as Partial<Message>),
-        msg({ messageKind: 'subagent_announce', metadata: { runId: 1 } } as Partial<Message>), // dup run-id
-      ]),
-    })
-    expect(api.announcedSubagentCount.value).toBe(2)
-  })
-
   it('detects a pending async announce from a tool-role row, cleared once announced', async () => {
     const messages = shallowRef<Message[]>([
       msg({ role: 'tool', content: '{"status":"RUNNING","run_id":"r1"}' }),

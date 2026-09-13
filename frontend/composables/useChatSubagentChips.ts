@@ -35,15 +35,17 @@ export function useChatSubagentChips(
   streaming: Ref<boolean>,
 ): {
   chips: ComputedRef<SubagentChip[]>
-  allRunsTotal: Ref<number | null>
-  expandedIds: Ref<Set<number>>
+  runsTotal: Ref<number>
+  expandedId: Ref<number | null>
   toggleExpanded: (id: number) => void
   closeChip: (id: number) => void
 } {
   const runs = ref<SubagentChip[]>([])
-  const allRunsTotal = ref<number | null>(null)
+  // Counts the inline runs that get no chip, so it matches the Subagents page the header links to.
+  const runsTotal = ref(0)
   const closedIds = ref(new Set<number>())
-  const expandedIds = ref(new Set<number>())
+  // One transcript at a time: each panel can take half the viewport.
+  const expandedId = ref<number | null>(null)
   let latestRequest = 0
   let timer: ReturnType<typeof setInterval> | undefined
 
@@ -55,7 +57,7 @@ export function useChatSubagentChips(
     const convoId = selectedConvoId.value
     if (!convoId) {
       runs.value = []
-      allRunsTotal.value = null
+      runsTotal.value = 0
       return
     }
     let newest: SubagentRunRow[]
@@ -78,8 +80,8 @@ export function useChatSubagentChips(
     }
     // An event and a poll can overlap, and the operator can switch conversations mid-request.
     if (request !== latestRequest || selectedConvoId.value !== convoId) return
-    allRunsTotal.value = total > newest.length ? total : null
     const rows = [...new Map([...running, ...newest].map(r => [r.id, r])).values()].sort((a, b) => a.id - b.id)
+    runsTotal.value = Number.isFinite(total) ? total : rows.length
     // Inline runs write into this same conversation and already render in its transcript.
     runs.value = rows.flatMap(r =>
       r.childConversationId != null && r.childConversationId !== convoId
@@ -96,21 +98,19 @@ export function useChatSubagentChips(
   }
 
   function toggleExpanded(id: number) {
-    const next = new Set(expandedIds.value)
-    if (!next.delete(id)) next.add(id)
-    expandedIds.value = next
+    expandedId.value = expandedId.value === id ? null : id
   }
 
   function closeChip(id: number) {
     closedIds.value = new Set(closedIds.value).add(id)
-    if (expandedIds.value.has(id)) toggleExpanded(id)
+    if (expandedId.value === id) expandedId.value = null
   }
 
   watch(selectedConvoId, () => {
     runs.value = []
-    allRunsTotal.value = null
+    runsTotal.value = 0
     closedIds.value = new Set()
-    expandedIds.value = new Set()
+    expandedId.value = null
     void refresh()
   }, { immediate: true })
 
@@ -146,5 +146,5 @@ export function useChatSubagentChips(
     document.removeEventListener('visibilitychange', onVisibilityChange)
   })
 
-  return { chips, allRunsTotal, expandedIds, toggleExpanded, closeChip }
+  return { chips, runsTotal, expandedId, toggleExpanded, closeChip }
 }

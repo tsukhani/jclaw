@@ -9,7 +9,6 @@ import {
   PaperClipIcon,
   PencilSquareIcon,
   SpeakerWaveIcon,
-  UsersIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 // Solid lightbulb for the active-reasoning header — the outline bulb on the
@@ -256,7 +255,6 @@ convHooks.afterLoad = (msgs) => {
 // late-arriving rows into messages and re-runs the subagent-collapse init.
 // Owns its own 5s poll timer; placed after useChatSubagents for that init dep.
 const {
-  announcedSubagentCount,
   hasPendingAsyncAnnounce,
   hasRecentTaskCreate,
   pollForAnnounce,
@@ -264,21 +262,11 @@ const {
 
 const {
   chips: subagentChips,
-  allRunsTotal: subagentAllRunsTotal,
-  expandedIds: expandedSubagentChipIds,
+  runsTotal: subagentRunsTotal,
+  expandedId: expandedSubagentChipId,
   toggleExpanded: toggleSubagentChip,
   closeChip: closeSubagentChip,
 } = useChatSubagentChips(selectedConvoId, streaming)
-
-// Closing the last chip unmounts its focused close button; the composer is disabled mid-stream and in a read-only transcript.
-function onCloseSubagentChip(id: number) {
-  closeSubagentChip(id)
-  if (subagentChips.value.length) return
-  void nextTick(() => {
-    if (chatInput.value && !chatInput.value.disabled) chatInput.value.focus()
-    else messagesEl.value?.focus()
-  })
-}
 
 // Token-usage + cost meter (latest-turn usage, cumulative tokens, running cost
 // recomputed only when idle, and the JCLAW-108 model-switch divider predicate)
@@ -829,15 +817,15 @@ function exportConversation() {
           </div>
         </div>
 
-        <!-- Outside the scroll container, so the subagent chips stay pinned while the transcript scrolls. -->
+        <!-- Outside the scroll container, so the subagent list stays pinned while the transcript scrolls. -->
         <ChatSubagentStack
-          v-if="selectedConvoId && (subagentChips.length || subagentAllRunsTotal)"
+          v-if="selectedConvoId && subagentRunsTotal"
           :runs="subagentChips"
-          :expanded-ids="expandedSubagentChipIds"
+          :expanded-id="expandedSubagentChipId"
           :conversation-id="selectedConvoId"
-          :all-runs-total="subagentAllRunsTotal"
+          :runs-total="subagentRunsTotal"
           @toggle="toggleSubagentChip"
-          @close="onCloseSubagentChip"
+          @close="closeSubagentChip"
         >
           <template #expanded="{ run }">
             <ChatSubagentTranscriptPanel
@@ -847,38 +835,6 @@ function exportConversation() {
             />
           </template>
         </ChatSubagentStack>
-
-        <!--
-          JCLAW-326: parent-conversation → /subagents deep-link banner.
-          Only renders for a real parent conversation that has at least one
-          subagent_announce in its message list; mutually exclusive with the
-          subagentTranscript banner above (you can't be both viewing a
-          child's transcript and the parent of a run at the same time).
-          Counts unique run-ids so the banner figure matches the count of
-          distinct rows the /subagents page will show under this filter.
-        -->
-        <div
-          v-if="!subagentTranscript && selectedConvoId && announcedSubagentCount > 0"
-          data-testid="conversation-subagents-banner"
-          class="mx-auto w-full max-w-3xl px-4 pt-3"
-        >
-          <NuxtLink
-            :to="`/subagents?parentConversationId=${selectedConvoId}`"
-            class="flex items-center gap-2 px-3 py-2 text-xs bg-muted/40 border border-input
-                   text-fg-muted hover:text-fg-strong hover:border-neutral-500 rounded transition-colors"
-          >
-            <UsersIcon
-              class="w-3.5 h-3.5 shrink-0"
-              aria-hidden="true"
-            />
-            <span>
-              <strong>{{ announcedSubagentCount }}</strong>
-              {{ announcedSubagentCount === 1 ? 'subagent' : 'subagents' }} spawned
-              in this conversation
-            </span>
-            <span class="ml-auto">View list →</span>
-          </NuxtLink>
-        </div>
 
         <!--
           Messages — overscroll-contain stops trackpad/wheel momentum

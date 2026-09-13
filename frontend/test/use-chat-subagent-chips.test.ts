@@ -100,7 +100,7 @@ afterEach(() => {
 describe('useChatSubagentChips', () => {
   it('asks for the conversation\'s newest runs, shows them in spawn order and keeps only those with their own transcript', async () => {
     const requests = serve(() => [run(1, 6), run(2, 5), run(3, null), run(4, 7, 'COMPLETED', 'Summarise the logs')])
-    const { chips, allRunsTotal } = await mountChips()
+    const { chips, runsTotal } = await mountChips()
 
     expect(requests[0]!.get('parentConversationId')).toBe('5')
     expect(requests[0]!.get('sort')).toBe('id')
@@ -111,26 +111,27 @@ describe('useChatSubagentChips', () => {
       { id: 1, label: null, childAgentName: 'main-sub-1', childAgentId: 91, childConversationId: 6, status: 'RUNNING' },
       { id: 4, label: 'Summarise the logs', childAgentName: 'main-sub-4', childAgentId: 94, childConversationId: 7, status: 'COMPLETED' },
     ])
-    expect(allRunsTotal.value).toBeNull()
+    // The two runs without a chip of their own still count.
+    expect(runsTotal.value).toBe(4)
   })
 
   it('keeps the newest 100 runs of a longer conversation, including one just spawned, and reports the full count', async () => {
     let rows = Array.from({ length: 100 }, (_, i) => run(i + 1, 1000 + i, 'COMPLETED'))
     serve(() => rows)
-    const { ids, allRunsTotal } = await mountChips()
-    expect(allRunsTotal.value).toBeNull()
+    const { ids, runsTotal } = await mountChips()
+    expect(runsTotal.value).toBe(100)
 
     rows = [...rows, run(101, 1100)]
     emitBus('subagentrun.started', runEvent(101, 5))
     await vi.waitFor(() => expect(ids().at(-1)).toBe(101))
     expect(ids()).toHaveLength(100)
     expect(ids()[0]).toBe(2)
-    expect(allRunsTotal.value).toBe(101)
+    expect(runsTotal.value).toBe(101)
   })
 
   it('keeps a chip for an old run still RUNNING once 100 newer runs push it out of the newest window', async () => {
     serve(() => [run(1, 1000), ...Array.from({ length: 100 }, (_, i) => run(i + 2, 1001 + i, 'COMPLETED'))])
-    const { ids, allRunsTotal } = await mountChips()
+    const { ids, runsTotal } = await mountChips()
 
     expect(runningRequests).toHaveLength(1)
     expect(runningRequests[0]!.get('parentConversationId')).toBe('5')
@@ -138,7 +139,7 @@ describe('useChatSubagentChips', () => {
     expect(ids()).toHaveLength(101)
     expect(ids()[0]).toBe(1)
     expect(ids().at(-1)).toBe(101)
-    expect(allRunsTotal.value).toBe(101)
+    expect(runsTotal.value).toBe(101)
   })
 
   it('refetches when the event stream reconnects or the tab becomes visible, recovering a spawn whose event was missed', async () => {
@@ -176,43 +177,45 @@ describe('useChatSubagentChips', () => {
   it('turns a Running chip to its terminal status on the ended event and keeps it expanded', async () => {
     let status: SubagentRunStatus = 'RUNNING'
     serve(() => [run(1, 6, status)])
-    const { chips, expandedIds, toggleExpanded } = await mountChips()
+    const { chips, expandedId, toggleExpanded } = await mountChips()
     toggleExpanded(1)
 
     status = 'COMPLETED'
     emitBus('subagentrun.ended', runEvent(1, 5, 'COMPLETED'))
     await vi.waitFor(() => expect(chips.value[0]!.status).toBe('COMPLETED'))
-    expect(expandedIds.value.has(1)).toBe(true)
+    expect(expandedId.value).toBe(1)
   })
 
   it('keeps a closed chip hidden through a status change while a new spawn still appears', async () => {
     let rows = [run(1, 6), run(2, 7)]
     serve(() => rows)
-    const { ids, expandedIds, toggleExpanded, closeChip } = await mountChips()
+    const { ids, expandedId, toggleExpanded, closeChip } = await mountChips()
 
     toggleExpanded(1)
     closeChip(1)
     expect(ids()).toEqual([2])
-    expect(expandedIds.value.has(1)).toBe(false)
+    expect(expandedId.value).toBeNull()
 
     rows = [run(1, 6, 'FAILED'), run(2, 7), run(3, 8)]
     emitBus('subagentrun.started', runEvent(3, 5))
     await vi.waitFor(() => expect(ids()).toEqual([2, 3]))
   })
 
-  it('expands chips independently', async () => {
+  it('keeps one chip expanded at a time', async () => {
     serve(() => [run(1, 6), run(2, 7)])
-    const { expandedIds, toggleExpanded } = await mountChips()
+    const { expandedId, toggleExpanded } = await mountChips()
 
     toggleExpanded(1)
+    expect(expandedId.value).toBe(1)
     toggleExpanded(2)
-    toggleExpanded(1)
-    expect([...expandedIds.value]).toEqual([2])
+    expect(expandedId.value).toBe(2)
+    toggleExpanded(2)
+    expect(expandedId.value).toBeNull()
   })
 
   it('restores closed chips and collapses expanded ones when the conversation is loaded again', async () => {
     serve(convoId => (convoId === 5 ? [run(1, 6), run(2, 7)] : []))
-    const { ids, expandedIds, toggleExpanded, closeChip, selectedConvoId } = await mountChips()
+    const { ids, expandedId, toggleExpanded, closeChip, selectedConvoId } = await mountChips()
     closeChip(1)
     toggleExpanded(2)
 
@@ -220,7 +223,7 @@ describe('useChatSubagentChips', () => {
     await vi.waitFor(() => expect(ids()).toEqual([]))
     selectedConvoId.value = 5
     await vi.waitFor(() => expect(ids()).toEqual([1, 2]))
-    expect(expandedIds.value.size).toBe(0)
+    expect(expandedId.value).toBeNull()
   })
 
   it('ignores a response that lands after the conversation changed', async () => {
@@ -311,11 +314,13 @@ describe('useChatSubagentChips', () => {
 
   it('clears the chips when the conversation closes', async () => {
     serve(() => [run(1, 6)])
-    const { ids, selectedConvoId } = await mountChips()
+    const { ids, runsTotal, selectedConvoId } = await mountChips()
     expect(ids()).toEqual([1])
+    expect(runsTotal.value).toBe(1)
 
     selectedConvoId.value = null
     await settle()
     expect(ids()).toEqual([])
+    expect(runsTotal.value).toBe(0)
   })
 })
