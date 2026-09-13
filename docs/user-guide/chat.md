@@ -110,11 +110,17 @@ The composer has an **Export as Markdown** button. It downloads the full thread 
 
 ## Running subagents
 
-While a subagent spawned by the conversation is still running, a chip for it stays pinned above the transcript with a pulsing blue dot, the same indicator the [Subagents](/subagents) page shows. Click it to open that subagent's transcript. The chip disappears when the run ends, and its result arrives as an announce card.
+Every subagent run the conversation spawns into its own child conversation gets a chip in a stack pinned above the transcript. Inline runs write into this conversation itself, so they get no chip. A chip appears as soon as its run is spawned and stays after the run ends. The stack shows about four chips before it scrolls.
+
+Each chip shows the run's label, or the subagent's name when the run has no label, and the run's status in the colours the [Subagents](/subagents) page uses: a pulsing blue dot for **Running**, then green for **Completed**, red for **Failed**, yellow for **Killed** and orange for **Timed out**. The status updates in place when the run ends. An async run's result still arrives as an announce card.
+
+Click the arrow on a chip to expand it and read that run's transcript in place, read-only. While the run is still going, new messages appear as the subagent writes them. Collapse the chip and expand it again and the transcript you had loaded shows straight away. **Open full transcript** at the bottom of the panel opens the child conversation as a full page.
+
+The **✕** on a chip closes it. A closed chip stays hidden until you load the conversation again, by switching to another conversation and back or by reloading the page.
 
 ## Subagent transcripts are read-only
 
-If you arrive at a conversation that was created by a subagent run (for example, via a running-subagent chip, the "View full →" link on an async announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it, and a running subagent's transcript shows the messages as of when you opened it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
+If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent chip, the "View full →" link on an async announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. The full page loads the transcript once, so a running subagent's transcript shows the messages as of when you opened it; to follow a run live, expand its chip in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
 
 ## Where to go next
 

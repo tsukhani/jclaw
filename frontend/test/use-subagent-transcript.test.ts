@@ -3,11 +3,8 @@ import { registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
 import type { Message } from '~/types/api'
-import {
-  useSubagentTranscript,
-  type SubagentRunStatus,
-  type UseSubagentTranscript,
-} from '~/composables/useSubagentTranscript'
+import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
+import { useSubagentTranscript, type UseSubagentTranscript } from '~/composables/useSubagentTranscript'
 
 afterEach(() => {
   vi.useRealTimers()

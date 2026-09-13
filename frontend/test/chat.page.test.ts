@@ -475,6 +475,12 @@ describe('Chat page — subagent chip stack', () => {
       { id: 900, role: 'user', content: 'watch the downloads', createdAt: '2026-09-13T09:44:00Z' },
     ])
     registerEndpoint('/api/conversations/700/messages', () => [])
+    registerEndpoint('/api/conversations/602/messages', () => [
+      { id: 910, role: 'assistant', content: 'still scanning the downloads', createdAt: '2026-09-13T09:44:50Z' },
+    ])
+    registerEndpoint('/api/conversations/603/messages', () => [
+      { id: 920, role: 'assistant', content: 'downloads summarised', createdAt: '2026-09-13T09:45:10Z' },
+    ])
     // 7 is an inline run: it writes into the parent conversation itself, so it gets no chip.
     registerEndpoint('/api/subagent-runs', (event) => {
       const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
@@ -515,7 +521,7 @@ describe('Chat page — subagent chip stack', () => {
     const chips = () => component.findAll('[data-testid="subagent-chip"]')
 
     await chips()[0]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
-    expect(chips()[0]!.find('[data-testid="subagent-chip-open-transcript"]').attributes('href'))
+    expect(chips()[0]!.find('[data-testid="subagent-transcript-full"]').attributes('href'))
       .toBe('/chat?conversation=602')
 
     await chips()[0]!.find('[data-testid="subagent-chip-close"]').trigger('click')
@@ -529,6 +535,26 @@ describe('Chat page — subagent chip stack', () => {
     await vm.loadConversation(601)
     await vi.waitFor(() => expect(chips()).toHaveLength(2))
     expect(component.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
+  })
+
+  it('mounts the transcript panel for the expanded run only, and unmounts it on collapse', async () => {
+    setupParentConversation()
+    const { component } = await mountParentConversation()
+    const chips = () => component.findAll('[data-testid="subagent-chip"]')
+    const panels = () => component.findAll('[data-testid="subagent-transcript-panel"]')
+    expect(panels()).toHaveLength(0)
+
+    await chips()[1]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
+    expect(panels()).toHaveLength(1)
+    expect(chips()[0]!.find('[data-testid="subagent-transcript-panel"]').exists()).toBe(false)
+    expect(chips()[1]!.find('[data-testid="subagent-transcript-full"]').attributes('href'))
+      .toBe('/chat?conversation=603')
+    await vi.waitFor(() => expect(chips()[1]!.text()).toContain('downloads summarised'))
+    expect(chips()[1]!.text()).not.toContain('still scanning the downloads')
+
+    await chips()[1]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
+    expect(panels()).toHaveLength(0)
+    expect(component.text()).not.toContain('downloads summarised')
   })
 })
 

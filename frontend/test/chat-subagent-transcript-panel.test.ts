@@ -3,7 +3,7 @@ import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import ChatSubagentTranscriptPanel from '~/components/chat/ChatSubagentTranscriptPanel.vue'
-import type { SubagentRunStatus } from '~/composables/useSubagentTranscript'
+import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
 
 afterEach(() => {
   vi.useRealTimers()

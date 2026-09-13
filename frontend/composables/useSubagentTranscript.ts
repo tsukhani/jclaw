@@ -13,14 +13,13 @@ import {
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import type { Message, MessageAttachment, ToolCall } from '~/types/api'
+import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
 
 /**
  * A subagent run's child transcript for the panel an expanded chip shows (JCLAW-1205): loaded
  * once, refetched every 5 s while the run is RUNNING and the tab is visible, fetched once more
  * when the run ends so its last messages land, and merged by server id.
  */
-export type SubagentRunStatus = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'KILLED' | 'TIMEOUT'
-
 export interface UseSubagentTranscript {
   messages: ShallowRef<Message[]>
   loaded: Ref<boolean>

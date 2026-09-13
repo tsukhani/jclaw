@@ -47,6 +47,7 @@ import { findProviderModel, isLocalProvider, modelSupportsTools } from '~/compos
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
+import ChatSubagentTranscriptPanel from '~/components/chat/ChatSubagentTranscriptPanel.vue'
 
 // Issued before either await so the two round trips overlap — in an SPA Nuxt
 // starts a useFetch at its call site, not at the await.
@@ -826,13 +827,11 @@ function exportConversation() {
           @close="closeSubagentChip"
         >
           <template #expanded="{ run }">
-            <NuxtLink
-              :to="`/chat?conversation=${run.childConversationId}`"
-              data-testid="subagent-chip-open-transcript"
-              class="block px-3 py-2 text-xs text-fg-muted hover:text-fg-strong underline-offset-2 hover:underline"
-            >
-              Open the full transcript →
-            </NuxtLink>
+            <ChatSubagentTranscriptPanel
+              :child-conversation-id="run.childConversationId"
+              :status="run.status"
+              :agent-id="run.childAgentId"
+            />
           </template>
         </ChatSubagentStack>
 

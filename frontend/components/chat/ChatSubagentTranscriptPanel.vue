@@ -2,7 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import { useChatMessageActions } from '~/composables/useChatMessageActions'
-import { useSubagentTranscript, type SubagentRunStatus } from '~/composables/useSubagentTranscript'
+import type { SubagentRunStatus } from '~/composables/useChatSubagentChips'
+import { useSubagentTranscript } from '~/composables/useSubagentTranscript'
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
 import type { Message } from '~/types/api'
 
