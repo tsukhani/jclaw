@@ -131,6 +131,22 @@ export async function expectFilterChip(page: Page, key: string, value: string) {
   await expect(page.getByLabel(`Filter: ${key} is ${value}`)).toBeVisible({ timeout: 10_000 })
 }
 
+/**
+ * Answer every non-GET `/api` request locally and record it, so a spec driving
+ * stubbed data can never write to the live instance. Register it after the
+ * spec's own routes: Playwright consults the last-registered route first.
+ */
+export async function blockApiWrites(page: Page): Promise<() => string[]> {
+  const blocked: string[] = []
+  await page.route(url => url.pathname.startsWith('/api/'), (route) => {
+    const req = route.request()
+    if (req.method() === 'GET' || req.method() === 'HEAD') return route.fallback()
+    blocked.push(`${req.method()} ${new URL(req.url()).pathname}`)
+    return route.fulfill({ status: 204 })
+  })
+  return () => blocked
+}
+
 /** Collect console errors for the lifetime of the page. Returns a getter so a
  *  test can assert at the end rather than racing the handler. */
 export function collectConsoleErrors(page: Page): () => string[] {
