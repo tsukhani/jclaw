@@ -462,11 +462,11 @@ describe('Chat page — subagent transcript read-only mode (JCLAW-274)', () => {
   })
 })
 
-describe('Chat page — running subagent chips', () => {
-  function runningRun(id: number, childConversationId: number) {
-    return { id, parentAgentId: 1, parentAgentName: 'streaming-agent', childAgentId: 90 + id,
+describe('Chat page — subagent chip stack', () => {
+  function subagentRun(id: number, childConversationId: number, status: string, label: string | null = null) {
+    return { id, label, parentAgentId: 1, parentAgentName: 'streaming-agent', childAgentId: 90 + id,
       childAgentName: `main-sub-${id}`, parentConversationId: 601, childConversationId,
-      mode: 'session', status: 'RUNNING', startedAt: '2026-09-13T09:44:41Z', endedAt: null, outcome: null }
+      mode: 'session', status, startedAt: '2026-09-13T09:44:41Z', endedAt: null, outcome: null }
   }
 
   function setupParentConversation() {
@@ -474,25 +474,61 @@ describe('Chat page — running subagent chips', () => {
     registerEndpoint('/api/conversations/601/messages', () => [
       { id: 900, role: 'user', content: 'watch the downloads', createdAt: '2026-09-13T09:44:00Z' },
     ])
+    registerEndpoint('/api/conversations/700/messages', () => [])
+    // 7 is an inline run: it writes into the parent conversation itself, so it gets no chip.
+    registerEndpoint('/api/subagent-runs', (event) => {
+      const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
+      return url.searchParams.get('parentConversationId') === '601'
+        ? [subagentRun(6, 602, 'RUNNING'), subagentRun(7, 601, 'RUNNING'), subagentRun(8, 603, 'COMPLETED', 'Summarise the downloads')]
+        : []
+    })
   }
 
-  it('pins a pulsing chip per running session run that opens its transcript', async () => {
-    setupParentConversation()
-    // 7 is an inline run: it writes into the parent conversation itself, so it gets no chip.
-    registerEndpoint('/api/subagent-runs', () => [runningRun(6, 602), runningRun(7, 601)])
+  async function mountParentConversation() {
     const component = await mountSuspended(Chat)
     await flushPromises()
-
     const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
     await vm.loadConversation(601)
     await flushPromises()
+    return { component, vm }
+  }
 
-    const chips = component.findAll('[data-testid="running-subagent-chip"]')
-    expect(chips).toHaveLength(1)
-    expect(chips[0]!.attributes('href')).toBe('/chat?conversation=602')
-    expect(chips[0]!.text()).toContain('main-sub-6')
-    expect(chips[0]!.text()).toContain('Running')
+  it('stacks a minimized chip for every session run the conversation spawned, whatever its status', async () => {
+    setupParentConversation()
+    const { component } = await mountParentConversation()
+
+    const chips = component.findAll('[data-testid="subagent-chip"]')
+    expect(chips).toHaveLength(2)
+    expect(chips[0]!.find('[data-testid="subagent-chip-label"]').text()).toBe('main-sub-6')
+    expect(chips[0]!.find('[data-testid="subagent-chip-status"]').text()).toBe('Running')
     expect(chips[0]!.find('.animate-pulse').exists()).toBe(true)
+    expect(chips[1]!.find('[data-testid="subagent-chip-label"]').text()).toBe('Summarise the downloads')
+    expect(chips[1]!.find('[data-testid="subagent-chip-label"]').attributes('title')).toBe('main-sub-8')
+    expect(chips[1]!.find('[data-testid="subagent-chip-status"]').text()).toBe('Completed')
+    expect(chips[1]!.find('.animate-pulse').exists()).toBe(false)
+    expect(component.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
+  })
+
+  it('expands a chip in place, and a closed chip returns when the conversation is loaded again', async () => {
+    setupParentConversation()
+    const { component, vm } = await mountParentConversation()
+    const chips = () => component.findAll('[data-testid="subagent-chip"]')
+
+    await chips()[0]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
+    expect(chips()[0]!.find('[data-testid="subagent-chip-open-transcript"]').attributes('href'))
+      .toBe('/chat?conversation=602')
+
+    await chips()[0]!.find('[data-testid="subagent-chip-close"]').trigger('click')
+    expect(chips()).toHaveLength(1)
+    expect(chips()[0]!.attributes('data-status')).toBe('COMPLETED')
+
+    await vm.loadConversation(700)
+    await flushPromises()
+    expect(component.find('[data-testid="subagent-stack"]').exists()).toBe(false)
+
+    await vm.loadConversation(601)
+    await vi.waitFor(() => expect(chips()).toHaveLength(2))
+    expect(component.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
   })
 })
 
