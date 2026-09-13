@@ -5,6 +5,8 @@ import models.SubagentRun;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
+import services.NotificationBus;
+import services.SubagentRegistry;
 import services.Tx;
 import utils.AppClock;
 
@@ -73,15 +75,19 @@ public class SubagentOrphanRecoveryJob extends Job<Void> {
         for (var orphan : orphans) {
             var orphanId = orphan.id;
             try {
-                Tx.run(() -> {
+                var failed = Tx.run(() -> {
                     var fresh = (SubagentRun) SubagentRun.findById(orphanId);
-                    if (fresh == null || fresh.status != SubagentRun.Status.RUNNING) return;
+                    if (fresh == null || fresh.status != SubagentRun.Status.RUNNING) return null;
                     fresh.status = SubagentRun.Status.FAILED;
                     fresh.endedAt = AppClock.now();
                     fresh.outcome = "Subagent run did not survive JVM restart (VT / harness process gone)";
                     fresh.save();
                     McpAllowlist.releaseSubagentGrants(fresh.childAgent);
+                    return fresh;
                 });
+                if (failed != null) {
+                    SubagentRegistry.publishRunEvent(NotificationBus.BUS_SUBAGENT_RUN_ENDED, failed);
+                }
                 EventLogger.warn(EVENT_CATEGORY_SUBAGENT,
                         "Marked orphaned SubagentRun " + orphanId + " FAILED at boot");
             } catch (RuntimeException e) {

@@ -8,6 +8,8 @@ import models.MessageRole;
 import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import services.NotificationBus;
+import services.SubagentRegistry;
 import services.Tx;
 import tools.SubagentSpawnTool.SyncRunOutcome;
 import utils.AppClock;
@@ -28,7 +30,7 @@ final class SubagentRunStore {
      *  per-run announce-message metadata JSON. */
     static Long insertSubagentRun(Long parentAgentId, @Nullable Long childAgentId,
                                   Long parentConvId, @Nullable Long childConvId, @Nullable String label) {
-        return Tx.run(() -> {
+        var inserted = Tx.run(() -> {
             var run = new SubagentRun();
             run.parentAgent = Agent.findById(parentAgentId);
             run.childAgent = Agent.findById(childAgentId);
@@ -37,8 +39,10 @@ final class SubagentRunStore {
             run.label = label != null && !label.isBlank() ? label : null;
             // status defaults to RUNNING, startedAt populated by @PrePersist.
             run.save();
-            return run.id;
+            return run;
         });
+        SubagentRegistry.publishRunEvent(NotificationBus.BUS_SUBAGENT_RUN_STARTED, inserted);
+        return inserted.id;
     }
 
     /**
@@ -49,7 +53,7 @@ final class SubagentRunStore {
      * overwriting.
      */
     static void persistTerminalRun(Long runId, SubagentRun.Status status, String outcome) {
-        Tx.run(() -> {
+        var ended = Tx.run(() -> {
             var fresh = (SubagentRun) SubagentRun.findById(runId);
             if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
                 fresh.status = status;
@@ -57,8 +61,11 @@ final class SubagentRunStore {
                 fresh.outcome = outcome;
                 fresh.save();
                 McpAllowlist.releaseSubagentGrants(fresh.childAgent);
+                return fresh;
             }
+            return null;
         });
+        if (ended != null) SubagentRegistry.publishRunEvent(NotificationBus.BUS_SUBAGENT_RUN_ENDED, ended);
     }
 
     /**
@@ -75,7 +82,7 @@ final class SubagentRunStore {
                 ? outcome.reply()
                 : outcome.errorReason();
         try {
-            Tx.run(() -> {
+            var ended = Tx.run(() -> {
                 var fresh = (SubagentRun) SubagentRun.findById(runId);
                 if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
                     fresh.status = finalStatus;
@@ -83,8 +90,11 @@ final class SubagentRunStore {
                     fresh.outcome = outcomeText;
                     fresh.save();
                     McpAllowlist.releaseSubagentGrants(fresh.childAgent);
+                    return fresh;
                 }
+                return null;
             });
+            if (ended != null) SubagentRegistry.publishRunEvent(NotificationBus.BUS_SUBAGENT_RUN_ENDED, ended);
         } catch (Throwable t) {
             EventLogger.warn(SubagentSpawnTool.SUBAGENT_CHANNEL,
                     "Failed to persist terminal SubagentRun update for run " + runId

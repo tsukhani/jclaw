@@ -6,6 +6,7 @@ import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
 import utils.AppClock;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-271: in-memory mapping from {@link SubagentRun} id to the
@@ -401,7 +403,8 @@ public final class SubagentRegistry {
     }
 
     private static SubagentRun.Status transitionToKilled(Long runId, String reason) {
-        return Tx.run(() -> {
+        var killed = new AtomicReference<SubagentRun>();
+        var status = Tx.run(() -> {
             var fresh = (SubagentRun) SubagentRun.findById(runId);
             if (fresh == null) return null;
             if (fresh.status != SubagentRun.Status.RUNNING) {
@@ -413,8 +416,27 @@ public final class SubagentRegistry {
             fresh.outcome = reason != null && !reason.isBlank() ? reason : "Killed by operator";
             fresh.save();
             McpAllowlist.releaseSubagentGrants(fresh.childAgent);
+            killed.set(fresh);
             return SubagentRun.Status.KILLED;
         });
+        var run = killed.get();
+        if (run != null) publishRunEvent(NotificationBus.BUS_SUBAGENT_RUN_ENDED, run);
+        return status;
+    }
+
+    /**
+     * JCLAW-1206: announce a run's start or terminal status on the bus, once the transaction
+     * that wrote it commits. Call it after the {@link Tx#run} that made the write returns.
+     */
+    public static void publishRunEvent(String type, SubagentRun run) {
+        var data = new LinkedHashMap<String, Object>();
+        data.put("runId", run.id);
+        data.put("parentConversationId", run.parentConversation.id);
+        data.put("childConversationId", run.childConversation.id);
+        data.put("childAgentId", run.childAgent.id);
+        data.put("status", run.status.name());
+        data.put("label", run.label);
+        NotificationBus.publishAfterCommit(type, data);
     }
 
     /**

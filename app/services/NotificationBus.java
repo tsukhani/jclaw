@@ -1,6 +1,7 @@
 package services;
 
 import com.google.gson.Gson;
+import play.Logger;
 
 import java.util.ArrayList;
 import java.util.Map;
@@ -40,6 +41,13 @@ public class NotificationBus {
     /** JCLAW-662: bus event type signaling a coding-harness run's output stream
      *  reached a terminal state, so a live monitor can stop tailing. */
     public static final String BUS_CODINGRUN_DONE = "codingrun.done";
+    /** JCLAW-1206: a new SubagentRun row committed. Payload carries {@code runId},
+     *  {@code parentConversationId}, {@code childConversationId}, {@code childAgentId},
+     *  {@code status} and {@code label}. */
+    public static final String BUS_SUBAGENT_RUN_STARTED = "subagentrun.started";
+    /** JCLAW-1206: a SubagentRun terminal status committed; same payload as
+     *  {@link #BUS_SUBAGENT_RUN_STARTED}. */
+    public static final String BUS_SUBAGENT_RUN_ENDED = "subagentrun.ended";
 
     private static final Gson gson = GSON;
     private static final CopyOnWriteArrayList<Consumer<String>> listeners = new CopyOnWriteArrayList<>();
@@ -111,6 +119,25 @@ public class NotificationBus {
             }
         }
         if (!failed.isEmpty()) listeners.removeAll(failed);
+    }
+
+    /**
+     * Publish once the ambient transaction commits, or now when there is none, so a client is
+     * never told about a row it cannot read yet. A failure is logged and never reaches the caller.
+     */
+    public static void publishAfterCommit(String type, Map<String, Object> data) {
+        Runnable publish = () -> {
+            try {
+                publish(type, data);
+            } catch (RuntimeException e) {
+                Logger.warn(e, "NotificationBus: publishing %s failed", type);
+            }
+        };
+        try {
+            Tx.afterCommit(publish);
+        } catch (RuntimeException e) {
+            Logger.warn(e, "NotificationBus: could not schedule %s after commit", type);
+        }
     }
 
     /** Convenience: publish a simple event with a message. */
