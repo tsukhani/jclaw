@@ -40,6 +40,7 @@ function setupBaseAgents() {
         value: '[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":false}]' },
     ],
   }))
+  registerEndpoint('/api/subagent-runs', () => [])
 }
 
 describe('Chat page — inline-subagent rendering (JCLAW-267)', () => {

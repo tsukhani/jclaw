@@ -37,6 +37,7 @@ function setupBaseChatApi() {
     ],
   }))
   registerEndpoint('/api/conversations', () => [])
+  registerEndpoint('/api/subagent-runs', () => [])
 }
 
 describe('Chat page — streaming state machine', () => {
@@ -422,6 +423,76 @@ describe('Chat page — subagent transcript read-only mode (JCLAW-274)', () => {
     expect(component.find('[data-testid="subagent-transcript-banner"]').exists()).toBe(false)
     const textarea = component.find('textarea').element as HTMLTextAreaElement
     expect(textarea.disabled).toBe(false)
+  })
+
+  it('links the banner back to the conversation that spawned the subagent', async () => {
+    setupSubagentTranscriptFixture()
+    registerEndpoint('/api/conversations/501', () => ({
+      id: 501, agentId: 99, agentName: 'helper-subagent', channelType: 'subagent',
+      peerId: null, messageCount: 2, preview: 'subagent task', parentConversationId: 601,
+      createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:01Z',
+    }))
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      resolveAndLoadConversation: (id: number) => Promise<boolean>
+    }
+    await vm.resolveAndLoadConversation(501)
+    await flushPromises()
+
+    const back = component.find('[data-testid="subagent-transcript-back"]')
+    expect(back.exists()).toBe(true)
+    expect(back.attributes('href')).toBe('/chat?conversation=601')
+  })
+
+  it('omits the back link when the transcript has no parent conversation', async () => {
+    setupSubagentTranscriptFixture()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      resolveAndLoadConversation: (id: number) => Promise<boolean>
+    }
+    await vm.resolveAndLoadConversation(501)
+    await flushPromises()
+
+    expect(component.find('[data-testid="subagent-transcript-banner"]').exists()).toBe(true)
+    expect(component.find('[data-testid="subagent-transcript-back"]').exists()).toBe(false)
+  })
+})
+
+describe('Chat page — running subagent chips', () => {
+  function runningRun(id: number, childConversationId: number) {
+    return { id, parentAgentId: 1, parentAgentName: 'streaming-agent', childAgentId: 90 + id,
+      childAgentName: `main-sub-${id}`, parentConversationId: 601, childConversationId,
+      mode: 'session', status: 'RUNNING', startedAt: '2026-09-13T09:44:41Z', endedAt: null, outcome: null }
+  }
+
+  function setupParentConversation() {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations/601/messages', () => [
+      { id: 900, role: 'user', content: 'watch the downloads', createdAt: '2026-09-13T09:44:00Z' },
+    ])
+  }
+
+  it('pins a pulsing chip per running session run that opens its transcript', async () => {
+    setupParentConversation()
+    // 7 is an inline run: it writes into the parent conversation itself, so it gets no chip.
+    registerEndpoint('/api/subagent-runs', () => [runningRun(6, 602), runningRun(7, 601)])
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(601)
+    await flushPromises()
+
+    const chips = component.findAll('[data-testid="running-subagent-chip"]')
+    expect(chips).toHaveLength(1)
+    expect(chips[0]!.attributes('href')).toBe('/chat?conversation=602')
+    expect(chips[0]!.text()).toContain('main-sub-6')
+    expect(chips[0]!.text()).toContain('Running')
+    expect(chips[0]!.find('.animate-pulse').exists()).toBe(true)
   })
 })
 

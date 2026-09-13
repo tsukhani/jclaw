@@ -39,7 +39,7 @@ export interface UseChatConversationDeps {
 export interface UseChatConversation {
   messages: Ref<Message[]>
   selectedConvoId: Ref<number | null>
-  subagentTranscript: Ref<{ agentId: number, agentName: string } | null>
+  subagentTranscript: Ref<{ agentId: number, agentName: string, parentConversationId?: number | null } | null>
   effectiveDisplayAgentId: ComputedRef<number | null>
   clearSubagentTranscript: () => void
   initializing: Ref<boolean>
@@ -75,7 +75,7 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
    * away from the read-only view (agent change, new chat, sidebar Recents
    * click, or deep-linking to a non-subagent conversation).
    */
-  const subagentTranscript = ref<{ agentId: number, agentName: string } | null>(null)
+  const subagentTranscript = ref<{ agentId: number, agentName: string, parentConversationId?: number | null } | null>(null)
 
   /** Effective agent id for {@code renderMarkdown} workspace-link rewriting. */
   const effectiveDisplayAgentId = computed(() => subagentTranscript.value?.agentId ?? selectedAgentId.value)
@@ -162,7 +162,11 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     // do NOT mutate selectedAgentId here: the dropdown should keep showing
     // whatever top-level agent the user had chosen, and the banner names the
     // subagent.
-    subagentTranscript.value = { agentId: convo.agentId, agentName: convo.agentName }
+    subagentTranscript.value = {
+      agentId: convo.agentId,
+      agentName: convo.agentName,
+      parentConversationId: convo.parentConversationId,
+    }
     await loadConversation(id)
     return true
   }

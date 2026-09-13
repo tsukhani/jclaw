@@ -39,6 +39,7 @@ import { useChatConversation, type ChatConversationLoadHooks } from '~/composabl
 import { useAgentModel } from '~/composables/useAgentModel'
 import { useChatAnnouncePoller } from '~/composables/useChatAnnouncePoller'
 import { useChatSubagents } from '~/composables/useChatSubagents'
+import { useChatRunningSubagents } from '~/composables/useChatRunningSubagents'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useChatStream } from '~/composables/useChatStream'
 import { useStreamProgress } from '~/composables/useStreamProgress'
@@ -258,6 +259,8 @@ const {
   hasRecentTaskCreate,
   pollForAnnounce,
 } = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState })
+
+const { runningSubagents } = useChatRunningSubagents(selectedConvoId, streaming)
 
 // Token-usage + cost meter (latest-turn usage, cumulative tokens, running cost
 // recomputed only when idle, and the JCLAW-108 model-switch divider predicate)
@@ -797,7 +800,40 @@ function exportConversation() {
           >
             <span class="font-mono uppercase tracking-wide">Read-only</span>
             <span>Subagent transcript for <strong>{{ subagentTranscript.agentName }}</strong></span>
+            <NuxtLink
+              v-if="subagentTranscript.parentConversationId"
+              :to="`/chat?conversation=${subagentTranscript.parentConversationId}`"
+              data-testid="subagent-transcript-back"
+              class="ml-auto shrink-0 underline-offset-2 hover:underline"
+            >
+              ← Back to conversation
+            </NuxtLink>
           </div>
+        </div>
+
+        <!-- Outside the scroll container, so running-subagent chips stay pinned while the transcript scrolls. -->
+        <div
+          v-if="selectedConvoId && runningSubagents.length"
+          data-testid="running-subagents"
+          class="mx-auto w-full max-w-3xl px-4 pt-3 flex flex-wrap gap-2"
+        >
+          <NuxtLink
+            v-for="run in runningSubagents"
+            :key="run.id"
+            :to="`/chat?conversation=${run.childConversationId}`"
+            :title="`View the ${run.childAgentName ?? 'subagent'} transcript`"
+            data-testid="running-subagent-chip"
+            class="inline-flex items-center gap-1.5 min-w-0 px-2 py-1 text-xs border rounded transition-colors
+                   bg-blue-100 dark:bg-blue-400/10 text-blue-700 dark:text-blue-300
+                   border-blue-300 dark:border-blue-400/20 hover:border-blue-500"
+          >
+            <span
+              class="w-1.5 h-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse"
+              aria-hidden="true"
+            />
+            <span class="font-mono truncate">{{ run.childAgentName ?? `Run #${run.id}` }}</span>
+            <span class="shrink-0 text-[10px] font-mono uppercase tracking-wide">Running</span>
+          </NuxtLink>
         </div>
 
         <!--

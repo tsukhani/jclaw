@@ -108,9 +108,13 @@ Metrics are summed across every round of a turn, so a turn that made several too
 
 The composer has an **Export as Markdown** button. It downloads the full thread — messages, tool calls, and reasoning — as a markdown file you can share or archive.
 
+## Running subagents
+
+While a subagent spawned by the conversation is still running, a chip for it stays pinned above the transcript with a pulsing blue dot, the same indicator the [Subagents](/subagents) page shows. Click it to open that subagent's transcript. The chip disappears when the run ends, and its result arrives as an announce card.
+
 ## Subagent transcripts are read-only
 
-If you arrive at a conversation that was created by a subagent run (for example, via the "View full →" link on an async announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. The conversation has already terminated; you can read but not extend it.
+If you arrive at a conversation that was created by a subagent run (for example, via a running-subagent chip, the "View full →" link on an async announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it, and a running subagent's transcript shows the messages as of when you opened it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
 
 ## Where to go next
 

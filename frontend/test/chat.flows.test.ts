@@ -36,6 +36,7 @@ function setupChatApi() {
 }
 
 beforeEach(() => {
+  registerEndpoint('/api/subagent-runs', () => [])
   // The chat composable layer caches conversation lists via useFetch; flush
   // so each case starts with the test-local fixture.
   clearNuxtData()
