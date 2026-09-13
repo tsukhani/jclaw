@@ -161,6 +161,32 @@ describe('Subagents — delete all with filter scope', () => {
 
     expect(deleteBody!.filter).toEqual({})
   })
+
+  it('keeps sending parentConversationId while the conversation filter is active (JCLAW-1208)', async () => {
+    const component = await mountSuspended(Harness)
+    await flushPromises()
+
+    await component.find('button[aria-label="Show only runs from conversation #5"]').trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ parentConversationId: '5' }))
+
+    const deleteAllBtn = component.findAll('button').find(b => b.text().startsWith('Delete all'))!
+    expect(deleteAllBtn.text()).toBe('Delete all matching')
+    await deleteAllBtn.trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector('[role="dialog"]')!.textContent).toContain('conversation:#5')
+    const gateInput = document.body.querySelector<HTMLInputElement>('[role="dialog"] input[type="text"]')
+    gateInput!.value = 'delete'
+    gateInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+
+    const confirmBtn = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+      .find(b => (b.textContent ?? '').trim() === 'Delete 2')
+    confirmBtn!.click()
+    await vi.waitFor(() => expect(deleteBody).not.toBeNull())
+
+    expect(deleteBody!.filter).toEqual({ parentConversationId: 5 })
+  })
 })
 
 describe('Subagents — server-side sort', () => {
@@ -258,6 +284,91 @@ describe('Subagents — pagination', () => {
     await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('0'))
     expect(capturedQueries.at(-1)!.status).toBe('COMPLETED')
     expect(component.text()).toContain('Page 1 of 3')
+  })
+})
+
+function groupHeaders(component: Awaited<ReturnType<typeof mountSuspended>>) {
+  return component.findAll('th[scope="rowgroup"]').map((th: { text: () => string }) => th.text())
+}
+
+describe('Subagents — grouping by parent conversation', () => {
+  it('requests sort=conversation desc by default and groups the page', async () => {
+    listRows = [run({ id: 30, parentConversationId: 9 }), run({ id: 21 }), run({ id: 20 })]
+    totalCount = 3
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    expect(capturedQueries[0]).toMatchObject({ sort: 'conversation', dir: 'desc' })
+    expect(groupHeaders(component)).toEqual(['Conversation #9', 'Conversation #5'])
+  })
+
+  it('repeats the group header when a conversation continues onto the next page', async () => {
+    totalCount = 22
+    listRows = [run({ id: 30, parentConversationId: 9 }), run({ id: 21 }), run({ id: 20 })]
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+    expect(groupHeaders(component)).toEqual(['Conversation #9', 'Conversation #5'])
+
+    listRows = [run({ id: 19 }), run({ id: 10, parentConversationId: 3 })]
+    await component.findAll('button').find(b => b.text() === 'Next')!.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('20'))
+    expect(capturedQueries.at(-1)).toMatchObject({ sort: 'conversation', dir: 'desc' })
+    await vi.waitFor(() => expect(groupHeaders(component)).toEqual(['Conversation #5', 'Conversation #3']))
+  })
+
+  it('renders the flat table under another column sort and groups again on Conversation', async () => {
+    listRows = [run({ id: 30, parentConversationId: 9 }), run({ id: 21 })]
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+    expect(groupHeaders(component)).toHaveLength(2)
+
+    await component.findAll('button').find(b => b.text().startsWith('Started'))!.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ sort: 'started' }))
+    expect(groupHeaders(component)).toEqual([])
+    expect(component.text()).toContain('#30')
+
+    await component.findAll('button').find(b => b.text().startsWith('Conversation'))!.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ sort: 'conversation', dir: 'desc' }))
+    expect(groupHeaders(component)).toEqual(['Conversation #9', 'Conversation #5'])
+  })
+})
+
+describe('Subagents — parent conversation filter', () => {
+  it('applies the filter from the Conversation column control', async () => {
+    totalCount = 42
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    await component.findAll('button').find(b => b.text() === 'Next')!.trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)!.offset).toBe('20'))
+
+    await component.find('button[aria-label="Show only runs from conversation #5"]').trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ parentConversationId: '5', offset: '0' }))
+    expect(component.find('button[aria-label="Clear conversation filter"]').exists()).toBe(true)
+    // Already filtered to #5, so the control that would apply it again is gone.
+    expect(component.find('button[aria-label="Show only runs from conversation #5"]').exists()).toBe(false)
+  })
+
+  it('keeps a deep-link filter when an unrelated token is committed', async () => {
+    routeQuery.value = { parentConversationId: '5' }
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    await commitFilter(component, 'status:COMPLETED')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ status: 'COMPLETED', parentConversationId: '5' }))
+  })
+
+  it('removing the parentConversation token from the bar clears the filter (JCLAW-1208)', async () => {
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    await commitFilter(component, 'parentConversation:5')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).toMatchObject({ parentConversationId: '5' }))
+    expect(component.find('button[aria-label="Clear conversation filter"]').exists()).toBe(true)
+
+    await component.find('button[aria-label="Remove filter parentConversation: 5"]').trigger('click')
+    await vi.waitFor(() => expect(capturedQueries.at(-1)).not.toHaveProperty('parentConversationId'))
+    expect(component.find('button[aria-label="Clear conversation filter"]').exists()).toBe(false)
   })
 })
 

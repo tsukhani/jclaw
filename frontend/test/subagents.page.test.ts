@@ -119,6 +119,69 @@ describe('Subagents admin page', () => {
     expect(hrefs).toContain('/chat?conversation=43')
   })
 
+  it('JCLAW-1208: renders a Conversation column linking each run to its parent conversation', async () => {
+    registerEndpoint('/api/subagent-runs', () => [
+      { id: 51, parentAgentId: 1, parentAgentName: 'main',
+        childAgentId: 2, childAgentName: 'child-a',
+        parentConversationId: 5, childConversationId: 60,
+        mode: 'session', status: 'COMPLETED',
+        startedAt: '2026-05-14T10:00:00Z', endedAt: '2026-05-14T10:00:30Z', outcome: 'ok' },
+      { id: 52, parentAgentId: 1, parentAgentName: 'main',
+        childAgentId: 3, childAgentName: 'child-b',
+        parentConversationId: 8, childConversationId: 61,
+        mode: 'session', status: 'COMPLETED',
+        startedAt: '2026-05-14T09:00:00Z', endedAt: '2026-05-14T09:00:30Z', outcome: 'ok' },
+      { id: 53, parentAgentId: 1, parentAgentName: 'main',
+        childAgentId: 4, childAgentName: 'orphan',
+        parentConversationId: null, childConversationId: 62,
+        mode: 'session', status: 'FAILED',
+        startedAt: '2026-05-14T08:00:00Z', endedAt: '2026-05-14T08:00:30Z', outcome: 'boom' },
+    ])
+
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    expect(component.findAll('th').some(th => th.text().startsWith('Conversation'))).toBe(true)
+
+    const links = component.findAll('a')
+      .filter(a => (a.attributes('title') ?? '').startsWith('Open conversation'))
+    expect(links.map(a => a.attributes('href'))).toEqual(['/chat?conversation=5', '/chat?conversation=8'])
+    expect(links.map(a => a.text())).toEqual(['#5', '#8'])
+
+    // A run with no parent conversation has nothing to link or filter on.
+    const filterButtons = component.findAll('button')
+      .filter(b => (b.attributes('aria-label') ?? '').startsWith('Show only runs from conversation'))
+    expect(filterButtons.map(b => b.attributes('aria-label'))).toEqual([
+      'Show only runs from conversation #5',
+      'Show only runs from conversation #8',
+    ])
+  })
+
+  it('JCLAW-1208: groups runs under a header row per parent conversation', async () => {
+    const row = (id: number, parentConversationId: number | null) => ({
+      id, parentAgentId: 1, parentAgentName: 'main',
+      childAgentId: 2, childAgentName: `child-${id}`,
+      parentConversationId, childConversationId: 100 + id,
+      mode: 'session', status: 'COMPLETED',
+      startedAt: '2026-05-14T10:00:00Z', endedAt: '2026-05-14T10:00:30Z', outcome: 'ok',
+    })
+    registerEndpoint('/api/subagent-runs', () => [row(71, 9), row(72, 5), row(73, 5), row(74, null)])
+
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    expect(component.findAll('th[scope="rowgroup"]').map(th => th.text())).toEqual([
+      'Conversation #9',
+      'Conversation #5',
+      'No parent conversation',
+    ])
+    // Each group's runs render inside that group's tbody, under its header.
+    const bodies = component.findAll('tbody')
+    expect(bodies.map(b => b.findAll('tr').length)).toEqual([2, 3, 2])
+    expect(bodies[1]!.text()).toContain('#72')
+    expect(bodies[1]!.text()).toContain('#73')
+  })
+
   it('JCLAW-326: forwards parentConversationId from the URL to /api/subagent-runs', async () => {
     routeQuery.value = { parentConversationId: '5' }
     const listSpy = vi.fn(() => [])

@@ -2,7 +2,7 @@
 import type { Agent, Message } from '~/types/api'
 // UsersRound matches the Subagents nav icon (the "spawned children" glyph) so
 // the empty-state landing reads as the same surface.
-import { UsersRound } from '@lucide/vue'
+import { Funnel, UsersRound } from '@lucide/vue'
 
 /**
  * JCLAW-271: SubagentRuns admin page. Lists every subagent run with filters
@@ -49,16 +49,17 @@ const parentConversationFilter = ref<string>(
 )
 
 interface Filter { key: string, value: string }
+let barHadConversationToken = false
 function onFiltersChanged(filters: Filter[]) {
   // Rehydrate watched refs from the bar's emitted state.
   qFilter.value = filters.find(f => f.key === 'q')?.value ?? ''
   parentAgentFilter.value = filters.find(f => f.key === 'parentAgent')?.value ?? ''
   statusFilter.value = filters.find(f => f.key === 'status')?.value ?? ''
   sinceFilter.value = filters.find(f => f.key === 'since')?.value ?? ''
-  // The parentConversation key on the bar mirrors the URL-driven chip
-  // for round-trip consistency; the chip's clear-button writes through
-  // here too so the URL state and the bar's chip stay in lockstep.
-  parentConversationFilter.value = filters.find(f => f.key === 'parentConversation')?.value ?? parentConversationFilter.value
+  // A bar without the token leaves a deep-link or column filter alone; removing a token the bar held clears it.
+  const conversationToken = filters.find(f => f.key === 'parentConversation')?.value
+  if (conversationToken !== undefined || barHadConversationToken) parentConversationFilter.value = conversationToken ?? ''
+  barHadConversationToken = conversationToken !== undefined
   // A new filter set changes the result count, so jump back to page 1 and drop
   // any carried-over selection. page + the filter refs are all `url` deps, so
   // Vue batches this into a single recompute → one refetch via the watch.
@@ -78,9 +79,15 @@ const page = ref(1)
 // `sort`/`dir` params, so a header click refetches an ordered page — the sort
 // spans the whole result set, not just the current page. `mode` (from spawn
 // events) and `duration` (computed) aren't DB columns, so they aren't sortable.
-type SortColumn = 'id' | 'parent' | 'child' | 'status' | 'started'
-const sortBy = ref<SortColumn | null>(null)
+type SortColumn = 'id' | 'parent' | 'conversation' | 'child' | 'status' | 'started'
+const sortBy = ref<SortColumn>('conversation')
 const sortDir = ref<'asc' | 'desc'>('desc')
+
+function applyConversationFilter(conversationId: number) {
+  parentConversationFilter.value = String(conversationId)
+  page.value = 1
+  selectedIds.value = new Set()
+}
 
 const url = computed(() => {
   const params = new URLSearchParams()
@@ -118,10 +125,8 @@ const url = computed(() => {
     // shapes — and the typed picker can layer on later if needed.
     params.set('since', `${sinceFilter.value}:00Z`)
   }
-  if (sortBy.value) {
-    params.set('sort', sortBy.value)
-    params.set('dir', sortDir.value)
-  }
+  params.set('sort', sortBy.value)
+  params.set('dir', sortDir.value)
   params.set('limit', String(pageSize))
   params.set('offset', String((page.value - 1) * pageSize))
   return `/api/subagent-runs?${params}`
@@ -178,7 +183,7 @@ function toggleSort(col: SortColumn) {
   }
   else {
     sortBy.value = col
-    sortDir.value = col === 'started' || col === 'id' ? 'desc' : 'asc'
+    sortDir.value = col === 'started' || col === 'id' || col === 'conversation' ? 'desc' : 'asc'
   }
   page.value = 1
   selectedIds.value = new Set()
@@ -188,6 +193,20 @@ function sortArrow(col: SortColumn): string {
   if (sortBy.value !== col) return ''
   return sortDir.value === 'asc' ? '↑' : '↓'
 }
+
+// Headers only make sense while the server orders by conversation; a group split across pages restarts on the next.
+const groupedByConversation = computed(() => sortBy.value === 'conversation')
+interface RunGroup { key: string, conversationId: number | null, runs: SubagentRun[] }
+const runGroups = computed<RunGroup[]>(() => {
+  if (!groupedByConversation.value) return [{ key: 'all', conversationId: null, runs: runs.value }]
+  const groups: RunGroup[] = []
+  for (const run of runs.value) {
+    const last = groups.at(-1)
+    if (last?.conversationId === run.parentConversationId) last.runs.push(run)
+    else groups.push({ key: `${groups.length}-${run.parentConversationId}`, conversationId: run.parentConversationId, runs: [run] })
+  }
+  return groups
+})
 
 // Auto-refresh every 5s when there is at least one RUNNING row — keeps the
 // admin view live during an actual subagent fan-out without polling
@@ -541,6 +560,22 @@ function closePeek() {
             </th>
             <th
               class="px-4 py-2.5 font-medium"
+              :aria-sort="sortBy === 'conversation' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+            >
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                :class="sortBy === 'conversation' ? 'text-fg-strong' : ''"
+                @click="toggleSort('conversation')"
+              >
+                Conversation <span
+                  v-if="sortArrow('conversation')"
+                  aria-hidden="true"
+                >{{ sortArrow('conversation') }}</span>
+              </button>
+            </th>
+            <th
+              class="px-4 py-2.5 font-medium"
               :aria-sort="sortBy === 'child' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
               <button
@@ -598,9 +633,25 @@ function closePeek() {
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-border">
+        <tbody
+          v-for="group in runGroups"
+          :key="group.key"
+          class="divide-y divide-border"
+        >
           <tr
-            v-for="run in runs"
+            v-if="groupedByConversation"
+            class="bg-muted/50 border-t border-border"
+          >
+            <th
+              scope="rowgroup"
+              colspan="10"
+              class="px-4 py-1.5 text-left text-xs font-medium text-fg-muted"
+            >
+              {{ group.conversationId === null ? 'No parent conversation' : `Conversation #${group.conversationId}` }}
+            </th>
+          </tr>
+          <tr
+            v-for="run in group.runs"
             :key="run.id"
             class="hover:bg-muted/30 transition-colors"
           >
@@ -619,6 +670,37 @@ function closePeek() {
             </td>
             <td class="px-4 py-2.5 text-fg-primary">
               {{ run.parentAgentName || '—' }}
+            </td>
+            <td class="px-4 py-2.5">
+              <div
+                v-if="run.parentConversationId !== null"
+                class="flex items-center gap-1"
+              >
+                <NuxtLink
+                  :to="`/chat?conversation=${run.parentConversationId}`"
+                  class="font-mono text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
+                  :title="`Open conversation #${run.parentConversationId} in chat`"
+                >
+                  #{{ run.parentConversationId }}
+                </NuxtLink>
+                <button
+                  v-if="parentConversationFilter !== String(run.parentConversationId)"
+                  type="button"
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  :title="`Show only runs from conversation #${run.parentConversationId}`"
+                  :aria-label="`Show only runs from conversation #${run.parentConversationId}`"
+                  @click="applyConversationFilter(run.parentConversationId)"
+                >
+                  <Funnel
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
+              <span
+                v-else
+                class="text-fg-muted"
+              >—</span>
             </td>
             <td class="px-4 py-2.5 text-fg-primary">
               {{ run.childAgentName || '—' }}

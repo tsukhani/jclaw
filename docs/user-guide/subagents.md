@@ -156,6 +156,10 @@ If the child's reply was cut off by the model's output budget, the announce card
 
 Lists every run — `RUNNING`, `COMPLETED`, `FAILED`, `KILLED`, `TIMEOUT` — across all parent agents. Filter by parent agent, status, and start time. Each row links to the child's transcript. Use this when you want a fleet view across multiple parents and time ranges.
 
+The **Conversation** column shows the conversation each run was spawned from, as a link that opens that conversation in [Chat](/chat). By default the list is sorted by that column, so runs from the same conversation sit together under a *Conversation #ID* header row, newest conversation first and newest run first within it. The order comes from the server, so grouping holds across pages: a conversation whose runs spill onto the next page repeats its header at the top of that page. Clicking another column header sorts by that column instead and shows the plain, ungrouped list; click **Conversation** to group again.
+
+To see only one conversation's runs, either click the funnel button beside an id in the Conversation column or type `parentConversation:ID` in the filter bar. A *Conversation #ID* chip beside the bar shows the active conversation filter, and its **×** clears it; removing the `parentConversation` token from the bar clears it too. Opening the page from a chat's subagent link applies the same filter. **Delete all matching** honours it, deleting only that conversation's terminal runs.
+
 ### 3. The `/subagent` slash command (in [Chat](/chat))
 
 Operator surface for the parent agent's *own* runs. Five subcommands:
