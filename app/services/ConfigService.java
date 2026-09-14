@@ -24,7 +24,7 @@ import services.telemetry.OtelRuntime;
 import services.tts.TtsEngine;
 import services.tts.TtsSidecarManager;
 import tools.SubagentSpawnTool;
-import tools.WebScrapeTool;
+import tools.scrape.WebScrapeSettings;
 import utils.HttpFactories;
 
 import java.time.Duration;
@@ -262,13 +262,11 @@ public class ConfigService {
             return "memory.recall.minCosine must be a finite number between -1.0 and 1.0.";
         }
 
-        // Each limit is the upper bound of a Math.clamp in web_scrape; below its floor the
-        // bounds cross and every scrape call throws.
-        if (key.equals(WebScrapeTool.CFG_MAX_PAGES) && !isIntAtLeast(value, 1)) {
-            return WebScrapeTool.CFG_MAX_PAGES + " must be a positive integer.";
-        }
-        if (key.equals(WebScrapeTool.CFG_MAX_DEPTH) && !isIntAtLeast(value, 0)) {
-            return WebScrapeTool.CFG_MAX_DEPTH + " must be a non-negative integer.";
+        if (key.startsWith(WebScrapeSettings.PREFIX)) {
+            var rejected = WebScrapeSettings.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
         }
 
         // The coding harness is pointed at this provider's endpoint at spawn time; a name with

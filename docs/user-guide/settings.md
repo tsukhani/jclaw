@@ -230,14 +230,29 @@ The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](
 
 ## Web Scraping
 
-Crawl limits for the `web_scrape` tool:
+Every setting the `web_scrape` tool reads, in two groups. Changes apply live; no restart needed.
 
-| Key                    | Default | Meaning                                                                                  |
-|------------------------|---------|------------------------------------------------------------------------------------------|
-| `web_scrape.max-pages` | 25      | Pages one call reads. Minimum 1.                                                         |
-| `web_scrape.max-depth` | 2       | How many links deep one call follows from the starting URL; `0` reads only that URL.     |
+**Crawl**
 
-Each limit is both the default, when the agent's call leaves `maxPages` / `maxDepth` out, and the ceiling, when it asks for more — an agent can request a smaller crawl, never a larger one. Changes apply live; no restart needed.
+| Key                            | Default | Meaning                                                                                  |
+|--------------------------------|---------|------------------------------------------------------------------------------------------|
+| `web_scrape.max-pages`         | 25      | Pages one call reads. Minimum 1.                                                         |
+| `web_scrape.max-depth`         | 2       | How many links deep one call follows from the starting URL; `0` reads only that URL.     |
+| `web_scrape.timeout-seconds`   | 60      | Time budget for one crawl. When it runs out the crawl returns the pages it has read. Minimum 1. |
+| `web_scrape.concurrency`       | 4       | Pages fetched in parallel, 1–16. Per-host pacing still applies, so a higher value overlaps round trips rather than hitting one site harder. |
+| `web_scrape.max-escalations`   | 5       | Pages per crawl that may be retried with a slower fetcher (browser impersonation or a full render) when a plain fetch is blocked or comes back empty. `0` never escalates. |
+| `web_scrape.language`          | `en`    | Preferred language on sites that publish translations, as an hreflang code (`en`, `ja`, `pt-BR`). Other translations of a page are skipped. |
+
+`max-pages` and `max-depth` are both the default, when the agent's call leaves `maxPages` / `maxDepth` out, and the ceiling, when it asks for more — an agent can request a smaller crawl, never a larger one. A call's own `language` argument overrides the language setting.
+
+**Robots & Sitemaps**
+
+| Key                                | Default | Meaning                                                                              |
+|------------------------------------|---------|--------------------------------------------------------------------------------------|
+| `web_scrape.respect-robots`        | on      | Honour each site's `robots.txt`. A call can still turn it off for one request when you ask. Per-host pacing stays on either way. |
+| `web_scrape.seed-from-sitemap`     | on      | Add URLs from the sitemaps a site's `robots.txt` declares. Only applies while `robots.txt` is respected. |
+| `web_scrape.max-sitemap-urls`      | 50      | Most URLs one crawl takes from sitemaps. `0` seeds nothing.                           |
+| `web_scrape.max-sitemap-documents` | 3       | Most sitemap files one crawl fetches, counting nested sitemap indexes. `0` fetches none. |
 
 ## Tasks
 

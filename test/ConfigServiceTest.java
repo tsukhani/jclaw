@@ -8,6 +8,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import tools.scrape.WebScrapeSettings;
 
 class ConfigServiceTest extends UnitTest {
 
@@ -290,30 +291,29 @@ class ConfigServiceTest extends UnitTest {
         assertEquals("0.6", ConfigService.get(memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE));
     }
 
-    // --- setWithSideEffects: web_scrape crawl limits ---
+    // --- setWithSideEffects: web_scrape settings (rules pinned in WebScrapeSettingsTest) ---
 
     @Test
     void setWithSideEffectsRejectsAPageLimitBelowOne() {
-        assertNotNull(ConfigService.setWithSideEffects(tools.WebScrapeTool.CFG_MAX_PAGES, "0"));
-        assertNotNull(ConfigService.setWithSideEffects(tools.WebScrapeTool.CFG_MAX_PAGES, "ten"));
-        assertNull(ConfigService.get(tools.WebScrapeTool.CFG_MAX_PAGES),
+        assertNotNull(ConfigService.setWithSideEffects(WebScrapeSettings.MAX_PAGES, "0"));
+        assertNull(ConfigService.get(WebScrapeSettings.MAX_PAGES),
                 "the rejected value must not be persisted");
     }
 
     @Test
     void setWithSideEffectsRejectsANegativeDepthLimit() {
-        assertNotNull(ConfigService.setWithSideEffects(tools.WebScrapeTool.CFG_MAX_DEPTH, "-1"));
-        assertNull(ConfigService.get(tools.WebScrapeTool.CFG_MAX_DEPTH),
+        assertNotNull(ConfigService.setWithSideEffects(WebScrapeSettings.MAX_DEPTH, "-1"));
+        assertNull(ConfigService.get(WebScrapeSettings.MAX_DEPTH),
                 "the rejected value must not be persisted");
     }
 
     @Test
     void setWithSideEffectsAcceptsValidCrawlLimits() {
         // The tool defaults: the scrape test classes running beside this one read these keys.
-        assertNull(ConfigService.setWithSideEffects(tools.WebScrapeTool.CFG_MAX_PAGES, "25"));
-        assertNull(ConfigService.setWithSideEffects(tools.WebScrapeTool.CFG_MAX_DEPTH, "2"));
-        assertEquals("25", ConfigService.get(tools.WebScrapeTool.CFG_MAX_PAGES));
-        assertEquals("2", ConfigService.get(tools.WebScrapeTool.CFG_MAX_DEPTH));
+        assertNull(ConfigService.setWithSideEffects(WebScrapeSettings.MAX_PAGES, "25"));
+        assertNull(ConfigService.setWithSideEffects(WebScrapeSettings.MAX_DEPTH, "2"));
+        assertEquals("25", ConfigService.get(WebScrapeSettings.MAX_PAGES));
+        assertEquals("2", ConfigService.get(WebScrapeSettings.MAX_DEPTH));
     }
 
     // --- setWithSideEffects: the privilege-guard path ---

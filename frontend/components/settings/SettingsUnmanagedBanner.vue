@@ -37,7 +37,7 @@ const MANAGED_PREFIXES = [
   'shell.', // Shell execution defaults — Settings (allowlist + timeout)
   'db.backup.', // JCLAW-1165: backup directory, retention and daily schedule — Settings (Database)
   'web_fetch.', // JCLAW-773: outbound-host allowlist — operator-set through the Settings API, no UI surface
-  'web_scrape.', // Crawl limits — Settings (Web Scraping); the other web_scrape.* tuning keys have no UI surface
+  'web_scrape.', // Crawl, robots and sitemap settings for web_scrape — Settings (Web Scraping)
   'playwright.', // JCLAW-172: namespace retired but kept in the prefix list
   // so leftover playwright.enabled / playwright.headless rows on upgraded
   // installs don't surface as "Unmanaged" diagnostic noise.

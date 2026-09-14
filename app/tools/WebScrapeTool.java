@@ -14,7 +14,7 @@ import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.scrape.ScrapeLadder;
 import tools.scrape.SitemapSeeder;
-import utils.PlayConfig;
+import tools.scrape.WebScrapeSettings;
 import utils.RobotsCache;
 import utils.SsrfGuard;
 import utils.WebExtraction;
@@ -86,14 +86,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String ARG_SAME_HOST = "sameHostOnly";
     private static final String ARG_RESPECT_ROBOTS = "respectRobots";
 
-    public static final String CFG_MAX_PAGES = "web_scrape.max-pages";
-    public static final String CFG_MAX_DEPTH = "web_scrape.max-depth";
-    private static final String CFG_TIMEOUT_SECONDS = "web_scrape.timeout-seconds";
-    private static final String CFG_RESPECT_ROBOTS = "web_scrape.respect-robots";
-    private static final String CFG_CONCURRENCY = "web_scrape.concurrency";
-    private static final String CFG_MAX_ESCALATIONS = "web_scrape.max-escalations";
-    private static final String CFG_SEED_FROM_SITEMAP = "web_scrape.seed-from-sitemap";
-    private static final String CFG_LANGUAGE = "web_scrape.language";
     private static final String ARG_LANGUAGE = "language";
     private static final String EVENT_CATEGORY = "scrape";
 
@@ -128,7 +120,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *  What it buys is overlapping round-trip time, turning a latency-bound crawl
      *  into a pacing-bound one. */
     private static final int DEFAULT_CONCURRENCY = 4;
-    private static final int MAX_CONCURRENCY = 16;
 
     /** Total budget across every page, matching what one web_fetch may return. */
     private static final int MAX_TOTAL_CHARS = WebExtraction.MAX_TEXT_LENGTH;
@@ -797,8 +788,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private static int configConcurrency() {
         return Math.clamp(
-                ConfigService.getInt(CFG_CONCURRENCY, DEFAULT_CONCURRENCY),
-                1, MAX_CONCURRENCY);
+                ConfigService.getInt(WebScrapeSettings.CONCURRENCY, DEFAULT_CONCURRENCY),
+                1, WebScrapeSettings.MAX_CONCURRENCY);
     }
 
     private static String reason(Exception e) {
@@ -866,32 +857,32 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     private static int configMaxPages() {
-        return ConfigService.getInt(CFG_MAX_PAGES, DEFAULT_MAX_PAGES);
+        return ConfigService.getInt(WebScrapeSettings.MAX_PAGES, DEFAULT_MAX_PAGES);
     }
 
     private static int configMaxDepth() {
-        return ConfigService.getInt(CFG_MAX_DEPTH, DEFAULT_MAX_DEPTH);
+        return ConfigService.getInt(WebScrapeSettings.MAX_DEPTH, DEFAULT_MAX_DEPTH);
     }
 
     /** Runtime config, matching web_scrape.concurrency and .respect-robots. JCLAW-1099
      *  described this as operator-tunable but read it from application.conf, which needs
      *  a restart to change — not tunable in the sense the ticket meant. */
     private static int maxEscalations() {
-        return ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
+        return ConfigService.getInt(WebScrapeSettings.MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
     }
 
     private static int configTimeoutSeconds() {
-        return (int) PlayConfig.longOr(CFG_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
+        return ConfigService.getInt(WebScrapeSettings.TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
     }
 
     private static String languageDefault() {
-        var configured = ConfigService.get(CFG_LANGUAGE, DEFAULT_LANGUAGE).strip();
+        var configured = ConfigService.get(WebScrapeSettings.LANGUAGE, DEFAULT_LANGUAGE).strip();
         return configured.isEmpty() ? DEFAULT_LANGUAGE : configured;
     }
 
     private static boolean seedFromSitemapDefault() {
         return !"false".equalsIgnoreCase(
-                ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());
+                ConfigService.get(WebScrapeSettings.SEED_FROM_SITEMAP, "true").strip());
     }
 
     /**
@@ -907,6 +898,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      */
     private static boolean respectRobotsDefault() {
         return !"false".equalsIgnoreCase(
-                ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());
+                ConfigService.get(WebScrapeSettings.RESPECT_ROBOTS, "true").strip());
     }
 }

@@ -36,9 +36,6 @@ import java.util.function.Predicate;
  */
 public final class SitemapSeeder {
 
-    private static final String CFG_MAX_URLS = "web_scrape.max-sitemap-urls";
-    private static final String CFG_MAX_DOCUMENTS = "web_scrape.max-sitemap-documents";
-
     /** URLs taken from sitemaps into the frontier. Above the default page budget of 25 so
      *  seeding still has something to offer after the admit gate drops some, but nowhere
      *  near a real sitemap's size. */
@@ -165,10 +162,10 @@ public final class SitemapSeeder {
      *  and the sibling keys web_scrape.concurrency and .respect-robots already live
      *  there. PlayConfig would require an edit and a restart. */
     private static int maxUrls() {
-        return ConfigService.getInt(CFG_MAX_URLS, DEFAULT_MAX_URLS);
+        return ConfigService.getInt(WebScrapeSettings.MAX_SITEMAP_URLS, DEFAULT_MAX_URLS);
     }
 
     private static int maxDocuments() {
-        return ConfigService.getInt(CFG_MAX_DOCUMENTS, DEFAULT_MAX_DOCUMENTS);
+        return ConfigService.getInt(WebScrapeSettings.MAX_SITEMAP_DOCUMENTS, DEFAULT_MAX_DOCUMENTS);
     }
 }

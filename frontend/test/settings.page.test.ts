@@ -465,12 +465,12 @@ describe('Settings page — Web Scraping section', () => {
     const row = component.find(`[data-testid="web-scrape-row-${label}"]`)
     await row.find('button[title="Edit"]').trigger('click')
     await flushPromises()
-    await row.find('input[type="number"]').setValue(value)
+    await row.find('input').setValue(value)
     await row.find('button[title="Save"]').trigger('click')
     await flushPromises()
   }
 
-  it('shows a stored limit, and the tool default for a limit that was never set', async () => {
+  it('shows every setting, with the tool default for one that was never set', async () => {
     stubOtherEndpoints()
     // The keys are never seeded, so an unset one must still read as the value the tool uses.
     registerEndpoint('/api/config', () => ({
@@ -479,8 +479,32 @@ describe('Settings page — Web Scraping section', () => {
     const component = await mountSettingsSection('web-scraping')
 
     expect(component.html()).toMatch(/<h2[^>]*>\s*Web Scraping\s*</)
-    expect(component.find('[data-testid="web-scrape-row-maxPages"]').text()).toContain('40')
-    expect(component.find('[data-testid="web-scrape-row-maxDepth"]').text()).toContain('2')
+    expect(component.findAll('[data-testid^="web-scrape-row-"]')).toHaveLength(10)
+    expect(component.find('[data-testid="web-scrape-row-max-pages"]').text()).toContain('40')
+    expect(component.find('[data-testid="web-scrape-row-max-depth"]').text()).toContain('2')
+    expect(component.find('[data-testid="web-scrape-row-timeout-seconds"]').text()).toContain('60')
+    expect(component.find('[data-testid="web-scrape-row-language"]').text()).toContain('en')
+  })
+
+  it('turns robots.txt off with one click on its toggle', async () => {
+    let postedBody: { key?: string, value?: string } | null = null
+    stubOtherEndpoints()
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: [] }) })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        postedBody = await readBody(event) as { key?: string, value?: string }
+        return { ok: true }
+      },
+    })
+    const component = await mountSettingsSection('web-scraping')
+
+    const toggle = component.find('[data-testid="web-scrape-row-respect-robots"] button[aria-pressed]')
+    expect(toggle.attributes('aria-pressed')).toBe('true')
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(postedBody).toEqual({ key: 'web_scrape.respect-robots', value: 'false' })
   })
 
   it('POSTs web_scrape.max-depth to /api/config when the operator saves the field', async () => {
@@ -496,7 +520,7 @@ describe('Settings page — Web Scraping section', () => {
     })
     const component = await mountSettingsSection('web-scraping')
 
-    await editLimit(component, 'maxDepth', '3')
+    await editLimit(component, 'max-depth', '3')
 
     expect(postedBody).not.toBeNull()
     expect(postedBody!.key).toBe('web_scrape.max-depth')
@@ -510,15 +534,15 @@ describe('Settings page — Web Scraping section', () => {
       method: 'POST',
       handler: (event) => {
         setResponseStatus(event, 403)
-        return { type: 'error', code: 'forbidden', message: 'web_scrape.max-pages must be a positive integer.' }
+        return { type: 'error', code: 'forbidden', message: 'web_scrape.max-pages must be a whole number of at least 1.' }
       },
     })
     const component = await mountSettingsSection('web-scraping')
 
-    await editLimit(component, 'maxPages', '0')
+    await editLimit(component, 'max-pages', '0')
 
     expect(component.find('[role="alert"]').text())
-      .toContain('web_scrape.max-pages must be a positive integer.')
+      .toContain('web_scrape.max-pages must be a whole number of at least 1.')
   })
 })
 
