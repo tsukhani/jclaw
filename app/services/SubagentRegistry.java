@@ -6,6 +6,7 @@ import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
 import utils.AppClock;
 
+import java.lang.ScopedValue.CallableOp;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -76,6 +77,19 @@ public final class SubagentRegistry {
 
     private static final Map<Long, Entry> ACTIVE = new ConcurrentHashMap<>();
 
+    /** The run a child's own thread executes, bound by {@link #callAsRun} for the thread's whole life. */
+    private static final ScopedValue<RunScope> CURRENT_RUN = ScopedValue.newInstance();
+
+    /**
+     * A child thread's run and its stop flag. The awaiting side unregisters a timed-out or
+     * killed run while the child can still be mid-tool, so the child keeps the flag itself.
+     */
+    public record RunScope(Long runId, AtomicBoolean stopFlag) {
+        public boolean stopRequested() {
+            return stopFlag.get();
+        }
+    }
+
     /**
      * JCLAW-664: the live external-harness {@link Process} per runId (the acp
      * runtime). Populated by {@link tools.SubagentSpawnTool} right after it
@@ -127,6 +141,18 @@ public final class SubagentRegistry {
         ACTIVE.put(runId, new Entry(future, new AtomicBoolean(false), new AtomicLong(System.nanoTime())));
     }
 
+    /** Call {@code body} as run {@code runId}'s child thread; a run that isn't registered calls it unbound. */
+    public static <R, X extends Throwable> R callAsRun(Long runId, CallableOp<R, X> body) throws X {
+        var entry = ACTIVE.get(runId);
+        if (entry == null) return body.call();
+        return ScopedValue.where(CURRENT_RUN, new RunScope(runId, entry.cancelRequested())).call(body);
+    }
+
+    /** The run bound to this thread by {@link #callAsRun}, or null when the thread runs no child. */
+    public static @Nullable RunScope currentRun() {
+        return CURRENT_RUN.isBound() ? CURRENT_RUN.get() : null;
+    }
+
     /**
      * JCLAW-424: mark the run as having just made progress. Called from
      * {@link agents.AgentRunner#checkSubagentCancel} — i.e. before each LLM
@@ -155,8 +181,8 @@ public final class SubagentRegistry {
      * uses (so the running {@link agents.AgentRunner} bails at its next
      * checkpoint with {@link agents.RunCancelledException}) but does NOT write a
      * KILLED audit row — the spawn tool persists the TIMEOUT status itself. The
-     * entry is left in place so the child's checkpoint can still observe the
-     * flag; the spawn path's {@code finally} unregisters once the child stops.
+     * child's thread holds the same flag through {@link #callAsRun}, so its
+     * checkpoint still observes the stop after the spawn path unregisters the run.
      */
     public static void requestStop(Long runId) {
         if (runId == null) return;

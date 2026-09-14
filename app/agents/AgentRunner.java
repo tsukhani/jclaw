@@ -201,6 +201,14 @@ public class AgentRunner {
      *                     conversations are no-ops
      */
     public static void checkSubagentCancel(Conversation conversation) {
+        // A child's own thread reads the flag it started with: a timeout or kill unregisters the run and
+        // saves its terminal status while the child can still be mid-tool, and the lookup below sees neither.
+        var bound = SubagentRegistry.currentRun();
+        if (bound != null) {
+            SubagentRegistry.touch(bound.runId());
+            if (bound.stopRequested()) throw new RunCancelledException(bound.runId());
+            return;
+        }
         if (conversation == null || conversation.id == null) return;
         // Query both the inline-mode (parentConversation FK == this conv) and
         // session-mode (childConversation FK == this conv) cases. In practice

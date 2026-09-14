@@ -177,6 +177,25 @@ class AgentRunnerSubagentTest extends UnitTest {
     }
 
     @Test
+    void aStoppedChildStillStopsAtItsCheckpointAfterItsRunIsUnregistered() {
+        // The timeout path: flag flipped, run unregistered and saved TIMEOUT, child thread still mid-tool.
+        var runId = 708_0001L;
+        SubagentRegistry.register(runId, new CompletableFuture<Void>());
+        var thrown = SubagentRegistry.callAsRun(runId, () -> {
+            SubagentRegistry.requestStop(runId);
+            SubagentRegistry.unregister(runId);
+            return assertThrows(RunCancelledException.class, () -> AgentRunner.checkSubagentCancel(null),
+                    "the child's own checkpoint must still see the stop");
+        });
+        assertEquals(runId, thrown.runId());
+
+        assertNull(SubagentRegistry.currentRun(), "the binding ends with the call");
+        AgentRunner.checkSubagentCancel(null);
+        assertNull(SubagentRegistry.callAsRun(708_0002L, SubagentRegistry::currentRun),
+                "a run that isn't registered runs unbound");
+    }
+
+    @Test
     void checkSubagentCancelIgnoresTerminalRunRows() {
         // A SubagentRun row exists for the conversation but is already
         // terminal (COMPLETED, FAILED, KILLED, TIMEOUT). The query in

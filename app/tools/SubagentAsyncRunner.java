@@ -368,7 +368,8 @@ final class SubagentAsyncRunner {
                     throw new IllegalStateException(
                             "Subagent rows vanished before AgentRunner.run");
                 }
-                future.complete(SubagentAcpRunner.executeChildRun(runId, childAgent, childConv, task, false));
+                future.complete(SubagentRegistry.callAsRun(runId,
+                        () -> SubagentAcpRunner.executeChildRun(runId, childAgent, childConv, task, false)));
             } catch (Throwable t) {
                 future.completeExceptionally(t);
             }
