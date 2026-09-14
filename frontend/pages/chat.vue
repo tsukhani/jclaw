@@ -386,7 +386,8 @@ watch(() => route.query.conversation, async (raw) => {
 // The address follows the open conversation, so a reload or a copied link reopens it; replace keeps it out of history.
 watch(selectedConvoId, (id) => {
   if (String(id ?? '') === String(route.query.conversation ?? '')) return
-  void router.replace({ query: { ...route.query, conversation: id ?? undefined } })
+  // A replace that fails leaves only the address stale; it must not surface as an unhandled rejection.
+  router.replace({ query: { ...route.query, conversation: id ?? undefined } }).catch(() => undefined)
 })
 
 function newChat() {
