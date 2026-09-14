@@ -2,13 +2,13 @@
 
 Chat works because an agent is on the other end. The [Agents](/agents) page is where you configure those agents — which model they speak to, what system prompt they have, what tools they can use, what skills are attached, and which MCP servers they can call.
 
-Once an agent is **enabled**, it appears in the [Chat](/chat) sidebar and can be bound to external channels on [Channels](/channels).
+Every agent appears in the **Agent** dropdown on [Chat](/chat); once an agent is **enabled**, it can also be bound to external channels on [Channels](/channels).
 
 ## Main Agent vs Custom Agents
 
 The page splits into two sections:
 
-- **Main Agent** — the built-in singleton. Always enabled, can't be renamed or deleted. It handles admin-style chat and acts as the fallback route for any [channel](/channels) without an explicit binding.
+- **Main Agent** — the built-in singleton. Always enabled, can't be renamed or deleted. It's the agent [Chat](/chat) opens on; external [channels](/channels) reach it only through a binding, the same as any other agent.
 - **Custom Agents** — every agent you create yourself. You can enable or disable, edit, or delete these freely.
 
 Both kinds use the same configuration surface, with a single difference: you can't change the Main Agent's **Name**, and the Main Agent gets a couple of extra knobs that custom agents don't need (see *Shell Exec Privileges* below).
@@ -21,7 +21,7 @@ Click **New Agent** at the top of the page, or click any existing row to edit it
 
 | Field                | What it controls                                                                                              |
 |----------------------|---------------------------------------------------------------------------------------------------------------|
-| **Name**             | How the agent appears in the sidebar and breadcrumbs.                                                          |
+| **Name**             | How the agent appears in the Chat Agent dropdown and breadcrumbs.                                              |
 | **Description**      | A short blurb shown under the name. Optional but useful when you have many agents.                             |
 | **Default Provider** | Which model provider to use. Must be configured in [Settings → LLM Providers](/guide#settings) first.          |
 | **Default Model**    | The specific model id within that provider. The capability pills (thinking / vision / audio / video / no tools) update to reflect what that model supports. |
@@ -80,12 +80,13 @@ These files are read on every turn when the system prompt is assembled, through 
 
 ### Other sections
 
-Four more sections on the same page, one line each:
+Five more sections on the same page, one line each:
 
 - **ACP External Harness** (custom agents only) — sets `acpAllowed`, letting this agent spawn [`runtime=acp` subagents](/guide#subagents-acp-harness) under an external coding harness, outside JClaw's tool and workspace confinement.
 - **Memory Autocapture** — automatically capture durable facts from this agent's conversations into long-term memory.
 - **Core memories** — the memories always loaded into this agent's prompt, independent of autocapture, with a cap and a **Migrate excess** action that refiles anything over it.
 - **Content Compression** — shrink large tool output (JSON arrays, code, prose) before it reaches the model: a master toggle, per-type sub-toggles, and an aggressiveness slider.
+- **Standing Tool Approvals** — the tools this agent may run without being asked, each granted by an "always allow" tap, with **Revoke** on every row. A grant has no channel dimension: it applies wherever the agent runs.
 
 :::note Tool Approvals
 Whether a dangerous action (such as `exec`) runs at all when nobody can be asked is decided platform-wide under [Settings → Security → Tool Approvals](/guide#settings) (`tool.approval.offChannelPolicy`: `allow`, `deny`, or `ask`). The two per-agent toggles below only widen what the Main Agent's shell may reach.
@@ -119,11 +120,10 @@ To remove a per-skill grant, disable or remove the skill. To change the global a
 
 Each Custom Agent has a toggle on its row. Disabled agents:
 
-- Don't appear in the [Chat](/chat) sidebar.
 - Can't be picked as a new [channel binding](/channels) target (existing bindings keep working until you remove them).
 - Still exist — toggle back on to restore.
 
-The Main Agent can't be disabled; it's the always-on fallback.
+The Main Agent can't be disabled.
 
 ## Capability pills
 

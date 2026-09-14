@@ -30,13 +30,13 @@ Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversat
 
 | Column                | Meaning                                                                              |
 |-----------------------|--------------------------------------------------------------------------------------|
-| **ID**                | The conversation id. Use this when reporting an issue or referencing in a tool call. |
 | **Name**              | The conversation's name — its first user message (truncated) until you rename it.    |
 | **Channel**           | Where it came in from.                                                               |
 | **Agent**             | Which agent answered.                                                                |
 | **Peer**              | External user id (blank for in-app web chat).                                        |
 | **Messages**          | How many messages are in the thread.                                                 |
-| **Created / Updated** | Timestamps.                                                                          |
+| **Last Activity**     | When the thread last changed.                                                        |
+| **Actions**           | Rename, Pin, **View details** (a read-only page for the thread) and **Quick preview**. |
 
 Click any row to open the conversation in [Chat](/chat) (read-only if it came from a subagent run; fully editable if it's your own thread).
 
@@ -52,11 +52,11 @@ Starring and pinning are independent: a conversation can be either, both, or nei
 
 ### Exporting
 
-The **Export all** button downloads the current filtered view as a CSV — useful for audit, sharing, or feeding into another tool.
+The **Export** button in the filter bar downloads `conversations.csv`: the pinned conversations plus the rows on the current page of results — useful for audit, sharing, or feeding into another tool.
 
 ### Deleting
 
-Select one or more rows and use the bulk action menu to delete. Deletion removes the thread and all its messages permanently; there's no undo.
+Select one or more rows and click **Delete N** to delete them. Deletion removes the thread and all its messages permanently; there's no undo.
 
 **Delete all matching** skips pinned conversations, the same way it skips subagent transcripts — it deletes exactly the rows the list is showing you a count of. To delete a pinned conversation, unpin it first.
 
@@ -91,11 +91,12 @@ Click the **Telegram** card to open the per-bot binding list. Each binding is a 
 You'll need:
 
 - A bot token from Telegram's BotFather.
+- Your numeric Telegram user id (**telegramUserId**) — DM `@userinfobot` and it replies with it. Save stays disabled until it's filled in.
 - An [agent](/agents) you want this bot to run as.
 
 The bot starts receiving messages as soon as you save and enable the binding. Telegram surfaces JClaw's [slash commands](/guide#chat) (`/new`, `/reset`, `/compact`, …) in its native autocomplete dropdown automatically.
 
-Each binding also picks a **transport**: **POLLING** (the default — JClaw pulls updates from Telegram, nothing to expose) or **WEBHOOK**, which needs a public HTTPS **webhookBaseUrl** (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). The webhook path is fixed — `/api/webhooks/telegram/{bindingId}` — and the secret is generated for you and checked from Telegram's `X-Telegram-Bot-Api-Secret-Token` header, so the base URL is the only part you enter.
+Each binding also picks a **transport**: **Polling** (the default — JClaw pulls updates from Telegram, nothing to expose) or **Webhook**, which needs a public HTTPS **webhookBaseUrl** (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). The webhook path is fixed — `/api/webhooks/telegram/{bindingId}` — and the secret is generated for you and checked from Telegram's `X-Telegram-Bot-Api-Secret-Token` header, so the base URL is the only part you enter.
 
 Below the bindings, **Channel defaults** set how every Telegram binding behaves:
 
@@ -133,7 +134,7 @@ Cloud-API integration via Meta's WhatsApp Business Platform. Like Slack and Tele
 
 Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
 
-A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language) used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** can instead be **WhatsApp Web** — a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all; proactive sends go to the paired owner.
+A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language) used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** is **Cloud API (official)** by default and can instead be **WhatsApp-Web (unofficial)** — a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all; proactive sends go to the paired owner.
 
 ## How channels and conversations connect
 

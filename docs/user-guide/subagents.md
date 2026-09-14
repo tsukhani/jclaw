@@ -8,7 +8,7 @@ Reach for a subagent when:
 - You want to fan out work in parallel without blocking the main conversation.
 - You want a separate transcript that's easy to inspect on its own.
 
-This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the four ways to inspect what a child did. Subagents are one of three "outside-this-turn" abstractions — [Tasks](/guide#tasks) and [Reminders](/guide#reminders) are the other two; jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) for the side-by-side comparison.
+This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the five ways to inspect what a child did. Subagents are one of three "outside-this-turn" abstractions — [Tasks](/guide#tasks) and [Reminders](/guide#reminders) are the other two; jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) for the side-by-side comparison.
 
 ## The simplest case
 
@@ -16,7 +16,7 @@ You don't have to think about any of the parameters. Just ask:
 
 > "Spawn a subagent to research nose trimmers on Lazada and Shopee, then summarize."
 
-The parent agent picks sensible defaults: a new sidebar conversation, no inherited context, blocking until done, with a 5-minute idle budget (or whatever `subagent.defaultRunTimeoutSeconds` is set to in Settings → **Subagents**). You'll see the child appear on the [Chat](/chat) page as a separate row in the sidebar, and when it finishes the parent reads its reply and continues.
+The parent agent picks sensible defaults: a new conversation of its own, no inherited context, blocking until done, with a 5-minute idle budget (or whatever `subagent.defaultRunTimeoutSeconds` is set to in Settings → **Subagents**). You'll see the child appear on the [Chat](/chat) page as a row in the subagent list under the chat header, and when it finishes the parent reads its reply and continues.
 
 The rest of this section is what you reach for when the defaults aren't quite right.
 
@@ -26,7 +26,7 @@ Pick a mode based on **how you want the child's work surfaced**.
 
 ### `mode=session` (default)
 
-The child runs in its own brand-new conversation. It shows up as a separate row in the [Chat](/chat) sidebar with its own message history. The parent waits for it to finish and reads its final reply as the tool result.
+The child runs in its own brand-new conversation. It shows up as a row in the [Chat](/chat) page's subagent list, which expands to its own message history. The parent waits for it to finish and reads its final reply as the tool result.
 
 **Use when:** you want the child's conversation to be a first-class, navigable artifact you can come back to later — long research, code generation, multi-step tool work.
 
@@ -38,7 +38,7 @@ The child's messages get folded into the parent's conversation as a collapsible 
 
 ### `mode=async`
 
-The child runs in the background. The parent gets control back immediately and can keep responding to you. When the child finishes (success, failure, or timeout), an **announce card** lands in your conversation showing the child's status, label, and reply, with a "View full →" link to the child's full transcript.
+The child runs in the background. The parent gets control back immediately and can keep responding to you. When the child finishes (success, failure, or timeout), its row in the chat's **subagent list** — the shade under the chat header — shows the outcome: status, how long ago it ended, and for a failed, timed-out, or killed run the reason. No announce card lands in your conversation unless the parent waits on the run with `subagent_yield` (see [Async plus yield](/guide#subagents-async-yield)).
 
 **Use when:** the child's work is going to take a while and you want to keep talking to the parent, or you want to fan out multiple children at once.
 
@@ -86,7 +86,7 @@ For long-running async work where the parent eventually needs the child's reply,
 4. When the child terminates, JClaw delivers the child's reply back as the parent's next user-role message and resumes the parent's loop. The parent picks up the conversation seamlessly with the child's output as fresh user input.
 
 :::note
-Without `subagent_yield`, the parent never gets to use the child's reply — the announce card surfaces it to *you*, not back into the parent. Use yield when you want the parent to keep working with the result.
+Without `subagent_yield`, the parent never gets to use the child's reply — the outcome surfaces to *you* in the chat's subagent list, not back into the parent. With yield, the reply arrives as an announce card in the conversation, and that card is the parent's next input. Use yield when you want the parent to keep working with the result.
 :::
 
 ## External coding harness (`runtime=acp`) {#acp-harness}
@@ -105,9 +105,9 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
 
    The command is whitespace-split into an argv, so fixed flags are fine (`/usr/local/bin/pi --headless`). It is read from config **only** — never from the model — so a subagent can't steer JClaw into running arbitrary shell.
 
-   Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: an unknown value refuses the spawn with a message naming the allowed values rather than silently falling back. Settings → **Subagents** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click.
+   Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: an unknown value refuses the spawn with a message naming the allowed values rather than silently falling back. Settings → **Coding** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click.
 
-   **Optionally, pick the model the harness runs with.** By default the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Subagents** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead, and a per-spawn `modelProvider` / `modelId` on `subagent_spawn` — "run this through Codex on `ollama` with `qwen3-coder`" — overrides that for one run. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API — Ollama and OpenRouter do); **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint; **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them; **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's transcript records the override as its first step.
+   **Optionally, pick the model the harness runs with.** By default the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Coding** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead, and a per-spawn `modelProvider` / `modelId` on `subagent_spawn` — "run this through Codex on `ollama` with `qwen3-coder`" — overrides that for one run. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API — Ollama and OpenRouter do); **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint; **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them; **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's transcript records the override as its first step.
 
 2. **Grant the spawning agent the `acp` capability.** The harness runs as an external process *outside* JClaw's tool gating and workspace confinement, so it's a privileged capability. The **main agent** may always request it; a **custom agent** must have `acpAllowed = true` set on its [Agents](/agents) page. Without the grant, an `acp` spawn is refused on permission. The gate is on the *spawning* agent, so a confined custom agent can't break out by delegating to `acp`.
 
@@ -117,7 +117,7 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
    subagent_spawn { "runtime": "acp", "async": true, "task": "..." }
    ```
 
-   `async:true` returns a `runId` immediately and lands an announce card when the harness finishes; drop it for a blocking run.
+   `async:true` returns a `runId` immediately, and the run's outcome shows in the chat's subagent list when the harness finishes; drop it for a blocking run.
 
 ### Bounds and failure
 
@@ -144,11 +144,11 @@ The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (defaul
 
 ## Inspecting what a child did
 
-Four surfaces, each with its own audience.
+Five surfaces, each with its own audience.
 
 ### 1. The announce card (in [Chat](/chat))
 
-Lands in your conversation when an `async` subagent terminates. Shows label, terminal status (`COMPLETED`, `FAILED`, or `TIMEOUT`), and the child's reply rendered as markdown. Includes a "View full →" link that opens the child's full transcript in the standard chat viewer — read-only, because the child is no longer accepting input.
+Lands in your conversation when an `async` subagent the parent waited on with `subagent_yield` terminates; a run nobody waited on reports in the chat's subagent list instead (surface 5). Shows label, terminal status (`COMPLETED`, `FAILED`, or `TIMEOUT`), and the child's reply rendered as markdown. Includes a "View full →" link that opens the child's full transcript in the standard chat viewer — read-only, because the child is no longer accepting input.
 
 If the child's reply was cut off by the model's output budget, the announce card shows a small amber *"Reply was truncated by the model"* marker so you know the summary isn't complete.
 
@@ -166,7 +166,7 @@ Operator surface for the parent agent's *own* runs. Five subcommands:
 
 | Command                  | What it does                                                                   |
 |--------------------------|--------------------------------------------------------------------------------|
-| `/subagent list`         | Show running and recently-terminal runs spawned by the current parent.         |
+| `/subagent list`         | Show running and recently-terminal runs spawned in the current conversation.   |
 | `/subagent info <id>`    | Detail block for one run: status, mode, context, started/ended, outcome.       |
 | `/subagent log <id>`     | Last ~50 events for a run (spawn, complete, error, kill).                      |
 | `/subagent kill <id>`    | Cooperatively cancel a running child.                                          |
@@ -175,6 +175,10 @@ Operator surface for the parent agent's *own* runs. Five subcommands:
 ### 4. The `conversation_history` tool
 
 For the parent agent itself to recall what a previous child did. Returns the full message list (role, content, tool calls and results, timestamps) for a child conversation given the run id. Useful when the parent wants to summarize across multiple historical runs, debug its own delegation pattern, or splice intermediate results into a follow-up turn. The calling agent must be the run's parent.
+
+### 5. The subagent list (in [Chat](/chat))
+
+A shade under the chat header, headed *N subagents · N running*, lists the runs the current conversation spawned. Each row shows the run's label, its status, and how long it has been running or how long ago it ended; a failed, timed-out, or killed run gets a coloured status pill with the reason as its tooltip. Expand a row to read its transcript (a failure reason also shows above it), click the header to collapse the list, or click **View all →** to open this conversation's runs on the [Subagents](/subagents) page.
 
 ## Quick reference
 

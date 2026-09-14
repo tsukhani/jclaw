@@ -12,12 +12,12 @@ A custom header is deliberately not CORS-simple, so a page the operator visits c
 sidecar even though it listens on loopback. `--no-auth` (off by default) serves unauthenticated.
 
 Protocol (SV-3 / JCLAW-512): `GET /health`, `GET /capability` (the adaptive-picker payload plus `activeModel`,
-the engine this process serves), `POST /jobs {prompt, num_frames?, steps?, fps?, width?, height?}` -> 202 {job_id}
+the engine this process serves), `POST /jobs {prompt, num_frames?, steps?, fps?, width?, height?}` -> 202 {job_id, state}
 (defaults `num_frames=49`, `steps=30`, `fps=24` clamped to 1–60) | 409 {busy} while a job is running |
-400 {insufficient_vram} when free VRAM is under the engine's floor, `GET /jobs/<id>` -> {state,percent} |
-404 {unknown_job}, `GET /jobs/<id>/result` -> mp4 | 409 {not_ready}, `POST /pull` -> ndjson progress.
-`--probe` prints the `/capability` JSON and exits — no server, no model load, no token. This is the only sidecar
-with **no `POST /shutdown`**: `LocalSidecarDaemon.evict()`, the JVM's one handle on a sidecar it did not spawn,
+400 {insufficient_vram} when free VRAM is under the engine's floor, `GET /jobs/<id>` -> {job_id, state, percent, error, output} |
+404 {unknown_job}, `GET /jobs/<id>/result` -> mp4 | 409 {not_ready}, `POST /pull` -> ndjson progress (WAN engines only).
+`--probe` prints the `/capability` JSON and exits — no server, no model load, no token. Like the image sidecar, it
+has **no `POST /shutdown`**: `LocalSidecarDaemon.evict()`, the JVM's one handle on a sidecar it did not spawn,
 gets `404 {not_found}` here, so an orphan stays up until its idle timeout.
 
 Models: `ltx` (plus `ltx-q8`/`ltx-bf16` on Apple Silicon, `ltx-fp8`/`ltx-fp8-offload` on CUDA — the

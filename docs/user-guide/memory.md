@@ -12,7 +12,7 @@ Capture is automatic — it happens in the background after a turn completes, so
 
 An explicit instruction takes a different route: the agent's `memory` tool (recall, store, forget) answers "remember that…" and "forget what I told you about…" directly, and reports exactly what it touched — storing something already known is a no-op, not a second row. That tool is also the only way a `core` memory is created: automatic capture never assigns `core`, and a candidate the extractor labels `core` is demoted to `fact`.
 
-Capture applies to your operator-facing agents only — [subagents](/subagents) never capture (their work returns to the parent, which captures what matters). Each agent has its own **Auto-capture memories** toggle and an optional extractor-model override on its [Agents](/agents) edit form; point the override at a cheap model to keep extraction costs negligible.
+Capture applies to your operator-facing agents only — [subagents](/subagents) never capture (their work returns to the parent, which captures what matters). Each agent has its own **Memory Autocapture** toggle and an optional extractor-model override on its [Agents](/agents) edit form; point the override at a cheap model to keep extraction costs negligible.
 
 ### What never gets stored
 
@@ -42,7 +42,7 @@ Importance drives everything downstream: recall ranking, and whether a `core` me
 
 Two paths return memories to the agent:
 
-- **Core auto-load** — `core`-category memories at or above the importance threshold (default 0.8) are injected into every session at start, capped at 20 entries within a small token budget so they can never crowd out the context window.
+- **Core auto-load** — `core`-category memories at or above the importance threshold (default 0.8) are injected into every session at start, capped at 20 entries — a count of whole memories, not a token budget (see [Tuning](#memory-tuning)).
 - **Per-turn recall** — each message triggers a relevance search over the agent's store; the best matches (up to 10) are injected for that turn only. Recalled text is framed to the model as stored reference data, **not** instructions — the soft counterpart of the write-time injection guard.
 
 By default relevance is keyword-based. Enabling **vector search** adds semantic recall — "what did we decide about invoicing?" finds a memory that never uses the word "invoicing" — with the two result lists blended by reciprocal-rank fusion. The backend is picked automatically: `pgvector` on PostgreSQL, an embedded Lucene HNSW index otherwise. See [Tuning](#memory-tuning) below.

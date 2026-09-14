@@ -11,7 +11,7 @@ Each prompt is a **title** plus the **prompt text** itself, filed under exactly 
 | Field        | Meaning                                                                                                   |
 |--------------|-----------------------------------------------------------------------------------------------------------|
 | **Title**    | Short label shown on the card and matched by search. Required.                                             |
-| **Content**  | The prompt text that gets loaded into the composer when you Run it. Required.                              |
+| **Prompt text** | The prompt text that gets loaded into the composer when you Run it. Required.                           |
 | **Category** | Exactly one, from a fixed set: **Coding, Writing, Analysis, Creative, Business, Custom**. The scannable, filterable axis. |
 | **Tags**     | Optional, free-form, comma-separated. The unlimited cross-cutting axis — your own labels.                 |
 
@@ -23,7 +23,7 @@ The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view they
 
 - **Category pills** — filter the grid by category. Each pill carries an absolute count of prompts in that category (whole library, not the current search).
 - **Search** — the search box filters live across each prompt's **title, text, and tags**.
-- **Run / Edit / Delete** — every card's actions (see below).
+- **Copy / Edit / Delete / Run** — every card's actions. **Copy** puts the prompt text on your clipboard; the others are covered below.
 - **Export · Import · New prompt** — the toolbar, left-aligned below the intro text.
 
 ## Creating a prompt
@@ -45,7 +45,7 @@ The **Generate** step calls your **main agent's** model, so it only works once t
 
 The active agent is whichever one you have selected in Chat — a saved prompt carries text, not an agent binding, so the same prompt works with any agent.
 
-You can also reach the library from the chat composer with the `/prompt` slash command — `/prompt <search words>` picks a saved prompt matching those words. It works on every channel: on the web it prefills the composer just like **Run**; on Telegram, Slack and WhatsApp the bot replies with the prompt text for you to copy, since a bot can't prefill a message box there.
+You can also reach the library from the chat composer with the `/prompt` slash command — `/prompt <search words>` picks a saved prompt matching those words. It works on every channel: on the web it prefills the composer just like **Run**; on Telegram, Slack and WhatsApp the bot replies with the prompt text for you to copy, since a bot can't prefill a message box there. On Slack, type it as `!prompt`.
 
 ## Editing and deleting
 

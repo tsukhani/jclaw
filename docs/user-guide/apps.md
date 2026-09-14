@@ -42,7 +42,7 @@ You don't build an app by hand — you describe it, and the agent builds it. Cli
 - **App name** and **Author** (both optional) — become the manifest's `name` and `creator`.
 - **What should the app do?** — the description the agent builds from.
 - **Designated agent** (optional) — the one agent this app may invoke (the manifest `agent` field).
-- **Pricing label** (optional) — a display-only `price`.
+- **Cost** — **Free** (the default), **Subscription** or **Fixed price**, the paid kinds with a currency and amount. It becomes the display-only `price` label.
 
 Submitting **Build in Chat →** doesn't fire a build immediately. It prefills a request into the [Chat](/chat) composer that invokes the **app-creator** skill — you review it and send it there. The skill builds `index.html`, `app.json`, and a generated `icon.svg` in the agent's workspace, then installs the bundle into `public/apps/<slug>/` so the Apps page serves it.
 
@@ -52,7 +52,7 @@ By default the app-creator skill delegates the actual build to an external codin
 
 ## Updating an app
 
-The pencil button on a card starts an update scoped to that app. Describe what should change — and optionally reassign the designated agent or the pricing label — then **Update in Chat →** hands the request to the app-creator skill in Chat. The skill edits `public/apps/<slug>/` in place and bumps the version (patch for fixes, minor for features, major for breaking changes).
+The pencil button on a card starts an update scoped to that app. Describe what should change — and optionally reassign the designated agent or change the **Cost** (it keeps the current pricing unless you pick another) — then **Update in Chat →** hands the request to the app-creator skill in Chat. The skill edits `public/apps/<slug>/` in place and bumps the version (patch for fixes, minor for features, major for breaking changes).
 
 ## Deleting an app
 

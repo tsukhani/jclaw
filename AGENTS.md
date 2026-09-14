@@ -30,7 +30,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - Backend tests: `play autotest`, never `play test` (interactive). One class: `./gradlew playAutotest -Ptests=<Class>`, about 30 s; the full suite is 5–8 min. `./jclaw.sh test` runs all five checks to the end and prints the failure at the bottom.
 - Test sources are the default package: test seams must be `public`. (A class that extends neither `play.test.UnitTest` nor `FunctionalTest` never runs; `TestDiscoveryConformanceTest` now fails the build on one, so it no longer needs watching by hand.)
 - Never pipe the suite (`| tail` returns tail's exit code); redirect to a file and check `test-result/*.failed.html`. Never compile while a run is in flight; `jcmd -l | grep -E "playAutotest|FirePhoque"` first. A `compileJava` that printed `UP-TO-DATE` measured nothing: `--rerun-tasks` when the compile is the evidence.
-- Test classes run concurrently in one JVM: never flip a process-global without its lock (`LuceneTestSync`, `ShellSandboxSync`, `ToolRegistrySync`, `TelemetryTestSync`, `LoadTestHarnessSync`); scope shared-table assertions to your own rows; a "seeded row missing" red is usually the `Fixtures.deleteDatabase` race, not a regression. Circuit breakers live in a process-global registry keyed by provider or MCP server name, so a test that drives `chat()`, a stream or `callTool` mints its own name and `CircuitBreakers.remove`s it — never `test-provider`, which another class may be tripping.
+- Test classes run concurrently in one JVM: never flip a process-global without its lock (`LuceneTestSync`, `ShellSandboxSync`, `ToolRegistrySync`, `TelemetryTestSync`, `LoadTestHarnessSync`, `SlackWebApiTestSync`); scope shared-table assertions to your own rows; a "seeded row missing" red is usually the `Fixtures.deleteDatabase` race, not a regression. Circuit breakers live in a process-global registry keyed by provider or MCP server name, so a test that drives `chat()`, a stream or `callTool` mints its own name and `CircuitBreakers.remove`s it — never `test-provider`, which another class may be tripping.
 - In a FunctionalTest, seed what your own HTTP request reads with `commitInFreshTx` — the body is already in a transaction and `Tx.run` joins it. Real HTTP against the autotest server 401s `password_unset` until `AuthFixture.seedAdminPassword` runs; the loadtest harness adds a warmup turn.
 - Frontend: `cd frontend && pnpm test` after edits; `pnpm typecheck` is the TS gate, the LSP's `.vue` import errors are false. After a dependency bump, `rm -rf .nuxt node_modules/.vite && pnpm exec nuxi prepare` before believing a green; in a fresh worktree run `nuxi prepare` first or the suite false-REDs with zero tests.
 - `pnpm test --coverage`, never `pnpm test -- --coverage` (vitest reads it as a filename and passes with no coverage). `pnpm test` never runs e2e; `./jclaw.sh e2e` needs a live instance answering `/api/status`.
@@ -209,7 +209,7 @@ bin/diagnostics.test.mjs` its parser tests.
 
 It parses, it does not add builds. It runs `./gradlew compileTestJava` — with `--tests`,
 `play autotest` as well — and reads javac's output plus the xunit reports already on
-disk. Parsing the 514 reports costs milliseconds against a compile measured in seconds
+disk. Parsing the ~560 reports costs milliseconds against a compile measured in seconds
 and a suite measured in minutes.
 
 Three contracts make the output safe to believe. A clean tree prints `[]`, never nothing:
@@ -446,21 +446,22 @@ close — the Gradle compile is the single place a javac plugin can see this cod
 layering Spotless uses.
 
 **What is in scope.** The `NullAway:AnnotatedPackages` option in `build.gradle.kts` lists
-`utils`, `llm`, `agents`, `tools`, `services`, `controllers`, `channels`, `jobs` and `slash` —
-every package under `app/` except one. Each carries a `package-info.java` with `@NullMarked`, and
-so must every subpackage, since the annotation does not inherit.
+`utils`, `llm`, `agents`, `tools`, `services`, `controllers`, `channels`, `jobs` and `slash`. Each
+carries a `package-info.java` with `@NullMarked`, and so must every subpackage, since the
+annotation does not inherit.
 
-**`models` is the only exclusion, and it is permanent.** JPA populates entity fields reflectively
-after construction, so every non-null column would report as uninitialised. Nothing else in
-`app/` is exempt, which is what stops a null contract going unchecked simply because the caller
-sat in an unannotated package.
+**`models` is the only deliberate exclusion, and it is permanent.** JPA populates entity fields
+reflectively after construction, so every non-null column would report as uninitialised. `mcp`
+and `memory` are not yet in scope — neither is listed nor has a `package-info.java` — so a null
+contract whose caller sits in either goes unchecked. (`com.aspose.words` is a compatibility shim
+for the WhatsApp-Web library, not JClaw code.)
 
 Getting there took three stories. JCLAW-1149 covered the first five. JCLAW-1160 added
 `controllers`, `jobs` and `slash`, because that gap was itself the defect: a parameter whose only
 null-passing caller lived in one of them was declared non-null and nothing objected, so the
 declaration was a lie no gate could catch. One of those, a null printer protocol reaching
-`defaultPort()`, had been 500ing the settings page for two months. JCLAW-1161 finished the job
-with `channels`.
+`defaultPort()`, had been 500ing the settings page for two months. JCLAW-1161 added
+`channels`.
 
 **Measure a widening before attempting it, and raise javac's error cap first.** `-Xmaxerrs`
 defaults to 100, so an unmodified `./gradlew compileJava` reports exactly 100 and stops — a count
@@ -502,7 +503,7 @@ an array it goes after the element type (`float @Nullable [] vector` annotates t
 error" — NullAway cannot see that a null `error()` implies a non-null payload. The convention
 here is an accessor that asserts the invariant and names it in one line, rather than a
 suppression: `FsPaths.TargetPath.resolvedTarget()`, `FsSupport.LoadedFile.resolvedContent()`,
-`DeliverySpec.resolvedTool()`, `ScrapeObservation.resolvedError()` and a dozen siblings all
+`DeliverySpec.resolvedTool()`, `ScrapeObservation.resolvedError()` and nearly twenty siblings all
 follow that shape. Prefer it — a `resolvedX()` throws where a suppression would return null.
 
 **Suppressions.** `@SuppressWarnings("NullAway")` with a one-line reason, and rare — one exists
@@ -531,11 +532,12 @@ class assignable to `AutoCloseable` (so `implements McpTransport` counts) and fa
 in `app/` with no `@MustBeClosed` outside a comment in its file, or if either compile task drops
 the check below `ERROR`.
 
-`HttpFactories` is deliberately untouched: its methods hand back the three shared
-`OkHttpClient` singletons, not per-call resources. The resource on that path is the `Response`,
-which belongs to whoever executes the call — `OkHttpLlmHttpDriver.send` already closes its own
-in try-with-resources, and `streamSse` blocks to completion rather than returning a live stream
-handle, so neither returns anything a caller could leak.
+`HttpFactories` is deliberately untouched: its methods hand back six shared `OkHttpClient`
+singletons (the three tiers and their SSRF-guarded variants), not per-call resources. The
+resource on that path is the `Response`, which belongs to whoever executes the call —
+`OkHttpLlmHttpDriver.send` already closes its own in try-with-resources, and `streamSse` blocks
+to completion rather than returning a live stream handle, so neither returns anything a caller
+could leak.
 
 **The Lucene test lock.** `LuceneTestSync` guards a JVM-global index behind one
 `ReentrantLock`; an acquire with no matching `release()` does not fail — it hangs every later
@@ -545,8 +547,9 @@ that lives inside one method body is compiler-enforced. Windows that span JUnit 
 keep the older `openForTest()` / `release()` pair, because `@MustBeClosed` accepts only a
 resource variable or a return and a `@BeforeEach`/`@AfterEach` pair is neither; those callers
 are covered instead by a source scan in `ResourceLeakGateConformanceTest` that fails on an
-acquire with no release in the same file. **Prefer the lease** for any new Lucene test whose
-window fits in one method.
+acquire whose `release()` is not in an `@AfterEach`/`@AfterAll` hook or a `finally` block — a
+release at the end of a test body never runs once an assertion above it fails. **Prefer the
+lease** for any new Lucene test whose window fits in one method.
 
 **Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — ten
 sites today. `McpConnectionManager.doConnect` and `McpServerService.testConnection` build a
@@ -609,7 +612,8 @@ started. Every process JClaw spawns that can be steered by model output goes thr
 coding-harness boundary and the native-tool boundary cannot drift apart:
 
 - **macOS** — `sandbox-exec -p '<inline Seatbelt profile>'`: allow-default, deny all writes,
-  then grant back the one write root plus `/private/tmp`, `/private/var/folders` and `/dev`;
+  then grant back the write root, any caller-passed allowances, `/private/tmp`,
+  `/private/var/folders` and `/dev`;
   deny reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, `~/.netrc`.
 - **Linux** — `bwrap --ro-bind / / --tmpfs $HOME --bind <writeRoot> <writeRoot>`: the visible
   filesystem is built from nothing, so secrets are *absent* rather than merely denied. Mount
@@ -617,6 +621,7 @@ coding-harness boundary and the native-tool boundary cannot drift apart:
   hides every earlier bind beneath it, so the `$HOME` tmpfs must precede the write-root bind
   (the workspace lives under `$HOME` on every non-container install).
   `HarnessSandboxTest.linuxBindsTheWriteRootAfterTheHomeTmpfs` pins that order on every host.
+  Allowances follow the write root as `--ro-bind-try`: readable here, but writable on macOS.
 
 Two independent tri-state keys drive it, both `false` by default, both accepting
 `true` (confine every run) or `untrusted` (confine only runs whose origin channel is not the
@@ -625,7 +630,7 @@ operator's own web chat):
 | Key | Covers | Write root |
 | --- | --- | --- |
 | `subagent.acp.sandbox` | ACP coding-harness processes | the run's session directory |
-| `shell.sandbox` | `exec` (`/bin/sh -c`), `diarize_audio`'s ffmpeg extraction, and `LlmAudio`'s ffmpeg transcode of an audio attachment | the agent's resolved workspace for `exec`; the temp directory for the two ffmpeg runs |
+| `shell.sandbox` | `exec` (`/bin/sh -c`), `diarize_audio`'s ffmpeg extraction, and `LlmAudio`'s ffmpeg transcode of an audio attachment | the agent's resolved workspace for `exec`; the temp directory for the two ffmpeg runs, with the workspace root (`diarize_audio`) or the source file's directory (`LlmAudio`) as an allowance |
 
 They are separate on purpose: confining a coding harness is not the same operator decision as
 confining every shell command. Neither key is seeded into the Config DB — an absent key already
@@ -829,7 +834,7 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **Instrumentation, helpers, and prior verdicts already in the repo beat improvising.**
 
-- Latency questions have `LatencyStats` / `LatencyTrace`, `/api/metrics`, the `./jclaw.sh loadtest` harness, and JProfiler. Prefer them over a hand-rolled stopwatch.
+- Latency questions have `LatencyStats` / `LatencyTrace`, `/api/metrics/latency`, the `./jclaw.sh loadtest` harness, and JProfiler. Prefer them over a hand-rolled stopwatch.
 - Before deciding a static-analysis finding, check how the same rule was already resolved elsewhere in this project. A verdict that contradicts an established one either needs to change both places or is wrong.
 - Match the existing construction for test fixtures and helpers (`AgentService.create`, `commitInFreshTx`, the probe `setForTest` seams) rather than building a parallel one.
 
@@ -868,7 +873,7 @@ for (var p : printers) { ... }
 - the specific failure a guard prevents
 - an external contract the code cannot state itself: wire format, provider quirk, library nullability
 
-**Length is one line.** A second line requires a reader who would otherwise get it wrong. A fifth means the code is unclear — fix the code (§3), don't explain it. Match the density around you: a new entry in a list of one-line comments gets one line. In `SettingsUnmanagedBanner.vue`'s prefix list, `playwright.` and `jtokkit.` run several lines because one is a deliberately-retained retired namespace and the other is written autonomously by a job — both genuinely surprising. Every ordinary entry beside them is a single line, and a new one that isn't will be sent back.
+**Length is one line.** A second line requires a reader who would otherwise get it wrong. A fifth means the code is unclear — fix the code (§3), don't explain it. Match the density around you: a new entry in a list of one-line comments gets one line. In `SettingsUnmanagedBanner.vue`'s prefix list, `playwright.`, `jtokkit.` and `memory.` run several lines because one is a deliberately-retained retired namespace and the other two cover keys written autonomously by a job — all genuinely surprising. Every ordinary entry beside them is a single line, and a new one that isn't will be sent back.
 
 **Javadoc is held to the same bar.** Stating a public contract — parameters, return, thrown conditions, threading — earns its length. Prose rationale *inside* a Javadoc block does not: it faces the same delete test as any other comment, and a private helper usually needs no Javadoc at all. A ten-line block explaining why a two-line method exists is the same defect as a ten-line inline comment.
 

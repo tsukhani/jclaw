@@ -20,7 +20,7 @@ matching the image/video sidecar architecture).
 | POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — `model` selects the engine (see below); persistent worker in its own uv script env (JCLAW-627/650) |
 | GET | `/asr/models?ids=a,b` | → `{status: {<id>: …}}` — per-model cached/bytesOnDisk/engine status for the Settings page, wrapped in a `status` object |
 | POST | `/asr/prefetch` | `{model}` → downloads the host engine's weights ahead of use |
-| POST | `/shutdown` | graceful exit (JVM shutdown hook) |
+| POST | `/shutdown` | exit — called only to evict an adopted orphan whose `/health` model no longer matches config (JCLAW-637); a JVM shutdown destroys the process instead |
 
 The audio file is passed **by path** (same host; attachments are already on
 disk). One inference at a time; concurrent callers get `409` and queue on

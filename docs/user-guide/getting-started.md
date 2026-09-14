@@ -30,7 +30,7 @@ Read in that order if it's your first time. Skim if you're hunting for a specifi
 1. **Set a theme.** The toggle is in the top-right of every page (system / light / dark).
 2. **Visit [Settings](/settings) and add at least one LLM provider.** Without an API key (or a local provider like Ollama configured), no agent can answer. See the [Settings](/guide#settings) section of this guide for what each provider needs.
 3. **Visit [Agents](/agents) and create or enable an agent.** Pick a model, write a short system prompt, and turn on whatever tools you need. The default agent template is a sensible starting point.
-4. **Open [Chat](/chat), pick that agent in the sidebar, and say hello.** Your conversation appears in the sidebar and you can come back to it later.
+4. **Open [Chat](/chat), pick that agent from the Agent dropdown in the header, and say hello.** Your conversation is saved, and you can reopen it later from [Conversations](/conversations).
 
 That's the minimum loop. Everything else in this guide is how to do more with it.
 
@@ -52,9 +52,9 @@ The left sidebar is grouped by intent:
 | **Admin** | [Settings](/settings), [Memories](/memories) (captured agent memories), [Logs](/logs). |
 | **Help** | Feedback, Guided Tour, this **User Guide**. |
 
-At the bottom, two diagnostic rows: your JClaw version (with a green/red pip for API status) and the Play framework version (with a green/amber pip showing whether it matches the pinned `.play-version`). Red on the first dot means the backend is unreachable — most pages will fail until it recovers.
+At the bottom, two diagnostic rows: your JClaw version (with a pip for API status — green when online, red when offline, amber when a newer release is available, which links to **Settings → Maintenance**) and the Play framework version (with a green/amber pip showing whether it matches the pinned `.play-version`). Red on the first dot means the backend is unreachable — most pages will fail until it recovers. Below them are your username and **Sign out** (an exit icon when the sidebar is collapsed).
 
-Up in the top bar, the **Search…** box on the right — beside the theme toggle — opens the command palette.
+Up in the top bar, the **Search…** box on the right — beside the theme toggle — opens the command palette. <kbd>⌘</kbd>+<kbd>K</kbd> (<kbd>Ctrl</kbd>+<kbd>K</kbd> on Windows and Linux) opens or closes it from any page.
 
 ## The Guided Tour
 

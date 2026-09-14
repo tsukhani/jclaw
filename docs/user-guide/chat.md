@@ -8,15 +8,15 @@ This section covers Chat on its own. The rest of the guide is how to bend it.
 
 The Chat page has three regions:
 
-- **Left sidebar** — a list of conversations for your current agent, plus a switcher to change which agent you're chatting with. New conversations appear here as you create them.
+- **Header** — the **Agent:** dropdown on the left, the model picker in the middle, and the context meter on the right.
 - **Message rail** — the active conversation: your messages, the agent's replies, tool calls, and inline reasoning when the model supports it.
 - **Composer** — at the bottom, where you type, attach, and send.
 
-Closing or refreshing the page is safe. Your conversation history is server-side; you'll find the same thread on return.
+Closing or refreshing the page is safe. Your conversation history is server-side; to reopen an earlier thread, click its row on [Conversations](/conversations).
 
 ## Picking an agent
 
-The sidebar shows agents you've enabled on the [Agents](/agents) page. Click one to switch your active conversation list to that agent. The composer at the bottom always sends to the currently-selected agent.
+The **Agent:** dropdown in the header lists the agents on the [Agents](/agents) page (subagents aside), starting on the Main Agent; with only one agent it shows that agent's name instead. The composer at the bottom always sends to the currently-selected agent.
 
 If you don't have any agents yet, [Agents](/guide#agents) is the next stop — come back when you do.
 
@@ -26,7 +26,9 @@ Type and press <kbd>Enter</kbd> to send. <kbd>Shift</kbd>+<kbd>Enter</kbd> inser
 
 The reply streams in real time. While the model is generating, the **Send** button turns into a **Stop** button — click it to interrupt the current generation.
 
-If you regret a message, hover over it: you'll see **Edit & resubmit** and **Delete message** controls. Editing rewinds the conversation to that point and re-runs from the edited text.
+If you regret a message, hover over it: you'll see **Copy to clipboard**, **Edit & resubmit** and **Delete message** controls. Editing rewinds the conversation to that point and re-runs from the edited text. A reply has **Copy to clipboard**, **Regenerate response** and **Delete message** on hover; regenerating removes that reply and the message it answered, then sends your message again for a fresh answer.
+
+To start over, click **New conversation** (the pencil-and-square icon in the composer footer). The page clears for a fresh thread; the previous one stays saved.
 
 To hear a reply, hover it and click the **speaker icon** — text-to-speech streams the answer aloud sentence by sentence, using the engine you pick in [Settings → Speech](/guide#settings).
 
@@ -58,7 +60,7 @@ For a hands-free spoken conversation, click **Voice mode** (the voice button nea
 
 ## Slash commands
 
-Type `/` at the start of a message to access these built-in commands. A menu opens listing every command with a one-line description; keep typing to filter it, use the arrow keys to move, and press Enter or Tab to pick one — then Enter again to send. They work in the web composer and in any external channel ([Telegram](/guide#conversations-and-channels), Slack, WhatsApp); Telegram surfaces the same list in its native autocomplete dropdown. `/prompt` is the one whose shape differs by channel — the web has a box to drop text into, other channels don't — so there it replies with the prompt for you to copy instead.
+Type `/` at the start of a message to access these built-in commands. A menu opens listing every command with a one-line description; keep typing to filter it, use the arrow keys to move, and press Enter or Tab to pick one — then Enter again to send. They work in the web composer and in any external channel ([Telegram](/guide#conversations-and-channels), Slack, WhatsApp); Telegram surfaces the same list in its native autocomplete dropdown. On Slack, type them with `!` instead of `/` (`!help`, `!model <provider>/<id>`), because Slack won't deliver `/` commands inside threads. `/prompt` is the one whose shape differs by channel — the web has a box to drop text into, other channels don't — so there it replies with the prompt for you to copy instead.
 
 | Command           | What it does                                                                                                  |
 |-------------------|---------------------------------------------------------------------------------------------------------------|
@@ -110,25 +112,23 @@ The composer has an **Export as Markdown** button. It downloads the full thread 
 
 ## Running subagents
 
-Every subagent run the conversation spawns into its own child conversation gets a chip in a stack pinned above the transcript. Inline runs write into this conversation itself, so they get no chip. A chip appears as soon as its run is spawned and stays after the run ends. The stack shows about four chips before it scrolls.
+Every subagent run the conversation spawns into its own child conversation gets a row in a list that hangs from the chat header. Inline runs write into this conversation itself, so they get no row, though the list's **N subagents · N running** header counts them. A row appears as soon as its run is spawned and stays after the run ends. The list shows about four rows before it scrolls; click its header to collapse or reopen it.
 
-Each chip shows the run's label, or the subagent's name when the run has no label, and the run's status in the colours the [Subagents](/subagents) page uses: a pulsing blue dot for **Running**, then green for **Completed**, red for **Failed**, yellow for **Killed** and orange for **Timed out**. The status updates in place when the run ends. An async run's result still arrives as an announce card.
+Each row shows the run's label, or the subagent's name when the run has no label, its status, and a time: how long a running run has been going, or how long ago a finished one ended. **Running** shows a spinner and **Completed** a plain word; only **Failed**, **Killed** and **Timed out** get a coloured pill, whose tooltip gives the reason. The status updates in place when the run ends. A background run posts no announce card in the transcript — its outcome is here instead. A run the agent waited on with `subagent_yield` still leaves its announce card.
 
-Click the arrow on a chip to expand it and read that run's transcript in place, read-only. While the run is still going, new messages appear as the subagent writes them. Collapse the chip and expand it again and the transcript you had loaded shows straight away, then catches up with anything written since. If a transcript fails to load, **Retry** in the panel fetches it again. **Open full transcript** at the bottom of the panel opens the child conversation as a full page.
+Click a row to expand it and read that run's transcript in place, read-only; a failed, killed or timed-out run shows its reason above the transcript. While the run is still going, new messages appear as the subagent writes them. Collapse the row and expand it again and the transcript you had loaded shows straight away, then catches up with anything written since. If a transcript fails to load, **Retry** in the panel fetches it again. **Open full transcript** at the bottom of the panel opens the child conversation as a full page.
 
-The **✕** on a chip closes it. A closed chip stays hidden until you load the conversation again, by switching to another conversation and back or by reloading the page.
-
-The stack holds a conversation's newest 100 runs. When a conversation has spawned more, **View all N on the Subagents page** under the stack opens the full list, filtered to that conversation.
+The list holds a conversation's newest 100 runs. **View all →** in its header opens the full list on the [Subagents](/subagents) page, filtered to that conversation.
 
 ## Subagent transcripts are read-only
 
-If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent chip, the "View full →" link on an async announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. The full page loads the transcript once, so a running subagent's transcript shows the messages as of when you opened it; to follow a run live, expand its chip in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
+If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent row, the "View full →" link on an announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. The full page loads the transcript once, so a running subagent's transcript shows the messages as of when you opened it; to follow a run live, expand its row in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.
 
 ## Where to go next
 
 You've got the base loop. The next layers are about *who* answers and *where* the conversation happens:
 
-- [Agents](/guide#agents) — create and configure the agents that show up in your sidebar.
+- [Agents](/guide#agents) — create and configure the agents that show up in the Agent dropdown.
 - [Conversations & Channels](/guide#conversations-and-channels) — manage prior threads and connect Slack / Telegram / WhatsApp.
 - [Subagents](/guide#subagents) — fan out child agents from inside a conversation.
 - [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) — extend what your agents can do.

@@ -29,7 +29,8 @@
 
 Get JClaw running in one command. The installer downloads the self-contained
 `jclaw-bundle.zip` from the latest GitHub Release, verifies Java 25+ (the bundle's
-**only** runtime dependency), extracts it to `~/.jclaw`, and starts JClaw on
+**only** runtime dependency) — offering to download a self-contained Zulu JRE 25
+into `~/.jclaw/jre` when none is found — extracts it to `~/.jclaw`, and starts JClaw on
 <http://localhost:9000>.
 
 **macOS & Linux**
@@ -54,19 +55,21 @@ any new shell — the installer puts the `jclaw` command on your `PATH` (via
 entirely, run `jclaw uninstall`: it stops the app, undoes the PATH and completion
 wiring, and deletes `~/.jclaw`.
 
-**Updating:** `jclaw upgrade` (or **Settings → Upgrade** in the app) installs the
+**Updating:** `jclaw upgrade` (or **Settings → System → Maintenance** in the app) installs the
 newest release in place. Your database, workspace, credentials, installed apps and
 edited configuration are carried across; the database is backed up first; and a
 release that fails to start is rolled back automatically. The download runs while
 JClaw keeps serving, so only the swap itself is downtime. `jclaw upgrade --check`
-reports what's available without installing it. Re-running the one-line installer
+reports what's available without installing it; `--version <tag>` installs a
+specific release (including an earlier one), and `--yes` skips the confirmation
+prompt. Re-running the one-line installer
 does the same thing — it hands off to `jclaw upgrade` when an install already
 exists. Docker deployments upgrade the image instead
 (`docker compose pull && docker compose up -d`), and a git clone uses `git pull`.
 
 **Requirements:** a Java 25+ runtime ([Zulu](https://www.azul.com/downloads/?version=java-25)
-or Temurin). Nothing else — the bundle bakes in the framework, app dependencies,
-precompiled classes, and the prebuilt SPA.
+or Temurin), or let the installer download one. Nothing else — the bundle bakes in
+the framework, app dependencies, precompiled classes, and the prebuilt SPA.
 
 **Configuration** (optional environment variables):
 
@@ -76,7 +79,12 @@ precompiled classes, and the prebuilt SPA.
 | `JCLAW_VERSION` | `latest` | Pin a release tag, e.g. `v0.14.7` |
 | `JCLAW_PORT` | `9000` | Port reported on launch |
 | `JCLAW_NO_START` | — | Set to `1` to install without starting |
-| `JCLAW_BUNDLE_URL` | — | Install from a specific bundle URL (including `file://`) instead of GitHub Releases |
+| `JCLAW_INSTALL_JRE` | — | Set to `1` to download the Zulu JRE without prompting when Java 25+ is missing |
+| `JCLAW_NO_JRE` | — | Set to `1` to never auto-install a JRE |
+| `JCLAW_NO_RC_EDIT` | — | Set to `1` to generate completion scripts without editing your shell rc |
+| `JCLAW_FORCE_REINSTALL` | — | Set to `1` to replace an existing install from scratch, **discarding** its database, workspace and credentials (otherwise an existing install is upgraded in place) |
+| `JCLAW_BIN_DIR` | `~/.local/bin` | Where the `jclaw` command goes (`install.sh` only) |
+| `JCLAW_BUNDLE_URL` | — | Install from a specific bundle URL (including `file://`) instead of GitHub Releases (`install.sh` only) |
 
 ```bash
 # Pin a version and install without auto-starting:
@@ -110,6 +118,7 @@ The implementation is entirely original — no code is shared with any of them. 
 ## Features
 
 - 🤖 **Agent System** — Conversational AI agents with memory and context
+- 💬 **Channels** — Web chat plus per-agent Telegram, Slack and WhatsApp bindings (the official Cloud API or unofficial WhatsApp Web)
 - ⚡ **Job Scheduling** — Persistent cron & scheduled tasks via db-scheduler, with automatic retries and crash recovery
 - 🔧 **Pure Java** — The server is all Java; Python is needed only by the optional local sidecars, JavaScript only to build the SPA
 - 📦 **Built-in Frontend** — Nuxt 4 SPA (Vue 3 + TypeScript)
@@ -118,7 +127,9 @@ The implementation is entirely original — no code is shared with any of them. 
 - ⏰ **Tasks & Reminders** — User-facing scheduled tasks and reminders, managed from the Tasks and Reminders pages
 - 🧩 **Skills, MCP & Subagents** — Reusable skills, MCP server tools, and subagent delegation including ACP coding harnesses
 - 📡 **OpenTelemetry** — Opt-in OTLP traces and metrics with GenAI spans per model call, reconfigurable live without a restart
-- 🎙️ **Voice, Image & Video** — Local ASR/TTS and image/video generation through the optional Python sidecars
+- 🎙️ **Voice, Image & Video** — Real-time voice mode, local ASR/TTS and image/video generation through the optional Python sidecars
+- 🗂️ **Apps** — Static mini-apps under `public/apps`, managed from the Apps page
+- 🛡️ **Tool Approvals & Sandboxing** — Dangerous actions (shell commands, coding-harness launches) ask you for approval; opt-in OS sandboxing (`shell.sandbox`, `subagent.acp.sandbox`) confines what those processes can write and read
 - 🚀 **Lightweight** — Minimal resource footprint, fast startup
 
 ---
@@ -132,7 +143,7 @@ jclaw/
 │   ├── models/                   # JPA domain entities
 │   ├── services/                 # Business logic (incl. db-scheduler bridge)
 │   ├── agents/                   # AI agent implementations
-│   ├── channels/                 # Messaging channels (web, Telegram, Slack)
+│   ├── channels/                 # Messaging channels (web, Telegram, Slack, WhatsApp)
 │   ├── llm/                      # LLM provider drivers (OkHttp 5)
 │   ├── tools/                    # Agent tool implementations
 │   ├── memory/                   # Agent memory stores (JPA-backed)
@@ -141,14 +152,14 @@ jclaw/
 │   ├── jobs/                     # Play @Every jobs + db-scheduler handlers
 │   ├── views/                    # Groovy server templates
 │   └── utils/                    # Utility classes
-├── bin/                          # diagnostics.mjs and its tests
+├── bin/                          # Dev tooling: diagnostics.mjs (+ tests), coverage-blend.mjs, JaCoCo jars
 ├── certs/                        # Generated .env secret + optional TLS cert (gitignored)
 ├── conf/                         # Play configuration
 │   ├── application.conf          # Main app config
 │   ├── routes                    # URL routing
 │   ├── play.plugins              # Play plugin registration
 │   └── log4j2.xml                # Logging configuration
-├── docs/                         # User guide + generated architecture docs
+├── docs/                         # User guide, generated architecture docs, spikes, reports
 ├── frontend/                     # Nuxt 4 SPA (SPA-only; ssr: false)
 │   ├── app.vue                   # Root component
 │   ├── layouts/                  # Page layouts
@@ -159,7 +170,6 @@ jclaw/
 │   ├── public/                   # Static assets
 │   └── nuxt.config.ts            # Nuxt configuration
 ├── evals/                        # Agent-behaviour eval datasets
-├── lib/                          # Custom JARs (if needed)
 ├── modules/                      # Play modules (auto-managed)
 ├── public/                       # Static web assets
 ├── sidecar/                      # Python sidecars (asr, diarize, fetch, image, stealth, tts, video)
@@ -207,7 +217,7 @@ choco install tesseract
 
 Additional language packs install separately. The default is English
 (`eng`); install `tesseract-ocr-fra`, `tesseract-ocr-jpn`, etc. for other
-languages, then update `ocr.tesseract.languages` in `conf/application.conf`
+languages, then set them under **Settings → Image → OCR**
 (e.g. `eng+fra+jpn`).
 
 **Local Ollama** — required only if you want to bind agents to the
@@ -236,9 +246,10 @@ After installing, pull a model:
 ollama pull qwen2.5
 ```
 
-Then open the Settings page, expand the `ollama-local` card, and either
-run Discover Models against `http://localhost:11434/v1` or paste the
-JSON for the model you pulled into the `models` field. Bind an agent
+Then open **Settings → Providers → LLM Providers**, open **Manage models**
+on the `ollama-local` row, and either run **Discover Models** against
+`http://localhost:11434/v1` or enter the model you pulled in the
+**Add model** form (ID, display name, context window, max tokens). Bind an agent
 to `ollama-local` from the Agent Edit page to start chatting against
 your local model.
 
@@ -256,9 +267,10 @@ installer, or Linux AppImage). After launching, load a model in the
 **My Models** tab, then switch to the **Server** tab and click
 **Start Server**. The default port is 1234.
 
-In JClaw Settings, expand the `lm-studio` card and either run
-Discover Models against `http://localhost:1234/v1` or paste the JSON
-for the model you loaded into the `models` field. Bind an agent to
+In **Settings → Providers → LLM Providers**, open **Manage models** on
+the `lm-studio` row and either run **Discover Models** against
+`http://localhost:1234/v1` or enter the model you loaded in the
+**Add model** form. Bind an agent to
 `lm-studio` from the Agent Edit page to use it.
 
 ### Clone
@@ -340,7 +352,7 @@ When the toolchain changes (e.g., a new Play version, a JDK bump, a base-image b
 |---|---|
 | **Cursor / VS Code** | <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → `Dev Containers: Rebuild Container` |
 | **JetBrains Gateway** | Container settings → `Rebuild` |
-| **CLI fallback** | `docker build -t jclaw-devcontainer:latest .devcontainer/` (manual, you'd then need to update the IDE config to use the rebuilt image) |
+| **CLI fallback** | `docker build -f .devcontainer/Dockerfile -t jclaw-devcontainer:latest .` from the repo root — the build context is the repo, since the Dockerfile copies `.play-version` (manual, you'd then need to update the IDE config to use the rebuilt image) |
 
 Most rebuilds reuse cached apt + JDK + Node layers and only re-download what changed (e.g., the Play release zip if `PLAY_VERSION` was bumped). Full cold rebuilds run ~5–10 min.
 
@@ -366,12 +378,15 @@ Most rebuilds reuse cached apt + JDK + Node layers and only re-download what cha
 
 # View logs (tails both backend and frontend logs)
 ./jclaw.sh --dev logs
+
+# Restart only the Play backend, leaving the Nuxt dev server running
+./jclaw.sh --dev restart --backend-only
 ```
 Default ports: backend on **:9000**, frontend on **:3000**.
 
 ### Production Deployment
 
-For a turnkey production install, use the [Quick Install](#quick-install-one-line) (which downloads the self-contained `jclaw-bundle.zip`) or [Docker](#docker-production). To build that bundle yourself, run `./jclaw.sh bundle` — it produces a self-contained `dist/jclaw-bundle.zip` that runs with only a Java 25 JRE. Unzip it wherever you want to install JClaw, then start it in place:
+For a turnkey production install, use the [Quick Install](#quick-install-one-line) (which downloads the self-contained `jclaw-bundle.zip`) or [Docker](#docker-production). To build that bundle yourself, run `./jclaw.sh bundle` — it produces a self-contained `dist/jclaw-bundle.zip` that runs with only a Java 25 JRE. (`./jclaw.sh dist` builds the lighter `dist/jclaw.zip`, which needs a local Java 25, Gradle and Play fork install to run.) Unzip it wherever you want to install JClaw, then start it in place:
 
 ```bash
 # Start
@@ -382,11 +397,24 @@ For a turnkey production install, use the [Quick Install](#quick-install-one-lin
 
 # View logs
 ./jclaw.sh logs
+
+# Database: backup (--list to show them), restore, H2 recovery, health
+./jclaw.sh backup
+./jclaw.sh restore <zip | backup id>   # validated first; a running instance restarts
+./jclaw.sh repair                      # rebuild a damaged database with H2's Recover tool
+./jclaw.sh db-clean                    # delete what the last successful repair left behind
+./jclaw.sh db-status                   # file size, health verdict, last backup
+
+# Admin
+./jclaw.sh secret                      # generate or rotate PLAY_SECRET in certs/.env
+./jclaw.sh reset                       # clear the admin password; the next launch asks for a new one
+./jclaw.sh completion install          # bash + zsh tab completion
+./jclaw.sh shim                        # re-link the `jclaw` command into ~/.local/bin
 ```
 
 ### Docker (Production)
 
-The simplest way to run JClaw in production is with Docker Compose. The shipped `docker-compose.yml` pulls the prebuilt image from GHCR, publishes the app on **:9000**, and persists `data/`, `logs/`, `workspace/`, `skills/`, and `certs/` (the generated secret and TLS material) to the host so config and conversations survive restarts.
+The simplest way to run JClaw in production is with Docker Compose. The shipped `docker-compose.yml` pulls the prebuilt image from GHCR, publishes the app on **:9000** (HTTP) and **:9443** (HTTPS, TCP and UDP), and persists `data/`, `logs/`, `workspace/`, `skills/`, and `certs/` (the generated secret and TLS material) to the host so config and conversations survive restarts.
 
 ```bash
 # Start in the background
@@ -398,15 +426,15 @@ docker compose logs -f
 # Stop and remove the container
 docker compose down
 
-# Run on a custom port (default: 9000)
-JCLAW_PORT=8080 docker compose up -d
+# Run on custom ports (defaults: 9000, and 9443 for HTTPS)
+JCLAW_PORT=8080 JCLAW_HTTPS_PORT=8443 docker compose up -d
 ```
 
 That's it — no `.env` setup needed. On first boot the container's entrypoint generates a 64-character `PLAY_SECRET` (used to sign session cookies) and persists it to `./certs/.env`. Subsequent restarts read the same file, so existing user sessions survive across `docker compose down` / `up` cycles. To rotate the secret, delete `./certs/.env` and restart the container — all existing `PLAY_SESSION` cookies become invalid, which is the point.
 
 If you'd rather pin the secret yourself (e.g. for multi-host deployments that need a shared cookie key, or rotation managed by your secret-store), drop a `.env` file alongside `docker-compose.yml` with `PLAY_SECRET=<value>` — Compose will forward it into the container and the entrypoint will defer to it instead of generating one.
 
-You can also set `JCLAW_PORT` in `.env` alongside `docker-compose.yml` instead of passing it inline — Compose reads the same file for variable interpolation in the YAML and for the runtime environment of the `jclaw` service.
+You can also set `JCLAW_PORT` and `JCLAW_HTTPS_PORT` in `.env` alongside `docker-compose.yml` instead of passing them inline — Compose reads the same file for variable interpolation in the YAML and for the runtime environment of the `jclaw` service.
 
 The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` (or your custom port) once the container is healthy.
 
@@ -520,6 +548,15 @@ This runs `play autotest` (backend JUnit + functional tests), `pnpm test` (front
 
 Each check writes its full output to `logs/test-<check>.log` (e.g. `logs/test-backend.log`, `logs/test-typecheck.log`) for post-mortem on failure. The command exits non-zero if any check failed, so it's safe to wire into git hooks or CI.
 
+A few more developer commands sit beside it:
+
+```bash
+./jclaw.sh diagnostics [--tests]   # compile errors (and test failures) as one JSON array
+./jclaw.sh e2e                     # Playwright UAT suite against an already-running server
+./jclaw.sh loadtest                # in-process load-test harness against /api/chat/stream
+./jclaw.sh scrapetest              # scrape-ladder access rates over the CF-100 corpus (needs the backend)
+```
+
 #### Evals
 
 Agent behaviour is measured against datasets in `evals/suites/` — tool selection, structured output, and grounding, each a set of cases with deterministic pass criteria:
@@ -528,9 +565,10 @@ Agent behaviour is measured against datasets in `evals/suites/` — tool selecti
 ./jclaw.sh evals                                              # validate the dataset
 ./jclaw.sh evals --responses run.json --out reports/now.json  # score a recorded run
 ./jclaw.sh evals --responses run.json --baseline reports/last.json  # catch regressions
+./jclaw.sh evals --capture run.json --agent __evaltest__ --suite tool-selection  # drive a live agent
 ```
 
-Eval runs are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. See [evals/README.md](evals/README.md) for the format and for why a suite is edited in place, with a content fingerprint guarding comparability between runs.
+Validating and scoring are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. `--capture` is the exception: it drives real agent turns, so it needs the backend running and spends model calls. See [evals/README.md](evals/README.md) for the format and for why a suite is edited in place, with a content fingerprint guarding comparability between runs.
 
 #### Git hooks
 
@@ -550,10 +588,10 @@ To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP
 
 - **Models**: JPA entities with Play's model pattern
 - **Controllers**: RESTful API endpoints
-- **Services**: Business logic with dependency injection
+- **Services**: Business logic, without a dependency-injection container
 - **Agents**: Conversational AI with memory/context persistence
 - **Jobs**: Internal maintenance (cleanup, probes, boot checks) on Play's built-in `@Every` / `@OnApplicationStart` job system
-- **Scheduling**: User-facing Tasks — cron, scheduled, and immediate — run on [db-scheduler](https://github.com/kagkarlsson/db-scheduler), persisted in a `scheduled_tasks` table with atomic row-claim, pluggable retries, and heartbeat-based dead-execution recovery
+- **Scheduling**: User-facing Tasks — immediate, scheduled, interval, and cron — run on [db-scheduler](https://github.com/kagkarlsson/db-scheduler), persisted in a `scheduled_tasks` table with atomic row-claim, pluggable retries, and heartbeat-based dead-execution recovery
 
 ### Frontend (Nuxt 4)
 
@@ -569,7 +607,7 @@ To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP
 
 ## Key Principles
 
-1. **Java-First** — Everything in Java. No Python, no Node for server-side logic.
+1. **Java-First** — Server-side logic is Java, not Node; Python only in the optional local sidecars.
 2. **Minimal Dependencies** — Only bring in what we absolutely need.
 3. **Memory & Context** — Agents remember. Context persists. Conversations flow.
 4. **Async by Default** — Jobs run in background. APIs are non-blocking.

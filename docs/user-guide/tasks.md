@@ -127,6 +127,7 @@ Walking the transitions:
 - **Transient failure.** A recoverable error (network blip, rate-limit) bumps the **Retries** counter and reschedules on a backoff — `30s → 60s → 5m → 15m → 1h`. The task returns to its waiting state between attempts, then re-enters `RUNNING` on the retry.
 - **Permanent failure.** A non-recoverable error, or the retry cap reached, ends the task `FAILED`. **Retry** requeues it.
 - **Crash recovery.** If the server stops mid-fire, the task is left `RUNNING` with a stale scheduler heartbeat. JClaw marks it `LOST` after ~1 minute so you can see it stalled, then the scheduler automatically re-fires it (~2 minutes) — `LOST → RUNNING → COMPLETED/FAILED` — with no action from you. **Retry** skips the wait.
+- **Time limit.** A single fire may run for at most `fireMaxDurationSeconds` seconds, set at **Settings → Tasks** (default `600`, ten minutes). When it elapses, the fire is cancelled at its next safe point — the top of a model round or between tool calls — so a wedged fire can't run forever. `0` turns the limit off.
 - **Operator stop.** *Cancel* moves a task to `CANCELLED` (the row is kept; `runNow` or **Re-enable** revives it). Cancelling a single in-flight **run** stops only that fire and returns the task to its waiting state — the recurring schedule is left intact.
 
 :::note Reminders ride the same machine
@@ -148,9 +149,11 @@ Walking the transitions:
 
 For bulk delete, click the trash icon in the page header to enter multi-select mode, tick rows, then click **Delete N**.
 
+To keep an audit copy, click **Export** in the filter bar: it downloads a JSON bundle (`jclaw-tasks-audit-<timestamp>.json`) of the tasks currently listed, each with its run history. An open run trace has its own **Export JSON** button for that one run.
+
 ### Calendar view
 
-**Calendar** view places `SCHEDULED` and `CRON` next-fire times on a month, week, or day grid, handy for spotting double-bookings before a task fires.
+**Calendar** view projects every `CRON` and `INTERVAL` fire in the visible range, and pins `SCHEDULED` and `IMMEDIATE` tasks to their next run, on a month, week, or day grid, handy for spotting double-bookings before a task fires.
 
 ## Cron syntax
 
@@ -181,7 +184,7 @@ When in doubt, ask the agent — `task_manager` knows Spring cron and can transl
 1. Per-task `timezone` (set by the agent or `updateTask`, validated as IANA — `America/New_York`, `Asia/Tokyo`, etc.).
 2. Operator default at **Settings → Tasks → Default timezone**.
 3. The `tasks.defaultTimezone` line in `application.conf` (shipped commented-out; uncomment to pin a zone).
-4. The app timezone at **Settings → General** (`app.timezone`), which itself defaults to the server's JVM zone.
+4. The app timezone at **Settings → Timezone** (`app.timezone`), which itself defaults to the server's JVM zone.
 
 `INTERVAL` and `IMMEDIATE` tasks ignore timezone — their schedule is duration-based, not wall-clock.
 

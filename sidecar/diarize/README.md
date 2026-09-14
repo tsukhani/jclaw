@@ -15,7 +15,7 @@ that's the ASR sidecar's job.
 | POST | `/diarize` | `{audio_path, num_speakers?, emotions?, emotion_model?}` → `{turns: [{startMs, endMs, speaker, emotion?}, ...]}` (`emotions=true` runs an SER pass per turn — best-effort; `emotion_model` picks the SER repo, default MERaLiON-SER-v1) |
 | GET | `/diarize/models?ids=repo1,repo2` | → per-repo cached/bytesOnDisk download status (pyannote + the operator's SER model) for the Settings page — answered by a one-shot `uv run hf_prefetch.py --status`, a minimal env that spawns no pyannote/SER worker |
 | POST | `/diarize/prefetch` | `{model}` (an HF repo) → kicks a **detached** `uv run hf_prefetch.py --prefetch` and returns immediately, so `/diarize/models` keeps reporting live progress |
-| POST | `/shutdown` | graceful exit (JVM shutdown hook) |
+| POST | `/shutdown` | exit — called only to evict an adopted orphan whose `/health` model no longer matches config (JCLAW-637); a JVM shutdown destroys the process instead |
 
 The audio file is passed **by path** (same host; attachments are already on
 disk) and transcoded to 16 kHz mono wav via ffmpeg before pyannote (which
@@ -59,7 +59,8 @@ The SER model is **operator-configurable** (`transcription.diarization.emotionMo
 sidecar accepts any Hugging Face `AutoModelForAudioClassification` SER model —
 `AutoProcessor`, falling back to `AutoFeatureExtractor` for audio-only wav2vec2
 models — but JClaw's Settings offer a fixed trio (`DiarizeModelStore.SER_MODELS`:
-MERaLiON-SER v1, superb, Dpngtm) and coerce any other value back to the default.
+MERaLiON-SER v1, superb, Dpngtm). The Settings status coerces any other value to
+the default, but `/diarize` receives the stored value unchanged.
 **MERaLiON is a robust multilingual default** (English/Chinese/Malay/Tamil/
 Indonesian, conversational training, + V/A/D) — and the one verified accurate on
 the hardest tested domain (8 kHz Malay telephony), where the wav2vec2

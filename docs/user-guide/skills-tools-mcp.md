@@ -118,12 +118,12 @@ When you click **Add server**, you pick one:
 
 ### STDIO configuration
 
-| Field         | What to fill in                                                                    |
-|---------------|------------------------------------------------------------------------------------|
-| **Name**      | Anything memorable; this is the label across the UI.                                |
-| **Command**   | Executable path. Example: `npx`.                                                    |
-| **Args**      | One argument per line. Example: `-y` then `@modelcontextprotocol/server-postgres`.  |
-| **Env**       | Key/value pairs added to the subprocess environment (for API keys, DB URLs, etc.).  |
+| Field                     | What to fill in                                                                    |
+|---------------------------|------------------------------------------------------------------------------------|
+| **Name**                  | Anything memorable; this is the label across the UI.                                |
+| **Command**               | Executable path. Example: `npx`.                                                    |
+| **Args**                  | One argument per line. Example: `-y` then `@modelcontextprotocol/server-postgres`.  |
+| **Environment variables** | Key/value pairs added to the subprocess environment (for API keys, DB URLs, etc.).  |
 
 ### HTTP configuration
 
@@ -135,7 +135,7 @@ When you click **Add server**, you pick one:
 
 ### Testing a server
 
-Each row has a **Test** button. JClaw connects, lists the server's tools, and reports back. A successful test means the server is reachable and speaks MCP; if it fails, the error message is surfaced inline so you can fix the config.
+Each row has a **Test connection** button, and the add/edit form has one too. JClaw connects, lists the server's tools, and reports back. A successful test means the server is reachable and speaks MCP; if it fails, the error message is surfaced inline so you can fix the config.
 
 A successful test doesn't guarantee a server's tools will work end-to-end — you still need to attach it to an agent and try one.
 

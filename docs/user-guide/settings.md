@@ -10,11 +10,11 @@ Operator-wide settings.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `app.timezone` | server JVM zone | The IANA timezone the assistant treats as the current wall-clock time ("now") in its system prompt. This is separate from the Tasks `defaultTimezone` (which governs `CRON`/`SCHEDULED` task scheduling). |
+| `app.timezone` | server JVM zone | The IANA timezone the assistant treats as the current wall-clock time ("now") in its system prompt. It is also the zone `CRON`/`SCHEDULED` tasks follow unless the Tasks `defaultTimezone` is set to a different one. |
 
 ## Auto-update model prices
 
-A standalone opt-in toggle hoisted above LLM Providers. When on, JClaw fetches the community-maintained `model_prices_and_context_window.json` from `github.com/BerriAI/litellm` nightly and fills in missing prices on your configured models. Prices you've set manually are never overwritten. Off by default — the toggle is explicit so the outbound GitHub call is a deliberate opt-in. A **Refresh now** button forces an immediate fetch.
+A **Pricing** subsection at the top of LLM Providers, with one opt-in toggle: **Auto-update model prices nightly**. When on, JClaw fetches the community-maintained `model_prices_and_context_window.json` from `github.com/BerriAI/litellm` nightly and fills in missing prices on your configured models. Prices you've set manually are never overwritten. Off by default — the toggle is explicit so the outbound GitHub call is a deliberate opt-in. A **Refresh now** button forces an immediate fetch; it is disabled while the toggle is off.
 
 ## LLM Providers
 
@@ -33,6 +33,7 @@ For each provider you can:
 - Set **local** — the provider's Remote/Local classification. It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp; absent means remote. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
 - Set the **paymentModality** — how the provider bills you. `PER_TOKEN` estimates cost per turn from model pricing; `SUBSCRIPTION` ignores per-token pricing and pro-rates a flat monthly fee instead. A provider that supports only one billing model shows it locked.
 - Set **subscriptionMonthlyUsd** — shown only when the modality is `SUBSCRIPTION`: the monthly USD you pay the provider, which the Dashboard's Chat Cost **Subscription** block pro-rates to the selected window (`monthly × window_days / 30`).
+- Set **keepAlive** — Ollama Local only (`provider.ollama-local.keepAlive`, default `5m`): how long a model stays loaded between requests. `-1` keeps it loaded for good; longer values hold GPU memory per model.
 - **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability badges (vision, audio, video, thinking) confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess).
 - **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
 
@@ -57,6 +58,21 @@ Streaming has two hazards a timeout alone cannot see, and each has its own budge
 - **A stream that stalls mid-answer.** A gap of more than **30 s** between chunks marks the call as slow, and enough slow calls open the breaker just as failures do. The stream itself is only ended — turn released, socket closed — after **5 minutes** of silence, because a local model re-evaluating its context mid-generation pauses for tens of seconds and that is not yet a reason to lose the rest of the answer. A stream that resumes in between keeps its turn.
 
 The [Dashboard](/) shows every breaker's state under **Circuit Breakers**, and lets you isolate or restore one by hand — see [Logs & Dashboard](/guide#logs-and-dashboard). The thresholds above are the defaults; change them under **Circuit breaker tuning** at the foot of this section. Saving re-tunes every provider breaker that is currently closed. An open or recovering breaker, including one you isolated, keeps its state and its old tuning until JClaw restarts. The stream budgets apply from the next stream.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `llm.breaker.failure-rate` | 50 | Percent of recent calls that must fail to open the breaker, 1–100. |
+| `llm.breaker.window` | 10 | How many recent calls the failure and slow-call rates are computed over. Minimum 1. |
+| `llm.breaker.min-calls` | 3 | Calls needed in the window before a rate is judged at all. Minimum 1. |
+| `llm.breaker.consecutive-failures` | 3 | Failures in a row that open the breaker whatever the rate. `0` turns this rule off. |
+| `llm.breaker.wait-seconds` | 60 | Seconds the breaker stays open before letting probe calls through. |
+| `llm.breaker.half-open-probes` | 3 | Probe calls that must all succeed to close the breaker again. Minimum 1. |
+| `llm.breaker.stall-seconds` | 30 | A gap between stream chunks longer than this marks the call as slow. `0` turns slow-call detection off. |
+| `llm.breaker.slow-rate` | 50 | Percent of recent calls that must be slow to open the breaker, 0–100. |
+| `llm.breaker.stall-abort-seconds` | 300 | A stream silent this long mid-answer is ended and its turn released. `0` never ends one. |
+| `llm.breaker.first-chunk-seconds` | 600 | A stream that sends nothing this long after dispatch is abandoned and counted as a failure. `0` never abandons one. |
+
+Every value is a whole number; a write outside these bounds is refused.
 
 ## Search Providers
 
@@ -84,7 +100,7 @@ Below the backend picker, a **Diarization** subsection covers the who-spoke-when
 
 - **Diarization** — who-said-what transcripts come from one of five providers you pick here. Ordinary voice-note transcription stays local (whisper) and works without any of this.
   - **Audio-capable chat model** — pick a provider — **OpenRouter** or **OpenAI** (cloud, using the API keys from LLM Providers), or **llama.cpp** or **vLLM** (local, over their OpenAI-compatible APIs; audio input is experimental upstream) — and one of its audio-capable models (the picker lists only models that accept audio input — the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names.
-  - **On-device (`pyannote-local`)** — fully offline. `pyannote/speaker-diarization-community-1` produces speaker turns, which are fused with the local ASR transcript; **no audio leaves the host**. It labels speakers by voice within the recording (Speaker 1, Speaker 2) rather than by name, so the chat-model path remains the option when you need named speakers. The gated weights need a Hugging Face token — the same one Image Generation uses. The panel shows download status and live progress for the diarizer and emotion weights, and only contacts the sidecar when this path is active.
+  - **Local** (`pyannote-local`) — fully offline. `pyannote/speaker-diarization-community-1` produces speaker turns, which are fused with the local ASR transcript; **no audio leaves the host**. It labels speakers by voice within the recording (Speaker 1, Speaker 2) rather than by name, so the chat-model path remains the option when you need named speakers. The gated weights need a Hugging Face token — the same one Image Generation uses. The panel shows download status and live progress for the diarizer and emotion weights, and only contacts the sidecar when this path is active.
 - **Emotion labels on diarized transcripts** — when the `diarize_audio` tool asks for them, each turn on the on-device path is tagged with how it was said (7 categories plus valence / arousal / dominance), classified locally from the voice's tone. The model is operator-selectable (`transcription.diarization.emotionModel`) from a fixed set: **MERaLiON-SER v1** (the default — multilingual, covering English, Chinese, Malay, Tamil and Indonesian), or one of two English-trained wav2vec2 alternatives. Match the model to your audio: the English models load fine on other languages but misclassify them. Best-effort — a failure returns turns without labels. Ordinary voice-note transcription is unaffected.
 
 ## Speech
@@ -97,6 +113,8 @@ Two engines:
 - **JVM-native** — runs in-process via sherpa-onnx, no Python or sidecar. Models: **Piper Amy** (tiny, fast, English) and **Kokoro-82M multilingual**; the chosen voice downloads once (a button in the panel) then synthesizes on CPU.
 
 **Voice** — models with named speakers show a voice dropdown under the model. **Kokoro** offers American and British, male and female voices. **Qwen3-TTS** and **Chatterbox** have no named voices: their voice is chosen by cloning a reference clip — **Record** a few seconds of clean speech in the panel or **Upload** one (WAV, MP3, FLAC, M4A or OGG, under 10 MB), and **Clear** it to return to the model default. Single-voice models (Piper) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
+
+**Keep warm** — sidecar engine only (`tts.local.idleTimeoutMinutes`, default 15, 0–1440): minutes idle before the sidecar unloads its model, `0` never unloads. Longer keeps the first reply fast but holds the model in RAM (Chatterbox is ~3 GB); shorter frees memory but makes the next reply after a gap pay the load again. Takes effect the next time the sidecar starts.
 
 ## Voice Mode
 
@@ -178,6 +196,8 @@ Master toggle, then a backend radio group:
   2. **GPU capability** — click **detect GPU** to probe VRAM. The verdict (runnable, free/total VRAM, and a reason) decides whether the radio is selectable.
   3. **Model download** — pull `black-forest-labs/FLUX.2-klein-4B` (~13 GB, Apache-2.0) with a progress bar; weights land under `data/image-models/` and are recognized across restarts.
 
+  With Self-Hosted selected, an optional **Hugging Face token** row (`imagegen.local.hfToken`) takes a Read token, which lifts Hugging Face rate limits, speeds downloads and unlocks gated models. Klein 4B downloads without one. The on-device diarization path under [Transcription](#settings-transcription) reuses this token for its gated weights.
+
 Cloud radios are disabled until their key is set (amber **no API key** badge). Saved keys are masked, so editing one means retyping the whole value. Changes apply live.
 
 ## Video Interpretation
@@ -224,7 +244,7 @@ Behavior limits for the in-app [Chat](/chat) surface:
 | `maxToolRounds`        | 100     | Maximum tool calls the agent can make per turn before it must give a final answer.               |
 | `maxContextMessages`   | 50      | How many recent messages get sent with each LLM request. Older messages are dropped to stay in the context window. |
 
-An **Advanced — context window & compaction** collapsible reveals four lower-level knobs:
+An **Advanced — context window & compaction** collapsible reveals four lower-level knobs: the three `compaction*` rows and the jtokkit multiplier. The three `pruneToolResults*` keys below (stored as `chat.pruneToolResults`, `chat.pruneToolResultsMinChars`, `chat.pruneToolResultsProtectRecent`) have no row in the panel — set them with `POST /api/config`.
 
 | Key                          | Default | Meaning                                                                                                 |
 |------------------------------|---------|---------------------------------------------------------------------------------------------------------|
@@ -238,22 +258,25 @@ An **Advanced — context window & compaction** collapsible reveals four lower-l
 
 ## Subagents
 
-Two hard caps that govern [Subagents](/guide#subagents):
+Caps, timeout defaults and the model for [Subagents](/guide#subagents):
 
 | Key                               | Default | Meaning                                                                                |
 |-----------------------------------|---------|----------------------------------------------------------------------------------------|
 | `subagent.maxDepth`               | 1       | How deep the parent → child → grandchild chain can go (1 = no grandchildren).          |
 | `subagent.maxChildrenPerParent`   | 5       | How many concurrently `RUNNING` children a single parent can have in flight.           |
+| `subagent.defaultRunTimeoutSeconds` | 300   | Idle budget (seconds with no activity) for a `subagent_spawn` call that omits `runTimeoutSeconds`. A call-site value overrides. Must be positive; anything else falls back to 300. |
+| `subagent.defaultYieldTimeoutSeconds` | 300 | Resume budget for a `subagent_yield` call that omits `timeoutSeconds`, capped at 3600. `0` turns the yield watchdog off, so the parent waits until the child ends on its own run timeout. |
+| `subagent.modelProvider` / `subagent.modelId` | *(unset)* | The **model** row. Unset (**Conversation default**) runs subagents on the model the chat is using; a specific model pins every fan-out to it — e.g. a cheaper one for large evaluations. |
 
 Violations emit `SUBAGENT_LIMIT_EXCEEDED` on the [Logs](/logs) page and return a plain-text refusal to the model. Changes apply live; no restart needed.
 
 ## Coding
 
-Delegating a subagent to an **external coding harness** (Pi / Claude Code / Codex CLI) instead of JClaw's native loop:
+Delegating a subagent to an **external coding harness** (such as Claude Code, Codex or Gemini CLI) instead of JClaw's native loop:
 
 | Key                    | Default    | Meaning                                                                                             |
 |------------------------|------------|-----------------------------------------------------------------------------------------------------|
-| `subagent.acp.command` | *(unset)*  | Absolute path to the harness command run for `subagent_spawn { runtime:"acp" }` (e.g. `/usr/local/bin/pi`). Read from config only, never the model. |
+| `subagent.acp.command` | *(unset)*  | The harness command line run for `subagent_spawn { runtime:"acp" }` (e.g. `claude -p` or `codex exec`). Empty refuses every `runtime:"acp"` spawn. Read from config only, never the model. |
 | `subagent.acp.modelProvider` / `subagent.acp.modelId` | *(unset)* | Provider/model the harness runs with instead of its own default (the `acp.model` picker). Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses refuse the override. A per-spawn `modelProvider` / `modelId` wins over it. |
 
 The **detected** row lists the harness CLIs found on this host's PATH — one click fills `subagent.acp.command` and `subagent.acp.harness` — and accepts a custom command, which is probed before it is stored.
@@ -295,7 +318,7 @@ Three knobs for the [Tasks](/guide#tasks) subsystem:
 | Key                       | Default | Meaning                                                                                                |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------|
 | `retentionDays`           | 30      | Days a terminal task (`COMPLETED` / `FAILED` / `CANCELLED` / `LOST`) stays in the DB before `TaskCleanupJob` hard-deletes it along with its run history. `0` disables auto-cleanup entirely. Active tasks (`PENDING` / `ACTIVE` / `RUNNING`) are never touched. Max: 3650 (≈10 years). |
-| `defaultTimezone`         | `UTC`   | IANA timezone applied to `CRON` / `SCHEDULED` tasks that don't specify their own. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
+| `defaultTimezone`         | *(unset)* | IANA timezone applied to `CRON` / `SCHEDULED` tasks that don't specify their own. Unset, tasks follow the [Timezone](#settings-timezone) setting (`app.timezone`); set it only to run tasks in a different zone. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
 | `fireMaxDurationSeconds`  | 600     | Longest one task run may take. When it elapses the run is cancelled at its next safe point, so a wedged run cannot go on for ever. `0` turns the limit off. |
 
 The retention TTL is also displayed next to the [Tasks](/tasks) page title so you don't get surprised by auto-deletes.
@@ -315,7 +338,7 @@ Overrides are applied through log4j2 *after* Play's own logging init, so a row h
 
 ### Disk used by logs
 
-Below the level table, the same section reports what the levels above are costing you on disk: the current log file, how many archives exist and what they occupy, and a total for the whole directory. The total covers every file in `logs/`, not just those two categories, so an ad-hoc file left behind by a test run can't hide from it.
+At the foot of the same section, a **Logs** block reports what the levels above are costing you on disk: the current log file, how many archives exist and what they occupy, and a total for the whole directory. The total covers every file in `logs/`, not just those two categories, so an ad-hoc file left behind by a test run can't hide from it.
 
 The current file is capped and rolled over automatically, so it is never the thing that grows — the archives are. They're deleted once they pass 30 days, at the next daily rollover, which means an instance that built up a backlog carries it until each file individually ages out. **Delete archives** clears them now.
 
@@ -455,8 +478,10 @@ This setting is a **fallback, not a replacement for the approval prompt**. When 
 
 Separately, an agent you have granted **always allow** for a tool runs it with no prompt on any origin. That standing grant is checked before this policy and overrides it — so if an agent stopped asking, a grant is why, not this setting.
 
-Note that a standing grant is currently one-way: it is created when you tap **always allow** on an approval prompt, and there is no interface to list or withdraw it. Tap it only for a tool you are content for that agent to run unattended from any channel, indefinitely.
+A standing grant is created when you tap **always allow** on an approval prompt, and it lasts until you revoke it. Tap it only for a tool you are content for that agent to run unattended from any channel.
 :::
+
+Under its two settings rows, the panel lists every standing grant: how many there are, and which tools each agent holds, with a link to that agent. The list is read-only — revoke a grant from the **Standing Tool Approvals** block on the agent's own [Agents](/agents) page.
 
 ## Shell Execution
 
@@ -464,7 +489,7 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on the 
 
 | Key                            | Default | Meaning                                                                                              |
 |--------------------------------|---------|------------------------------------------------------------------------------------------------------|
-| `shell.allowlist`              | (empty) | Newline-separated list of commands (with optional argument patterns) the agent may run.              |
+| `shell.allowlist`              | (empty) | Comma-separated list of commands (with optional argument patterns) the agent may run.              |
 | `shell.defaultTimeoutSeconds`  | 30      | Per-command wall-clock budget (1–300 s).                                                              |
 | `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Has no row in the panel — set it with `POST /api/config`. |
 
@@ -506,7 +531,7 @@ Attention is the state worth knowing about. On 2026-09-09 the live database turn
 
 **Back up now** writes an H2 online backup — a zip containing the data file — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
 
-**Schedule** sits under the list and takes a time of day, in this instance's timezone (the one set under General, or the server's when none is), for a daily backup. The times in the backup list are shown in that same zone, whatever zone the browser is in. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log. The schedule counts a day as done once a backup has been written at or after its time, so restarting the instance later that day does not write another; an instance that was down at the scheduled time catches up once, on its first minute back up.
+**Schedule** sits under the list and takes a time of day, in this instance's timezone (the one set under Timezone, or the server's when none is), for a daily backup. The times in the backup list are shown in that same zone, whatever zone the browser is in. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log. The schedule counts a day as done once a backup has been written at or after its time, so restarting the instance later that day does not write another; an instance that was down at the scheduled time catches up once, on its first minute back up.
 
 **retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
 
