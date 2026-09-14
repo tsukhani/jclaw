@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 /**
- * JCLAW-748: {@code jclaw.logs.retention.days} is operator-editable, and the
+ * JCLAW-748: {@code logs.retentionDays} is operator-editable, and the
  * bare {@code Integer.parseInt} it used to feed threw out of every 24h tick on
  * a typo — silently stopping event-log retention for good.
  */

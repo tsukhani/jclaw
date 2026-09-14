@@ -9,6 +9,7 @@ import {
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import SettingsConfigField from './SettingsConfigField.vue'
 
 const { configData, saving, refresh } = useSettingsConfig()
 
@@ -73,7 +74,8 @@ async function saveTasksField(configKey: string, value: string) {
       (<span class="font-mono">PENDING</span> / <span class="font-mono">ACTIVE</span> /
       <span class="font-mono">RUNNING</span>) are never touched. Set to
       <span class="font-mono">0</span> to disable auto-cleanup entirely
-      (tasks retained forever).
+      (tasks retained forever). <span class="font-mono">fireMaxDurationSeconds</span>
+      bounds how long a single run may take.
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
@@ -199,6 +201,15 @@ async function saveTasksField(configKey: string, value: string) {
             </button>
           </template>
         </div>
+        <SettingsConfigField
+          config-key="tasks.fireMaxDurationSeconds"
+          label="fireMaxDurationSeconds"
+          kind="number"
+          fallback="600"
+          :min="0"
+          label-width="w-48"
+          tip="Longest one task run may take, in seconds. When it elapses the run is cancelled at its next safe point, so a wedged run cannot go on for ever. 0 turns the limit off."
+        />
       </div>
     </div>
   </div>

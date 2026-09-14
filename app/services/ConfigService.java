@@ -3,6 +3,7 @@ package services;
 import jakarta.persistence.PersistenceException;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
+import jobs.EventLogCleanupJob;
 import jobs.ToolRegistrationJob;
 import llm.ProviderLocality;
 import llm.ProviderRegistry;
@@ -23,6 +24,7 @@ import services.telemetry.OtelConfig;
 import services.telemetry.OtelRuntime;
 import services.tts.TtsEngine;
 import services.tts.TtsSidecarManager;
+import tools.DocumentsTool;
 import tools.SubagentSpawnTool;
 import tools.scrape.WebScrapeSettings;
 import utils.HttpFactories;
@@ -30,8 +32,10 @@ import utils.HttpFactories;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public class ConfigService {
 
@@ -39,6 +43,10 @@ public class ConfigService {
 
     /** Namespace every per-provider config key lives under: {@code provider.<name>.<field>}. */
     private static final String PROVIDER_KEY_PREFIX = "provider.";
+
+    private static final Pattern TESSERACT_LANGUAGES = Pattern.compile("[A-Za-z0-9_]+(\\+[A-Za-z0-9_]+)*");
+    private static final Set<String> PDF_STRATEGIES =
+            Set.of("auto", "no_ocr", "ocr_only", "ocr_and_text_extraction");
 
     // The cache stores Optional<String> rather than String so we can distinguish
     // "key absent in DB" (empty Optional, cached) from "key not yet fetched"
@@ -269,6 +277,32 @@ public class ConfigService {
             }
         }
 
+        // Each of these readers falls back to its default on a bad value, so without a check
+        // here a typo saves cleanly and silently changes nothing.
+        if (key.equals(DocumentsTool.KEY_OCR_LANGUAGES)
+                && (value == null || !TESSERACT_LANGUAGES.matcher(value.trim()).matches())) {
+            return key + " must be Tesseract language codes joined by +, such as eng or eng+fra.";
+        }
+        if (key.equals(DocumentsTool.KEY_OCR_TIMEOUT) && !isIntAtLeast(value, 1)) {
+            return key + " must be a whole number of seconds, at least 1.";
+        }
+        if (key.equals(DocumentsTool.KEY_OCR_PDF_STRATEGY)
+                && (value == null || !PDF_STRATEGIES.contains(value.trim().toLowerCase(Locale.ROOT)))) {
+            return key + " must be one of auto, no_ocr, ocr_only or ocr_and_text_extraction.";
+        }
+        // A retention of 0 or less puts the cutoff at or after now, and the cleanup empties the log.
+        if (key.equals(EventLogCleanupJob.CONFIG_KEY) && !isIntAtLeast(value, 1)) {
+            return key + " must be a whole number of days, at least 1.";
+        }
+        if (key.equals(TaskFireDeadline.MAX_DURATION_KEY) && !isIntAtLeast(value, 0)) {
+            return key + " must be a whole number of seconds; 0 turns the limit off.";
+        }
+        if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY) && value != null && !value.isBlank()
+                && ProviderRegistry.get(value.trim()) == null) {
+            return "Provider '" + value.trim() + "' is not configured. " + key
+                    + " must name a provider from Settings > LLM Providers.";
+        }
+
         // The coding harness is pointed at this provider's endpoint at spawn time; a name with
         // no provider behind it would only surface as a refused spawn much later.
         if (key.equals(SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY) && value != null && !value.isBlank()
@@ -312,6 +346,10 @@ public class ConfigService {
 
         if (key.startsWith(PROVIDER_KEY_PREFIX)) {
             AgentService.syncEnabledStates();
+        }
+        // The registry otherwise re-reads the pin only once a minute.
+        if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) {
+            ProviderRegistry.refresh();
         }
         // JCLAW-930: JpaMemoryStore reads the vector settings once into final fields and
         // MemoryStoreFactory caches the instance, so without this the singleton serves the
@@ -422,6 +460,9 @@ public class ConfigService {
         delete(key);
         if (key.startsWith(PROVIDER_KEY_PREFIX)) {
             AgentService.syncEnabledStates();
+        }
+        if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) {
+            ProviderRegistry.refresh();
         }
         // JCLAW-930: see setWithSideEffects — clearing a vector key changes the
         // effective setting just as writing one does, so the store must rebuild too.

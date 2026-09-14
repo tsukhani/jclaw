@@ -6,7 +6,6 @@ import com.google.gson.reflect.TypeToken;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
 import org.jspecify.annotations.Nullable;
-import play.Play;
 import services.ConfigService;
 import services.Tx;
 import utils.GsonHolder;
@@ -41,6 +40,8 @@ public final class ProviderRegistry {
     private ProviderRegistry() { /* static-only utility */ }
 
     private static final String CONFIG_KEY_PREFIX = "provider.";
+    /** Settings &gt; LLM Providers: pins the provider {@link #getPrimary()} returns. */
+    public static final String PRIMARY_PROVIDER_KEY = "llm.primaryProvider";
 
     /** Providers whose {@code provider.*} credentials are image-generation only (JCLAW-225, BFL Flux)
      *  and must NOT be registered as chat LlmProviders — they don't speak {@code /chat/completions}.
@@ -135,10 +136,9 @@ public final class ProviderRegistry {
                 .toList());
         Collections.sort(providerNames);
 
-        // Optional operator pin: llm.primaryProvider forces a named provider to the
+        // Optional operator pin (Settings > LLM Providers): forces a named provider to the
         // front of the deterministic order when it matches a configured provider.
-        var primary = Play.configuration != null
-                ? Play.configuration.getProperty("llm.primaryProvider") : null;
+        var primary = configMap.get(PRIMARY_PROVIDER_KEY);
         if (primary != null && !primary.isBlank() && providerNames.remove(primary.trim())) {
             providerNames.addFirst(primary.trim());
         }

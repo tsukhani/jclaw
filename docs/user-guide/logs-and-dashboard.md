@@ -169,7 +169,7 @@ Logs include the metadata of what happened, not the full conversation content. M
 :::
 
 :::note Retention
-Events older than the configured retention window (default 30 days, see `jclaw.logs.retention.days` in `application.conf`) are swept by `EventLogCleanupJob` on a daily tick. Active investigations should be exported before the cutoff.
+Events older than the configured retention window (default 30 days, set under **Settings → Logging → Event Log Retention**) are swept by `EventLogCleanupJob` at startup and on a daily tick. Active investigations should be exported before the cutoff.
 :::
 
 ## Sidebar status pip

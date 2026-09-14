@@ -1,10 +1,11 @@
 package jobs;
 
 import models.EventLog;
-import play.Play;
+import org.jspecify.annotations.Nullable;
 import play.jobs.Every;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
+import services.ConfigService;
 import services.EventLogger;
 import utils.AppClock;
 
@@ -22,12 +23,13 @@ import java.time.temporal.ChronoUnit;
 @Every("24h")
 public class EventLogCleanupJob extends Job<Void> {
 
-    private static final String CONFIG_KEY = "jclaw.logs.retention.days";
+    /** Settings &gt; Logging. */
+    public static final String CONFIG_KEY = "logs.retentionDays";
     private static final int DEFAULT_RETENTION_DAYS = 30;
 
     @Override
     public void doJob() {
-        var retentionDays = resolveRetentionDays(Play.configuration.getProperty(CONFIG_KEY));
+        var retentionDays = resolveRetentionDays(ConfigService.get(CONFIG_KEY));
         var cutoff = AppClock.now().minus(retentionDays, ChronoUnit.DAYS);
         var deleted = EventLog.deleteOlderThan(cutoff);
         if (deleted > 0) {
@@ -37,13 +39,13 @@ public class EventLogCleanupJob extends Job<Void> {
     }
 
     /**
-     * Retention window for {@code jclaw.logs.retention.days}: absent, blank or
+     * Retention window for {@code logs.retentionDays}: absent, blank or
      * non-numeric falls back to {@link #DEFAULT_RETENTION_DAYS} with a warn, so
-     * an operator typo cannot throw out of every 24h run and stop retention.
-     * Takes the raw value rather than reading config so the fallback is
-     * testable without mutating the process-global {@link Play#configuration}.
+     * a value written around the API's validation cannot throw out of every 24h
+     * run and stop retention. Takes the raw value rather than reading config so
+     * the fallback is testable without writing the shared config table.
      */
-    public static int resolveRetentionDays(String raw) {
+    public static int resolveRetentionDays(@Nullable String raw) {
         if (raw == null || raw.isBlank()) return DEFAULT_RETENTION_DAYS;
         try {
             return Integer.parseInt(raw.trim());

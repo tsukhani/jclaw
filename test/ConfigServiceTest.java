@@ -291,6 +291,57 @@ class ConfigServiceTest extends UnitTest {
         assertEquals("0.6", ConfigService.get(memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE));
     }
 
+    // --- setWithSideEffects: settings moved out of application.conf ---
+
+    @Test
+    void setWithSideEffectsRejectsOcrTuningTesseractCannotUse() {
+        assertNotNull(ConfigService.setWithSideEffects(tools.DocumentsTool.KEY_OCR_LANGUAGES, "eng fra"));
+        assertNotNull(ConfigService.setWithSideEffects(tools.DocumentsTool.KEY_OCR_TIMEOUT, "0"));
+        assertNotNull(ConfigService.setWithSideEffects(tools.DocumentsTool.KEY_OCR_PDF_STRATEGY, "sometimes"));
+        assertNull(ConfigService.get(tools.DocumentsTool.KEY_OCR_PDF_STRATEGY),
+                "the rejected value must not be persisted");
+    }
+
+    @Test
+    void setWithSideEffectsAcceptsOcrTuning() {
+        // The defaults: document-reading tests running beside this one read these keys.
+        assertNull(ConfigService.setWithSideEffects(tools.DocumentsTool.KEY_OCR_LANGUAGES, "eng"));
+        assertNull(ConfigService.setWithSideEffects(tools.DocumentsTool.KEY_OCR_TIMEOUT, "60"));
+        assertNull(ConfigService.setWithSideEffects(tools.DocumentsTool.KEY_OCR_PDF_STRATEGY, "auto"));
+    }
+
+    @Test
+    void setWithSideEffectsRejectsARetentionThatWouldEmptyTheEventLog() {
+        assertNotNull(ConfigService.setWithSideEffects(jobs.EventLogCleanupJob.CONFIG_KEY, "0"));
+        assertNull(ConfigService.setWithSideEffects(jobs.EventLogCleanupJob.CONFIG_KEY, "30"));
+    }
+
+    @Test
+    void setWithSideEffectsRejectsANegativeTaskTimeLimit() {
+        assertNotNull(ConfigService.setWithSideEffects("tasks.fireMaxDurationSeconds", "-1"));
+        assertNull(ConfigService.setWithSideEffects("tasks.fireMaxDurationSeconds", "600"));
+    }
+
+    @Test
+    void primaryProviderMustBeConfiguredAndReordersTheRegistryOnSave() {
+        var key = llm.ProviderRegistry.PRIMARY_PROVIDER_KEY;
+        assertNotNull(ConfigService.setWithSideEffects(key, "no-such-provider"));
+
+        // "zz-" sorts last, so only the pin can put this provider first.
+        ConfigService.set("provider.zz-primary-pin.baseUrl", "http://127.0.0.1:1/v1");
+        ConfigService.set("provider.zz-primary-pin.apiKey", "k");
+        llm.ProviderRegistry.refresh();
+        try {
+            assertNull(ConfigService.setWithSideEffects(key, "zz-primary-pin"));
+            var primary = llm.ProviderRegistry.getPrimary();
+            assertNotNull(primary);
+            assertEquals("zz-primary-pin", primary.config().name(),
+                    "the save must reorder the registry without waiting for its refresh interval");
+        } finally {
+            assertNull(ConfigService.setWithSideEffects(key, ""));
+        }
+    }
+
     // --- setWithSideEffects: web_scrape settings (rules pinned in WebScrapeSettingsTest) ---
 
     @Test

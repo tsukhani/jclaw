@@ -51,6 +51,8 @@ const MANAGED_PREFIXES = [
   'subagent.', // JCLAW-266: subagent recursion caps — Settings (Subagents section)
   'printer.', // JCLAW-911: default printer + its job options — Settings (Printers)
   'tasks.', // JCLAW-259: task retention TTL — Settings (Tasks section)
+  'logs.', // Event log retention — Settings (Logging)
+  'llm.', // Primary-provider pin — Settings (LLM Providers)
   'tailscale.', // Funnel enable/port (tailscale.funnel.*) — managed on the Channels page
   'jtokkit.', // Token-count safety multipliers — `jtokkit.safetyMultiplier.unmatched`
   // is the operator-tunable global in the Advanced subsection of Chat, and the

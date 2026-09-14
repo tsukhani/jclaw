@@ -458,11 +458,15 @@ public class DocumentsTool implements ToolRegistry.Tool {
         }
     }
 
+    public static final String KEY_OCR_LANGUAGES = "ocr.tesseract.languages";
+    public static final String KEY_OCR_TIMEOUT = "ocr.tesseract.timeout";
+    public static final String KEY_OCR_PDF_STRATEGY = "ocr.pdf.strategy";
+
     /**
      * Build a {@link ParseContext} configured for the current OCR toggle.
      * When {@code ocrActive} is true, pre-loads TesseractOCRConfig and
      * PDFParserConfig so image inputs (and image-only PDFs) reach Tesseract,
-     * with tunables from application.conf. When false, explicitly opts out:
+     * with tunables from Settings &gt; OCR. When false, explicitly opts out:
      * Tika's AutoDetectParser would otherwise invoke TesseractOCRParser by
      * default whenever the binary is on PATH, ignoring an empty ParseContext.
      * Each parse rebuilds the context so live config + toggle edits apply on
@@ -473,8 +477,8 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
         var ocr = new TesseractOCRConfig();
         if (ocrActive) {
-            ocr.setLanguage(stringOrDefault("ocr.tesseract.languages", "eng"));
-            ocr.setTimeoutMillis(1000L * positiveIntOrDefault("ocr.tesseract.timeout", 60));
+            ocr.setLanguage(configOrDefault(KEY_OCR_LANGUAGES, "eng"));
+            ocr.setTimeoutMillis(1000L * positiveIntOrDefault(KEY_OCR_TIMEOUT, 60));
             applyTesseractPath(ocr);
         }
         ocr.setSkipOcr(!ocrActive);
@@ -482,7 +486,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
         var pdfOcr = new OcrConfig();
         pdfOcr.setStrategy(ocrActive
-                ? parsePdfStrategy(stringOrDefault("ocr.pdf.strategy", "auto"))
+                ? parsePdfStrategy(configOrDefault(KEY_OCR_PDF_STRATEGY, "auto"))
                 : OcrConfig.Strategy.NO_OCR);
         var pdf = new PDFParserConfig();
         pdf.setOcr(pdfOcr);
@@ -498,9 +502,13 @@ public class DocumentsTool implements ToolRegistry.Tool {
         return (raw == null || raw.isBlank()) ? fallback : raw.trim();
     }
 
+    private static String configOrDefault(String key, String fallback) {
+        var raw = ConfigService.get(key);
+        return (raw == null || raw.isBlank()) ? fallback : raw.trim();
+    }
+
     private static int positiveIntOrDefault(String key, int fallback) {
-        var raw = Play.configuration != null
-                ? Play.configuration.getProperty(key) : null;
+        var raw = ConfigService.get(key);
         if (raw == null || raw.isBlank()) return fallback;
         try {
             int n = Integer.parseInt(raw.trim());

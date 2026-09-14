@@ -4,7 +4,11 @@
 // Config DB row but the render gates on the runtime probe — a host without the
 // binary cannot flip the toggle on. Moved verbatim from pages/settings.vue;
 // owns its own /api/ocr/status probe fetch (moved from the page).
+import SettingsConfigField from './SettingsConfigField.vue'
 import type { OcrStatusResponse } from '~/types/api'
+
+const PDF_STRATEGIES = ['auto', 'no_ocr', 'ocr_only', 'ocr_and_text_extraction']
+  .map(s => ({ value: s, label: s }))
 
 const { saving, refresh } = useSettingsConfig()
 
@@ -108,6 +112,34 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
           class="block mt-1 text-amber-700 dark:text-amber-400"
         >{{ backend.installHint }}</span>
       </div>
+    </div>
+    <h3 class="text-[11px] font-semibold text-fg-muted uppercase tracking-wide pt-2">
+      Tesseract Tuning
+    </h3>
+    <div class="bg-surface-elevated border border-border divide-y divide-border">
+      <SettingsConfigField
+        config-key="ocr.tesseract.languages"
+        label="languages"
+        kind="text"
+        fallback="eng"
+        tip="Tesseract language packs to read with, joined by + (eng, eng+fra+jpn). Each extra language must be installed on the host, e.g. tesseract-ocr-fra."
+      />
+      <SettingsConfigField
+        config-key="ocr.tesseract.timeout"
+        label="timeout"
+        kind="number"
+        fallback="60"
+        :min="1"
+        tip="Seconds Tesseract may spend on one image before it is abandoned. Minimum 1."
+      />
+      <SettingsConfigField
+        config-key="ocr.pdf.strategy"
+        label="pdfStrategy"
+        kind="select"
+        fallback="auto"
+        :options="PDF_STRATEGIES"
+        tip="How PDFs are read. auto uses the text layer and OCRs only image-only PDFs; ocr_and_text_extraction does both in one pass; ocr_only ignores the text layer; no_ocr never runs OCR."
+      />
     </div>
   </div>
 </template>

@@ -449,6 +449,68 @@ describe('Settings page — Subagents section (JCLAW-266)', () => {
   })
 })
 
+describe('Settings page — rows for settings moved out of application.conf', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  function stubConfig(onPost: (body: { key?: string, value?: string }) => void) {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+    registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: [] }) })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        onPost(await readBody(event) as { key?: string, value?: string })
+        return { ok: true }
+      },
+    })
+  }
+
+  it('shows the OCR tuning defaults and saves a PDF strategy from its select', async () => {
+    let posted: { key?: string, value?: string } | null = null
+    stubConfig((body) => {
+      posted = body
+    })
+    const component = await mountSettingsSection('ocr')
+
+    expect(component.find('[data-testid="config-field-ocr.tesseract.languages"]').text()).toContain('eng')
+    expect(component.find('[data-testid="config-field-ocr.tesseract.timeout"]').text()).toContain('60')
+    await component.find('[data-testid="config-field-ocr.pdf.strategy"] select').setValue('ocr_only')
+    await flushPromises()
+
+    expect(posted).toEqual({ key: 'ocr.pdf.strategy', value: 'ocr_only' })
+  })
+
+  it('shows the task time limit on the Tasks panel', async () => {
+    stubConfig(() => {})
+    registerEndpoint('/api/timezones', () => ({ timezones: ['UTC'], default: 'UTC', appDefault: 'UTC' }))
+    const component = await mountSettingsSection('tasks')
+
+    expect(component.find('[data-testid="config-field-tasks.fireMaxDurationSeconds"]').text()).toContain('600')
+  })
+
+  it('pins the primary provider from the providers the registry lists', async () => {
+    let posted: { key?: string, value?: string } | null = null
+    stubConfig((body) => {
+      posted = body
+    })
+    registerEndpoint('/api/providers', () => [
+      { name: 'openrouter', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0, supportedModalities: ['PER_TOKEN'], local: false },
+    ])
+    const component = await mountSettingsSection('providers')
+
+    const select = component.find('[data-testid="config-field-llm.primaryProvider"] select')
+    expect(select.findAll('option').map(o => o.attributes('value'))).toEqual(['', 'openrouter'])
+    await select.setValue('openrouter')
+    await flushPromises()
+
+    expect(posted).toEqual({ key: 'llm.primaryProvider', value: 'openrouter' })
+  })
+})
+
 describe('Settings page — Web Scraping section', () => {
   beforeEach(() => {
     clearNuxtData()

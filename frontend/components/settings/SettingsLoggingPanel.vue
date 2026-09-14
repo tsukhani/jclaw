@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Disk footprint of what these levels produce — the levels decide what is
 // written, this shows what it costs.
+import SettingsConfigField from './SettingsConfigField.vue'
 import SettingsLogsPanel from './SettingsLogsPanel.vue'
 import { PlusIcon, TrashIcon } from '@heroicons/vue/24/outline'
 
@@ -220,6 +221,26 @@ async function deleteLoggerLevel(logger: string) {
     >
       {{ loggingError }}
     </p>
+  </div>
+
+  <div class="mb-6 space-y-4">
+    <h2 class="text-sm font-medium text-fg-muted">
+      Event Log Retention
+    </h2>
+    <p class="text-xs text-fg-muted">
+      How long entries on the Logs page are kept. A cleanup that runs at startup and
+      then daily deletes anything older.
+    </p>
+    <div class="bg-surface-elevated border border-border">
+      <SettingsConfigField
+        config-key="logs.retentionDays"
+        label="retentionDays"
+        kind="number"
+        fallback="30"
+        :min="1"
+        tip="Days an event log entry is kept before the cleanup deletes it. Minimum 1."
+      />
+    </div>
   </div>
 
   <SettingsLogsPanel />

@@ -1,7 +1,6 @@
 package services;
 
 import org.jspecify.annotations.Nullable;
-import play.Play;
 
 import java.time.Duration;
 import java.util.Set;
@@ -41,10 +40,10 @@ public final class TaskFireDeadline {
 
     private TaskFireDeadline() {}
 
-    /** Config key for the per-fire wall-clock bound, in seconds. Blank /
+    /** Settings &gt; Tasks: the per-fire wall-clock bound, in seconds. Blank /
      *  non-numeric falls back to {@link #DEFAULT_MAX_DURATION_SECONDS}; a
      *  non-positive value disables the watchdog. */
-    static final String MAX_DURATION_PROPERTY = "jclaw.tasks.fire.maxDurationSeconds";
+    static final String MAX_DURATION_KEY = "tasks.fireMaxDurationSeconds";
 
     /** Default per-fire bound: 10 minutes. Generous for a multi-round agent
      *  loop, but finite so a wedged fire cannot run indefinitely. */
@@ -74,7 +73,7 @@ public final class TaskFireDeadline {
 
     /**
      * Test seam: arm with an explicit delay/unit, bypassing the config read (so
-     * a unit test doesn't mutate the process-global {@code Play.configuration}).
+     * a unit test doesn't write the shared config table).
      */
     static @Nullable ScheduledFuture<?> arm(Long taskRunId, long delay, TimeUnit unit) {
         if (taskRunId == null || delay <= 0) return null;
@@ -120,12 +119,6 @@ public final class TaskFireDeadline {
     }
 
     private static long maxDurationSeconds() {
-        var raw = Play.configuration.getProperty(MAX_DURATION_PROPERTY);
-        if (raw == null || raw.isBlank()) return DEFAULT_MAX_DURATION_SECONDS;
-        try {
-            return Long.parseLong(raw.trim());
-        } catch (NumberFormatException _) {
-            return DEFAULT_MAX_DURATION_SECONDS;
-        }
+        return ConfigService.getLong(MAX_DURATION_KEY, DEFAULT_MAX_DURATION_SECONDS);
     }
 }

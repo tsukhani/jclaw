@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -30,6 +31,39 @@ async function mountSettingsSection(sectionId: string) {
   await flushPromises()
   return component
 }
+
+describe('Settings page — Event Log Retention', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  it('shows the default and the reason a retention that would empty the log is refused', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
+    registerEndpoint('/api/providers', () => [])
+    registerEndpoint('/api/logging/levels', () => ({ entries: [], validLevels: ['INFO'], knownLoggers: [] }))
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: [] }) })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 403)
+        return { type: 'error', code: 'forbidden', message: 'logs.retentionDays must be a whole number of days, at least 1.' }
+      },
+    })
+    const component = await mountSettingsSection('logging')
+
+    const row = component.find('[data-testid="config-field-logs.retentionDays"]')
+    expect(row.text()).toContain('30')
+    await row.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    await row.find('input').setValue('0')
+    await row.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    expect(row.find('[role="alert"]').text()).toContain('at least 1')
+  })
+})
 
 describe('Settings page — Logging Levels', () => {
   beforeEach(() => {

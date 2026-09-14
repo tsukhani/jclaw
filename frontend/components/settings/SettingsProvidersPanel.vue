@@ -20,6 +20,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { isDeclaredToolIncapable, isLocalProvider } from '~/composables/useProviders'
 import type { Agent, ConfigEntry, DiscoveredModel, DiscoverModelsResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
+import SettingsConfigField from './SettingsConfigField.vue'
 
 const { configData, saving, refresh, getProviderModels, editingKey, editValue, startEdit, updateEntry, providersData } = useSettingsConfig()
 
@@ -64,6 +65,12 @@ async function togglePriceRefresh() {
   }
   finally { saving.value = false }
 }
+
+// The backend accepts only a provider the registry lists, which is what /api/providers returns.
+const primaryProviderOptions = computed(() => [
+  { value: '', label: 'Not pinned (first in alphabetical order)' },
+  ...(providersData.value ?? []).map(p => ({ value: p.name, label: providerLabel(p.name) })),
+])
 
 const priceRefreshStatus = ref<string | null>(null)
 async function manuallyRefreshPrices() {
@@ -674,6 +681,20 @@ const groupedProviders = computed(() => {
           >{{ priceRefreshStatus }}</span>
         </div>
       </div>
+    </div>
+
+    <h3 class="text-[11px] font-semibold text-fg-muted uppercase tracking-wide pt-2">
+      Primary Provider
+    </h3>
+    <div class="bg-surface-elevated border border-border">
+      <SettingsConfigField
+        config-key="llm.primaryProvider"
+        label="primaryProvider"
+        kind="select"
+        fallback=""
+        :options="primaryProviderOptions"
+        tip="The provider JClaw falls back to when an agent, voice, memory or a slash command has no provider of its own. Not pinned, it is the first configured provider in alphabetical order."
+      />
     </div>
 
     <template

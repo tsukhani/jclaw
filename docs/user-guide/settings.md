@@ -38,6 +38,10 @@ For each provider you can:
 
 If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
 
+### Primary provider
+
+**Primary Provider** (`llm.primaryProvider`) is the provider JClaw falls back to when an agent, voice, memory or a slash command has no provider of its own. Not pinned, it is the first configured provider in alphabetical order. Only a configured provider can be chosen, and the change applies immediately.
+
 ### When a provider misbehaves
 
 Every model call runs through the same four-link chain, so a slow or broken provider costs you a bounded amount of time and then gets routed around:
@@ -116,7 +120,15 @@ Installing Tesseract:
 
 **On Windows the installer does not add Tesseract to your PATH.** Either add its folder yourself and open a new terminal, or — simpler — set `ocr.tesseract.path` in `conf/application.conf` to the install directory (`C:\Program Files\Tesseract-OCR`) and restart. Point it at the folder, not the `.exe`. A path that isn't a directory is refused at startup rather than ignored, so a typo tells you instead of silently leaving OCR off.
 
-Extra languages install separately (`tesseract-ocr-fra`, `tesseract-ocr-jpn`, …); list them in `ocr.tesseract.languages` as `eng+fra+jpn`.
+### Tesseract tuning
+
+| Setting                   | Default | Meaning |
+|---------------------------|---------|---------|
+| `ocr.tesseract.languages` | `eng`   | Language packs to read with, joined by `+` (`eng+fra+jpn`). Extra languages install separately (`tesseract-ocr-fra`, `tesseract-ocr-jpn`, …). |
+| `ocr.tesseract.timeout`   | 60      | Seconds Tesseract may spend on one image. |
+| `ocr.pdf.strategy`        | `auto`  | `auto` uses a PDF's text layer and OCRs only image-only PDFs; `ocr_and_text_extraction` does both in one pass; `ocr_only` ignores the text layer; `no_ocr` never runs OCR. |
+
+Changes apply to the next document read; no restart needed.
 
 ## Image Captioning
 
@@ -256,12 +268,13 @@ Every setting the `web_scrape` tool reads, in two groups. Changes apply live; no
 
 ## Tasks
 
-Two knobs for the [Tasks](/guide#tasks) subsystem:
+Three knobs for the [Tasks](/guide#tasks) subsystem:
 
 | Key                       | Default | Meaning                                                                                                |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------|
 | `retentionDays`           | 30      | Days a terminal task (`COMPLETED` / `FAILED` / `CANCELLED` / `LOST`) stays in the DB before `TaskCleanupJob` hard-deletes it along with its run history. `0` disables auto-cleanup entirely. Active tasks (`PENDING` / `ACTIVE` / `RUNNING`) are never touched. Max: 3650 (≈10 years). |
 | `defaultTimezone`         | `UTC`   | IANA timezone applied to `CRON` / `SCHEDULED` tasks that don't specify their own. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
+| `fireMaxDurationSeconds`  | 600     | Longest one task run may take. When it elapses the run is cancelled at its next safe point, so a wedged run cannot go on for ever. `0` turns the limit off. |
 
 The retention TTL is also displayed next to the [Tasks](/tasks) page title so you don't get surprised by auto-deletes.
 
@@ -273,6 +286,10 @@ Per-logger log-level overrides for the running JVM — the operator counterpart 
 - **Level** — one of `OFF`, `FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `ALL` (least to most verbose).
 
 Overrides are applied through log4j2 *after* Play's own logging init, so a row here **wins over both `conf/log4j2.xml` and `application.conf`**. Deleting a row reverts that logger to its inherited (parent) level; deleting the `root` override restores the baseline captured before you first changed it (falling back to `INFO`). They're stored under reserved `logging.level.<logger>` config keys, so they never show up in the [Unmanaged keys](#settings-unmanaged-keys) list.
+
+### Event log retention
+
+`logs.retentionDays` (default 30) sets how long entries on the [Logs](/logs) page are kept. A cleanup runs at startup and then daily, deleting anything older. The minimum is 1 day.
 
 ### Disk used by logs
 
