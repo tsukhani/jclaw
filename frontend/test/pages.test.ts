@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import Index from '~/pages/index.vue'
 import Agents from '~/pages/agents/[[name]].vue'
@@ -199,7 +199,7 @@ describe('Logs page', () => {
     expect(selects.length).toBeGreaterThanOrEqual(2)
   })
 
-  function categorySelect(component: Awaited<ReturnType<typeof mountSuspended>>) {
+  function categorySelect(component: VueWrapper) {
     return component.findAll('select').find(s => s.text().includes('All categories'))!
   }
 
