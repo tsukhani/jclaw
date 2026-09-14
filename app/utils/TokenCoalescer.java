@@ -25,6 +25,9 @@ import java.util.function.Consumer;
  */
 public final class TokenCoalescer {
 
+    /** Settings &gt; Performance: the web chat stream's threshold, in characters. */
+    public static final String CONFIG_KEY = "chat.stream.token_coalesce_chars";
+
     private final int threshold;
     private final Consumer<String> flushFn;
     private final StringBuilder buf = new StringBuilder();

@@ -1,5 +1,6 @@
 package services;
 
+import agents.DangerousActionGate;
 import jakarta.persistence.PersistenceException;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
@@ -24,10 +25,12 @@ import services.telemetry.OtelConfig;
 import services.telemetry.OtelRuntime;
 import services.tts.TtsEngine;
 import services.tts.TtsSidecarManager;
+import services.voice.VoiceSettings;
 import tools.DocumentsTool;
 import tools.SubagentSpawnTool;
 import tools.scrape.WebScrapeSettings;
 import utils.HttpFactories;
+import utils.TokenCoalescer;
 
 import java.time.Duration;
 import java.time.ZoneId;
@@ -301,6 +304,19 @@ public class ConfigService {
                 && ProviderRegistry.get(value.trim()) == null) {
             return "Provider '" + value.trim() + "' is not configured. " + key
                     + " must name a provider from Settings > LLM Providers.";
+        }
+        if (key.startsWith(VoiceSettings.PREFIX)) {
+            var rejected = VoiceSettings.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
+        }
+        // A zero timeout expires an approval prompt before anyone can answer it.
+        if (key.equals(DangerousActionGate.APPROVAL_TIMEOUT_KEY) && !isIntAtLeast(value, 1)) {
+            return key + " must be a whole number of seconds, at least 1.";
+        }
+        if (key.equals(TokenCoalescer.CONFIG_KEY) && !isIntAtLeast(value, 0)) {
+            return key + " must be a whole number of characters; 0 sends every token at once.";
         }
 
         // The coding harness is pointed at this provider's endpoint at spawn time; a name with

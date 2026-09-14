@@ -513,7 +513,7 @@ public class ApiChatController extends Controller {
         // and emits one frame per ~N chars of accumulated content. Default
         // 0 = current per-token behavior. First token always emits
         // immediately; only steady-state tokens batch.
-        final int coalesceChars = Math.max(0, ConfigService.getInt("chat.stream.token_coalesce_chars", 0));
+        final int coalesceChars = Math.max(0, ConfigService.getInt(TokenCoalescer.CONFIG_KEY, 0));
         var tokenCoalescer = new TokenCoalescer(coalesceChars,
                 s -> sendChunkFrame(sse, SSE_TOKEN_PREFIX, s));
         var reasoningCoalescer = new TokenCoalescer(coalesceChars,

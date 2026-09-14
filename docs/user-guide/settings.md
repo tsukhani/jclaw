@@ -98,6 +98,28 @@ Two engines:
 
 **Voice** — models with named speakers show a voice dropdown under the model. **Kokoro** offers American and British, male and female voices. **Qwen3-TTS** and **Chatterbox** have no named voices: their voice is chosen by cloning a reference clip — **Record** a few seconds of clean speech in the panel or **Upload** one (WAV, MP3, FLAC, M4A or OGG, under 10 MB), and **Clear** it to return to the model default. Single-voice models (Piper) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
 
+## Voice Mode
+
+How a real-time [Voice mode](/guide#chat) conversation decides you have finished speaking, and how the reply is paced into speech. Turn detection and live-transcript settings apply from the next voice session; the run-on limit applies from the next reply.
+
+**Turn Detection**
+
+| Key                             | Default | Meaning |
+|---------------------------------|---------|---------|
+| `voice.endpoint.speechStartMs`  | 180     | Milliseconds of continuous speech before sound counts as the start of an utterance. Higher ignores coughs and background noise. |
+| `voice.endpoint.baseSilenceMs`  | 500     | Silence that ends a turn which sounds complete. Must not exceed `maxSilenceMs`. |
+| `voice.endpoint.maxSilenceMs`   | 1500    | Longest silence waited out when you pause mid-sentence before the turn ends anyway. Must be at least `baseSilenceMs`. |
+| `voice.endpoint.minUtteranceMs` | 200     | Shortest utterance kept; briefer blips are dropped. |
+| `voice.endpoint.semanticHold`   | on      | When the live transcript ends mid-clause, wait up to `maxSilenceMs` instead of ending the turn after `baseSilenceMs`. |
+
+**Transcripts & Speech**
+
+| Key                         | Default | Meaning |
+|-----------------------------|---------|---------|
+| `voice.partials.enabled`    | on      | Show a live transcript while you speak. Not used with models that hear audio directly. |
+| `voice.partials.intervalMs` | 1200    | Minimum milliseconds between live-transcript updates. |
+| `voice.tts.maxRunOnChars`   | 220     | A reply with no sentence break is cut into speech after this many characters, so audio starts without waiting for the sentence to end. Minimum 1. |
+
 ## OCR
 
 Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
@@ -322,6 +344,10 @@ OkHttp dispatcher concurrency caps for outbound LLM calls:
 
 Auto-tuned at first start; transiently bumped during loadtest if `--concurrency` would otherwise saturate. Changes apply live.
 
+### Chat streaming
+
+`chat.stream.token_coalesce_chars` (default 0) batches the web chat stream: tokens accumulate until at least that many characters are waiting, then go out as one frame. Every frame costs a network flush, so a value of 16 to 32 helps with very fast models at the cost of per-token smoothness. `0` sends every token as it arrives, and the first token of a reply is always sent at once.
+
 ## Uploads
 
 Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIME decides which limit applies — images, audio, or everything else.
@@ -414,6 +440,7 @@ What a dangerous action does when it can't reach you for approval. It covers the
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `tool.approval.offChannelPolicy` | `allow` | `allow`, `ask`, or `deny` — see below. |
+| `telegram.approval.timeout-seconds` | 300 | How long an approval prompt in Telegram or Slack waits for your answer before it expires unanswered. Minimum 1. |
 
 This setting is a **fallback, not a replacement for the approval prompt**. When *someone else* messages the agent on Telegram or Slack and that agent has a working binding, you are asked in that chat regardless of what is set here. Your own messages are not prompted — the channel already established that the sender was you — so this policy is what decides them:
 

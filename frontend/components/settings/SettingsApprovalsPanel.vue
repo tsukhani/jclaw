@@ -9,6 +9,8 @@
 // lives on each agent's page, since a grant is per-agent — but "does anything still
 // hold a standing grant?" is an instance-wide question, and answering it by opening
 // every agent in turn is exactly the gap that ticket exists to close.
+import SettingsConfigField from './SettingsConfigField.vue'
+
 const { configData, saving, refresh } = useSettingsConfig()
 
 interface AgentGrants { agentId: number, agentName: string, tools: string[] }
@@ -117,6 +119,17 @@ async function save(value: string) {
         An agent that you have previously granted &ldquo;always allow&rdquo; for a tool
         runs it without a prompt on any origin, independently of this setting.
       </p>
+
+      <div class="bg-surface-elevated border border-border">
+        <SettingsConfigField
+          config-key="telegram.approval.timeout-seconds"
+          label="promptTimeoutSeconds"
+          kind="number"
+          fallback="300"
+          :min="1"
+          tip="How long an approval prompt in Telegram or Slack waits for your answer before it expires unanswered. Minimum 1."
+        />
+      </div>
 
       <!-- JCLAW-1062 roll-up. Read-only by design: revoke belongs on the agent's own
            page, since a grant is per-agent. This answers the question that page cannot —

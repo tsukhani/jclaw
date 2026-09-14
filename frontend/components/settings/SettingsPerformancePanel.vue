@@ -3,6 +3,7 @@ import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 // Runtime state first: the dispatcher caps below are tuned against what the JVM is
 // actually doing, so reading them in the other order is backwards.
 import SettingsJvmPanel from './SettingsJvmPanel.vue'
+import SettingsConfigField from './SettingsConfigField.vue'
 
 // LLM dispatcher caps — outbound concurrency tuning. Defaults seeded by
 // DefaultConfigJob using clamp(8 * cores, 64, 256) per host (total = 2×);
@@ -143,6 +144,28 @@ async function savePerfField(configKey: string, value: string) {
           </template>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="mb-6 space-y-4">
+    <h2 class="text-sm font-medium text-fg-muted">
+      Chat Streaming
+    </h2>
+    <p class="text-xs text-fg-muted">
+      Token coalescing for the web chat stream. Every streamed frame costs a network flush,
+      so batching tokens trades per-token smoothness for fewer flushes. The first token of
+      a reply is always sent at once. Applies from the next reply.
+    </p>
+    <div class="bg-surface-elevated border border-border">
+      <SettingsConfigField
+        config-key="chat.stream.token_coalesce_chars"
+        label="tokenCoalesceChars"
+        kind="number"
+        fallback="0"
+        :min="0"
+        label-width="w-48"
+        tip="Characters to accumulate before sending a frame. 0 sends every token as it arrives; 16 to 32 suits very fast models."
+      />
     </div>
   </div>
 </template>

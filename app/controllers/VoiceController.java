@@ -30,6 +30,7 @@ import services.tts.TtsSidecarManager;
 import services.voice.TextTurnConfirmer;
 import services.voice.TurnEndpointer;
 import services.voice.VoiceSession;
+import services.voice.VoiceSettings;
 import services.voice.VoiceTurnMetrics;
 import services.voice.VoiceTurnSpeaker;
 import services.voice.VoiceVad;
@@ -283,15 +284,15 @@ public class VoiceController extends WebSocketController {
             // there's no transcript (audio-native models) or when disabled via config.
             var latestPartial = new AtomicReference<String>();
             boolean semanticHold = !"false".equalsIgnoreCase(
-                    String.valueOf(ConfigService.get("voice.endpoint.semanticHold")));
+                    String.valueOf(ConfigService.get(VoiceSettings.SEMANTIC_HOLD)));
             TurnEndpointer.Confirmer confirmer = semanticHold
                     ? new TextTurnConfirmer(latestPartial::get)
                     : TurnEndpointer.ALWAYS_COMPLETE;
             var endpointer = new TurnEndpointer(
-                    ConfigService.getInt("voice.endpoint.speechStartMs", 180),
-                    ConfigService.getInt("voice.endpoint.baseSilenceMs", 500),
-                    ConfigService.getInt("voice.endpoint.maxSilenceMs", 1500),
-                    ConfigService.getInt("voice.endpoint.minUtteranceMs", 200),
+                    ConfigService.getInt(VoiceSettings.SPEECH_START_MS, VoiceSettings.DEFAULT_SPEECH_START_MS),
+                    ConfigService.getInt(VoiceSettings.BASE_SILENCE_MS, VoiceSettings.DEFAULT_BASE_SILENCE_MS),
+                    ConfigService.getInt(VoiceSettings.MAX_SILENCE_MS, VoiceSettings.DEFAULT_MAX_SILENCE_MS),
+                    ConfigService.getInt(VoiceSettings.MIN_UTTERANCE_MS, VoiceSettings.DEFAULT_MIN_UTTERANCE_MS),
                     confirmer);
             var boundAgent = agent;
             // Interim transcripts (JCLAW-798): show partial text as the user
@@ -319,7 +320,7 @@ public class VoiceController extends WebSocketController {
             discardSessionConversation(bindingRef.getAndSet(binding));
             boolean modelHearsAudio = modelHearsAudioAtInit(binding);
             if (!modelHearsAudio) prewarmAsr(asr);
-            boolean partialsOn = !"false".equalsIgnoreCase(String.valueOf(ConfigService.get("voice.partials.enabled")))
+            boolean partialsOn = !"false".equalsIgnoreCase(String.valueOf(ConfigService.get(VoiceSettings.PARTIALS_ENABLED)))
                     && !modelHearsAudio;
             var interimBusy = new AtomicBoolean(false);
             VoiceSession.Partial partialSink = !partialsOn ? null : wav -> {
@@ -363,7 +364,8 @@ public class VoiceController extends WebSocketController {
                     Thread.ofVirtual().name("voice-turn-" + turnId).start(() ->
                             runTurn(binding, asr, wav, cancel, turnId, out, writeLock));
                 }
-            }, partialSink, ConfigService.getInt("voice.partials.intervalMs", 1200));
+            }, partialSink, ConfigService.getInt(VoiceSettings.PARTIALS_INTERVAL_MS,
+                    VoiceSettings.DEFAULT_PARTIALS_INTERVAL_MS));
             handedOff = true; // the session now owns the VAD; socket()'s finally closes it
             var displaced = sessionRef.getAndSet(voice);
             if (displaced != null) displaced.close(); // a repeated init frame must not leak the first VAD
@@ -408,7 +410,7 @@ public class VoiceController extends WebSocketController {
             // two voice-to-voice numbers, recorded under channel "voice" alongside the
             // LLM segments the streaming trace already emits on that channel.
             var metrics = new VoiceTurnMetrics(agent.id == null ? null : agent.id.toString(), t0);
-            int maxRunOn = ConfigService.getInt("voice.tts.maxRunOnChars", 220);
+            int maxRunOn = ConfigService.getInt(VoiceSettings.MAX_RUN_ON_CHARS, VoiceSettings.DEFAULT_MAX_RUN_ON_CHARS);
             // One transaction resolves the session conversation (JCLAW-862, created at init)
             // AND whether the active model hears audio natively — both walk agent/conversation.
             // Audio capability is resolved per turn so a mid-session model switch takes effect

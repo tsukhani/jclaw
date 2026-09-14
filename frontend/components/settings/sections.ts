@@ -36,6 +36,7 @@ import {
   HandRaisedIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
+  PhoneIcon,
   PhotoIcon,
   PrinterIcon,
   PuzzlePieceIcon,
@@ -74,6 +75,7 @@ import SettingsTranscriptionPanel from './SettingsTranscriptionPanel.vue'
 import SettingsUploadsPanel from './SettingsUploadsPanel.vue'
 import SettingsVideoGenPanel from './SettingsVideoGenPanel.vue'
 import SettingsVideoInterpPanel from './SettingsVideoInterpPanel.vue'
+import SettingsVoicePanel from './SettingsVoicePanel.vue'
 import SettingsWebScrapePanel from './SettingsWebScrapePanel.vue'
 
 export interface SettingsSection {
@@ -129,6 +131,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
     sections: [
       { id: 'transcription', title: 'Transcription', icon: MicrophoneIcon, component: SettingsTranscriptionPanel },
       { id: 'speech', title: 'Speech', icon: SpeakerWaveIcon, component: SettingsSpeechPanel },
+      { id: 'voice', title: 'Voice Mode', icon: PhoneIcon, component: SettingsVoicePanel },
     ],
   },
   {

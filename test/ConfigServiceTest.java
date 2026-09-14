@@ -342,6 +342,28 @@ class ConfigServiceTest extends UnitTest {
         }
     }
 
+    @Test
+    void setWithSideEffectsRoutesVoiceKeysThroughTheirRules() {
+        // The rules themselves are pinned in VoiceSettingsTest.
+        assertNotNull(ConfigService.setWithSideEffects(services.voice.VoiceSettings.MAX_RUN_ON_CHARS, "0"));
+        assertNull(ConfigService.get(services.voice.VoiceSettings.MAX_RUN_ON_CHARS),
+                "the rejected value must not be persisted");
+    }
+
+    @Test
+    void setWithSideEffectsRejectsAnApprovalTimeoutBelowOneSecond() {
+        assertNotNull(ConfigService.setWithSideEffects(agents.DangerousActionGate.APPROVAL_TIMEOUT_KEY, "0"));
+        assertNull(ConfigService.get(agents.DangerousActionGate.APPROVAL_TIMEOUT_KEY),
+                "the rejected value must not be persisted");
+    }
+
+    @Test
+    void setWithSideEffectsRejectsANegativeTokenCoalesceSize() {
+        assertNotNull(ConfigService.setWithSideEffects(utils.TokenCoalescer.CONFIG_KEY, "-1"));
+        // The default: chat streaming tests running beside this one read the key.
+        assertNull(ConfigService.setWithSideEffects(utils.TokenCoalescer.CONFIG_KEY, "0"));
+    }
+
     // --- setWithSideEffects: web_scrape settings (rules pinned in WebScrapeSettingsTest) ---
 
     @Test

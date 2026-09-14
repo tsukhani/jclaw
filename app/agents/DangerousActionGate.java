@@ -100,6 +100,9 @@ public final class DangerousActionGate {
     private static final String CHANNEL_NAME = "telegram";
     private static final String SLACK_CHANNEL = "slack";
 
+    /** Settings &gt; Tool Approvals. Named for Telegram, but bounds the Slack prompt too. */
+    public static final String APPROVAL_TIMEOUT_KEY = "telegram.approval.timeout-seconds";
+
     /** Default wait for a button tap before the prompt times out (seconds). */
     private static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
@@ -609,7 +612,7 @@ public final class DangerousActionGate {
 
     private static Duration timeout() {
         return Duration.ofSeconds(
-                ConfigService.getInt("telegram.approval.timeout-seconds", DEFAULT_TIMEOUT_SECONDS));
+                ConfigService.getInt(APPROVAL_TIMEOUT_KEY, DEFAULT_TIMEOUT_SECONDS));
     }
 
     /** Visible for testing: drop every standing grant. */
