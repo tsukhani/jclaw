@@ -383,6 +383,12 @@ watch(() => route.query.conversation, async (raw) => {
   await resolveAndLoadConversation(id)
 })
 
+// The address follows the open conversation, so a reload or a copied link reopens it; replace keeps it out of history.
+watch(selectedConvoId, (id) => {
+  if (String(id ?? '') === String(route.query.conversation ?? '')) return
+  void router.replace({ query: { ...route.query, conversation: id ?? undefined } })
+})
+
 function newChat() {
   // Abort any in-flight stream first so late SSE events don't land in the
   // freshly-cleared state as orphan deltas.

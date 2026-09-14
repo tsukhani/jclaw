@@ -1544,6 +1544,40 @@ describe('Chat page — user-message hover actions', () => {
   })
 })
 
+describe('Chat page — address bar', () => {
+  afterEach(async () => {
+    vi.restoreAllMocks()
+    await useRouter().replace({ query: {} })
+  })
+
+  it('puts a new conversation in the address once its first reply starts, and drops it for a new conversation', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations/950/messages', () => [])
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const encoder = new TextEncoder()
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":950}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"complete","content":"hi"}\n'))
+          controller.close()
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    })
+    const router = useRouter()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    expect(router.currentRoute.value.query.conversation).toBeUndefined()
+
+    await component.find<HTMLTextAreaElement>('textarea').setValue('hello')
+    await component.find('form').trigger('submit.prevent')
+    await vi.waitFor(() => expect(router.currentRoute.value.query.conversation).toBe('950'))
+
+    await component.find('button[title="New conversation"]').trigger('click')
+    await vi.waitFor(() => expect(router.currentRoute.value.query.conversation).toBeUndefined())
+  })
+})
+
 describe('Chat page — error-event SSE branch', () => {
   it('renders the error content from a provider error envelope into the assistant bubble', async () => {
     setupBaseChatApi()
