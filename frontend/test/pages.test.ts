@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { clearNuxtData } from '#app'
 import Index from '~/pages/index.vue'
 import Agents from '~/pages/agents/[[name]].vue'
 import Settings from '~/pages/settings.vue'
@@ -161,6 +162,10 @@ describe('Settings page', () => {
 })
 
 describe('Logs page', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
   it('renders with auto-refresh toggle', async () => {
     setupMockApi()
     const component = await mountSuspended(Logs)
@@ -194,24 +199,54 @@ describe('Logs page', () => {
     expect(selects.length).toBeGreaterThanOrEqual(2)
   })
 
-  // JCLAW-272: subagent lifecycle filter group exposes the six categories
-  // so operators can scope the events page to subagent activity once the
-  // emission stories (JCLAW-265/266/270/273) wire it up.
-  it('exposes subagent lifecycle categories in the filter', async () => {
-    setupMockApi()
-    const component = await mountSuspended(Logs)
+  function categorySelect(component: Awaited<ReturnType<typeof mountSuspended>>) {
+    return component.findAll('select').find(s => s.text().includes('All categories'))!
+  }
 
-    const optgroup = component.find('optgroup[label="Subagents"]')
-    expect(optgroup.exists()).toBe(true)
-    const values = optgroup.findAll('option').map(o => o.attributes('value'))
-    expect(values).toEqual([
-      'SUBAGENT_SPAWN',
-      'SUBAGENT_COMPLETE',
-      'SUBAGENT_ERROR',
-      'SUBAGENT_KILL',
-      'SUBAGENT_LIMIT_EXCEEDED',
-      'SUBAGENT_TIMEOUT',
+  it('builds the category filter from the categories the backend reports', async () => {
+    setupMockApi()
+    registerEndpoint('/api/logs/categories', () => [
+      'CIRCUIT_BREAKER', 'MCP_CONNECT', 'SUBAGENT_SPAWN', 'TASK_STARTED', 'llm',
     ])
+    const component = await mountSuspended(Logs)
+    await flushPromises()
+
+    const select = categorySelect(component)
+    const flat = select.findAll(':scope > option').map(o => o.attributes('value'))
+    expect(flat).toEqual(['', 'CIRCUIT_BREAKER', 'llm'])
+    const groups = select.findAll('optgroup').map(g => ({
+      label: g.attributes('label'),
+      values: g.findAll('option').map(o => o.attributes('value')),
+    }))
+    expect(groups).toEqual([
+      { label: 'Subagents', values: ['SUBAGENT_SPAWN'] },
+      { label: 'Tasks', values: ['TASK_STARTED'] },
+      { label: 'MCP', values: ['MCP_CONNECT'] },
+    ])
+  })
+
+  it('offers only "All categories" when the event log is empty', async () => {
+    setupMockApi()
+    registerEndpoint('/api/logs/categories', () => [])
+    const component = await mountSuspended(Logs)
+    await flushPromises()
+
+    const select = categorySelect(component)
+    expect(select.findAll('option').map(o => o.text())).toEqual(['All categories'])
+    expect(select.findAll('optgroup')).toHaveLength(0)
+  })
+
+  it('offers only "All categories" when the categories fetch fails, and still lists events', async () => {
+    setupMockApi()
+    registerEndpoint('/api/logs/categories', () => {
+      throw createError({ statusCode: 500 })
+    })
+    const component = await mountSuspended(Logs)
+    await flushPromises()
+
+    const select = categorySelect(component)
+    expect(select.findAll('option').map(o => o.text())).toEqual(['All categories'])
+    expect(component.text()).toContain('Test event')
   })
 })
 

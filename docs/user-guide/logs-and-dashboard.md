@@ -125,7 +125,7 @@ The [Logs](/logs) page is the operator's microscope. Every meaningful event — 
 
 Three filters across the top:
 
-- **Category** — restrict to one subsystem. The standard set is `llm`, `channel`, `tool`, `task`, `agent`, `auth`, `system`. A **Subagents** optgroup adds the per-event subagent categories (`SUBAGENT_SPAWN`, `SUBAGENT_COMPLETE`, `SUBAGENT_ERROR`, `SUBAGENT_KILL`, `SUBAGENT_LIMIT_EXCEEDED`, `SUBAGENT_TIMEOUT`).
+- **Category** — restrict to one subsystem. The list is built from the categories already present in the event log, so every category that has written an event is selectable (e.g. `llm`, `channel`, `tool`, `CIRCUIT_BREAKER`). Per-event categories are grouped: **Subagents** (`SUBAGENT_*`), **Tasks** (`TASK_*`) and **MCP** (`MCP_*`); a group appears once one of its categories has an event. The list loads when the page opens.
 - **Level** — `ERROR`, `WARN`, or `INFO`.
 - **Search** — free-text match on the message body.
 

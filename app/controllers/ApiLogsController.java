@@ -1,11 +1,13 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.EventLog;
 import org.jspecify.annotations.Nullable;
+import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 import utils.ApiResponses;
@@ -65,6 +67,15 @@ public class ApiLogsController extends Controller {
         )).toList();
 
         renderJSON(gson.toJson(new LogListResponse(entries, effectiveLimit, effectiveOffset)));
+    }
+
+    /** The distinct categories present in the event log, in code-point order. */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = String.class))))
+    public static void categories() {
+        var categories = JPA.em()
+                .createQuery("SELECT DISTINCT e.category FROM EventLog e", String.class)
+                .getResultList().stream().sorted().toList();
+        renderJSON(gson.toJson(categories));
     }
 
     /**

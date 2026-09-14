@@ -329,6 +329,7 @@ POST    /api/webhooks/whatsapp                  WebhookWhatsAppController.webhoo
 
 # Logs API
 GET     /api/logs                               ApiLogsController.list
+GET     /api/logs/categories                    ApiLogsController.categories
 
 # ACP coding-harness detection (Settings → Subagents)
 GET     /api/subagents/acp-harnesses            ApiAcpHarnessController.list

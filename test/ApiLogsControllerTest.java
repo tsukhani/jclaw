@@ -1,8 +1,12 @@
+import com.google.gson.JsonParser;
 import models.EventLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+
+import java.util.ArrayList;
+import java.util.List;
 
 class ApiLogsControllerTest extends FunctionalTest {
 
@@ -102,6 +106,40 @@ class ApiLogsControllerTest extends FunctionalTest {
         assertIsOk(resp);
         assertTrue(getContent(resp).contains("\"offset\":0"),
                 "negative offset must default to 0: " + getContent(resp));
+    }
+
+    @Test
+    void categoriesRequiresAuth() {
+        assertEquals(401, GET("/api/logs/categories").status.intValue());
+    }
+
+    @Test
+    void categoriesAreDistinctAndSorted() {
+        login();
+        commitInFreshTx(() -> {
+            seedEvent("llm-cat-test", "one");
+            seedEvent("TASK_CAT_TEST", "two");
+            seedEvent("CIRCUIT_CAT_TEST", "three");
+            seedEvent("SUBAGENT_CAT_TEST", "four");
+            seedEvent("TASK_CAT_TEST", "five");
+        });
+        var resp = GET("/api/logs/categories");
+        assertIsOk(resp);
+        var mine = List.of("CIRCUIT_CAT_TEST", "SUBAGENT_CAT_TEST", "TASK_CAT_TEST", "llm-cat-test");
+        var returned = new ArrayList<String>();
+        JsonParser.parseString(getContent(resp)).getAsJsonArray().forEach(e -> returned.add(e.getAsString()));
+        assertEquals(returned.stream().sorted().toList(), returned, "categories come back sorted: " + returned);
+        assertEquals(mine, returned.stream().filter(mine::contains).toList(),
+                "each seeded category appears exactly once: " + returned);
+    }
+
+    @Test
+    void aCategoryFromTheListFiltersToItsEvents() {
+        login();
+        commitInFreshTx(() -> seedEvent("MCP_CAT_FILTER_TEST", "mcp filter entry"));
+        assertTrue(getContent(GET("/api/logs/categories")).contains("\"MCP_CAT_FILTER_TEST\""));
+        var body = getContent(GET("/api/logs?category=MCP_CAT_FILTER_TEST"));
+        assertTrue(body.contains("mcp filter entry"), "filtering by a listed category returns its events: " + body);
     }
 
     @Test

@@ -37,19 +37,25 @@ function toggleExpand(id: number) {
   expandedId.value = expandedId.value === id ? null : id
 }
 
-const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
+// The backend answers the distinct categories actually written, so a category
+// emitted anywhere is selectable without a list here to keep in step.
+const { data: categoryData } = useLazyFetch<string[]>('/api/logs/categories', { default: () => [] })
 
-// JCLAW-272: subagent lifecycle taxonomy. Emission lands later (JCLAW-265
-// spawn, JCLAW-266 limit exceeded, JCLAW-270/273 completion); the filter
-// exposes the categories now so they're recognized as soon as events flow.
-const subagentCategories = [
-  'SUBAGENT_SPAWN',
-  'SUBAGENT_COMPLETE',
-  'SUBAGENT_ERROR',
-  'SUBAGENT_KILL',
-  'SUBAGENT_LIMIT_EXCEEDED',
-  'SUBAGENT_TIMEOUT',
+const CATEGORY_GROUPS = [
+  { prefix: 'SUBAGENT_', label: 'Subagents' },
+  { prefix: 'TASK_', label: 'Tasks' },
+  { prefix: 'MCP_', label: 'MCP' },
 ]
+
+const categoryOptions = computed(() => {
+  const all = Array.isArray(categoryData.value) ? categoryData.value : []
+  return {
+    flat: all.filter(c => !CATEGORY_GROUPS.some(g => c.startsWith(g.prefix))),
+    groups: CATEGORY_GROUPS
+      .map(g => ({ label: g.label, categories: all.filter(c => c.startsWith(g.prefix)) }))
+      .filter(g => g.categories.length > 0),
+  }
+})
 
 // A11y: stable ids for label/control association
 const autoRefreshId = useId()
@@ -113,15 +119,19 @@ function formatTimestamp(iso: string): string {
             All categories
           </option>
           <option
-            v-for="c in categories"
+            v-for="c in categoryOptions.flat"
             :key="c"
             :value="c"
           >
             {{ c }}
           </option>
-          <optgroup label="Subagents">
+          <optgroup
+            v-for="g in categoryOptions.groups"
+            :key="g.label"
+            :label="g.label"
+          >
             <option
-              v-for="c in subagentCategories"
+              v-for="c in g.categories"
               :key="c"
               :value="c"
             >
