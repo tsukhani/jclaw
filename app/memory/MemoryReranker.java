@@ -3,6 +3,7 @@ package memory;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.SessionCompactor;
@@ -47,13 +48,13 @@ public final class MemoryReranker {
      */
     @FunctionalInterface
     public interface RankCall {
-        String rank(List<ChatMessage> messages) throws Exception;
+        @Nullable String rank(List<ChatMessage> messages) throws Exception;
     }
 
-    private static volatile RankCall rankCallOverride;
+    private static volatile @Nullable RankCall rankCallOverride;
 
     /** Test-only: install (or clear with {@code null}) a canned rank call. */
-    public static void setRankCallForTest(RankCall override) {
+    public static void setRankCallForTest(@Nullable RankCall override) {
         rankCallOverride = override;
     }
 
@@ -92,7 +93,9 @@ public final class MemoryReranker {
             var messages = List.of(
                     ChatMessage.system(INSTRUCTIONS),
                     ChatMessage.user(render(query, shortlist)));
-            return parseOrder(call.rank(messages), shortlist.size());
+            var raw = call.rank(messages);
+            if (raw == null) return identity;
+            return parseOrder(raw, shortlist.size());
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY,
                     "Memory rerank failed, keeping fused order: %s".formatted(e.getMessage()));
@@ -114,7 +117,7 @@ public final class MemoryReranker {
      * routinely a cloud one. {@code ConfigService} rejects a non-local value for
      * this key, so a configured provider is a local provider.
      */
-    private static RankCall productionCall() {
+    private static @Nullable RankCall productionCall() {
         var providerName = ConfigService.get(KEY_PROVIDER, "").trim();
         var model = ConfigService.get(KEY_MODEL, "");
         if (providerName.isBlank() || model.isBlank()) {

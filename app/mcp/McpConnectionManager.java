@@ -11,6 +11,7 @@ import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
 import models.EventLog;
 import models.McpServer;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.db.jpa.JPA;
 import services.BreakerAlarms;
@@ -104,7 +105,7 @@ public final class McpConnectionManager {
     // Reference is reassigned under synchronized ensureScheduler(); the held
     // executor is itself thread-safe, so volatile-on-reference is sufficient.
     @SuppressWarnings("java:S3077")
-    private static volatile ScheduledExecutorService scheduler;
+    private static volatile @Nullable ScheduledExecutorService scheduler;
 
     private McpConnectionManager() {}
 
@@ -220,7 +221,7 @@ public final class McpConnectionManager {
         return future;
     }
 
-    private static void connectInternal(McpServer server, CompletableFuture<Void> firstAttemptFuture) {
+    private static void connectInternal(McpServer server, @Nullable CompletableFuture<Void> firstAttemptFuture) {
         ensureScheduler();
         stop(server.name);
         var entry = new Entry(server.name);
@@ -284,7 +285,7 @@ public final class McpConnectionManager {
         return e != null ? e.status : McpServer.Status.DISCONNECTED;
     }
 
-    public static String lastError(String serverName) {
+    public static @Nullable String lastError(String serverName) {
         var e = connections.get(serverName);
         return e != null ? e.lastError : null;
     }
@@ -609,7 +610,7 @@ public final class McpConnectionManager {
         scheduleConnect(entry, server, entry.attempts + 1);
     }
 
-    private static void handleFailure(Entry entry, McpServer server, int attempt, String error) {
+    private static void handleFailure(Entry entry, McpServer server, int attempt, @Nullable String error) {
         // Identity guard before any mutation — the catch-path counterpart to doConnect's
         // success-path check: an orphaned failure must not unpublish the live replacement's
         // tools, clobber its DB row or delete its allowlist rows. The caller already closed
@@ -748,7 +749,7 @@ public final class McpConnectionManager {
      * re-save it. Targeted UPDATE statements only touch the column we
      * want, so concurrent enabled/configJson changes can't be clobbered.
      */
-    private static void persistStatus(Long serverId, McpServer.Status status, String error) {
+    private static void persistStatus(Long serverId, McpServer.Status status, @Nullable String error) {
         if (serverId == null) return;
         var truncated = error != null && error.length() > 500 ? error.substring(0, 500) : error;
         try {
@@ -812,9 +813,9 @@ public final class McpConnectionManager {
         // ConcurrentHashMap for pending requests); volatile here just publishes the
         // reference. Likewise ScheduledFuture is thread-safe by JDK contract.
         @SuppressWarnings("java:S3077")
-        volatile McpClient client;
+        volatile @Nullable McpClient client;
         volatile McpServer.Status status = McpServer.Status.DISCONNECTED;
-        volatile String lastError;
+        volatile @Nullable String lastError;
         volatile int attempts;
         /** JCLAW-388: per-server interactive-approval flag, captured from the
          *  {@link McpServer} row at connect time. Read on the tool-dispatch
@@ -822,14 +823,14 @@ public final class McpConnectionManager {
          *  reconnect that replaces the entry publishes a fresh value. */
         volatile boolean requiresApproval;
         @SuppressWarnings("java:S3077")
-        volatile ScheduledFuture<?> scheduledRetry;
+        volatile @Nullable ScheduledFuture<?> scheduledRetry;
         /** JCLAW-288: when non-null, completed on the FIRST attempt's
          *  resolution (success or failure). Populated by
          *  {@link #connectAndAwait}; left null for fire-and-forget
          *  {@link #connect}. CompletableFuture is itself thread-safe;
          *  this volatile only publishes the reference. */
         @SuppressWarnings("java:S3077")
-        volatile CompletableFuture<Void> firstAttemptFuture;
+        volatile @Nullable CompletableFuture<Void> firstAttemptFuture;
 
         Entry(String name) { this.name = name; }
     }

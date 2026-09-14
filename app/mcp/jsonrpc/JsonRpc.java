@@ -5,6 +5,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import org.jspecify.annotations.Nullable;
 import utils.GsonHolder;
 
 /**
@@ -36,24 +37,31 @@ public final class JsonRpc {
 
     public sealed interface Message permits Request, Response, Notification {}
 
-    public record Request(Object id, String method, Object params) implements Message {
+    public record Request(Object id, String method, @Nullable Object params) implements Message {
         public Request {
             if (id == null) throw new IllegalArgumentException("Request requires an id");
             if (method == null || method.isEmpty()) throw new IllegalArgumentException("method required");
         }
     }
 
-    public record Response(Object id, JsonElement result, Error error) implements Message {
+    public record Response(@Nullable Object id, @Nullable JsonElement result, @Nullable Error error)
+            implements Message {
         public boolean isError() { return error != null; }
+
+        /** Valid only once {@link #isError()} is true. */
+        public Error resolvedError() {
+            if (error == null) throw new IllegalStateException("response carries no error");
+            return error;
+        }
     }
 
-    public record Notification(String method, Object params) implements Message {
+    public record Notification(String method, @Nullable Object params) implements Message {
         public Notification {
             if (method == null || method.isEmpty()) throw new IllegalArgumentException("method required");
         }
     }
 
-    public record Error(int code, String message, JsonElement data) {
+    public record Error(int code, String message, @Nullable JsonElement data) {
         public Error(int code, String message) { this(code, message, null); }
     }
 
@@ -110,7 +118,9 @@ public final class JsonRpc {
         boolean hasError = root.has(KEY_ERROR);
 
         if (hasMethod && hasId) {
-            return new Request(decodeId(root.get(KEY_ID)), root.get(KEY_METHOD).getAsString(),
+            var id = decodeId(root.get(KEY_ID));
+            if (id == null) throw new IllegalArgumentException("Request requires an id");
+            return new Request(id, root.get(KEY_METHOD).getAsString(),
                     root.has(KEY_PARAMS) ? root.get(KEY_PARAMS) : null);
         }
         if (hasMethod) {
@@ -135,13 +145,13 @@ public final class JsonRpc {
                 e.has(KEY_DATA) ? e.get(KEY_DATA) : null);
     }
 
-    private static JsonElement idJson(Object id) {
+    private static JsonElement idJson(@Nullable Object id) {
         if (id == null) return JsonNull.INSTANCE;
         if (id instanceof Number n) return new JsonPrimitive(n);
         return new JsonPrimitive(id.toString());
     }
 
-    private static Object decodeId(JsonElement el) {
+    private static @Nullable Object decodeId(JsonElement el) {
         if (el == null || el.isJsonNull()) return null;
         var p = el.getAsJsonPrimitive();
         if (p.isNumber()) return p.getAsLong();

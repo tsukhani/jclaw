@@ -1,6 +1,7 @@
 package memory;
 
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
@@ -52,14 +53,14 @@ public final class MemoryReembedService {
     private static final AtomicInteger processed = new AtomicInteger();
     private static final AtomicInteger total = new AtomicInteger();
     private static volatile String activeModel = "";
-    private static volatile String lastError;
+    private static volatile @Nullable String lastError;
 
     /**
      * What the UI polls. {@code upToDate} is false after a model switch, which is what
      * turns into the prompt to re-embed — it is not derivable from {@code running}.
      */
     public record Status(boolean running, int processed, int total, String model,
-                         String error, boolean upToDate) {}
+                         @Nullable String error, boolean upToDate) {}
 
     public static Status status() {
         return new Status(running.get(), processed.get(), total.get(),
@@ -71,7 +72,7 @@ public final class MemoryReembedService {
      * {@code null} when it did — single-flight, because two concurrent rebuilds would
      * wipe each other's work.
      */
-    public static String start() {
+    public static @Nullable String start() {
         if (!MemoryVectorSettings.enabled()) {
             return "Vector memory is disabled — there is nothing to embed.";
         }

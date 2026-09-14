@@ -1,5 +1,7 @@
 package memory;
 
+import org.jspecify.annotations.Nullable;
+
 import services.ConfigService;
 import services.search.LuceneIndexer;
 
@@ -39,7 +41,7 @@ public final class MemoryVectorSettings {
      * {@code HttpFactories.setLlmDispatcherCapTransient}, which overrides the dispatcher caps
      * for a run without touching what the operator configured.
      */
-    private static volatile Boolean transientOverride;
+    private static volatile @Nullable Boolean transientOverride;
 
     /** Off unless an operator turns it on: a fresh install has no embedding provider. */
     public static boolean enabled() {
@@ -48,7 +50,7 @@ public final class MemoryVectorSettings {
     }
 
     /** {@code null} clears the override and returns to the persisted value. */
-    public static void setTransientOverride(Boolean value) {
+    public static void setTransientOverride(@Nullable Boolean value) {
         transientOverride = value;
     }
 

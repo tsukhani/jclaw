@@ -2,6 +2,7 @@ package mcp;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -51,7 +52,7 @@ public record McpToolDef(String name, String description, JsonObject inputSchema
         return out;
     }
 
-    private static Object jsonToJava(JsonElement el) {
+    private static @Nullable Object jsonToJava(JsonElement el) {
         if (el == null || el.isJsonNull()) return null;
         if (el.isJsonObject()) return jsonToMap(el.getAsJsonObject());
         if (el.isJsonArray()) {

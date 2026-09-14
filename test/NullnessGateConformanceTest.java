@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -30,6 +31,9 @@ class NullnessGateConformanceTest extends UnitTest {
     private static final Pattern NULL_MARKED_PACKAGE = Pattern.compile("@NullMarked\\s+package\\s");
 
     private static final String TEST_COMPILE_BLOCK = "tasks.named<JavaCompile>(\"compileTestJava\")";
+
+    /** JPA entities, populated reflectively after construction, and the vendored Aspose shim. */
+    private static final Set<String> EXCLUDED_PACKAGES = Set.of("models", "com");
 
     /** Everything a commented-out line would leave behind: the token without the configuration. */
     private static final List<String> SILENT_SWITCH_OFFS = List.of(
@@ -103,6 +107,30 @@ class NullnessGateConformanceTest extends UnitTest {
             }
         }
         assertEquals(List.of(), missing, "packages under the NullAway scope with no @NullMarked package-info");
+    }
+
+    @Test
+    void everyTopLevelPackageIsInScopeOrDeliberatelyExcluded() throws Exception {
+        // AnnotatedPackages is an allowlist, so a package nobody adds is silently unchecked —
+        // mcp and memory sat outside it with 94 violations between them.
+        var listed = annotatedPackages();
+        var unaccounted = new ArrayList<String>();
+        try (Stream<Path> roots = Files.list(repo("app"))) {
+            for (var dir : roots.filter(Files::isDirectory).sorted().toList()) {
+                var name = dir.getFileName().toString();
+                if (!listed.contains(name) && !EXCLUDED_PACKAGES.contains(name) && holdsJavaSource(dir)) {
+                    unaccounted.add(name);
+                }
+            }
+        }
+        assertEquals(List.of(), unaccounted,
+                "top-level app/ packages neither in NullAway:AnnotatedPackages nor excluded on purpose");
+    }
+
+    private static boolean holdsJavaSource(Path root) throws IOException {
+        try (Stream<Path> tree = Files.walk(root)) {
+            return tree.anyMatch(f -> f.getFileName().toString().endsWith(".java"));
+        }
     }
 
     private static boolean hasJavaSource(Path dir) throws IOException {

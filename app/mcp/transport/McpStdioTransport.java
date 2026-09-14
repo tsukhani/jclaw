@@ -2,6 +2,7 @@ package mcp.transport;
 
 import com.google.errorprone.annotations.MustBeClosed;
 import mcp.jsonrpc.JsonRpc;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import utils.SubprocessEnv;
 
@@ -38,11 +39,11 @@ public final class McpStdioTransport implements McpTransport {
     private final Map<String, String> env;
     private final String name;
 
-    private Process process;
-    private BufferedWriter stdin;
-    private BufferedReader stdout;
-    private Consumer<JsonRpc.Message> onMessage;
-    private Consumer<Throwable> onError;
+    private @Nullable Process process;
+    private @Nullable BufferedWriter stdin;
+    private @Nullable BufferedReader stdout;
+    private Consumer<JsonRpc.Message> onMessage = msg -> {};
+    private Consumer<Throwable> onError = t -> {};
     private volatile boolean closed;
     private final ReentrantLock sendLock = new ReentrantLock();
 
@@ -67,9 +68,10 @@ public final class McpStdioTransport implements McpTransport {
         SubprocessEnv.apply(pb, env);
         process = pb.start();
         stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
-        stdout = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+        var reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+        stdout = reader;
         var stderr = new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8));
-        Thread.ofVirtual().name("mcp-stdio-" + name).start(this::readLoop);
+        Thread.ofVirtual().name("mcp-stdio-" + name).start(() -> readLoop(reader));
         Thread.ofVirtual().name("mcp-stderr-" + name).start(() -> drainStderr(stderr));
     }
 
@@ -77,10 +79,12 @@ public final class McpStdioTransport implements McpTransport {
     public void send(JsonRpc.Message msg) throws IOException {
         sendLock.lock();
         try {
+            var out = stdin;
             if (closed) throw new IOException("transport closed");
-            stdin.write(JsonRpc.encode(msg));
-            stdin.write('\n');
-            stdin.flush();
+            if (out == null) throw new IOException("transport not started");
+            out.write(JsonRpc.encode(msg));
+            out.write('\n');
+            out.flush();
         } finally {
             sendLock.unlock();
         }
@@ -116,10 +120,10 @@ public final class McpStdioTransport implements McpTransport {
     // catches RuntimeException (per-line parse failure, loop continues). They
     // are not collapsible — one bad line shouldn't kill the stdio reader.
     @SuppressWarnings("java:S1141")
-    private void readLoop() {
+    private void readLoop(BufferedReader in) {
         try {
             String line;
-            while (!closed && (line = stdout.readLine()) != null) {
+            while (!closed && (line = in.readLine()) != null) {
                 if (line.isBlank()) continue;
                 try {
                     onMessage.accept(JsonRpc.decode(line));

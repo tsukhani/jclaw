@@ -4,12 +4,14 @@ import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonObject;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpTransport;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -62,7 +64,7 @@ public class McpClient implements AutoCloseable {
     // so volatile-on-reference is sufficient publication.
     @SuppressWarnings("java:S3077")
     private volatile List<McpToolDef> cachedTools = List.of();
-    private volatile String lastError;
+    private volatile @Nullable String lastError;
     // Reassigned with a stateless Consumer; volatile-on-reference is sufficient.
     @SuppressWarnings("java:S3077")
     private volatile Consumer<List<McpToolDef>> onToolsChanged = tools -> {};
@@ -98,9 +100,9 @@ public class McpClient implements AutoCloseable {
 
     public String name() { return name; }
 
-    public State state() { return state.get(); }
+    public State state() { return Objects.requireNonNull(state.get()); }
 
-    public String lastError() { return lastError; }
+    public @Nullable String lastError() { return lastError; }
 
     public List<McpToolDef> tools() { return cachedTools; }
 
@@ -148,7 +150,7 @@ public class McpClient implements AutoCloseable {
         params.add("arguments", arguments != null ? arguments : new JsonObject());
         var resp = sendRequest("tools/call", params);
         if (resp.isError()) {
-            throw new McpException(resp.error().code(), resp.error().message());
+            throw new McpException(resp.resolvedError().code(), resp.resolvedError().message());
         }
         if (resp.result() == null || !resp.result().isJsonObject()) {
             throw new McpException("tools/call returned non-object result");
@@ -179,16 +181,16 @@ public class McpClient implements AutoCloseable {
         params.add("clientInfo", info);
         var resp = sendRequest("initialize", params, handshakeTimeout);
         if (resp.isError()) {
-            throw new McpException(resp.error().code(),
-                    "initialize failed: " + resp.error().message());
+            throw new McpException(resp.resolvedError().code(),
+                    "initialize failed: " + resp.resolvedError().message());
         }
     }
 
     private List<McpToolDef> fetchTools(Duration timeout) throws IOException, McpException {
         var resp = sendRequest("tools/list", new JsonObject(), timeout);
         if (resp.isError()) {
-            throw new McpException(resp.error().code(),
-                    "tools/list failed: " + resp.error().message());
+            throw new McpException(resp.resolvedError().code(),
+                    "tools/list failed: " + resp.resolvedError().message());
         }
         var result = resp.result();
         if (result == null || !result.isJsonObject()) return List.of();
@@ -235,7 +237,7 @@ public class McpClient implements AutoCloseable {
         }
     }
 
-    private void sendNotification(String method, Object params) throws IOException {
+    private void sendNotification(String method, @Nullable Object params) throws IOException {
         transport.send(new JsonRpc.Notification(method, params));
     }
 

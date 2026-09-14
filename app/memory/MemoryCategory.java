@@ -1,5 +1,7 @@
 package memory;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -49,7 +51,7 @@ public enum MemoryCategory {
      * Match a raw category string (case-insensitive, trimmed) to a canonical
      * category, or empty when it isn't one of the six.
      */
-    public static Optional<MemoryCategory> from(String raw) {
+    public static Optional<MemoryCategory> from(@Nullable String raw) {
         if (raw == null) return Optional.empty();
         var key = raw.strip().toLowerCase(Locale.ROOT);
         return Arrays.stream(values()).filter(c -> c.label.equals(key)).findFirst();
@@ -60,7 +62,7 @@ public enum MemoryCategory {
      * whitespace trimmed; an unrecognized non-blank value passes through (legacy
      * rows keep working); blank or null becomes {@code null}.
      */
-    public static String normalize(String raw) {
+    public static @Nullable String normalize(@Nullable String raw) {
         if (raw == null || raw.isBlank()) return null;
         return raw.strip().toLowerCase(Locale.ROOT);
     }
@@ -80,7 +82,7 @@ public enum MemoryCategory {
      * {@code project} instead, any specific bucket we chose would be our guess at an intent
      * the model did not express. {@code fact} is the neutral option that adds no meaning.
      */
-    public static String coerceForStorage(String raw) {
+    public static String coerceForStorage(@Nullable String raw) {
         return from(raw).map(c -> c.label).orElse(FACT.label);
     }
 
@@ -98,7 +100,7 @@ public enum MemoryCategory {
      * <p>Demotes to {@link #FACT} for the reason given above: it is the neutral bucket that
      * adds no meaning the model did not express.
      */
-    public static String coerceForCapture(String raw) {
+    public static String coerceForCapture(@Nullable String raw) {
         var coerced = coerceForStorage(raw);
         return CORE.label.equals(coerced) ? FACT.label : coerced;
     }

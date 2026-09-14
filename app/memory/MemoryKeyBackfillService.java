@@ -3,6 +3,7 @@ package memory;
 import llm.LlmTypes.ChatMessage;
 import models.Agent;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 import services.evals.MemoryEvalGenerator;
@@ -72,10 +73,10 @@ public final class MemoryKeyBackfillService {
     private static final AtomicInteger total = new AtomicInteger();
     private static final AtomicInteger promoted = new AtomicInteger();
     private static final AtomicInteger keyed = new AtomicInteger();
-    private static volatile String lastError;
+    private static volatile @Nullable String lastError;
 
     public record Status(boolean running, int processed, int total, int promoted, int keyed,
-                         String error) {}
+                         @Nullable String error) {}
 
     public static Status status() {
         return new Status(running.get(), processed.get(), total.get(), promoted.get(), keyed.get(),
@@ -188,7 +189,7 @@ public final class MemoryKeyBackfillService {
      * guard that removes the best key to remove the worst one is the more expensive trade.
      */
 
-    private static String keyFor(Row row, List<Row> all, MemoryEvalGenerator.QuestionWriter writer) {
+    private static @Nullable String keyFor(Row row, List<Row> all, MemoryEvalGenerator.QuestionWriter writer) {
         var related = neighbours(row, all);
         var prompt = "MEMORY: %s\nRELATED:\n%s".formatted(row.text(),
                 related.isEmpty() ? "(none)" : String.join("\n", related));

@@ -446,22 +446,22 @@ close — the Gradle compile is the single place a javac plugin can see this cod
 layering Spotless uses.
 
 **What is in scope.** The `NullAway:AnnotatedPackages` option in `build.gradle.kts` lists
-`utils`, `llm`, `agents`, `tools`, `services`, `controllers`, `channels`, `jobs` and `slash`. Each
-carries a `package-info.java` with `@NullMarked`, and so must every subpackage, since the
-annotation does not inherit.
+`utils`, `llm`, `agents`, `tools`, `services`, `controllers`, `channels`, `jobs`, `slash`, `mcp`
+and `memory`. Each carries a `package-info.java` with `@NullMarked`, and so must every
+subpackage, since the annotation does not inherit.
 
-**`models` is the only deliberate exclusion, and it is permanent.** JPA populates entity fields
-reflectively after construction, so every non-null column would report as uninitialised. `mcp`
-and `memory` are not yet in scope — neither is listed nor has a `package-info.java` — so a null
-contract whose caller sits in either goes unchecked. (`com.aspose.words` is a compatibility shim
-for the WhatsApp-Web library, not JClaw code.)
+**`models` and `com` are the only deliberate exclusions, and both are permanent.** JPA populates
+entity fields reflectively after construction, so every non-null column would report as
+uninitialised. `com.aspose.words` is a compatibility shim for the WhatsApp-Web library, not
+JClaw code.
 
-Getting there took three stories. JCLAW-1149 covered the first five. JCLAW-1160 added
+Getting there took three stories and a sweep. JCLAW-1149 covered the first five. JCLAW-1160 added
 `controllers`, `jobs` and `slash`, because that gap was itself the defect: a parameter whose only
 null-passing caller lived in one of them was declared non-null and nothing objected, so the
 declaration was a lie no gate could catch. One of those, a null printer protocol reaching
 `defaultPort()`, had been 500ing the settings page for two months. JCLAW-1161 added
-`channels`.
+`channels`. A docs sweep then found `mcp` and `memory` still unlisted, and so unchecked: 94
+violations between them and their callers in `tools`, `controllers` and `agents`.
 
 **Measure a widening before attempting it, and raise javac's error cap first.** `-Xmaxerrs`
 defaults to 100, so an unmodified `./gradlew compileJava` reports exactly 100 and stops — a count
@@ -491,7 +491,9 @@ a false non-null costs a production NPE on the first unusual payload.
 (`@NullMarked` is per-package and does not inherit; `AnnotatedPackages` itself is prefix-matched,
 so one name covers a whole tree), then run `./gradlew compileJava` and annotate what it reports.
 `NullnessGateConformanceTest` fails if a package inside the scope has no `@NullMarked`
-package-info, if the checker is downgraded below `ERROR`, or if `models` reappears in the list.
+package-info, if the checker is downgraded below `ERROR`, if `models` reappears in the list, or
+if a top-level `app/` package holding Java sources is neither listed nor one of the two
+exclusions — so a new package cannot land silently unchecked.
 
 **Writing the annotations.** Two spellings catch people out, because `@Nullable` is a
 `TYPE_USE` annotation. On a qualified nested type it goes on the simple name

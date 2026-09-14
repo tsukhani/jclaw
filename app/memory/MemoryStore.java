@@ -1,5 +1,7 @@
 package memory;
 
+import org.jspecify.annotations.Nullable;
+
 import java.time.Instant;
 import java.util.List;
 
@@ -76,7 +78,7 @@ public interface MemoryStore {
      * which is the pre-529 behavior rather than a degradation.
      */
     default String storeDeferred(String agentId, String text, String category, double importance,
-            String retrievalKey) {
+            @Nullable String retrievalKey) {
         return storeDeferred(agentId, text, category, importance);
     }
 
@@ -105,7 +107,7 @@ public interface MemoryStore {
      *         backend has no vector leg — callers pass that straight through and get the
      *         keyword-only degradation they would have got anyway.
      */
-    default float[] embedQuery(String query) {
+    default float @Nullable [] embedQuery(String query) {
         return null;
     }
 
@@ -115,7 +117,7 @@ public interface MemoryStore {
      * embedding means "none was precomputed" and leaves the implementation to fall back
      * to whatever the three-arg form does.
      */
-    default List<MemoryEntry> search(String agentId, String query, int limit, float[] queryEmbedding) {
+    default List<MemoryEntry> search(String agentId, String query, int limit, float @Nullable [] queryEmbedding) {
         return search(agentId, query, limit);
     }
 
@@ -130,7 +132,7 @@ public interface MemoryStore {
      * {@code text}, which is a blocking HTTP round-trip; the capture pipeline calls
      * this in its own phase precisely so the plan transaction never spans it.
      */
-    default List<Long> semanticNeighbours(String agentId, String text, String retrievalKey,
+    default List<Long> semanticNeighbours(String agentId, String text, @Nullable String retrievalKey,
             int limit, double minCosine) {
         return semanticNeighbours(agentId, text, limit, minCosine);
     }

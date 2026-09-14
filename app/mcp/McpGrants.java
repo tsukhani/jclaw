@@ -4,6 +4,7 @@ import agents.ToolRegistry;
 import models.Agent;
 import models.AgentToolConfig;
 import models.McpServer;
+import org.jspecify.annotations.Nullable;
 
 import java.util.HashMap;
 import java.util.List;
@@ -62,7 +63,7 @@ public final class McpGrants {
     }
 
     /** Populate exactly one of the two addressing forms and clear the other. */
-    private static void assign(AgentToolConfig row, String toolName, McpServer server) {
+    private static void assign(AgentToolConfig row, String toolName, @Nullable McpServer server) {
         row.toolName = server == null ? toolName : null;
         row.mcpServer = server;
         row.mcpAction = server == null ? null : actionOf(toolName, server.name);
@@ -73,7 +74,7 @@ public final class McpGrants {
      * through the live registry rather than by parsing the name, so a server whose name is a
      * prefix of another's cannot claim its tools.
      */
-    private static McpServer serverFor(String toolName) {
+    private static @Nullable McpServer serverFor(String toolName) {
         var tool = ToolRegistry.lookupTool(toolName);
         if (tool == null || tool.group() == null) return null;
         return McpServer.findByName(tool.group());

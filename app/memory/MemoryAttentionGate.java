@@ -1,5 +1,6 @@
 package memory;
 
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 
 import java.util.Locale;
@@ -21,9 +22,15 @@ public final class MemoryAttentionGate {
 
     private MemoryAttentionGate() {}
 
-    public record Decision(boolean proceed, String reason) {
+    public record Decision(boolean proceed, @Nullable String reason) {
         static Decision ok() { return new Decision(true, null); }
         static Decision skip(String reason) { return new Decision(false, reason); }
+
+        /** Valid only once {@link #proceed()} is false — {@code ok()} carries no reason. */
+        public String resolvedReason() {
+            if (reason == null) throw new IllegalStateException("a proceed decision carries no reason");
+            return reason;
+        }
     }
 
     // Purely social one-liners. Kept small on purpose: only used to skip turns

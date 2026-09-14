@@ -1,5 +1,6 @@
 package memory;
 
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 /**
@@ -13,17 +14,20 @@ public class MemoryStoreFactory {
 
     private static final String EVENT_CATEGORY_MEMORY = "memory";
 
-    private static volatile MemoryStore instance;
+    private static volatile @Nullable MemoryStore instance;
 
     public static MemoryStore get() {
-        if (instance == null) {
+        var store = instance;
+        if (store == null) {
             synchronized (MemoryStoreFactory.class) {
-                if (instance == null) {
-                    instance = create();
+                store = instance;
+                if (store == null) {
+                    store = create();
+                    instance = store;
                 }
             }
         }
-        return instance;
+        return store;
     }
 
     private static MemoryStore create() {

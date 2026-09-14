@@ -7,6 +7,7 @@ import llm.ProviderRegistry;
 import models.Agent;
 import models.Memory;
 import org.hibernate.Session;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.cache.Cache;
 import play.cache.CacheConfig;
@@ -72,10 +73,10 @@ public class JpaMemoryStore implements MemoryStore {
      * Lucene KNN path with canned vectors. Volatile: tests set/clear it around
      * the {@code LuceneTestSync} lock while production threads read it.
      */
-    private static volatile Function<String, float[]> embedderOverride;
+    private static volatile @Nullable Function<String, float[]> embedderOverride;
 
     /** Test-only: install (or clear with {@code null}) a canned embedder. */
-    public static void setEmbedderForTest(Function<String, float[]> override) {
+    public static void setEmbedderForTest(@Nullable Function<String, float[]> override) {
         embedderOverride = override;
     }
 
@@ -176,7 +177,7 @@ public class JpaMemoryStore implements MemoryStore {
 
     @Override
     public String storeDeferred(String agentId, String text, String category, double importance,
-            String retrievalKey) {
+            @Nullable String retrievalKey) {
         return persistRow(agentId, text, category, importance, retrievalKey).id.toString();
     }
 
@@ -185,7 +186,7 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     private Memory persistRow(String agentId, String text, String category, double importance,
-            String retrievalKey) {
+            @Nullable String retrievalKey) {
         var memory = new Memory();
         memory.agent = resolveAgent(agentId);   // JCLAW-537: real FK — the agent must exist
         memory.text = text;
@@ -206,7 +207,7 @@ public class JpaMemoryStore implements MemoryStore {
      * <p>Never what a prompt renders: {@code Memory.text} is still the payload, so a
      * key cannot leak generated questions into the model's context.
      */
-    public static String searchText(String text, String retrievalKey) {
+    public static String searchText(String text, @Nullable String retrievalKey) {
         return (retrievalKey == null || retrievalKey.isBlank()) ? text : text + "\n" + retrievalKey;
     }
 
@@ -237,7 +238,7 @@ public class JpaMemoryStore implements MemoryStore {
      * hoist the call out of (the operator introspection and eval endpoints).
      */
     @Override
-    public List<MemoryEntry> search(String agentId, String query, int limit, float[] queryEmbedding) {
+    public List<MemoryEntry> search(String agentId, String query, int limit, float @Nullable [] queryEmbedding) {
         if (vectorEnabled) {
             var embedding = queryEmbedding != null ? queryEmbedding : generateQueryEmbedding(query);
             return isPostgres
@@ -252,7 +253,7 @@ public class JpaMemoryStore implements MemoryStore {
 
     /** {@inheritDoc} */
     @Override
-    public float[] embedQuery(String query) {
+    public float @Nullable [] embedQuery(String query) {
         if (!vectorEnabled || query == null || query.isBlank()) return null;
         return generateQueryEmbedding(query);
     }
@@ -327,7 +328,7 @@ public class JpaMemoryStore implements MemoryStore {
      * paraphrases only this leg can catch that were silently getting through.
      */
     @Override
-    public List<Long> semanticNeighbours(String agentId, String text, String retrievalKey,
+    public List<Long> semanticNeighbours(String agentId, String text, @Nullable String retrievalKey,
             int limit, double minCosine) {
         if (!vectorEnabled || text == null || text.isBlank()) return List.of();
         Long pk = pkOrNull(agentId);
@@ -963,7 +964,7 @@ public class JpaMemoryStore implements MemoryStore {
      * fails with nothing but a warning to show for it. Embedding models and chat
      * models are chosen independently; this lets them be.
      */
-    private LlmProvider embeddingProvider() {
+    private @Nullable LlmProvider embeddingProvider() {
         if (vectorProvider.isBlank()) {
             return ProviderRegistry.getPrimary();
         }
@@ -1105,7 +1106,7 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     /** Parse an agent-id string to its PK, or null when null/non-numeric. */
-    private static Long pkOrNull(String agentId) {
+    private static @Nullable Long pkOrNull(@Nullable String agentId) {
         if (agentId == null) return null;
         try {
             return Long.valueOf(agentId.strip());

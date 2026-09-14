@@ -830,7 +830,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     /** An embedding plus the model the provider reports having served it with. */
     public record EmbeddingResult(float[] vector, String servedModel) {}
 
-    public float[] embeddings(String model, String input, String channel) {
+    public float[] embeddings(String model, String input, @Nullable String channel) {
         return embeddingsDetailed(model, input, channel).vector();
     }
 

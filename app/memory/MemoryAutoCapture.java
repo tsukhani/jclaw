@@ -100,7 +100,7 @@ public final class MemoryAutoCapture {
     public interface Extractor {
         // Production lambda calls LlmProvider.chat which surfaces provider-specific checked exceptions.
         @SuppressWarnings("java:S112")
-        String extract(List<ChatMessage> messages) throws Exception;
+        @Nullable String extract(List<ChatMessage> messages) throws Exception;
     }
 
     /**
@@ -114,10 +114,10 @@ public final class MemoryAutoCapture {
     public interface Consolidator {
         // Production lambda calls LlmProvider.chat which surfaces provider-specific checked exceptions.
         @SuppressWarnings("java:S112")
-        String judge(List<ChatMessage> messages) throws Exception;
+        @Nullable String judge(List<ChatMessage> messages) throws Exception;
     }
 
-    public record Candidate(String text, String category, double importance, String retrievalKey) {
+    public record Candidate(String text, String category, double importance, @Nullable String retrievalKey) {
         public Candidate(String text, String category, double importance) {
             this(text, category, importance, null);
         }
@@ -139,7 +139,7 @@ public final class MemoryAutoCapture {
      */
     public record ConsolidationPlan(List<Candidate> survivors, List<Existing> shortlist, int overflow) {}
 
-    public record CaptureResult(int captured, int skipped, String skipReason) {
+    public record CaptureResult(int captured, int skipped, @Nullable String skipReason) {
         static CaptureResult skipped(String reason) {
             return new CaptureResult(0, 0, reason);
         }
@@ -165,7 +165,7 @@ public final class MemoryAutoCapture {
      *                 (JCLAW-1193): the agent's fallback, unless the agent has its own
      *                 auto-capture override, in which case that override is the whole choice
      */
-    public record ExtractContext(LlmProvider provider, String modelId, String channelType,
+    public record ExtractContext(LlmProvider provider, String modelId, @Nullable String channelType,
                                  LlmProvider.@Nullable Fallback fallback) {}
 
     /** The agent's fallback for an extraction, or null when an auto-capture override is the whole choice. Public for the test tree. */
@@ -185,7 +185,7 @@ public final class MemoryAutoCapture {
     }
 
     /** One extraction or judge call under the context's provider, failing over when its breaker refuses. */
-    public static String chatText(ExtractContext ctx, List<ChatMessage> msgs, int maxOutput) {
+    public static @Nullable String chatText(ExtractContext ctx, List<ChatMessage> msgs, int maxOutput) {
         return SessionCompactor.firstChoiceText(LlmProvider.chatWithFailover(
                 ctx.provider(), ctx.fallback(), ctx.modelId(), msgs, List.of(), maxOutput, null, ctx.channelType()));
     }
@@ -207,7 +207,7 @@ public final class MemoryAutoCapture {
      * compiles into the default package. Must run inside a transaction — it reads the
      * Conversation.
      */
-    public static ExtractContext resolveExtractContext(Agent agent, Long conversationId, String agentName) {
+    public static @Nullable ExtractContext resolveExtractContext(Agent agent, Long conversationId, String agentName) {
         var conv = ConversationService.findById(conversationId);
         if (conv == null) {
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
@@ -295,7 +295,8 @@ public final class MemoryAutoCapture {
      * provider from the agent directly and passes a null channel — there is no channel to
      * be ineligible (JCLAW-866 gates voice turns, which a corpus has none of).
      */
-    public static CaptureResult captureSync(Agent agent, String userMessage, String assistantResponse) {
+    public static CaptureResult captureSync(Agent agent, @Nullable String userMessage,
+                                            @Nullable String assistantResponse) {
         if (agent == null || userMessage == null || userMessage.isBlank()
                 || assistantResponse == null || assistantResponse.isBlank()) {
             return CaptureResult.skipped("empty_turn");
@@ -364,14 +365,14 @@ public final class MemoryAutoCapture {
      * factored out. An unknown or null channel stays eligible: capture has always
      * been the default and a channel we don't recognize is not a reason to drop it.
      */
-    public static boolean channelEligible(String channelType) {
+    public static boolean channelEligible(@Nullable String channelType) {
         return !ChannelType.VOICE.value.equalsIgnoreCase(channelType);
     }
 
     // JCLAW-534: the extractor runs on the agent's per-agent autocapture model —
     // the agent's default model unless an operator set an explicit override in the
     // agent's Memory section. No global model knob.
-    private static LlmProvider resolveProvider(Agent agent) {
+    private static @Nullable LlmProvider resolveProvider(Agent agent) {
         var p = ProviderRegistry.get(agent.autocaptureProviderEffective());
         return p != null ? p : ProviderRegistry.getPrimary();
     }
@@ -405,10 +406,10 @@ public final class MemoryAutoCapture {
      */
     public static CaptureResult capture(String agentKey, String agentName, String userMessage,
                                         String assistantResponse, Extractor extractor,
-                                        Consolidator consolidator, CircuitBreaker breaker) {
+                                        @Nullable Consolidator consolidator, CircuitBreaker breaker) {
         var gate = MemoryAttentionGate.evaluate(userMessage);
         if (!gate.proceed()) {
-            return logged(agentName, CaptureResult.skipped(gate.reason()));
+            return logged(agentName, CaptureResult.skipped(gate.resolvedReason()));
         }
 
         if (!breaker.allowRequest()) {
@@ -729,7 +730,8 @@ public final class MemoryAutoCapture {
      * the capture stores append-only, exactly the pre-525 behavior.
      */
     private static Map<Integer, List<Integer>> judgeSupersessions(String agentName, ConsolidationPlan plan,
-                                                                  Consolidator consolidator, CircuitBreaker breaker) {
+                                                                  @Nullable Consolidator consolidator,
+                                                                  CircuitBreaker breaker) {
         if (consolidator == null || plan.survivors().isEmpty() || plan.shortlist().isEmpty()) return Map.of();
         if (!ConfigService.getBoolean("memory.consolidation.enabled", true)) return Map.of();
         if (!breaker.allowRequest()) {
@@ -986,7 +988,7 @@ public final class MemoryAutoCapture {
      * JSON and of either {@code {"memories":[...]}} or a bare array; returns an
      * empty list on any malformed/non-JSON output (capture nothing this turn).
      */
-    public static List<Candidate> parseCandidates(String raw) {
+    public static List<Candidate> parseCandidates(@Nullable String raw) {
         var out = new ArrayList<Candidate>();
         if (raw == null || raw.isBlank()) return out;
         try {
@@ -1049,7 +1051,7 @@ public final class MemoryAutoCapture {
      * omitted it (JCLAW-529). Absent is the pre-529 behavior, not an error — the row
      * simply embeds its statement alone.
      */
-    private static String parseQuestions(JsonObject o) {
+    private static @Nullable String parseQuestions(JsonObject o) {
         if (!o.has(KEY_QUESTIONS) || !o.get(KEY_QUESTIONS).isJsonArray()) return null;
         var joined = new StringBuilder();
         for (var q : o.getAsJsonArray(KEY_QUESTIONS)) {
@@ -1070,7 +1072,7 @@ public final class MemoryAutoCapture {
      * yields no supersessions (fail-open, the capture stores append-only).
      * Public because the test tree compiles into the default package.
      */
-    public static Map<Integer, List<Integer>> parseSupersessions(String raw, int newCount, int existingCount) {
+    public static Map<Integer, List<Integer>> parseSupersessions(@Nullable String raw, int newCount, int existingCount) {
         if (raw == null || raw.isBlank()) return Map.of();
         var out = new LinkedHashMap<Integer, List<Integer>>();
         try {

@@ -423,7 +423,7 @@ final class SubagentChildBootstrap {
      * child has none for MCP tools (they are disabled-by-default, not by an
      * explicit row), so there is nothing to flip.
      */
-    private static void grantParentMcpGrants(Agent parentAgent, @Nullable Agent childAgent) {
+    private static void grantParentMcpGrants(Agent parentAgent, Agent childAgent) {
         var parentDisabled = ToolRegistry.loadDisabledTools(parentAgent);
         var childDisabled = ToolRegistry.loadDisabledTools(childAgent);
         var toGrant = ToolRegistry.listTools().stream()

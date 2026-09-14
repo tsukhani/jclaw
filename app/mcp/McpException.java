@@ -1,5 +1,7 @@
 package mcp;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Thrown when an MCP server returns a JSON-RPC error response, when the
  * protocol contract is violated, or when a request times out (JCLAW-31).
@@ -10,14 +12,14 @@ package mcp;
  */
 public class McpException extends RuntimeException {
 
-    private final Integer code;
+    private final @Nullable Integer code;
 
     public McpException(String message) {
         super(message);
         this.code = null;
     }
 
-    public McpException(String message, Throwable cause) {
+    public McpException(String message, @Nullable Throwable cause) {
         super(message, cause);
         this.code = null;
     }
@@ -27,7 +29,7 @@ public class McpException extends RuntimeException {
         this.code = code;
     }
 
-    public Integer code() { return code; }
+    public @Nullable Integer code() { return code; }
 
     /**
      * The operator opened this server's circuit breaker by hand (JCLAW-1187). Still an

@@ -5,6 +5,7 @@ import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 import services.SessionCompactor;
@@ -68,10 +69,10 @@ public final class CoreMemoryCapMigration {
         List<String> classify(Agent agent, List<String> texts);
     }
 
-    private static volatile Classifier classifierOverride;
+    private static volatile @Nullable Classifier classifierOverride;
 
     /** Test-only: install (or clear with {@code null}) a canned classifier. */
-    public static void setClassifierForTest(Classifier override) {
+    public static void setClassifierForTest(@Nullable Classifier override) {
         classifierOverride = override;
     }
 
@@ -83,11 +84,11 @@ public final class CoreMemoryCapMigration {
     private static final AtomicBoolean running = new AtomicBoolean(false);
     private static final AtomicInteger processed = new AtomicInteger();
     private static final AtomicInteger total = new AtomicInteger();
-    private static volatile String lastError;
+    private static volatile @Nullable String lastError;
     /** Which agent the in-flight pass belongs to; null when idle. */
-    private static volatile String runningFor;
+    private static volatile @Nullable String runningFor;
     /** Which agent {@link #lastError} came from, so it surfaces on that card only. */
-    private static volatile String lastErrorFor;
+    private static volatile @Nullable String lastErrorFor;
 
     /**
      * What one agent's Memory card polls. {@code overCap} is what turns its button on, and
@@ -97,7 +98,7 @@ public final class CoreMemoryCapMigration {
      * @param running true only while THIS agent is the one being migrated
      */
     public record Status(boolean running, int processed, int total,
-                         long liveCore, int cap, boolean overCap, String error) {}
+                         long liveCore, int cap, boolean overCap, @Nullable String error) {}
 
     public static Status status(String agentId) {
         int cap = cap();
@@ -111,7 +112,7 @@ public final class CoreMemoryCapMigration {
         return ConfigService.getInt("memory.coreload.maxCount", 20);
     }
 
-    public static String start(String agentId) {
+    public static @Nullable String start(String agentId) {
         var s = status(agentId);
         if (!s.overCap()) {
             return "This agent is not over the core-memory cap of %d — there is nothing to migrate."
@@ -128,12 +129,11 @@ public final class CoreMemoryCapMigration {
         lastErrorFor = null;
         processed.set(0);
         total.set(0);
-        Thread.ofVirtual().name("core-memory-migration").start(CoreMemoryCapMigration::run);
+        Thread.ofVirtual().name("core-memory-migration").start(() -> run(agentId));
         return null;
     }
 
-    private static void run() {
-        var agentId = runningFor;
+    private static void run(String agentId) {
         try {
             migrate(agentId);
         } catch (Exception e) {
@@ -235,7 +235,7 @@ public final class CoreMemoryCapMigration {
     }
 
     /** Models fence JSON despite being told not to. */
-    private static String strip(String s) {
+    private static String strip(@Nullable String s) {
         if (s == null) return "[]";
         var t = s.strip();
         if (t.startsWith("```")) {
