@@ -235,15 +235,6 @@ Killed runs don't get an announce card. The `/subagent kill` response *is* your 
 Every subagent run belongs to you. JClaw Personal Edition has a single **admin** operator, so the [Subagents](/subagents) page and the `/subagent` command show and control every run on the instance.
 :::
 
-## Where to go next
-
-Subagents fan out work *now*, in this turn. The next two sections cover fanning out *later*:
-
-- [Tasks](/guide#tasks) — scheduled work the agent figures out at fire time.
-- [Reminders](/guide#reminders) — scheduled pre-written nudges that skip the LLM entirely.
-- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.
-
-
 ## Where coding output lands
 
 Every `runtime=acp` coding session runs inside its own directory under the
@@ -286,3 +277,12 @@ Windows, WSL1, or a WSL2 kernel with unprivileged user namespaces disabled),
 the run is aborted with an actionable error rather than launched unsandboxed.
 Network egress stays open — the harness needs its API. Off by default; see the
 JCLAW-671 spike for the measured confinement results and limitations.
+
+
+## Where to go next
+
+Subagents fan out work *now*, in this turn. The next two sections cover fanning out *later*:
+
+- [Tasks](/guide#tasks) — scheduled work the agent figures out at fire time.
+- [Reminders](/guide#reminders) — scheduled pre-written nudges that skip the LLM entirely.
+- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.

@@ -12,6 +12,235 @@ Operator-wide settings.
 |-----|---------|---------|
 | `app.timezone` | server JVM zone | The IANA timezone the assistant treats as the current wall-clock time ("now") in its system prompt. It is also the zone `CRON`/`SCHEDULED` tasks follow unless the Tasks `defaultTimezone` is set to a different one. |
 
+## Logging
+
+Per-logger log-level overrides for the running JVM — the operator counterpart to the [Logs](/logs) page. Add a row naming a logger and the level you want; the change applies **live** (no restart) and persists across restarts.
+
+- **Logger** — any dotted name: a single class (`controllers.ApiChatController`) or a whole subtree (`play`). The alias **`root`** targets the root logger (the global floor). An autocomplete list suggests loggers that have already emitted a line; a name that hasn't logged yet is accepted with a soft amber hint, not rejected.
+- **Level** — one of `OFF`, `FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `ALL` (least to most verbose).
+
+Overrides are applied through log4j2 *after* Play's own logging init, so a row here **wins over both `conf/log4j2.xml` and `application.conf`**. Deleting a row reverts that logger to its inherited (parent) level; deleting the `root` override restores the baseline captured before you first changed it (falling back to `INFO`). They're stored under reserved `logging.level.<logger>` config keys, so they never show up in the [Unmanaged keys](#settings-unmanaged-keys) list.
+
+### Event log retention
+
+`logs.retentionDays` (default 30) sets how long entries on the [Logs](/logs) page are kept. A cleanup runs at startup and then daily, deleting anything older. The minimum is 1 day.
+
+### Disk used by logs
+
+At the foot of the same section, a **Logs** block reports what the levels above are costing you on disk: the current log file, how many archives exist and what they occupy, and a total for the whole directory. The total covers every file in `logs/`, not just those two categories, so an ad-hoc file left behind by a test run can't hide from it.
+
+The current file is capped and rolled over automatically, so it is never the thing that grows — the archives are. They're deleted once they pass 30 days, at the next daily rollover, which means an instance that built up a backlog carries it until each file individually ages out. **Delete archives** clears them now.
+
+That button removes only the rolled-over `.gz` archives. The file currently being written is kept: log4j2 holds it open, and deleting it would leave the instance logging into a file nothing can read until the next rollover. The confirmation says so, because "delete logs" is otherwise ambiguous about exactly that file. Nothing here is required maintenance — it only reclaims disk sooner than retention would.
+
+## Performance
+
+### Runtime
+
+Live state of the JVM serving the page, refreshed every few seconds while the section is open, above the caps you'd tune against it.
+
+Memory appears as three separate figures, because they measure different things and only one of them answers "how much RAM is this using?":
+
+- **Heap** — used, currently held, and the ceiling. What the JVM allocates inside its own arena.
+- **Non-heap** — metaspace, code cache and direct buffers. Invisible to every heap figure, and where the outbound HTTP stack's buffers live.
+- **Process memory** — what the operating system charges JClaw, and the figure to compare against the machine's RAM. It sits **well above** the heap, because the JVM also holds non-heap memory and reserves address space the heap hasn't filled. A large gap is normal and is not a leak. On a platform with no supported way to read it, this shows a dash rather than a substituted heap number.
+
+Alongside those: processor share and core count, garbage collections (both the running total and how many happened since the last sample — the total alone says little), uptime, and **platform threads** with their high-water mark. That last label is deliberate: it excludes virtual threads, which is where chat turns and tool calls actually run, so a low flat count here does not mean the instance is idle.
+
+OkHttp dispatcher concurrency caps for outbound LLM calls:
+
+| Key                                  | Default                | Meaning                                                              |
+|--------------------------------------|------------------------|----------------------------------------------------------------------|
+| `dispatcher.llm.maxRequestsPerHost`  | `clamp(8 × cores, 64, 256)` | In-flight calls allowed to a single provider.                   |
+| `dispatcher.llm.maxRequests`         | `2 × maxRequestsPerHost`    | Total in-flight calls across all providers.                     |
+
+Auto-tuned at first start; transiently bumped during loadtest if `--concurrency` would otherwise saturate. Changes apply live.
+
+### Chat streaming
+
+`chat.stream.token_coalesce_chars` (default 0) batches the web chat stream: tokens accumulate until at least that many characters are waiting, then go out as one frame. Every frame costs a network flush, so a value of 16 to 32 helps with very fast models at the cost of per-token smoothness. `0` sends every token as it arrives, and the first token of a reply is always sent at once.
+
+## Uploads
+
+Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIME decides which limit applies — images, audio, or everything else.
+
+| Key                | Default | Bound                                                          |
+|--------------------|---------|----------------------------------------------------------------|
+| `maxImageBytes`    | 20 MB   | Image uploads (most vision models accept up to 20 MB).         |
+| `maxAudioBytes`    | 100 MB  | Audio uploads (~1 hour at 128 kbps).                           |
+| `maxFileBytes`     | 100 MB  | Every other attachment type (PDFs, text, archives, etc.).      |
+| `maxFiles`         | 5       | Max files per chat message. System-wide ceiling is 5.          |
+
+Takes effect without a restart; raise `play.netty.maxContentLength` in `conf/application.conf` if you need over the bundled 512 MB transport-layer ceiling.
+
+## Printers
+
+The default printer the `printer` tool targets, and the job options that default carries. Per-agent enable/disable lives on the [Agents](/agents) page — printing is off for every agent until you turn it on. See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the tool itself.
+
+**Find printers** runs an mDNS browse of the local network and lists what answers; pick one to make it the default. Discovery is an explicit action rather than something the page does on open — a browse takes seconds, and opening Settings to change the timezone shouldn't pay for it. You can also enter a host and port directly, which is the fallback when mDNS is blocked (it's link-local, so VPNs and containers without a multicast route routinely drop it).
+
+A reachability badge probes the saved default and reports whether it still answers. This matters because a default outlives the DHCP lease it was saved under; without the probe the only symptom of a moved printer is a print that times out with no hint why.
+
+**Job options** are read from the selected printer, not from a list JClaw carries — the page offers `sides`, `media`, `copies`, quality and whatever else the device announces, with its own default preselected. Leave any of them blank to use the printer's default. Options are re-queried whenever you change the selected printer, so a device that reports one-sided-only never lets you save a duplex default it would have to reject.
+
+## Telemetry
+
+Exports traces and metrics to an OpenTelemetry collector over OTLP. Off by default — nothing leaves the process until you turn it on. Found under **System → Telemetry** in the rail.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `otel.enabled` | `false` | Master switch. |
+| `otel.exporter.endpoint` | `http://localhost:4318` | Collector base URL; `/v1/traces` and `/v1/metrics` are appended for http/protobuf. |
+| `otel.exporter.protocol` | `http/protobuf` | `http/protobuf` or `grpc`. |
+| `otel.exporter.secretHeaders` | (empty) | Comma-separated `name=value` pairs sent with every export — vendor auth goes here. Masked once saved, so editing means retyping the whole value; save it empty to clear. |
+| `otel.service.name` | `jclaw` | How this instance is named in the collector. |
+| `otel.traces.sampler.ratio` | `1.0` | Share of root spans recorded, 0–1. |
+| `otel.metrics.interval.seconds` | `60` | Seconds between metric exports. Has no row in the panel and is **read at JVM start only** — set it through `POST /api/config` and restart. |
+
+Changes to the endpoint, headers, protocol and sampling ratio apply live — the exporter is swapped for the next span and the next metric collection, no restart. **Send test span** emits one span and waits for the collector's verdict, so you can tell "saved" from "reaching the collector": it reports **Delivered** with the trace id, or the exporter's own error.
+
+What leaves the process once enabled: an HTTP server span per request, named from the route (`GET /api/config/{key}` is one name however many keys are read); a `turn` span per agent turn, with each model call beneath it as a GenAI-convention client span carrying provider, model, token counts and cache reads; HTTP-client and JDBC spans under those; the `gen_ai.client.*` histograms (operation duration, token usage, time to first chunk) and `jclaw.turn.segment.duration`, the per-segment turn timings behind the Dashboard's Chat Performance panel; and the `jvm.*` runtime metrics. Prompt and completion text are never exported.
+
+When the OpenTelemetry Java agent is attached to the JVM, the panel says so and disables the export toggle: the agent's own `OTEL_*` settings decide where telemetry goes, and the keys here are read once at start rather than live.
+
+## Database
+
+Everything on this instance — conversations, agents, tasks, memories, config — lives in one H2 data file, `data/jclaw.mv.db`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.
+
+### The health strip
+
+The top of the panel is one line: the **verdict**, the **size** of the data file (with the trace file, a pre-restore copy and any repair remnants added up beside it), **free space** on that volume, how long ago the **last backup** was taken, the **H2 version**, and how long a probe query took. Below it is the reason for the verdict, in words.
+
+| Verdict | What it means |
+|---------|---------------|
+| **Healthy** | Queries answer and H2's trace file shows no read failures in the last seven days. |
+| **Attention** | The trace file has logged read failures — `File corrupted`, `Unable to read the page` — in the last day or week. Pages are going bad. Back up now, then consider Repair. |
+| **Critical** | The probe query failed: the database is closed or unreadable and every request is failing with it. Repair or Restore. |
+
+Attention is the state worth knowing about. On 2026-09-09 the live database turned out to have had damaged pages since July; the trace file had been logging a handful of read failures a day for two months, and nothing surfaced them until a boot-time read of a damaged page closed the database. The verdict reads that file so the warning arrives before the outage does.
+
+### Backups
+
+**Back up now** writes an H2 online backup — a zip containing the data file — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
+
+**Schedule** sits under the list and takes a time of day, in this instance's timezone (the one set under Timezone, or the server's when none is), for a daily backup. The times in the backup list are shown in that same zone, whatever zone the browser is in. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log. The schedule counts a day as done once a backup has been written at or after its time, so restarting the instance later that day does not write another; an instance that was down at the scheduled time catches up once, on its first minute back up.
+
+**retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
+
+Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, and H2's own tools open it.
+
+### Restore
+
+Restore replaces the database with a backup — one from the list, or a zip you pick with **Restore from a file…**. The file is checked first: anything that is not an H2 backup is refused with the reason and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
+
+Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The displaced file is kept as `data/jclaw.mv.db.pre-restore` until the next successful backup, so a restore is itself reversible until you have moved on.
+
+### Repair
+
+Repair is the procedure from the September incident, run for you rather than by hand. H2's recovery tool reads the damaged file into a script; the file and its trace are moved aside; a fresh database is rebuilt from the script in the app's mode, with each ENUM column cast back from the ordinals the recovery tool writes; every table's row count is checked against what the damaged file reported before the repair and against what the script staged; the result is compacted; and `data/repair-<stamp>.json` records what was created. The instance restarts around it, and when the page reconnects the panel shows the per-table result.
+
+Two limits are worth knowing:
+
+- **Rows on pages that cannot be read are lost.** The report names the tables that came back short, with how many rows were expected. Back up first if the database still answers.
+- **A loss H2 has already rolled back is invisible.** When the newest chunk of the file is damaged, H2 falls back to an older version silently, and the recovery tool sees that older version too. The repair reads the damaged file read-only before it starts so it can compare; when the file will not open at all there is no reference to compare against, and the report says so.
+
+Repair is shown prominently when the verdict is Attention or Critical and is available at any time — on a healthy file it rebuilds and compacts, which is how a file grown large after a hand rebuild is brought back to size.
+
+### Cleaning up after a repair
+
+Everything a repair creates is kept in `data/` — the damaged file, its trace, the recovery script and dump — because the damaged file is the only route to a second attempt. The panel shows their total size and offers **Clean up repair files** once the repair succeeded and the verdict is Healthy, with no read failure logged since and every restored table readable. Until then the button is disabled with the reason. Cleanup deletes exactly what the manifest lists, after checking each file's checksum, and the manifest last; the live file, the lock, the trace and `backups/` are never touched.
+
+### From the command line
+
+```bash
+jclaw backup                     # online through the running instance, or from the closed file
+jclaw backup --list              # what is in data/backups/
+jclaw restore <zip | backup id>  # validate, stop, swap, start
+jclaw repair                     # stop, recover, rebuild, verify, compact, start; then offer cleanup
+jclaw db-clean                   # delete what the last successful repair left behind
+jclaw db-status                  # the health strip as text
+```
+
+The CLI and the panel share one implementation. With the instance running, `backup` and `db-status` go through the API — the button's code path — so retention and the health verdict come from the running JVM. With the instance stopped, the same engine runs directly against the file on the H2 jar alone, which is what makes `repair` usable when the database will not open. Helper output goes to `logs/database.log`.
+
+## Maintenance
+
+The operator actions that change this instance, ordered by how often one is wanted: upgrading is the reason to open this page, restarting is the follow-up, and a password reset is rare enough that it sits last.
+
+This section was previously three — **Password**, **Upgrade** and **Restart**. Links to the old `?section=password`, `?section=upgrade` and `?section=restart` addresses all still resolve here.
+
+### Upgrade and restart
+
+Installs the newest JClaw release over this one, without a shell. The button hands off to `jclaw.sh upgrade` — the same command you'd run by hand — so the CLI and the UI take exactly the same path.
+
+The panel shows the version you're running and the newest published release. **Check again** forces a fresh lookup; otherwise the answer is cached for an hour, because GitHub allows only 60 unauthenticated API calls an hour per address and this panel is polled on every visit.
+
+When JClaw is served from a git checkout, the panel also names the commit it's running, marked when the working tree has uncommitted changes. A checkout keeps the same version number across many commits, so the version alone can't tell you which build is live. A packaged install has no repository and shows nothing here.
+
+**The download happens while JClaw keeps serving.** The release (~400 MB for a bundle install) is fetched, checksum-verified and unpacked before anything is stopped, so a network failure, a bad download or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
+
+### What is kept
+
+Everything the release doesn't ship is carried across, so an upgrade never resets your instance:
+
+| Kept | What's in it |
+|------|--------------|
+| `data/` | the database, uploaded attachments, the search index |
+| `workspace/` | the agent workspace, including per-skill credentials |
+| `certs/` | the application secret (your sessions survive) and any TLS cert+key |
+| `public/apps/` | apps you've installed |
+| `logs/` | the existing application, GC and upgrade logs |
+| `sidecar/*/.venv` | Python environments and downloaded models |
+| skills you installed | bundled skills are updated; yours are left alone |
+
+The rule is inverted on purpose: rather than listing directories to preserve — a list that goes stale the moment a release adds one — the upgrade keeps *anything the new release does not ship*. The exceptions are build outputs (`precompiled/`, `lib/`, `framework/`, `public/spa/`), which must come from the release verbatim: merging those would leave a deleted class on the classpath or two versions of a jar side by side.
+
+`conf/application.conf` is handled separately. If you never edited it, the release's copy is installed so new settings take effect. If you did, **your file is kept** and the release's copy is written beside it as `conf/application.conf.new-<version>` so you can see what changed. The panel tells you when this happens.
+
+### If it goes wrong
+
+The database is copied to `data/backups/` before the swap — this matters because the new version migrates the schema on first boot, and that isn't undone by putting the old files back. The three most recent backups are kept.
+
+If the new version doesn't answer within four minutes of starting, the upgrade **rolls itself back**: the old tree is restored, the pre-upgrade database is restored over it, and the previous version is started again. The panel then reports the rollback rather than showing an unchanged version number with no explanation. Helper output goes to `logs/upgrade.log`.
+
+### When the button isn't there
+
+Upgrade only applies to installs made by the one-line installer or from an unzipped release archive. In two cases the panel explains itself instead of offering a button:
+
+- **A source checkout** — update it with `git pull`.
+- **A container** — the image is the upgrade unit; use `docker compose pull && docker compose up -d`. A tree swap inside the container would be thrown away on the next start.
+
+Either way the release check still runs, and the explanation only appears when there is a newer release to explain. An install already on the newest release reports just that — **up to date** — with nothing to do.
+
+### From the command line
+
+```bash
+jclaw upgrade --check                    # report versions, change nothing
+jclaw upgrade                            # install the newest release
+jclaw upgrade --version v0.17.48 --yes   # pin a release (also how you step back)
+```
+
+Re-running the one-line installer over an existing install now delegates here too, so it upgrades rather than replacing your data.
+
+### Restart
+
+Reboots this JClaw instance without a shell. The **Restart** button hands off to `jclaw.sh restart` — the same command you'd run by hand — so the stop/start sequencing, stale-lock cleanup and port checks are identical either way.
+
+Before it acts, the panel shows what the reboot will interrupt: task runs and subagent runs currently in flight. Restart is deliberately **not** blocked when work is running — the moment you most want to reboot is usually the moment something is stuck — so the counts are there to inform the confirmation, not to veto it. In-flight chat streams are cut as well.
+
+The page reconnects on its own: it waits for the backend to go down, then polls until it answers again, then reloads. Two details worth knowing:
+
+- **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running — bouncing it would kill the very server that rendered the page you clicked from.
+- **In a source checkout** a production restart may recompile Java sources and rebuild the SPA. Both steps are gated on staleness and skipped when nothing changed, so this is usually quick. Two timed restarts on a developer clone: **48 s** with both steps skipped, **58 s** with a full SPA rebuild — the SPA is worth about ten seconds, not minutes. A cold Java recompile is the step that can take substantially longer, and it wasn't exercised in either measurement. The panel errs long when sizing how long it waits for the backend to return (15 minutes for a source checkout), so a genuinely slow restart is still survivable.
+
+If the instance wasn't started by `jclaw.sh`, the button is disabled and says so — there's nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app doesn't come back.
+
+### Password
+
+The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out — on the next access you'll be routed to the setup screen to choose a new password.
+
+When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
+
 ## Auto-update model prices
 
 A **Pricing** subsection at the top of LLM Providers, with one opt-in toggle: **Auto-update model prices nightly**. When on, JClaw fetches the community-maintained `model_prices_and_context_window.json` from `github.com/BerriAI/litellm` nightly and fills in missing prices on your configured models. Prices you've set manually are never overwritten. Off by default — the toggle is explicit so the outbound GitHub call is a deliberate opt-in. A **Refresh now** button forces an immediate fetch; it is disabled while the toggle is off.
@@ -323,97 +552,6 @@ Three knobs for the [Tasks](/guide#tasks) subsystem:
 
 The retention TTL is also displayed next to the [Tasks](/tasks) page title so you don't get surprised by auto-deletes.
 
-## Logging
-
-Per-logger log-level overrides for the running JVM — the operator counterpart to the [Logs](/logs) page. Add a row naming a logger and the level you want; the change applies **live** (no restart) and persists across restarts.
-
-- **Logger** — any dotted name: a single class (`controllers.ApiChatController`) or a whole subtree (`play`). The alias **`root`** targets the root logger (the global floor). An autocomplete list suggests loggers that have already emitted a line; a name that hasn't logged yet is accepted with a soft amber hint, not rejected.
-- **Level** — one of `OFF`, `FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `ALL` (least to most verbose).
-
-Overrides are applied through log4j2 *after* Play's own logging init, so a row here **wins over both `conf/log4j2.xml` and `application.conf`**. Deleting a row reverts that logger to its inherited (parent) level; deleting the `root` override restores the baseline captured before you first changed it (falling back to `INFO`). They're stored under reserved `logging.level.<logger>` config keys, so they never show up in the [Unmanaged keys](#settings-unmanaged-keys) list.
-
-### Event log retention
-
-`logs.retentionDays` (default 30) sets how long entries on the [Logs](/logs) page are kept. A cleanup runs at startup and then daily, deleting anything older. The minimum is 1 day.
-
-### Disk used by logs
-
-At the foot of the same section, a **Logs** block reports what the levels above are costing you on disk: the current log file, how many archives exist and what they occupy, and a total for the whole directory. The total covers every file in `logs/`, not just those two categories, so an ad-hoc file left behind by a test run can't hide from it.
-
-The current file is capped and rolled over automatically, so it is never the thing that grows — the archives are. They're deleted once they pass 30 days, at the next daily rollover, which means an instance that built up a backlog carries it until each file individually ages out. **Delete archives** clears them now.
-
-That button removes only the rolled-over `.gz` archives. The file currently being written is kept: log4j2 holds it open, and deleting it would leave the instance logging into a file nothing can read until the next rollover. The confirmation says so, because "delete logs" is otherwise ambiguous about exactly that file. Nothing here is required maintenance — it only reclaims disk sooner than retention would.
-
-## Performance
-
-### Runtime
-
-Live state of the JVM serving the page, refreshed every few seconds while the section is open, above the caps you'd tune against it.
-
-Memory appears as three separate figures, because they measure different things and only one of them answers "how much RAM is this using?":
-
-- **Heap** — used, currently held, and the ceiling. What the JVM allocates inside its own arena.
-- **Non-heap** — metaspace, code cache and direct buffers. Invisible to every heap figure, and where the outbound HTTP stack's buffers live.
-- **Process memory** — what the operating system charges JClaw, and the figure to compare against the machine's RAM. It sits **well above** the heap, because the JVM also holds non-heap memory and reserves address space the heap hasn't filled. A large gap is normal and is not a leak. On a platform with no supported way to read it, this shows a dash rather than a substituted heap number.
-
-Alongside those: processor share and core count, garbage collections (both the running total and how many happened since the last sample — the total alone says little), uptime, and **platform threads** with their high-water mark. That last label is deliberate: it excludes virtual threads, which is where chat turns and tool calls actually run, so a low flat count here does not mean the instance is idle.
-
-OkHttp dispatcher concurrency caps for outbound LLM calls:
-
-| Key                                  | Default                | Meaning                                                              |
-|--------------------------------------|------------------------|----------------------------------------------------------------------|
-| `dispatcher.llm.maxRequestsPerHost`  | `clamp(8 × cores, 64, 256)` | In-flight calls allowed to a single provider.                   |
-| `dispatcher.llm.maxRequests`         | `2 × maxRequestsPerHost`    | Total in-flight calls across all providers.                     |
-
-Auto-tuned at first start; transiently bumped during loadtest if `--concurrency` would otherwise saturate. Changes apply live.
-
-### Chat streaming
-
-`chat.stream.token_coalesce_chars` (default 0) batches the web chat stream: tokens accumulate until at least that many characters are waiting, then go out as one frame. Every frame costs a network flush, so a value of 16 to 32 helps with very fast models at the cost of per-token smoothness. `0` sends every token as it arrives, and the first token of a reply is always sent at once.
-
-## Uploads
-
-Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIME decides which limit applies — images, audio, or everything else.
-
-| Key                | Default | Bound                                                          |
-|--------------------|---------|----------------------------------------------------------------|
-| `maxImageBytes`    | 20 MB   | Image uploads (most vision models accept up to 20 MB).         |
-| `maxAudioBytes`    | 100 MB  | Audio uploads (~1 hour at 128 kbps).                           |
-| `maxFileBytes`     | 100 MB  | Every other attachment type (PDFs, text, archives, etc.).      |
-| `maxFiles`         | 5       | Max files per chat message. System-wide ceiling is 5.          |
-
-Takes effect without a restart; raise `play.netty.maxContentLength` in `conf/application.conf` if you need over the bundled 512 MB transport-layer ceiling.
-
-## Printers
-
-The default printer the `printer` tool targets, and the job options that default carries. Per-agent enable/disable lives on the [Agents](/agents) page — printing is off for every agent until you turn it on. See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the tool itself.
-
-**Find printers** runs an mDNS browse of the local network and lists what answers; pick one to make it the default. Discovery is an explicit action rather than something the page does on open — a browse takes seconds, and opening Settings to change the timezone shouldn't pay for it. You can also enter a host and port directly, which is the fallback when mDNS is blocked (it's link-local, so VPNs and containers without a multicast route routinely drop it).
-
-A reachability badge probes the saved default and reports whether it still answers. This matters because a default outlives the DHCP lease it was saved under; without the probe the only symptom of a moved printer is a print that times out with no hint why.
-
-**Job options** are read from the selected printer, not from a list JClaw carries — the page offers `sides`, `media`, `copies`, quality and whatever else the device announces, with its own default preselected. Leave any of them blank to use the printer's default. Options are re-queried whenever you change the selected printer, so a device that reports one-sided-only never lets you save a duplex default it would have to reject.
-
-## Telemetry
-
-Exports traces and metrics to an OpenTelemetry collector over OTLP. Off by default — nothing leaves the process until you turn it on. Found under **System → Telemetry** in the rail.
-
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `otel.enabled` | `false` | Master switch. |
-| `otel.exporter.endpoint` | `http://localhost:4318` | Collector base URL; `/v1/traces` and `/v1/metrics` are appended for http/protobuf. |
-| `otel.exporter.protocol` | `http/protobuf` | `http/protobuf` or `grpc`. |
-| `otel.exporter.secretHeaders` | (empty) | Comma-separated `name=value` pairs sent with every export — vendor auth goes here. Masked once saved, so editing means retyping the whole value; save it empty to clear. |
-| `otel.service.name` | `jclaw` | How this instance is named in the collector. |
-| `otel.traces.sampler.ratio` | `1.0` | Share of root spans recorded, 0–1. |
-| `otel.metrics.interval.seconds` | `60` | Seconds between metric exports. Has no row in the panel and is **read at JVM start only** — set it through `POST /api/config` and restart. |
-
-Changes to the endpoint, headers, protocol and sampling ratio apply live — the exporter is swapped for the next span and the next metric collection, no restart. **Send test span** emits one span and waits for the collector's verdict, so you can tell "saved" from "reaching the collector": it reports **Delivered** with the trace id, or the exporter's own error.
-
-What leaves the process once enabled: an HTTP server span per request, named from the route (`GET /api/config/{key}` is one name however many keys are read); a `turn` span per agent turn, with each model call beneath it as a GenAI-convention client span carrying provider, model, token counts and cache reads; HTTP-client and JDBC spans under those; the `gen_ai.client.*` histograms (operation duration, token usage, time to first chunk) and `jclaw.turn.segment.duration`, the per-segment turn timings behind the Dashboard's Chat Performance panel; and the `jvm.*` runtime metrics. Prompt and completion text are never exported.
-
-When the OpenTelemetry Java agent is attached to the JVM, the panel says so and disables the export toggle: the agent's own `OTEL_*` settings decide where telemetry goes, and the keys here are read once at start rather than live.
-
 ## Skills Promotion
 
 LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) page. Promoted skills run an LLM pass that strips installation scripts and external network calls.
@@ -510,144 +648,6 @@ Hash-based reputation lookups that scan every binary inside a skill before it's 
 Multiple scanners run independently and compose under OR: a skill is rejected if any enabled scanner flags any binary. A scanner is only active when both **enabled** is on *and* its API key is configured. Each row links to the provider's signup page.
 
 Off by default; turn on for environments where users can upload arbitrary skill bundles.
-
-## Database
-
-Everything on this instance — conversations, agents, tasks, memories, config — lives in one H2 data file, `data/jclaw.mv.db`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.
-
-### The health strip
-
-The top of the panel is one line: the **verdict**, the **size** of the data file (with the trace file, a pre-restore copy and any repair remnants added up beside it), **free space** on that volume, how long ago the **last backup** was taken, the **H2 version**, and how long a probe query took. Below it is the reason for the verdict, in words.
-
-| Verdict | What it means |
-|---------|---------------|
-| **Healthy** | Queries answer and H2's trace file shows no read failures in the last seven days. |
-| **Attention** | The trace file has logged read failures — `File corrupted`, `Unable to read the page` — in the last day or week. Pages are going bad. Back up now, then consider Repair. |
-| **Critical** | The probe query failed: the database is closed or unreadable and every request is failing with it. Repair or Restore. |
-
-Attention is the state worth knowing about. On 2026-09-09 the live database turned out to have had damaged pages since July; the trace file had been logging a handful of read failures a day for two months, and nothing surfaced them until a boot-time read of a damaged page closed the database. The verdict reads that file so the warning arrives before the outage does.
-
-### Backups
-
-**Back up now** writes an H2 online backup — a zip containing the data file — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
-
-**Schedule** sits under the list and takes a time of day, in this instance's timezone (the one set under Timezone, or the server's when none is), for a daily backup. The times in the backup list are shown in that same zone, whatever zone the browser is in. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log. The schedule counts a day as done once a backup has been written at or after its time, so restarting the instance later that day does not write another; an instance that was down at the scheduled time catches up once, on its first minute back up.
-
-**retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
-
-Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, and H2's own tools open it.
-
-### Restore
-
-Restore replaces the database with a backup — one from the list, or a zip you pick with **Restore from a file…**. The file is checked first: anything that is not an H2 backup is refused with the reason and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
-
-Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The displaced file is kept as `data/jclaw.mv.db.pre-restore` until the next successful backup, so a restore is itself reversible until you have moved on.
-
-### Repair
-
-Repair is the procedure from the September incident, run for you rather than by hand. H2's recovery tool reads the damaged file into a script; the file and its trace are moved aside; a fresh database is rebuilt from the script in the app's mode, with each ENUM column cast back from the ordinals the recovery tool writes; every table's row count is checked against what the damaged file reported before the repair and against what the script staged; the result is compacted; and `data/repair-<stamp>.json` records what was created. The instance restarts around it, and when the page reconnects the panel shows the per-table result.
-
-Two limits are worth knowing:
-
-- **Rows on pages that cannot be read are lost.** The report names the tables that came back short, with how many rows were expected. Back up first if the database still answers.
-- **A loss H2 has already rolled back is invisible.** When the newest chunk of the file is damaged, H2 falls back to an older version silently, and the recovery tool sees that older version too. The repair reads the damaged file read-only before it starts so it can compare; when the file will not open at all there is no reference to compare against, and the report says so.
-
-Repair is shown prominently when the verdict is Attention or Critical and is available at any time — on a healthy file it rebuilds and compacts, which is how a file grown large after a hand rebuild is brought back to size.
-
-### Cleaning up after a repair
-
-Everything a repair creates is kept in `data/` — the damaged file, its trace, the recovery script and dump — because the damaged file is the only route to a second attempt. The panel shows their total size and offers **Clean up repair files** once the repair succeeded and the verdict is Healthy, with no read failure logged since and every restored table readable. Until then the button is disabled with the reason. Cleanup deletes exactly what the manifest lists, after checking each file's checksum, and the manifest last; the live file, the lock, the trace and `backups/` are never touched.
-
-### From the command line
-
-```bash
-jclaw backup                     # online through the running instance, or from the closed file
-jclaw backup --list              # what is in data/backups/
-jclaw restore <zip | backup id>  # validate, stop, swap, start
-jclaw repair                     # stop, recover, rebuild, verify, compact, start; then offer cleanup
-jclaw db-clean                   # delete what the last successful repair left behind
-jclaw db-status                  # the health strip as text
-```
-
-The CLI and the panel share one implementation. With the instance running, `backup` and `db-status` go through the API — the button's code path — so retention and the health verdict come from the running JVM. With the instance stopped, the same engine runs directly against the file on the H2 jar alone, which is what makes `repair` usable when the database will not open. Helper output goes to `logs/database.log`.
-
-## Maintenance
-
-The operator actions that change this instance, ordered by how often one is wanted: upgrading is the reason to open this page, restarting is the follow-up, and a password reset is rare enough that it sits last.
-
-This section was previously three — **Password**, **Upgrade** and **Restart**. Links to the old `?section=password`, `?section=upgrade` and `?section=restart` addresses all still resolve here.
-
-### Upgrade and restart
-
-Installs the newest JClaw release over this one, without a shell. The button hands off to `jclaw.sh upgrade` — the same command you'd run by hand — so the CLI and the UI take exactly the same path.
-
-The panel shows the version you're running and the newest published release. **Check again** forces a fresh lookup; otherwise the answer is cached for an hour, because GitHub allows only 60 unauthenticated API calls an hour per address and this panel is polled on every visit.
-
-When JClaw is served from a git checkout, the panel also names the commit it's running, marked when the working tree has uncommitted changes. A checkout keeps the same version number across many commits, so the version alone can't tell you which build is live. A packaged install has no repository and shows nothing here.
-
-**The download happens while JClaw keeps serving.** The release (~400 MB for a bundle install) is fetched, checksum-verified and unpacked before anything is stopped, so a network failure, a bad download or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
-
-### What is kept
-
-Everything the release doesn't ship is carried across, so an upgrade never resets your instance:
-
-| Kept | What's in it |
-|------|--------------|
-| `data/` | the database, uploaded attachments, the search index |
-| `workspace/` | the agent workspace, including per-skill credentials |
-| `certs/` | the application secret (your sessions survive) and any TLS cert+key |
-| `public/apps/` | apps you've installed |
-| `logs/` | the existing application, GC and upgrade logs |
-| `sidecar/*/.venv` | Python environments and downloaded models |
-| skills you installed | bundled skills are updated; yours are left alone |
-
-The rule is inverted on purpose: rather than listing directories to preserve — a list that goes stale the moment a release adds one — the upgrade keeps *anything the new release does not ship*. The exceptions are build outputs (`precompiled/`, `lib/`, `framework/`, `public/spa/`), which must come from the release verbatim: merging those would leave a deleted class on the classpath or two versions of a jar side by side.
-
-`conf/application.conf` is handled separately. If you never edited it, the release's copy is installed so new settings take effect. If you did, **your file is kept** and the release's copy is written beside it as `conf/application.conf.new-<version>` so you can see what changed. The panel tells you when this happens.
-
-### If it goes wrong
-
-The database is copied to `data/backups/` before the swap — this matters because the new version migrates the schema on first boot, and that isn't undone by putting the old files back. The three most recent backups are kept.
-
-If the new version doesn't answer within four minutes of starting, the upgrade **rolls itself back**: the old tree is restored, the pre-upgrade database is restored over it, and the previous version is started again. The panel then reports the rollback rather than showing an unchanged version number with no explanation. Helper output goes to `logs/upgrade.log`.
-
-### When the button isn't there
-
-Upgrade only applies to installs made by the one-line installer or from an unzipped release archive. In two cases the panel explains itself instead of offering a button:
-
-- **A source checkout** — update it with `git pull`.
-- **A container** — the image is the upgrade unit; use `docker compose pull && docker compose up -d`. A tree swap inside the container would be thrown away on the next start.
-
-Either way the release check still runs, and the explanation only appears when there is a newer release to explain. An install already on the newest release reports just that — **up to date** — with nothing to do.
-
-### From the command line
-
-```bash
-jclaw upgrade --check                    # report versions, change nothing
-jclaw upgrade                            # install the newest release
-jclaw upgrade --version v0.17.48 --yes   # pin a release (also how you step back)
-```
-
-Re-running the one-line installer over an existing install now delegates here too, so it upgrades rather than replacing your data.
-
-### Restart
-
-Reboots this JClaw instance without a shell. The **Restart** button hands off to `jclaw.sh restart` — the same command you'd run by hand — so the stop/start sequencing, stale-lock cleanup and port checks are identical either way.
-
-Before it acts, the panel shows what the reboot will interrupt: task runs and subagent runs currently in flight. Restart is deliberately **not** blocked when work is running — the moment you most want to reboot is usually the moment something is stuck — so the counts are there to inform the confirmation, not to veto it. In-flight chat streams are cut as well.
-
-The page reconnects on its own: it waits for the backend to go down, then polls until it answers again, then reloads. Two details worth knowing:
-
-- **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running — bouncing it would kill the very server that rendered the page you clicked from.
-- **In a source checkout** a production restart may recompile Java sources and rebuild the SPA. Both steps are gated on staleness and skipped when nothing changed, so this is usually quick. Two timed restarts on a developer clone: **48 s** with both steps skipped, **58 s** with a full SPA rebuild — the SPA is worth about ten seconds, not minutes. A cold Java recompile is the step that can take substantially longer, and it wasn't exercised in either measurement. The panel errs long when sizing how long it waits for the backend to return (15 minutes for a source checkout), so a genuinely slow restart is still survivable.
-
-If the instance wasn't started by `jclaw.sh`, the button is disabled and says so — there's nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app doesn't come back.
-
-### Password
-
-The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out — on the next access you'll be routed to the setup screen to choose a new password.
-
-When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
 
 ## Source-only controls
 

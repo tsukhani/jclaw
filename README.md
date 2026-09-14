@@ -215,6 +215,11 @@ choco install tesseract
 # or: winget install --id UB-Mannheim.TesseractOCR
 ```
 
+On Windows, the UB Mannheim installer (the `winget` line) does not add
+Tesseract to `PATH`, and OCR then silently returns empty text. Set
+`ocr.tesseract.path` in `conf/application.conf` to the directory holding
+`tesseract.exe` (e.g. `C:\Program Files\Tesseract-OCR`), not to the `.exe`.
+
 Additional language packs install separately. The default is English
 (`eng`); install `tesseract-ocr-fra`, `tesseract-ocr-jpn`, etc. for other
 languages, then set them under **Settings → Image → OCR**

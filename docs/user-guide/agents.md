@@ -146,7 +146,7 @@ You don't need many agents to be productive. A single well-tuned agent with the 
 :::
 
 :::gotcha "provider not configured"
-A small amber **provider not configured** pill on an agent row means the agent's selected provider doesn't have an API key (or its local provider isn't reachable). Visit [Settings → LLM Providers](/guide#settings) to fix it; the agent will continue to be disabled in chat until you do.
+A small amber **provider not configured** pill on an agent row means the agent's selected provider doesn't have an API key (or its local provider isn't reachable). Visit [Settings → LLM Providers](/guide#settings-llm-providers) to fix it; until you do, the status dot on [Chat](/chat)'s model picker turns grey (**Model offline**) for that agent.
 :::
 
 :::note Editing doesn't rewrite history
