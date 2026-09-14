@@ -142,7 +142,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * subagent run, independent of activity — the runaway guard the idle budget
      * (which an active child never trips) cannot provide. NOT settable by the
      * spawning LLM. {@code 0} disables the ceiling (idle budget only). Seeded by
-     * {@link jobs.DefaultConfigJob}, editable in Settings &gt; Subagents.
+     * {@link jobs.DefaultConfigJob}; Settings has no row for it, so it is changed through the Config API.
      */
     public static final String MAX_WALLCLOCK_KEY = "subagent.maxWallClockSeconds";
     public static final int DEFAULT_MAX_WALLCLOCK_SECONDS = 1800;

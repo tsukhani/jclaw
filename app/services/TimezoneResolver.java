@@ -48,7 +48,7 @@ public final class TimezoneResolver {
      * {@link #resolve(String)}) the default zone for CRON / SCHEDULED tasks
      * that carry no explicit zone of their own. Defaults to the server's JVM
      * zone so a fresh install reflects where the operator actually is. Set
-     * from Settings → General.
+     * from Settings → Timezone.
      */
     public static final String APP_CONFIG_KEY = "app.timezone";
 
@@ -103,7 +103,7 @@ public final class TimezoneResolver {
      * treats as "now". Resolution order:
      *
      * <ol>
-     *   <li>Config key {@code app.timezone} — set from Settings → General.</li>
+     *   <li>Config key {@code app.timezone} — set from Settings → Timezone.</li>
      *   <li>application.conf {@code app.timezone} — optional baked-in default
      *       (absent by default, so fresh installs fall through to the JVM zone).</li>
      *   <li>{@link ZoneId#systemDefault()} — the server's JVM zone.</li>

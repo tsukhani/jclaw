@@ -47,7 +47,7 @@ public class ApiSchedulingMetaController extends Controller {
         payload.put("timezones", ids);
         // `default` = effective task-scheduling zone (tasks.defaultTimezone chain).
         // `appDefault` = effective operator wall-clock zone (app.timezone chain,
-        // falling back to the server's JVM zone) — used by Settings → General.
+        // falling back to the server's JVM zone) — used by Settings → Timezone.
         payload.put("default", TimezoneResolver.currentDefault().getId());
         payload.put("appDefault", TimezoneResolver.appZone().getId());
         renderJSON(gson.toJson(payload));

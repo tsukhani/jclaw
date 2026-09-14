@@ -28,8 +28,9 @@ refuses to start.
 
 The audio file is passed by path, not uploaded: both processes run on the
 same host and jclaw's attachments are already on disk. pyannote's gated
-community-1 weights need HF_TOKEN in the environment (the JVM passes it from
-imagegen.local.hfToken); weights cache under --cache-dir via HF_HOME.
+community-1 weights need HF_TOKEN in the environment (the JVM passes
+transcription.diarization.local.hfToken, falling back to imagegen.local.hfToken);
+weights cache under --cache-dir via HF_HOME.
 """
 
 import argparse

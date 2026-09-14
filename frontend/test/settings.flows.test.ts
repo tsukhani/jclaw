@@ -314,7 +314,7 @@ describe('Settings page — entry inline edit (baseUrl / apiKey)', () => {
     // Find the Edit button on the baseUrl row of ollama-cloud. There's a
     // forest of similar pencils across the page, so scope to the LLM Providers
     // section (data-tour="llm-providers") rather than the global button list —
-    // otherwise an Edit pencil in an earlier section (e.g. General → timezone)
+    // otherwise an Edit pencil in an earlier section (e.g. Timezone)
     // would be picked up as button[0]. Within the providers section, the first
     // pencil is ollama-cloud's baseUrl row.
     const providersSection = component.find('[data-tour="llm-providers"]')
@@ -1995,12 +1995,12 @@ describe('Settings page — Unmanaged config warning banner', () => {
   })
 })
 
-describe('Settings page — General operator timezone (app.timezone)', () => {
+describe('Settings page — Timezone section (app.timezone)', () => {
   beforeEach(() => {
     clearNuxtData()
   })
 
-  it('POSTs app.timezone when the General timezone is changed and saved', async () => {
+  it('POSTs app.timezone when the operator timezone is changed and saved', async () => {
     registerEndpoint('/api/timezones', () => ({
       timezones: ['UTC', 'Asia/Kuala_Lumpur', 'America/New_York'],
       default: 'UTC',
@@ -2010,8 +2010,8 @@ describe('Settings page — General operator timezone (app.timezone)', () => {
     setupDefaultApi({ capturePost: b => captured.push(b) })
     const component = await mountSettingsSection('timezone')
 
-    // Enter edit mode for the General timezone by clicking the pencil, then
-    // drive the unique <select> + Save button through the DOM. General is the
+    // Enter edit mode for the operator timezone by clicking the pencil, then
+    // drive the unique <select> + Save button through the DOM. Timezone is the
     // first section, so its Edit button is the first rendered.
     const editBtn = component.find('button[title="Edit"]')
     expect(editBtn.exists()).toBe(true)
@@ -2022,7 +2022,7 @@ describe('Settings page — General operator timezone (app.timezone)', () => {
     expect(select.exists()).toBe(true)
     await select.setValue('Asia/Kuala_Lumpur')
 
-    // General is the first section, so its Save button is the first rendered
+    // Timezone is the first section, so its Save button is the first rendered
     // (no other field is in edit mode).
     const saveBtn = component.find('button[title="Save"]')
     expect(saveBtn.exists()).toBe(true)

@@ -15,7 +15,7 @@ const { configData } = useSettingsConfig()
 // regardless of which page actually manages it. Keeps Settings free of
 // exact-key knowledge about other pages' config.
 const MANAGED_PREFIXES = [
-  'app.', // Operator-wide settings — Settings (General). app.timezone = the
+  'app.', // Operator-wide settings — Settings (Timezone). app.timezone = the
   // assistant's wall-clock zone injected into the system prompt.
   'provider.', // LLM providers — Settings
   'dispatcher.', // OkHttp dispatcher caps — Settings (Performance)

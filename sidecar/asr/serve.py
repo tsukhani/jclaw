@@ -11,7 +11,7 @@ is plain transcription and ASR model management for the Settings page.
 
 Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health  -> 200 {status, model, loaded}
-  GET  /asr/models?ids=a,b -> 200 {models: {...}}   (JCLAW-650)
+  GET  /asr/models?ids=a,b -> 200 {status: {...}}   (JCLAW-650)
   POST /transcribe {audio_path, model, language?}
         -> 200 {segments: [{startMs, endMs, text, ...confidence}, ...]}
   POST /asr/prefetch {model} -> 200 {...}           (JCLAW-650)
