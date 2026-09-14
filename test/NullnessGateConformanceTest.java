@@ -111,14 +111,13 @@ class NullnessGateConformanceTest extends UnitTest {
 
     @Test
     void everyTopLevelPackageIsInScopeOrDeliberatelyExcluded() throws Exception {
-        // AnnotatedPackages is an allowlist, so a package nobody adds is silently unchecked —
-        // mcp and memory sat outside it with 94 violations between them.
+        // AnnotatedPackages is an allowlist, so a package nobody adds is silently unchecked.
         var listed = annotatedPackages();
         var unaccounted = new ArrayList<String>();
         try (Stream<Path> roots = Files.list(repo("app"))) {
             for (var dir : roots.filter(Files::isDirectory).sorted().toList()) {
                 var name = dir.getFileName().toString();
-                if (!listed.contains(name) && !EXCLUDED_PACKAGES.contains(name) && holdsJavaSource(dir)) {
+                if (!listed.contains(name) && !EXCLUDED_PACKAGES.contains(name) && treeHoldsJavaSource(dir)) {
                     unaccounted.add(name);
                 }
             }
@@ -127,7 +126,7 @@ class NullnessGateConformanceTest extends UnitTest {
                 "top-level app/ packages neither in NullAway:AnnotatedPackages nor excluded on purpose");
     }
 
-    private static boolean holdsJavaSource(Path root) throws IOException {
+    private static boolean treeHoldsJavaSource(Path root) throws IOException {
         try (Stream<Path> tree = Files.walk(root)) {
             return tree.anyMatch(f -> f.getFileName().toString().endsWith(".java"));
         }

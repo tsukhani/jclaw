@@ -25,7 +25,8 @@ tasks.withType<JavaCompile>().configureEach {
         check("MustBeClosed", CheckSeverity.ERROR)
         // Packages whose unannotated types default to non-null. `models` is deliberately
         // absent: JPA populates entity fields reflectively after construction, so every
-        // non-null column would report as uninitialised. Widening to another package is a
+        // non-null column would report as uninitialised. `com` (the vendored Aspose shim) is
+        // absent too, as it is not JClaw code. Widening to another package is a
         // name here plus a @NullMarked package-info per (sub)package it contains.
         option("NullAway:AnnotatedPackages", "utils,llm,agents,tools,services,controllers,channels,jobs,slash,mcp,memory")
     }

@@ -382,7 +382,7 @@ final class SubagentChildBootstrap {
      * union IS the full grant — the child only sees tools the parent had
      * enabled OR the child default-allowed.
      */
-    private static void unionParentToolGrants(Agent parentAgent, @Nullable Agent childAgent) {
+    private static void unionParentToolGrants(Agent parentAgent, Agent childAgent) {
         var parentDisabled = ToolRegistry.loadDisabledTools(parentAgent);
         var allRegistered = ToolRegistry.listTools();
         // Parent's enabled set: every registered tool not in the parent's

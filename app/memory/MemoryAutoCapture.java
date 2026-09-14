@@ -295,7 +295,7 @@ public final class MemoryAutoCapture {
      * provider from the agent directly and passes a null channel — there is no channel to
      * be ineligible (JCLAW-866 gates voice turns, which a corpus has none of).
      */
-    public static CaptureResult captureSync(Agent agent, @Nullable String userMessage,
+    public static CaptureResult captureSync(@Nullable Agent agent, @Nullable String userMessage,
                                             @Nullable String assistantResponse) {
         if (agent == null || userMessage == null || userMessage.isBlank()
                 || assistantResponse == null || assistantResponse.isBlank()) {
