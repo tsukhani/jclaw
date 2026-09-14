@@ -507,6 +507,9 @@ describe('Chat page — subagent chip stack', () => {
     expect(chips).toHaveLength(2)
     // The inline run gets no chip but is still one of the runs the header counts.
     expect(component.find('[data-testid="subagent-stack-count"]').text()).toBe('3 subagents spawned in this conversation')
+    // The list hangs straight from the chat header, ahead of every conversation notice.
+    expect(component.find('[data-testid="subagent-stack"]').element.previousElementSibling)
+      .toBe(component.find('[data-testid="chat-header"]').element)
     expect(chips[0]!.find('[data-testid="subagent-chip-label"]').text()).toBe('main-sub-6')
     expect(chips[0]!.find('[data-testid="subagent-chip-status"]').text()).toBe('Running')
     expect(chips[0]!.find('.animate-pulse').exists()).toBe(true)

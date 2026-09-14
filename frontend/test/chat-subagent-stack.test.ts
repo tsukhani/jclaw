@@ -124,6 +124,10 @@ describe('ChatSubagentStack', () => {
   it('collapses the whole list from the header and opens it again, unmounting an open transcript meanwhile', async () => {
     const { wrapper, probe } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')])
     const toggle = () => wrapper.find('[data-testid="subagent-stack-toggle"]')
+    // The toggle is the shade's bottom rail: after the list, not in the header row.
+    const list = document.getElementById('subagent-stack-list')!
+    expect(list.compareDocumentPosition(toggle().element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.find('[data-testid="subagent-stack-count"]').element.parentElement!.contains(toggle().element)).toBe(false)
     expect(toggle().attributes('aria-expanded')).toBe('true')
     expect(toggle().attributes('aria-label')).toBe('Collapse the subagent list')
     expect(toggle().attributes('aria-controls')).toBe('subagent-stack-list')

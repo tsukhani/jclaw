@@ -689,7 +689,10 @@ function exportConversation() {
         lifts the header above the chat canvas without jumping to a
         hard division line.
       -->
-      <div class="relative px-3 py-2 border-b border-neutral-300 dark:border-neutral-700 flex items-center gap-2">
+      <div
+        data-testid="chat-header"
+        class="relative px-3 py-2 border-b border-neutral-300 dark:border-neutral-700 flex items-center gap-2"
+      >
         <ChatAgentSelector
           v-model="selectedAgentId"
           :agents="agents"
@@ -718,6 +721,24 @@ function exportConversation() {
           />
         </span>
       </div>
+      <!-- Hangs straight from the header, above the conversation notices and outside the scroll container, so the list stays pinned while the transcript scrolls. -->
+      <ChatSubagentStack
+        v-if="selectedConvoId && subagentRunsTotal"
+        :runs="subagentChips"
+        :expanded-id="expandedSubagentChipId"
+        :conversation-id="selectedConvoId"
+        :runs-total="subagentRunsTotal"
+        @toggle="toggleSubagentChip"
+        @close="closeSubagentChip"
+      >
+        <template #expanded="{ run }">
+          <ChatSubagentTranscriptPanel
+            :child-conversation-id="run.childConversationId"
+            :status="run.status"
+            :agent-id="run.childAgentId"
+          />
+        </template>
+      </ChatSubagentStack>
       <!--
         Body wrapper: a flex-col with a pair of spacers (top + bottom)
         that reflow between 0 and 1fr. When the chat is empty the
@@ -816,25 +837,6 @@ function exportConversation() {
             </NuxtLink>
           </div>
         </div>
-
-        <!-- Outside the scroll container, so the subagent list stays pinned while the transcript scrolls. -->
-        <ChatSubagentStack
-          v-if="selectedConvoId && subagentRunsTotal"
-          :runs="subagentChips"
-          :expanded-id="expandedSubagentChipId"
-          :conversation-id="selectedConvoId"
-          :runs-total="subagentRunsTotal"
-          @toggle="toggleSubagentChip"
-          @close="closeSubagentChip"
-        >
-          <template #expanded="{ run }">
-            <ChatSubagentTranscriptPanel
-              :child-conversation-id="run.childConversationId"
-              :status="run.status"
-              :agent-id="run.childAgentId"
-            />
-          </template>
-        </ChatSubagentStack>
 
         <!--
           Messages — overscroll-contain stops trackpad/wheel momentum
