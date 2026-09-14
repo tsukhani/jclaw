@@ -83,7 +83,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         TelegramPollingRunnerTestHooks.clear();
         if (fakeApp != null) fakeApp.shutdownExecutors();
         if (mock != null) mock.close();
-        play.Play.configuration.remove("telegram.reactions.notify");
+        services.ConfigService.delete("telegram.reactions.notify");
         System.clearProperty(TelegramOffsetStore.OFFSET_PATH_PROPERTY);
         if (offsetTmp != null && Files.exists(offsetTmp)) {
             try (Stream<Path> walk = Files.walk(offsetTmp)) {
@@ -571,7 +571,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
 
     @Test
     void handleReactionNullArgsAndSuppressedGroupProduceNoNotification() {
-        play.Play.configuration.remove("telegram.reactions.notify"); // default: own
+        services.ConfigService.delete("telegram.reactions.notify"); // default: own
         var agent = new Agent();
         agent.name = "reaction-noop-agent";
         var groupDelta = new TelegramReactionNotifier.ReactionDelta("100", "supergroup", 42,

@@ -307,7 +307,7 @@ class TelegramStreamingSinkTest extends UnitTest {
     @Test
     void effectiveNotifierSilent_bindingOverrideWins() {
         // Global default = reply (not silent); a binding override of silent wins.
-        play.Play.configuration.remove("telegram.notifier.policy");
+        services.ConfigService.delete("telegram.notifier.policy");
         String token = "jclaw378-silent-" + System.nanoTime();
         try {
             seedBindingNotifierOverride(token, "silent", null);
@@ -321,7 +321,7 @@ class TelegramStreamingSinkTest extends UnitTest {
     @Test
     void effectiveNotifierSilent_overrideForcesReplyOverSilentConfig() {
         // Config says silent, but a binding override of reply forces the reply on.
-        play.Play.configuration.setProperty("telegram.notifier.policy", "silent");
+        services.ConfigService.set("telegram.notifier.policy", "silent");
         String token = "jclaw378-reply-" + System.nanoTime();
         try {
             seedBindingNotifierOverride(token, "reply", null);
@@ -329,13 +329,13 @@ class TelegramStreamingSinkTest extends UnitTest {
                     "binding errorReplyPolicy=reply must override a silent config default");
         } finally {
             deleteBinding(token);
-            play.Play.configuration.remove("telegram.notifier.policy");
+            services.ConfigService.delete("telegram.notifier.policy");
         }
     }
 
     @Test
     void effectiveNotifierSilent_nullOverrideFallsBackToConfig() {
-        play.Play.configuration.setProperty("telegram.notifier.policy", "silent");
+        services.ConfigService.set("telegram.notifier.policy", "silent");
         String token = "jclaw378-silent-fallback-" + System.nanoTime();
         try {
             seedBindingNotifierOverride(token, null, null);
@@ -343,13 +343,13 @@ class TelegramStreamingSinkTest extends UnitTest {
                     "null override falls back to silent config default");
         } finally {
             deleteBinding(token);
-            play.Play.configuration.remove("telegram.notifier.policy");
+            services.ConfigService.delete("telegram.notifier.policy");
         }
     }
 
     @Test
     void effectiveNotifierCooldownMs_bindingOverrideWins() {
-        play.Play.configuration.setProperty("telegram.notifier.cooldownMs", "60000");
+        services.ConfigService.set("telegram.notifier.cooldownMs", "60000");
         String token = "jclaw378-cooldown-" + System.nanoTime();
         try {
             seedBindingNotifierOverride(token, null, 12_345L);
@@ -357,13 +357,13 @@ class TelegramStreamingSinkTest extends UnitTest {
                     "binding cooldown override must win over config default");
         } finally {
             deleteBinding(token);
-            play.Play.configuration.remove("telegram.notifier.cooldownMs");
+            services.ConfigService.delete("telegram.notifier.cooldownMs");
         }
     }
 
     @Test
     void effectiveNotifierCooldownMs_nullOverrideFallsBackToConfig() {
-        play.Play.configuration.setProperty("telegram.notifier.cooldownMs", "77777");
+        services.ConfigService.set("telegram.notifier.cooldownMs", "77777");
         String token = "jclaw378-cooldown-fallback-" + System.nanoTime();
         try {
             seedBindingNotifierOverride(token, null, null);
@@ -371,14 +371,14 @@ class TelegramStreamingSinkTest extends UnitTest {
                     "null cooldown override falls back to config default");
         } finally {
             deleteBinding(token);
-            play.Play.configuration.remove("telegram.notifier.cooldownMs");
+            services.ConfigService.delete("telegram.notifier.cooldownMs");
         }
     }
 
     @Test
     void effectiveNotifierCooldownMs_noBindingFallsBackToConfigDefault() {
         // No config value and no binding → the hardcoded 60s default.
-        play.Play.configuration.remove("telegram.notifier.cooldownMs");
+        services.ConfigService.delete("telegram.notifier.cooldownMs");
         assertEquals(60_000L, TelegramStreamingSink.effectiveNotifierCooldownMs(
                 "jclaw378-cooldown-none-" + System.nanoTime()));
     }
@@ -825,13 +825,13 @@ class TelegramStreamingSinkTest extends UnitTest {
     // telegram.linkPreview). The streaming sink's network seams aren't mocked
     // in these unit tests, so we assert directly on the options-builder helper
     // — the same object the builders attach via .linkPreviewOptions(...).
-    // Toggling is via play.Play.configuration, mirroring the notifier-policy
+    // Toggling is via ConfigService, mirroring the notifier-policy
     // tests above.
 
     @Test
     void streamingLinkPreviewOptionsDisabledWhenSuppressionOn() {
-        var prior = play.Play.configuration.getProperty("telegram.linkPreview");
-        play.Play.configuration.setProperty("telegram.linkPreview", "off");
+        var prior = services.ConfigService.get("telegram.linkPreview");
+        services.ConfigService.set("telegram.linkPreview", "off");
         try {
             var opts = TelegramStreamingSink.streamingLinkPreviewOptions();
             assertNotNull(opts,
@@ -847,9 +847,9 @@ class TelegramStreamingSinkTest extends UnitTest {
 
     @Test
     void streamingLinkPreviewOptionsNullWhenSuppressionOff() {
-        var prior = play.Play.configuration.getProperty("telegram.linkPreview");
+        var prior = services.ConfigService.get("telegram.linkPreview");
         // "on" is the explicit preview-on value; also covers the default branch.
-        play.Play.configuration.setProperty("telegram.linkPreview", "on");
+        services.ConfigService.set("telegram.linkPreview", "on");
         try {
             assertNull(TelegramStreamingSink.streamingLinkPreviewOptions(),
                     "telegram.linkPreview=on must leave Telegram's default "
@@ -861,9 +861,9 @@ class TelegramStreamingSinkTest extends UnitTest {
 
     private static void restoreLinkPreview(String prior) {
         if (prior == null) {
-            play.Play.configuration.remove("telegram.linkPreview");
+            services.ConfigService.delete("telegram.linkPreview");
         } else {
-            play.Play.configuration.setProperty("telegram.linkPreview", prior);
+            services.ConfigService.set("telegram.linkPreview", prior);
         }
     }
     /**

@@ -1,8 +1,8 @@
 package channels;
 
 import org.jspecify.annotations.Nullable;
+import services.ConfigService;
 import services.EventLogger;
-import utils.PlayConfig;
 
 import java.util.List;
 import java.util.function.Consumer;
@@ -55,8 +55,8 @@ public final class TelegramInboundTextBuffer {
      *  auto-split sends. */
     static final long DEFAULT_COALESCE_WINDOW_MS = 750L;
 
-    private static final String CFG_THRESHOLD = "telegram.inbound.coalesce-threshold";
-    private static final String CFG_WINDOW_MS = "telegram.inbound.coalesce-window-ms";
+    private static final String CFG_THRESHOLD = TelegramSettings.COALESCE_THRESHOLD;
+    private static final String CFG_WINDOW_MS = TelegramSettings.COALESCE_WINDOW_MS;
 
     private static final class Bucket {
         final StringBuilder text = new StringBuilder();
@@ -147,12 +147,12 @@ public final class TelegramInboundTextBuffer {
      *  {@code telegram.inbound.coalesce-threshold} (default 4000). Unparseable
      *  / unset values fall back to the default. */
     static int coalesceThreshold() {
-        return PlayConfig.intOr(CFG_THRESHOLD, DEFAULT_COALESCE_THRESHOLD);
+        return ConfigService.getInt(CFG_THRESHOLD, DEFAULT_COALESCE_THRESHOLD);
     }
 
     /** Idle window in ms before a buffered group flushes, read from
      *  {@code telegram.inbound.coalesce-window-ms} (default 750). */
     static long coalesceWindowMs() {
-        return PlayConfig.longOr(CFG_WINDOW_MS, DEFAULT_COALESCE_WINDOW_MS);
+        return ConfigService.getLong(CFG_WINDOW_MS, DEFAULT_COALESCE_WINDOW_MS);
     }
 }

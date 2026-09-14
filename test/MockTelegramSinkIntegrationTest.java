@@ -470,7 +470,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // The streaming placeholder is the turn's first message, so under the
         // default reply mode (first) it must carry reply_parameters for the
         // inbound message id, and message_thread_id for the (non-General) topic.
-        play.Play.configuration.remove("telegram.replyTo.mode"); // → default "first"
+        services.ConfigService.delete("telegram.replyTo.mode"); // → default "first"
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 11L, "supergroup",
                 4321, 88);
         pokePending(sink, "live preview tokens");
@@ -513,7 +513,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     void ackReactionSetsWorkingOnStartAndSuccessOnSealWhenEnabled() {
         // AC2: ackReaction=on → 👀 on turn start (constructor), ✅ on seal.
         // The triggering message is the sink's replyToMessageId (= 4321 here).
-        play.Play.configuration.setProperty("telegram.ackReaction", "on");
+        services.ConfigService.set("telegram.ackReaction", "on");
         try {
             var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 20L, "private",
                     4321, null);
@@ -527,14 +527,14 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
                     "seal must replace the working reaction with a success reaction");
             assertReactionBody(server, "✅", 4321); // ✅
         } finally {
-            play.Play.configuration.remove("telegram.ackReaction");
+            services.ConfigService.delete("telegram.ackReaction");
         }
     }
 
     @Test
     void ackReactionSetsErrorOnErrorFallbackWhenEnabled() {
         // AC2: ackReaction=on → ❌ on errorFallback.
-        play.Play.configuration.setProperty("telegram.ackReaction", "on");
+        services.ConfigService.set("telegram.ackReaction", "on");
         try {
             var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 21L, "private",
                     777, null);
@@ -545,14 +545,14 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
                     "errorFallback must place the error reaction");
             assertReactionBody(server, "❌", 777); // ❌
         } finally {
-            play.Play.configuration.remove("telegram.ackReaction");
+            services.ConfigService.delete("telegram.ackReaction");
         }
     }
 
     @Test
     void ackReactionDisabledByDefaultSendsNoReaction() {
         // AC2: default off — no setMessageReaction at any point in the lifecycle.
-        play.Play.configuration.remove("telegram.ackReaction"); // → default off
+        services.ConfigService.delete("telegram.ackReaction"); // → default off
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 22L, "private",
                 999, null);
         sink.seal("done");
@@ -564,14 +564,14 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     void ackReactionNoOpWhenReplyTargetIsNull() {
         // AC2: no-op when replyToMessageId is null even if the feature is on —
         // there is no message to react to.
-        play.Play.configuration.setProperty("telegram.ackReaction", "on");
+        services.ConfigService.set("telegram.ackReaction", "on");
         try {
             var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 23L, "private");
             sink.seal("done");
             assertEquals(0, server.countRequests("setMessageReaction"),
                     "null reply target must suppress the ack lifecycle; requests=" + server.requests());
         } finally {
-            play.Play.configuration.remove("telegram.ackReaction");
+            services.ConfigService.delete("telegram.ackReaction");
         }
     }
 

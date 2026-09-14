@@ -3,6 +3,7 @@ package tools;
 import agents.ToolAction;
 import agents.ToolRegistry;
 import channels.TelegramChannel;
+import channels.TelegramSettings;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -12,7 +13,7 @@ import models.TelegramBinding;
 import models.WhatsAppBinding;
 import models.WhatsAppTransport;
 import org.jspecify.annotations.Nullable;
-import play.Play;
+import services.ConfigService;
 import services.DeliveryDispatcher;
 import services.Tx;
 import utils.GsonHolder;
@@ -167,8 +168,8 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final int MIN_POLL_OPTIONS = 2;
     private static final int MAX_POLL_OPTIONS = 10;
 
-    // JCLAW-374: per-action capability toggles, read from play.Play.configuration
-    // (same mechanism as TelegramChannel.replyToMode). Sensible defaults: react
+    // JCLAW-374: per-action capability toggles, set under Channel defaults on the
+    // Channels > Telegram page. Sensible defaults: react
     // and delete are low-blast-radius and commonly wanted, so they default ON;
     // pin/unpin mutate chat-wide pinned state for everyone in the chat, so it
     // defaults OFF and the operator opts in. unpin shares the pin toggle.
@@ -176,15 +177,15 @@ public class MessageTool implements ToolRegistry.Tool {
     // bot-sent message in place) are both low-blast-radius — they only add or
     // amend the bot's own output, never delete anyone's message or mutate
     // chat-wide pinned state — so they default ON like react/delete.
-    private static final String CFG_ACTION_DELETE = "telegram.actions.delete";
-    private static final String CFG_ACTION_PIN = "telegram.actions.pin";
-    private static final String CFG_ACTION_REACT = "telegram.actions.react";
-    private static final String CFG_ACTION_REPLY = "telegram.actions.reply";
-    private static final String CFG_ACTION_EDIT = "telegram.actions.edit";
+    private static final String CFG_ACTION_DELETE = TelegramSettings.ACTIONS_PREFIX + ACTION_DELETE;
+    private static final String CFG_ACTION_PIN = TelegramSettings.ACTIONS_PREFIX + ACTION_PIN;
+    private static final String CFG_ACTION_REACT = TelegramSettings.ACTIONS_PREFIX + ACTION_REACT;
+    private static final String CFG_ACTION_REPLY = TelegramSettings.ACTIONS_PREFIX + ACTION_REPLY;
+    private static final String CFG_ACTION_EDIT = TelegramSettings.ACTIONS_PREFIX + ACTION_EDIT;
     // JCLAW-387 (C1): poll posts a native poll to the chat — low blast radius
     // (it only adds the bot's own message, never mutates anyone else's content),
     // so it defaults ON like react/delete/reply/edit.
-    private static final String CFG_ACTION_POLL = "telegram.actions.poll";
+    private static final String CFG_ACTION_POLL = TelegramSettings.ACTIONS_PREFIX + ACTION_POLL;
 
     @Override
     public String name() { return TOOL_NAME; }
@@ -667,12 +668,12 @@ public class MessageTool implements ToolRegistry.Tool {
         return DeliveryResolver.operatingConversation(agent).map(c -> c.peerId).orElse(null);
     }
 
-    /** Per-action capability toggle, read from {@code play.Play.configuration}
+    /** Per-action capability toggle, read from the Config DB
      *  with safe defaults (react/delete ON, pin/unpin OFF). */
     static boolean actionEnabled(String action) {
         var key = cfgKeyFor(action);
         boolean defaultOn = !ACTION_PIN.equals(action) && !ACTION_UNPIN.equals(action);
-        var raw = Play.configuration.getProperty(key, Boolean.toString(defaultOn));
+        var raw = ConfigService.get(key, Boolean.toString(defaultOn));
         if (raw == null || raw.isBlank()) return defaultOn;
         return Boolean.parseBoolean(raw.trim());
     }
@@ -686,7 +687,7 @@ public class MessageTool implements ToolRegistry.Tool {
             case ACTION_REPLY -> CFG_ACTION_REPLY;
             case ACTION_EDIT -> CFG_ACTION_EDIT;
             case ACTION_POLL -> CFG_ACTION_POLL;
-            default -> "telegram.actions." + action;
+            default -> TelegramSettings.ACTIONS_PREFIX + action;
         };
     }
 

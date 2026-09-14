@@ -97,6 +97,18 @@ The bot starts receiving messages as soon as you save and enable the binding. Te
 
 Each binding also picks a **transport**: **POLLING** (the default — JClaw pulls updates from Telegram, nothing to expose) or **WEBHOOK**, which needs a public HTTPS **webhookBaseUrl** (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). The webhook path is fixed — `/api/webhooks/telegram/{bindingId}` — and the secret is generated for you and checked from Telegram's `X-Telegram-Bot-Api-Secret-Token` header, so the base URL is the only part you enter.
 
+Below the bindings, **Channel defaults** set how every Telegram binding behaves:
+
+- whether replies quote the message being answered, and whether link previews appear
+- the 👀 / ✅ / ❌ progress reaction
+- delivery-failure notices and their cooldown
+- which message reactions the agent hears about
+- how long pastes and forwarded bursts are joined into one turn
+- group-chat wake words, and where inline keyboards work
+- which message actions the agent may take: reply, edit, delete, react, poll and pin. Pinning starts off, because it changes the chat for everyone; the rest start on.
+
+A binding's own reply mode, error reply policy and notifier cooldown override the matching default. Changes apply from the next message.
+
 ### Slack
 
 Click the **Slack** card to open its per-app binding list, then **+ New binding**. Each binding pairs one Slack app with the agent it runs as, so multiple Slack apps can coexist (one per agent):

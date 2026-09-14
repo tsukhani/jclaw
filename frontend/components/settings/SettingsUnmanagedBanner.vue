@@ -54,7 +54,7 @@ const MANAGED_PREFIXES = [
   'logs.', // Event log retention — Settings (Logging)
   'llm.', // Primary-provider pin — Settings (LLM Providers)
   'voice.', // Turn detection, live transcripts and speech pacing — Settings (Voice Mode)
-  'telegram.approval.', // Approval prompt timeout — Settings (Tool Approvals)
+  'telegram.', // Channel defaults — Channels page (Telegram); approval timeout — Settings (Tool Approvals)
   'tailscale.', // Funnel enable/port (tailscale.funnel.*) — managed on the Channels page
   'jtokkit.', // Token-count safety multipliers — `jtokkit.safetyMultiplier.unmatched`
   // is the operator-tunable global in the Advanced subsection of Chat, and the

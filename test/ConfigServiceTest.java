@@ -364,6 +364,14 @@ class ConfigServiceTest extends UnitTest {
         assertNull(ConfigService.setWithSideEffects(utils.TokenCoalescer.CONFIG_KEY, "0"));
     }
 
+    @Test
+    void setWithSideEffectsRoutesTelegramKeysThroughTheirRules() {
+        // The rules themselves are pinned in TelegramSettingsTest.
+        assertNotNull(ConfigService.setWithSideEffects(channels.TelegramSettings.KEYBOARD_SCOPE, "everywhere"));
+        assertNull(ConfigService.get(channels.TelegramSettings.KEYBOARD_SCOPE),
+                "the rejected value must not be persisted");
+    }
+
     // --- setWithSideEffects: web_scrape settings (rules pinned in WebScrapeSettingsTest) ---
 
     @Test

@@ -40,6 +40,9 @@ let probeResponse: Record<string, unknown> = {}
 // JCLAW-378: capture the PUT body of a binding save (endpoint registered at module
 // scope — a registerEndpoint inside an it() block doesn't intercept reliably).
 let capturedPutBody: unknown = null
+// Channel defaults (Config DB rows) and the bodies POSTed when one changes.
+let configEntries: { key: string, value: string }[] = []
+let postedConfig: { key?: string, value?: string }[] = []
 
 registerEndpoint('/api/agents', () => [AGENT])
 registerEndpoint('/api/channels/telegram/bindings', () => bindingsResponse)
@@ -53,6 +56,16 @@ registerEndpoint('/api/channels/telegram/bindings/7', {
     return binding({ id: 7, transport: 'POLLING' })
   },
 })
+registerEndpoint('/api/providers', () => [])
+registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: configEntries }) })
+registerEndpoint('/api/config', {
+  method: 'POST',
+  handler: async (event) => {
+    const { readBody } = await import('h3')
+    postedConfig.push(await readBody(event))
+    return { ok: true }
+  },
+})
 
 beforeEach(() => {
   // useFetch caches by URL across mounts; clear so each test re-fetches.
@@ -61,6 +74,8 @@ beforeEach(() => {
   tailscaleResponse = { enabled: true, available: true, publicUrl: 'https://jclaw.tnet.ts.net', error: null }
   probeResponse = {}
   capturedPutBody = null
+  configEntries = []
+  postedConfig = []
 })
 
 describe('telegram bindings page — webhook base URL + auto-secret (JCLAW-339)', () => {
@@ -228,5 +243,32 @@ describe('telegram bindings page — health probe (JCLAW-362)', () => {
     expect(result.text()).toContain('Webhook pending updates:')
     expect(result.text()).toContain('3')
     expect(result.text()).toContain('Wrong response from the webhook')
+  })
+})
+
+describe('telegram bindings page — channel defaults', () => {
+  it('shows every Telegram behaviour setting, with the default for one never set', async () => {
+    configEntries = [{ key: 'telegram.replyTo.mode', value: 'all' }]
+    const c = await mountSuspended(Telegram)
+    await flushPromises()
+
+    const panel = c.find('[data-testid="telegram-channel-defaults"]')
+    expect(panel.findAll('[data-testid^="config-field-telegram."]')).toHaveLength(17)
+    const replyMode = panel.find('[data-testid="config-field-telegram.replyTo.mode"] select').element as HTMLSelectElement
+    expect(replyMode.value).toBe('all')
+    const keyboard = panel.find('[data-testid="config-field-telegram.keyboardScope"] select').element as HTMLSelectElement
+    expect(keyboard.value).toBe('all')
+  })
+
+  it('turns pinning on with one click, since it is the one action that starts off', async () => {
+    const c = await mountSuspended(Telegram)
+    await flushPromises()
+
+    const pin = c.find('[data-testid="config-field-telegram.actions.pin"] button[aria-pressed]')
+    expect(pin.attributes('aria-pressed')).toBe('false')
+    await pin.trigger('click')
+    await flushPromises()
+
+    expect(postedConfig).toEqual([{ key: 'telegram.actions.pin', value: 'true' }])
   })
 })

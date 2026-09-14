@@ -1,6 +1,7 @@
 package services;
 
 import agents.DangerousActionGate;
+import channels.TelegramSettings;
 import jakarta.persistence.PersistenceException;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
@@ -317,6 +318,12 @@ public class ConfigService {
         }
         if (key.equals(TokenCoalescer.CONFIG_KEY) && !isIntAtLeast(value, 0)) {
             return key + " must be a whole number of characters; 0 sends every token at once.";
+        }
+        if (key.startsWith(TelegramSettings.PREFIX)) {
+            var rejected = TelegramSettings.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
         }
 
         // The coding harness is pointed at this provider's endpoint at spawn time; a name with

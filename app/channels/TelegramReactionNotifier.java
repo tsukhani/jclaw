@@ -9,7 +9,7 @@ import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.reactions.ReactionType;
 import org.telegram.telegrambots.meta.api.objects.reactions.ReactionTypeEmoji;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
-import play.Play;
+import services.ConfigService;
 import services.EventLogger;
 
 import java.util.ArrayList;
@@ -36,7 +36,7 @@ public final class TelegramReactionNotifier {
 
     // ===== JCLAW-375: inbound reaction notifications =====
 
-    private static final String CFG_REACTIONS_NOTIFY = "telegram.reactions.notify";
+    private static final String CFG_REACTIONS_NOTIFY = TelegramSettings.REACTIONS_NOTIFY;
     /** Notify policy values for {@link #CFG_REACTIONS_NOTIFY}. */
     public static final String NOTIFY_OFF = "off";
     public static final String NOTIFY_OWN = "own";
@@ -67,7 +67,7 @@ public final class TelegramReactionNotifier {
      * the config-read contract (matches the {@code *ForTest} convention).
      */
     public static String reactionNotifyMode() {
-        var raw = Play.configuration.getProperty(CFG_REACTIONS_NOTIFY, NOTIFY_OWN);
+        var raw = ConfigService.get(CFG_REACTIONS_NOTIFY, NOTIFY_OWN);
         if (raw == null) return NOTIFY_OWN;
         var v = raw.trim().toLowerCase();
         return switch (v) {

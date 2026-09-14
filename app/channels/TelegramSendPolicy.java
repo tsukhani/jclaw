@@ -5,7 +5,7 @@ import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.api.objects.ReplyParameters;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
-import play.Play;
+import services.ConfigService;
 
 /**
  * Config- and binding-driven send-policy resolver for the Telegram outbound
@@ -13,7 +13,7 @@ import play.Play;
  * should this send behave?" questions — reply-targeting mode, link-preview
  * suppression, forum-topic stripping, and the HTML-parse-error retry gate —
  * so {@link TelegramSender} can stay a focused send engine. Pure policy: no
- * per-instance state, no I/O; every method reads {@link play.Play#configuration}
+ * per-instance state, no I/O; every method reads the Config DB
  * (and, for the effective mode, the per-binding override) and returns a
  * decision.
  */
@@ -26,8 +26,8 @@ final class TelegramSendPolicy {
     /**
      * JCLAW-369: reply-targeting policy. Controls whether — and how often —
      * an inbound {@code replyToMessageId} is applied to the turn's outbound
-     * messages, read from {@code telegram.replyTo.mode} via
-     * {@link play.Play#configuration} (default {@link #REPLY_MODE_FIRST} when
+     * messages, read from {@code telegram.replyTo.mode} in the Config DB
+     * (default {@link #REPLY_MODE_FIRST} when
      * unset/blank/unrecognized):
      *
      * <ul>
@@ -38,7 +38,7 @@ final class TelegramSendPolicy {
      *   <li>{@link #REPLY_MODE_ALL} — set it on every chunk/message.</li>
      * </ul>
      */
-    private static final String CFG_REPLY_TO_MODE = "telegram.replyTo.mode";
+    private static final String CFG_REPLY_TO_MODE = TelegramSettings.REPLY_TO_MODE;
     static final String REPLY_MODE_OFF = "off";
     static final String REPLY_MODE_FIRST = "first";
     static final String REPLY_MODE_ALL = "all";
@@ -54,8 +54,8 @@ final class TelegramSendPolicy {
     // ── JCLAW-359: link-preview suppression ──────────────────────────────
 
     /**
-     * JCLAW-359: link-preview policy, read from {@code telegram.linkPreview} via
-     * {@link play.Play#configuration}. Telegram auto-renders a preview card for
+     * JCLAW-359: link-preview policy, read from {@code telegram.linkPreview} in
+     * the Config DB. Telegram auto-renders a preview card for
      * the first URL in a message; some operators want that off so a chat full of
      * agent-cited links stays compact. The flag is a coarse on/off:
      *
@@ -67,7 +67,7 @@ final class TelegramSendPolicy {
      *       every text send so no preview card is generated.</li>
      * </ul>
      */
-    private static final String CFG_LINK_PREVIEW = "telegram.linkPreview";
+    private static final String CFG_LINK_PREVIEW = TelegramSettings.LINK_PREVIEW;
     static final String LINK_PREVIEW_ON = "on";
     static final String LINK_PREVIEW_OFF = "off";
 
@@ -87,7 +87,7 @@ final class TelegramSendPolicy {
      * can assert the config-read contract, mirroring {@link #replyToMode()}.
      */
     public static boolean suppressLinkPreview() {
-        var raw = Play.configuration.getProperty(CFG_LINK_PREVIEW, LINK_PREVIEW_ON);
+        var raw = ConfigService.get(CFG_LINK_PREVIEW, LINK_PREVIEW_ON);
         return raw != null && raw.trim().equalsIgnoreCase(LINK_PREVIEW_OFF);
     }
 
@@ -124,7 +124,7 @@ final class TelegramSendPolicy {
      * elsewhere in this class for test-reachable surface).
      */
     public static String replyToMode() {
-        var raw = Play.configuration.getProperty(CFG_REPLY_TO_MODE, REPLY_MODE_FIRST);
+        var raw = ConfigService.get(CFG_REPLY_TO_MODE, REPLY_MODE_FIRST);
         return normalizeReplyMode(raw, REPLY_MODE_FIRST);
     }
 

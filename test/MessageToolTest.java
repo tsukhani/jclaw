@@ -75,12 +75,12 @@ class MessageToolTest extends UnitTest {
     }
 
     private static void clearActionConfig() {
-        play.Play.configuration.remove(CFG_DELETE);
-        play.Play.configuration.remove(CFG_PIN);
-        play.Play.configuration.remove(CFG_REACT);
-        play.Play.configuration.remove(CFG_REPLY);
-        play.Play.configuration.remove(CFG_EDIT);
-        play.Play.configuration.remove(CFG_POLL);
+        services.ConfigService.delete(CFG_DELETE);
+        services.ConfigService.delete(CFG_PIN);
+        services.ConfigService.delete(CFG_REACT);
+        services.ConfigService.delete(CFG_REPLY);
+        services.ConfigService.delete(CFG_EDIT);
+        services.ConfigService.delete(CFG_POLL);
     }
 
     /** Bind {@link #BOT_TOKEN} to {@link #agent} and seed a Telegram
@@ -448,7 +448,7 @@ class MessageToolTest extends UnitTest {
     @Test
     void pinActionCallsPinChatMessageWhenEnabled() throws Exception {
         // pin defaults OFF — operator must opt in.
-        play.Play.configuration.setProperty(CFG_PIN, "true");
+        services.ConfigService.set(CFG_PIN, "true");
         seedTelegramBindingAndConversation();
         var result = invokeTool(agent.id, "{\"action\":\"pin\",\"message_id\":9}");
         var parsed = JsonParser.parseString(result).getAsJsonObject();
@@ -460,7 +460,7 @@ class MessageToolTest extends UnitTest {
     @Test
     void unpinActionCallsUnpinChatMessageWhenEnabled() throws Exception {
         // unpin shares the pin toggle (default OFF).
-        play.Play.configuration.setProperty(CFG_PIN, "true");
+        services.ConfigService.set(CFG_PIN, "true");
         seedTelegramBindingAndConversation();
         var result = invokeTool(agent.id, "{\"action\":\"unpin\",\"message_id\":9}");
         var parsed = JsonParser.parseString(result).getAsJsonObject();
@@ -502,7 +502,7 @@ class MessageToolTest extends UnitTest {
 
     @Test
     void disabledDeleteIsRefusedWithoutApiCall() throws Exception {
-        play.Play.configuration.setProperty(CFG_DELETE, "false");
+        services.ConfigService.set(CFG_DELETE, "false");
         seedTelegramBindingAndConversation();
         var result = invokeTool(agent.id, "{\"action\":\"delete\",\"message_id\":7}");
         var parsed = JsonParser.parseString(result).getAsJsonObject();
@@ -567,7 +567,7 @@ class MessageToolTest extends UnitTest {
         // Pin replyTo.mode=all so the reply target is attached unconditionally
         // (default FIRST also attaches it on a single-chunk send, but pinning
         // it here keeps the wire-body assertion deterministic).
-        play.Play.configuration.setProperty(CFG_REPLY_TO_MODE, "all");
+        services.ConfigService.set(CFG_REPLY_TO_MODE, "all");
         try {
             seedTelegramBindingAndConversation();
             var result = invokeTool(agent.id,
@@ -586,7 +586,7 @@ class MessageToolTest extends UnitTest {
             assertTrue(body.contains("7"),
                     "the reply target message id must appear in the sendMessage body: " + body);
         } finally {
-            play.Play.configuration.remove(CFG_REPLY_TO_MODE);
+            services.ConfigService.delete(CFG_REPLY_TO_MODE);
         }
     }
 
@@ -611,7 +611,7 @@ class MessageToolTest extends UnitTest {
 
     @Test
     void disabledReplyIsRefusedWithoutApiCall() throws Exception {
-        play.Play.configuration.setProperty(CFG_REPLY, "false");
+        services.ConfigService.set(CFG_REPLY, "false");
         seedTelegramBindingAndConversation();
         var result = invokeTool(agent.id,
                 "{\"action\":\"reply\",\"message_id\":7,\"message\":\"hi\"}");
@@ -623,7 +623,7 @@ class MessageToolTest extends UnitTest {
 
     @Test
     void disabledEditIsRefusedWithoutApiCall() throws Exception {
-        play.Play.configuration.setProperty(CFG_EDIT, "false");
+        services.ConfigService.set(CFG_EDIT, "false");
         seedTelegramBindingAndConversation();
         var result = invokeTool(agent.id,
                 "{\"action\":\"edit\",\"message_id\":8,\"message\":\"hi\"}");
@@ -667,7 +667,7 @@ class MessageToolTest extends UnitTest {
         // body as reply_parameters.quote alongside the reply target. Pin
         // replyTo.mode=all so the assertions are deterministic regardless of
         // the chunk-policy default.
-        play.Play.configuration.setProperty(CFG_REPLY_TO_MODE, "all");
+        services.ConfigService.set(CFG_REPLY_TO_MODE, "all");
         try {
             seedTelegramBindingAndConversation();
             var result = invokeTool(agent.id,
@@ -689,7 +689,7 @@ class MessageToolTest extends UnitTest {
             assertTrue(body.contains("7"),
                     "the reply target message id must appear in the body: " + body);
         } finally {
-            play.Play.configuration.remove(CFG_REPLY_TO_MODE);
+            services.ConfigService.delete(CFG_REPLY_TO_MODE);
         }
     }
 
@@ -697,7 +697,7 @@ class MessageToolTest extends UnitTest {
     void replyActionWithoutQuoteOmitsQuoteFromBody() throws Exception {
         // Absent `quote` must reproduce today's reply behavior exactly: a
         // sendMessage with the reply target but NO reply_parameters.quote.
-        play.Play.configuration.setProperty(CFG_REPLY_TO_MODE, "all");
+        services.ConfigService.set(CFG_REPLY_TO_MODE, "all");
         try {
             seedTelegramBindingAndConversation();
             var result = invokeTool(agent.id,
@@ -711,7 +711,7 @@ class MessageToolTest extends UnitTest {
             assertFalse(body.contains("\"quote\""),
                     "absent quote must not put a quote field on the wire: " + body);
         } finally {
-            play.Play.configuration.remove(CFG_REPLY_TO_MODE);
+            services.ConfigService.delete(CFG_REPLY_TO_MODE);
         }
     }
 
@@ -800,7 +800,7 @@ class MessageToolTest extends UnitTest {
 
     @Test
     void disabledPollIsRefusedWithoutApiCall() throws Exception {
-        play.Play.configuration.setProperty(CFG_POLL, "false");
+        services.ConfigService.set(CFG_POLL, "false");
         try {
             seedTelegramBindingAndConversation();
             var result = invokeTool(agent.id,
@@ -810,7 +810,7 @@ class MessageToolTest extends UnitTest {
             assertEquals(0, server.countRequests("sendPoll"),
                     "a disabled poll must NOT touch the Telegram API");
         } finally {
-            play.Play.configuration.remove(CFG_POLL);
+            services.ConfigService.delete(CFG_POLL);
         }
     }
 

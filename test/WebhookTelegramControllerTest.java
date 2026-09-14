@@ -352,14 +352,14 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         // JCLAW-375: the handler is wired into the webhook dispatch path. With
         // notify=off the reaction is parsed but gated out — no agent spawn, no
         // network. Controller still returns 200 so Telegram stops retrying.
-        play.Play.configuration.setProperty("telegram.reactions.notify", "off");
+        services.ConfigService.set("telegram.reactions.notify", "off");
         try {
             var bindingId = seedBinding(true);
             var body = reactionBody("private", 100, 42, BOUND_USER_ID, "👍"); // 👍
             var response = postWithSecretHeader(bindingId, SECRET, body);
             assertEquals(200, response.status.intValue());
         } finally {
-            play.Play.configuration.remove("telegram.reactions.notify");
+            services.ConfigService.delete("telegram.reactions.notify");
         }
     }
 
@@ -368,7 +368,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         // Default policy is 'own', which suppresses group reactions (the reacted
         // message's author is unattributable from the update). Parsed, gated out,
         // 200, no agent dispatch.
-        play.Play.configuration.remove("telegram.reactions.notify"); // → default 'own'
+        services.ConfigService.delete("telegram.reactions.notify"); // → default 'own'
         var bindingId = seedBinding(true);
         var body = reactionBody("supergroup", -100, 42, BOUND_USER_ID, "👍");
         var response = postWithSecretHeader(bindingId, SECRET, body);

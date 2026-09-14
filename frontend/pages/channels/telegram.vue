@@ -4,6 +4,7 @@ import {
   TrashIcon,
 } from '@heroicons/vue/24/outline'
 import type { Agent, TelegramBindingSummary } from '~/types/api'
+import TelegramChannelDefaults from '~/components/TelegramChannelDefaults.vue'
 
 // JCLAW-378: per-binding setting overrides ride on the binding summary the
 // backend returns; declared locally (rather than on the shared
@@ -760,5 +761,7 @@ async function testBinding(binding: TelegramBindingSummary) {
         </button>
       </div>
     </div>
+
+    <TelegramChannelDefaults />
   </div>
 </template>

@@ -4,7 +4,7 @@ import channels.TelegramModelCallback.Payload;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
-import play.Play;
+import services.ConfigService;
 import services.ModelOverrideResolver;
 import services.Tx;
 import slash.Commands;
@@ -114,8 +114,7 @@ public final class TelegramCallbackDispatcher {
      * keyboard up front; the dispatcher uses it as the inbound gate.
      */
     public static boolean keyboardScopeAllows(@Nullable String chatType) {
-        String scope = Play.configuration
-                .getProperty("telegram.keyboardScope", "all")
+        String scope = ConfigService.get(TelegramSettings.KEYBOARD_SCOPE, "all")
                 .trim().toLowerCase(Locale.ROOT);
         return switch (scope) {
             case "off" -> false;

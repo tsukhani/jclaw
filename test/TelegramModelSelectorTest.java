@@ -103,7 +103,7 @@ class TelegramModelSelectorTest extends UnitTest {
     void sendSummaryRendersKeyboardWhenScopeAllowsChatType() {
         // scope=group + a supergroup conversation → keyboard permitted.
         setConversationChatType("supergroup");
-        play.Play.configuration.setProperty("telegram.keyboardScope", "group");
+        services.ConfigService.set("telegram.keyboardScope", "group");
         try {
             boolean ok = TelegramModelSelector.sendSummary(agent, conversation);
             assertTrue(ok, "send should succeed when the keyboard is allowed");
@@ -113,7 +113,7 @@ class TelegramModelSelectorTest extends UnitTest {
             assertFalse(body.contains("Inline keyboards are disabled"),
                     "no suppression notice when the keyboard is allowed: " + body);
         } finally {
-            play.Play.configuration.remove("telegram.keyboardScope");
+            services.ConfigService.delete("telegram.keyboardScope");
         }
     }
 
@@ -122,7 +122,7 @@ class TelegramModelSelectorTest extends UnitTest {
         // scope=dm but the conversation is a group → keyboard suppressed; a plain
         // text notice goes out instead (no reply_markup).
         setConversationChatType("group");
-        play.Play.configuration.setProperty("telegram.keyboardScope", "dm");
+        services.ConfigService.set("telegram.keyboardScope", "dm");
         try {
             boolean ok = TelegramModelSelector.sendSummary(agent, conversation);
             assertTrue(ok, "send should still succeed via the plain-text path");
@@ -134,7 +134,7 @@ class TelegramModelSelectorTest extends UnitTest {
             assertTrue(body.contains("Inline keyboards are disabled"),
                     "a plain notice must explain the suppression: " + body);
         } finally {
-            play.Play.configuration.remove("telegram.keyboardScope");
+            services.ConfigService.delete("telegram.keyboardScope");
         }
     }
 
@@ -142,7 +142,7 @@ class TelegramModelSelectorTest extends UnitTest {
     void sendSummaryScopeOffSuppressesEvenForDm() {
         // scope=off → no chat type gets a keyboard, including a DM.
         setConversationChatType("private");
-        play.Play.configuration.setProperty("telegram.keyboardScope", "off");
+        services.ConfigService.set("telegram.keyboardScope", "off");
         try {
             TelegramModelSelector.sendSummary(agent, conversation);
             var body = firstRequestBody("sendMessage");
@@ -150,7 +150,7 @@ class TelegramModelSelectorTest extends UnitTest {
                     "scope=off must suppress the keyboard even in a DM: " + body);
             assertTrue(body.contains("Inline keyboards are disabled"), body);
         } finally {
-            play.Play.configuration.remove("telegram.keyboardScope");
+            services.ConfigService.delete("telegram.keyboardScope");
         }
     }
 
@@ -159,7 +159,7 @@ class TelegramModelSelectorTest extends UnitTest {
         // Default (no telegram.keyboardScope set → "all"): the keyboard renders
         // for any chat type, including a group — confirming default behavior is
         // unchanged by the suppression guard.
-        play.Play.configuration.remove("telegram.keyboardScope");
+        services.ConfigService.delete("telegram.keyboardScope");
         setConversationChatType("group");
         boolean ok = TelegramModelSelector.sendSummary(agent, conversation);
         assertTrue(ok);

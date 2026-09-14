@@ -11,8 +11,8 @@ import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageTe
 import org.telegram.telegrambots.meta.api.objects.LinkPreviewOptions;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
-import play.Play;
 import services.AttachmentService;
+import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
 import utils.VirtualThreads;
@@ -125,7 +125,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * error. The reacted-to message is the sink's {@code replyToMessageId} (the
      * inbound message id); no-op when that is null or the feature is off.
      */
-    private static final String CFG_ACK_REACTION = "telegram.ackReaction";
+    private static final String CFG_ACK_REACTION = TelegramSettings.ACK_REACTION;
     private static final String ACK_ON = "on";
     private static final String ACK_WORKING = "👀";
     private static final String ACK_SUCCESS = "✅";
@@ -788,7 +788,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /** True when the operator opted into the ack-reaction lifecycle. */
     static boolean ackReactionEnabled() {
-        var raw = Play.configuration.getProperty(CFG_ACK_REACTION, "off");
+        var raw = ConfigService.get(CFG_ACK_REACTION, "off");
         return raw != null && raw.trim().equalsIgnoreCase(ACK_ON);
     }
 
@@ -1036,13 +1036,13 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      *       window in milliseconds (default {@value #DEFAULT_NOTIFIER_RATE_LIMIT_MS}).</li>
      * </ul>
      */
-    private static final String CFG_NOTIFIER_POLICY = "telegram.notifier.policy";
-    private static final String CFG_NOTIFIER_COOLDOWN_MS = "telegram.notifier.cooldownMs";
+    private static final String CFG_NOTIFIER_POLICY = TelegramSettings.NOTIFIER_POLICY;
+    private static final String CFG_NOTIFIER_COOLDOWN_MS = TelegramSettings.NOTIFIER_COOLDOWN_MS;
     private static final String POLICY_SILENT = "silent";
 
     /** Resolve the configured cooldown window, falling back on a missing/invalid value. */
     static long notifierCooldownMs() {
-        var raw = Play.configuration.getProperty(CFG_NOTIFIER_COOLDOWN_MS);
+        var raw = ConfigService.get(CFG_NOTIFIER_COOLDOWN_MS);
         if (raw == null || raw.isBlank()) return DEFAULT_NOTIFIER_RATE_LIMIT_MS;
         try {
             long ms = Long.parseLong(raw.trim());
@@ -1067,7 +1067,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /** True when the operator opted out of the user-facing delivery-failure reply. */
     static boolean notifierSilent() {
-        var raw = Play.configuration.getProperty(CFG_NOTIFIER_POLICY, "reply");
+        var raw = ConfigService.get(CFG_NOTIFIER_POLICY, "reply");
         return raw != null && raw.trim().equalsIgnoreCase(POLICY_SILENT);
     }
 

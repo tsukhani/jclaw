@@ -64,14 +64,14 @@ class TelegramAccessPolicyTest extends UnitTest {
 
     @AfterEach
     void clearWakeWordConfig() {
-        play.Play.configuration.remove("telegram.mentionPatterns");
+        services.ConfigService.delete("telegram.mentionPatterns");
     }
 
     @Test
     void wakeWordMatchAdmitsGroupMessageViaIsAllowed() {
         // A configured wake-word match surfaces as botMentioned=true, which the
         // existing group branch of isAllowed admits — no policy change needed.
-        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        services.ConfigService.set("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
         boolean addressed = TelegramChannel.matchesWakeWord("Jarvis, what's up");
         assertTrue(addressed, "the configured wake-word must match");
         assertTrue(TelegramAccessPolicy.isAllowed(false, "group", addressed),
@@ -80,7 +80,7 @@ class TelegramAccessPolicyTest extends UnitTest {
 
     @Test
     void nonMatchingGroupMessageStillIgnored() {
-        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        services.ConfigService.set("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
         boolean addressed = TelegramChannel.matchesWakeWord("just chatting");
         assertFalse(addressed, "an unrelated message must not match the wake-word");
         assertFalse(TelegramAccessPolicy.isAllowed(false, "group", addressed),

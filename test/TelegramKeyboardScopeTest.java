@@ -48,7 +48,7 @@ class TelegramKeyboardScopeTest extends UnitTest {
         Fixtures.deleteDatabase();
         services.ConfigService.clearCache();
         // Start from the default — each test sets the scope it wants explicitly.
-        play.Play.configuration.remove(SCOPE_KEY);
+        services.ConfigService.delete(SCOPE_KEY);
         server = new MockTelegramServer();
         server.start();
         TelegramChannel.installForTest(BOT_TOKEN, server.telegramUrl());
@@ -71,7 +71,7 @@ class TelegramKeyboardScopeTest extends UnitTest {
 
     @AfterEach
     void teardown() {
-        play.Play.configuration.remove(SCOPE_KEY);
+        services.ConfigService.delete(SCOPE_KEY);
         if (server != null) server.close();
         TelegramChannel.clearForTest(BOT_TOKEN);
     }
@@ -93,9 +93,9 @@ class TelegramKeyboardScopeTest extends UnitTest {
     })
     void scopeAllAndOffDispatch(String scope, String chatType, boolean expectRan) {
         if (scope == null || scope.isBlank()) {
-            play.Play.configuration.remove(SCOPE_KEY);
+            services.ConfigService.delete(SCOPE_KEY);
         } else {
-            play.Play.configuration.setProperty(SCOPE_KEY, scope);
+            services.ConfigService.set(SCOPE_KEY, scope);
         }
         dispatchBrowse(chatType);
         if (expectRan) {
@@ -120,7 +120,7 @@ class TelegramKeyboardScopeTest extends UnitTest {
         "group, private,    false",
     })
     void scopeDmAndGroupDispatch(String scope, String chatType, boolean expectRan) {
-        play.Play.configuration.setProperty(SCOPE_KEY, scope);
+        services.ConfigService.set(SCOPE_KEY, scope);
         dispatchBrowse(chatType);
         if (expectRan) {
             assertHandlerRan();
@@ -133,7 +133,7 @@ class TelegramKeyboardScopeTest extends UnitTest {
 
     @Test
     void predicateAllPermitsEveryChatType() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "all");
+        services.ConfigService.set(SCOPE_KEY, "all");
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("private"));
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("group"));
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("supergroup"));
@@ -144,7 +144,7 @@ class TelegramKeyboardScopeTest extends UnitTest {
 
     @Test
     void predicateOffPermitsNothing() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "off");
+        services.ConfigService.set(SCOPE_KEY, "off");
         assertFalse(TelegramCallbackDispatcher.keyboardScopeAllows("private"));
         assertFalse(TelegramCallbackDispatcher.keyboardScopeAllows("group"));
         assertFalse(TelegramCallbackDispatcher.keyboardScopeAllows("supergroup"));
@@ -152,7 +152,7 @@ class TelegramKeyboardScopeTest extends UnitTest {
 
     @Test
     void predicateDmPermitsOnlyPrivate() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "dm");
+        services.ConfigService.set(SCOPE_KEY, "dm");
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("private"));
         assertFalse(TelegramCallbackDispatcher.keyboardScopeAllows("group"));
         assertFalse(TelegramCallbackDispatcher.keyboardScopeAllows("supergroup"));
@@ -161,7 +161,7 @@ class TelegramKeyboardScopeTest extends UnitTest {
 
     @Test
     void predicateGroupPermitsOnlyGroupAndSupergroup() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "group");
+        services.ConfigService.set(SCOPE_KEY, "group");
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("group"));
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("supergroup"));
         assertFalse(TelegramCallbackDispatcher.keyboardScopeAllows("private"));
@@ -171,14 +171,14 @@ class TelegramKeyboardScopeTest extends UnitTest {
     @Test
     void predicateUnknownScopeFailsOpenToAll() {
         // A typo in the operator config must not silently disable all keyboards.
-        play.Play.configuration.setProperty(SCOPE_KEY, "wat");
+        services.ConfigService.set(SCOPE_KEY, "wat");
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("private"));
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("group"));
     }
 
     @Test
     void predicateIsCaseAndWhitespaceInsensitive() {
-        play.Play.configuration.setProperty(SCOPE_KEY, "  DM  ");
+        services.ConfigService.set(SCOPE_KEY, "  DM  ");
         assertTrue(TelegramCallbackDispatcher.keyboardScopeAllows("private"));
         assertFalse(TelegramCallbackDispatcher.keyboardScopeAllows("group"));
     }

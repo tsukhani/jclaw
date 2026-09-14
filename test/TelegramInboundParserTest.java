@@ -36,17 +36,17 @@ class TelegramInboundParserTest extends UnitTest {
 
     @BeforeEach
     void snapshotWakeWordConfig() {
-        previousWakePatterns = play.Play.configuration.getProperty(WAKE_CFG_KEY);
+        previousWakePatterns = services.ConfigService.get(WAKE_CFG_KEY);
         // Deterministic baseline: wake-words off unless a test opts in.
-        play.Play.configuration.remove(WAKE_CFG_KEY);
+        services.ConfigService.delete(WAKE_CFG_KEY);
     }
 
     @AfterEach
     void restoreWakeWordConfig() {
         if (previousWakePatterns == null) {
-            play.Play.configuration.remove(WAKE_CFG_KEY);
+            services.ConfigService.delete(WAKE_CFG_KEY);
         } else {
-            play.Play.configuration.setProperty(WAKE_CFG_KEY, previousWakePatterns);
+            services.ConfigService.set(WAKE_CFG_KEY, previousWakePatterns);
         }
     }
 
@@ -365,7 +365,7 @@ class TelegramInboundParserTest extends UnitTest {
         // Config mixes a blank token, a valid pattern, and an invalid regex —
         // the blank is skipped, the invalid is dropped at compile time, and
         // the valid pattern still matches.
-        play.Play.configuration.setProperty(WAKE_CFG_KEY, "  ,(?i)\\bjarvis\\b,[oops");
+        services.ConfigService.set(WAKE_CFG_KEY, "  ,(?i)\\bjarvis\\b,[oops");
         var hit = parse("""
                 {"update_id":1,"message":{"message_id":1,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},
@@ -389,7 +389,7 @@ class TelegramInboundParserTest extends UnitTest {
 
     @Test
     void wakeWordInCaptionFlagsBot() throws Exception {
-        play.Play.configuration.setProperty(WAKE_CFG_KEY, "(?i)\\bjarvis\\b");
+        services.ConfigService.set(WAKE_CFG_KEY, "(?i)\\bjarvis\\b");
         var msg = parse("""
                 {"update_id":1,"message":{"message_id":1,
                   "from":{"id":42,"is_bot":false,"first_name":"Ada"},

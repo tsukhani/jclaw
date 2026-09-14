@@ -13,8 +13,8 @@ import org.telegram.telegrambots.meta.api.objects.Venue;
 import org.telegram.telegrambots.meta.api.objects.location.Location;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.api.objects.stickers.Sticker;
-import play.Play;
 import services.AttachmentService;
+import services.ConfigService;
 import services.EventLogger;
 
 import java.util.ArrayList;
@@ -283,7 +283,7 @@ public final class TelegramInboundParser {
      * message whose text matches any of them is treated as addressed to the bot
      * (see {@link #matchesWakeWord(String)}). Empty / unset disables the feature.
      */
-    static final String CFG_MENTION_PATTERNS = "telegram.mentionPatterns";
+    static final String CFG_MENTION_PATTERNS = TelegramSettings.MENTION_PATTERNS;
 
     /**
      * Cached compiled wake-word patterns, keyed by the raw config string they
@@ -325,14 +325,14 @@ public final class TelegramInboundParser {
 
     /**
      * Resolve the compiled wake-word patterns, recompiling only when the raw
-     * config value changes. Reads {@link #CFG_MENTION_PATTERNS} via
-     * {@link play.Play#configuration}. Splits on newlines and commas, trims, and
+     * config value changes. Reads {@link #CFG_MENTION_PATTERNS} from the
+     * Config DB. Splits on newlines and commas, trims, and
      * compiles each non-blank token; an invalid regex is skipped with a warn log
      * (so one bad pattern can't disable the rest, and the hot path never sees a
      * {@link java.util.regex.PatternSyntaxException}).
      */
     private static List<Pattern> compiledWakeWords() {
-        var raw = Play.configuration.getProperty(CFG_MENTION_PATTERNS, "");
+        var raw = ConfigService.get(CFG_MENTION_PATTERNS, "");
         if (raw == null) raw = "";
         var cached = wakeWordCache.get();
         if (cached != null && cached.source().equals(raw)) return cached.patterns();
@@ -345,7 +345,7 @@ public final class TelegramInboundParser {
     private static List<Pattern> compileWakeWords(String raw) {
         var out = new ArrayList<Pattern>();
         if (raw.isBlank()) return List.of();
-        for (var token : raw.split("[\\n,]")) {
+        for (var token : raw.split(TelegramSettings.MENTION_PATTERN_SEPARATOR)) {
             var trimmed = token.trim();
             if (trimmed.isEmpty()) continue;
             try {

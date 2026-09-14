@@ -45,8 +45,8 @@ class TelegramSenderTest extends UnitTest {
 
     @AfterEach
     void teardown() {
-        play.Play.configuration.remove("telegram.linkPreview");
-        play.Play.configuration.remove("telegram.replyTo.mode");
+        services.ConfigService.delete("telegram.linkPreview");
+        services.ConfigService.delete("telegram.replyTo.mode");
         if (mock != null) mock.close();
     }
 
@@ -129,7 +129,7 @@ class TelegramSenderTest extends UnitTest {
                     "with the default config the edit must not carry link_preview_options");
 
             // telegram.linkPreview=off: the edit must disable the preview.
-            play.Play.configuration.setProperty("telegram.linkPreview", "off");
+            services.ConfigService.set("telegram.linkPreview", "off");
             TelegramChannel.editMessageText(token, "100", 5, "updated again");
             var edits = mock.requests().stream()
                     .filter(r -> r.method().equalsIgnoreCase("editMessageText"))

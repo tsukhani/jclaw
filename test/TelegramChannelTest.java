@@ -28,12 +28,12 @@ class TelegramChannelTest extends UnitTest {
     void teardown() {
         // JCLAW-369: the reply-mode tests set this property; clear it so they
         // can't leak into other tests in the suite.
-        play.Play.configuration.remove("telegram.replyTo.mode");
+        services.ConfigService.delete("telegram.replyTo.mode");
         // JCLAW-359: same for the link-preview flag the suppression tests set.
-        play.Play.configuration.remove("telegram.linkPreview");
+        services.ConfigService.delete("telegram.linkPreview");
         // JCLAW-387 (B3): same for the wake-word patterns the wake-word tests set,
         // so a stale value can't leak into another test's parse path.
-        play.Play.configuration.remove("telegram.mentionPatterns");
+        services.ConfigService.delete("telegram.mentionPatterns");
         if (mock != null) mock.close();
     }
 
@@ -362,7 +362,7 @@ class TelegramChannelTest extends UnitTest {
         // is_disabled=true to the send body.
         String token = "jclaw359-lpoff-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.linkPreview", "off");
+            services.ConfigService.set("telegram.linkPreview", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.forToken(token).trySend("12345", "see https://x.test").ok());
             String body = mock.requests().stream()
@@ -384,7 +384,7 @@ class TelegramChannelTest extends UnitTest {
         // Telegram's default preview-on behavior is preserved.
         String token = "jclaw359-lpdefault-" + System.nanoTime();
         try {
-            play.Play.configuration.remove("telegram.linkPreview");
+            services.ConfigService.delete("telegram.linkPreview");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.forToken(token).trySend("12345", "see https://x.test").ok());
             String body = mock.requests().stream()
@@ -617,7 +617,7 @@ class TelegramChannelTest extends UnitTest {
         // is_disabled=true to the keyboard send body, mirroring the main path.
         String token = "jclaw380-kbd-lpoff-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.linkPreview", "off");
+            services.ConfigService.set("telegram.linkPreview", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             var keyboard = InlineKeyboardMarkup.builder()
                     .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
@@ -644,7 +644,7 @@ class TelegramChannelTest extends UnitTest {
         // link_preview_options — Telegram's default preview-on behavior holds.
         String token = "jclaw380-kbd-lpdefault-" + System.nanoTime();
         try {
-            play.Play.configuration.remove("telegram.linkPreview");
+            services.ConfigService.delete("telegram.linkPreview");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             var keyboard = InlineKeyboardMarkup.builder()
                     .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
@@ -669,7 +669,7 @@ class TelegramChannelTest extends UnitTest {
         // is_disabled=true to the edit body, mirroring the main path.
         String token = "jclaw380-edit-lpoff-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.linkPreview", "off");
+            services.ConfigService.set("telegram.linkPreview", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.editMessageText(token, "12345", 7,
                     "<b>see https://x.test</b>", null));
@@ -692,7 +692,7 @@ class TelegramChannelTest extends UnitTest {
         // Telegram's default preview-on behavior is preserved.
         String token = "jclaw380-edit-lpdefault-" + System.nanoTime();
         try {
-            play.Play.configuration.remove("telegram.linkPreview");
+            services.ConfigService.delete("telegram.linkPreview");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.editMessageText(token, "12345", 7,
                     "<b>see https://x.test</b>", null));
@@ -921,7 +921,7 @@ class TelegramChannelTest extends UnitTest {
         // no reply_parameters, no message_thread_id on the wire.
         String token = "jclaw369-backcompat-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
+            services.ConfigService.set("telegram.replyTo.mode", "all");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.forToken(token).sendTurn("12345", "plain reply", null, null, null));
             String body = allSendMessageBodies();
@@ -940,7 +940,7 @@ class TelegramChannelTest extends UnitTest {
         // turn. Force a two-chunk turn by exceeding the 4000-char chunk size.
         String token = "jclaw369-first-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.replyTo.mode", "first");
+            services.ConfigService.set("telegram.replyTo.mode", "first");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             String big = "A".repeat(4500);
             assertTrue(TelegramChannel.forToken(token).sendTurn("12345", big, null, 9001, null));
@@ -965,7 +965,7 @@ class TelegramChannelTest extends UnitTest {
     void sendMessage_replyModeAll_setsReplyOnEveryChunk() {
         String token = "jclaw369-all-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
+            services.ConfigService.set("telegram.replyTo.mode", "all");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             String big = "B".repeat(4500);
             assertTrue(TelegramChannel.forToken(token).sendTurn("12345", big, null, 7777, null));
@@ -986,7 +986,7 @@ class TelegramChannelTest extends UnitTest {
     void sendMessage_replyModeOff_neverSetsReply() {
         String token = "jclaw369-off-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
+            services.ConfigService.set("telegram.replyTo.mode", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.forToken(token).sendTurn("12345", "hi there", null, 4242, null));
             assertFalse(allSendMessageBodies().contains("reply_parameters"),
@@ -999,14 +999,14 @@ class TelegramChannelTest extends UnitTest {
     @Test
     void replyToMode_defaultsToFirstWhenUnsetOrUnrecognized() {
         // No property set → default "first".
-        play.Play.configuration.remove("telegram.replyTo.mode");
+        services.ConfigService.delete("telegram.replyTo.mode");
         assertEquals("first", TelegramChannel.replyToMode(),
                 "unset telegram.replyTo.mode defaults to first");
         // Unrecognized value normalizes to first; case-insensitive for known ones.
-        play.Play.configuration.setProperty("telegram.replyTo.mode", "garbage");
+        services.ConfigService.set("telegram.replyTo.mode", "garbage");
         assertEquals("first", TelegramChannel.replyToMode(),
                 "unrecognized value normalizes to first");
-        play.Play.configuration.setProperty("telegram.replyTo.mode", "ALL");
+        services.ConfigService.set("telegram.replyTo.mode", "ALL");
         assertEquals("all", TelegramChannel.replyToMode(),
                 "known value is lowercased");
     }
@@ -1016,7 +1016,7 @@ class TelegramChannelTest extends UnitTest {
     @Test
     void effectiveReplyToMode_bindingOverrideWins() {
         // The binding's stored override beats the global config default.
-        play.Play.configuration.setProperty("telegram.replyTo.mode", "first");
+        services.ConfigService.set("telegram.replyTo.mode", "first");
         String token = "jclaw378-override-" + System.nanoTime();
         try {
             seedBindingOverride(token, "all", null, null);
@@ -1030,7 +1030,7 @@ class TelegramChannelTest extends UnitTest {
     @Test
     void effectiveReplyToMode_nullOverrideFallsBackToConfig() {
         // No binding override → resolve to the global config default.
-        play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
+        services.ConfigService.set("telegram.replyTo.mode", "all");
         String token = "jclaw378-fallback-" + System.nanoTime();
         try {
             seedBindingOverride(token, null, null, null);
@@ -1044,7 +1044,7 @@ class TelegramChannelTest extends UnitTest {
     @Test
     void effectiveReplyToMode_noBindingFallsBackToConfig() {
         // An unknown token (no binding row) resolves to the config default.
-        play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
+        services.ConfigService.set("telegram.replyTo.mode", "off");
         assertEquals("off",
                 TelegramChannel.effectiveReplyToMode("jclaw378-no-binding-" + System.nanoTime()));
     }
@@ -1078,7 +1078,7 @@ class TelegramChannelTest extends UnitTest {
         // AC3: a non-General topic thread id is set on the send.
         String token = "jclaw369-thread-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
+            services.ConfigService.set("telegram.replyTo.mode", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.forToken(token).sendTurn("12345", "in topic", null, null, 42));
             String body = allSendMessageBodies();
@@ -1097,7 +1097,7 @@ class TelegramChannelTest extends UnitTest {
         // explicitly is rejected by the Bot API; a bare send lands in General.
         String token = "jclaw369-general-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.replyTo.mode", "off");
+            services.ConfigService.set("telegram.replyTo.mode", "off");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.forToken(token).sendTurn("12345", "general topic", null, null, 1));
             assertFalse(allSendMessageBodies().contains("message_thread_id"),
@@ -1192,7 +1192,7 @@ class TelegramChannelTest extends UnitTest {
         // target may be set (per replyTo.mode) but NO quote field.
         String token = "jclaw387-noquote-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.replyTo.mode", "all");
+            services.ConfigService.set("telegram.replyTo.mode", "all");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             assertTrue(TelegramChannel.sendReplyWithQuote(
                     token, "12345", "plain", null, 55, "   "));
@@ -1347,7 +1347,7 @@ class TelegramChannelTest extends UnitTest {
         // chunk, so first/all both apply the reply; thread is General-stripped.
         String token = "jclaw369-kbd-" + System.nanoTime();
         try {
-            play.Play.configuration.setProperty("telegram.replyTo.mode", "first");
+            services.ConfigService.set("telegram.replyTo.mode", "first");
             TelegramChannel.installForTest(token, mock.telegramUrl());
             mock.respondWith("sendMessage", 200,
                     "{\"ok\":true,\"result\":{\"message_id\":5,\"chat\":{\"id\":12345,"
@@ -1993,17 +1993,17 @@ class TelegramChannelTest extends UnitTest {
 
     @Test
     void matchesWakeWord_offByDefaultWhenConfigEmpty() {
-        play.Play.configuration.remove("telegram.mentionPatterns");
+        services.ConfigService.delete("telegram.mentionPatterns");
         assertFalse(TelegramChannel.matchesWakeWord("hey assistant, help me"),
                 "no configured patterns means the feature is off — never a match");
-        play.Play.configuration.setProperty("telegram.mentionPatterns", "");
+        services.ConfigService.set("telegram.mentionPatterns", "");
         assertFalse(TelegramChannel.matchesWakeWord("hey assistant"),
                 "an empty pattern config means the feature is off");
     }
 
     @Test
     void matchesWakeWord_matchesConfiguredPattern() {
-        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        services.ConfigService.set("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
         assertTrue(TelegramChannel.matchesWakeWord("ok Jarvis, what's the weather?"),
                 "a body matching the configured wake-word is a match");
         assertFalse(TelegramChannel.matchesWakeWord("talking about something else"),
@@ -2016,7 +2016,7 @@ class TelegramChannelTest extends UnitTest {
 
     @Test
     void matchesWakeWord_multiplePatternsNewlineAndCommaSeparated() {
-        play.Play.configuration.setProperty("telegram.mentionPatterns",
+        services.ConfigService.set("telegram.mentionPatterns",
                 "(?i)hey bot\n(?i)\\bassistant\\b, ^/summon\\b");
         assertTrue(TelegramChannel.matchesWakeWord("Hey Bot can you help"),
                 "first (newline-separated) pattern matches");
@@ -2032,7 +2032,7 @@ class TelegramChannelTest extends UnitTest {
     void matchesWakeWord_invalidRegexIsSkippedNotThrown() {
         // A malformed regex must be dropped (logged) without throwing, and the
         // valid patterns alongside it must still work.
-        play.Play.configuration.setProperty("telegram.mentionPatterns",
+        services.ConfigService.set("telegram.mentionPatterns",
                 "[invalid(regex\n(?i)\\bvalid\\b");
         Assertions.assertDoesNotThrow(() ->
                 TelegramChannel.matchesWakeWord("anything"));
@@ -2047,7 +2047,7 @@ class TelegramChannelTest extends UnitTest {
         // End-to-end wiring: a group message matching a configured wake-word
         // pattern must surface botMentioned=true (so TelegramAccessPolicy admits
         // it), even on the identity-independent single-arg parse path.
-        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        services.ConfigService.set("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
         var json = JsonParser.parseString("""
                 {
                   "update_id": 1,
@@ -2068,7 +2068,7 @@ class TelegramChannelTest extends UnitTest {
 
     @Test
     void parseUpdate_groupMessageNotMatchingWakeWord_leavesBotMentionedFalse() {
-        play.Play.configuration.setProperty("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
+        services.ConfigService.set("telegram.mentionPatterns", "(?i)\\bjarvis\\b");
         var json = JsonParser.parseString("""
                 {
                   "update_id": 2,
@@ -2091,7 +2091,7 @@ class TelegramChannelTest extends UnitTest {
     void parseUpdate_emptyWakeWordConfig_unchangedBehavior() {
         // Empty config = feature off: a plain group message with no mention and
         // no wake-word match must remain not-addressed (back-compat).
-        play.Play.configuration.remove("telegram.mentionPatterns");
+        services.ConfigService.delete("telegram.mentionPatterns");
         var json = JsonParser.parseString("""
                 {
                   "update_id": 3,

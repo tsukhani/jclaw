@@ -471,18 +471,18 @@ class TelegramPollingRunnerTest extends FunctionalTest {
 
     @Test
     void reactionNotifyModeDefaultsToOwnAndNormalizesUnknown() {
-        play.Play.configuration.remove("telegram.reactions.notify"); // → default
+        services.ConfigService.delete("telegram.reactions.notify"); // → default
         assertEquals("own", TelegramReactionNotifier.reactionNotifyMode(),
                 "missing config must default to 'own'");
         try {
-            play.Play.configuration.setProperty("telegram.reactions.notify", "garbage");
+            services.ConfigService.set("telegram.reactions.notify", "garbage");
             assertEquals("own", TelegramReactionNotifier.reactionNotifyMode(),
                     "an unknown value must normalize to 'own'");
-            play.Play.configuration.setProperty("telegram.reactions.notify", "ALL");
+            services.ConfigService.set("telegram.reactions.notify", "ALL");
             assertEquals("all", TelegramReactionNotifier.reactionNotifyMode(),
                     "case-insensitive parse of 'all'");
         } finally {
-            play.Play.configuration.remove("telegram.reactions.notify");
+            services.ConfigService.delete("telegram.reactions.notify");
         }
     }
 

@@ -1,7 +1,7 @@
 package channels;
 
 import org.jspecify.annotations.Nullable;
-import play.Play;
+import services.ConfigService;
 import services.EventLogger;
 
 import java.util.ArrayList;
@@ -55,7 +55,7 @@ public final class TelegramForwardCoalesceBuffer {
      *  while staying responsive for a single forward. */
     static final long DEFAULT_FORWARD_COALESCE_WINDOW_MS = 1000L;
 
-    private static final String CFG_WINDOW_MS = "telegram.inbound.forward-coalesce-window-ms";
+    private static final String CFG_WINDOW_MS = TelegramSettings.FORWARD_COALESCE_WINDOW_MS;
 
     private static final class Bucket {
         final StringBuilder text = new StringBuilder();
@@ -129,12 +129,6 @@ public final class TelegramForwardCoalesceBuffer {
      *  {@code telegram.inbound.forward-coalesce-window-ms} (default 1000).
      *  Unparseable / unset values fall back to the default. */
     static long forwardCoalesceWindowMs() {
-        var raw = Play.configuration.getProperty(CFG_WINDOW_MS);
-        if (raw == null || raw.isBlank()) return DEFAULT_FORWARD_COALESCE_WINDOW_MS;
-        try {
-            return Long.parseLong(raw.trim());
-        } catch (NumberFormatException _) {
-            return DEFAULT_FORWARD_COALESCE_WINDOW_MS;
-        }
+        return ConfigService.getLong(CFG_WINDOW_MS, DEFAULT_FORWARD_COALESCE_WINDOW_MS);
     }
 }
