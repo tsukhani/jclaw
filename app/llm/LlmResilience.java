@@ -4,11 +4,12 @@ import llm.LlmProvider.LlmException;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.BreakerAlarms;
+import services.ConfigService;
 import utils.CircuitBreaker;
 import utils.CircuitBreakers;
-import utils.PlayConfig;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -60,15 +61,65 @@ public final class LlmResilience {
                 return t;
             });
 
+    /** Settings &gt; LLM Providers &gt; Circuit breaker tuning. */
+    public static final String BREAKER_KEY_PREFIX = "llm.breaker.";
+
+    /** Inclusive bounds a written {@code llm.breaker.*} value must fall within. */
+    private static final Map<String, long[]> BREAKER_BOUNDS = Map.of(
+            "llm.breaker.window", new long[] {1, Integer.MAX_VALUE},
+            "llm.breaker.failure-rate", new long[] {1, 100},
+            "llm.breaker.min-calls", new long[] {1, Integer.MAX_VALUE},
+            "llm.breaker.consecutive-failures", new long[] {0, Integer.MAX_VALUE},
+            "llm.breaker.wait-seconds", new long[] {0, Integer.MAX_VALUE},
+            "llm.breaker.half-open-probes", new long[] {1, Integer.MAX_VALUE},
+            "llm.breaker.stall-seconds", new long[] {0, Integer.MAX_VALUE},
+            "llm.breaker.slow-rate", new long[] {0, 100},
+            "llm.breaker.stall-abort-seconds", new long[] {0, Integer.MAX_VALUE},
+            "llm.breaker.first-chunk-seconds", new long[] {0, Integer.MAX_VALUE});
+
     /** Registry name for a provider's chat breaker; prefixed so it cannot collide with an MCP server's. */
     public static String breakerName(String providerName) {
         return "llm:" + providerName;
     }
 
+    /** A message naming what {@code value} must be, or null when {@code key} accepts it. */
+    public static @Nullable String rejectionFor(String key, @Nullable String value) {
+        var bounds = BREAKER_BOUNDS.get(key);
+        if (bounds == null) {
+            return null;
+        }
+        try {
+            long n = Long.parseLong(value == null ? "" : value.trim());
+            if (n >= bounds[0] && n <= bounds[1]) {
+                return null;
+            }
+        } catch (NumberFormatException _) {
+            // rejected below
+        }
+        return bounds[1] == Integer.MAX_VALUE
+                ? "%s must be a whole number of at least %d.".formatted(key, bounds[0])
+                : "%s must be a whole number from %d to %d.".formatted(key, bounds[0], bounds[1]);
+    }
+
+    /**
+     * Re-tunes the provider breakers after an {@code llm.breaker.*} write by dropping each closed
+     * one, so the next call mints it from the new config. An open or half-open breaker is kept:
+     * dropping it would silently close a provider that is failing, or one isolated by hand. Only
+     * configured providers are touched, so a breaker minted under any other name is left alone.
+     */
+    public static void applyConfig() {
+        for (var provider : ProviderRegistry.listAll()) {
+            var name = breakerName(provider.config().name());
+            CircuitBreakers.find(name)
+                    .filter(b -> b.state() == CircuitBreaker.State.CLOSED)
+                    .ifPresent(_ -> CircuitBreakers.remove(name));
+        }
+    }
+
     /**
      * Breaker tuning from {@code llm.breaker.*}. Read on every lookup but applied only
-     * where the name is first minted ({@link CircuitBreakers#get}), so an edit reaches a
-     * provider that has not been called yet and a restart reaches the rest.
+     * where the name is first minted ({@link CircuitBreakers#get}); {@link #applyConfig}
+     * drops the closed breakers after a settings change so they are minted again.
      *
      * <p>The slow-call rule reaches only the streaming path: {@link #guard} reports through
      * {@link CircuitBreaker#recordSuccess()}, which carries no duration and is never slow.
@@ -79,14 +130,14 @@ public final class LlmResilience {
      */
     public static CircuitBreaker.Config config() {
         return CircuitBreaker.Config.of(
-                        PlayConfig.intOr("llm.breaker.window", 10),
-                        PlayConfig.intOr("llm.breaker.failure-rate", 50) / 100.0,
-                        PlayConfig.intOr("llm.breaker.min-calls", 3),
-                        PlayConfig.longOr("llm.breaker.wait-seconds", 60) * 1000L)
-                .withHalfOpenPermits(PlayConfig.intOr("llm.breaker.half-open-probes", 3))
-                .withSlowCalls(PlayConfig.longOr("llm.breaker.stall-seconds", 30) * 1000L,
-                        PlayConfig.intOr("llm.breaker.slow-rate", 50) / 100.0)
-                .withConsecutiveFailures(PlayConfig.intOr("llm.breaker.consecutive-failures", 3));
+                        ConfigService.getInt("llm.breaker.window", 10),
+                        ConfigService.getInt("llm.breaker.failure-rate", 50) / 100.0,
+                        ConfigService.getInt("llm.breaker.min-calls", 3),
+                        ConfigService.getLong("llm.breaker.wait-seconds", 60) * 1000L)
+                .withHalfOpenPermits(ConfigService.getInt("llm.breaker.half-open-probes", 3))
+                .withSlowCalls(ConfigService.getLong("llm.breaker.stall-seconds", 30) * 1000L,
+                        ConfigService.getInt("llm.breaker.slow-rate", 50) / 100.0)
+                .withConsecutiveFailures(ConfigService.getInt("llm.breaker.consecutive-failures", 3));
     }
 
     public static CircuitBreaker breakerFor(String providerName) {
@@ -119,7 +170,7 @@ public final class LlmResilience {
      * disconnect" instead of the abandonment the sweep was about to deliver.
      */
     public static Duration firstChunkBudget() {
-        return Duration.ofSeconds(PlayConfig.longOr("llm.breaker.first-chunk-seconds", 600));
+        return Duration.ofSeconds(ConfigService.getLong("llm.breaker.first-chunk-seconds", 600));
     }
 
     /**
@@ -130,7 +181,7 @@ public final class LlmResilience {
      * it would retract nothing and lose the rest of the answer.
      */
     private static long stallAbortBudgetNanos() {
-        return PlayConfig.longOr("llm.breaker.stall-abort-seconds", 300) * 1_000_000_000L;
+        return ConfigService.getLong("llm.breaker.stall-abort-seconds", 300) * 1_000_000_000L;
     }
 
     /**

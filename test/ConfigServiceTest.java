@@ -372,6 +372,13 @@ class ConfigServiceTest extends UnitTest {
                 "the rejected value must not be persisted");
     }
 
+    @Test
+    void setWithSideEffectsRoutesBreakerKeysThroughTheirBounds() {
+        // The bounds themselves are pinned in LlmBreakerTest.
+        assertNotNull(ConfigService.setWithSideEffects("llm.breaker.window", "0"));
+        assertNull(ConfigService.get("llm.breaker.window"), "the rejected value must not be persisted");
+    }
+
     // --- setWithSideEffects: web_scrape settings (rules pinned in WebScrapeSettingsTest) ---
 
     @Test

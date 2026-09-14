@@ -52,7 +52,7 @@ const MANAGED_PREFIXES = [
   'printer.', // JCLAW-911: default printer + its job options — Settings (Printers)
   'tasks.', // JCLAW-259: task retention TTL — Settings (Tasks section)
   'logs.', // Event log retention — Settings (Logging)
-  'llm.', // Primary-provider pin — Settings (LLM Providers)
+  'llm.', // Primary-provider pin and circuit breaker tuning — Settings (LLM Providers)
   'voice.', // Turn detection, live transcripts and speech pacing — Settings (Voice Mode)
   'telegram.', // Channel defaults — Channels page (Telegram); approval timeout — Settings (Tool Approvals)
   'tailscale.', // Funnel enable/port (tailscale.funnel.*) — managed on the Channels page

@@ -1,8 +1,8 @@
 import controllers.ApiChatController;
 import llm.LlmResilience;
 import org.junit.jupiter.api.Test;
-import play.Play;
 import play.test.UnitTest;
+import services.ConfigService;
 
 import java.time.Duration;
 
@@ -11,7 +11,7 @@ import java.time.Duration;
  * abandonment a silent stream ends with reaches the browser instead of a client disconnect
  * that landed a few seconds earlier.
  *
- * <p>Play.configuration is process-global and play1 runs test classes concurrently, so each
+ * <p>The config table is shared and play1 runs test classes concurrently, so each
  * override here lives for one read and is removed in a finally block.
  */
 class ChatStreamTimeoutTest extends UnitTest {
@@ -28,21 +28,21 @@ class ChatStreamTimeoutTest extends UnitTest {
 
     @Test
     void raisingTheBudgetRaisesTheCeiling() {
-        Play.configuration.setProperty(KEY, "1200");
+        ConfigService.set(KEY, "1200");
         try {
             assertEquals(Duration.ofSeconds(1320), ApiChatController.chatStreamTimeout());
         } finally {
-            Play.configuration.remove(KEY);
+            ConfigService.delete(KEY);
         }
     }
 
     @Test
     void aBudgetUnderTheFloorKeepsTheTenMinutes() {
-        Play.configuration.setProperty(KEY, "60");
+        ConfigService.set(KEY, "60");
         try {
             assertEquals(Duration.ofMinutes(10), ApiChatController.chatStreamTimeout());
         } finally {
-            Play.configuration.remove(KEY);
+            ConfigService.delete(KEY);
         }
     }
 }

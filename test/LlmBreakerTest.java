@@ -9,8 +9,8 @@ import okhttp3.Protocol;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.junit.jupiter.api.Test;
-import play.Play;
 import play.test.UnitTest;
+import services.ConfigService;
 import utils.CircuitBreaker;
 import utils.CircuitBreakers;
 import utils.HttpFactories;
@@ -206,7 +206,7 @@ class LlmBreakerTest extends UnitTest {
     }
 
     @Test
-    void theDefaultsAreTheOnesApplicationConfDocuments() {
+    void theDefaultsAreTheOnesSettingsShows() {
         var config = LlmResilience.config();
 
         assertEquals(10, config.windowSize());
@@ -261,22 +261,65 @@ class LlmBreakerTest extends UnitTest {
         assertEquals(0, config.consecutiveFailures(), "zero switches the streak rule off");
     }
 
+    @Test
+    void savingRetunesAClosedBreakerAndLeavesAnOpenOneAlone() {
+        var closed = "zz-breaker-retune-closed";
+        var open = "zz-breaker-retune-open";
+        for (var name : List.of(closed, open)) {
+            // The registry lists a provider only once both its baseUrl and apiKey are set.
+            ConfigService.set("provider." + name + ".baseUrl", UNROUTABLE);
+            ConfigService.set("provider." + name + ".apiKey", "k");
+        }
+        llm.ProviderRegistry.refresh();
+        try {
+            LlmResilience.breakerFor(closed);
+            LlmResilience.breakerFor(open).trip();
+
+            LlmResilience.applyConfig();
+
+            assertTrue(CircuitBreakers.find(LlmResilience.breakerName(closed)).isEmpty(),
+                    "a closed breaker is dropped, so the next call mints it from the new tuning");
+            var kept = CircuitBreakers.find(LlmResilience.breakerName(open));
+            assertTrue(kept.isPresent(), "a settings save must not silently close an open breaker");
+            assertEquals(CircuitBreaker.State.OPEN, kept.get().state());
+        } finally {
+            forget(closed);
+            forget(open);
+            for (var name : List.of(closed, open)) {
+                ConfigService.delete("provider." + name + ".baseUrl");
+                ConfigService.delete("provider." + name + ".apiKey");
+            }
+            llm.ProviderRegistry.refresh();
+        }
+    }
+
+    @Test
+    void breakerSettingsAreBoundedOnWrite() {
+        assertNotNull(LlmResilience.rejectionFor("llm.breaker.failure-rate", "0"));
+        assertNull(LlmResilience.rejectionFor("llm.breaker.failure-rate", "100"));
+        assertNotNull(LlmResilience.rejectionFor("llm.breaker.failure-rate", "101"));
+        assertNull(LlmResilience.rejectionFor("llm.breaker.slow-rate", "0"), "0 turns slow-call detection off");
+        assertNotNull(LlmResilience.rejectionFor("llm.breaker.window", "0"));
+        assertNull(LlmResilience.rejectionFor("llm.breaker.first-chunk-seconds", "0"), "0 never abandons a stream");
+        assertNotNull(LlmResilience.rejectionFor("llm.breaker.wait-seconds", "soon"));
+    }
+
     private static CircuitBreaker breakerWith(String providerName, Map<String, String> keys) {
         return withKeys(keys, () -> LlmResilience.breakerFor(providerName));
     }
 
     /**
-     * Run {@code body} with {@code keys} set on the static configuration. Play.configuration is
-     * process-global and play1 runs test classes concurrently, so the window is one read and the
-     * values are chosen to be harmless: a breaker some other class happened to mint inside it
-     * would only be tuned never to open.
+     * Run {@code body} with {@code keys} set in the config table. The table is shared and play1
+     * runs test classes concurrently, so the window is one read and the values are chosen to be
+     * harmless: a breaker some other class happened to mint inside it would only be tuned never
+     * to open.
      */
     private static <T> T withKeys(Map<String, String> keys, Supplier<T> body) {
-        keys.forEach(Play.configuration::setProperty);
+        keys.forEach(ConfigService::set);
         try {
             return body.get();
         } finally {
-            keys.keySet().forEach(Play.configuration::remove);
+            keys.keySet().forEach(ConfigService::delete);
         }
     }
 }

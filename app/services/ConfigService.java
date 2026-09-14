@@ -7,6 +7,7 @@ import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import jobs.EventLogCleanupJob;
 import jobs.ToolRegistrationJob;
+import llm.LlmResilience;
 import llm.ProviderLocality;
 import llm.ProviderRegistry;
 import memory.JpaMemoryStore;
@@ -325,6 +326,13 @@ public class ConfigService {
                 return rejected;
             }
         }
+        // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.
+        if (key.startsWith(LlmResilience.BREAKER_KEY_PREFIX)) {
+            var rejected = LlmResilience.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
+        }
 
         // The coding harness is pointed at this provider's endpoint at spawn time; a name with
         // no provider behind it would only surface as a refused spawn much later.
@@ -373,6 +381,10 @@ public class ConfigService {
         // The registry otherwise re-reads the pin only once a minute.
         if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) {
             ProviderRegistry.refresh();
+        }
+        // A breaker reads its tuning only when first minted.
+        if (key.startsWith(LlmResilience.BREAKER_KEY_PREFIX)) {
+            LlmResilience.applyConfig();
         }
         // JCLAW-930: JpaMemoryStore reads the vector settings once into final fields and
         // MemoryStoreFactory caches the instance, so without this the singleton serves the
@@ -486,6 +498,9 @@ public class ConfigService {
         }
         if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) {
             ProviderRegistry.refresh();
+        }
+        if (key.startsWith(LlmResilience.BREAKER_KEY_PREFIX)) {
+            LlmResilience.applyConfig();
         }
         // JCLAW-930: see setWithSideEffects — clearing a vector key changes the
         // effective setting just as writing one does, so the store must rebuild too.

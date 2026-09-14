@@ -1918,5 +1918,104 @@ const groupedProviders = computed(() => {
         </div>
       </div>
     </template>
+
+    <details
+      class="bg-surface-elevated border border-border"
+      data-testid="llm-breaker-settings"
+    >
+      <summary class="px-4 py-2.5 text-sm font-medium text-fg-strong cursor-pointer">
+        Circuit breaker tuning
+      </summary>
+      <p class="px-4 pb-2.5 text-xs text-fg-muted">
+        When a provider keeps failing, its breaker opens and calls to it fail at once instead of
+        spending another retry loop. Saving re-tunes every provider breaker that is currently
+        closed; an open or recovering breaker, including one isolated from the Dashboard, keeps its
+        state and its old tuning until JClaw restarts. Stream budgets apply from the next stream.
+      </p>
+      <div class="border-t border-border divide-y divide-border">
+        <SettingsConfigField
+          config-key="llm.breaker.failure-rate"
+          label="failure-rate"
+          kind="number"
+          fallback="50"
+          :min="1"
+          :max="100"
+          tip="Percent of recent calls that must fail to open the breaker. 1 to 100."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.window"
+          label="window"
+          kind="number"
+          fallback="10"
+          :min="1"
+          tip="How many recent calls the failure and slow-call rates are computed over. Minimum 1."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.min-calls"
+          label="min-calls"
+          kind="number"
+          fallback="3"
+          :min="1"
+          tip="Calls needed in the window before a rate is judged at all. Minimum 1."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.consecutive-failures"
+          label="consecutive-failures"
+          kind="number"
+          fallback="3"
+          :min="0"
+          tip="Failures in a row that open the breaker whatever the rate. 0 turns this rule off."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.wait-seconds"
+          label="wait-seconds"
+          kind="number"
+          fallback="60"
+          :min="0"
+          tip="Seconds the breaker stays open before letting probe calls through."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.half-open-probes"
+          label="half-open-probes"
+          kind="number"
+          fallback="3"
+          :min="1"
+          tip="Probe calls that must all succeed to close the breaker again. Minimum 1."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.stall-seconds"
+          label="stall-seconds"
+          kind="number"
+          fallback="30"
+          :min="0"
+          tip="A gap between stream chunks longer than this marks the call as slow, which counts toward opening the breaker. 0 turns slow-call detection off."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.slow-rate"
+          label="slow-rate"
+          kind="number"
+          fallback="50"
+          :min="0"
+          :max="100"
+          tip="Percent of recent calls that must be slow to open the breaker. 0 turns slow-call detection off."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.stall-abort-seconds"
+          label="stall-abort-seconds"
+          kind="number"
+          fallback="300"
+          :min="0"
+          tip="A stream silent this long mid-answer is ended and its turn released. 0 never ends one."
+        />
+        <SettingsConfigField
+          config-key="llm.breaker.first-chunk-seconds"
+          label="first-chunk-seconds"
+          kind="number"
+          fallback="600"
+          :min="0"
+          tip="A stream that sends nothing this long after dispatch is abandoned and counted as a failure. The web chat's inactivity timeout follows it. 0 never abandons one."
+        />
+      </div>
+    </details>
   </div>
 </template>
