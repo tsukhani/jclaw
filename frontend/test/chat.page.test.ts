@@ -669,7 +669,8 @@ describe('Chat page — async subagent announce polling', () => {
     ])
     // First call (from loadConversation) returns the pre-announce shape:
     // user, assistant, tool-result with status:RUNNING. Second call (the
-    // first poll tick) adds the system-role subagent_announce row.
+    // first poll tick) adds the subagent_announce row of a run the agent
+    // waited on — user-role, the kind the chat page still renders as a card.
     let messagesCalls = 0
     registerEndpoint('/api/conversations/401/messages', () => {
       messagesCalls++
@@ -689,7 +690,7 @@ describe('Chat page — async subagent announce polling', () => {
       ]
       if (messagesCalls >= 2) {
         base.push({
-          id: 703, role: 'system' as unknown as 'tool',
+          id: 703, role: 'user',
           content: 'Subagent completed (research): result body',
           // @ts-expect-error fixture-only fields not in Message type
           messageKind: 'subagent_announce',
@@ -1099,7 +1100,7 @@ describe('Chat page — truncated reply marker', () => {
         createdAt: '2026-05-15T10:00:00Z' },
       { id: 1301, role: 'assistant', content: 'Spawned!',
         createdAt: '2026-05-15T10:00:01Z' },
-      { id: 1302, role: 'system' as unknown as 'tool',
+      { id: 1302, role: 'user',
         content: 'Subagent completed (research): partial reply text',
         messageKind: 'subagent_announce',
         truncated: true,
@@ -1210,7 +1211,7 @@ describe('Chat page — subagent_announce status pill + child-conversation link'
     registerEndpoint('/api/conversations/601/messages', () => [
       { id: 1600, role: 'user', content: 'Spawn a research subagent',
         createdAt: '2026-05-16T10:00:00Z' },
-      { id: 1601, role: 'system' as unknown as 'tool',
+      { id: 1601, role: 'user',
         content: 'Subagent completed (deep-research): result body',
         messageKind: 'subagent_announce',
         metadata: {
@@ -1247,7 +1248,7 @@ describe('Chat page — subagent_announce status pill + child-conversation link'
     registerEndpoint('/api/conversations/602/messages', () => [
       { id: 1700, role: 'user', content: 'spawn failure',
         createdAt: '2026-05-16T10:00:00Z' },
-      { id: 1701, role: 'system' as unknown as 'tool',
+      { id: 1701, role: 'user',
         content: 'Subagent failed (broken): err',
         messageKind: 'subagent_announce',
         metadata: {
@@ -1281,7 +1282,7 @@ describe('Chat page — subagent_announce status pill + child-conversation link'
     registerEndpoint('/api/conversations/603/messages', () => [
       { id: 1800, role: 'user', content: 'spawn timeout',
         createdAt: '2026-05-16T10:00:00Z' },
-      { id: 1801, role: 'system' as unknown as 'tool',
+      { id: 1801, role: 'user',
         content: 'Subagent timeout (slow): timed out',
         messageKind: 'subagent_announce',
         metadata: {
@@ -1312,7 +1313,7 @@ describe('Chat page — subagent_announce status pill + child-conversation link'
         createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
     ])
     registerEndpoint('/api/conversations/604/messages', () => [
-      { id: 1900, role: 'system' as unknown as 'tool',
+      { id: 1900, role: 'user',
         content: 'Subagent completed',
         messageKind: 'subagent_announce',
         metadata: {
@@ -1332,6 +1333,39 @@ describe('Chat page — subagent_announce status pill + child-conversation link'
     expect(component.find('[data-testid="subagent-announce-view-full"]').exists()).toBe(false)
     // The status pill defaults to COMPLETED when present in the metadata.
     expect(component.find('[data-testid="subagent-announce-card"]').text()).toContain('COMPLETED')
+  })
+})
+
+describe('Chat page — subagent announce cards', () => {
+  it('leaves a background spawn\'s announce to the subagent list, and keeps the card of a run the agent waited on', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 605, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 3, preview: 'two announces',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/605/messages', () => [
+      { id: 2000, role: 'user', content: 'Spawn two subagents', createdAt: '2026-05-16T10:00:00Z' },
+      { id: 2001, role: 'system', content: 'Subagent completed (background-run): HELLO',
+        messageKind: 'subagent_announce',
+        metadata: { runId: 41, label: 'background-run', status: 'COMPLETED', reply: 'HELLO', childConversationId: 70010 },
+        createdAt: '2026-05-16T10:00:01Z' },
+      { id: 2002, role: 'user', content: 'Subagent completed (waited-run): DONE',
+        messageKind: 'subagent_announce',
+        metadata: { runId: 42, label: 'waited-run', status: 'COMPLETED', reply: 'DONE', childConversationId: 70011, yielded: true },
+        createdAt: '2026-05-16T10:00:02Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(605)
+    await flushPromises()
+
+    const cards = component.findAll('[data-testid="subagent-announce-card"]')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]!.text()).toContain('waited-run')
+    expect(component.text()).not.toContain('background-run')
   })
 })
 

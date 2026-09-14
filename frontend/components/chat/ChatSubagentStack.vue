@@ -31,6 +31,11 @@ function needsAttention(status: SubagentRunStatus): boolean {
   return status === 'FAILED' || status === 'KILLED' || status === 'TIMEOUT'
 }
 
+// A completed run's outcome is only its reply, which the transcript already shows.
+function failureReason(run: SubagentChip): string | undefined {
+  return needsAttention(run.status) ? run.outcome?.trim() || undefined : undefined
+}
+
 function chipName(run: SubagentChip): string {
   return run.label?.trim() || run.childAgentName || `Run #${run.id}`
 }
@@ -277,6 +282,7 @@ watch(() => props.runs.map(r => r.status), () => {
                     :class="needsAttention(run.status)
                       ? ['rounded-full border px-1.5 py-px text-[11px] font-medium', SUBAGENT_STATUS_BADGE[run.status]]
                       : 'text-fg-muted'"
+                    :title="failureReason(run)"
                   >{{ statusWords[run.status] }}</span>
                   <span
                     v-if="chipTime(run)"
@@ -298,6 +304,13 @@ watch(() => props.runs.map(r => r.status), () => {
                   data-testid="subagent-chip-expanded"
                   class="px-1 pb-1 text-fg-strong"
                 >
+                  <p
+                    v-if="failureReason(run)"
+                    data-testid="subagent-chip-reason"
+                    class="px-2 pt-1 pb-1.5 text-fg-muted"
+                  >
+                    {{ failureReason(run) }}
+                  </p>
                   <slot
                     name="expanded"
                     :run="run"

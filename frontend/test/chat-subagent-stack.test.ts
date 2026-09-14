@@ -7,7 +7,7 @@ import type { SubagentChip, SubagentRunStatus } from '~/composables/useChatSubag
 import { SUBAGENT_STATUS_BADGE, SUBAGENT_STATUS_TEXT } from '~/utils/subagent-status'
 
 function chip(id: number, status: SubagentRunStatus, label: string | null = null): SubagentChip {
-  return { id, label, childAgentName: `main-sub-${id}`, childAgentId: 90 + id, childConversationId: 600 + id, status, startedAt: null, endedAt: null }
+  return { id, label, childAgentName: `main-sub-${id}`, childAgentId: 90 + id, childConversationId: 600 + id, status, startedAt: null, endedAt: null, outcome: null }
 }
 
 const mounted: Array<{ unmount: () => void }> = []
@@ -94,6 +94,22 @@ describe('ChatSubagentStack', () => {
       expect(toggle.attributes('aria-expanded')).toBe('false')
       expect(row.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
     })
+  })
+
+  it('gives a run that ended badly its reason on the pill and above its transcript, but not a completed run its reply', async () => {
+    const timedOut = { ...chip(1, 'TIMEOUT', 'Impatient wait'), outcome: 'Subagent run exceeded its 15-second idle budget (no activity)' }
+    const completed = { ...chip(2, 'COMPLETED', 'Say hello'), outcome: 'HELLO' }
+    const { wrapper } = await mountStack([timedOut, completed])
+    const row = (i: number) => wrapper.findAll('[data-testid="subagent-chip"]')[i]!
+
+    expect(row(0).find('[data-testid="subagent-chip-status"]').attributes('title')).toBe(timedOut.outcome)
+    expect(row(1).find('[data-testid="subagent-chip-status"]').attributes('title')).toBeUndefined()
+
+    await row(0).find('[data-testid="subagent-chip-toggle"]').trigger('click')
+    expect(row(0).find('[data-testid="subagent-chip-reason"]').text()).toBe(timedOut.outcome)
+    await row(1).find('[data-testid="subagent-chip-toggle"]').trigger('click')
+    expect(row(1).find('[data-testid="subagent-chip-expanded"]').exists()).toBe(true)
+    expect(row(1).find('[data-testid="subagent-chip-reason"]').exists()).toBe(false)
   })
 
   it('labels a chip with its spawn label and keeps the child agent name in its tooltip and toggle name', async () => {

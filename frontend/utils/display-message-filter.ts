@@ -38,6 +38,14 @@ function hasToolCalls(m: DisplayMessageCandidate): boolean {
   return !!(m.toolCalls && (m.toolCalls.length ?? 0) > 0)
 }
 
+/**
+ * An announce for a background spawn the agent never waited on: a system-role
+ * row the model does not read, for a run the chat page's subagent list shows.
+ */
+export function isBackgroundSubagentAnnounce(m: DisplayMessageCandidate): boolean {
+  return m.messageKind === 'subagent_announce' && m.role?.toLowerCase() === 'system'
+}
+
 export function shouldDisplayMessage(
   m: DisplayMessageCandidate,
   streaming: boolean,

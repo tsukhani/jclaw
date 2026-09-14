@@ -36,7 +36,7 @@ function run(id: number, childConversationId: number | null, status: SubagentRun
   label: string | null = null, parentConversationId = 5) {
   return { id, label, childAgentId: 90 + id, childAgentName: `main-sub-${id}`, parentConversationId,
     childConversationId, mode: 'session', status, startedAt: '2026-09-13T09:44:41Z',
-    endedAt: status === 'RUNNING' ? null : '2026-09-13T09:45:10Z', outcome: null }
+    endedAt: status === 'RUNNING' ? null : '2026-09-13T09:45:10Z', outcome: status === 'RUNNING' ? null : 'done' }
 }
 
 function runEvent(runId: number, parentConversationId: number | null, status: SubagentRunStatus = 'RUNNING') {
@@ -110,9 +110,9 @@ describe('useChatSubagentChips', () => {
     expect(requests[0]!.has('status')).toBe(false)
     expect(chips.value).toEqual([
       { id: 1, label: null, childAgentName: 'main-sub-1', childAgentId: 91, childConversationId: 6, status: 'RUNNING',
-        startedAt: '2026-09-13T09:44:41Z', endedAt: null },
+        startedAt: '2026-09-13T09:44:41Z', endedAt: null, outcome: null },
       { id: 4, label: 'Summarise the logs', childAgentName: 'main-sub-4', childAgentId: 94, childConversationId: 7, status: 'COMPLETED',
-        startedAt: '2026-09-13T09:44:41Z', endedAt: '2026-09-13T09:45:10Z' },
+        startedAt: '2026-09-13T09:44:41Z', endedAt: '2026-09-13T09:45:10Z', outcome: 'done' },
     ])
     // The two runs without a chip of their own still count.
     expect(runsTotal.value).toBe(4)

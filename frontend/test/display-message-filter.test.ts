@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shouldDisplayMessage } from '~/utils/display-message-filter'
+import { isBackgroundSubagentAnnounce, shouldDisplayMessage } from '~/utils/display-message-filter'
 
 describe('shouldDisplayMessage (JCLAW-75 regression — reasoning must render live)', () => {
   it('keeps a streaming assistant message that has only reasoning (no content yet)', () => {
@@ -87,5 +87,18 @@ describe('shouldDisplayMessage (JCLAW-75 regression — reasoning must render li
       toolCalls: [{ id: 'call_a' }],
     }
     expect(shouldDisplayMessage(msg, true)).toBe(true)
+  })
+})
+
+describe('isBackgroundSubagentAnnounce', () => {
+  it('matches the system-role announce of a spawn nobody waited on, whatever the role\'s case', () => {
+    expect(isBackgroundSubagentAnnounce({ role: 'system', messageKind: 'subagent_announce' })).toBe(true)
+    expect(isBackgroundSubagentAnnounce({ role: 'SYSTEM', messageKind: 'subagent_announce' })).toBe(true)
+  })
+
+  it('leaves the user-role announce a waiting agent resumes on, and every other message', () => {
+    expect(isBackgroundSubagentAnnounce({ role: 'user', messageKind: 'subagent_announce' })).toBe(false)
+    expect(isBackgroundSubagentAnnounce({ role: 'system', messageKind: 'subagent_send' })).toBe(false)
+    expect(isBackgroundSubagentAnnounce({ role: 'system', content: 'a system prompt' })).toBe(false)
   })
 })

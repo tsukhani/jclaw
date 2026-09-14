@@ -14,6 +14,8 @@ export interface SubagentChip {
   /** ISO instants from the run row; a RUNNING run has no endedAt. */
   startedAt: string | null
   endedAt: string | null
+  /** A completed run's reply, or the reason a run failed, timed out or was killed. */
+  outcome: string | null
 }
 
 interface SubagentRunRow {
@@ -25,6 +27,7 @@ interface SubagentRunRow {
   status: SubagentRunStatus
   startedAt?: string | null
   endedAt?: string | null
+  outcome?: string | null
 }
 
 export const SUBAGENT_CHIP_POLL_MS = 5000
@@ -97,6 +100,7 @@ export function useChatSubagentChips(
             status: r.status,
             startedAt: r.startedAt ?? null,
             endedAt: r.endedAt ?? null,
+            outcome: r.outcome ?? null,
           }]
         : [],
     )

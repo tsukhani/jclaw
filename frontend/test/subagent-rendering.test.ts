@@ -136,8 +136,9 @@ describe('Chat page — async-spawn announce card (JCLAW-270)', () => {
         peerId: 'admin', messageCount: 3, preview: 'async demo',
         createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
     ])
-    // Fixture: parent prompt → assistant tool-call → SYSTEM announce row
-    // with structured metadata. The announce row carries no content beyond
+    // Fixture: parent prompt → assistant tool-call → the announce row of a
+    // run the agent waited on (user-role; a background spawn's system-role
+    // announce is left to the subagent list) with structured metadata. The announce row carries no content beyond
     // its plain-text fallback; the chat view's render path picks the card
     // off the messageKind discriminator and reads the metadata payload.
     registerEndpoint('/api/conversations/50/messages', () => [
@@ -146,7 +147,7 @@ describe('Chat page — async-spawn announce card (JCLAW-270)', () => {
       { id: 2, role: 'assistant',
         content: 'Spawning the work in the background.',
         createdAt: '2026-05-14T10:00:01Z' },
-      { id: 3, role: 'system',
+      { id: 3, role: 'user',
         content: 'Subagent completed (research-x): result body...',
         messageKind: 'subagent_announce',
         metadata: {
@@ -187,7 +188,7 @@ describe('Chat page — async-spawn announce card (JCLAW-270)', () => {
         createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
     ])
     registerEndpoint('/api/conversations/51/messages', () => [
-      { id: 10, role: 'system',
+      { id: 10, role: 'user',
         content: 'Subagent failed: provider 503',
         messageKind: 'subagent_announce',
         metadata: {

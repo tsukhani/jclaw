@@ -26,7 +26,7 @@ import { formatSize } from '~/utils/format'
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
 // suppression rule closes.
-import { shouldDisplayMessage } from '~/utils/display-message-filter'
+import { isBackgroundSubagentAnnounce, shouldDisplayMessage } from '~/utils/display-message-filter'
 
 import type { Agent, AgentSkill, AgentTool, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
 import { useChatComposer } from '~/composables/useChatComposer'
@@ -219,8 +219,9 @@ onUnmounted(() => {
   document.removeEventListener('error', onMarkdownImageError, true)
 })
 
+// A background spawn's announce card repeats a run the subagent list already shows.
 const displayMessages = computed(() =>
-  messages.value.filter(m => shouldDisplayMessage(m, streaming.value)),
+  messages.value.filter(m => shouldDisplayMessage(m, streaming.value) && !isBackgroundSubagentAnnounce(m)),
 )
 
 // Inline-subagent display state (collapsible blocks, active coding-run per
