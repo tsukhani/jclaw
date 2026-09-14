@@ -84,6 +84,16 @@ describe('StatusBanner', () => {
     expect(alert.classes()).toContain('bg-red-50')
   })
 
+  it('sits its content 1px below centre to offset the bright header line above it', async () => {
+    const component = await mountSuspended(StatusBanner, {
+      props: { message: 'Offline', variant: 'error' },
+    })
+    const classes = component.find('[role="alert"]').classes()
+    expect(classes).toContain('pt-[11px]')
+    expect(classes).toContain('pb-[9px]')
+    expect(classes).not.toContain('py-2.5')
+  })
+
   it('applies info variant styles', async () => {
     const component = await mountSuspended(StatusBanner, {
       props: { message: 'Info', variant: 'info' },

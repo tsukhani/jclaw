@@ -65,8 +65,9 @@ const style = computed(() => variantStyles[props.variant])
     role="alert"
     aria-live="assertive"
     :class="[style.bg, style.border, style.text]"
-    class="flex items-center gap-3 px-4 py-2.5 border-b text-sm"
+    class="flex items-center gap-3 px-4 pt-[11px] pb-[9px] border-b text-sm"
   >
+    <!-- 1px below centre on purpose: under the bright header line, exactly centred text reads high. -->
     <!-- Status icon -->
     <component
       :is="style.icon"
