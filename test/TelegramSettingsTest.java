@@ -4,10 +4,6 @@ import play.test.UnitTest;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /** Write-time rules for the Telegram behaviour keys edited on the Channels > Telegram page. */
 class TelegramSettingsTest extends UnitTest {
 

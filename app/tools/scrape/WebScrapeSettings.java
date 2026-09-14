@@ -27,7 +27,8 @@ public final class WebScrapeSettings {
     public static final int MAX_CONCURRENCY = 16;
 
     // The language is also sent verbatim in an Accept-Language header, so nothing but a code gets through.
-    private static final Pattern LANGUAGE_CODE = Pattern.compile("[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*");
+    // The possessive repeat keeps the regex engine from recursing per subtag on a very long value.
+    private static final Pattern LANGUAGE_CODE = Pattern.compile("[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*+");
 
     private WebScrapeSettings() {}
 
