@@ -248,6 +248,24 @@ describe('Logs page', () => {
     expect(select.findAll('option').map(o => o.text())).toEqual(['All categories'])
     expect(component.text()).toContain('Test event')
   })
+
+  it('offers a category written after mount once the select is focused', async () => {
+    setupMockApi()
+    const categories = ['llm']
+    registerEndpoint('/api/logs/categories', () => [...categories].sort())
+    const component = await mountSuspended(Logs)
+    await flushPromises()
+
+    const select = categorySelect(component)
+    expect(select.findAll('option').map(o => o.attributes('value'))).toEqual(['', 'llm'])
+
+    categories.push('CIRCUIT_BREAKER')
+    await select.trigger('focus')
+    await flushPromises()
+
+    expect(categorySelect(component).findAll('option').map(o => o.attributes('value')))
+      .toEqual(['', 'CIRCUIT_BREAKER', 'llm'])
+  })
 })
 
 describe('Conversations page', () => {

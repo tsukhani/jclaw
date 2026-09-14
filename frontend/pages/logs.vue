@@ -39,7 +39,7 @@ function toggleExpand(id: number) {
 
 // The backend answers the distinct categories actually written, so a category
 // emitted anywhere is selectable without a list here to keep in step.
-const { data: categoryData } = useLazyFetch<string[]>('/api/logs/categories', { default: () => [] })
+const { data: categoryData, refresh: refreshCategories } = useLazyFetch<string[]>('/api/logs/categories', { default: () => [] })
 
 const CATEGORY_GROUPS = [
   { prefix: 'SUBAGENT_', label: 'Subagents' },
@@ -114,6 +114,7 @@ function formatTimestamp(iso: string): string {
           :id="categorySelectId"
           v-model="categoryFilter"
           class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+          @focus="refreshCategories()"
         >
           <option value="">
             All categories

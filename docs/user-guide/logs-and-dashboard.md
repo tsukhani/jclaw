@@ -125,7 +125,7 @@ The [Logs](/logs) page is the operator's microscope. Every meaningful event — 
 
 Three filters across the top:
 
-- **Category** — restrict to one subsystem. The list is built from the categories already present in the event log, so every category that has written an event is selectable (e.g. `llm`, `channel`, `tool`, `CIRCUIT_BREAKER`). Per-event categories are grouped: **Subagents** (`SUBAGENT_*`), **Tasks** (`TASK_*`) and **MCP** (`MCP_*`); a group appears once one of its categories has an event. The list loads when the page opens.
+- **Category** — restrict to one subsystem. The list is built from the categories already present in the event log, so every category that has written an event is selectable (e.g. `llm`, `channel`, `tool`, `CIRCUIT_BREAKER`). Per-event categories are grouped: **Subagents** (`SUBAGENT_*`), **Tasks** (`TASK_*`) and **MCP** (`MCP_*`); a group appears once one of its categories has an event. The list reloads each time you focus the filter, so a category first written while the page is open shows up without a reload.
 - **Level** — `ERROR`, `WARN`, or `INFO`.
 - **Search** — free-text match on the message body.
 
