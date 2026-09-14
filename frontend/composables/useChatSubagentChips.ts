@@ -11,6 +11,9 @@ export interface SubagentChip {
   childAgentId: number | null
   childConversationId: number
   status: SubagentRunStatus
+  /** ISO instants from the run row; a RUNNING run has no endedAt. */
+  startedAt: string | null
+  endedAt: string | null
 }
 
 interface SubagentRunRow {
@@ -20,6 +23,8 @@ interface SubagentRunRow {
   childAgentId: number | null
   childConversationId: number | null
   status: SubagentRunStatus
+  startedAt?: string | null
+  endedAt?: string | null
 }
 
 export const SUBAGENT_CHIP_POLL_MS = 5000
@@ -90,6 +95,8 @@ export function useChatSubagentChips(
             childAgentId: r.childAgentId,
             childConversationId: r.childConversationId,
             status: r.status,
+            startedAt: r.startedAt ?? null,
+            endedAt: r.endedAt ?? null,
           }]
         : [],
     )

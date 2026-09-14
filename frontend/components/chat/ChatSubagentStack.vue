@@ -55,6 +55,45 @@ function chipLabelClass(run: SubagentChip): string {
 
 const runningCount = computed(() => props.runs.filter(r => r.status === 'RUNNING').length)
 
+// Elapsed time on a running row ticks each second; "ago" on a finished row only needs a coarse refresh.
+const now = ref(Date.now())
+let clock: ReturnType<typeof setInterval> | undefined
+watch(runningCount, (running) => {
+  now.value = Date.now()
+  clearInterval(clock)
+  clock = setInterval(() => {
+    now.value = Date.now()
+  }, running ? 1000 : 30_000)
+}, { immediate: true })
+
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  const h = Math.floor(m / 60)
+  return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`
+}
+
+// A running row shows how long it has run, a finished one how long ago it ended; a clock behind the server's reads as just now.
+function chipTime(run: SubagentChip): string | null {
+  if (run.status === 'RUNNING') {
+    const started = Date.parse(run.startedAt ?? '')
+    return Number.isNaN(started) ? null : formatElapsed(now.value - started)
+  }
+  const ended = Date.parse(run.endedAt ?? '')
+  if (Number.isNaN(ended)) return null
+  const minutes = Math.floor((now.value - ended) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  return minutes < 1440 ? `${Math.floor(minutes / 60)}h ago` : `${Math.floor(minutes / 1440)}d ago`
+}
+
+function chipDuration(run: SubagentChip): string | undefined {
+  const ms = Date.parse(run.endedAt ?? '') - Date.parse(run.startedAt ?? '')
+  return Number.isNaN(ms) ? undefined : `Ran for ${formatElapsed(ms)}`
+}
+
 const listOpen = ref(true)
 
 // With no chip to show the header is only a summary, so it stops being a toggle.
@@ -95,7 +134,10 @@ watch([() => props.expandedId, listOpen], ([id]) => {
   rowObserver?.observe(row)
 }, { flush: 'post' })
 
-onUnmounted(() => rowObserver?.disconnect())
+onUnmounted(() => {
+  rowObserver?.disconnect()
+  clearInterval(clock)
+})
 
 const announcement = ref('')
 const lastStatus = new Map<number, SubagentRunStatus>()
@@ -200,7 +242,7 @@ watch(() => props.runs.map(r => r.status), () => {
                   :aria-expanded="expandedId === run.id"
                   :aria-controls="expandedId === run.id ? `subagent-chip-panel-${run.id}` : undefined"
                   :aria-label="`${expandedId === run.id ? 'Collapse' : 'Expand'} ${chipAccessibleName(run)}`"
-                  :aria-describedby="`subagent-chip-status-${run.id}`"
+                  :aria-describedby="`subagent-chip-status-${run.id} subagent-chip-time-${run.id}`"
                   class="flex w-full min-w-0 h-7 items-center gap-2 px-2 rounded text-left hover:bg-black/5 dark:hover:bg-white/5
                      focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
                   @click="emit('toggle', run.id)"
@@ -236,6 +278,13 @@ watch(() => props.runs.map(r => r.status), () => {
                       ? ['rounded-full border px-1.5 py-px text-[11px] font-medium', SUBAGENT_STATUS_BADGE[run.status]]
                       : 'text-fg-muted'"
                   >{{ statusWords[run.status] }}</span>
+                  <span
+                    v-if="chipTime(run)"
+                    :id="`subagent-chip-time-${run.id}`"
+                    data-testid="subagent-chip-time"
+                    class="shrink-0 text-fg-muted tabular-nums"
+                    :title="chipDuration(run)"
+                  >{{ chipTime(run) }}</span>
                   <ChevronDownIcon
                     class="w-3.5 h-3.5 shrink-0 text-fg-muted transition-transform motion-reduce:transition-none"
                     :class="{ 'rotate-180': expandedId === run.id }"

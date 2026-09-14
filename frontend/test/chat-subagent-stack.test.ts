@@ -7,7 +7,7 @@ import type { SubagentChip, SubagentRunStatus } from '~/composables/useChatSubag
 import { SUBAGENT_STATUS_BADGE, SUBAGENT_STATUS_TEXT } from '~/utils/subagent-status'
 
 function chip(id: number, status: SubagentRunStatus, label: string | null = null): SubagentChip {
-  return { id, label, childAgentName: `main-sub-${id}`, childAgentId: 90 + id, childConversationId: 600 + id, status }
+  return { id, label, childAgentName: `main-sub-${id}`, childAgentId: 90 + id, childConversationId: 600 + id, status, startedAt: null, endedAt: null }
 }
 
 const mounted: Array<{ unmount: () => void }> = []
@@ -89,7 +89,7 @@ describe('ChatSubagentStack', () => {
       else expect(statusWord.classes().filter(c => statusHue.test(c))).toEqual([])
       expect(statusWord.text()).toBe(word)
       // The toggle's aria-label replaces its content, so the status reaches a screen reader as its description.
-      expect(toggle.attributes('aria-describedby')).toBe(statusWord.attributes('id'))
+      expect(toggle.attributes('aria-describedby')!.split(' ')).toContain(statusWord.attributes('id'))
       expect(row.find('[data-testid="subagent-chip-label"]').text()).toBe(`task ${i + 1}`)
       expect(toggle.attributes('aria-expanded')).toBe('false')
       expect(row.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
@@ -113,6 +113,37 @@ describe('ChatSubagentStack', () => {
     expect(toggles[1]!.attributes('aria-label')).toBe('Expand main-sub-2')
     // The whole row opens the transcript, not a chevron beside it.
     expect(toggles[0]!.element.contains(labels[0]!.element)).toBe(true)
+  })
+
+  it('shows how long a running chip has run, ticking each second, and how long ago a finished one ended', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    vi.setSystemTime(new Date('2026-09-14T10:02:14Z'))
+    try {
+      const running = { ...chip(1, 'RUNNING'), startedAt: '2026-09-14T10:00:00Z' }
+      // The server writes Instant.toString(), which can carry microseconds.
+      const finished = { ...chip(2, 'FAILED'), startedAt: '2026-09-14T09:50:00Z', endedAt: '2026-09-14T09:58:00.123456Z' }
+      const { wrapper } = await mountStack([running, finished])
+      const row = (i: number) => wrapper.findAll('[data-testid="subagent-chip"]')[i]!
+      const time = (i: number) => row(i).find('[data-testid="subagent-chip-time"]')
+
+      expect(time(0).text()).toBe('2m 14s')
+      expect(time(1).text()).toBe('4m ago')
+      expect(time(1).attributes('title')).toBe('Ran for 8m 0s')
+      expect(row(1).find('[data-testid="subagent-chip-toggle"]').attributes('aria-describedby')!.split(' '))
+        .toContain(time(1).attributes('id'))
+
+      vi.advanceTimersByTime(1000)
+      await nextTick()
+      expect(time(0).text()).toBe('2m 15s')
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows no time for a run whose row carries no timestamps', async () => {
+    const { wrapper } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')])
+    expect(wrapper.find('[data-testid="subagent-chip-time"]').exists()).toBe(false)
   })
 
   it('heads the list with the run count, how many are running, and a link to the conversation\'s runs on the Subagents page', async () => {
