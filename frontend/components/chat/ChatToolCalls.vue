@@ -87,7 +87,7 @@ function readableResultText(text: string): string {
   catch {
     return text
   }
-  return JSON.stringify(parsed, null, 2).replace(/"(?:[^"\\]|\\.)*"/g, (token) => {
+  return JSON.stringify(parsed, null, 2).replaceAll(/"(?:[^"\\]|\\.)*"/g, (token) => {
     const value = JSON.parse(token) as string
     return value.includes('\n') ? `"${value}"` : token
   })

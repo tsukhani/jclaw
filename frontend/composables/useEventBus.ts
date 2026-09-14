@@ -97,32 +97,32 @@ function off(type: string, handler: EventHandler) {
   handlers.get(type)?.delete(handler)
 }
 
+/**
+ * Register a handler that is automatically removed when the calling
+ * component unmounts. Prevents handler accumulation on page navigation
+ * (e.g., visiting Skills 3 times no longer fires the handler 3 times).
+ */
+function onEvent(type: string, handler: EventHandler) {
+  on(type, handler)
+  if (getCurrentInstance()) {
+    onUnmounted(() => off(type, handler))
+  }
+}
+
+/**
+ * Register a handler run each time the stream (re)connects, removed on unmount like
+ * {@link onEvent}. Events published while the stream was down are not replayed.
+ */
+function onOpen(handler: () => void) {
+  openHandlers.add(handler)
+  if (getCurrentInstance()) {
+    onUnmounted(() => openHandlers.delete(handler))
+  }
+}
+
 export function useEventBus() {
   // Connect on first use
   connect()
-
-  /**
-   * Register a handler that is automatically removed when the calling
-   * component unmounts. Prevents handler accumulation on page navigation
-   * (e.g., visiting Skills 3 times no longer fires the handler 3 times).
-   */
-  function onEvent(type: string, handler: EventHandler) {
-    on(type, handler)
-    if (getCurrentInstance()) {
-      onUnmounted(() => off(type, handler))
-    }
-  }
-
-  /**
-   * Register a handler run each time the stream (re)connects, removed on unmount like
-   * {@link onEvent}. Events published while the stream was down are not replayed.
-   */
-  function onOpen(handler: () => void) {
-    openHandlers.add(handler)
-    if (getCurrentInstance()) {
-      onUnmounted(() => openHandlers.delete(handler))
-    }
-  }
 
   return { on, off, onEvent, onOpen }
 }

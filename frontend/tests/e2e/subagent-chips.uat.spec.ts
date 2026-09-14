@@ -92,7 +92,7 @@ async function stubChat(page: Page, request: APIRequestContext, stub: ChatStub) 
   await page.route(url => /^\/api\/conversations\/990\d{3}(\/|$)/.test(url.pathname), (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
     const url = new URL(route.request().url())
-    const [, rawId, suffix] = url.pathname.match(/^\/api\/conversations\/(\d+)(\/messages)?$/) ?? []
+    const [, rawId, suffix] = /^\/api\/conversations\/(\d+)(\/messages)?$/.exec(url.pathname) ?? []
     const id = Number(rawId)
     if (id === stub.parentId && !suffix) {
       return fulfillJson(route, {
@@ -108,7 +108,8 @@ async function stubChat(page: Page, request: APIRequestContext, stub: ChatStub) 
         parentConversationId: null,
       })
     }
-    const rows = suffix ? (id === stub.parentId ? parentMessages : stub.transcripts.get(id)) : undefined
+    const transcript = id === stub.parentId ? parentMessages : stub.transcripts.get(id)
+    const rows = suffix ? transcript : undefined
     if (rows) {
       const offset = Number(url.searchParams.get('offset') ?? 0)
       const limit = Number(url.searchParams.get('limit') ?? rows.length)

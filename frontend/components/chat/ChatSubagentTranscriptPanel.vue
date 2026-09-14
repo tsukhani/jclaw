@@ -98,6 +98,7 @@ async function onRetry(event: Event) {
         v-if="!loaded"
         class="flex items-center gap-3"
       >
+        <!-- A polite live region for the load state; an output element would present it as a computed result. -->
         <p
           role="status"
           class="text-sm italic text-fg-muted"

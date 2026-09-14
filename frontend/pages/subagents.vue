@@ -530,7 +530,10 @@ function closePeek() {
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
-            <th class="px-4 py-2.5 font-medium w-8">
+            <th
+              scope="col"
+              class="px-4 py-2.5 font-medium w-8"
+            >
               <input
                 type="checkbox"
                 :checked="allRunsSelected"
@@ -542,6 +545,7 @@ function closePeek() {
               >
             </th>
             <th
+              scope="col"
               class="px-4 py-2.5 font-medium"
               :aria-sort="sortBy === 'id' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
@@ -558,6 +562,7 @@ function closePeek() {
               </button>
             </th>
             <th
+              scope="col"
               class="px-4 py-2.5 font-medium"
               :aria-sort="sortBy === 'parent' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
@@ -574,6 +579,7 @@ function closePeek() {
               </button>
             </th>
             <th
+              scope="col"
               class="px-4 py-2.5 font-medium"
               :aria-sort="sortBy === 'conversation' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
@@ -590,6 +596,7 @@ function closePeek() {
               </button>
             </th>
             <th
+              scope="col"
               class="px-4 py-2.5 font-medium"
               :aria-sort="sortBy === 'child' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
@@ -605,10 +612,14 @@ function closePeek() {
                 >{{ sortArrow('child') }}</span>
               </button>
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th
+              scope="col"
+              class="px-4 py-2.5 font-medium"
+            >
               Mode
             </th>
             <th
+              scope="col"
               class="px-4 py-2.5 font-medium"
               :aria-sort="sortBy === 'status' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
@@ -625,6 +636,7 @@ function closePeek() {
               </button>
             </th>
             <th
+              scope="col"
               class="px-4 py-2.5 font-medium"
               :aria-sort="sortBy === 'started' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
             >
@@ -640,10 +652,16 @@ function closePeek() {
                 >{{ sortArrow('started') }}</span>
               </button>
             </th>
-            <th class="px-4 py-2.5 font-medium">
+            <th
+              scope="col"
+              class="px-4 py-2.5 font-medium"
+            >
               Duration
             </th>
-            <th class="px-4 py-2.5 font-medium text-right">
+            <th
+              scope="col"
+              class="px-4 py-2.5 font-medium text-right"
+            >
               Actions
             </th>
           </tr>
