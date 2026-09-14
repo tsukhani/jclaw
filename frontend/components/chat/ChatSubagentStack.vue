@@ -2,6 +2,7 @@
 import { nextTick, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { ChevronDownIcon, UsersIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { SubagentChip, SubagentRunStatus } from '~/composables/useChatSubagentChips'
+import { SUBAGENT_STATUS_BADGE } from '~/utils/subagent-status'
 
 const props = defineProps<{
   runs: SubagentChip[]
@@ -12,23 +13,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ toggle: [id: number], close: [id: number] }>()
 defineSlots<{ expanded?: (props: { run: SubagentChip }) => unknown }>()
-
-// The badge colours of pages/subagents.vue, so a chip reads the same as its row there.
-const chipColors: Record<SubagentRunStatus, string> = {
-  RUNNING: 'bg-blue-100 dark:bg-blue-400/10 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-400/20',
-  COMPLETED: 'bg-emerald-100 dark:bg-emerald-400/10 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-400/20',
-  FAILED: 'bg-red-100 dark:bg-red-400/10 text-red-700 dark:text-red-400 border-red-300 dark:border-red-400/20',
-  KILLED: 'bg-yellow-100 dark:bg-yellow-400/10 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-400/20',
-  TIMEOUT: 'bg-orange-100 dark:bg-orange-400/10 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-400/20',
-}
-
-const dotColors: Record<SubagentRunStatus, string> = {
-  RUNNING: 'bg-blue-500 animate-pulse',
-  COMPLETED: 'bg-emerald-500',
-  FAILED: 'bg-red-500',
-  KILLED: 'bg-yellow-500',
-  TIMEOUT: 'bg-orange-500',
-}
 
 const statusWords: Record<SubagentRunStatus, string> = {
   RUNNING: 'Running',
@@ -174,30 +158,34 @@ watch(() => props.runs.map(r => r.status), () => {
         class="flex flex-col gap-1 p-1 border-t border-input overflow-y-auto overscroll-contain"
         :class="expandedId != null ? 'max-h-[50vh]' : 'max-h-36'"
       >
+        <!-- A neutral row one surface step off the container; only the status pill carries colour. -->
         <li
           v-for="(run, index) in runs"
           :key="run.id"
           data-testid="subagent-chip"
           :data-status="run.status"
-          class="shrink-0 text-xs border rounded"
-          :class="chipColors[run.status]"
+          class="shrink-0 text-xs text-fg-muted bg-muted border border-neutral-200 dark:border-neutral-700 rounded"
         >
           <div class="flex items-center gap-2 min-w-0 px-2 py-1">
             <span
-              data-testid="subagent-chip-dot"
-              class="w-1.5 h-1.5 shrink-0 rounded-full"
-              :class="dotColors[run.status]"
-              aria-hidden="true"
-            />
-            <span
               data-testid="subagent-chip-label"
-              class="font-mono truncate min-w-0"
+              class="font-mono text-fg-strong truncate min-w-0"
               :title="chipTitle(run)"
             >{{ chipName(run) }}</span>
             <span
               data-testid="subagent-chip-status"
-              class="ml-auto shrink-0 text-[10px] font-mono uppercase tracking-wide"
-            >{{ statusWords[run.status] }}</span>
+              class="ml-auto shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 border text-[10px] font-mono uppercase tracking-wide"
+              :class="SUBAGENT_STATUS_BADGE[run.status]"
+            >
+              <!-- The dot takes the pill's text colour: a -500 dot on the light -100 fill measured 2.18:1, under the 3:1 a status mark needs. -->
+              <span
+                data-testid="subagent-chip-dot"
+                class="w-1.5 h-1.5 shrink-0 rounded-full bg-current"
+                :class="{ 'animate-pulse': run.status === 'RUNNING' }"
+                aria-hidden="true"
+              />
+              {{ statusWords[run.status] }}
+            </span>
             <button
               :ref="(el: unknown) => bindToggle(run.id, el)"
               type="button"

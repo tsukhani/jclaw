@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Agent, Message } from '~/types/api'
+import { SUBAGENT_STATUS_BADGE } from '~/utils/subagent-status'
 // UsersRound matches the Subagents nav icon (the "spawned children" glyph) so
 // the empty-state landing reads as the same surface.
 import { Funnel, UsersRound } from '@lucide/vue'
@@ -239,14 +240,6 @@ onMounted(() => {
   }, 5000)
 })
 onUnmounted(() => clearInterval(interval))
-
-const statusColors: Record<string, string> = {
-  RUNNING: 'bg-blue-100 dark:bg-blue-400/10 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-400/20',
-  COMPLETED: 'bg-emerald-100 dark:bg-emerald-400/10 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-400/20',
-  FAILED: 'bg-red-100 dark:bg-red-400/10 text-red-700 dark:text-red-400 border-red-300 dark:border-red-400/20',
-  KILLED: 'bg-yellow-100 dark:bg-yellow-400/10 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-400/20',
-  TIMEOUT: 'bg-orange-100 dark:bg-orange-400/10 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-400/20',
-}
 
 function durationSeconds(r: SubagentRun): number | null {
   if (!r.startedAt) return null
@@ -739,7 +732,7 @@ function closePeek() {
             </td>
             <td class="px-4 py-2.5">
               <span
-                :class="statusColors[run.status]"
+                :class="SUBAGENT_STATUS_BADGE[run.status]"
                 class="inline-flex items-center gap-1 -ml-1.5 text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 border"
               >
                 <span

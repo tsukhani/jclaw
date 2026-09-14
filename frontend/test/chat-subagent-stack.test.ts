@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onUnmounted, ref, type PropType } from 'vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import type { SubagentChip, SubagentRunStatus } from '~/composables/useChatSubagentChips'
+import { SUBAGENT_STATUS_BADGE } from '~/utils/subagent-status'
 
 function chip(id: number, status: SubagentRunStatus, label: string | null = null): SubagentChip {
   return { id, label, childAgentName: `main-sub-${id}`, childAgentId: 90 + id, childConversationId: 600 + id, status }
@@ -67,26 +68,29 @@ async function mountStack(initial: SubagentChip[], extra: { conversationId?: num
 }
 
 describe('ChatSubagentStack', () => {
-  it('renders one minimized row per status with its colour, dot and status word', async () => {
-    const cases: Array<[SubagentRunStatus, string, string, string]> = [
-      ['RUNNING', 'bg-blue-100', 'bg-blue-500', 'Running'],
-      ['COMPLETED', 'bg-emerald-100', 'bg-emerald-500', 'Completed'],
-      ['FAILED', 'bg-red-100', 'bg-red-500', 'Failed'],
-      ['KILLED', 'bg-yellow-100', 'bg-yellow-500', 'Killed'],
-      ['TIMEOUT', 'bg-orange-100', 'bg-orange-500', 'Timed out'],
+  it('renders one neutral row per status, with the status colour, dot and word in its pill', async () => {
+    const cases: Array<[SubagentRunStatus, string]> = [
+      ['RUNNING', 'Running'],
+      ['COMPLETED', 'Completed'],
+      ['FAILED', 'Failed'],
+      ['KILLED', 'Killed'],
+      ['TIMEOUT', 'Timed out'],
     ]
     const { wrapper } = await mountStack(cases.map(([status], i) => chip(i + 1, status, `task ${i + 1}`)))
+    const statusHue = /^(dark:)?(bg|text|border)-(blue|emerald|red|yellow|orange)-/
 
     const rows = wrapper.findAll('[data-testid="subagent-chip"]')
     expect(rows).toHaveLength(cases.length)
-    cases.forEach(([status, chipClass, dotClass, word], i) => {
+    cases.forEach(([status, word], i) => {
       const row = rows[i]!
-      const dot = row.find('[data-testid="subagent-chip-dot"]')
-      expect(row.classes()).toContain(chipClass)
-      expect(dot.classes()).toContain(dotClass)
+      const pill = row.find('[data-testid="subagent-chip-status"]')
+      const dot = pill.find('[data-testid="subagent-chip-dot"]')
+      expect(row.classes().filter(c => statusHue.test(c))).toEqual([])
+      expect(pill.classes()).toEqual(expect.arrayContaining(SUBAGENT_STATUS_BADGE[status].split(' ')))
+      expect(dot.classes()).toContain('bg-current')
       expect(dot.classes().includes('animate-pulse')).toBe(status === 'RUNNING')
       expect(row.find('[data-testid="subagent-chip-label"]').text()).toBe(`task ${i + 1}`)
-      expect(row.find('[data-testid="subagent-chip-status"]').text()).toBe(word)
+      expect(pill.text()).toBe(word)
       expect(row.find('[data-testid="subagent-chip-toggle"]').attributes('aria-expanded')).toBe('false')
       expect(row.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
     })
