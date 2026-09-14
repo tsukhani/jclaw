@@ -86,8 +86,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String ARG_SAME_HOST = "sameHostOnly";
     private static final String ARG_RESPECT_ROBOTS = "respectRobots";
 
-    private static final String CFG_MAX_PAGES = "web_scrape.max-pages";
-    private static final String CFG_MAX_DEPTH = "web_scrape.max-depth";
+    public static final String CFG_MAX_PAGES = "web_scrape.max-pages";
+    public static final String CFG_MAX_DEPTH = "web_scrape.max-depth";
     private static final String CFG_TIMEOUT_SECONDS = "web_scrape.timeout-seconds";
     private static final String CFG_RESPECT_ROBOTS = "web_scrape.respect-robots";
     private static final String CFG_CONCURRENCY = "web_scrape.concurrency";
@@ -167,10 +167,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION, "The URL to start from"),
                         ARG_MAX_PAGES, Map.of(SchemaKeys.TYPE, "integer",
                                 SchemaKeys.DESCRIPTION,
-                                "Maximum pages to read (default %d)".formatted(DEFAULT_MAX_PAGES)),
+                                "Maximum pages to read. Defaults to the operator's limit (%d unless "
+                                + "changed in Settings); a larger value is capped to that limit"
+                                        .formatted(DEFAULT_MAX_PAGES)),
                         ARG_MAX_DEPTH, Map.of(SchemaKeys.TYPE, "integer",
                                 SchemaKeys.DESCRIPTION,
-                                "How many links deep to follow; 0 reads only the starting URL (default %d)"
+                                "How many links deep to follow; 0 reads only the starting URL. "
+                                + "Defaults to the operator's limit (%d unless changed in Settings); "
+                                + "a larger value is capped to that limit"
                                         .formatted(DEFAULT_MAX_DEPTH)),
                         ARG_SAME_HOST, Map.of(SchemaKeys.TYPE, "boolean",
                                 SchemaKeys.DESCRIPTION,
@@ -862,11 +866,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     private static int configMaxPages() {
-        return (int) PlayConfig.longOr(CFG_MAX_PAGES, DEFAULT_MAX_PAGES);
+        return ConfigService.getInt(CFG_MAX_PAGES, DEFAULT_MAX_PAGES);
     }
 
     private static int configMaxDepth() {
-        return (int) PlayConfig.longOr(CFG_MAX_DEPTH, DEFAULT_MAX_DEPTH);
+        return ConfigService.getInt(CFG_MAX_DEPTH, DEFAULT_MAX_DEPTH);
     }
 
     /** Runtime config, matching web_scrape.concurrency and .respect-robots. JCLAW-1099

@@ -24,6 +24,7 @@ import services.telemetry.OtelRuntime;
 import services.tts.TtsEngine;
 import services.tts.TtsSidecarManager;
 import tools.SubagentSpawnTool;
+import tools.WebScrapeTool;
 import utils.HttpFactories;
 
 import java.time.Duration;
@@ -254,11 +255,20 @@ public class ConfigService {
         // JCLAW-970: both keys are writable through POST /api/config, and a bad value is silent
         // at read — a negative rrfK pins one memory above every other, a non-finite minCosine
         // drops the vector leg entirely. Rejected here for the reason the timezone guard gives.
-        if (key.equals(JpaMemoryStore.KEY_RRF_K) && !isNonNegativeInt(value)) {
+        if (key.equals(JpaMemoryStore.KEY_RRF_K) && !isIntAtLeast(value, 0)) {
             return "memory.recall.rrfK must be a non-negative integer.";
         }
         if (key.equals(JpaMemoryStore.KEY_RECALL_MIN_COSINE) && !isCosine(value)) {
             return "memory.recall.minCosine must be a finite number between -1.0 and 1.0.";
+        }
+
+        // Each limit is the upper bound of a Math.clamp in web_scrape; below its floor the
+        // bounds cross and every scrape call throws.
+        if (key.equals(WebScrapeTool.CFG_MAX_PAGES) && !isIntAtLeast(value, 1)) {
+            return WebScrapeTool.CFG_MAX_PAGES + " must be a positive integer.";
+        }
+        if (key.equals(WebScrapeTool.CFG_MAX_DEPTH) && !isIntAtLeast(value, 0)) {
+            return WebScrapeTool.CFG_MAX_DEPTH + " must be a non-negative integer.";
         }
 
         // The coding harness is pointed at this provider's endpoint at spawn time; a name with
@@ -362,9 +372,9 @@ public class ConfigService {
         return null;
     }
 
-    private static boolean isNonNegativeInt(String value) {
+    private static boolean isIntAtLeast(String value, int min) {
         try {
-            return Integer.parseInt(value == null ? "" : value.trim()) >= 0;
+            return Integer.parseInt(value == null ? "" : value.trim()) >= min;
         } catch (NumberFormatException _) {
             return false;
         }

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -446,6 +446,79 @@ describe('Settings page — Subagents section (JCLAW-266)', () => {
     // A type="number" input may serialize as either '4' or 4 depending on
     // v-model coercion, so normalize via String() — the backend coerces both.
     expect(String(postedBody!.value)).toBe('4')
+  })
+})
+
+describe('Settings page — Web Scraping section', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  function stubOtherEndpoints() {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+    registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
+  }
+
+  async function editLimit(component: Awaited<ReturnType<typeof mountSettingsSection>>, label: string, value: string) {
+    const row = component.find(`[data-testid="web-scrape-row-${label}"]`)
+    await row.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    await row.find('input[type="number"]').setValue(value)
+    await row.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+  }
+
+  it('shows a stored limit, and the tool default for a limit that was never set', async () => {
+    stubOtherEndpoints()
+    // The keys are never seeded, so an unset one must still read as the value the tool uses.
+    registerEndpoint('/api/config', () => ({
+      entries: [{ key: 'web_scrape.max-pages', value: '40', updatedAt: '2026-09-14T10:00:00Z' }],
+    }))
+    const component = await mountSettingsSection('web-scraping')
+
+    expect(component.html()).toMatch(/<h2[^>]*>\s*Web Scraping\s*</)
+    expect(component.find('[data-testid="web-scrape-row-maxPages"]').text()).toContain('40')
+    expect(component.find('[data-testid="web-scrape-row-maxDepth"]').text()).toContain('2')
+  })
+
+  it('POSTs web_scrape.max-depth to /api/config when the operator saves the field', async () => {
+    let postedBody: { key?: string, value?: string } | null = null
+    stubOtherEndpoints()
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: [] }) })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        postedBody = await readBody(event) as { key?: string, value?: string }
+        return { ok: true }
+      },
+    })
+    const component = await mountSettingsSection('web-scraping')
+
+    await editLimit(component, 'maxDepth', '3')
+
+    expect(postedBody).not.toBeNull()
+    expect(postedBody!.key).toBe('web_scrape.max-depth')
+    expect(postedBody!.value).toBe('3')
+  })
+
+  it('shows the reason when the backend refuses a limit', async () => {
+    stubOtherEndpoints()
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: [] }) })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 403)
+        return { type: 'error', code: 'forbidden', message: 'web_scrape.max-pages must be a positive integer.' }
+      },
+    })
+    const component = await mountSettingsSection('web-scraping')
+
+    await editLimit(component, 'maxPages', '0')
+
+    expect(component.find('[role="alert"]').text())
+      .toContain('web_scrape.max-pages must be a positive integer.')
   })
 })
 

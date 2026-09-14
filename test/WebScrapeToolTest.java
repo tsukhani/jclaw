@@ -9,6 +9,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.ConfigService;
 import tools.WebScrapeTool;
 
 import java.io.IOException;
@@ -145,6 +146,30 @@ class WebScrapeToolTest extends UnitTest {
         assertTrue(out.contains("page budget (2) reached"), out.substring(0, 200));
         assertTrue(out.contains("not read"), out.substring(0, 200));
         assertEquals(2, routes.pageHits().size());
+    }
+
+    @Test
+    void theDepthCeilingIsReadFromRuntimeConfig() {
+        routes.put("https://site.test/", page("Home", "/a"));
+        routes.put("https://site.test/a", page("A", "/b"));
+        routes.put("https://site.test/b", page("B", "/c"));
+        routes.put("https://site.test/c", page("C"));
+        var request = "{\"url\":\"https://site.test/\",\"maxDepth\":3}";
+        var original = ConfigService.get(WebScrapeTool.CFG_MAX_DEPTH);
+        try {
+            assertFalse(scrape(request).contains("# C"), "the default ceiling of 2 caps a request for 3");
+
+            // Raised, never lowered: the scrape classes running concurrently pass depths of
+            // 2 or less, which a higher ceiling leaves untouched.
+            ConfigService.set(WebScrapeTool.CFG_MAX_DEPTH, "3");
+            assertTrue(scrape(request).contains("# C"), "a Settings ceiling of 3 must admit depth 3");
+        } finally {
+            if (original == null) {
+                ConfigService.delete(WebScrapeTool.CFG_MAX_DEPTH);
+            } else {
+                ConfigService.set(WebScrapeTool.CFG_MAX_DEPTH, original);
+            }
+        }
     }
 
     @Test

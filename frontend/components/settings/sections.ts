@@ -32,6 +32,7 @@ import {
   DocumentTextIcon,
   EyeIcon,
   FilmIcon,
+  GlobeAltIcon,
   HandRaisedIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
@@ -73,6 +74,7 @@ import SettingsTranscriptionPanel from './SettingsTranscriptionPanel.vue'
 import SettingsUploadsPanel from './SettingsUploadsPanel.vue'
 import SettingsVideoGenPanel from './SettingsVideoGenPanel.vue'
 import SettingsVideoInterpPanel from './SettingsVideoInterpPanel.vue'
+import SettingsWebScrapePanel from './SettingsWebScrapePanel.vue'
 
 export interface SettingsSection {
   /** Stable URL id (`/settings?section=<id>`). Lowercase kebab; don't rename once shipped. */
@@ -150,6 +152,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'chat', title: 'Chat', icon: ChatBubbleOvalLeftEllipsisIcon, component: SettingsChatPanel },
       { id: 'subagents', title: 'Subagents', icon: UserGroupIcon, component: SettingsSubagentsPanel },
       { id: 'coding', title: 'Coding', icon: CodeBracketIcon, component: SettingsCodingPanel },
+      { id: 'web-scraping', title: 'Web Scraping', icon: GlobeAltIcon, component: SettingsWebScrapePanel },
       { id: 'tasks', title: 'Tasks', icon: ClipboardDocumentCheckIcon, component: SettingsTasksPanel },
       { id: 'skills', title: 'Skills Promotion', icon: PuzzlePieceIcon, component: SettingsSkillsPanel },
     ],

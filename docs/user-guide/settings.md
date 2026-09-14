@@ -228,6 +228,17 @@ The model override is never written into `subagent.acp.command`: each harness ta
 
 The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](/agents) page; the main agent always may), and each run is bounded by `subagent.maxWallClockSeconds` (default 1800). See [External coding harness](/guide#subagents-acp-harness) for the full setup.
 
+## Web Scraping
+
+Crawl limits for the `web_scrape` tool:
+
+| Key                    | Default | Meaning                                                                                  |
+|------------------------|---------|------------------------------------------------------------------------------------------|
+| `web_scrape.max-pages` | 25      | Pages one call reads. Minimum 1.                                                         |
+| `web_scrape.max-depth` | 2       | How many links deep one call follows from the starting URL; `0` reads only that URL.     |
+
+Each limit is both the default, when the agent's call leaves `maxPages` / `maxDepth` out, and the ceiling, when it asks for more — an agent can request a smaller crawl, never a larger one. Changes apply live; no restart needed.
+
 ## Tasks
 
 Two knobs for the [Tasks](/guide#tasks) subsystem:
