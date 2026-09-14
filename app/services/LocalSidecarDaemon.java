@@ -132,7 +132,7 @@ public final class LocalSidecarDaemon {
 
     /** Retained for the diarization facade
      *  ({@code services.transcription.DiarizeSidecarManager}), which still
-     *  serializes its own {@code ensureRunning} on this monitor. The six other
+     *  serializes its own {@code ensureRunning} on this monitor. The other
      *  facades use {@link #singleFlight(Supplier)} instead (JCLAW-830). This
      *  monitor is orthogonal to {@code startLock} and is not the lock
      *  {@link #stop()} uses. */
