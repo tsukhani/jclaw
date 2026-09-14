@@ -3,6 +3,7 @@ package services;
 import models.EventLog;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import utils.AppClock;
 import utils.GsonHolder;
 
 import java.util.ArrayList;
@@ -112,6 +113,8 @@ public class EventLogger {
         // Queue for batch persistence — avoids opening a new transaction per log entry
         // when called from virtual threads (e.g., during tool-execution loops).
         var event = new EventLog();
+        // Stamped now: the batched save can run up to 30 s later.
+        event.timestamp = AppClock.now();
         event.level = level;
         event.category = category;
         event.agentId = agentId;

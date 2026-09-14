@@ -4,7 +4,11 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.EventLogger;
+import utils.AppClock;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -54,6 +58,19 @@ class EventLoggerTest extends UnitTest {
         assertEquals(1, events.size());
         assertEquals("agent-1", events.getFirst().agentId);
         assertEquals("telegram", events.getFirst().channel);
+    }
+
+    @Test
+    void recordStampsTheEventWhenItHappensNotWhenItsBatchIsSaved() {
+        var happened = Instant.parse("2026-01-02T03:04:05Z");
+        AppClock.runWith(Clock.fixed(happened, ZoneOffset.UTC),
+                () -> EventLogger.record("INFO", "eltest.stamp", "queued under a fixed clock", null));
+        EventLogger.flush();
+
+        var events = mine("eltest.stamp");
+        assertEquals(1, events.size());
+        assertEquals(happened, events.getFirst().timestamp);
+        assertNotEquals(happened, events.getFirst().createdAt, "the save runs later, on the real clock");
     }
 
     @Test
