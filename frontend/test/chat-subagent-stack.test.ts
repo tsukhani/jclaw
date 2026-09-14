@@ -4,7 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick, onUnmounted, ref, type PropType } from 'vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import type { SubagentChip, SubagentRunStatus } from '~/composables/useChatSubagentChips'
-import { SUBAGENT_STATUS_BADGE } from '~/utils/subagent-status'
+import { SUBAGENT_STATUS_BADGE, SUBAGENT_STATUS_TEXT } from '~/utils/subagent-status'
 
 function chip(id: number, status: SubagentRunStatus, label: string | null = null): SubagentChip {
   return { id, label, childAgentName: `main-sub-${id}`, childAgentId: 90 + id, childConversationId: 600 + id, status }
@@ -68,7 +68,7 @@ async function mountStack(initial: SubagentChip[], extra: { conversationId?: num
 }
 
 describe('ChatSubagentStack', () => {
-  it('renders one neutral row per status, with the status colour, dot and word in its pill', async () => {
+  it('marks each status with a coloured icon, pills only the endings that need attention, and offers no dismiss on a running row', async () => {
     const cases: Array<[SubagentRunStatus, string]> = [
       ['RUNNING', 'Running'],
       ['COMPLETED', 'Completed'],
@@ -76,6 +76,7 @@ describe('ChatSubagentStack', () => {
       ['KILLED', 'Killed'],
       ['TIMEOUT', 'Timed out'],
     ]
+    const pilled: SubagentRunStatus[] = ['FAILED', 'KILLED', 'TIMEOUT']
     const { wrapper } = await mountStack(cases.map(([status], i) => chip(i + 1, status, `task ${i + 1}`)))
     const statusHue = /^(dark:)?(bg|text|border)-(blue|emerald|red|yellow|orange)-/
 
@@ -83,15 +84,20 @@ describe('ChatSubagentStack', () => {
     expect(rows).toHaveLength(cases.length)
     cases.forEach(([status, word], i) => {
       const row = rows[i]!
-      const pill = row.find('[data-testid="subagent-chip-status"]')
-      const dot = pill.find('[data-testid="subagent-chip-dot"]')
+      const icon = row.find('[data-testid="subagent-chip-icon"]')
+      const statusWord = row.find('[data-testid="subagent-chip-status"]')
+      const toggle = row.find('[data-testid="subagent-chip-toggle"]')
       expect(row.classes().filter(c => statusHue.test(c))).toEqual([])
-      expect(pill.classes()).toEqual(expect.arrayContaining(SUBAGENT_STATUS_BADGE[status].split(' ')))
-      expect(dot.classes()).toContain('bg-current')
-      expect(dot.classes().includes('animate-pulse')).toBe(status === 'RUNNING')
+      expect(icon.classes()).toEqual(expect.arrayContaining(SUBAGENT_STATUS_TEXT[status].split(' ')))
+      expect(icon.classes().includes('animate-spin')).toBe(status === 'RUNNING')
+      if (pilled.includes(status)) expect(statusWord.classes()).toEqual(expect.arrayContaining(SUBAGENT_STATUS_BADGE[status].split(' ')))
+      else expect(statusWord.classes().filter(c => statusHue.test(c))).toEqual([])
+      expect(statusWord.text()).toBe(word)
+      // The toggle's aria-label replaces its content, so the status reaches a screen reader as its description.
+      expect(toggle.attributes('aria-describedby')).toBe(statusWord.attributes('id'))
       expect(row.find('[data-testid="subagent-chip-label"]').text()).toBe(`task ${i + 1}`)
-      expect(pill.text()).toBe(word)
-      expect(row.find('[data-testid="subagent-chip-toggle"]').attributes('aria-expanded')).toBe('false')
+      expect(row.find('[data-testid="subagent-chip-close"]').exists()).toBe(status !== 'RUNNING')
+      expect(toggle.attributes('aria-expanded')).toBe('false')
       expect(row.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
     })
   })
@@ -104,32 +110,36 @@ describe('ChatSubagentStack', () => {
     expect(labels[0]!.attributes('title')).toBe('Watch the downloads · main-sub-1')
     expect(labels[1]!.text()).toBe('main-sub-2')
     expect(labels[1]!.attributes('title')).toBe('main-sub-2')
+    // A spawn label is prose; only the generated agent name is set in monospace.
+    expect(labels[0]!.classes()).not.toContain('font-mono')
+    expect(labels[1]!.classes()).toContain('font-mono')
 
     const toggles = wrapper.findAll('[data-testid="subagent-chip-toggle"]')
     expect(toggles[0]!.attributes('aria-label')).toBe('Expand Watch the downloads (main-sub-1)')
     expect(toggles[1]!.attributes('aria-label')).toBe('Expand main-sub-2')
+    // The whole row opens the transcript, not a chevron beside it.
+    expect(toggles[0]!.element.contains(labels[0]!.element)).toBe(true)
   })
 
-  it('heads the list with the run count and a link to the conversation\'s runs on the Subagents page', async () => {
+  it('heads the list with the run count, how many are running, and a link to the conversation\'s runs on the Subagents page', async () => {
     const { wrapper } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')], { conversationId: 7, runsTotal: 3 })
-    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('3 subagents spawned in this conversation')
+    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('3 subagents · 1 running')
     const link = wrapper.find('[data-testid="subagent-stack-view-list"]')
     expect(link.attributes('href')).toBe('/subagents?parentConversationId=7')
-    expect(link.text()).toBe('View list →')
+    expect(link.text()).toBe('View all →')
 
-    const { wrapper: single } = await mountStack([chip(3, 'RUNNING')], { runsTotal: 1 })
-    expect(single.find('[data-testid="subagent-stack-count"]').text()).toBe('1 subagent spawned in this conversation')
+    const { wrapper: single } = await mountStack([chip(3, 'COMPLETED')], { runsTotal: 1 })
+    expect(single.find('[data-testid="subagent-stack-count"]').text()).toBe('1 subagent')
   })
 
   it('collapses the whole list from the header and opens it again, unmounting an open transcript meanwhile', async () => {
     const { wrapper, probe } = await mountStack([chip(1, 'RUNNING'), chip(2, 'COMPLETED')])
     const toggle = () => wrapper.find('[data-testid="subagent-stack-toggle"]')
-    // The toggle is the shade's bottom rail: after the list, not in the header row.
+    // The header itself is the toggle: it holds the count and sits above the list it controls.
     const list = document.getElementById('subagent-stack-list')!
-    expect(list.compareDocumentPosition(toggle().element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(wrapper.find('[data-testid="subagent-stack-count"]').element.parentElement!.contains(toggle().element)).toBe(false)
+    expect(list.compareDocumentPosition(toggle().element) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    expect(toggle().element.contains(wrapper.find('[data-testid="subagent-stack-count"]').element)).toBe(true)
     expect(toggle().attributes('aria-expanded')).toBe('true')
-    expect(toggle().attributes('aria-label')).toBe('Collapse the subagent list')
     expect(toggle().attributes('aria-controls')).toBe('subagent-stack-list')
     expect(document.getElementById('subagent-stack-list')).not.toBeNull()
     await wrapper.findAll('[data-testid="subagent-chip-toggle"]')[0]!.trigger('click')
@@ -139,9 +149,8 @@ describe('ChatSubagentStack', () => {
     expect(wrapper.findAll('[data-testid="subagent-chip"]')).toHaveLength(0)
     expect(probe.unmounts).toBe(1)
     expect(toggle().attributes('aria-expanded')).toBe('false')
-    expect(toggle().attributes('aria-label')).toBe('Expand the subagent list')
     expect(toggle().attributes('aria-controls')).toBeUndefined()
-    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('2 subagents spawned in this conversation')
+    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('2 subagents · 1 running')
 
     await toggle().trigger('click')
     expect(wrapper.findAll('[data-testid="subagent-chip"]')).toHaveLength(2)
@@ -152,7 +161,8 @@ describe('ChatSubagentStack', () => {
     const { wrapper } = await mountStack([], { runsTotal: 2 })
     expect(wrapper.find('ul').exists()).toBe(false)
     expect(wrapper.find('[data-testid="subagent-stack-toggle"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('2 subagents spawned in this conversation')
+    expect(wrapper.find('[data-testid="subagent-stack-count"]').element.closest('button')).toBeNull()
+    expect(wrapper.find('[data-testid="subagent-stack-count"]').text()).toBe('2 subagents')
     expect(wrapper.find('[data-testid="subagent-stack-view-list"]').exists()).toBe(true)
   })
 
@@ -178,13 +188,13 @@ describe('ChatSubagentStack', () => {
     expect(toggle().attributes('aria-controls')).toBeUndefined()
   })
 
-  it('closes a chip from its named close control', async () => {
-    const { wrapper, probe, closedIds } = await mountStack([chip(1, 'RUNNING', 'Watch the downloads'), chip(2, 'FAILED')])
+  it('dismisses a finished chip from its named dismiss control', async () => {
+    const { wrapper, probe, closedIds } = await mountStack([chip(1, 'COMPLETED', 'Watch the downloads'), chip(2, 'FAILED')])
     const first = wrapper.findAll('[data-testid="subagent-chip"]')[0]!
     await first.find('[data-testid="subagent-chip-toggle"]').trigger('click')
 
     const close = wrapper.findAll('[data-testid="subagent-chip"]')[0]!.find('[data-testid="subagent-chip-close"]')
-    expect(close.attributes('aria-label')).toBe('Close Watch the downloads')
+    expect(close.attributes('aria-label')).toBe('Dismiss Watch the downloads')
     await close.trigger('click')
 
     expect([...closedIds.value]).toEqual([1])
@@ -194,9 +204,9 @@ describe('ChatSubagentStack', () => {
     expect(probe.unmounts).toBe(1)
   })
 
-  it('hands focus to the next chip on close, the previous one when the last row closes, and the header link after the final chip', async () => {
-    const { wrapper } = await mountStack([chip(1, 'RUNNING'), chip(2, 'RUNNING'), chip(3, 'COMPLETED')])
-    const closeButton = (id: number) => wrapper.find(`[aria-label="Close main-sub-${id}"]`)
+  it('hands focus to the next chip on dismiss, the previous one when the last row goes, and the header link after the final chip', async () => {
+    const { wrapper } = await mountStack([chip(1, 'COMPLETED'), chip(2, 'FAILED'), chip(3, 'COMPLETED')])
+    const closeButton = (id: number) => wrapper.find(`[aria-label="Dismiss main-sub-${id}"]`)
 
     await closeButton(1).trigger('click')
     await nextTick()

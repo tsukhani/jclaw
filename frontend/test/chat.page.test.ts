@@ -506,32 +506,32 @@ describe('Chat page — subagent chip stack', () => {
     const chips = component.findAll('[data-testid="subagent-chip"]')
     expect(chips).toHaveLength(2)
     // The inline run gets no chip but is still one of the runs the header counts.
-    expect(component.find('[data-testid="subagent-stack-count"]').text()).toBe('3 subagents spawned in this conversation')
+    expect(component.find('[data-testid="subagent-stack-count"]').text()).toBe('3 subagents · 1 running')
     // The list hangs straight from the chat header, ahead of every conversation notice.
     expect(component.find('[data-testid="subagent-stack"]').element.previousElementSibling)
       .toBe(component.find('[data-testid="chat-header"]').element)
     expect(chips[0]!.find('[data-testid="subagent-chip-label"]').text()).toBe('main-sub-6')
     expect(chips[0]!.find('[data-testid="subagent-chip-status"]').text()).toBe('Running')
-    expect(chips[0]!.find('.animate-pulse').exists()).toBe(true)
+    expect(chips[0]!.find('.animate-spin').exists()).toBe(true)
     expect(chips[1]!.find('[data-testid="subagent-chip-label"]').text()).toBe('Summarise the downloads')
     expect(chips[1]!.find('[data-testid="subagent-chip-label"]').attributes('title')).toBe('Summarise the downloads · main-sub-8')
     expect(chips[1]!.find('[data-testid="subagent-chip-status"]').text()).toBe('Completed')
-    expect(chips[1]!.find('.animate-pulse').exists()).toBe(false)
+    expect(chips[1]!.find('.animate-spin').exists()).toBe(false)
     expect(component.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
   })
 
-  it('expands a chip in place, and a closed chip returns when the conversation is loaded again', async () => {
+  it('expands a chip in place, and a dismissed chip returns when the conversation is loaded again', async () => {
     setupParentConversation()
     const { component, vm } = await mountParentConversation()
     const chips = () => component.findAll('[data-testid="subagent-chip"]')
 
-    await chips()[0]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
-    expect(chips()[0]!.find('[data-testid="subagent-transcript-full"]').attributes('href'))
-      .toBe('/chat?conversation=602')
+    await chips()[1]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
+    expect(chips()[1]!.find('[data-testid="subagent-transcript-full"]').attributes('href'))
+      .toBe('/chat?conversation=603')
 
-    await chips()[0]!.find('[data-testid="subagent-chip-close"]').trigger('click')
+    await chips()[1]!.find('[data-testid="subagent-chip-close"]').trigger('click')
     expect(chips()).toHaveLength(1)
-    expect(chips()[0]!.attributes('data-status')).toBe('COMPLETED')
+    expect(chips()[0]!.attributes('data-status')).toBe('RUNNING')
 
     await vm.loadConversation(700)
     await flushPromises()
@@ -575,23 +575,20 @@ describe('Chat page — subagent chip stack', () => {
     expect(chips()[0]!.find('[data-testid="subagent-chip-toggle"]').attributes('aria-expanded')).toBe('false')
   })
 
-  it('hands focus to the next chip on close, and to the View list link when the last chip closes', async () => {
+  it('offers dismiss on the finished chip only, and hands focus to the running chip beside it on dismiss', async () => {
     setupParentConversation()
     const component = await mountSuspended(Chat, { attachTo: document.body })
     await flushPromises()
     const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
     await vm.loadConversation(601)
     await flushPromises()
-    const firstClose = () => component.find('[data-testid="subagent-chip-close"]')
+    const closes = component.findAll('[data-testid="subagent-chip-close"]')
+    expect(closes).toHaveLength(1)
 
-    await firstClose().trigger('click')
+    await closes[0]!.trigger('click')
     await flushPromises()
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Expand Summarise the downloads (main-sub-8)')
-
-    await firstClose().trigger('click')
-    await flushPromises()
-    expect(component.findAll('[data-testid="subagent-chip"]')).toHaveLength(0)
-    expect(document.activeElement).toBe(component.find('[data-testid="subagent-stack-view-list"]').element)
+    expect(component.findAll('[data-testid="subagent-chip"]')).toHaveLength(1)
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Expand main-sub-6')
     component.unmount()
   })
 
@@ -606,19 +603,19 @@ describe('Chat page — subagent chip stack', () => {
     registerEndpoint('/api/subagent-runs', (event) => {
       const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
       event.node.res.setHeader('x-total-count', '150')
-      return url.searchParams.get('parentConversationId') === '601' ? [subagentRun(6, 602, 'RUNNING')] : []
+      return url.searchParams.get('parentConversationId') === '601' ? [subagentRun(6, 602, 'COMPLETED')] : []
     })
     const { component } = await mountParentConversation()
     const count = () => component.find('[data-testid="subagent-stack-count"]')
 
-    expect(count().text()).toBe('150 subagents spawned in this conversation')
+    expect(count().text()).toBe('150 subagents')
     expect(component.find('[data-testid="subagent-stack-view-list"]').attributes('href'))
       .toBe('/subagents?parentConversationId=601')
 
     await component.find('[data-testid="subagent-chip-close"]').trigger('click')
     await flushPromises()
     expect(component.findAll('[data-testid="subagent-chip"]')).toHaveLength(0)
-    expect(count().text()).toBe('150 subagents spawned in this conversation')
+    expect(count().text()).toBe('150 subagents')
   })
 })
 

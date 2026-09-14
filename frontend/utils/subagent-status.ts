@@ -8,3 +8,9 @@ export const SUBAGENT_STATUS_BADGE: Record<SubagentRunStatus, string> = {
   KILLED: 'bg-yellow-100 dark:bg-yellow-400/10 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-400/20',
   TIMEOUT: 'bg-orange-100 dark:bg-orange-400/10 text-orange-700 dark:text-orange-400 border-orange-300 dark:border-orange-400/20',
 }
+
+/** The badge's text colour alone, for the chat list's status icon. */
+export const SUBAGENT_STATUS_TEXT = Object.fromEntries(
+  Object.entries(SUBAGENT_STATUS_BADGE).map(([status, classes]) =>
+    [status, classes.split(' ').filter(c => /^(dark:)?text-/.test(c)).join(' ')]),
+) as Record<SubagentRunStatus, string>
