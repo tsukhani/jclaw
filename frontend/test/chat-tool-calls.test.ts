@@ -13,6 +13,22 @@ describe('ChatToolCalls (JCLAW-170)', () => {
     expect(c.text()).toContain('1 tool call')
     expect(c.text()).toContain('Searched "cats"')
   })
+  it('names the tool and previews the argument that says what the call did', async () => {
+    const spawn = tc({ name: 'subagent_spawn', icon: 'users',
+      arguments: JSON.stringify({ async: true, label: 'Say hello', mode: 'session', task: 'Reply HELLO.' }) })
+    const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: [spawn], collapsed: false } })
+    expect(c.text()).toContain('Used tool: subagent_spawn · Say hello')
+    expect(c.text()).not.toContain('async: true')
+  })
+  it('falls back to the first argument, and to the bare tool name for a call without arguments', async () => {
+    const calls = [
+      tc({ id: 't2', name: 'subagent_yield', icon: 'users', arguments: JSON.stringify({ all: true }) }),
+      tc({ id: 't3', name: 'datetime', icon: 'users', arguments: '{}' }),
+    ]
+    const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: calls, collapsed: false } })
+    const rows = c.findAll('button').filter(b => b.text().startsWith('Used tool:'))
+    expect(rows.map(r => r.text())).toEqual(['Used tool: subagent_yield · all: true', 'Used tool: datetime'])
+  })
   it('hides the call rows when collapsed', async () => {
     const c = await mountSuspended(ChatToolCalls, { props: { toolCalls: [tc()], collapsed: true } })
     expect(c.text()).not.toContain('Searched "cats"')

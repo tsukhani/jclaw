@@ -15,28 +15,34 @@ const emit = defineEmits<{
   (e: 'toggle-call', tc: ToolCall): void
 }>()
 
+// The arguments that best say what a call did, most telling first; a call with none of them previews its first argument.
+const PREVIEW_ARGUMENTS = ['label', 'query', 'command', 'path', 'url', 'task']
+
 /**
- * JCLAW-170: compact one-line preview of a tool call's arguments. For
- * web_search the query gets wrapped in quotes to match the "Searched <q>"
- * label the reference UX uses; other tools show their first argument name
- * and value, truncated. Falls back to the raw JSON slice on parse failure.
+ * JCLAW-170: compact one-line label for a tool call. web_search reads as
+ * "Searched <q>" to match the reference UX; every other call names its tool,
+ * then previews one argument, truncated.
  */
 function toolCallPreview(tc: ToolCall): string {
-  if (!tc.arguments) return ''
+  if (!tc.arguments) return tc.name
   try {
     const parsed = JSON.parse(tc.arguments) as Record<string, unknown>
     if (tc.name === 'web_search' && typeof parsed.query === 'string') {
       return `Searched "${parsed.query}"`
     }
-    const keys = Object.keys(parsed)
-    if (keys.length === 0) return tc.name
-    const first = keys[0]!
+    const telling = PREVIEW_ARGUMENTS.find((key) => {
+      const value = parsed[key]
+      return typeof value === 'string' && value.trim() !== ''
+    })
+    if (telling) return `${tc.name} · ${String(parsed[telling]).slice(0, 80)}`
+    const first = Object.keys(parsed)[0]
+    if (first === undefined) return tc.name
     const v = parsed[first]
     const preview = typeof v === 'string' ? v : JSON.stringify(v)
-    return `${first}: ${String(preview).slice(0, 80)}`
+    return `${tc.name} · ${first}: ${String(preview).slice(0, 80)}`
   }
   catch {
-    return tc.arguments.slice(0, 80)
+    return `${tc.name} · ${tc.arguments.slice(0, 80)}`
   }
 }
 
