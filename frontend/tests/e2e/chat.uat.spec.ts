@@ -27,6 +27,25 @@ test.describe('UAT-15 chat', () => {
     await expect(page.getByRole('button', { name: 'Think' })).toBeVisible()
   })
 
+  test('the chat fits under the status banner without overflowing the page', async ({ page, context }) => {
+    await gotoPage(page, '/chat')
+    await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
+
+    await context.setOffline(true)
+    try {
+      await expect(page.getByText('The JClaw server isn\'t responding')).toBeVisible()
+      const main = page.locator('main')
+      // A viewport-height chat overflowed main by exactly the banner's height.
+      expect(await main.evaluate(m => m.scrollHeight - m.clientHeight)).toBe(0)
+      const mainBox = (await main.boundingBox())!
+      const sendBox = (await page.getByRole('button', { name: 'Send' }).boundingBox())!
+      expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(mainBox.y + mainBox.height)
+    }
+    finally {
+      await context.setOffline(false)
+    }
+  })
+
   test('model picker exposes the active model', async ({ page }) => {
     await gotoPage(page, '/chat')
     // The combobox label is "<model name><provider>" — assert a provider is
