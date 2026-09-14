@@ -7,9 +7,9 @@ handle immediately and the jclaw runner polls for state + percent, then fetches 
 per process (the active engine, via --model), one job at a time (VRAM-bound), gated on FREE VRAM
 (the SV-2 finding — a 24 GB card with 6 GB free must refuse, not OOM), with real per-step progress.
 
-Dual runtime for the "ltx" engine (JCLAW-233): on Apple Silicon it uses MLX (LTX-2.3 int4 via
-ltx_pipelines_mlx — faster, higher quality, generates audio); everywhere else it uses diffusers
-(LTX-Video). WAN stays diffusers/CUDA. The two stacks are platform-conditional deps (never co-installed).
+Dual runtime for the "ltx" engine (JCLAW-233): on Apple Silicon it uses MLX (LTX-2.3 via
+ltx_pipelines_mlx — generates audio); everywhere else it uses Lightricks' official ltx_pipelines
+(LTX-2.3 on CUDA). WAN stays diffusers/CUDA. The two stacks are platform-conditional deps (never co-installed).
 
   GET  /health            -> {status, device, model, weights_present, loaded}     (fast; no torch import)
   GET  /capability        -> {kind, gpu, freeVramGb, totalVramGb, models:[{id,label,tier,runnable}...]}
@@ -18,7 +18,8 @@ ltx_pipelines_mlx — faster, higher quality, generates audio); everywhere else 
                           -> 202 {job_id, state} | 409 {busy} | 400 {insufficient_vram|unknown}
   GET  /jobs/<id>         -> {job_id, state, percent, error, output}
   GET  /jobs/<id>/result  -> mp4 bytes | 409 {not_ready}
-  POST /pull              -> ndjson stream of {bytesDownloaded,totalBytes} while weights download
+  POST /pull              -> ndjson stream of {bytesDownloaded,totalBytes} while weights download (WAN)
+                          | 400 {pull_unsupported} (LTX engines fetch their weights on first load)
 
 Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM
 derives from its own install secret; without it in the environment the sidecar
@@ -493,6 +494,10 @@ class Handler(BaseHTTPRequestHandler):
         s = self.state
         path = self.path.split("?")[0]
         if path == "/pull":
+            # Refused before any header goes out: _pull_stream needs a `repo`, which only WAN specs carry.
+            if "repo" not in s.spec:
+                self._json(400, {"error": "pull_unsupported", "model": s.model_id})
+                return
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson")
             self.end_headers()
