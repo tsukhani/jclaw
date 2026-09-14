@@ -265,7 +265,6 @@ const {
   runsTotal: subagentRunsTotal,
   expandedId: expandedSubagentChipId,
   toggleExpanded: toggleSubagentChip,
-  closeChip: closeSubagentChip,
 } = useChatSubagentChips(selectedConvoId, streaming)
 
 // Token-usage + cost meter (latest-turn usage, cumulative tokens, running cost
@@ -723,7 +722,6 @@ function exportConversation() {
         :conversation-id="selectedConvoId"
         :runs-total="subagentRunsTotal"
         @toggle="toggleSubagentChip"
-        @close="closeSubagentChip"
       >
         <template #expanded="{ run }">
           <ChatSubagentTranscriptPanel

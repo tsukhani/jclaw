@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue'
-import { ChevronDownIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { ChevronDownIcon } from '@heroicons/vue/24/outline'
 import { CheckCircleIcon, ClockIcon, StopCircleIcon, XCircleIcon } from '@heroicons/vue/16/solid'
 import type { SubagentChip, SubagentRunStatus } from '~/composables/useChatSubagentChips'
 import { SUBAGENT_STATUS_BADGE, SUBAGENT_STATUS_TEXT } from '~/utils/subagent-status'
@@ -12,7 +12,7 @@ const props = defineProps<{
   /** Every run the conversation spawned, inline ones included: the rows its Subagents page lists. */
   runsTotal: number
 }>()
-const emit = defineEmits<{ toggle: [id: number], close: [id: number] }>()
+const emit = defineEmits<{ toggle: [id: number] }>()
 defineSlots<{ expanded?: (props: { run: SubagentChip }) => unknown }>()
 
 const statusWords: Record<SubagentRunStatus, string> = {
@@ -56,9 +56,8 @@ function chipLabelClass(run: SubagentChip): string {
 const runningCount = computed(() => props.runs.filter(r => r.status === 'RUNNING').length)
 
 const listOpen = ref(true)
-const viewListLink = ref<ComponentPublicInstance | null>(null)
 
-// With no chip left the header is only a summary, so it stops being a toggle.
+// With no chip to show the header is only a summary, so it stops being a toggle.
 const headerToggle = computed(() => props.runs.length
   ? {
       'type': 'button',
@@ -76,18 +75,6 @@ const toggleButtons = new Map<number, HTMLElement>()
 function bindToggle(id: number, el: unknown) {
   if (el instanceof HTMLElement) toggleButtons.set(id, el)
   else toggleButtons.delete(id)
-}
-
-// The dismiss button removes its own row, so hand focus to the neighbouring chip, or to the header's link after the last one.
-function close(index: number) {
-  const run = props.runs[index]
-  if (!run) return
-  const neighbour = props.runs[index + 1] ?? props.runs[index - 1]
-  emit('close', run.id)
-  void nextTick(() => {
-    const target = neighbour ? toggleButtons.get(neighbour.id) : viewListLink.value?.$el as HTMLElement | undefined
-    target?.focus()
-  })
 }
 
 function scrollRowIntoView(row: Element) {
@@ -167,7 +154,6 @@ watch(() => props.runs.map(r => r.status), () => {
           </span>
         </component>
         <NuxtLink
-          ref="viewListLink"
           :to="`/subagents?parentConversationId=${conversationId}`"
           data-testid="subagent-stack-view-list"
           class="shrink-0 rounded underline-offset-2 hover:text-fg-strong hover:underline"
@@ -200,87 +186,62 @@ watch(() => props.runs.map(r => r.status), () => {
             >
               <!-- A flat row on the shade: no border or fill of its own until hovered or expanded. -->
               <li
-                v-for="(run, index) in runs"
+                v-for="run in runs"
                 :key="run.id"
                 data-testid="subagent-chip"
                 :data-status="run.status"
-                class="group shrink-0 rounded"
+                class="shrink-0 rounded"
                 :class="{ 'bg-black/3 dark:bg-white/5': expandedId === run.id }"
               >
-                <div class="flex items-center min-w-0 rounded hover:bg-black/5 dark:hover:bg-white/5">
-                  <button
-                    :ref="(el: unknown) => bindToggle(run.id, el)"
-                    type="button"
-                    data-testid="subagent-chip-toggle"
-                    :aria-expanded="expandedId === run.id"
-                    :aria-controls="expandedId === run.id ? `subagent-chip-panel-${run.id}` : undefined"
-                    :aria-label="`${expandedId === run.id ? 'Collapse' : 'Expand'} ${chipAccessibleName(run)}`"
-                    :aria-describedby="`subagent-chip-status-${run.id}`"
-                    class="flex flex-1 min-w-0 h-7 items-center gap-2 px-2 rounded text-left
+                <button
+                  :ref="(el: unknown) => bindToggle(run.id, el)"
+                  type="button"
+                  data-testid="subagent-chip-toggle"
+                  :aria-expanded="expandedId === run.id"
+                  :aria-controls="expandedId === run.id ? `subagent-chip-panel-${run.id}` : undefined"
+                  :aria-label="`${expandedId === run.id ? 'Collapse' : 'Expand'} ${chipAccessibleName(run)}`"
+                  :aria-describedby="`subagent-chip-status-${run.id}`"
+                  class="flex w-full min-w-0 h-7 items-center gap-2 px-2 rounded text-left hover:bg-black/5 dark:hover:bg-white/5
                      focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
-                    @click="emit('toggle', run.id)"
-                  >
-                    <!-- A heroicon is a functional component and drops data-testid, so the wrapper carries it. -->
-                    <span
-                      data-testid="subagent-chip-icon"
-                      class="flex w-4 h-4 shrink-0 items-center justify-center"
-                      :class="[SUBAGENT_STATUS_TEXT[run.status], { 'animate-spin motion-reduce:animate-none': run.status === 'RUNNING' }]"
-                      aria-hidden="true"
-                    >
-                      <span
-                        v-if="run.status === 'RUNNING'"
-                        class="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent"
-                      />
-                      <component
-                        :is="statusIcons[run.status]"
-                        v-else
-                        class="w-4 h-4"
-                      />
-                    </span>
-                    <span
-                      data-testid="subagent-chip-label"
-                      class="truncate min-w-0"
-                      :class="chipLabelClass(run)"
-                      :title="chipTitle(run)"
-                    >{{ chipName(run) }}</span>
-                    <span
-                      :id="`subagent-chip-status-${run.id}`"
-                      data-testid="subagent-chip-status"
-                      class="ml-auto shrink-0"
-                      :class="needsAttention(run.status)
-                        ? ['rounded-full border px-1.5 py-px text-[11px] font-medium', SUBAGENT_STATUS_BADGE[run.status]]
-                        : 'text-fg-muted'"
-                    >{{ statusWords[run.status] }}</span>
-                    <ChevronDownIcon
-                      class="w-3.5 h-3.5 shrink-0 text-fg-muted transition-transform motion-reduce:transition-none"
-                      :class="{ 'rotate-180': expandedId === run.id }"
-                      aria-hidden="true"
-                    />
-                  </button>
-                  <!-- Dismissing only hides the row, so a running agent offers none: an ✕ beside it reads as "stop". -->
-                  <button
-                    v-if="run.status !== 'RUNNING'"
-                    type="button"
-                    data-testid="subagent-chip-close"
-                    :aria-label="`Dismiss ${chipName(run)}`"
-                    title="Dismiss"
-                    class="flex w-6 h-6 mr-0.5 shrink-0 items-center justify-center rounded text-fg-muted
-                     opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100
-                     hover:text-fg-strong hover:bg-black/5 dark:hover:bg-white/10
-                     focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
-                    @click="close(index)"
-                  >
-                    <XMarkIcon
-                      class="w-3.5 h-3.5"
-                      aria-hidden="true"
-                    />
-                  </button>
+                  @click="emit('toggle', run.id)"
+                >
+                  <!-- A heroicon is a functional component and drops data-testid, so the wrapper carries it. -->
                   <span
-                    v-else
-                    class="w-6 mr-0.5 shrink-0"
+                    data-testid="subagent-chip-icon"
+                    class="flex w-4 h-4 shrink-0 items-center justify-center"
+                    :class="[SUBAGENT_STATUS_TEXT[run.status], { 'animate-spin motion-reduce:animate-none': run.status === 'RUNNING' }]"
+                    aria-hidden="true"
+                  >
+                    <span
+                      v-if="run.status === 'RUNNING'"
+                      class="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent"
+                    />
+                    <component
+                      :is="statusIcons[run.status]"
+                      v-else
+                      class="w-4 h-4"
+                    />
+                  </span>
+                  <span
+                    data-testid="subagent-chip-label"
+                    class="truncate min-w-0"
+                    :class="chipLabelClass(run)"
+                    :title="chipTitle(run)"
+                  >{{ chipName(run) }}</span>
+                  <span
+                    :id="`subagent-chip-status-${run.id}`"
+                    data-testid="subagent-chip-status"
+                    class="ml-auto shrink-0"
+                    :class="needsAttention(run.status)
+                      ? ['rounded-full border px-1.5 py-px text-[11px] font-medium', SUBAGENT_STATUS_BADGE[run.status]]
+                      : 'text-fg-muted'"
+                  >{{ statusWords[run.status] }}</span>
+                  <ChevronDownIcon
+                    class="w-3.5 h-3.5 shrink-0 text-fg-muted transition-transform motion-reduce:transition-none"
+                    :class="{ 'rotate-180': expandedId === run.id }"
                     aria-hidden="true"
                   />
-                </div>
+                </button>
                 <!-- Not a scroller: the panel inside owns the height budget, so its footer stays in view. -->
                 <div
                   v-if="expandedId === run.id"

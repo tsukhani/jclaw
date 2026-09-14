@@ -520,7 +520,7 @@ describe('Chat page — subagent chip stack', () => {
     expect(component.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
   })
 
-  it('expands a chip in place, and a dismissed chip returns when the conversation is loaded again', async () => {
+  it('expands a chip in place, and closes its transcript when the conversation is loaded again', async () => {
     setupParentConversation()
     const { component, vm } = await mountParentConversation()
     const chips = () => component.findAll('[data-testid="subagent-chip"]')
@@ -528,10 +528,6 @@ describe('Chat page — subagent chip stack', () => {
     await chips()[1]!.find('[data-testid="subagent-chip-toggle"]').trigger('click')
     expect(chips()[1]!.find('[data-testid="subagent-transcript-full"]').attributes('href'))
       .toBe('/chat?conversation=603')
-
-    await chips()[1]!.find('[data-testid="subagent-chip-close"]').trigger('click')
-    expect(chips()).toHaveLength(1)
-    expect(chips()[0]!.attributes('data-status')).toBe('RUNNING')
 
     await vm.loadConversation(700)
     await flushPromises()
@@ -575,24 +571,7 @@ describe('Chat page — subagent chip stack', () => {
     expect(chips()[0]!.find('[data-testid="subagent-chip-toggle"]').attributes('aria-expanded')).toBe('false')
   })
 
-  it('offers dismiss on the finished chip only, and hands focus to the running chip beside it on dismiss', async () => {
-    setupParentConversation()
-    const component = await mountSuspended(Chat, { attachTo: document.body })
-    await flushPromises()
-    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
-    await vm.loadConversation(601)
-    await flushPromises()
-    const closes = component.findAll('[data-testid="subagent-chip-close"]')
-    expect(closes).toHaveLength(1)
-
-    await closes[0]!.trigger('click')
-    await flushPromises()
-    expect(component.findAll('[data-testid="subagent-chip"]')).toHaveLength(1)
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Expand main-sub-6')
-    component.unmount()
-  })
-
-  it('heads the list with the run count from the Subagents page rather than the announcements, and keeps it after the last chip closes', async () => {
+  it('heads the list with the run count from the Subagents page rather than the announcements', async () => {
     setupParentConversation()
     // One announce row, but the conversation spawned 150 runs: the header counts runs.
     registerEndpoint('/api/conversations/601/messages', () => [
@@ -611,11 +590,6 @@ describe('Chat page — subagent chip stack', () => {
     expect(count().text()).toBe('150 subagents')
     expect(component.find('[data-testid="subagent-stack-view-list"]').attributes('href'))
       .toBe('/subagents?parentConversationId=601')
-
-    await component.find('[data-testid="subagent-chip-close"]').trigger('click')
-    await flushPromises()
-    expect(component.findAll('[data-testid="subagent-chip"]')).toHaveLength(0)
-    expect(count().text()).toBe('150 subagents')
   })
 })
 

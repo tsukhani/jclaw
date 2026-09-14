@@ -26,9 +26,9 @@ export const SUBAGENT_CHIP_POLL_MS = 5000
 export const SUBAGENT_CHIP_RUN_LIMIT = 100
 
 /**
- * Every subagent run the open conversation spawned, plus the client-only closed
- * and expanded chip state. Spawns and endings arrive on the event bus; the poll
- * is a fallback that runs only while a visible chip is still RUNNING.
+ * Every subagent run the open conversation spawned, plus the client-only
+ * expanded chip state. Spawns and endings arrive on the event bus; the poll
+ * is a fallback that runs only while a chip is still RUNNING.
  */
 export function useChatSubagentChips(
   selectedConvoId: Ref<number | null>,
@@ -38,18 +38,16 @@ export function useChatSubagentChips(
   runsTotal: Ref<number>
   expandedId: Ref<number | null>
   toggleExpanded: (id: number) => void
-  closeChip: (id: number) => void
 } {
   const runs = ref<SubagentChip[]>([])
   // Counts the inline runs that get no chip, so it matches the Subagents page the header links to.
   const runsTotal = ref(0)
-  const closedIds = ref(new Set<number>())
   // One transcript at a time: each panel can take half the viewport.
   const expandedId = ref<number | null>(null)
   let latestRequest = 0
   let timer: ReturnType<typeof setInterval> | undefined
 
-  const chips = computed(() => runs.value.filter(r => !closedIds.value.has(r.id)))
+  const chips = computed(() => runs.value)
   const anyRunning = computed(() => chips.value.some(r => r.status === 'RUNNING'))
 
   async function refresh() {
@@ -101,15 +99,9 @@ export function useChatSubagentChips(
     expandedId.value = expandedId.value === id ? null : id
   }
 
-  function closeChip(id: number) {
-    closedIds.value = new Set(closedIds.value).add(id)
-    if (expandedId.value === id) expandedId.value = null
-  }
-
   watch(selectedConvoId, () => {
     runs.value = []
     runsTotal.value = 0
-    closedIds.value = new Set()
     expandedId.value = null
     void refresh()
   }, { immediate: true })
@@ -146,5 +138,5 @@ export function useChatSubagentChips(
     document.removeEventListener('visibilitychange', onVisibilityChange)
   })
 
-  return { chips, runsTotal, expandedId, toggleExpanded, closeChip }
+  return { chips, runsTotal, expandedId, toggleExpanded }
 }

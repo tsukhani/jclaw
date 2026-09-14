@@ -35,7 +35,6 @@ function captureScrollIntoView() {
 async function mountStack(initial: SubagentChip[], extra: { conversationId?: number, runsTotal?: number } = {}) {
   const runs = ref(initial)
   const expandedId = ref<number | null>(null)
-  const closedIds = ref(new Set<number>())
   const probe = { unmounts: 0 }
   const Probe = defineComponent({
     props: { run: { type: Object as PropType<SubagentChip>, required: true } },
@@ -49,26 +48,22 @@ async function mountStack(initial: SubagentChip[], extra: { conversationId?: num
   const wrapper = await mountSuspended(defineComponent({
     setup() {
       return () => h(ChatSubagentStack, {
-        runs: runs.value.filter(r => !closedIds.value.has(r.id)),
+        runs: runs.value,
         expandedId: expandedId.value,
         conversationId: extra.conversationId ?? 5,
         runsTotal: extra.runsTotal ?? initial.length,
         onToggle: (id: number) => {
           expandedId.value = expandedId.value === id ? null : id
         },
-        onClose: (id: number) => {
-          closedIds.value = new Set(closedIds.value).add(id)
-          if (expandedId.value === id) expandedId.value = null
-        },
       }, { expanded: ({ run }: { run: SubagentChip }) => h(Probe, { run }) })
     },
   }), { attachTo: document.body })
   mounted.push(wrapper)
-  return { wrapper, probe, closedIds, runs }
+  return { wrapper, probe, runs }
 }
 
 describe('ChatSubagentStack', () => {
-  it('marks each status with a coloured icon, pills only the endings that need attention, and offers no dismiss on a running row', async () => {
+  it('marks each status with a coloured icon and pills only the endings that need attention', async () => {
     const cases: Array<[SubagentRunStatus, string]> = [
       ['RUNNING', 'Running'],
       ['COMPLETED', 'Completed'],
@@ -96,7 +91,6 @@ describe('ChatSubagentStack', () => {
       // The toggle's aria-label replaces its content, so the status reaches a screen reader as its description.
       expect(toggle.attributes('aria-describedby')).toBe(statusWord.attributes('id'))
       expect(row.find('[data-testid="subagent-chip-label"]').text()).toBe(`task ${i + 1}`)
-      expect(row.find('[data-testid="subagent-chip-close"]').exists()).toBe(status !== 'RUNNING')
       expect(toggle.attributes('aria-expanded')).toBe('false')
       expect(row.find('[data-testid="subagent-chip-expanded"]').exists()).toBe(false)
     })
@@ -186,39 +180,6 @@ describe('ChatSubagentStack', () => {
     expect(wrapper.find('[data-testid="slot-probe"]').exists()).toBe(false)
     expect(probe.unmounts).toBe(1)
     expect(toggle().attributes('aria-controls')).toBeUndefined()
-  })
-
-  it('dismisses a finished chip from its named dismiss control', async () => {
-    const { wrapper, probe, closedIds } = await mountStack([chip(1, 'COMPLETED', 'Watch the downloads'), chip(2, 'FAILED')])
-    const first = wrapper.findAll('[data-testid="subagent-chip"]')[0]!
-    await first.find('[data-testid="subagent-chip-toggle"]').trigger('click')
-
-    const close = wrapper.findAll('[data-testid="subagent-chip"]')[0]!.find('[data-testid="subagent-chip-close"]')
-    expect(close.attributes('aria-label')).toBe('Dismiss Watch the downloads')
-    await close.trigger('click')
-
-    expect([...closedIds.value]).toEqual([1])
-    const rows = wrapper.findAll('[data-testid="subagent-chip"]')
-    expect(rows).toHaveLength(1)
-    expect(rows[0]!.attributes('data-status')).toBe('FAILED')
-    expect(probe.unmounts).toBe(1)
-  })
-
-  it('hands focus to the next chip on dismiss, the previous one when the last row goes, and the header link after the final chip', async () => {
-    const { wrapper } = await mountStack([chip(1, 'COMPLETED'), chip(2, 'FAILED'), chip(3, 'COMPLETED')])
-    const closeButton = (id: number) => wrapper.find(`[aria-label="Dismiss main-sub-${id}"]`)
-
-    await closeButton(1).trigger('click')
-    await nextTick()
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Expand main-sub-2')
-
-    await closeButton(3).trigger('click')
-    await nextTick()
-    expect(document.activeElement?.getAttribute('aria-label')).toBe('Expand main-sub-2')
-
-    await closeButton(2).trigger('click')
-    await nextTick()
-    expect(document.activeElement).toBe(wrapper.find('[data-testid="subagent-stack-view-list"]').element)
   })
 
   it('announces a run that ends, but not a chip that arrives already finished', async () => {

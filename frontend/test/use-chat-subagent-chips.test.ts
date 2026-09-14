@@ -186,21 +186,6 @@ describe('useChatSubagentChips', () => {
     expect(expandedId.value).toBe(1)
   })
 
-  it('keeps a closed chip hidden through a status change while a new spawn still appears', async () => {
-    let rows = [run(1, 6), run(2, 7)]
-    serve(() => rows)
-    const { ids, expandedId, toggleExpanded, closeChip } = await mountChips()
-
-    toggleExpanded(1)
-    closeChip(1)
-    expect(ids()).toEqual([2])
-    expect(expandedId.value).toBeNull()
-
-    rows = [run(1, 6, 'FAILED'), run(2, 7), run(3, 8)]
-    emitBus('subagentrun.started', runEvent(3, 5))
-    await vi.waitFor(() => expect(ids()).toEqual([2, 3]))
-  })
-
   it('keeps one chip expanded at a time', async () => {
     serve(() => [run(1, 6), run(2, 7)])
     const { expandedId, toggleExpanded } = await mountChips()
@@ -213,10 +198,9 @@ describe('useChatSubagentChips', () => {
     expect(expandedId.value).toBeNull()
   })
 
-  it('restores closed chips and collapses expanded ones when the conversation is loaded again', async () => {
+  it('collapses the expanded chip when the conversation is loaded again', async () => {
     serve(convoId => (convoId === 5 ? [run(1, 6), run(2, 7)] : []))
-    const { ids, expandedId, toggleExpanded, closeChip, selectedConvoId } = await mountChips()
-    closeChip(1)
+    const { ids, expandedId, toggleExpanded, selectedConvoId } = await mountChips()
     toggleExpanded(2)
 
     selectedConvoId.value = 11

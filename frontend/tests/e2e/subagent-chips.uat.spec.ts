@@ -256,31 +256,6 @@ test.describe('UAT-18 chat subagent chips', () => {
     expect(guard.writes()).toEqual([])
   })
 
-  test('a closed chip comes back when the conversation loads again', async ({ page, request }) => {
-    const parentId = 990140
-    const guard = await stubChat(page, request, {
-      parentId,
-      runs: [
-        { id: 990541, label: 'e2e-uat close me', childAgentName: 'e2e-uat-child-close', childConversationId: 990141, status: 'COMPLETED' },
-        { id: 990542, label: null, childAgentName: 'e2e-uat-child-stay', childConversationId: 990142, status: 'FAILED' },
-      ],
-      transcripts: new Map(),
-    })
-
-    await gotoPage(page, `/chat?conversation=${parentId}`)
-    await expect(page.getByTestId('subagent-chip')).toHaveCount(2)
-    await page.getByRole('button', { name: 'Dismiss e2e-uat close me' }).click()
-    await expect(chip(page, 'e2e-uat close me')).toHaveCount(0)
-    await expect(chip(page, 'e2e-uat-child-stay')).toBeVisible()
-
-    await page.reload()
-    await expect(page.locator('main')).toBeVisible()
-    await expect(chip(page, 'e2e-uat close me')).toBeVisible()
-    await expect(page.getByTestId('subagent-chip')).toHaveCount(2)
-    expect(guard.unexpected()).toEqual([])
-    expect(guard.writes()).toEqual([])
-  })
-
   test('the header counts every run the conversation spawned and links to them on the Subagents page', async ({ page, request }) => {
     const parentId = 990150
     const guard = await stubChat(page, request, {
