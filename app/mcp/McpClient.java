@@ -51,7 +51,7 @@ public class McpClient implements AutoCloseable {
     private final String name;
     private final McpTransport transport;
     private final String clientVersion;
-    /** Budget for the connect handshake — initialize and the first tools/list — which a cold server may take minutes to answer. */
+    /** Budget for the connect handshake: initialize and the first tools/list. */
     private final Duration handshakeTimeout;
     /** Budget for every request after the handshake, tool calls included. */
     private final Duration requestTimeout;
@@ -67,7 +67,7 @@ public class McpClient implements AutoCloseable {
     private volatile @Nullable String lastError;
     // Reassigned with a stateless Consumer; volatile-on-reference is sufficient.
     @SuppressWarnings("java:S3077")
-    private volatile Consumer<List<McpToolDef>> onToolsChanged = tools -> {};
+    private volatile Consumer<List<McpToolDef>> onToolsChanged = _ -> {};
 
     @MustBeClosed
     public McpClient(String name, McpTransport transport, String clientVersion) {
@@ -108,7 +108,7 @@ public class McpClient implements AutoCloseable {
 
     /** Set a callback fired when the server reports {@code tools/list_changed}. */
     public void onToolsChanged(Consumer<List<McpToolDef>> handler) {
-        this.onToolsChanged = handler != null ? handler : tools -> {};
+        this.onToolsChanged = handler != null ? handler : _ -> {};
     }
 
     /**

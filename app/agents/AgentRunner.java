@@ -164,7 +164,7 @@ public class AgentRunner {
      *                    payload — its job is to let transports quiesce
      *                    side-channel state (the Telegram typing heartbeat
      *                    is the motivating case: JCLAW-181 follow-up). Web's
-     *                    per-request cancellation is signalled via SSE
+     *                    per-request cancellation is signaled via SSE
      *                    close, not this hook, so the web caller passes a
      *                    no-op.
      */

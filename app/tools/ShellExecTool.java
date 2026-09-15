@@ -88,7 +88,7 @@ import java.util.stream.Collectors;
  * <p>It bounds <em>reach</em>, not grammar. {@code echo hi; rm -rf ~/Documents}
  * still passes the allowlist and still runs both statements; the {@code rm} now
  * fails on every path outside the workspace. Metacharacter gating remains
- * explicitly not the defence — filesystem confinement is.
+ * explicitly not the defense — filesystem confinement is.
  *
  * <p>It fails closed: with the flag on and no usable sandbox mechanism (native
  * Windows, or a host missing {@code sandbox-exec}/{@code bwrap}), the launch

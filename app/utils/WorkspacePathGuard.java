@@ -43,7 +43,7 @@ public final class WorkspacePathGuard {
      *   <li><b>Lexical</b>: collapse {@code ..} via {@code normalize()} and
      *       verify the result starts with {@code root}.</li>
      *   <li><b>Canonical</b>: realpath the deepest existing ancestor of both
-     *       the root and the target (handles a not-yet-materialised root and
+     *       the root and the target (handles a not-yet-materialized root and
      *       writes whose target doesn't exist yet), append the missing suffix,
      *       and verify the resulting absolute path is still inside the
      *       canonical root. Catches symlink escapes — a symlink inside the root
@@ -87,7 +87,7 @@ public final class WorkspacePathGuard {
      * the existing prefix), then re-attach the not-yet-created suffix verbatim.
      * A read-only equivalent of {@link Path#toRealPath} that tolerates a path
      * whose tail doesn't exist yet — the common case for write targets, and for
-     * a workspace root that hasn't been materialised on disk.
+     * a workspace root that hasn't been materialized on disk.
      *
      * @param path the absolute path to canonicalize
      * @return the canonicalized absolute path, or {@code null} if no ancestor

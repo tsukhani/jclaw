@@ -79,7 +79,7 @@ public final class DiarizationFusion {
      * with similar voices: acoustic separation can't split them, so everything
      * clusters onto one label. The caller warns the agent to attribute
      * speakers from conversational context instead of trusting the labels.
-     * Fewer than 3 turns is too little to judge (a real short monologue).
+     * Fewer than 3 turns is too little to judge (a real short monolog).
      */
     public static boolean isDegenerate(List<DiarizeSidecarClient.Turn> turns) {
         if (turns.size() < 3) return false;

@@ -517,15 +517,15 @@ public class VoiceController extends WebSocketController {
     private static AgentRunner.StreamingCallbacks sentenceChunking(Queue<String> sentences, int maxRunOn) {
         var pending = new StringBuilder();
         return new AgentRunner.StreamingCallbacks(
-                c -> { },
+                _ -> { },
                 token -> {
                     synchronized (pending) {
                         pending.append(token);
                         drainSentences(pending, sentences, maxRunOn);
                     }
                 },
-                r -> { }, s -> { }, tc -> { },
-                full -> {
+                _ -> { }, _ -> { }, _ -> { },
+                _ -> {
                     synchronized (pending) {
                         var tail = pending.toString().strip();
                         if (!tail.isEmpty()) sentences.offer(tail);
@@ -533,7 +533,7 @@ public class VoiceController extends WebSocketController {
                     }
                     sentences.offer(VoiceTurnSpeaker.END_OF_TURN);
                 },
-                err -> sentences.offer(VoiceTurnSpeaker.END_OF_TURN),
+                _ -> sentences.offer(VoiceTurnSpeaker.END_OF_TURN),
                 () -> sentences.offer(VoiceTurnSpeaker.END_OF_TURN));
     }
 

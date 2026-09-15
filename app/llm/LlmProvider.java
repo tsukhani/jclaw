@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -82,7 +83,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     private static final long RETRY_AFTER_MAX_SECONDS = 60;
 
     // OpenAI-compatible JSON field names used across request/response (de)serialization
-    // and chunk-usage augmentation. Centralised so a typo can't drift one call site
+    // and chunk-usage augmentation. Centralized so a typo can't drift one call site
     // off the wire shape without the compiler catching it.
     private static final String JSON_USAGE = "usage";
     private static final String JSON_MODEL = "model";
@@ -531,7 +532,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         if (response.choices() == null) return List.of();
         return response.choices().stream()
                 .map(Choice::finishReason)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .distinct()
                 .toList();
     }
@@ -871,8 +872,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     /**
      * Where a turn goes when its primary fails it (JCLAW-1190): the provider the operator chose
      * on the agent and the model registered there. The model is part of the choice rather than
-     * derived, because the primary's model id need not exist on the fallback — the live drill
-     * that motivated this landed on a local server that had never heard of the model it was sent.
+     * derived, because the primary's model id need not exist on the fallback.
      */
     public record Fallback(LlmProvider provider, String modelId) {
 

@@ -48,7 +48,7 @@ public final class VoiceSession implements AutoCloseable {
     private final TurnEndpointer endpointer;
     private final PcmWindower windower;
     private final Listener listener;
-    private final @Nullable Partial partial;         // nullable — interim transcript hook
+    private final @Nullable Partial partial;         // interim transcript hook
     private final long partialIntervalMs;  // min gap between interim emits
     private final int prerollWindows;
     private final ArrayDeque<float[]> preroll = new ArrayDeque<>();

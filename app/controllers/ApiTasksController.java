@@ -95,10 +95,6 @@ public class ApiTasksController extends Controller {
             return of(t, null, null);
         }
 
-        static TaskView of(Task t, Instant lastFiredAt) {
-            return of(t, lastFiredAt, null);
-        }
-
         /**
          * Fullest variant, populated by {@link #list} via two single bulk SQL
          * passes:

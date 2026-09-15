@@ -73,9 +73,4 @@ public class AgentSkillAllowedTool extends Model {
         // the L2 region so the next ShellExecTool check sees fresh data.
         JPA.em().getEntityManagerFactory().getCache().evict(AgentSkillAllowedTool.class);
     }
-
-    public static void deleteByAgent(Agent agent) {
-        AgentSkillAllowedTool.delete("agent = ?1", agent);
-        JPA.em().getEntityManagerFactory().getCache().evict(AgentSkillAllowedTool.class);
-    }
 }

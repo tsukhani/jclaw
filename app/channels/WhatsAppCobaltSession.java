@@ -213,7 +213,7 @@ public final class WhatsAppCobaltSession {
     }
 
     private void wireListeners(Whatsapp wa) {
-        wa.addLoggedInListener(api -> onLoggedIn());
+        wa.addLoggedInListener(_ -> onLoggedIn());
         wa.addNewChatMessageListener(this::onNewChatMessage);
         wa.addDisconnectedListener(this::onDisconnected);
     }

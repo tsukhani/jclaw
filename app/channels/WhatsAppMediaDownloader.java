@@ -326,9 +326,8 @@ public final class WhatsAppMediaDownloader {
                     "Inbound media message %s no longer cached; skipping".formatted(part.mediaId()));
             return null;
         }
-        // Read the session once. downloadCobalt checked it, but disconnect() nulls this
-        // volatile field, so an unlink racing an inbound media message used to NPE into the
-        // catch below and log "failed: null" instead of naming the cause (JCLAW-1161).
+        // Read the session once: downloadCobalt checked it, but disconnect() nulls this volatile
+        // field, so an unlink racing an inbound media message would NPE here (JCLAW-1161).
         var whatsapp = session.whatsapp();
         if (whatsapp == null) {
             EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,

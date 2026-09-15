@@ -46,7 +46,7 @@ public final class WorkspaceFiles {
                     .build());
 
     /**
-     * Memoized workspace byte size. 60 s is negligible against the runaway growth the
+     * 60 s is negligible against the runaway growth the
      * dashboard card this feeds exists to catch, and it collapses a revisit storm —
      * {@link Cache#get} runs the loader once per concurrent miss, not once per caller.
      */
@@ -449,11 +449,11 @@ public final class WorkspaceFiles {
      * agent. Throws on failure so the caller's transaction rolls the rename back
      * rather than leaving the entity renamed with a stranded directory. Freeing
      * the old name also closes the reuse-leak: a new agent taking it later
-     * materialises a fresh, empty workspace via {@link #createWorkspace}.
+     * materializes a fresh, empty workspace via {@link #createWorkspace}.
      */
     static void moveWorkspaceDirectory(@Nullable Path src, Path dest) {
         try {
-            if (src == null || !Files.exists(src)) return;   // workspace never materialised
+            if (src == null || !Files.exists(src)) return;   // workspace never materialized
             if (Files.exists(dest)) {
                 throw new IllegalStateException("workspace target already exists: " + dest);
             }

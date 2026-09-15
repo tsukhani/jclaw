@@ -50,7 +50,7 @@ public final class InactivityTimer {
         arm();
     }
 
-    /** Stop the timer; a cancelled timer never fires. */
+    /** Stop the timer; a canceled timer never fires. */
     public void cancel() {
         cancelled.set(true);
         var t = task;

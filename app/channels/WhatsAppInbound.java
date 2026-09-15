@@ -107,9 +107,7 @@ public final class WhatsAppInbound {
 
             var attachments = WhatsAppMediaDownloader.downloadAll(binding, msg, agent.name);
             var peerId = conversationPeerId(msg);
-            // A caption-less media message carries no text. Telegram's parser already
-            // normalises that to "" before dispatch; WhatsApp was the only transport
-            // handing the agent pipeline a null (JCLAW-1161).
+            // A caption-less media message carries no text; the pipeline expects "", as Telegram's parser sends (JCLAW-1161).
             var text = Objects.requireNonNullElse(senderAttributed(msg), "");
             AgentRunner.processInboundForAgentStreaming(
                     agent, CHANNEL_WHATSAPP, peerId, text,

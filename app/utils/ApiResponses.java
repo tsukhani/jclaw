@@ -37,7 +37,7 @@ public final class ApiResponses {
 
     /**
      * Canonical machine-readable error codes for {@link #error}/{@link #errorAndLog}.
-     * Centralised here — the wire-contract source of truth — so controllers reference
+     * Centralized here — the wire-contract source of truth — so controllers reference
      * one spelling instead of repeating the literal, which stops the codes from
      * drifting or being typo'd per controller (JCLAW: SonarQube java:S1192).
      */
@@ -132,7 +132,7 @@ public final class ApiResponses {
 
     /**
      * A throwable's message, or its simple type name when it has none. {@code getMessage()}
-     * is null for an NPE and for several IO failures, and {@link #error} serialises its
+     * is null for an NPE and for several IO failures, and {@link #error} serializes its
      * argument straight into the response body — so the alternative is shipping
      * {@code "message": null} to the client (JCLAW-1160).
      */

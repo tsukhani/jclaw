@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class LlmCallEventListener extends EventListener {
 
-    private static final EventListener.Factory FACTORY = call -> new LlmCallEventListener();
+    private static final EventListener.Factory FACTORY = _ -> new LlmCallEventListener();
 
     private static final Set<String> SEEN_HOSTS = ConcurrentHashMap.newKeySet();
 

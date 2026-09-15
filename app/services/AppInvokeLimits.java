@@ -94,7 +94,7 @@ public final class AppInvokeLimits {
         }
         long windowId = nowMillis / (windowSeconds * 1000L);
         boolean[] admitted = {false};
-        WINDOWS.compute(slug, (k, w) -> {
+        WINDOWS.compute(slug, (_, w) -> {
             if (w == null || w.id != windowId) {
                 w = new Window();
                 w.id = windowId;

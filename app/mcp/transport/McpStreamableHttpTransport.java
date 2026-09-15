@@ -66,8 +66,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
     private final URI endpoint;
     private final Map<String, String> headers;
 
-    private Consumer<JsonRpc.Message> onMessage = msg -> {};
-    private Consumer<Throwable> onError = t -> {};
+    private Consumer<JsonRpc.Message> onMessage = _ -> {};
+    private Consumer<Throwable> onError = _ -> {};
     private volatile boolean closed;
 
     private final ConcurrentHashMap<Long, Call> inFlight = new ConcurrentHashMap<>();

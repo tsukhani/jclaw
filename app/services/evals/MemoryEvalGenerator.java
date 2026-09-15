@@ -164,7 +164,7 @@ public final class MemoryEvalGenerator {
      * <p><b>The clustering signal decides what the suite can conclude, so pick it against
      * the comparison being run.</b> A gold grouping built on the same signal a ranker
      * scores on settles the comparison before it runs. Grouping on token Jaccard to
-     * evaluate a ranker that penalises token Jaccard produced exactly that: a clean
+     * evaluate a ranker that penalizes token Jaccard produced exactly that: a clean
      * monotone decline that restated the clustering choice rather than measuring anything.
      * Semantic clustering groups on embedding cosine, so use it against any lexical
      * ranker, and lexical clustering against a purely semantic one.
@@ -252,9 +252,9 @@ public final class MemoryEvalGenerator {
      * words appear nowhere in the memory that answers it. The bridging relation lives in a
      * <em>different</em> row, and pairing the two is the whole job.
      *
-     * <p><b>Pairs on rare shared content tokens, deliberately not on capitalisation.</b>
+     * <p><b>Pairs on rare shared content tokens, deliberately not on capitalization.</b>
      * Retrieval-key generation gathers a memory's neighbors from
-     * {@code JpaMemoryStore.entityNames}, a capitalisation rule; generating gold with that
+     * {@code JpaMemoryStore.entityNames}, a capitalization rule; generating gold with that
      * same rule would select for pairs the keys already link and report the mechanism's own
      * heuristic back as a score. Rarity is independent of it, so a case survives or fails on
      * retrieval rather than on agreeing with the fix.
@@ -582,7 +582,7 @@ public final class MemoryEvalGenerator {
 
     /** Embedding neighbors of the seed, restricted to the corpus rows already in hand. */
     private static List<Row> semanticCluster(Agent agent, Row seed, List<Row> all, double minCosine) {
-        var byId = all.stream().collect(Collectors.toMap(Row::id, r -> r, (a, b) -> a));
+        var byId = all.stream().collect(Collectors.toMap(Row::id, r -> r, (a, _) -> a));
         // Seed embedded as a document, matching what the index holds (JCLAW-529). Bare text
         // against statement+key vectors compares a format difference rather than a
         // similarity, which shrinks every cluster and quietly weakens the coverage suites
@@ -626,7 +626,7 @@ public final class MemoryEvalGenerator {
      * any near-duplicate of it.
      *
      * <p>Without this the harness would score a correct retrieval as a miss whenever the
-     * corpus holds a fact more than once, penalising exactly what dedup is for. Uses the
+     * corpus holds a fact more than once, penalizing exactly what dedup is for. Uses the
      * same duplicate test capture uses, so what counts as the same fact here is what
      * counts as the same fact there.
      */

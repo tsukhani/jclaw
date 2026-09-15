@@ -55,7 +55,7 @@ public final class TelegramWebhookRateLimiter {
     public static boolean allow(long bindingId, int max, long windowSeconds) {
         long now = System.currentTimeMillis();
         long windowMs = windowSeconds * 1000L;
-        Window w = windows.compute(bindingId, (k, existing) -> {
+        Window w = windows.compute(bindingId, (_, existing) -> {
             if (existing == null) {
                 existing = new Window(now);
             }

@@ -15,7 +15,7 @@ import java.util.concurrent.CompletableFuture;
  *
  * <p>The {@code /model} selector (JCLAW-109) proved out the inline-keyboard
  * + {@code callback_query} plumbing, but only that one feature used it.
- * This service generalises it so any code path — a dangerous tool, an
+ * This service generalizes it so any code path — a dangerous tool, an
  * {@code exec} call, a privileged slash command — can surface an
  * interactive approve/deny prompt to the bound user and block until they
  * tap a button (or it times out).

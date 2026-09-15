@@ -84,6 +84,6 @@ public enum TtsModel {
 
     /** The default model for an engine when {@code tts.<engine>.model} is unset. */
     public static TtsModel defaultFor(TtsEngine engine) {
-        return forEngine(engine).get(0);
+        return forEngine(engine).getFirst();
     }
 }

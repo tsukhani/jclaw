@@ -17,10 +17,14 @@ import io.opentelemetry.instrumentation.runtimetelemetry.RuntimeTelemetry;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.common.export.RetryPolicy;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import io.opentelemetry.sdk.metrics.export.MetricExporter;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
 import io.opentelemetry.sdk.resources.Resource;
+import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
+import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
@@ -34,6 +38,8 @@ import play.Play;
 import services.EventLogger;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -217,10 +223,6 @@ public final class OtelRuntime {
         return api.getMeter(INSTRUMENTATION_SCOPE);
     }
 
-    public static OpenTelemetry openTelemetry() {
-        return api;
-    }
-
     private static volatile @Nullable OkHttpTelemetry okHttp;
     private static volatile @Nullable OpenTelemetry okHttpApi;
 
@@ -309,12 +311,12 @@ public final class OtelRuntime {
      * returns them, with the sampler forced on. Process-global, so a test that uses it
      * holds {@code TelemetryTestSync}; the leaves are restored from the Config DB on exit.
      */
-    public static java.util.List<io.opentelemetry.sdk.trace.data.SpanData> captureForTest(Runnable body) {
+    public static List<SpanData> captureForTest(Runnable body) {
         var s = sdk;
         if (s == null) {
             throw new IllegalStateException("telemetry runtime is not initialized");
         }
-        var memory = io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter.create();
+        var memory = InMemorySpanExporter.create();
         synchronized (OtelRuntime.class) {
             SPANS.swap(memory);
             SAMPLER.swap(Sampler.alwaysOn());
@@ -337,12 +339,12 @@ public final class OtelRuntime {
      * into memory after {@code body} and the points returned. Aggregation is cumulative, so
      * a test keys its own series with a unique attribute value.
      */
-    public static java.util.Collection<io.opentelemetry.sdk.metrics.data.MetricData> captureMetricsForTest(Runnable body) {
+    public static Collection<MetricData> captureMetricsForTest(Runnable body) {
         var s = sdk;
         if (s == null) {
             throw new IllegalStateException("telemetry runtime is not initialized");
         }
-        var memory = io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter.create();
+        var memory = InMemoryMetricExporter.create();
         synchronized (OtelRuntime.class) {
             METRICS.swap(memory);
             applied = new OtelConfig(true, applied.endpoint(), applied.protocol(), applied.headers(),

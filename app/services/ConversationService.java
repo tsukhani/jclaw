@@ -1,6 +1,7 @@
 package services;
 
 import jakarta.persistence.Query;
+import llm.ProviderRegistry;
 import models.Agent;
 import models.ChannelType;
 import models.Conversation;
@@ -42,7 +43,6 @@ public class ConversationService {
      */
     private static final ThreadLocal<Long> INLINE_SUBAGENT_RUN_ID = new ThreadLocal<>();
 
-    /** Bind name shared by the single-column update statements below. */
     private static final String PARAM_VALUE = "value";
 
     /**
@@ -145,7 +145,7 @@ public class ConversationService {
     public static @Nullable String thinkingOverrideRejection(@Nullable String provider, @Nullable String modelId,
                                                              String mode) {
         if (Conversation.THINKING_OFF.equals(mode)) return null;
-        var p = provider != null ? llm.ProviderRegistry.get(provider) : null;
+        var p = provider != null ? ProviderRegistry.get(provider) : null;
         if (p == null) return "Provider '" + provider + "' is not configured.";
         var model = p.config().models().stream().filter(m -> m.id().equals(modelId)).findFirst();
         if (model.isEmpty()) return "Provider '" + provider + "' has no model with id '" + modelId + "'.";
@@ -162,20 +162,15 @@ public class ConversationService {
      * then re-sync the managed entity.
      *
      * <p>Naming, starring, pinning and switching the model are operator
-     * annotations, not conversation activity — but the list renders
-     * {@code updatedAt} as "Last Activity" and sorts by it. Routing them through
-     * {@code save()}, whose inherited {@link models.TimestampedModel}
-     * {@code @PreUpdate} stamps that column, dated a starred conversation to the
-     * moment of the click and jumped it to the top of the page. A bulk JPQL
-     * update bypasses the lifecycle callback, which is the semantic wanted here.
+     * annotations, not activity, but the list renders and sorts by
+     * {@code updatedAt} as "Last Activity". {@code save()} would stamp it through
+     * the inherited {@link models.TimestampedModel} {@code @PreUpdate}; a bulk
+     * JPQL update bypasses that callback.
      *
-     * <p>Two consequences of going around the entity, both handled here.
-     * The caller must not also assign the field: a dirty managed field is
-     * flushed at commit as an ordinary second UPDATE and stamps
-     * {@code updatedAt} after all. And a bulk update leaves the persistence
-     * context's copy stale, so the {@code refresh} is what keeps a caller that
-     * re-reads in the same transaction — {@code /model}'s handler, and the
-     * service tests — from seeing the pre-write value.
+     * <p>The caller must not also assign the field: a dirty managed field is
+     * flushed at commit as a second UPDATE and stamps {@code updatedAt} after
+     * all. The {@code refresh} keeps a same-transaction re-read — {@code /model}'s
+     * handler, the service tests — from seeing the stale pre-write value.
      */
     private static void applyWithoutTouchingActivity(Conversation conversation, Query update) {
         update.setParameter("id", conversation.id).executeUpdate();
@@ -184,9 +179,8 @@ public class ConversationService {
 
     /**
      * Overwrite the conversation's display name. Writes {@link Conversation#preview}
-     * itself rather than a parallel title column, so the rename reaches every
-     * surface that already reads it — the list, the chat header, the command
-     * palette, the detail page — with no per-surface fallback.
+     * itself rather than a parallel title column, so every surface that reads it
+     * shows the rename with no per-surface fallback.
      *
      * <p>{@code name} must be non-blank and within the column's 100-character
      * cap; the caller validates both, because a silent truncate here would hide

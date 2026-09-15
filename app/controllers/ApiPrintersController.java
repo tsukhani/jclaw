@@ -80,9 +80,8 @@ public class ApiPrintersController extends Controller {
         if (saved.isUnset()) {
             renderJSON(GSON.toJson(new DefaultStatus(false, false, null, 0)));
         }
-        // Resolve port the way a directly-addressed printer does: an absent protocol
-        // means IPP and port 0 means that protocol's standard port. Saving a manual
-        // default with neither left parse() null here and 500'd the settings panel.
+        // A manual default may be saved with no protocol and port 0, so resolve them the
+        // way a directly-addressed printer does: IPP, and that protocol's standard port.
         var port = PrinterDiscovery.direct(
                 saved.host(), saved.port(), PrintProtocol.parse(saved.protocol())).port();
         renderJSON(GSON.toJson(new DefaultStatus(

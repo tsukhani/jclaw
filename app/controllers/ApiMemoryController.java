@@ -317,7 +317,7 @@ public class ApiMemoryController extends Controller {
 
         var mode = JsonArgs.optString(body, "mode", "single");
         // Semantic by default: lexical gold groups share their signal with any ranker
-        // that penalises token overlap, which decides the comparison in advance.
+        // that penalizes token overlap, which decides the comparison in advance.
         // See MemoryEvalGenerator#generateCoverage.
         // Temporal reads clusterThreshold as a span in DAYS, not a cosine, so it needs its
         // own default — 0.62 days is a 15-hour window and would return an empty suite that

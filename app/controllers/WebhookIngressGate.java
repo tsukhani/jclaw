@@ -77,7 +77,7 @@ public final class WebhookIngressGate {
     public static boolean allow(String key, int max, long windowSeconds) {
         long now = System.currentTimeMillis();
         long windowMs = windowSeconds * 1000L;
-        Window w = WINDOWS.compute(key, (k, existing) -> {
+        Window w = WINDOWS.compute(key, (_, existing) -> {
             if (existing == null) {
                 existing = new Window(now);
             }

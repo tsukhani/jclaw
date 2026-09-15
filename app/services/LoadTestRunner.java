@@ -477,11 +477,11 @@ public final class LoadTestRunner {
         boolean variedPrompts = req.prompts() != null && !req.prompts().isEmpty();
         return variedPrompts
                 ? idx -> req.prompts().get(idx)
-                : idx -> userMessage;
+                : _ -> userMessage;
     }
 
     /**
-     * Single sequential request: stabilises agent lookup, provider cache,
+     * Single sequential request: stabilizes agent lookup, provider cache,
      * session affinity, and JIT before concurrent workers start. Snapshot
      * before/restore after so only the warmup sample is dropped — data
      * accumulated by prior runs (or by real chat traffic the operator cares

@@ -145,13 +145,6 @@ public class ApiConversationsController extends Controller {
 
     public record DeletedCountResponse(int deleted) {}
 
-    public record DeleteByIdsRequest(List<Long> ids) {}
-
-    public record DeleteFilter(String channel, Long agentId, String name, String peer,
-                              Boolean starred, String q) {}
-
-    public record DeleteByFilterRequest(DeleteFilter filter) {}
-
     public record RenameRequest(String name) {}
 
     public record NameResponse(String name) {}
@@ -306,11 +299,9 @@ public class ApiConversationsController extends Controller {
      * Resolve {@code q} to the conversation ids whose messages match, letting an
      * unreachable index surface as {@link IOException}.
      *
-     * <p>{@link #ftsConversationIds} is the degrade-open wrapper around this, and
-     * is right for the listing endpoint: a wider result set is harmless to look
-     * at. Callers that act on the scope rather than display it — the bulk delete —
-     * call this directly, because "no FTS constraint" would widen what they
-     * destroy.
+     * <p>{@link #ftsConversationIds} is the degrade-open wrapper for the listing;
+     * the bulk delete calls this directly, because "no FTS constraint" would widen
+     * what it destroys.
      */
     private static List<Long> searchConversationIds(String q) throws IOException {
         // A term matching more than 500 messages truncates silently, so a common
@@ -764,13 +755,9 @@ public class ApiConversationsController extends Controller {
     /**
      * PUT /api/conversations/{id}/name
      *
-     * <p>Body: {@code {"name": "Invoice thread"}}. Writes {@link models.Conversation#preview}
-     * itself, so the new name reaches the chat header, the command palette and the
-     * detail page as well as the list — every surface already reads that field.
-     *
-     * <p>A blank name or one over the column's 100-character cap is a 400 rather
-     * than a truncation, so what is stored is never quietly different from what
-     * the operator typed.
+     * <p>Body: {@code {"name": "Invoice thread"}}. A blank name or one over the column's
+     * 100-character cap is a 400 rather than a truncation, so what is stored is never
+     * quietly different from what the operator typed.
      */
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = RenameRequest.class)))

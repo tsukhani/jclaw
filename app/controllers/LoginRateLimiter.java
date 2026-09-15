@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * nor forces unbounded 600k-iteration PBKDF2 verifies (a CPU-exhaustion
  * amplifier). A successful login clears the source's counter immediately, so a
  * legitimate operator who eventually types the right password is never
- * penalised for earlier typos.
+ * penalized for earlier typos.
  *
  * <p>Single-JVM by design — mirrors {@link channels.TelegramWebhookRateLimiter}.
  * JClaw runs as one JVM, so an in-memory counter is the right granularity; a
@@ -66,7 +66,7 @@ public final class LoginRateLimiter {
     public static void recordFailure(String key, long windowSeconds) {
         long now = System.currentTimeMillis();
         long windowMs = windowSeconds * 1000L;
-        windows.compute(key, (k, existing) -> {
+        windows.compute(key, (_, existing) -> {
             if (existing == null || now - existing.windowStartMs.get() >= windowMs) {
                 Window fresh = new Window(now);
                 fresh.count.set(1);

@@ -497,7 +497,6 @@ public class SystemPromptAssembler {
                 """);
     }
 
-    /** Emits the channel section only for a channel that has registered guidance. */
     private static void appendChannelGuidance(SectionedBuilder b, @Nullable String channelType) {
         if (channelType == null) return;
         var guidance = channelGuidanceFor(channelType);
@@ -927,7 +926,7 @@ public class SystemPromptAssembler {
      */
     public static List<MemoryStore.MemoryEntry> rankRecall(List<MemoryStore.MemoryEntry> hits,
             Set<String> excludeIds, double relWeight, double impWeight, int limit) {
-        return rankRecall(hits, excludeIds, relWeight, impWeight, limit, e -> 1.0);
+        return rankRecall(hits, excludeIds, relWeight, impWeight, limit, _ -> 1.0);
     }
 
     /**

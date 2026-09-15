@@ -25,7 +25,7 @@ import java.io.IOException;
  * <p>The only behavioral difference from cloud is upside: {@link #poll} carries a real {@code percent}
  * (from the sidecar's diffusion step callback), whereas cloud reports {@code null}.
  *
- * <p>Parameterised by the engine model id ({@code ltx} / {@code wan-5b} / {@code wan-14b}); each
+ * <p>Parameterized by the engine model id ({@code ltx} / {@code wan-5b} / {@code wan-14b}); each
  * {@link #submit} first {@link LocalVideoSidecarManager#ensureRunning(String) ensures} the sidecar is up
  * on that engine, restarting it if a different engine was previously active.
  */

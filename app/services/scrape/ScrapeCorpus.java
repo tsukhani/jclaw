@@ -58,7 +58,7 @@ public final class ScrapeCorpus {
     public record Corpus(Identity identity, @Nullable String allocation, List<String> strata,
                          List<Entry> entries) {
 
-        /** The counts the entries realise, which is what the gate is scored against; the
+        /** The counts the entries realize, which is what the gate is scored against; the
          *  builder's recorded {@code realised_strata} is provenance and can be stale. */
         public Map<String, Integer> realisedCounts() {
             var counts = new LinkedHashMap<String, Integer>();
@@ -71,7 +71,7 @@ public final class ScrapeCorpus {
          *  strata under equal allocation. Proportionally sampled, the unprotected
          *  strata alone would carry it.
          *
-         *  <p>Scored on realised counts, not on the declared label: {@code build_corpus.py}
+         *  <p>Scored on realized counts, not on the declared label: {@code build_corpus.py}
          *  deliberately never moves that label, so a check of it alone can never fire. */
         public boolean isEqualAllocation() {
             if (!"equal".equals(allocation) || entries.isEmpty()) return false;

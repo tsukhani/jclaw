@@ -1,5 +1,6 @@
 package services.database;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.hibernate.JDBCException;
 import org.hibernate.Session;
@@ -173,8 +174,7 @@ public final class DatabaseService {
     public static BackupInfo backupNow() throws SQLException, IOException {
         var dir = Files.createDirectories(backupsDir());
         var zip = dir.resolve(BACKUP_PREFIX + STAMP.format(AppClock.now()) + ".zip");
-        // Through the request's own connection: the Hibernate session hands it out for the
-        // duration of doWork, and a JDBC refusal comes back wrapped rather than as SQLException.
+        // doWork lends the session's connection; a JDBC refusal comes back wrapped, not as SQLException.
         try {
             JPA.em().unwrap(Session.class).doWork(connection -> H2Maintenance.backupOnline(connection, zip));
         } catch (JDBCException e) {
@@ -440,7 +440,7 @@ public final class DatabaseService {
         }
     }
 
-    private static @Nullable String str(com.google.gson.JsonObject json, String key) {
+    private static @Nullable String str(JsonObject json, String key) {
         return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : null;
     }
 

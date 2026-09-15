@@ -64,10 +64,6 @@ abstract class ConfiguredHashScanner implements Scanner {
         return true;
     }
 
-    protected void resetWarningForTest() {
-        missingKeyWarning.reset();
-    }
-
     protected ScannerConfig config() {
         return dependencies.config();
     }

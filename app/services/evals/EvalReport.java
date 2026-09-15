@@ -130,7 +130,7 @@ public record EvalReport(String suiteId, String fingerprint, List<CaseResult> re
      */
     public List<String> regressionsAgainst(EvalReport baseline) {
         Map<String, Boolean> before = baseline.results().stream()
-                .collect(Collectors.toMap(CaseResult::caseId, CaseResult::passed, (a, b) -> a));
+                .collect(Collectors.toMap(CaseResult::caseId, CaseResult::passed, (a, _) -> a));
         return results.stream()
                 .filter(r -> !r.passed() && !r.errored() && Boolean.TRUE.equals(before.get(r.caseId())))
                 .map(CaseResult::caseId)

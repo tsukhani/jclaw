@@ -54,11 +54,6 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
                 dependencies);
     }
 
-    /** Test-only hook to reset the one-shot warning between key-toggle tests. */
-    static void resetMissingKeyWarning() {
-        new VirusTotalScanner().resetWarningForTest();
-    }
-
     @Override
     public Verdict lookup(String sha256) {
         var baseUrl = config().get("scanner.virustotal.url", "https://www.virustotal.com/api/v3/");

@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /**
- * The Telegram behaviour keys, edited under Channel defaults on the Channels &gt; Telegram page,
+ * The Telegram behavior keys, edited under Channel defaults on the Channels &gt; Telegram page,
  * and the rules {@code ConfigService.setWithSideEffects} applies when one is written. The webhook
  * hardening keys ({@code telegram.webhook.*}) are read from application.conf and are not here.
  */
@@ -28,7 +28,6 @@ public final class TelegramSettings {
     /** One true/false toggle per message-tool action: {@code telegram.actions.reply}, {@code .pin}, … */
     public static final String ACTIONS_PREFIX = "telegram.actions.";
 
-    /** Wake-word patterns are separated by newlines or commas. */
     static final String MENTION_PATTERN_SEPARATOR = "[\\n,]";
 
     private TelegramSettings() {}

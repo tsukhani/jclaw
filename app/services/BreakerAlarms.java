@@ -9,10 +9,8 @@ import java.util.function.Consumer;
  * What a circuit-breaker state change does: an operator-visible event-log line plus the
  * {@code jclaw.breaker.transitions} metric and span event (JCLAW-1170).
  *
- * <p>One implementation for every breaker in {@link utils.CircuitBreakers}, because two
- * subsystems each logging their own transitions is exactly the drift this story exists to
- * close — the LLM breakers had no transition record at all and the MCP ones had no metric.
- * A subsystem contributes only how it names itself.
+ * <p>One implementation for every breaker in {@link utils.CircuitBreakers}, so subsystems
+ * cannot drift in how they record transitions. A subsystem contributes only how it names itself.
  *
  * <p>A manual trip is reported as an operator decision, never as a failure rate: an
  * operator who isolated a provider must not later read the log and conclude the provider

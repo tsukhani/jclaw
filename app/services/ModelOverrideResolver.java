@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  * <p><b>Why one helper.</b> The same precedence rule appears in JCLAW-108
  * ({@code /model} slash command, per-conversation override) and in
  * JCLAW-269 (per-spawn override recorded on the child Conversation).
- * Centralising it means the cost-attribution dashboard (JCLAW-28), the
+ * Centralizing it means the cost-attribution dashboard (JCLAW-28), the
  * AgentRunner LLM dispatch path, the Telegram model picker, and the slash
  * command handlers all read the same source — no risk of a fourth call
  * site rolling its own slightly-different copy.

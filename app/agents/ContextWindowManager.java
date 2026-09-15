@@ -438,9 +438,8 @@ public final class ContextWindowManager {
             @Nullable String modelId, boolean modelMatched, @Nullable String providerName,
             int keepHead, int keepTail) {
         var original = working.get(cand.index());
-        // collectCandidates only admits indices whose content is a String. Asserted here
-        // rather than suppressed for the whole method, which left the rest of the body
-        // unchecked by construction (JCLAW-1160).
+        // collectCandidates only admits String content; asserted rather than suppressed so
+        // NullAway still checks the rest of the method (JCLAW-1160).
         var originalText = Objects.requireNonNull((String) original.content(),
                 "collectCandidates admitted a candidate whose content is not a String");
         var truncated = truncateToolResultContent(originalText, keepHead, keepTail);

@@ -785,7 +785,7 @@ public class JpaMemoryStore implements MemoryStore {
         return out;
     }
 
-    /** Month abbreviations read as proper nouns by the capitalisation rule, which would
+    /** Month abbreviations read as proper nouns by the capitalization rule, which would
      *  otherwise make every dated memory look like it names an entity. */
     private static final Set<String> NON_ENTITY_CAPITALS = Set.of(
             "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
@@ -794,7 +794,7 @@ public class JpaMemoryStore implements MemoryStore {
             "friday", "saturday", "sunday");
 
     /**
-     * Entity names in {@code text}: capitalised, alphabetic, not boilerplate. Used by
+     * Entity names in {@code text}: capitalized, alphabetic, not boilerplate. Used by
      * {@link MemoryKeyBackfillService} to find a memory's neighbors when writing its
      * retrieval key.
      */

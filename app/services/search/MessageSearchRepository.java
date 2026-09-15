@@ -77,7 +77,7 @@ public interface MessageSearchRepository {
      * round-tripping unused entity rows through JPA.
      *
      * @param query     the search string; case-insensitive,
-     *                  tokenised per the dialect's analyser
+     *                  tokenized per the dialect's analyzer
      * @param limit     hard cap on result count
      * @return matching rows ordered by relevance
      */
@@ -94,8 +94,8 @@ public interface MessageSearchRepository {
      * equality predicates rather than fetching every match.
      *
      * @param scope     which on-disk index to query
-     * @param query     the search string; tokenised per the
-     *                  dialect's analyser
+     * @param query     the search string; tokenized per the
+     *                  dialect's analyzer
      * @param limit     hard cap on result count
      * @return matching ids ordered by relevance
      */

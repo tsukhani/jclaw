@@ -113,7 +113,7 @@ public final class EvalScorer {
 
     private static void score(EvalCheck check, Response response, List<String> failures) {
         // Substring matching is case-insensitive: these suites test whether the fact
-        // survived the turn, not how the model capitalised it.
+        // survived the turn, not how the model capitalized it.
         var haystack = response.output().toLowerCase(Locale.ROOT);
         switch (check.kind()) {
             case CONTAINS_ALL -> {

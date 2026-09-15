@@ -66,7 +66,7 @@ public final class TaskExecutor {
     /**
      * Resolved-in-Tx capture of the task fields the agent loop needs.
      * Pulling them out in a short transaction guarantees the
-     * eager-loaded {@link Task#agent} reference is materialised before
+     * eager-loaded {@link Task#agent} reference is materialized before
      * the outer body crosses a Tx boundary — the agent loop reads
      * {@code agent.name}, {@code agent.modelProvider}, etc. on what
      * may be a detached entity once the surrounding Tx commits, but
