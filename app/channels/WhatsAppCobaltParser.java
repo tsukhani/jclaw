@@ -166,8 +166,7 @@ public final class WhatsAppCobaltParser {
      * the null-target reaction the Cloud-API parser refuses. Cobalt's
      * {@code ReactionMessage} constructor does {@code requireNonNull(key)} and
      * {@code ChatMessageKey} substitutes a random UUID for a null id, so both hops are
-     * non-null by construction — the guard this replaced was dead code that only made
-     * the two transports look like they disagreed.
+     * non-null by construction.
      *
      * <p>A container typed REACTION whose payload is not a {@code ReactionMessage} is
      * equally unreachable ({@code mapType} reads the type off the payload), but it is

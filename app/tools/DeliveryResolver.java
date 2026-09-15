@@ -16,10 +16,8 @@ import java.util.Optional;
  * {@link MessageTool} (a mid-turn send's channel + peer) and
  * {@link SubagentChildBootstrap} (a spawned run's parent conversation).
  *
- * <p>These previously carried their own copy of the
- * most-recently-updated-conversation lookup and had to be "kept agreeing" by
- * hand. Routing them through {@link #operatingConversation} makes that
- * agreement structural: change the rule here and every surface moves together.
+ * <p>Routing all three through {@link #operatingConversation} keeps them agreeing:
+ * change the rule here and every surface moves together.
  */
 public final class DeliveryResolver {
 

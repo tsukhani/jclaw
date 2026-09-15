@@ -42,7 +42,7 @@ public final class LlmResilience {
 
     private LlmResilience() {}
 
-    /** How often {@link #sweep} looks for a stream that has gone quiet; the cadence of the cancellation poll. */
+    /** How often {@link #sweep} looks for a stream that has gone quiet. */
     private static final long SWEEP_MILLIS = 5_000L;
 
     /** Streams being watched for a stall. Empty — and the sweeper unstarted — when the budget is off. */
@@ -363,7 +363,7 @@ public final class LlmResilience {
             this.abandon = abandon;
         }
 
-        /** A chunk reached the caller: fold the gap since the previous one and re-arm. */
+        /** A chunk reached the caller. */
         public void chunk() {
             var now = nanoTime.getAsLong();
             fold(now);

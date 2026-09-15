@@ -65,8 +65,8 @@ public class ApiChatController extends Controller {
      * first-chunk budget rather than fixed (JCLAW-1192): the sweep abandons a silent stream
      * just past that budget, and a ceiling that fell first cut the browser off with "client
      * disconnect" a few seconds before the abandonment it was about to receive. Never under
-     * the ten minutes it always was. Since JCLAW-1204 this is an inactivity budget, not a
-     * cap on the turn: a 41-round tool loop that keeps emitting frames is never cut by it.
+     * ten minutes. An inactivity budget, not a cap on the turn (JCLAW-1204): a 41-round tool
+     * loop that keeps emitting frames is never cut by it.
      */
     public static Duration chatStreamTimeout() {
         var derived = LlmResilience.firstChunkBudget().plus(CHAT_STREAM_MARGIN);

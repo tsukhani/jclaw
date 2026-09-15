@@ -173,8 +173,7 @@ public final class DatabaseService {
     public static BackupInfo backupNow() throws SQLException, IOException {
         var dir = Files.createDirectories(backupsDir());
         var zip = dir.resolve(BACKUP_PREFIX + STAMP.format(AppClock.now()) + ".zip");
-        // Through the request's own connection: the Hibernate session hands it out for the
-        // duration of doWork, and a JDBC refusal comes back wrapped rather than as SQLException.
+        // doWork lends the session's connection; a JDBC refusal comes back wrapped, not as SQLException.
         try {
             JPA.em().unwrap(Session.class).doWork(connection -> H2Maintenance.backupOnline(connection, zip));
         } catch (JDBCException e) {

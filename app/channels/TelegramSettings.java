@@ -28,7 +28,6 @@ public final class TelegramSettings {
     /** One true/false toggle per message-tool action: {@code telegram.actions.reply}, {@code .pin}, … */
     public static final String ACTIONS_PREFIX = "telegram.actions.";
 
-    /** Wake-word patterns are separated by newlines or commas. */
     static final String MENTION_PATTERN_SEPARATOR = "[\\n,]";
 
     private TelegramSettings() {}

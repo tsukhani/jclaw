@@ -495,11 +495,10 @@ public class ApiProvidersController extends Controller {
      *
      * <p>Ladders are not uniform: GLM-5.3 accepts low/high/max with no medium rung,
      * and out-of-enum values are answered HTTP 200 while silently falling back to
-     * max — so an unlisted level is billed, not rejected. Without this the field
-     * was dropped on every save and every model collapsed to the low/medium/high
-     * default in {@link llm.LlmTypes#DEFAULT_THINKING_LEVELS}.
+     * max — so an unlisted level is billed, not rejected.
      *
-     * <p>Omitted when empty so the shared default keeps applying.
+     * <p>Omitted when empty so the shared default, {@link llm.LlmTypes#DEFAULT_THINKING_LEVELS},
+     * keeps applying.
      */
     private static void addThinkingLevelsIfSet(JsonObject out, JsonObject body) {
         if (!body.has(KEY_THINKING_LEVELS) || !body.get(KEY_THINKING_LEVELS).isJsonArray()) return;

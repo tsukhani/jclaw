@@ -51,7 +51,7 @@ public class McpClient implements AutoCloseable {
     private final String name;
     private final McpTransport transport;
     private final String clientVersion;
-    /** Budget for the connect handshake — initialize and the first tools/list — which a cold server may take minutes to answer. */
+    /** Budget for the connect handshake: initialize and the first tools/list. */
     private final Duration handshakeTimeout;
     /** Budget for every request after the handshake, tool calls included. */
     private final Duration requestTimeout;

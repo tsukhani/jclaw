@@ -46,7 +46,7 @@ public final class WorkspaceFiles {
                     .build());
 
     /**
-     * Memoized workspace byte size. 60 s is negligible against the runaway growth the
+     * 60 s is negligible against the runaway growth the
      * dashboard card this feeds exists to catch, and it collapses a revisit storm —
      * {@link Cache#get} runs the loader once per concurrent miss, not once per caller.
      */

@@ -689,11 +689,9 @@ public final class ToolCallLoopRunner {
     }
 
     /**
-     * Recover from an empty continuation (JCLAW-1199), then emit a labeled diagnostic.
-     * Retry one repeats the synthesis nudge with reasoning off: the usual shape is a
-     * reasoning-capable model spending its whole output budget thinking and stopping
-     * mid-thought before any content. Retry two goes to the agent's fallback model when
-     * one is configured. Every retry counts in the turn's usage.
+     * Recover from an empty continuation (JCLAW-1199) through {@link #retrySynthesis}, then
+     * emit a labeled diagnostic. The usual shape is a reasoning-capable model spending its
+     * whole output budget thinking and stopping mid-thought before any content.
      */
     private static String retryEmptyContinuation(StreamingTurnContext ctx, int round,
                                                  ArrayList<ChatMessage> currentMessages, String priorContent,

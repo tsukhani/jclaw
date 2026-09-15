@@ -871,8 +871,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     /**
      * Where a turn goes when its primary fails it (JCLAW-1190): the provider the operator chose
      * on the agent and the model registered there. The model is part of the choice rather than
-     * derived, because the primary's model id need not exist on the fallback — the live drill
-     * that motivated this landed on a local server that had never heard of the model it was sent.
+     * derived, because the primary's model id need not exist on the fallback.
      */
     public record Fallback(LlmProvider provider, String modelId) {
 

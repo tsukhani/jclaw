@@ -18,8 +18,6 @@ public final class TaskService {
 
     private TaskService() {}
 
-    /** Play's {@code Model.findById} returns null for a missing row, so this can too
-     *  (JCLAW-1160). */
     public static @Nullable Task findById(Long id) {
         return Task.findById(id);
     }

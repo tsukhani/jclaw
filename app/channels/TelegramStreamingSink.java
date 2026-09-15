@@ -155,10 +155,8 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      *
      * <p>The retry is load-bearing (JCLAW-1162): a lost compare-and-set means someone
      * else moved the reference between the read and the swap, and re-reading it once
-     * returns whatever they left — including the null {@link #shutdown} installs. That
-     * handed callers a null they dereference immediately, two of them under
-     * {@code stateLock}. Looping re-reads instead, so the caller either adopts the
-     * winner's executor or installs its own.
+     * returns whatever they left — including the null {@link #shutdown} installs.
+     * Looping re-reads, so the caller either adopts the winner's executor or installs its own.
      */
     private static ScheduledExecutorService scheduler() {
         while (true) {

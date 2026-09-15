@@ -497,7 +497,6 @@ public class SystemPromptAssembler {
                 """);
     }
 
-    /** Emits the channel section only for a channel that has registered guidance. */
     private static void appendChannelGuidance(SectionedBuilder b, @Nullable String channelType) {
         if (channelType == null) return;
         var guidance = channelGuidanceFor(channelType);

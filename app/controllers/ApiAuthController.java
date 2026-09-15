@@ -223,7 +223,6 @@ public class ApiAuthController extends Controller {
 
     public record ResetPasswordResponse(String status) {}
 
-    /** The 401 detail every session-rejection branch renders. */
     private static final String AUTH_REQUIRED = "Authentication required";
 
     /** GET /api/auth/status — unauthenticated. Returns whether a password
