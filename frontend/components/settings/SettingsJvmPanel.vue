@@ -225,13 +225,13 @@ const gcContext = computed(() => {
           <dd class="text-[11px] text-fg-muted">
             {{ heapContext }}
           </dd>
-          <div class="mt-auto pt-2">
+          <dd class="mt-auto pt-2">
             <MetricBar
               data-testid="jvm-heap-bar"
               :segments="heapSegments"
               :total="heapTotal"
             />
-          </div>
+          </dd>
         </div>
 
         <div class="flex flex-col">
@@ -264,13 +264,13 @@ const gcContext = computed(() => {
               of {{ bytes(stats.machineMemoryBytes) }} on this machine
             </template>
           </dd>
-          <div class="mt-auto pt-2">
+          <dd class="mt-auto pt-2">
             <MetricBar
               data-testid="jvm-rss-bar"
               :segments="[{ label: 'Resident', value: stats?.rssBytes ?? 0, class: 'bg-emerald-500' }]"
               :total="stats?.machineMemoryBytes ?? null"
             />
-          </div>
+          </dd>
         </div>
 
         <div class="flex flex-col">
@@ -286,13 +286,13 @@ const gcContext = computed(() => {
           <dd class="text-[11px] text-fg-muted">
             of {{ stats?.availableProcessors ?? '—' }} cores
           </dd>
-          <div class="mt-auto pt-2">
+          <dd class="mt-auto pt-2">
             <MetricSparkline
               data-testid="jvm-cpu-spark"
               :points="cpuHistory"
               label="Processor share over the last few minutes"
             />
-          </div>
+          </dd>
         </div>
 
         <div class="flex flex-col">
@@ -308,13 +308,13 @@ const gcContext = computed(() => {
           <dd class="text-[11px] text-fg-muted">
             {{ gcContext }}
           </dd>
-          <div class="mt-auto pt-2">
+          <dd class="mt-auto pt-2">
             <MetricSparkline
               data-testid="jvm-gc-spark"
               :points="gcHistory"
               label="Collections per sample over the last few minutes"
             />
-          </div>
+          </dd>
         </div>
 
         <div class="flex flex-col">
@@ -330,13 +330,13 @@ const gcContext = computed(() => {
           <dd class="text-[11px] text-fg-muted">
             {{ llmContext }}
           </dd>
-          <div class="mt-auto pt-2">
+          <dd class="mt-auto pt-2">
             <MetricSparkline
               data-testid="jvm-llm-spark"
               :points="llmHistory"
               label="Outbound LLM calls in flight over the last few minutes"
             />
-          </div>
+          </dd>
         </div>
 
         <div class="flex flex-col">

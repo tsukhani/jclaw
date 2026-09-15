@@ -93,9 +93,9 @@ const detectedHarnesses = computed(() => harnessData.value?.harnesses ?? [])
 // all (stdin/stdout fallback). Mirrors CodingRunMonitor's KIND_META pattern.
 const STDIO_BADGE = { label: 'stdin/stdout', cls: 'text-fg-muted border-border' }
 const ACP_BADGE: Record<string, { label: string, cls: string }> = {
-  'native': { label: 'ACP native', cls: 'text-emerald-700 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10' },
+  'native': { label: 'ACP native', cls: 'text-emerald-800 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10' },
   'adapter': { label: 'ACP · adapter', cls: 'text-sky-700 dark:text-sky-400 border-sky-500/40 bg-sky-500/10' },
-  'adapter-missing': { label: 'ACP · adapter', cls: 'text-amber-700 dark:text-amber-400 border-amber-500/40 bg-amber-500/10' },
+  'adapter-missing': { label: 'ACP · adapter', cls: 'text-amber-800 dark:text-amber-400 border-amber-500/40 bg-amber-500/10' },
   'none': STDIO_BADGE,
 }
 function acpBadge(h: DetectedHarness) {
