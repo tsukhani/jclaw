@@ -49,7 +49,8 @@ public class ConfigService {
     /** Namespace every per-provider config key lives under: {@code provider.<name>.<field>}. */
     private static final String PROVIDER_KEY_PREFIX = "provider.";
 
-    private static final Pattern TESSERACT_LANGUAGES = Pattern.compile("[A-Za-z0-9_]+(\\+[A-Za-z0-9_]+)*");
+    // Possessive: a repeated group that can backtrack recurses per character and can overflow the stack.
+    private static final Pattern TESSERACT_LANGUAGES = Pattern.compile("\\w++(?:\\+\\w++)*+");
     private static final Set<String> PDF_STRATEGIES =
             Set.of("auto", "no_ocr", "ocr_only", "ocr_and_text_extraction");
 
@@ -304,8 +305,7 @@ public class ConfigService {
         }
         if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY) && value != null && !value.isBlank()
                 && ProviderRegistry.get(value.trim()) == null) {
-            return "Provider '" + value.trim() + "' is not configured. " + key
-                    + " must name a provider from Settings > LLM Providers.";
+            return unconfiguredProvider(key, value.trim());
         }
         if (key.startsWith(VoiceSettings.PREFIX)) {
             var rejected = VoiceSettings.rejectionFor(key, value);
@@ -338,8 +338,7 @@ public class ConfigService {
         // no provider behind it would only surface as a refused spawn much later.
         if (key.equals(SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY) && value != null && !value.isBlank()
                 && ProviderRegistry.get(value.trim()) == null) {
-            return "Provider '" + value.trim() + "' is not configured. " + key
-                    + " must name a provider from Settings > LLM Providers.";
+            return unconfiguredProvider(key, value.trim());
         }
 
         // JCLAW-1165: a schedule that never fires or a retention of zero is silent at read.
@@ -441,6 +440,11 @@ public class ConfigService {
         }
 
         return null;
+    }
+
+    private static String unconfiguredProvider(String key, String name) {
+        return "Provider '" + name + "' is not configured. " + key
+                + " must name a provider from Settings > LLM Providers.";
     }
 
     private static boolean isIntAtLeast(String value, int min) {

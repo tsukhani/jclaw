@@ -156,7 +156,7 @@ class WebScrapeToolTest extends UnitTest {
         routes.put("https://site.test/b", page("B", "/c"));
         routes.put("https://site.test/c", page("C"));
         var request = "{\"url\":\"https://site.test/\",\"maxDepth\":3}";
-        var original = ConfigService.get(WebScrapeSettings.MAX_DEPTH);
+        var originalDepth = ConfigService.get(WebScrapeSettings.MAX_DEPTH);
         try {
             assertFalse(scrape(request).contains("# C"), "the default ceiling of 2 caps a request for 3");
 
@@ -165,10 +165,10 @@ class WebScrapeToolTest extends UnitTest {
             ConfigService.set(WebScrapeSettings.MAX_DEPTH, "3");
             assertTrue(scrape(request).contains("# C"), "a Settings ceiling of 3 must admit depth 3");
         } finally {
-            if (original == null) {
+            if (originalDepth == null) {
                 ConfigService.delete(WebScrapeSettings.MAX_DEPTH);
             } else {
-                ConfigService.set(WebScrapeSettings.MAX_DEPTH, original);
+                ConfigService.set(WebScrapeSettings.MAX_DEPTH, originalDepth);
             }
         }
     }
