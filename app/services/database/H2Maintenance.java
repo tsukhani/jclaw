@@ -124,9 +124,6 @@ public final class H2Maintenance {
         public long intermediateBytes() {
             return files.stream().mapToLong(FileEntry::bytes).sum();
         }
-        public List<TableResult> mismatches() {
-            return tables.stream().filter(t -> !t.matches()).toList();
-        }
     }
 
     public record CleanResult(boolean ok, String reason, List<FileEntry> deleted, long reclaimedBytes) {}

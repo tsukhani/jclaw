@@ -12,8 +12,6 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
-import java.util.List;
-
 /**
  * JCLAW-372: optional per-(chatId, threadId) agent override for a
  * {@link TelegramBinding}. A forum topic in a group chat can be routed to a
@@ -73,10 +71,6 @@ public class TelegramTopicBinding extends Model {
     @JoinColumn(name = "agent_id", nullable = false)
     @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent agent;
-
-    public static List<TelegramTopicBinding> findByBinding(TelegramBinding binding) {
-        return TelegramTopicBinding.find("binding = ?1", binding).fetch();
-    }
 
     public static TelegramTopicBinding findByBindingAndTopic(
             TelegramBinding binding, String chatId, Integer threadId) {

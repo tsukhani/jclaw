@@ -145,13 +145,6 @@ public class ApiConversationsController extends Controller {
 
     public record DeletedCountResponse(int deleted) {}
 
-    public record DeleteByIdsRequest(List<Long> ids) {}
-
-    public record DeleteFilter(String channel, Long agentId, String name, String peer,
-                              Boolean starred, String q) {}
-
-    public record DeleteByFilterRequest(DeleteFilter filter) {}
-
     public record RenameRequest(String name) {}
 
     public record NameResponse(String name) {}

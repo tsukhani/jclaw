@@ -19,7 +19,6 @@ import services.search.LuceneIndexer;
 import utils.AppClock;
 
 import java.time.Instant;
-import java.util.List;
 
 /**
  * One turn within a {@link TaskRun}'s transcript. Plays the same role for
@@ -131,14 +130,5 @@ public class TaskRunMessage extends Model {
         if (id != null) {
             LuceneIndexer.remove(id);
         }
-    }
-
-    /**
-     * All messages for the given TaskRun in turn order. The PeekPanel
-     * (JCLAW-22) loads via this method to render the per-fire transcript.
-     */
-    public static List<TaskRunMessage> findByTaskRun(TaskRun taskRun) {
-        return TaskRunMessage.<TaskRunMessage>find(
-                "taskRun = ?1 ORDER BY turnIndex ASC", taskRun).fetch();
     }
 }

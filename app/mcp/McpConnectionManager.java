@@ -224,7 +224,7 @@ public final class McpConnectionManager {
     private static void connectInternal(McpServer server, @Nullable CompletableFuture<Void> firstAttemptFuture) {
         ensureScheduler();
         stop(server.name);
-        var entry = new Entry(server.name);
+        var entry = new Entry();
         entry.firstAttemptFuture = firstAttemptFuture;
         // JCLAW-388: capture the approval flag from the row now so the
         // dispatch-path lookup (McpServerTool.dangerous → requiresApproval)
@@ -808,7 +808,6 @@ public final class McpConnectionManager {
          *  the Entry itself so the lock cannot be acquired by anything that merely holds the
          *  reference, and so the guarded state is named at the lock site. */
         final Object teardownLock = new Object();
-        final String name;
         // McpClient manages its own internal thread-safety (state via AtomicReference,
         // ConcurrentHashMap for pending requests); volatile here just publishes the
         // reference. Likewise ScheduledFuture is thread-safe by JDK contract.
@@ -831,7 +830,5 @@ public final class McpConnectionManager {
          *  this volatile only publishes the reference. */
         @SuppressWarnings("java:S3077")
         volatile @Nullable CompletableFuture<Void> firstAttemptFuture;
-
-        Entry(String name) { this.name = name; }
     }
 }

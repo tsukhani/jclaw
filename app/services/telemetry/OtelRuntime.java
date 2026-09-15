@@ -217,10 +217,6 @@ public final class OtelRuntime {
         return api.getMeter(INSTRUMENTATION_SCOPE);
     }
 
-    public static OpenTelemetry openTelemetry() {
-        return api;
-    }
-
     private static volatile @Nullable OkHttpTelemetry okHttp;
     private static volatile @Nullable OpenTelemetry okHttpApi;
 

@@ -1,7 +1,6 @@
 package jobs;
 
 import com.github.kagkarlsson.scheduler.SchedulerClient;
-import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Task;
 import models.TaskRun;
 import play.jobs.Job;
@@ -316,19 +315,5 @@ public class BootConsistencyCheck extends Job<Void> {
      */
     public static void runForTest() {
         new BootConsistencyCheck().doJob();
-    }
-
-    /**
-     * Single-call existence check for a specific Task. Exposed because
-     * the same lookup is useful from operator tooling — "is this Task
-     * actually scheduled?" — without exposing the SchedulerClient
-     * directly. Returns false if the scheduler hasn't bootstrapped.
-     */
-    public static boolean isScheduled(Long taskId) {
-        var scheduler = DbSchedulerBootstrapJob.scheduler();
-        if (scheduler == null || taskId == null) return false;
-        return scheduler.getScheduledExecution(
-                TaskInstanceId.of(TaskExecutionHandler.TASK_NAME, taskId.toString())
-        ).isPresent();
     }
 }

@@ -189,7 +189,7 @@ public final class McpAllowlist {
      * DELETE bypasses the entity lifecycle, so without the evict a reader can
      * still be served a row this call removed — and the readers here decide
      * whether a tool call is permitted. Same discipline as the model's own
-     * {@code deleteByAgent} helpers.
+     * {@code deleteByAgentAndSkill}.
      */
     private static int deleteAndEvict(String query, Object... params) {
         var removed = AgentSkillAllowedTool.delete(query, params);

@@ -55,10 +55,6 @@ public final class ScannerRegistry {
 
     private ScannerRegistry() {}
 
-    public static List<Registration> registrations() {
-        return REGISTRATIONS;
-    }
-
     public static List<Scanner> createDefaultScanners() {
         return createScanners(ScannerDependencies.production());
     }

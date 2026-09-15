@@ -54,11 +54,6 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
                 dependencies);
     }
 
-    /** Test-only hook to reset the one-shot warning between key-toggle tests. */
-    static void resetMissingKeyWarning() {
-        new MetaDefenderCloudScanner().resetWarningForTest();
-    }
-
     /**
      * Look up a single SHA-256 hash against MetaDefender Cloud v4. Never throws;
      * on any failure returns a clean verdict and logs a warning (fail-open).

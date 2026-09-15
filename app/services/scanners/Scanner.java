@@ -58,18 +58,13 @@ public interface Scanner {
     /**
      * Reusable one-shot warning guard. Ensures a warning is emitted at most
      * once per JVM lifetime: callers gate their {@code warn(...)} on
-     * {@link #shouldWarn()}, with a test hook to reset between test runs.
+     * {@link #shouldWarn()}.
      */
     class OneShotWarning {
         private final AtomicBoolean warned = new AtomicBoolean(false);
 
         public boolean shouldWarn() {
             return warned.compareAndSet(false, true);
-        }
-
-        /** Test-only hook to reset the warning flag between key-toggle tests. */
-        public void reset() {
-            warned.set(false);
         }
     }
 }
