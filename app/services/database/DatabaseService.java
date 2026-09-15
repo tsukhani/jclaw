@@ -1,5 +1,6 @@
 package services.database;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.hibernate.JDBCException;
 import org.hibernate.Session;
@@ -439,7 +440,7 @@ public final class DatabaseService {
         }
     }
 
-    private static @Nullable String str(com.google.gson.JsonObject json, String key) {
+    private static @Nullable String str(JsonObject json, String key) {
         return json.has(key) && !json.get(key).isJsonNull() ? json.get(key).getAsString() : null;
     }
 

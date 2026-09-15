@@ -2,6 +2,7 @@ package services.database;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import org.h2.tools.Backup;
 import org.h2.tools.Recover;
 import org.h2.util.ScriptReader;
 import org.jspecify.annotations.Nullable;
@@ -141,7 +142,7 @@ public final class H2Maintenance {
 
     /** Backup of a closed database: the same zip {@code BACKUP TO} writes, from the file. */
     public static void backupOffline(Path dataDir, Path zip) throws SQLException {
-        org.h2.tools.Backup.execute(zip.toAbsolutePath().toString(), dataDir.toAbsolutePath().toString(), DB_NAME, true);
+        Backup.execute(zip.toAbsolutePath().toString(), dataDir.toAbsolutePath().toString(), DB_NAME, true);
     }
 
     /** A zip holding one {@value #DATA_FILE} entry that starts like an MVStore file. */

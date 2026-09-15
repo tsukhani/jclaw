@@ -25,6 +25,7 @@ import utils.AppClock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -726,7 +727,7 @@ public final class Commands {
                     : "This conversation had no thinking override. The agent default ("
                             + describeAgentThinking(agent) + ") remains in effect.";
         }
-        var mode = args.toLowerCase(java.util.Locale.ROOT);
+        var mode = args.toLowerCase(Locale.ROOT);
         var rejection = ConversationService.thinkingOverrideRejection(
                 ModelOverrideResolver.provider(current, agent), ModelOverrideResolver.modelId(current, agent), mode);
         if (rejection != null) {
