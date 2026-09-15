@@ -477,7 +477,7 @@ public final class LoadTestRunner {
         boolean variedPrompts = req.prompts() != null && !req.prompts().isEmpty();
         return variedPrompts
                 ? idx -> req.prompts().get(idx)
-                : idx -> userMessage;
+                : _ -> userMessage;
     }
 
     /**

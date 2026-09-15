@@ -30,7 +30,7 @@ public final class CircuitBreakers {
 
     /** The breaker registered under {@code name}, created from {@code config} if there is none yet. */
     public static CircuitBreaker get(String name, CircuitBreaker.Config config) {
-        return BREAKERS.computeIfAbsent(name, ignored -> new CircuitBreaker(config));
+        return BREAKERS.computeIfAbsent(name, _ -> new CircuitBreaker(config));
     }
 
     public static Optional<CircuitBreaker> find(String name) {

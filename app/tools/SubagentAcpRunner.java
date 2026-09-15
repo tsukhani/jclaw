@@ -520,7 +520,7 @@ final class SubagentAcpRunner {
         var argv = HarnessSandbox.wrap(launchArgv,
                 workdir, sandboxAdapter != null ? sandboxAdapter : new GenericAdapter(),
                 sandboxTrustedOrigin(runId));
-        var params = AgentParameters.builder(argv.get(0)).args(argv.subList(1, argv.size())).env(env).build();
+        var params = AgentParameters.builder(argv.getFirst()).args(argv.subList(1, argv.size())).env(env).build();
 
         // The acp-core SDK applies its per-request timeout (default 30s) to EVERY
         // request — including prompt(), which in ACP spans the whole agent turn

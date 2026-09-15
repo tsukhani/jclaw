@@ -1111,7 +1111,7 @@ public final class MemoryAutoCapture {
                 olds.add(oldIdx);
             }
         }
-        if (!olds.isEmpty()) out.merge(newIdx, olds, (a, b) -> a);
+        if (!olds.isEmpty()) out.merge(newIdx, olds, (a, _) -> a);
     }
 
     private static String renderConsolidation(ConsolidationPlan plan) {

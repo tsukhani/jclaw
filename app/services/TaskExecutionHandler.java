@@ -104,7 +104,7 @@ public final class TaskExecutionHandler {
     public static CustomTask<Void> buildTask() {
         return Tasks.custom(TASK_NAME, Void.class)
                 .onFailure(new JClawFailureHandler())
-                .execute((inst, ctx) -> {
+                .execute((inst, _) -> {
             String instanceId = inst.getId();
             Long jclawTaskId = parseTaskId(instanceId);
             if (jclawTaskId == null) {
@@ -296,7 +296,7 @@ public final class TaskExecutionHandler {
      * 60 seconds out, not "30 seconds ago".
      */
     private static CompletionHandler<Void> scheduleIntervalNextCompletion(Task task) {
-        return (executionComplete, executionOperations) -> {
+        return (_, executionOperations) -> {
             stopCurrentRow(task, executionOperations);
             rescheduleNext(task, () -> AppClock.now().plusSeconds(task.intervalSeconds),
                     "INTERVAL", " (every %ds)".formatted(task.intervalSeconds));
@@ -387,7 +387,7 @@ public final class TaskExecutionHandler {
      * sweep reschedules it.
      */
     private static CompletionHandler<Void> scheduleCronNextCompletion(Task task) {
-        return (executionComplete, executionOperations) -> {
+        return (_, executionOperations) -> {
             stopCurrentRow(task, executionOperations);
             rescheduleNext(task, () -> {
                 // JCLAW-261: same zone resolution as the first-fire computation

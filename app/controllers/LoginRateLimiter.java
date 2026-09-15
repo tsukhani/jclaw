@@ -66,7 +66,7 @@ public final class LoginRateLimiter {
     public static void recordFailure(String key, long windowSeconds) {
         long now = System.currentTimeMillis();
         long windowMs = windowSeconds * 1000L;
-        windows.compute(key, (k, existing) -> {
+        windows.compute(key, (_, existing) -> {
             if (existing == null || now - existing.windowStartMs.get() >= windowMs) {
                 Window fresh = new Window(now);
                 fresh.count.set(1);

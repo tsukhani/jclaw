@@ -199,7 +199,7 @@ public final class TelegramReactionNotifier {
         Thread.ofVirtual().name("telegram-reaction").start(() -> {
             try {
                 AgentRunner.processInboundForAgent(agent, LOG_SOURCE, peerId, eventText,
-                        (pid, response) -> TelegramChannel.forToken(botToken).sendText(
+                        (_, response) -> TelegramChannel.forToken(botToken).sendText(
                                 chatId, response, agent));
             } catch (Exception e) {
                 EventLogger.error(LOG_CATEGORY, agent.name, LOG_SOURCE,

@@ -42,8 +42,8 @@ public final class McpStdioTransport implements McpTransport {
     private @Nullable Process process;
     private @Nullable BufferedWriter stdin;
     private @Nullable BufferedReader stdout;
-    private Consumer<JsonRpc.Message> onMessage = msg -> {};
-    private Consumer<Throwable> onError = t -> {};
+    private Consumer<JsonRpc.Message> onMessage = _ -> {};
+    private Consumer<Throwable> onError = _ -> {};
     private volatile boolean closed;
     private final ReentrantLock sendLock = new ReentrantLock();
 

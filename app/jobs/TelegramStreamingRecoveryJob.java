@@ -68,7 +68,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         // disabled binding is simply absent here, which the per-orphan check
         // below treats the same as before (no enabled binding → skip).
         Map<Long, String> tokensByAgentId = Tx.run(() -> TelegramBinding.findAllEnabled().stream()
-                .collect(Collectors.toMap(b -> b.agent.id, b -> b.botToken, (first, dup) -> first)));
+                .collect(Collectors.toMap(b -> b.agent.id, b -> b.botToken, (first, _) -> first)));
 
         for (var orphan : orphans) {
             try {

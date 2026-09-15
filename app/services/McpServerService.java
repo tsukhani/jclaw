@@ -415,7 +415,7 @@ public final class McpServerService {
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
                         e -> ConfigService.maskValue(e.getKey(), e.getValue()),
-                        (a, b) -> a, LinkedHashMap::new));
+                        (a, _) -> a, LinkedHashMap::new));
     }
 
     /** JCLAW-780: mask every header value unconditionally — MCP config headers
@@ -427,7 +427,7 @@ public final class McpServerService {
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
                         e -> maskSecret(e.getValue()),
-                        (a, b) -> a, LinkedHashMap::new));
+                        (a, _) -> a, LinkedHashMap::new));
     }
 
     /** Mask an all-secret value: first 4 chars + {@code "****"}, or {@code "****"}
@@ -481,6 +481,6 @@ public final class McpServerService {
                 .sorted(Comparator.comparing(Map.Entry::getKey))
                 .collect(Collectors.toMap(
                         Map.Entry::getKey, Map.Entry::getValue,
-                        (a, b) -> a, LinkedHashMap::new));
+                        (a, _) -> a, LinkedHashMap::new));
     }
 }

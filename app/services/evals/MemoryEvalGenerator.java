@@ -582,7 +582,7 @@ public final class MemoryEvalGenerator {
 
     /** Embedding neighbors of the seed, restricted to the corpus rows already in hand. */
     private static List<Row> semanticCluster(Agent agent, Row seed, List<Row> all, double minCosine) {
-        var byId = all.stream().collect(Collectors.toMap(Row::id, r -> r, (a, b) -> a));
+        var byId = all.stream().collect(Collectors.toMap(Row::id, r -> r, (a, _) -> a));
         // Seed embedded as a document, matching what the index holds (JCLAW-529). Bare text
         // against statement+key vectors compares a format difference rather than a
         // similarity, which shrinks every cluster and quietly weakens the coverage suites
