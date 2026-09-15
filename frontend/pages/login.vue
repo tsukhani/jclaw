@@ -159,7 +159,7 @@ const passwordId = useId()
           type="submit"
           :disabled="loading || !password"
           class="w-full h-9 rounded-[26px] text-sm font-medium text-white
-                 bg-emerald-700 hover:bg-emerald-600
+                 bg-emerald-700 hover:bg-emerald-800
                  disabled:bg-emerald-700/40 disabled:text-white/70 disabled:cursor-not-allowed
                  transition-colors"
         >

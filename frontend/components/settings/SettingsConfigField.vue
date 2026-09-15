@@ -3,7 +3,6 @@
 // A refused write (403) is shown under the row with the backend's reason.
 import {
   CheckIcon,
-  InformationCircleIcon,
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
@@ -80,15 +79,12 @@ async function save(next: string) {
         :class="labelWidth"
       >
         {{ label }}
-        <span class="relative group/tip">
-          <InformationCircleIcon
-            class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-            aria-hidden="true"
-          />
-          <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-            {{ tip }}
-          </span>
-        </span>
+        <InfoTip
+          :label="`About ${label}`"
+          content-class="w-64 font-mono"
+        >
+          {{ tip }}
+        </InfoTip>
       </span>
       <template v-if="kind === 'boolean'">
         <button

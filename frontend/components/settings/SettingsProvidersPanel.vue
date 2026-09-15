@@ -10,7 +10,6 @@ import {
   CheckIcon,
   ChevronUpIcon,
   Cog6ToothIcon,
-  InformationCircleIcon,
   LockClosedIcon,
   MagnifyingGlassIcon,
   PencilIcon,
@@ -833,15 +832,12 @@ const groupedProviders = computed(() => {
           >
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
               paymentModality
-              <span class="relative group/tip">
-                <InformationCircleIcon
-                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  aria-hidden="true"
-                />
-                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-60 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                  How this provider bills you. <code class="font-mono">PER_TOKEN</code> uses model pricing to estimate cost per turn. <code class="font-mono">SUBSCRIPTION</code> ignores per-token pricing and pro-rates the monthly fee instead.
-                </span>
-              </span>
+              <InfoTip
+                label="About paymentModality"
+                content-class="w-60 font-mono"
+              >
+                How this provider bills you. <code class="font-mono">PER_TOKEN</code> uses model pricing to estimate cost per turn. <code class="font-mono">SUBSCRIPTION</code> ignores per-token pricing and pro-rates the monthly fee instead.
+              </InfoTip>
             </span>
             <template v-if="supportedModalitiesFor(name).length > 1 && editingKey === `provider.${name}.paymentModality`">
               <select
@@ -891,18 +887,21 @@ const groupedProviders = computed(() => {
                   aria-hidden="true"
                 />
               </button>
-              <span
+              <InfoTip
                 v-else
-                class="relative group/lock p-1 text-fg-muted"
+                label="Billing modality is fixed"
+                content-class="w-56"
+                trigger-class="p-1"
+                align="end"
               >
-                <LockClosedIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-                <span class="absolute right-0 top-7 z-20 hidden group-hover/lock:block w-56 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                  {{ providerLabel(name) }} only supports {{ paymentModalityFor(name) }} billing.
-                </span>
-              </span>
+                <template #icon>
+                  <LockClosedIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </template>
+                {{ providerLabel(name) }} only supports {{ paymentModalityFor(name) }} billing.
+              </InfoTip>
             </template>
           </div>
           <!-- JCLAW-280: subscriptionMonthlyUsd — only when the selected modality is
@@ -914,15 +913,12 @@ const groupedProviders = computed(() => {
           >
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
               subscriptionMonthlyUsd
-              <span class="relative group/tip">
-                <InformationCircleIcon
-                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  aria-hidden="true"
-                />
-                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-60 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                  Monthly USD you pay {{ providerLabel(name) }}. The Chat Cost dashboard pro-rates this to the selected time window (<code class="font-mono">monthly × window_days / 30</code>).
-                </span>
-              </span>
+              <InfoTip
+                label="About subscriptionMonthlyUsd"
+                content-class="w-60 font-mono"
+              >
+                Monthly USD you pay {{ providerLabel(name) }}. The Chat Cost dashboard pro-rates this to the selected time window (<code class="font-mono">monthly × window_days / 30</code>).
+              </InfoTip>
             </span>
             <template v-if="editingKey === `provider.${name}.subscriptionMonthlyUsd`">
               <span class="text-sm text-fg-muted">$</span>
@@ -976,15 +972,12 @@ const groupedProviders = computed(() => {
           >
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
               keepAlive
-              <span class="relative group/tip">
-                <InformationCircleIcon
-                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  aria-hidden="true"
-                />
-                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                  How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">5m</code> for 5 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever. Longer values hold GPU memory per model.
-                </span>
-              </span>
+              <InfoTip
+                label="About keepAlive"
+                content-class="w-56 font-mono"
+              >
+                How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">5m</code> for 5 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever. Longer values hold GPU memory per model.
+              </InfoTip>
             </span>
             <template v-if="editingKey === keepAliveKey(name)">
               <input

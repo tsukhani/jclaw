@@ -1467,7 +1467,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         v-if="!editing && !creating"
         type="button"
         :disabled="!providers.length"
-        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-600 transition-colors"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-700 transition-colors"
         title="New Agent"
         @click="newAgent"
       >
@@ -1672,7 +1672,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             v-if="editing"
             class="px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400
                    bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20
-                   hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-600
+                   hover:text-emerald-800 dark:hover:text-emerald-300 hover:border-emerald-600
                    dark:hover:border-emerald-500/50 transition-colors"
             title="Inspect the system prompt this agent receives — per-section char + token breakdown"
             @click="openPromptBreakdown(editing)"

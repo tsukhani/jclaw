@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckIcon, InformationCircleIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 
 // JCLAW-131: Uploads settings — per-kind attachment size caps. Values are
 // stored in bytes in the DB (matches services/UploadLimits.java) but
@@ -83,15 +83,12 @@ async function saveUploadCount(value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             maxImageBytes
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                Max upload size for image attachments, in megabytes (1–{{ MAX_IMAGE_MB }}). Stored as bytes; most vision models accept up to 20 MB per image.
-              </span>
-            </span>
+            <InfoTip
+              label="About maxImageBytes"
+              content-class="w-64 font-mono"
+            >
+              Max upload size for image attachments, in megabytes (1–{{ MAX_IMAGE_MB }}). Stored as bytes; most vision models accept up to 20 MB per image.
+            </InfoTip>
           </span>
           <template v-if="editingUploadField === 'maxImageMb'">
             <input
@@ -140,15 +137,12 @@ async function saveUploadCount(value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             maxAudioBytes
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                Max upload size for audio attachments, in megabytes (1–{{ MAX_AUDIO_MB }}). 100 MB holds roughly an hour of 128 kbps recording.
-              </span>
-            </span>
+            <InfoTip
+              label="About maxAudioBytes"
+              content-class="w-64 font-mono"
+            >
+              Max upload size for audio attachments, in megabytes (1–{{ MAX_AUDIO_MB }}). 100 MB holds roughly an hour of 128 kbps recording.
+            </InfoTip>
           </span>
           <template v-if="editingUploadField === 'maxAudioMb'">
             <input
@@ -197,15 +191,12 @@ async function saveUploadCount(value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             maxFileBytes
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                Max upload size for every other attachment type (PDFs, text, archives, etc.), in megabytes (1–{{ MAX_FILE_MB }}).
-              </span>
-            </span>
+            <InfoTip
+              label="About maxFileBytes"
+              content-class="w-64 font-mono"
+            >
+              Max upload size for every other attachment type (PDFs, text, archives, etc.), in megabytes (1–{{ MAX_FILE_MB }}).
+            </InfoTip>
           </span>
           <template v-if="editingUploadField === 'maxFileMb'">
             <input
@@ -254,15 +245,12 @@ async function saveUploadCount(value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             maxFiles
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                Maximum number of files a user can attach to a single chat message (1–{{ MAX_FILES }}). Capped at 5 system-wide; this lets operators be stricter.
-              </span>
-            </span>
+            <InfoTip
+              label="About maxFiles"
+              content-class="w-64 font-mono"
+            >
+              Maximum number of files a user can attach to a single chat message (1–{{ MAX_FILES }}). Capped at 5 system-wide; this lets operators be stricter.
+            </InfoTip>
           </span>
           <template v-if="editingUploadField === 'maxFiles'">
             <input

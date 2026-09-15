@@ -237,7 +237,7 @@ function handleInputKeydown(e: KeyboardEvent) {
         >
           <span class="truncate">{{ view.name }}</span>
           <button
-            class="text-fg-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
+            class="text-fg-muted hover:text-danger opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
             :aria-label="`Delete saved view ${view.name}`"
             @click.stop="deleteSavedView(i)"
           >

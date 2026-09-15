@@ -82,11 +82,29 @@ function showCostTooltip(event: MouseEvent | FocusEvent) {
   const r = el.getBoundingClientRect()
   costTooltipBottom.value = window.innerHeight - r.top + 4
   costTooltipRight.value = window.innerWidth - r.right
+  keepCostTooltip()
   costTooltipVisible.value = true
+  window.addEventListener('keydown', hideCostTooltipOnEscape)
+}
+let costTooltipHideTimer: ReturnType<typeof setTimeout> | null = null
+// The delay lets the pointer cross the 4px gap onto the tooltip, which stays open while hovered (WCAG 1.4.13).
+function scheduleHideCostTooltip() {
+  keepCostTooltip()
+  costTooltipHideTimer = setTimeout(hideCostTooltip, 150)
+}
+function keepCostTooltip() {
+  if (costTooltipHideTimer) clearTimeout(costTooltipHideTimer)
+  costTooltipHideTimer = null
 }
 function hideCostTooltip() {
+  keepCostTooltip()
   costTooltipVisible.value = false
+  window.removeEventListener('keydown', hideCostTooltipOnEscape)
 }
+function hideCostTooltipOnEscape(e: KeyboardEvent) {
+  if (e.key === 'Escape') hideCostTooltip()
+}
+onBeforeUnmount(hideCostTooltip)
 // Provider-chip filter for the Subscription subsection. When set, the
 // subscription per-model table + tfoot Total + Combined Total all narrow
 // to that provider's models and prorated bill. Click the same chip again
@@ -1306,7 +1324,7 @@ defineExpose({ refresh })
                         class="inline-flex items-center justify-center min-h-6 min-w-6 -my-1 p-0 m-0 bg-transparent border-0 cursor-help"
                         aria-label="Cost column information"
                         @mouseenter="showCostTooltip"
-                        @mouseleave="hideCostTooltip"
+                        @mouseleave="scheduleHideCostTooltip"
                         @focus="showCostTooltip"
                         @blur="hideCostTooltip"
                       >
@@ -1819,12 +1837,15 @@ defineExpose({ refresh })
          above and right-aligned with the icon without needing the
          tooltip's intrinsic dimensions. -->
     <Teleport to="body">
+      <!-- eslint-disable-next-line vuejs-accessibility/mouse-events-have-key-events, vuejs-accessibility/no-static-element-interactions -- pointer-only hover persistence; keyboard users open it by focusing the info button, and blur or Esc closes it -->
       <div
         v-if="costTooltipVisible"
         :style="{ bottom: costTooltipBottom + 'px', right: costTooltipRight + 'px' }"
-        class="fixed z-50 w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none"
+        class="fixed z-50 w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl"
         role="tooltip"
         data-testid="cost-info-tooltip"
+        @mouseenter="keepCostTooltip"
+        @mouseleave="scheduleHideCostTooltip"
       >
         Subscription cost allocated across models by total tokens (prompt + completion + reasoning).
       </div>

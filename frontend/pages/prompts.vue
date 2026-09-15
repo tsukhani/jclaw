@@ -196,7 +196,7 @@ async function doImport(mode: 'merge' | 'replace') {
       <button
         type="button"
         data-testid="new-prompt-button"
-        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white transition-colors"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white transition-colors"
         @click="openCreate"
       >
         <PlusIcon
@@ -317,7 +317,7 @@ async function doImport(mode: 'merge' | 'replace') {
       </p>
       <button
         type="button"
-        class="inline-flex items-center gap-2 px-3 py-2 text-sm text-white bg-emerald-700 hover:bg-emerald-600 transition-colors"
+        class="inline-flex items-center gap-2 px-3 py-2 text-sm text-white bg-emerald-700 hover:bg-emerald-800 transition-colors"
         @click="openCreate"
       >
         <PlusIcon

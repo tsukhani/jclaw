@@ -266,7 +266,7 @@ function removeHeaderRow(i: number) {
       </h1>
       <button
         type="button"
-        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white"
+        class="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white"
         @click="openAddForm"
       >
         <PlusIcon class="w-4 h-4" />
@@ -521,7 +521,7 @@ function removeHeaderRow(i: number) {
         <div class="flex items-center gap-2 pt-2">
           <button
             type="submit"
-            class="text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white"
+            class="text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white"
           >
             Create
           </button>
@@ -940,7 +940,7 @@ function removeHeaderRow(i: number) {
                   <div class="flex items-center gap-2 pt-2">
                     <button
                       type="submit"
-                      class="text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white"
+                      class="text-xs px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white"
                     >
                       Save changes
                     </button>

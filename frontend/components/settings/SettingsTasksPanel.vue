@@ -5,7 +5,6 @@
 // /api/timezones fetch — the same URL the General panel fetches.
 import {
   CheckIcon,
-  InformationCircleIcon,
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
@@ -82,15 +81,12 @@ async function saveTasksField(configKey: string, value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             retentionDays
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                Days a terminal task stays in the DB before TaskCleanupJob deletes it. 0 = retention disabled. Max 3650 (≈10 years).
-              </span>
-            </span>
+            <InfoTip
+              label="About retentionDays"
+              content-class="w-64 font-mono"
+            >
+              Days a terminal task stays in the DB before TaskCleanupJob deletes it. 0 = retention disabled. Max 3650 (≈10 years).
+            </InfoTip>
           </span>
           <template v-if="editingTasksField === 'retentionDays'">
             <input
@@ -142,15 +138,12 @@ async function saveTasksField(configKey: string, value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             defaultTimezone
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                IANA timezone applied to CRON / SCHEDULED tasks that don't specify their own. Leave unset to follow the operator timezone (Settings → Timezone); set it only to run tasks in a different zone. Per-task `timezone` overrides this. INTERVAL / IMMEDIATE are duration-based and ignore timezone entirely.
-              </span>
-            </span>
+            <InfoTip
+              label="About defaultTimezone"
+              content-class="w-64 font-mono"
+            >
+              IANA timezone applied to CRON / SCHEDULED tasks that don't specify their own. Leave unset to follow the operator timezone (Settings → Timezone); set it only to run tasks in a different zone. Per-task `timezone` overrides this. INTERVAL / IMMEDIATE are duration-based and ignore timezone entirely.
+            </InfoTip>
           </span>
           <template v-if="editingTasksField === 'defaultTimezone'">
             <select

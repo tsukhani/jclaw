@@ -235,6 +235,18 @@ describe('useAgentModel', () => {
     expect(api.thinkingMenuOpen.value).toBe(true)
   })
 
+  it('closes the hover-opened thinking menu on Escape (WCAG 1.4.13)', async () => {
+    const { api } = await mountAgentModel({
+      agents: ref([agent({ modelProvider: 'ollama-cloud', modelId: 'glm-5.3-flash', thinkingMode: null })]),
+    })
+    api.openThinkingMenu()
+    expect(api.thinkingMenuOpen.value).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+    expect(api.thinkingMenuOpen.value).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(api.thinkingMenuOpen.value).toBe(false)
+  })
+
   it('treats a locked model with a single rung as genuinely inoperable', async () => {
     // Nothing to pick between, so the pill really is inert and must say so —
     // aria-disabled on a menu trigger with a menu would be a lie either way.

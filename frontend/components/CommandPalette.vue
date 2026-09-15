@@ -124,7 +124,7 @@ function toggleTheme() {
     @update:open="emit('update:open', $event)"
   >
     <CommandInput placeholder="Search pages, agents, conversations..." />
-    <CommandList class="max-h-[400px] p-1">
+    <CommandList class="max-h-[min(400px,calc(85dvh_-_7rem))] p-1">
       <CommandEmpty>No results found.</CommandEmpty>
 
       <CommandGroup heading="Navigation">

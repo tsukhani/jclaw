@@ -114,7 +114,7 @@ describe('ChatCostSection — cost-column tooltip', () => {
     }))
   }
 
-  it('shows the teleported tooltip on mouseenter and hides it on mouseleave', async () => {
+  it('shows the teleported tooltip on mouseenter and hides it shortly after mouseleave', async () => {
     stubSubscriptionWithUsage()
     const wrapper = await mountSuspended(ChatCostSection, { props: { agents: STUB_AGENTS } })
     await flushPromises()
@@ -130,6 +130,30 @@ describe('ChatCostSection — cost-column tooltip', () => {
     expect(tooltip!.textContent).toContain('allocated across models by total tokens')
 
     await infoBtn.trigger('mouseleave')
+    await nextTick()
+    expect(document.body.querySelector('[data-testid="cost-info-tooltip"]')).not.toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await nextTick()
+    expect(document.body.querySelector('[data-testid="cost-info-tooltip"]')).toBeNull()
+  })
+
+  it('stays open while the pointer is on the tooltip and closes on Escape (WCAG 1.4.13)', async () => {
+    stubSubscriptionWithUsage()
+    const wrapper = await mountSuspended(ChatCostSection, { props: { agents: STUB_AGENTS } })
+    await flushPromises()
+
+    const infoBtn = wrapper.find('button[aria-label="Cost column information"]')
+    await infoBtn.trigger('mouseenter')
+    await nextTick()
+    const tooltip = document.body.querySelector<HTMLElement>('[data-testid="cost-info-tooltip"]')!
+
+    await infoBtn.trigger('mouseleave')
+    tooltip.dispatchEvent(new MouseEvent('mouseenter'))
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await nextTick()
+    expect(document.body.querySelector('[data-testid="cost-info-tooltip"]')).not.toBeNull()
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await nextTick()
     expect(document.body.querySelector('[data-testid="cost-info-tooltip"]')).toBeNull()
   })

@@ -56,7 +56,8 @@ onMounted(async () => {
   const status = await loadTourStatus()
   if (status.shouldAutoShow) showTourIntro()
 })
-const sidebarOpen = ref(true)
+// Below lg the sidebar is a fixed overlay, so opening it by default covers the page at 200% zoom (WCAG 1.4.4).
+const sidebarOpen = ref(typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1024px)').matches)
 const isMac = ref(true)
 const paletteOpen = ref(false)
 

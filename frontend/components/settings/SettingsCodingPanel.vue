@@ -4,7 +4,6 @@
 // with. Split out of the Subagents panel, which keeps the recursion caps.
 import {
   CheckIcon,
-  InformationCircleIcon,
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
@@ -228,15 +227,12 @@ async function saveAcpModel(value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5 pt-1">
             acp.command
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                External agent harness for runtime="acp" subagents — e.g. "claude -p" or "codex exec". The task is sent on stdin and stdout becomes the reply. Empty disables ACP (runtime="acp" spawns are refused). Operator-set only; never model-supplied.
-              </span>
-            </span>
+            <InfoTip
+              label="About acp.command"
+              content-class="w-72 font-mono"
+            >
+              External agent harness for runtime="acp" subagents — e.g. "claude -p" or "codex exec". The task is sent on stdin and stdout becomes the reply. Empty disables ACP (runtime="acp" spawns are refused). Operator-set only; never model-supplied.
+            </InfoTip>
           </span>
           <template v-if="editingField === 'acpCommand'">
             <input
@@ -323,15 +319,12 @@ async function saveAcpModel(value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5 pt-1">
             detected
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                Coding-harness CLIs found on this host's PATH. Click an available one to fill acp.command + acp.harness. Re-open Settings to re-probe.
-              </span>
-            </span>
+            <InfoTip
+              label="About detected"
+              content-class="w-72 font-mono"
+            >
+              Coding-harness CLIs found on this host's PATH. Click an available one to fill acp.command + acp.harness. Re-open Settings to re-probe.
+            </InfoTip>
           </span>
           <div class="flex-1 flex flex-wrap items-center gap-2 pt-0.5">
             <span
@@ -420,15 +413,12 @@ async function saveAcpModel(value: string) {
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             acp.model
-            <span class="relative group/tip">
-              <InformationCircleIcon
-                class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                aria-hidden="true"
-              />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-72 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                Provider/model the acp coding harness runs with instead of its own default. Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses take neither and refuse the spawn. A per-spawn modelProvider/modelId on subagent_spawn overrides this.
-              </span>
-            </span>
+            <InfoTip
+              label="About acp.model"
+              content-class="w-72 font-mono"
+            >
+              Provider/model the acp coding harness runs with instead of its own default. Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses take neither and refuse the spawn. A per-spawn modelProvider/modelId on subagent_spawn overrides this.
+            </InfoTip>
           </span>
           <!-- min-w-0: a flex item's min-width defaults to its content, and a select's
                content is its widest option, so flex-1 alone overflows the row. -->

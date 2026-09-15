@@ -304,6 +304,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     // (the chat history scrollbox) reposition the floating menu too.
     window.addEventListener('scroll', computeThinkingMenuStyle, { passive: true, capture: true })
     window.addEventListener('resize', computeThinkingMenuStyle)
+    window.addEventListener('keydown', closeThinkingMenuOnEscape)
     thinkingMenuListenersAttached = true
   }
 
@@ -311,7 +312,19 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     if (!thinkingMenuListenersAttached) return
     window.removeEventListener('scroll', computeThinkingMenuStyle, { capture: true } as EventListenerOptions)
     window.removeEventListener('resize', computeThinkingMenuStyle)
+    window.removeEventListener('keydown', closeThinkingMenuOnEscape)
     thinkingMenuListenersAttached = false
+  }
+
+  // Esc dismisses the hover-opened menu without moving the pointer (WCAG 1.4.13).
+  function closeThinkingMenuOnEscape(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return
+    if (thinkingMenuCloseTimer) {
+      clearTimeout(thinkingMenuCloseTimer)
+      thinkingMenuCloseTimer = null
+    }
+    thinkingMenuOpen.value = false
+    detachMenuTrackingListeners()
   }
 
   function openThinkingMenu() {

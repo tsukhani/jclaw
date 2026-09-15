@@ -212,7 +212,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
         >
           {{ msg.content }}
         </div>
-        <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
           <button
             type="button"
             class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
@@ -419,7 +419,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
             'flex items-center gap-1 mt-1.5 -ml-1 transition-opacity',
             tokStatsHoverKey === (msg.id ?? msg._key)
               ? 'opacity-100'
-              : 'opacity-0 group-hover:opacity-100',
+              : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
           ]"
         >
           <button
