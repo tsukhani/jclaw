@@ -1004,43 +1004,48 @@ public final class MemoryAutoCapture {
             }
             for (var el : arr) {
                 if (!el.isJsonObject()) continue;
-                var o = el.getAsJsonObject();
-                if (!o.has(KEY_TEXT) || o.get(KEY_TEXT).isJsonNull()) continue;
-                var text = o.get(KEY_TEXT).getAsString().strip();
-                if (text.isEmpty()) continue;
-                // JCLAW-927: the prompt names six categories and says to pick exactly one;
-                // the model still returns others (opinion, belief, instruction, project).
-                // Storing those verbatim leaves rows the taxonomy does not describe, and
-                // silently drops them to BASELINE_IMPORTANCE whenever the extractor also
-                // omits importance.
-                var rawCategory = (o.has(KEY_CATEGORY) && !o.get(KEY_CATEGORY).isJsonNull())
-                        ? MemoryCategory.normalize(o.get(KEY_CATEGORY).getAsString()) : null;
-                // JCLAW-981: coerceForCapture, not coerceForStorage — capture may not assign
-                // core. That tier is granted by an explicit operator instruction only.
-                var category = MemoryCategory.coerceForCapture(rawCategory);
-                if (rawCategory != null && !rawCategory.equals(category)) {
-                    EventLogger.warn(EVENT_CATEGORY,
-                            "Extractor returned category '%s', which capture may not assign; stored as '%s'"
-                                    .formatted(rawCategory, category));
-                }
-                double importance = (o.has(KEY_IMPORTANCE) && !o.get(KEY_IMPORTANCE).isJsonNull())
-                        ? clamp01(safeDouble(o.get(KEY_IMPORTANCE)))
-                        : MemoryCategory.defaultImportanceFor(category);
-                // JCLAW-529: identity facts go to the always-loaded tier instead of competing
-                // for vector-search slots. The importance lift is not cosmetic — findCore
-                // filters on memory.coreload.minImportance (0.8), and the extractor scores
-                // facts like "the user's son X was born on Y" at 0.7, so a promotion without
-                // it would admit the memory to a tier that then never renders it.
-                if (MemoryIdentityClass.isIdentity(text)) {
-                    category = MemoryCategory.CORE.label;
-                    importance = Math.max(importance, MemoryCategory.defaultImportanceFor(category));
-                }
-                out.add(new Candidate(text, category, importance, parseQuestions(o)));
+                var candidate = parseCandidate(el.getAsJsonObject());
+                if (candidate != null) out.add(candidate);
             }
         } catch (Exception _) {
             return new ArrayList<>();
         }
         return out;
+    }
+
+    /** One extractor row as a {@link Candidate}, or null when it carries no usable text. */
+    private static @Nullable Candidate parseCandidate(JsonObject o) {
+        if (!o.has(KEY_TEXT) || o.get(KEY_TEXT).isJsonNull()) return null;
+        var text = o.get(KEY_TEXT).getAsString().strip();
+        if (text.isEmpty()) return null;
+        // JCLAW-927: the prompt names six categories and says to pick exactly one;
+        // the model still returns others (opinion, belief, instruction, project).
+        // Storing those verbatim leaves rows the taxonomy does not describe, and
+        // silently drops them to BASELINE_IMPORTANCE whenever the extractor also
+        // omits importance.
+        var rawCategory = (o.has(KEY_CATEGORY) && !o.get(KEY_CATEGORY).isJsonNull())
+                ? MemoryCategory.normalize(o.get(KEY_CATEGORY).getAsString()) : null;
+        // JCLAW-981: coerceForCapture, not coerceForStorage — capture may not assign
+        // core. That tier is granted by an explicit operator instruction only.
+        var category = MemoryCategory.coerceForCapture(rawCategory);
+        if (rawCategory != null && !rawCategory.equals(category)) {
+            EventLogger.warn(EVENT_CATEGORY,
+                    "Extractor returned category '%s', which capture may not assign; stored as '%s'"
+                            .formatted(rawCategory, category));
+        }
+        double importance = (o.has(KEY_IMPORTANCE) && !o.get(KEY_IMPORTANCE).isJsonNull())
+                ? clamp01(safeDouble(o.get(KEY_IMPORTANCE)))
+                : MemoryCategory.defaultImportanceFor(category);
+        // JCLAW-529: identity facts go to the always-loaded tier instead of competing
+        // for vector-search slots. The importance lift is not cosmetic — findCore
+        // filters on memory.coreload.minImportance (0.8), and the extractor scores
+        // facts like "the user's son X was born on Y" at 0.7, so a promotion without
+        // it would admit the memory to a tier that then never renders it.
+        if (MemoryIdentityClass.isIdentity(text)) {
+            category = MemoryCategory.CORE.label;
+            importance = Math.max(importance, MemoryCategory.defaultImportanceFor(category));
+        }
+        return new Candidate(text, category, importance, parseQuestions(o));
     }
 
     /** Cap on stored questions: the prompt asks for two or three, this bounds a model that ignores that. */

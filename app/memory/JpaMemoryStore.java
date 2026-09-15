@@ -290,7 +290,7 @@ public class JpaMemoryStore implements MemoryStore {
      * is what documents and the symmetric dedup comparison in {@link #semanticNeighbours}
      * must keep using — prefixing a document would compare a query format against itself.
      */
-    private float[] generateQueryEmbedding(String query) {
+    private float @Nullable [] generateQueryEmbedding(String query) {
         return generateEmbedding(prefixQuery(queryPrefix(), query));
     }
 
@@ -628,7 +628,7 @@ public class JpaMemoryStore implements MemoryStore {
      * the story's shared-contract AC. Degrades hybrid → FTS → LIKE, same as
      * before.
      */
-    private List<MemoryEntry> hybridSearch(String agentId, String query, int limit, float[] embedding) {
+    private List<MemoryEntry> hybridSearch(String agentId, String query, int limit, float @Nullable [] embedding) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
         try {
@@ -659,7 +659,7 @@ public class JpaMemoryStore implements MemoryStore {
      * Degrades to FTS-only when the query embedding is unavailable (no provider,
      * embeddings endpoint down) or the KNN leg fails.
      */
-    private List<MemoryEntry> luceneHybridSearch(String agentId, String query, int limit, float[] embedding) {
+    private List<MemoryEntry> luceneHybridSearch(String agentId, String query, int limit, float @Nullable [] embedding) {
         if (embedding == null) {
             return likeSearch(agentId, query, limit);
         }
@@ -994,7 +994,7 @@ public class JpaMemoryStore implements MemoryStore {
         }
     }
 
-    private float[] generateEmbedding(String text) {
+    private float @Nullable [] generateEmbedding(String text) {
         // Test seam: canned embeddings bypass the provider AND the shared cache
         // so cross-test pollution through the static Caffeine instance is
         // impossible (the cache would otherwise pin a canned vector under the
@@ -1036,7 +1036,7 @@ public class JpaMemoryStore implements MemoryStore {
      * vector); a {@code null} compute (no provider, failure) is not cached,
      * matching the loader's old null-skip.
      */
-    private static float[] cachedEmbedding(EmbeddingKey key, Supplier<float[]> compute) {
+    private static float @Nullable [] cachedEmbedding(EmbeddingKey key, Supplier<float @Nullable []> compute) {
         var cached = embeddingCache.getIfPresent(key);
         if (cached != null) {
             return cached;
