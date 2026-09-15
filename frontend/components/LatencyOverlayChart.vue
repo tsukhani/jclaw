@@ -14,18 +14,18 @@ const props = withDefaults(defineProps<{
   storageKey: 'jclaw:chat-perf:selected-series',
 })
 
-// Hand-picked palette — Tailwind-400-equivalent HSL tones readable on both
-// light and dark backgrounds. Index is by series position, so each segment
-// keeps a stable color across sessions.
+// Each tone pairs a light-theme shade that clears 3:1 on the light surface with
+// the dark-theme HSL; light-dark() picks by color-scheme. Index is by series
+// position, so each segment keeps a stable color across sessions.
 const PALETTE = [
-  'hsl(160 84% 52%)', // emerald
-  'hsl(199 89% 58%)', // sky
-  'hsl(38 92% 55%)', // amber
-  'hsl(258 85% 66%)', // violet
-  'hsl(350 82% 60%)', // rose
-  'hsl(173 70% 52%)', // teal
-  'hsl(328 86% 65%)', // pink
-  'hsl(215 20% 65%)', // slate
+  'light-dark(oklch(59.6% 0.145 163.225), hsl(160 84% 52%))', // emerald
+  'light-dark(oklch(58.8% 0.158 241.966), hsl(199 89% 58%))', // sky
+  'light-dark(oklch(55.5% 0.163 48.998), hsl(38 92% 55%))', // amber
+  'light-dark(oklch(54.1% 0.281 293.009), hsl(258 85% 66%))', // violet
+  'light-dark(oklch(58.6% 0.253 17.585), hsl(350 82% 60%))', // rose
+  'light-dark(oklch(60% 0.118 184.704), hsl(173 70% 52%))', // teal
+  'light-dark(oklch(59.2% 0.249 0.584), hsl(328 86% 65%))', // pink
+  'light-dark(oklch(55.4% 0.046 257.417), hsl(215 20% 65%))', // slate
 ]
 function colorForIndex(i: number): string {
   return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length]!
@@ -446,12 +446,11 @@ const plot = computed(() => {
             :stroke="plot.color"
             stroke-width="1"
             stroke-dasharray="3 3"
-            opacity="0.65"
           />
           <text
             :x="m.x"
             :y="m.nameY"
-            :fill="plot.color"
+            fill="var(--color-fg-primary)"
             font-size="9"
             font-family="ui-monospace, SFMono-Regular, monospace"
             text-anchor="middle"

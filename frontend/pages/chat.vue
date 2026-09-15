@@ -922,7 +922,7 @@ function exportConversation() {
                 role="status"
               >{{ streamProgressLabel }}</span>
               <span
-                class="text-sm tabular-nums opacity-80"
+                class="text-sm tabular-nums"
                 aria-hidden="true"
               >{{ streamProgressElapsed }}</span>
             </div>
@@ -1209,7 +1209,7 @@ function exportConversation() {
                   class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
                   :class="[
                     thinkingLock.locked
-                      ? `bg-emerald-700/30 text-emerald-700 dark:text-emerald-300 ${thinkingPillInert ? 'cursor-not-allowed' : 'cursor-default'}`
+                      ? `bg-emerald-700/30 text-emerald-800 dark:text-emerald-300 ${thinkingPillInert ? 'cursor-not-allowed' : 'cursor-default'}`
                       : (thinkingActive
                         ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25'
                         : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'),
@@ -1258,7 +1258,7 @@ function exportConversation() {
                 -->
                 <span
                   v-if="audioSupported"
-                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-amber-500/15 text-amber-700 dark:text-amber-400 cursor-default"
+                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-amber-500/15 text-amber-800 dark:text-amber-400 cursor-default"
                   title="This model handles audio natively. Voice notes pass through directly; non-audio models receive a transcript."
                 >
                   <SpeakerWaveIcon

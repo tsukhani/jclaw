@@ -35,11 +35,11 @@ const statusColors: Record<string, string> = {
 // Solid block fills for actual runs (the text statusColors are too faint as a
 // filled background). Falls back to neutral for any unmapped status.
 const statusBg: Record<string, string> = {
-  RUNNING: 'bg-blue-500/70 border-blue-400',
-  LOST: 'bg-orange-500/70 border-orange-400',
-  COMPLETED: 'bg-green-600/60 border-green-500',
-  FAILED: 'bg-red-500/70 border-red-400',
-  CANCELLED: 'bg-neutral-600/60 border-neutral-500',
+  RUNNING: 'bg-blue-700 border-blue-600 dark:bg-blue-500/70 dark:border-blue-400',
+  LOST: 'bg-orange-700 border-orange-600 dark:bg-orange-500/70 dark:border-orange-400',
+  COMPLETED: 'bg-green-700 border-green-600 dark:bg-green-600/60 dark:border-green-500',
+  FAILED: 'bg-red-700 border-red-600 dark:bg-red-500/70 dark:border-red-400',
+  CANCELLED: 'bg-neutral-700 border-neutral-600 dark:bg-neutral-600/60 dark:border-neutral-500',
 }
 
 // 1s tick drives the live "now" line + RUNNING run-block growth.
@@ -320,7 +320,7 @@ function fmtRunTime(run: RecentRunView): string {
           type="button"
           class="px-2.5 py-1 text-xs capitalize transition-colors"
           :class="calGranularity === g
-            ? 'bg-emerald-600/20 text-emerald-700 dark:text-emerald-300'
+            ? 'bg-emerald-600/20 text-emerald-800 dark:text-emerald-300'
             : 'text-fg-muted hover:text-fg-strong'"
           :aria-pressed="calGranularity === g"
           @click="calGranularity = g"
@@ -385,19 +385,18 @@ function fmtRunTime(run: RecentRunView): string {
           class="min-h-[100px] border-r border-b border-border last:border-r-0 px-2 py-1.5 flex flex-col gap-1"
           :class="[
             cell.inMonth ? '' : 'bg-muted/20',
-            cell.isPast ? 'opacity-40' : '',
           ]"
         >
           <div
             class="text-xs flex items-center gap-1"
             :class="[
-              cell.inMonth ? 'text-fg-primary' : 'text-fg-muted',
+              cell.inMonth && !cell.isPast ? 'text-fg-primary' : 'text-fg-muted',
               cell.isToday ? 'font-semibold' : '',
             ]"
           >
             <span
               v-if="cell.isToday"
-              class="inline-block w-5 h-5 rounded-full bg-emerald-500 text-white text-center leading-5"
+              class="inline-block w-5 h-5 rounded-full bg-emerald-700 text-white text-center leading-5"
             >{{ cell.date.getDate() }}</span>
             <span v-else>{{ cell.date.getDate() }}</span>
           </div>
@@ -410,9 +409,8 @@ function fmtRunTime(run: RecentRunView): string {
               :key="i"
               class="text-[10px] truncate"
               :class="[
-                statusColors[fire.taskStatus] || 'text-fg-muted',
-                fire.isPast ? 'opacity-40' : '',
-                fire.taskPaused ? 'opacity-40 line-through' : '',
+                fire.isPast || fire.taskPaused ? 'text-fg-muted' : (statusColors[fire.taskStatus] || 'text-fg-muted'),
+                fire.taskPaused ? 'line-through' : '',
               ]"
               :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}${fire.taskPaused ? ' · paused' : ''}`"
             >
@@ -493,7 +491,7 @@ function fmtRunTime(run: RecentRunView): string {
             :key="`r${bi}`"
             type="button"
             class="absolute rounded-sm border px-1 text-[10px] text-white text-left leading-tight overflow-hidden hover:brightness-125 transition z-10"
-            :class="statusBg[blk.run.status ?? ''] ?? 'bg-neutral-600/60 border-neutral-500'"
+            :class="statusBg[blk.run.status ?? ''] ?? 'bg-neutral-700 border-neutral-600 dark:bg-neutral-600/60 dark:border-neutral-500'"
             :style="{ top: `${blk.topPct}%`, height: `${blk.heightPct}%`, ...laneStyle(blk) }"
             :title="`${blk.run.taskName ?? 'run'} · ${blk.run.status} · ${fmtRunTime(blk.run)}`"
             @click="emit('open-run', blk.run)"
@@ -505,14 +503,13 @@ function fmtRunTime(run: RecentRunView): string {
             v-for="(fm, fi) in col.fires"
             :key="`f${fi}`"
             class="absolute flex items-center gap-1 pointer-events-none z-10"
-            :class="(fm.fire.taskPaused || fm.fire.isPast) ? 'opacity-40' : ''"
             :style="{ top: `${fm.topPct}%`, ...laneStyle(fm) }"
           >
             <span class="w-1.5 h-1.5 rounded-full border border-emerald-400 bg-surface-elevated shrink-0" />
             <span class="flex-1 border-t border-dashed border-emerald-400/50" />
             <span
-              class="text-[10px] text-emerald-700 dark:text-emerald-300 font-mono truncate max-w-[70%]"
-              :class="fm.fire.taskPaused ? 'line-through' : ''"
+              class="text-[10px] font-mono truncate max-w-[70%]"
+              :class="[(fm.fire.taskPaused || fm.fire.isPast) ? 'text-fg-muted' : 'text-emerald-700 dark:text-emerald-300', fm.fire.taskPaused ? 'line-through' : '']"
               :title="`${fm.fire.taskName} · ${fm.fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}${fm.fire.taskPaused ? ' · paused' : ''}`"
             >{{ fm.fire.taskName }}</span>
           </div>

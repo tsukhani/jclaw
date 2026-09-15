@@ -44,7 +44,7 @@ const strengthBarClass = computed(() => {
 const strengthTextClass = computed(() => {
   const s = strength.value.score
   if (s <= 1) return 'text-red-600 dark:text-red-400'
-  if (s === 2) return 'text-amber-600 dark:text-amber-400'
+  if (s === 2) return 'text-amber-700 dark:text-amber-400'
   return 'text-emerald-700 dark:text-emerald-400'
 })
 
@@ -165,7 +165,7 @@ const confirmPasswordId = useId()
               class="w-full h-9 pl-4 pr-10 rounded-[26px] text-sm text-fg-strong
                      bg-[#dfe7e3]/30 border border-[#dfe7e3]
                      dark:bg-fg-muted/10 dark:border-border
-                     focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40
+                     focus:outline-hidden focus:ring-2 focus:ring-emerald-600
                      transition-colors"
             >
             <button
@@ -199,7 +199,7 @@ const confirmPasswordId = useId()
               class="w-full h-9 pl-4 pr-10 rounded-[26px] text-sm text-fg-strong
                      bg-[#dfe7e3]/30 border border-[#dfe7e3]
                      dark:bg-fg-muted/10 dark:border-border
-                     focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40
+                     focus:outline-hidden focus:ring-2 focus:ring-emerald-600
                      transition-colors"
             >
             <button

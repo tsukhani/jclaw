@@ -157,7 +157,7 @@ onUnmounted(() => {
                   Mark as seen
                 </button>
                 <button
-                  class="rounded p-1 text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:text-amber-400 dark:hover:bg-amber-900/30 dark:hover:text-amber-300"
+                  class="rounded p-1 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/30 dark:hover:text-amber-300"
                   title="Delete reminder"
                   aria-label="Delete reminder"
                   @click="dismiss(t.id)"
@@ -170,7 +170,7 @@ onUnmounted(() => {
               </div>
             </div>
             <button
-              class="text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+              class="text-zinc-600 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300"
               aria-label="Dismiss"
               @click="acknowledge(t.id)"
             >

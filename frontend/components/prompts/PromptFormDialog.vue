@@ -139,7 +139,7 @@ async function save() {
             type="submit"
             :disabled="!description.trim() || generating"
             data-testid="prompt-generate"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-emerald-700 text-white rounded hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <span
               v-if="generating"
@@ -251,7 +251,7 @@ async function save() {
               type="submit"
               :disabled="!canSave || saving"
               data-testid="prompt-save"
-              class="px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              class="px-3 py-1.5 text-sm font-medium bg-emerald-700 text-white rounded hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {{ isEdit ? 'Save' : 'Create' }}
             </button>

@@ -497,7 +497,7 @@ onBeforeUnmount(stopPoll)
           v-if="!isCloud"
           class="border border-amber-500/60 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 space-y-2"
         >
-          <p class="flex items-center gap-1.5 font-medium text-amber-200">
+          <p class="flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-200">
             <ExclamationTriangleIcon
               class="h-4 w-4 shrink-0"
               aria-hidden="true"

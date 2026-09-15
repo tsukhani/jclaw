@@ -463,7 +463,7 @@ function closePeek() {
       <h2 class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
         No subagent runs yet
       </h2>
-      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
+      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
         <!-- Link text sits flush against the tags so Vue's whitespace
              condensing doesn't leak a space before the comma. -->
         Runs appear here when an agent delegates part of a task to a child agent — via the spawn tool or a <NuxtLink

@@ -118,7 +118,7 @@ function durationLabel(): string {
           <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
           <span
             v-else
-            class="ml-auto text-[11px] italic text-red-700/90 dark:text-red-400/90"
+            class="ml-auto text-[11px] italic text-red-700/90 dark:text-red-400"
           >deleted from workspace</span>
         </div>
         <!-- Prompt: full chip width, wraps naturally. -->

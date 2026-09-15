@@ -252,7 +252,7 @@ async function persist(body: Record<string, unknown>) {
                   :class="reach.reachable ? 'bg-emerald-500' : 'bg-amber-500'"
                   aria-hidden="true"
                 />
-                <span :class="reach.reachable ? 'text-fg-muted' : 'text-amber-600 dark:text-amber-400'">
+                <span :class="reach.reachable ? 'text-fg-muted' : 'text-amber-700 dark:text-amber-400'">
                   {{ reach.reachable ? 'Online' : 'Not answering' }}
                 </span>
               </span>
@@ -265,7 +265,7 @@ async function persist(body: Record<string, unknown>) {
                  common cause. -->
             <div
               v-if="reach?.configured && !reach.reachable"
-              class="mt-1 text-amber-600 dark:text-amber-400"
+              class="mt-1 text-amber-700 dark:text-amber-400"
             >
               Nothing answered at this address. If the printer moved to a new IP, scan
               and save it again.
@@ -295,8 +295,8 @@ async function persist(body: Record<string, unknown>) {
         </div>
         <button
           :disabled="scanning"
-          class="shrink-0 px-3 py-1.5 text-xs font-medium text-white bg-accent
-                 hover:opacity-90 disabled:opacity-40 rounded-full transition-opacity"
+          class="shrink-0 px-3 py-1.5 text-xs font-medium text-white bg-emerald-700
+                 hover:bg-emerald-800 disabled:opacity-40 rounded-full transition-colors"
           @click="scan"
         >
           {{ scanning ? 'Scanning…' : 'Scan' }}
@@ -317,7 +317,7 @@ async function persist(body: Record<string, unknown>) {
             <span
               v-if="p.isDefault"
               class="ml-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wide
-                     bg-accent/15 text-accent rounded"
+                     bg-secondary text-secondary-foreground rounded"
             >Default</span>
             <div class="text-xs text-fg-muted mt-0.5">
               {{ p.host }}:{{ p.port }} ({{ p.protocol }})<template v-if="p.formats">
@@ -473,8 +473,8 @@ async function persist(body: Record<string, unknown>) {
       >
         <button
           :disabled="savingState || !hasDefault"
-          class="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:opacity-90
-                 disabled:opacity-40 rounded-full transition-opacity"
+          class="px-3 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800
+                 disabled:opacity-40 rounded-full transition-colors"
           @click="saveOptions"
         >
           {{ savingState ? 'Saving…' : 'Save options' }}

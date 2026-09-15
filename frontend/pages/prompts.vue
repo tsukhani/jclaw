@@ -220,7 +220,7 @@ async function doImport(mode: 'merge' | 'replace') {
         type="button"
         :disabled="importing"
         data-testid="import-merge"
-        class="px-3 py-1.5 text-sm font-medium text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+        class="px-3 py-1.5 text-sm font-medium text-white bg-emerald-700 rounded hover:bg-emerald-800 disabled:opacity-50 transition-colors"
         @click="doImport('merge')"
       >
         Merge

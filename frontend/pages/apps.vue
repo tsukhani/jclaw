@@ -249,7 +249,7 @@ async function deleteApp(app: AppEntry) {
             type="submit"
             :disabled="!updateBrief.trim() && !updateAgentChanged && !updatePriceChanged"
             data-testid="update-app-submit"
-            class="px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            class="px-3 py-1.5 text-sm font-medium bg-emerald-700 text-white rounded hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Update in Chat →
           </button>
@@ -351,7 +351,7 @@ async function deleteApp(app: AppEntry) {
             type="submit"
             :disabled="!newAppBrief.trim()"
             data-testid="build-app-submit"
-            class="px-3 py-1.5 text-sm font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            class="px-3 py-1.5 text-sm font-medium bg-emerald-700 text-white rounded hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Build in Chat →
           </button>

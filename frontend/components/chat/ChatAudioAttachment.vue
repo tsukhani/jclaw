@@ -34,7 +34,7 @@ defineProps<{ att: MessageAttachment }>()
       <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
       <span
         v-if="att.generated"
-        class="shrink-0 text-[10px] uppercase tracking-wide text-purple-500 border border-purple-400/40 rounded px-1"
+        class="shrink-0 text-[10px] uppercase tracking-wide text-purple-700 dark:text-purple-300 border border-purple-400/40 rounded px-1"
         :title="att.generationMetadata ? `AI-generated · ${att.generationMetadata}` : 'AI-generated audio'"
       >gen</span>
     </a>

@@ -137,7 +137,7 @@ describe('memories admin page (JCLAW-40)', () => {
     expect(putBody).toEqual({ importance: 0.95 })
   })
 
-  it('renders superseded rows dimmed with a badge, active rows without (JCLAW-557)', async () => {
+  it('marks superseded rows with a badge rather than dimming them, active rows without (JCLAW-557)', async () => {
     memoriesResponse = [
       mem(),
       mem({
@@ -152,9 +152,8 @@ describe('memories admin page (JCLAW-40)', () => {
 
     const rows = c.findAll('[data-testid="memory-row"]')
     expect(rows).toHaveLength(2)
-    expect(rows[0]!.classes()).not.toContain('opacity-50')
     expect(rows[0]!.find('[data-testid="superseded-badge"]').exists()).toBe(false)
-    expect(rows[1]!.classes()).toContain('opacity-50')
+    expect(rows[1]!.classes()).not.toContain('opacity-50')
     const badge = rows[1]!.find('[data-testid="superseded-badge"]')
     expect(badge.exists()).toBe(true)
     expect(badge.text()).toBe('superseded')

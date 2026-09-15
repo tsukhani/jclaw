@@ -380,7 +380,7 @@ onUnmounted(() => stopTranscriptionPolling())
           Install it (e.g. <span class="font-mono">brew install ffmpeg</span>) and reload this page.
           <span
             v-if="transcriptionState?.ffmpegReason"
-            class="block opacity-70 mt-0.5"
+            class="block mt-0.5"
           >Probe: {{ transcriptionState.ffmpegReason }}</span>
         </div>
         <fieldset class="min-w-0 border-t border-border">
@@ -478,7 +478,7 @@ onUnmounted(() => stopTranscriptionPolling())
             v-if="transcriptionStateLoading"
             class="px-4 py-2.5 text-xs text-fg-muted italic"
           >
-            Starting the transcription engine… <span class="opacity-70">(first load spins up the local ASR sidecar)</span>
+            Starting the transcription engine… (first load spins up the local ASR sidecar)
           </div>
           <div
             v-else

@@ -65,7 +65,7 @@ function dimsLabel(): string {
         <!-- Once the bytes are gone: a deletion marker replaces the actions. -->
         <span
           v-if="deleted"
-          class="ml-auto text-[11px] italic text-red-700/90 dark:text-red-400/90"
+          class="ml-auto text-[11px] italic text-red-700/90 dark:text-red-400"
         >deleted from workspace</span>
         <!-- Actions while the file exists: download + delete, right-aligned. -->
         <template v-else>

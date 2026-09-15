@@ -28,11 +28,21 @@ const props = withDefaults(defineProps<{
 
 // Curated palette for the leading slices — the arcs big enough to identify by
 // colour alone. Picked to stay distinguishable in both themes and to avoid the
-// red reserved for destructive affordances elsewhere in the admin UI.
+// red reserved for destructive affordances elsewhere in the admin UI. Each
+// pairs a light-theme shade clearing 3:1 on the light surface with the dark tone.
 const COLORS = [
-  '#2dd4bf', '#60a5fa', '#a78bfa', '#f0abfc',
-  '#fbbf24', '#34d399', '#818cf8', '#fb923c',
-  '#22d3ee', '#a3e635', '#f472b6', '#94a3b8',
+  'light-dark(oklch(60% 0.118 184.704), #2dd4bf)',
+  'light-dark(oklch(54.6% 0.245 262.881), #60a5fa)',
+  'light-dark(oklch(54.1% 0.281 293.009), #a78bfa)',
+  'light-dark(oklch(59.1% 0.293 322.896), #f0abfc)',
+  'light-dark(oklch(55.5% 0.163 48.998), #fbbf24)',
+  'light-dark(oklch(59.6% 0.145 163.225), #34d399)',
+  'light-dark(oklch(51.1% 0.262 276.966), #818cf8)',
+  'light-dark(oklch(64.6% 0.222 41.116), #fb923c)',
+  'light-dark(oklch(60.9% 0.126 221.723), #22d3ee)',
+  'light-dark(oklch(53.2% 0.157 131.589), #a3e635)',
+  'light-dark(oklch(59.2% 0.249 0.584), #f472b6)',
+  'light-dark(oklch(55.4% 0.046 257.417), #94a3b8)',
 ]
 
 // Past the curated set the series is an open-ended tail, so colours are
@@ -48,7 +58,8 @@ function sliceColor(i: number): string {
   if (curated) return curated
   // Start the generated ramp off 0° so it doesn't open on destructive-red.
   const hue = (30 + (i - COLORS.length + 1) * GOLDEN_ANGLE) % 360
-  return `hsl(${hue.toFixed(1)}, 62%, 62%)`
+  const h = hue.toFixed(1)
+  return `light-dark(hsl(${h}, 62%, 34%), hsl(${h}, 62%, 62%))`
 }
 
 const RADIUS = 60

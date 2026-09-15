@@ -59,10 +59,7 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
     <div
       v-for="backend in (ocrStatus?.providers ?? [])"
       :key="backend.name"
-      :class="[
-        'bg-surface-elevated border border-border',
-        backend.available ? '' : 'opacity-60',
-      ]"
+      class="bg-surface-elevated border border-border"
     >
       <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
         <div class="flex items-center gap-2">

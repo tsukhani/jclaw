@@ -507,8 +507,8 @@ const lastOp = computed(() => {
           :title="status.backupsDir"
         >in {{ status.backupsDir }}</span>
         <button
-          class="ml-auto shrink-0 px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700
-                 disabled:bg-emerald-600/40 disabled:cursor-not-allowed rounded-full transition-colors"
+          class="ml-auto shrink-0 px-3 py-1.5 text-xs font-medium text-white bg-emerald-700 hover:bg-emerald-800
+                 disabled:bg-emerald-700/40 disabled:cursor-not-allowed rounded-full transition-colors"
           :disabled="busy !== null || phase !== 'idle'"
           data-testid="db-backup-now"
           @click="backupNow"
@@ -711,7 +711,7 @@ const lastOp = computed(() => {
         <button
           class="shrink-0 px-3 py-1.5 text-xs font-medium rounded-full transition-colors disabled:cursor-not-allowed"
           :class="needsRepair
-            ? 'text-white bg-amber-600 hover:bg-amber-700 disabled:bg-amber-600/40'
+            ? 'text-white bg-amber-700 hover:bg-amber-800 disabled:bg-amber-700/40'
             : 'border border-border text-fg-primary hover:bg-muted disabled:opacity-50'"
           :disabled="phase !== 'idle' || !status?.maintenanceAvailable"
           data-testid="db-repair"

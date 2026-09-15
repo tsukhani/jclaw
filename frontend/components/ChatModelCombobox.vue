@@ -162,9 +162,9 @@ function onCloseAutoFocus(event: Event) {
             type="text"
             placeholder="Search models"
             aria-label="Search models"
-            class="w-full h-9 pl-8 pr-3 rounded-3xl bg-input/30 border border-[#dfe7e3] dark:border-[#2e3035]
+            class="w-full h-9 pl-8 pr-3 rounded-3xl dark:bg-input/20 border border-[#dfe7e3] dark:border-[#2e3035]
                    text-sm text-fg-primary placeholder:text-muted-foreground
-                   focus-visible:border-emerald-500 focus-visible:ring-emerald-500/50 focus-visible:ring-[3px]
+                   focus-visible:border-emerald-600 focus-visible:ring-emerald-600 dark:focus-visible:border-emerald-500 dark:focus-visible:ring-emerald-500 focus-visible:ring-[3px]
                    focus-visible:outline-none transition-colors"
           >
         </div>

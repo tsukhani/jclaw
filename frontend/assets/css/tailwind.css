@@ -68,7 +68,7 @@
     --accent-foreground: hsl(0 0% 9%);
     --destructive: hsl(0 72% 45%);         /* JCLAW-691 #5: darkened so white --destructive-foreground ≥4.5:1 (was 60.2% ≈3.6:1) */
     --destructive-foreground: hsl(0 0% 98%);
-    --border: hsl(0 0% 57%);               /* WCAG-2026-07 #8: 80%→57% so borders meet 3:1 non-text on the near-white surface (was 1.6:1). Heavier chrome — see audit note. */
+    --border: hsl(0 0% 55%);               /* ≥3:1 non-text on --muted as well as the near-white surfaces (57% was 2.88:1 on --muted). Heavier chrome — see audit note. */
     --input: hsl(0 0% 55%);                /* JCLAW-691 #4: 89.8%→55% so form-field borders ≥3:1 non-text on the near-white surface */
     --ring: hsl(0 0% 3.9%);
     --radius: 0.5rem;
@@ -84,7 +84,7 @@
     --fg-muted: hsl(0 0% 43%);             /* secondary text — neutral; ≥4.5:1 incl. tinted surfaces (WCAG AA) */
     --fg-strong: hsl(0 0% 9%);             /* emphasis/hover — neutral-900 */
     --ok: hsl(160 84% 27%);                /* success — JCLAW-691 #2: darkened emerald so text ≥4.5:1 on white (was 39% ≈2.6:1); dark keeps 39% */
-    --danger: hsl(0 72% 51%);              /* error — red-600 (already ≥4.5:1 on white) */
+    --danger: hsl(0 72% 49%);              /* error — 51%→49% so error text ≥4.5:1 on --muted too (was 4.40:1) */
     --warning: hsl(38 92% 31%);            /* WCAG-2026-08 #5: 33%→31% so warning text ≥4.5:1 on every light surface incl. --muted (was 4.22:1 there, 4.49:1 on --surface-elevated) */
     --info: hsl(221 83% 45%);              /* informational — JCLAW-691 #2: darkened blue so text ≥4.5:1 on white (was blue-500 ≈3.6:1); dark keeps blue-500 */
   }
@@ -126,7 +126,7 @@
        intentional-invisibility uses of `dark:border-border` in
        layouts/default.vue have been switched to `dark:border-transparent`
        to preserve their structural-spacer behavior. */
-    --border: hsl(0 0% 43%);               /* WCAG-2026-07 #8: 32%→43% so borders meet 3:1 non-text on the elevated dark surface (was 2.0:1). Heavier chrome — see audit note. */
+    --border: hsl(0 0% 44%);               /* ≥3:1 non-text on --muted as well as the elevated dark surface (43% was 2.95:1 on --muted). Heavier chrome — see audit note. */
     --input: hsl(0 0% 45%);                /* JCLAW-691 #4: 22%→45% so form-field borders ≥3:1 non-text on the elevated dark surface */
     --ring: hsl(0 0% 83.1%);
 
@@ -137,9 +137,9 @@
     --fg-muted: hsl(0 0% 56%);             /* secondary text — ~4.8:1 on elevated surface (WCAG AA; was 50%≈3.93:1) */
     --fg-strong: hsl(0 0% 100%);           /* emphasis/hover — white */
     --ok: hsl(160 84% 39%);                /* success — emerald-500 */
-    --danger: hsl(0 84% 64%);              /* error — WCAG-2026-07 #6: 60%→64% so error text ≥4.5:1 on --surface-elevated (#222427); was 4.11:1 */
+    --danger: hsl(0 84% 65%);              /* error — 64%→65% so error text ≥4.5:1 on --muted as well as --surface-elevated (was 4.46:1) */
     --warning: hsl(38 92% 50%);            /* warning — amber-500 */
-    --info: hsl(217 91% 62%);              /* informational — WCAG-2026-07 #7: 60%→62% so info text ≥4.5:1 on --surface-elevated; was 4.29:1 */
+    --info: hsl(217 91% 63%);              /* informational — 62%→63% so info text ≥4.5:1 on --muted as well as --surface-elevated (was 4.47:1) */
   }
 
   /* Preserve v3 defaults that changed in v4 */
@@ -261,9 +261,9 @@
 .code-block:hover .code-copy,
 .code-copy:focus-visible { opacity: 1; }
 
-/* #047857 (emerald-700) over a 6%-black-on-light surface measures ~6.3:1 —
-   the same pairing already justified for .prose-chat a.workspace-file. */
-.code-copy[data-copied] { opacity: 1; color: #047857; }
+/* #065f46 (emerald-800): the button's 6% black sits over the code block's own
+   tint, where emerald-700 measured only 4.40:1. */
+.code-copy[data-copied] { opacity: 1; color: #065f46; }
 
 html.dark .code-copy {
   background: rgb(255,255,255,8%);

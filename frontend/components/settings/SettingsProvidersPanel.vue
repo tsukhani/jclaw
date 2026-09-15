@@ -715,8 +715,7 @@ const groupedProviders = computed(() => {
       <div
         v-for="[name, entries] in group.items"
         :key="name"
-        :class="isProviderEnabled(name) ? '' : 'opacity-60'"
-        class="bg-surface-elevated border border-border transition-opacity"
+        class="bg-surface-elevated border border-border"
       >
         <div class="px-4 py-2.5 border-b border-border">
           <div class="flex items-center gap-2">
@@ -1806,7 +1805,7 @@ const groupedProviders = computed(() => {
                 <span
                   v-if="model.leaderboardRank"
                   class="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded"
-                  :class="model.leaderboardRank <= 3 ? 'text-amber-700 dark:text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
+                  :class="model.leaderboardRank <= 3 ? 'text-amber-800 dark:text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
                   :title="`#${model.leaderboardRank} on provider leaderboard`"
                 >
                   #{{ model.leaderboardRank }}
@@ -1832,7 +1831,7 @@ const groupedProviders = computed(() => {
                   </span>
                   <span
                     v-if="model.alwaysThinks"
-                    class="inline-flex items-center gap-0.5 text-xs text-emerald-700 dark:text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
+                    class="inline-flex items-center gap-0.5 text-xs text-emerald-800 dark:text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
                     :title="model.alwaysThinksDetectedFromProvider
                       ? 'Pure reasoning model (provider-confirmed) — thinking is always on'
                       : 'Pure reasoning model (id-pattern match) — thinking is always on'"

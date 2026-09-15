@@ -675,7 +675,7 @@ const pinnedColumns = columns.filter(c => c.id !== 'select')
       <h2 class="mt-3 text-sm font-medium text-zinc-700 dark:text-zinc-300">
         No conversations yet
       </h2>
-      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
+      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
         <!-- Link text sits flush against the opening/closing tags (no
              newline between `>` and "new chat" or between "new chat" and
              `</NuxtLink>`) so Vue's "condense" whitespace mode doesn't
@@ -712,7 +712,7 @@ const pinnedColumns = columns.filter(c => c.id !== 'select')
         <span>{{ actionNotice }}</span>
         <button
           type="button"
-          class="text-amber-800/70 hover:text-amber-800 dark:text-amber-300/70 dark:hover:text-amber-300"
+          class="text-amber-800 hover:text-amber-950 dark:text-amber-300/70 dark:hover:text-amber-300"
           aria-label="Dismiss notice"
           @click="actionNotice = null"
         >

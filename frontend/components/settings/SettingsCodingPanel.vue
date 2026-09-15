@@ -286,7 +286,7 @@ async function saveAcpModel(value: string) {
                   <span class="font-mono text-fg-primary">{{ previewData!.effective }}</span>
                   <!-- Naming the harness explains the flags: acp.harness is what picks them,
                        and a hand-edited command can leave it pointing elsewhere. -->
-                  <span class="ml-1 opacity-70">(harness {{ previewData!.harness }})</span>
+                  <span class="ml-1">(harness {{ previewData!.harness }})</span>
                   <span
                     v-if="previewData!.acpAdapter"
                     class="ml-1"
@@ -300,7 +300,7 @@ async function saveAcpModel(value: string) {
                 </p>
                 <p
                   v-if="previewData!.rejection"
-                  class="text-xs text-rose-600 dark:text-rose-400"
+                  class="text-xs text-rose-700 dark:text-rose-400"
                 >
                   {{ previewData!.rejection }}
                 </p>
@@ -359,7 +359,7 @@ async function saveAcpModel(value: string) {
                     aria-hidden="true"
                   />
                   {{ h.name }}
-                  <span class="font-mono opacity-70">{{ h.command }}</span>
+                  <span class="font-mono">{{ h.command }}</span>
                   <span
                     class="px-1 py-px text-xs leading-none border rounded"
                     :class="acpBadge(h).cls"
@@ -409,7 +409,7 @@ async function saveAcpModel(value: string) {
             </div>
             <p
               v-if="customError"
-              class="text-xs text-rose-600 dark:text-rose-400 w-full"
+              class="text-xs text-rose-700 dark:text-rose-400 w-full"
             >
               {{ customError }}
             </p>

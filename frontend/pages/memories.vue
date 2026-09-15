@@ -436,7 +436,6 @@ async function exportMemories() {
             :key="mem.id"
             data-testid="memory-row"
             class="align-top"
-            :class="{ 'opacity-50': mem.supersededAt }"
           >
             <td class="px-4 py-2.5">
               <input

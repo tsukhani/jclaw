@@ -148,7 +148,7 @@ const sizeCls = computed(() =>
 )
 const iconCls = computed(() => (props.size === 'md' ? 'w-3.5 h-3.5' : 'w-3 h-3'))
 
-const offCls = 'text-neutral-500 border-neutral-600/40 bg-transparent hover:bg-neutral-500/5'
+const offCls = 'text-neutral-600 dark:text-neutral-400 border-neutral-600/40 bg-transparent hover:bg-neutral-500/5'
 
 function tooltip(p: PillDef): string {
   if (!p.interactive) {

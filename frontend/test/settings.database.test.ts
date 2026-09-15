@@ -165,7 +165,7 @@ describe('Settings → Database', () => {
     expect(c.find('[data-testid="db-verdict"]').text()).toBe('Attention')
     expect(c.find('[data-testid="db-reason"]').text()).toContain('3 read failures')
     expect(c.find('[data-testid="db-repair-section"]').classes()).toContain('border-amber-500/70')
-    expect(c.find('[data-testid="db-repair"]').classes().join(' ')).toContain('bg-amber-600')
+    expect(c.find('[data-testid="db-repair"]').classes().join(' ')).toContain('bg-amber-700')
   })
 
   it('backs up on demand and reports the new file', async () => {
