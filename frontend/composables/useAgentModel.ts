@@ -302,17 +302,17 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
     if (thinkingMenuListenersAttached) return
     // capture: true so scroll events on nested overflow-auto containers
     // (the chat history scrollbox) reposition the floating menu too.
-    window.addEventListener('scroll', computeThinkingMenuStyle, { passive: true, capture: true })
-    window.addEventListener('resize', computeThinkingMenuStyle)
-    window.addEventListener('keydown', closeThinkingMenuOnEscape)
+    globalThis.addEventListener('scroll', computeThinkingMenuStyle, { passive: true, capture: true })
+    globalThis.addEventListener('resize', computeThinkingMenuStyle)
+    globalThis.addEventListener('keydown', closeThinkingMenuOnEscape)
     thinkingMenuListenersAttached = true
   }
 
   function detachMenuTrackingListeners() {
     if (!thinkingMenuListenersAttached) return
-    window.removeEventListener('scroll', computeThinkingMenuStyle, { capture: true } as EventListenerOptions)
-    window.removeEventListener('resize', computeThinkingMenuStyle)
-    window.removeEventListener('keydown', closeThinkingMenuOnEscape)
+    globalThis.removeEventListener('scroll', computeThinkingMenuStyle, { capture: true } as EventListenerOptions)
+    globalThis.removeEventListener('resize', computeThinkingMenuStyle)
+    globalThis.removeEventListener('keydown', closeThinkingMenuOnEscape)
     thinkingMenuListenersAttached = false
   }
 

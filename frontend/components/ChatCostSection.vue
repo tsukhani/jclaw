@@ -80,11 +80,11 @@ function showCostTooltip(event: MouseEvent | FocusEvent) {
   const el = event.currentTarget as HTMLElement | null
   if (!el) return
   const r = el.getBoundingClientRect()
-  costTooltipBottom.value = window.innerHeight - r.top + 4
-  costTooltipRight.value = window.innerWidth - r.right
+  costTooltipBottom.value = globalThis.innerHeight - r.top + 4
+  costTooltipRight.value = globalThis.innerWidth - r.right
   keepCostTooltip()
   costTooltipVisible.value = true
-  window.addEventListener('keydown', hideCostTooltipOnEscape)
+  globalThis.addEventListener('keydown', hideCostTooltipOnEscape)
 }
 let costTooltipHideTimer: ReturnType<typeof setTimeout> | null = null
 // The delay lets the pointer cross the 4px gap onto the tooltip, which stays open while hovered (WCAG 1.4.13).
@@ -99,7 +99,7 @@ function keepCostTooltip() {
 function hideCostTooltip() {
   keepCostTooltip()
   costTooltipVisible.value = false
-  window.removeEventListener('keydown', hideCostTooltipOnEscape)
+  globalThis.removeEventListener('keydown', hideCostTooltipOnEscape)
 }
 function hideCostTooltipOnEscape(e: KeyboardEvent) {
   if (e.key === 'Escape') hideCostTooltip()
