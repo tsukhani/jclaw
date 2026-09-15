@@ -2290,7 +2290,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           v-if="allowlistExpanded"
           class="px-4 py-3"
         >
-          <p class="text-[11px] text-fg-muted mb-2">
+          <p class="text-xs text-fg-muted mb-2">
             What this agent can run via the exec tool. Global entries come from
             <span class="font-mono text-fg-muted">shell.allowlist</span> in Settings;
             per-skill entries come from the skill's declared
@@ -3003,7 +3003,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             {{ promptTextError }}
           </p>
           <template v-else>
-            <p class="text-[11px] text-fg-muted mb-2">
+            <p class="text-xs text-fg-muted mb-2">
               The exact system prompt string for
               <span class="font-mono">{{ promptBreakdownChannel }}</span>, as the model
               receives it. Tool schemas travel separately and are not part of this text.
@@ -3428,7 +3428,7 @@ html.dark .md-preview a { color: hsl(152 76% 60%); }
 
 .md-preview code {
   font-family: ui-monospace, monospace;
-  font-size: 0.85em;
+  font-size: max(0.85em, 0.75rem);
   padding: 0.15em 0.4em;
   border-radius: 0.25rem;
   background: var(--muted);
@@ -3442,7 +3442,7 @@ html.dark .md-preview a { color: hsl(152 76% 60%); }
   background: var(--muted);
   border: 1px solid var(--border);
 }
-.md-preview pre code { background: none; padding: 0; font-size: 0.85em; }
+.md-preview pre code { background: none; padding: 0; font-size: max(0.85em, 0.75rem); }
 
 .md-preview blockquote {
   margin: 0.5em 0;

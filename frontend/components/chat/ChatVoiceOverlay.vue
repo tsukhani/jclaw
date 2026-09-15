@@ -126,7 +126,7 @@ const animating = computed(() => ['listening', 'capturing', 'speaking'].includes
         </p>
       </div>
 
-      <p class="px-4 pb-4 text-[11px] text-fg-muted text-center">
+      <p class="px-4 pb-4 text-xs text-fg-muted text-center">
         Speak, then pause to send. An audio-capable model hears you directly;
         otherwise the local transcription model is used. Replies use your
         selected voice engine (Settings&nbsp;›&nbsp;Speech).

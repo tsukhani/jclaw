@@ -103,7 +103,7 @@ async function setCaptionModel(value: string) {
 
     <!-- Active-backend status line. -->
     <div
-      class="px-3 py-2 text-[11px] border"
+      class="px-3 py-2 text-xs border"
       :class="captionEnabled
         ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
         : 'bg-muted border-border text-fg-muted'"
@@ -259,7 +259,7 @@ async function setCaptionModel(value: string) {
         </div>
         <p
           v-if="captionVisionModels.length === 0"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+          class="px-4 pb-2.5 -mt-1 text-xs text-fg-muted"
         >
           <template v-if="captionProvider === 'ollama-local'">
             No vision-capable Ollama models are configured. Add your local Ollama models under
@@ -275,7 +275,7 @@ async function setCaptionModel(value: string) {
         </p>
         <p
           v-if="captionModelOrphaned"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+          class="px-4 pb-2.5 -mt-1 text-xs text-amber-700 dark:text-amber-400"
         >
           Saved model “{{ captionModel }}” is hidden because it is not marked vision-capable. Pick a
           vision model above, or mark it “supports vision” under

@@ -95,7 +95,7 @@ const expanded = ref(false)
         <span class="text-sm font-medium text-amber-800 dark:text-amber-300">
           {{ unmanaged.length }} unmanaged config {{ unmanaged.length === 1 ? 'key' : 'keys' }}
         </span>
-        <span class="block text-[11px] text-amber-700 dark:text-amber-400">
+        <span class="block text-xs text-amber-700 dark:text-amber-400">
           Config DB rows not owned by any Settings section — usually stale keys from a prior
           version. They shouldn't exist; review and remove them.
         </span>

@@ -192,7 +192,7 @@ onUnmounted(() => stopVideoCapPolling())
 
     <!-- Active-backend status line. -->
     <div
-      class="px-3 py-2 text-[11px] border"
+      class="px-3 py-2 text-xs border"
       :class="videogenEnabled
         ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
         : 'bg-muted border-border text-fg-muted'"
@@ -300,7 +300,7 @@ onUnmounted(() => stopVideoCapPolling())
           <!-- Empty-state hint when discovery returned nothing (no API key set, or a transient error). -->
           <div
             v-if="videogenModelsStatus !== 'pending' && !videogenModels?.length"
-            class="border-t border-border px-4 py-2 text-[11px] text-fg-muted"
+            class="border-t border-border px-4 py-2 text-xs text-fg-muted"
           >
             No models discovered — set a Replicate API key in Image Generation above, then refresh.
           </div>
@@ -351,7 +351,7 @@ onUnmounted(() => stopVideoCapPolling())
           <!-- PROBING — the first run installs the Python video deps. -->
           <div
             v-if="videoCapState === 'PROBING'"
-            class="px-4 py-2.5 text-[11px] text-fg-muted"
+            class="px-4 py-2.5 text-xs text-fg-muted"
           >
             Detecting GPU capability… the first run installs the Python video deps and can take a few minutes.
           </div>
@@ -359,7 +359,7 @@ onUnmounted(() => stopVideoCapPolling())
           <!-- ERROR — probe failed. -->
           <div
             v-else-if="videoCapState === 'ERROR'"
-            class="px-4 py-2.5 text-[11px] text-rose-700 dark:text-rose-400"
+            class="px-4 py-2.5 text-xs text-rose-700 dark:text-rose-400"
           >
             {{ videoCapability?.error ?? 'Capability probe failed.' }}
           </div>
@@ -407,7 +407,7 @@ onUnmounted(() => stopVideoCapPolling())
             <!-- No engine fits this machine — Self-Hosted is disabled above; say why. -->
             <div
               v-if="videoLocalUnsupported"
-              class="px-4 py-2 text-[11px] text-amber-700 dark:text-amber-400 border-t border-border"
+              class="px-4 py-2 text-xs text-amber-700 dark:text-amber-400 border-t border-border"
             >
               This machine can't run local video generation — no engine fits the detected GPU / free VRAM. Use Replicate instead.
             </div>
@@ -416,7 +416,7 @@ onUnmounted(() => stopVideoCapPolling())
           <!-- NEEDS_PROBE — idle hint. -->
           <div
             v-else-if="videoCapState === 'NEEDS_PROBE' && videoCapability?.uvAvailable"
-            class="px-4 py-2.5 text-[11px] text-fg-muted"
+            class="px-4 py-2.5 text-xs text-fg-muted"
           >
             Run local WAN 2 / LTX on your own GPU — detect to see what this machine can run.
           </div>

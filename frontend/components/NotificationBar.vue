@@ -141,7 +141,7 @@ onUnmounted(() => {
                 </span>
                 <span
                   v-if="t.createdAt"
-                  class="text-[0.65rem] text-amber-700 dark:text-amber-400"
+                  class="text-xs text-amber-700 dark:text-amber-400"
                 >
                   {{ formatWhen(t.createdAt) }}
                 </span>

@@ -65,7 +65,7 @@ async function saveLimits() {
               data-testid="memory-core-max-count"
             >
           </label>
-          <p class="mt-1 text-[11px] text-fg-muted">
+          <p class="mt-1 text-xs text-fg-muted">
             The highest-importance durable facts, always in context. Ordered by importance, so
             lowering this drops the least important first.
           </p>
@@ -86,7 +86,7 @@ async function saveLimits() {
               data-testid="memory-recall-limit"
             >
           </label>
-          <p class="mt-1 text-[11px] text-fg-muted">
+          <p class="mt-1 text-xs text-fg-muted">
             Matched against each message and ranked by relevance, importance and age. Lowering this
             drops the lowest-ranked first.
           </p>
@@ -104,7 +104,7 @@ async function saveLimits() {
           </button>
           <span
             v-if="!isValid"
-            class="text-[11px] text-red-700 dark:text-red-400"
+            class="text-xs text-red-700 dark:text-red-400"
             data-testid="memory-limits-invalid"
           >Both limits must be a whole number of at least 1.</span>
         </div>

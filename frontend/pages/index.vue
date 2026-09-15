@@ -662,7 +662,7 @@ onBeforeUnmount(() => {
           </table>
           <p
             v-if="cachedShare !== null"
-            class="px-4 py-2 text-[11px] text-fg-muted border-t border-border"
+            class="px-4 py-2 text-xs text-fg-muted border-t border-border"
           >
             {{ (cachedShare * 100).toFixed(1) }}% of LLM calls were served from the
             provider's prompt cache — a ratio of summed calls, not of percentiles,
@@ -726,7 +726,7 @@ onBeforeUnmount(() => {
                 <td
                   class="py-2 px-4"
                   :class="row.isChild
-                    ? 'text-fg-muted text-[0.95em] pl-10'
+                    ? 'text-fg-muted text-xs pl-10'
                     : 'text-fg-primary'"
                 >
                   {{ row.label }}

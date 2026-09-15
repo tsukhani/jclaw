@@ -38,7 +38,7 @@
 
 .driver-popover.jclaw-tour .driver-popover-title {
   color: var(--fg-strong);
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   margin-bottom: 6px;
   letter-spacing: 0.01em;
@@ -46,7 +46,7 @@
 
 .driver-popover.jclaw-tour .driver-popover-description {
   color: var(--fg-primary);
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   line-height: 1.55;
 
   /* Gap to the footer (counter + buttons). Bumped from 14px so the body
@@ -89,7 +89,7 @@
    and the buttons. */
 .driver-popover.jclaw-tour .jclaw-tour-progress {
   margin-right: auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--fg-muted);
   letter-spacing: 0.01em;
 }
@@ -101,7 +101,7 @@
   border: 0;
   border-radius: 8px;
   padding: 7px 14px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
   text-shadow: none;
   cursor: pointer;
@@ -136,7 +136,7 @@
   border: 0;
   border-radius: 8px;
   padding: 7px 14px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
   text-shadow: none;
   cursor: pointer;
@@ -225,14 +225,14 @@
 
 .jclaw-tour-intro [data-slot="dialog-title"] {
   color: var(--fg-strong);
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
 
 .jclaw-tour-intro [data-slot="dialog-description"] {
   color: var(--fg-primary);
-  font-size: 13.5px;
+  font-size: 0.84375rem;
   line-height: 1.55;
 }
 
@@ -242,7 +242,7 @@
   border: 0;
   border-radius: 8px;
   padding: 7px 14px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
   transition: background-color 120ms;
 }

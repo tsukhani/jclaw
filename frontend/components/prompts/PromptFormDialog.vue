@@ -118,7 +118,7 @@ async function save() {
             class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden resize-y"
           />
         </label>
-        <p class="text-[11px] text-fg-muted">
+        <p class="text-xs text-fg-muted">
           The prompt, category, and tags are generated from this — you can edit them all before saving.
         </p>
         <p

@@ -245,7 +245,7 @@ onUnmounted(() => stopImagegenLocalPolling())
 
     <!-- Active-backend status line. -->
     <div
-      class="px-3 py-2 text-[11px] border"
+      class="px-3 py-2 text-xs border"
       :class="imagegenEnabled
         ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
         : 'bg-muted border-border text-fg-muted'"
@@ -539,7 +539,7 @@ onUnmounted(() => stopImagegenLocalPolling())
           <!-- Empty-state hint when discovery returned nothing (no API key set, or a transient error). -->
           <div
             v-if="imagegenProvider === 'replicate' && imagegenModelsStatus !== 'pending' && !imagegenModels?.length"
-            class="border-t border-border px-4 py-2 text-[11px] text-fg-muted"
+            class="border-t border-border px-4 py-2 text-xs text-fg-muted"
           >
             No models discovered — set a Replicate API key above, then refresh.
           </div>
@@ -593,14 +593,14 @@ onUnmounted(() => stopImagegenLocalPolling())
           <!-- PROBING — the first run installs the Python image deps. -->
           <div
             v-if="imageCapState === 'PROBING'"
-            class="px-4 py-2.5 text-[11px] text-fg-muted"
+            class="px-4 py-2.5 text-xs text-fg-muted"
           >
             Detecting GPU capability… the first run installs the Python image deps and can take a few minutes.
           </div>
           <!-- ERROR — probe failed. -->
           <div
             v-else-if="imageCapState === 'ERROR'"
-            class="px-4 py-2.5 text-[11px] text-rose-700 dark:text-rose-400"
+            class="px-4 py-2.5 text-xs text-rose-700 dark:text-rose-400"
           >
             {{ imageCapability?.error ?? 'Capability probe failed.' }}
           </div>
@@ -612,7 +612,7 @@ onUnmounted(() => stopImagegenLocalPolling())
             </div>
             <div
               v-if="imageLocalUnsupported"
-              class="px-4 pb-2 text-[11px] text-amber-700 dark:text-amber-400"
+              class="px-4 pb-2 text-xs text-amber-700 dark:text-amber-400"
             >
               This machine can't run local image generation — {{ imageCapability.capability.reason }}. Use a cloud provider instead.
             </div>
@@ -625,7 +625,7 @@ onUnmounted(() => stopImagegenLocalPolling())
           >
             <div
               v-if="!fluxUvAvailable"
-              class="px-4 py-2.5 text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50/50 dark:bg-amber-900/15 border-b border-amber-200 dark:border-amber-800/50"
+              class="px-4 py-2.5 text-xs text-amber-800 dark:text-amber-300 bg-amber-50/50 dark:bg-amber-900/15 border-b border-amber-200 dark:border-amber-800/50"
             >
               {{ imagegenLocalState?.uvReason || 'uv is required to run the local Flux sidecar.' }}
               Install uv from astral.sh/uv and restart jclaw.
@@ -635,7 +635,7 @@ onUnmounted(() => stopImagegenLocalPolling())
                 <div class="text-sm font-mono text-fg-strong truncate">
                   {{ imagegenLocalState?.model }}
                 </div>
-                <div class="text-[11px] text-fg-muted">
+                <div class="text-xs text-fg-muted">
                   <template v-if="fluxModelStatus === 'AVAILABLE'">
                     Ready — weights downloaded.
                   </template>
@@ -679,7 +679,7 @@ onUnmounted(() => stopImagegenLocalPolling())
             </div>
             <div
               v-if="fluxModelStatus === 'ERROR' && imagegenLocalState?.error"
-              class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+              class="px-4 pb-2.5 -mt-1 text-xs text-red-700 dark:text-red-400 break-words"
             >
               {{ imagegenLocalState.error }}
             </div>

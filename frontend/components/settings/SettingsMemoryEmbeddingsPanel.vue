@@ -363,7 +363,7 @@ async function saveSelection() {
               data-testid="memory-embedding-dimensions"
             >
           </label>
-          <p class="mt-1 text-[11px] text-fg-muted">
+          <p class="mt-1 text-xs text-fg-muted">
             Read from the model itself when you check it — a typed value that disagrees with the
             model cannot be detected at runtime.
           </p>
@@ -394,7 +394,7 @@ async function saveSelection() {
           </button>
           <span
             v-if="isDirty && !probe?.ok"
-            class="text-[11px] text-fg-muted"
+            class="text-xs text-fg-muted"
           >Check the model before saving.</span>
         </div>
       </div>

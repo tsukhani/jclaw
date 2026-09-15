@@ -1392,7 +1392,7 @@ function exportConversation() {
           </Teleport>
           <p
             v-if="!isEmptyChat"
-            class="mt-1.5 text-center text-[11px] text-fg-muted"
+            class="mt-1.5 text-center text-xs text-fg-muted"
           >
             LLMs can make mistakes. Double-check all responses.
           </p>
@@ -1461,7 +1461,7 @@ function exportConversation() {
    the alpha background against the surrounding surface. */
 .prose-chat code {
   padding: 0.15em 0.35em;
-  font-size: 0.875em;
+  font-size: max(0.875em, 0.75rem);
   font-family: ui-monospace, monospace;
   background: rgb(0,0,0,6%);
   color: #171717;

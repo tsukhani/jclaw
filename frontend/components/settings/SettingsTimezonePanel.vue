@@ -74,7 +74,7 @@ async function saveGeneralField(configKey: string, value: string) {
                 class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                 aria-hidden="true"
               />
-              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+              <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                 IANA timezone the assistant treats as the current wall-clock time in its system prompt. Defaults to the server's JVM zone when unset.
               </span>
             </span>

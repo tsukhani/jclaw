@@ -1661,7 +1661,7 @@ function zoneForTaskRender(task: Task): string | undefined {
 
                         <!-- JCLAW-457: always-present, collapsible grammar helper. Native
                          <details> keeps it space-conserving (closed by default) and a11y-friendly. -->
-                        <details class="text-[11px] text-fg-muted">
+                        <details class="text-xs text-fg-muted">
                           <summary class="cursor-pointer select-none hover:text-fg-strong transition-colors">
                             What can I put here?
                           </summary>

@@ -257,7 +257,7 @@ async function setVideoModel(value: string) {
 
     <!-- Active-path / fallback status -->
     <div
-      class="px-3 py-2 text-[11px] border"
+      class="px-3 py-2 text-xs border"
       :class="videoEnabled
         ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
         : 'bg-muted border-border text-fg-muted'"
@@ -476,13 +476,13 @@ async function setVideoModel(value: string) {
         </div>
         <p
           v-if="videoModelsError"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+          class="px-4 pb-2.5 -mt-1 text-xs text-amber-700 dark:text-amber-400"
         >
           Couldn't load video models from {{ videoProvider }}: {{ videoModelsError }}
         </p>
         <p
           v-else-if="!videoModelsLoading && videoModelOptions.length === 0"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+          class="px-4 pb-2.5 -mt-1 text-xs text-fg-muted"
         >
           No video-capable models found on {{ videoProvider }}. {{ videoProvider === 'vllm'
             ? 'Make sure vLLM is serving a model that accepts video input.'
@@ -500,7 +500,7 @@ async function setVideoModel(value: string) {
     >
       <span class="flex-1">
         <span class="block text-sm font-medium text-fg-strong">Seconds per frame</span>
-        <span class="block text-[11px] text-fg-muted mt-0.5">
+        <span class="block text-xs text-fg-muted mt-0.5">
           Sampling density — grab one frame per this many seconds of video (1–60). Lower means more
           frames, finer detail, higher cost. This is what densifies <span class="text-fg-muted">short</span>
           clips, which otherwise floor at 2 frames; the ceiling below caps long ones.
@@ -526,7 +526,7 @@ async function setVideoModel(value: string) {
     >
       <span class="flex-1">
         <span class="block text-sm font-medium text-fg-strong">Max frames per video</span>
-        <span class="block text-[11px] text-fg-muted mt-0.5">
+        <span class="block text-xs text-fg-muted mt-0.5">
           Hard ceiling on how many frames are ever extracted from one video (2–32), regardless of
           length. A long clip is sampled at the density above up to this cap; raising it lets long
           videos be sampled more finely.

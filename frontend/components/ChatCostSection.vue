@@ -1822,7 +1822,7 @@ defineExpose({ refresh })
       <div
         v-if="costTooltipVisible"
         :style="{ bottom: costTooltipBottom + 'px', right: costTooltipRight + 'px' }"
-        class="fixed z-50 w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none"
+        class="fixed z-50 w-64 px-2.5 py-2 bg-muted border border-input text-xs text-fg-muted leading-relaxed shadow-xl pointer-events-none"
         role="tooltip"
         data-testid="cost-info-tooltip"
       >

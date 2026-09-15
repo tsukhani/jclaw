@@ -201,7 +201,7 @@ async function saveSelection() {
           </p>
           <p
             v-else
-            class="mt-1 text-[11px] text-fg-muted"
+            class="mt-1 text-xs text-fg-muted"
           >
             A small instruct model is enough — it only has to return the shortlist in a new order.
           </p>
@@ -219,7 +219,7 @@ async function saveSelection() {
           </button>
           <span
             v-if="incomplete"
-            class="text-[11px] text-amber-700 dark:text-amber-400"
+            class="text-xs text-amber-700 dark:text-amber-400"
             data-testid="memory-rerank-incomplete"
           >Reranking stays off until a provider and model are saved.</span>
         </div>

@@ -261,7 +261,7 @@ async function deleteApp(app: AppEntry) {
             Cancel
           </button>
         </div>
-        <p class="text-[11px] text-fg-muted">
+        <p class="text-xs text-fg-muted">
           Hands the changes to the <span class="font-mono">app-creator</span> skill in Chat, which
           updates <span class="font-mono">public/apps/{{ updatingApp.id }}/</span> and bumps its version. Review + send it there.
         </p>
@@ -363,7 +363,7 @@ async function deleteApp(app: AppEntry) {
             Cancel
           </button>
         </div>
-        <p class="text-[11px] text-fg-muted">
+        <p class="text-xs text-fg-muted">
           Hands your description to the <span class="font-mono">app-creator</span> skill in Chat,
           which builds the app into <span class="font-mono">public/apps/</span>. Review + send it there.
         </p>

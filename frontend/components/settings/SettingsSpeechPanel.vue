@@ -210,7 +210,7 @@ onUnmounted(() => stopTtsPolling())
     </p>
 
     <!-- Active-engine status line. -->
-    <div class="px-3 py-2 text-[11px] border bg-muted border-border text-fg-muted">
+    <div class="px-3 py-2 text-xs border bg-muted border-border text-fg-muted">
       <template v-if="ttsStateLoading">
         Checking speech engines…
       </template>
@@ -423,7 +423,7 @@ onUnmounted(() => stopTtsPolling())
         </p>
         <p
           v-else-if="!ttsStateLoading && supportsCloning"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+          class="px-4 pb-2.5 -mt-1 text-xs text-fg-muted"
         >
           A few seconds of clean speech works best — this model clones the speaker
           rather than offering named voices. WAV, MP3, FLAC, M4A or OGG, under 10&nbsp;MB.
@@ -454,13 +454,13 @@ onUnmounted(() => stopTtsPolling())
             :disabled="saving"
             @change="setIdleTimeout(($event.target as HTMLInputElement).value)"
           >
-          <span class="text-[11px] text-fg-muted">
+          <span class="text-xs text-fg-muted">
             minutes idle before the model unloads — 0 never unloads
           </span>
         </div>
         <p
           v-if="selectedEngine === 'sidecar'"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+          class="px-4 pb-2.5 -mt-1 text-xs text-fg-muted"
         >
           Longer keeps the first reply fast but holds the model in RAM
           (Chatterbox is ~3&nbsp;GB); shorter frees memory but makes the next
@@ -469,7 +469,7 @@ onUnmounted(() => stopTtsPolling())
         </p>
         <p
           v-if="selectedEngine === 'sidecar'"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+          class="px-4 pb-2.5 -mt-1 text-xs text-fg-muted"
         >
           Sidecar weights download automatically from Hugging Face on first read-aloud (needs
           <span class="font-mono">uv</span> on PATH). Qwen3-TTS supports voice cloning and is
@@ -477,7 +477,7 @@ onUnmounted(() => stopTtsPolling())
         </p>
         <p
           v-else
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+          class="px-4 pb-2.5 -mt-1 text-xs text-fg-muted"
         >
           Runs in-process via sherpa-onnx — no Python, no sidecar. The voice downloads once (button
           above, or automatically on first read-aloud) and then synthesizes on CPU. Piper is tiny

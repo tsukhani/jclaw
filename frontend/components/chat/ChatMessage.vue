@@ -395,7 +395,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
              marker at the SYSTEM-role render path above. -->
         <div
           v-if="msg.truncated"
-          class="flex items-center gap-1.5 mt-1.5 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded bg-amber-50/50 dark:bg-amber-950/20"
+          class="flex items-center gap-1.5 mt-1.5 px-2 py-1 text-xs text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded bg-amber-50/50 dark:bg-amber-950/20"
           data-testid="truncated-marker"
         >
           <ExclamationTriangleIcon

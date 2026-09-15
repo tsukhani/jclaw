@@ -83,7 +83,7 @@ function subagentAnnounceTruncated(m: Message): boolean {
         <!-- eslint-enable vue/no-v-html -->
         <div
           v-if="subagentAnnounceTruncated(msg)"
-          class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-400 border-t border-neutral-200 dark:border-neutral-700 bg-amber-50/50 dark:bg-amber-950/20"
+          class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-400 border-t border-neutral-200 dark:border-neutral-700 bg-amber-50/50 dark:bg-amber-950/20"
           data-testid="truncated-marker"
         >
           <ExclamationTriangleIcon

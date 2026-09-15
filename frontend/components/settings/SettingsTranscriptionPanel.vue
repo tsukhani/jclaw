@@ -331,7 +331,7 @@ onUnmounted(() => stopTranscriptionPolling())
 
     <!-- Active-backend status line. -->
     <div
-      class="px-3 py-2 text-[11px] border"
+      class="px-3 py-2 text-xs border"
       :class="transcriptionEnabled
         ? 'bg-emerald-50/50 dark:bg-emerald-900/15 border-emerald-200 dark:border-emerald-800/50 text-emerald-800 dark:text-emerald-300'
         : 'bg-muted border-border text-fg-muted'"
@@ -373,7 +373,7 @@ onUnmounted(() => stopTranscriptionPolling())
       <template v-if="transcriptionEnabled">
         <div
           v-if="transcriptionState && !transcriptionState.ffmpegAvailable && selectedTranscriptionProvider === 'whisper-local'"
-          class="border-t border-border px-4 py-2 bg-amber-50 dark:bg-amber-900/20 text-[11px] text-amber-800 dark:text-amber-300"
+          class="border-t border-border px-4 py-2 bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-800 dark:text-amber-300"
         >
           ⚠ <span class="font-mono">ffmpeg</span> is not on PATH. The self-hosted Whisper backend
           needs ffmpeg to convert audio attachments to PCM before inference.
@@ -544,7 +544,7 @@ onUnmounted(() => stopTranscriptionPolling())
           </div>
           <div
             v-if="(selectedLocalModelStatus?.status === 'ERROR' || selectedLocalModelStatus?.status === 'UNAVAILABLE') && selectedLocalModelStatus?.error"
-            class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+            class="px-4 pb-2.5 -mt-1 text-xs text-red-700 dark:text-red-400 break-words"
           >
             {{ selectedLocalModelStatus.error }}
           </div>
@@ -572,7 +572,7 @@ onUnmounted(() => stopTranscriptionPolling())
               <option value="gpt-4o-mini-transcribe" />
             </datalist>
           </div>
-          <p class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted">
+          <p class="px-4 pb-2.5 -mt-1 text-xs text-fg-muted">
             The model on {{ selectedTranscriptionProvider }}'s
             <span class="font-mono">/audio/transcriptions</span> endpoint. Leave blank for
             <span class="font-mono">whisper-1</span>. Common options:
@@ -604,7 +604,7 @@ onUnmounted(() => stopTranscriptionPolling())
         </button>
         <span class="text-[11px] text-fg-muted">{{ diarizationEnabled ? 'on' : 'off' }}</span>
       </div>
-      <div class="px-4 pt-2.5 text-[11px] text-fg-muted">
+      <div class="px-4 pt-2.5 text-xs text-fg-muted">
         Who-said-what transcripts (the diarize-audio tool) come from an
         <span class="font-medium">audio-capable</span> chat model (cloud or local) — the recording
         is sent with a verbatim-diarization prompt — or from the fully on-device
@@ -767,7 +767,7 @@ onUnmounted(() => stopTranscriptionPolling())
           </div>
           <p
             v-if="diarizationAudioModels.length === 0"
-            class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+            class="px-4 pb-2.5 -mt-1 text-xs text-fg-muted"
           >
             No audio-capable models are configured for this provider. Add one under
             <span class="text-fg-muted">LLM Providers</span> above (models with audio input
@@ -775,7 +775,7 @@ onUnmounted(() => stopTranscriptionPolling())
           </p>
           <p
             v-if="diarizationModelOrphaned"
-            class="px-4 pb-2.5 -mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+            class="px-4 pb-2.5 -mt-1 text-xs text-amber-700 dark:text-amber-400"
           >
             The saved model “{{ diarizationModel }}” is not marked audio-capable — pick one
             from the list so recordings can actually be heard.
@@ -826,7 +826,7 @@ onUnmounted(() => stopTranscriptionPolling())
           </div>
           <div
             v-if="diarizerModelStatus?.status === 'ERROR' && diarizerModelStatus?.error"
-            class="px-4 pb-2 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+            class="px-4 pb-2 -mt-1 text-xs text-red-700 dark:text-red-400 break-words"
           >
             {{ diarizerModelStatus.error }}
           </div>
@@ -886,11 +886,11 @@ onUnmounted(() => stopTranscriptionPolling())
           </div>
           <div
             v-if="emotionModelStatus?.status === 'ERROR' && emotionModelStatus?.error"
-            class="px-4 pb-2 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+            class="px-4 pb-2 -mt-1 text-xs text-red-700 dark:text-red-400 break-words"
           >
             {{ emotionModelStatus.error }}
           </div>
-          <p class="px-4 pb-2.5 pt-1 text-[11px] text-fg-muted">
+          <p class="px-4 pb-2.5 pt-1 text-xs text-fg-muted">
             On-device diarization runs
             <span class="font-mono">pyannote/speaker-diarization-community-1</span> (gated — needs
             <span class="font-mono">uv</span> and a Hugging Face token, shared with
