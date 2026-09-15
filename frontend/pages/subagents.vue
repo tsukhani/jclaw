@@ -468,7 +468,7 @@ function closePeek() {
              condensing doesn't leak a space before the comma. -->
         Runs appear here when an agent delegates part of a task to a child agent — via the spawn tool or a <NuxtLink
           to="/chat"
-          class="font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400"
+          class="font-medium text-emerald-700 underline underline-offset-2 hover:decoration-2 dark:text-emerald-400"
         >/subagent command in chat</NuxtLink>. Each run's status, transcript, and outcome shows up in this list.
       </p>
     </section>

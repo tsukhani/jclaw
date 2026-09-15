@@ -683,7 +683,7 @@ const pinnedColumns = columns.filter(c => c.id !== 'select')
              otherwise show as a visible gap before the comma. -->
         Start a <NuxtLink
           to="/chat"
-          class="font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400"
+          class="font-medium text-emerald-700 underline underline-offset-2 hover:decoration-2 dark:text-emerald-400"
         >new chat</NuxtLink>,
         send a message to one of your bound Telegram bots, or hook up another channel —
         every back-and-forth shows up here.

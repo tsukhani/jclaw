@@ -96,7 +96,7 @@ describe('default layout — version dot signals an available update', () => {
     await flushPromises()
 
     // An update the operator cannot reach is not the useful thing to report.
-    expect(layout!.find('.bg-danger').exists()).toBe(true)
+    expect(layout!.find('.border-danger').exists()).toBe(true)
     expect(layout!.find(MAINTENANCE_LINK).exists()).toBe(false)
   })
 

@@ -66,7 +66,7 @@ interface PillDef {
    *  have an LLM-API-level toggle the way thinking does. */
   interactive: boolean
   /** True when the pill is in a locked-on state (alwaysThinks pure
-   *  reasoners). Triggers the darker violet shade + filled bulb so the
+   *  reasoners). Triggers the darker shade and a non-interactive span so the
    *  user can distinguish "always-on" from a regular "on" at a glance. */
   locked: boolean
 }
@@ -197,7 +197,7 @@ function tooltip(p: PillDef): string {
       >
         <component
           :is="p.icon"
-          :class="iconCls"
+          :class="[iconCls, p.enabled ? 'fill-current' : '']"
           aria-hidden="true"
         />
         <span>{{ p.label }}</span>

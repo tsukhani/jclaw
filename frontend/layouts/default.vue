@@ -561,13 +561,15 @@ const navGroups: NavGroup[] = [
               :title="versionDotTitle"
               :aria-label="versionDotTitle"
             >
-              <span class="block w-2.5 h-2.5 rounded-full bg-warning" />
+              <span class="block w-2.5 h-2.5 rotate-45 rounded-[2px] bg-warning" />
             </NuxtLink>
             <span
               v-else
+              role="img"
               class="w-2.5 h-2.5 rounded-full transition-colors shrink-0"
-              :class="apiOnline ? 'bg-ok' : 'bg-danger'"
+              :class="apiOnline ? 'bg-ok' : 'border-2 border-danger'"
               :title="versionDotTitle"
+              :aria-label="versionDotTitle"
             />
           </div>
         </div>
@@ -623,13 +625,15 @@ const navGroups: NavGroup[] = [
           :title="`${versionDotTitle}${apiVersion ? ` — running v${apiVersion}` : ''}`"
           :aria-label="versionDotTitle"
         >
-          <span class="block w-2.5 h-2.5 rounded-full bg-warning" />
+          <span class="block w-2.5 h-2.5 rotate-45 rounded-[2px] bg-warning" />
         </NuxtLink>
         <span
           v-else
+          role="img"
           class="w-2.5 h-2.5 rounded-full transition-colors"
-          :class="apiOnline ? 'bg-ok' : 'bg-danger'"
+          :class="apiOnline ? 'bg-ok' : 'border-2 border-danger'"
           :title="`${versionDotTitle}${apiVersion ? ` — v${apiVersion}` : ''}`"
+          :aria-label="versionDotTitle"
         />
         <span
           v-if="frameworkVersionMatch !== 'unknown'"

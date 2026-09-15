@@ -392,7 +392,7 @@ const statusColors: Record<string, string> = {
           Open
           <NuxtLink
             to="/chat"
-            class="font-medium text-emerald-700 dark:text-emerald-400 underline-offset-2 hover:underline"
+            class="font-medium text-emerald-700 dark:text-emerald-400 underline underline-offset-2 hover:decoration-2"
           >
             a chat
           </NuxtLink>

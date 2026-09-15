@@ -33,13 +33,14 @@ const statusColors: Record<string, string> = {
   CANCELLED: 'text-fg-muted',
 }
 // Solid block fills for actual runs (the text statusColors are too faint as a
-// filled background). Falls back to neutral for any unmapped status.
+// filled background). Falls back to neutral for any unmapped status. The border
+// style repeats the status for readers who cannot tell the fills apart (1.4.1).
 const statusBg: Record<string, string> = {
   RUNNING: 'bg-blue-700 border-blue-600 dark:bg-blue-500/70 dark:border-blue-400',
-  LOST: 'bg-orange-700 border-orange-600 dark:bg-orange-500/70 dark:border-orange-400',
+  LOST: 'bg-orange-700 border-orange-600 border-dotted dark:bg-orange-500/70 dark:border-orange-400',
   COMPLETED: 'bg-green-700 border-green-600 dark:bg-green-600/60 dark:border-green-500',
-  FAILED: 'bg-red-700 border-red-600 dark:bg-red-500/70 dark:border-red-400',
-  CANCELLED: 'bg-neutral-700 border-neutral-600 dark:bg-neutral-600/60 dark:border-neutral-500',
+  FAILED: 'bg-red-700 border-red-600 border-dashed dark:bg-red-500/70 dark:border-red-400',
+  CANCELLED: 'bg-neutral-700 border-neutral-600 line-through dark:bg-neutral-600/60 dark:border-neutral-500',
 }
 
 // 1s tick drives the live "now" line + RUNNING run-block growth.
@@ -412,10 +413,11 @@ function fmtRunTime(run: RecentRunView): string {
                 fire.isPast || fire.taskPaused ? 'text-fg-muted' : (statusColors[fire.taskStatus] || 'text-fg-muted'),
                 fire.taskPaused ? 'line-through' : '',
               ]"
-              :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })}${fire.taskPaused ? ' · paused' : ''}`"
+              :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })} · ${fire.taskStatus.toLowerCase()}${fire.taskPaused ? ' · paused' : ''}`"
             >
               <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>
               <span class="ml-1">{{ fire.taskName }}</span>
+              <span class="sr-only">, {{ fire.taskStatus.toLowerCase() }}{{ fire.taskPaused ? ', paused' : '' }}</span>
             </li>
             <li v-if="cell.fires.length > 4">
               <button
@@ -494,6 +496,7 @@ function fmtRunTime(run: RecentRunView): string {
             :class="statusBg[blk.run.status ?? ''] ?? 'bg-neutral-700 border-neutral-600 dark:bg-neutral-600/60 dark:border-neutral-500'"
             :style="{ top: `${blk.topPct}%`, height: `${blk.heightPct}%`, ...laneStyle(blk) }"
             :title="`${blk.run.taskName ?? 'run'} · ${blk.run.status} · ${fmtRunTime(blk.run)}`"
+            :aria-label="`${blk.run.taskName ?? 'run'}, ${(blk.run.status ?? '').toLowerCase()}, ${fmtRunTime(blk.run)}`"
             @click="emit('open-run', blk.run)"
           >
             <span class="font-mono">{{ blk.run.taskName ?? 'run' }}</span>
