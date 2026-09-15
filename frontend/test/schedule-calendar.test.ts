@@ -46,6 +46,15 @@ describe('ScheduleCalendar (JCLAW-440)', () => {
     expect(text).toContain('daily-briefing')
   })
 
+  it('marks a non-active fire with a status glyph, not colour alone', async () => {
+    const c = await mountSuspended(ScheduleCalendar, { props: { items: items() } })
+    const chips = c.findAll('li').filter(li => li.find('.font-mono').exists())
+    const pending = chips.find(li => li.text().includes('pay-rent'))
+    const active = chips.find(li => li.text().includes('daily-briefing'))
+    expect(pending?.find('svg[aria-hidden="true"]').exists()).toBe(true)
+    expect(active?.find('svg').exists()).toBe(false)
+  })
+
   it('"+N more" drills into the day view for that cell', async () => {
     // Every 2 hours ⇒ 12 fires/day, well past the 4-per-cell month-grid cap.
     const busy = [{

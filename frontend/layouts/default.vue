@@ -75,6 +75,9 @@ const frameworkVersionMatch = computed<'match' | 'mismatch' | 'unknown'>(() => {
   if (!frameworkVersion.value || !expectedFrameworkVersion.value) return 'unknown'
   return frameworkVersion.value === expectedFrameworkVersion.value ? 'match' : 'mismatch'
 })
+const frameworkDotTitle = computed(() => frameworkVersionMatch.value === 'match'
+  ? `Framework matches .play-version (v${expectedFrameworkVersion.value})`
+  : `Framework drift: running v${frameworkVersion.value}, .play-version expects v${expectedFrameworkVersion.value}`)
 const apiOnline = ref(false)
 // Plain http caps a browser at 6 connections per host and each tab's /api/events stream holds
 // one, so a 7th tab's probe times out; JClaw's https port serves HTTP/2, which has no such cap.
@@ -586,8 +589,8 @@ const navGroups: NavGroup[] = [
               <span class="text-xs text-fg-muted font-mono uppercase tracking-wider w-[5.5rem] shrink-0">Framework</span>
               <span class="text-sm text-fg-primary font-mono truncate">{{ frameworkVersion ? `v${frameworkVersion}` : '...' }}</span>
             </div>
-            <!-- Match dot: green when running fork == .play-version,
-                 amber when drift, hidden when the expected version
+            <!-- Match dot: green circle when running fork == .play-version,
+                 amber diamond when drift, hidden when the expected version
                  isn't known (dist install, file missing). Tooltip
                  spells out the comparison so an operator hovering an
                  amber dot can read the actual delta without digging.
@@ -598,11 +601,11 @@ const navGroups: NavGroup[] = [
                  sidebar, under WCAG 1.4.11's 3:1 for a status dot. -->
             <span
               v-if="frameworkVersionMatch !== 'unknown'"
-              class="w-2.5 h-2.5 rounded-full shrink-0"
-              :class="frameworkVersionMatch === 'match' ? 'bg-ok' : 'bg-warning'"
-              :title="frameworkVersionMatch === 'match'
-                ? `Framework matches .play-version (${expectedFrameworkVersion})`
-                : `Framework drift: running v${frameworkVersion}, .play-version expects v${expectedFrameworkVersion}`"
+              role="img"
+              class="w-2.5 h-2.5 shrink-0"
+              :class="frameworkVersionMatch === 'match' ? 'rounded-full bg-ok' : 'rotate-45 rounded-[2px] bg-warning'"
+              :title="frameworkDotTitle"
+              :aria-label="frameworkDotTitle"
             />
           </div>
         </div>
@@ -637,11 +640,11 @@ const navGroups: NavGroup[] = [
         />
         <span
           v-if="frameworkVersionMatch !== 'unknown'"
-          class="w-2.5 h-2.5 rounded-full"
-          :class="frameworkVersionMatch === 'match' ? 'bg-ok' : 'bg-warning'"
-          :title="frameworkVersionMatch === 'match'
-            ? `Framework matches .play-version (v${expectedFrameworkVersion})`
-            : `Framework drift: running v${frameworkVersion}, .play-version expects v${expectedFrameworkVersion}`"
+          role="img"
+          class="w-2.5 h-2.5"
+          :class="frameworkVersionMatch === 'match' ? 'rounded-full bg-ok' : 'rotate-45 rounded-[2px] bg-warning'"
+          :title="frameworkDotTitle"
+          :aria-label="frameworkDotTitle"
         />
       </div>
 
@@ -732,7 +735,7 @@ const navGroups: NavGroup[] = [
             @click="paletteOpen = true"
           >
             <span class="truncate">Search...</span>
-            <kbd class="max-sm:hidden shrink-0 px-1.5 py-0.5 bg-transparent border border-fg-muted/40 rounded text-[10px] font-mono tracking-widest">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
+            <kbd class="max-sm:hidden shrink-0 px-1.5 py-0.5 bg-transparent border border-fg-muted/40 rounded text-xs font-mono tracking-widest">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
           </button>
           <div class="flex items-center gap-0.5 p-0.5 border border-fg-muted/40 rounded-full">
             <button

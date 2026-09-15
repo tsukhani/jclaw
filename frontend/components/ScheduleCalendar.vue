@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import type { Task, RecentRunView } from '~/types/api'
 import type { Lane, ProjectedFire } from '~/utils/calendar'
-import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
+import type { Component } from 'vue'
+import {
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  ExclamationCircleIcon,
+  ExclamationTriangleIcon,
+  PlayIcon,
+  XMarkIcon,
+} from '@heroicons/vue/24/outline'
 
 /**
  * Shared schedule calendar (JCLAW-440), extracted from the Tasks page so the
@@ -31,6 +41,16 @@ const statusColors: Record<string, string> = {
   COMPLETED: 'text-green-700 dark:text-green-400',
   FAILED: 'text-red-700 dark:text-red-400',
   CANCELLED: 'text-fg-muted',
+}
+// Status → glyph (month-grid fires), so status survives without the colour (1.4.1).
+// ACTIVE is the resting state and carries none.
+const statusIcons: Record<string, Component> = {
+  PENDING: ClockIcon,
+  RUNNING: PlayIcon,
+  LOST: ExclamationTriangleIcon,
+  COMPLETED: CheckIcon,
+  FAILED: ExclamationCircleIcon,
+  CANCELLED: XMarkIcon,
 }
 // Solid block fills for actual runs (the text statusColors are too faint as a
 // filled background). Falls back to neutral for any unmapped status. The border
@@ -415,6 +435,12 @@ function fmtRunTime(run: RecentRunView): string {
               ]"
               :title="`${fire.taskName} · ${fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true })} · ${fire.taskStatus.toLowerCase()}${fire.taskPaused ? ' · paused' : ''}`"
             >
+              <component
+                :is="statusIcons[fire.taskStatus]"
+                v-if="statusIcons[fire.taskStatus]"
+                class="inline-block w-3 h-3 mr-0.5 align-[-2px]"
+                aria-hidden="true"
+              />
               <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>
               <span class="ml-1">{{ fire.taskName }}</span>
               <span class="sr-only">, {{ fire.taskStatus.toLowerCase() }}{{ fire.taskPaused ? ', paused' : '' }}</span>

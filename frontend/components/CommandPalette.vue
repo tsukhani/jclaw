@@ -198,16 +198,16 @@ function toggleTheme() {
       class="flex shrink-0 items-center gap-4 border-t px-3 py-2 text-xs text-fg-muted"
     >
       <span class="flex items-center gap-1.5">
-        <kbd class="inline-flex size-5 items-center justify-center rounded border bg-muted font-sans text-[10px]">↑</kbd>
-        <kbd class="inline-flex size-5 items-center justify-center rounded border bg-muted font-sans text-[10px]">↓</kbd>
+        <kbd class="inline-flex size-5 items-center justify-center rounded border bg-muted font-sans text-xs">↑</kbd>
+        <kbd class="inline-flex size-5 items-center justify-center rounded border bg-muted font-sans text-xs">↓</kbd>
         navigate
       </span>
       <span class="flex items-center gap-1.5">
-        <kbd class="inline-flex size-5 items-center justify-center rounded border bg-muted font-sans text-[10px]">↵</kbd>
+        <kbd class="inline-flex size-5 items-center justify-center rounded border bg-muted font-sans text-xs">↵</kbd>
         open
       </span>
       <span class="ml-auto flex items-center gap-1.5">
-        <kbd class="inline-flex h-5 items-center justify-center rounded border bg-muted px-1.5 font-sans text-[10px]">esc</kbd>
+        <kbd class="inline-flex h-5 items-center justify-center rounded border bg-muted px-1.5 font-sans text-xs">esc</kbd>
         close
       </span>
     </div>

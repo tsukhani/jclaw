@@ -390,17 +390,30 @@ const plot = computed(() => {
         </template>
       </g>
 
-      <!-- histogram bars -->
-      <rect
+      <!-- histogram bars: the 25% fill measures ~1.3–1.8:1, so a full-colour top edge carries 1.4.11's 3:1 -->
+      <template
         v-for="(b, bi) in plot.bars"
         :key="`bar-${bi}`"
-        :x="b.x1"
-        :y="b.y"
-        :width="Math.max(0.5, b.x2 - b.x1 - 1)"
-        :height="plot.baseline - b.y"
-        :fill="plot.color"
-        :fill-opacity="hoveredBarIdx === bi ? 0.5 : 0.25"
-      />
+      >
+        <rect
+          :x="b.x1"
+          :y="b.y"
+          :width="Math.max(0.5, b.x2 - b.x1 - 1)"
+          :height="plot.baseline - b.y"
+          :fill="plot.color"
+          :fill-opacity="hoveredBarIdx === bi ? 0.5 : 0.25"
+        />
+        <line
+          v-if="plot.baseline - b.y > 0"
+          data-testid="bar-edge"
+          :x1="b.x1"
+          :x2="b.x1 + Math.max(0.5, b.x2 - b.x1 - 1)"
+          :y1="b.y + 0.75"
+          :y2="b.y + 0.75"
+          :stroke="plot.color"
+          stroke-width="1.5"
+        />
+      </template>
 
       <!-- smooth density curve -->
       <path
