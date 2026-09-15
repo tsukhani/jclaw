@@ -16,7 +16,7 @@ import java.util.List;
  *        <p>Two levels, because two different things are being measured. Within a group,
  *        any member counts: a corpus holding one fact three times has three correct
  *        retrievals, and scoring only the source would mark a paraphrase a miss and
- *        penalise exactly what dedup produces. Across groups, each one is a separate
+ *        penalize exactly what dedup produces. Across groups, each one is a separate
  *        thing the answer needs — which is what makes coverage measurable at all.
  *
  *        <p>A single-fact case is simply a case with one group, so the coverage metric

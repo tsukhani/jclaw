@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * <p>Config rows are writable at runtime; {@code application.conf} is not reachable from the
  * config table at all. So for a privileged key the conf value is the authority and a DB row may
  * only <em>tighten</em> it — the shape {@link AppInvokeLimits} already uses for app invoke caps,
- * generalised here because "tighten" means something different per key: a set intersects, a
+ * generalized here because "tighten" means something different per key: a set intersects, a
  * grant boolean can only be withdrawn, an approval policy can only get stricter, and a provider
  * base URL has no tighter form at all.
  *

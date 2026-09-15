@@ -59,7 +59,7 @@ public class AgentService {
      * Resolve a {@code provider:modelId} pair to its registered
      * {@link llm.LlmTypes.ModelInfo}. Empty when either id is null, the
      * provider isn't registered, or the model isn't in that provider's list.
-     * Centralises the {@code ProviderRegistry.get → models().stream().filter}
+     * Centralizes the {@code ProviderRegistry.get → models().stream().filter}
      * lookup shared by {@link #supportsVision}, {@link #normalizeThinkingMode},
      * and {@link #isProviderConfigured}.
      */
@@ -87,7 +87,7 @@ public class AgentService {
 
     /**
      * Six-argument variant with explicit control over workspace folder
-     * materialisation. {@link tools.SubagentSpawnTool#bootstrapChild} passes
+     * materialization. {@link tools.SubagentSpawnTool#bootstrapChild} passes
      * {@code createWorkspace=false} because subagents are delegates of their
      * parent agent — they inherit the parent's workspace via
      * {@link #workspacePath(String)}'s parent-chain walk and never need
@@ -102,7 +102,7 @@ public class AgentService {
      * @param modelId          model id the agent defaults to
      * @param thinkingMode     reasoning effort default; null clears the field
      * @param description      operator-supplied short description
-     * @param createWorkspace  when true, materialise the workspace folder
+     * @param createWorkspace  when true, materialize the workspace folder
      *                         (SOUL / IDENTITY / USER / BOOTSTRAP / AGENT
      *                         scaffolding); subagents pass false
      * @return the persisted Agent

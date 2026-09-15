@@ -209,7 +209,7 @@ public class ApiChatController extends Controller {
         });
     }
 
-    /** Renders a 400 and throws for a pick the provider or model cannot honour; returns for a good one. */
+    /** Renders a 400 and throws for a pick the provider or model cannot honor; returns for a good one. */
     private static void rejectInvalidOverrides(Agent agent, PendingOverrides o) {
         if (o.modelProvider() != null) {
             var provider = ProviderRegistry.get(o.modelProvider());
@@ -579,7 +579,7 @@ public class ApiChatController extends Controller {
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
                 },
-                // onCancel: web cancellation is signalled via SSE close, not via
+                // onCancel: web cancellation is signaled via SSE close, not via
                 // ConversationQueue.cancellationFlag (the only flag /stop flips),
                 // so the runner-level onCancel hook has no transport frame to send.
                 // It still fires on the SSE-close path (where onComplete/onError do

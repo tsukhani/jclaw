@@ -146,7 +146,7 @@ public final class LlmTypes {
             double costUsd,
             ProviderMetrics providerMetrics
     ) {
-        /** Normalise null to {@link ProviderMetrics#EMPTY} so readers never null-check. */
+        /** Normalize null to {@link ProviderMetrics#EMPTY} so readers never null-check. */
         public Usage {
             providerMetrics = providerMetrics == null ? ProviderMetrics.EMPTY : providerMetrics;
         }

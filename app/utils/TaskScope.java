@@ -23,7 +23,7 @@ import java.util.concurrent.Future;
  * API in JDK 25 (JEP 505) and unusable here: the play1 fork's ECJ compiler has no
  * {@code --enable-preview} path at {@code java.source=25}, so it emits an unmarked
  * classfile where Gradle's javac emits a preview-marked one that the app JVM then
- * refuses to load. Revisit when structured concurrency finalises — JDK 26 at the
+ * refuses to load. Revisit when structured concurrency finalizes — JDK 26 at the
  * earliest. See JCLAW-1155 for the spike output.
  *
  * <p>Homogeneous by design: every task returns {@code T}. Forking tasks of differing
@@ -62,7 +62,7 @@ public final class TaskScope<T> implements AutoCloseable {
      * {@link #fork} future is safe to read with {@link Future#resultNow()}.
      *
      * @throws ExecutionException wrapping the first task failure; the siblings that
-     *                            were still running have been cancelled
+     *                            were still running have been canceled
      * @throws InterruptedException if the joining thread is interrupted while waiting
      * @throws IllegalStateException on a second call — the completion queue is already drained,
      *                               so it would park forever instead of failing
@@ -85,7 +85,7 @@ public final class TaskScope<T> implements AutoCloseable {
     @Override
     public void close() {
         cancelAll();
-        // Waits for the cancelled tasks to actually end, which is what makes the scope
+        // Waits for the canceled tasks to actually end, which is what makes the scope
         // structured; a task that swallows its interrupt blocks here, as it would under
         // StructuredTaskScope.
         pool.close();

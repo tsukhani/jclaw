@@ -384,7 +384,7 @@ public class DefaultConfigJob extends Job<Void> {
         // from the Java-literal defaults without touching existing content.
         // Since JCLAW-910 the repository ships NO workspace files — workspace/ is
         // untracked because everything under it is operator state — so on a fresh
-        // install THIS call is what materialises main's markdown, including the
+        // install THIS call is what materializes main's markdown, including the
         // default agent's shipped SOUL and IDENTITY. It also still covers a file
         // deleted from disk post-boot. Idempotent by construction: writeFile only
         // writes when the target is absent.

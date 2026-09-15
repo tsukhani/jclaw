@@ -679,7 +679,7 @@ public final class ToolCallLoopRunner {
     /** Nudge for a first call that stopped with no content: there are no tool results to point at. */
     private static final String ANSWER_NUDGE = "Write the full answer now as markdown. Keep any reasoning brief.";
 
-    /** Outcome of the synthesis retries: the content that answered, the cancelled-turn reply, or neither. */
+    /** Outcome of the synthesis retries: the content that answered, the canceled-turn reply, or neither. */
     record SynthesisRecovery(@Nullable String content, boolean truncated, @Nullable String cancelled) {
         static final SynthesisRecovery EMPTY = new SynthesisRecovery(null, false, null);
         static SynthesisRecovery answered(String content, @Nullable String finishReason) {
@@ -780,7 +780,7 @@ public final class ToolCallLoopRunner {
         return SynthesisRecovery.EMPTY;
     }
 
-    /** Waits for {@code acc}; returns the cancelled-turn reply when the operator stopped the turn, else null. */
+    /** Waits for {@code acc}; returns the canceled-turn reply when the operator stopped the turn, else null. */
     private static @Nullable String awaitOrCancel(StreamingTurnContext ctx, LlmProvider.StreamAccumulator acc,
                                                   String priorContent, int round) {
         try {

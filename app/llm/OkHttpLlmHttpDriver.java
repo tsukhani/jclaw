@@ -86,7 +86,7 @@ final class OkHttpLlmHttpDriver {
      * <p>{@code publishCancel} receives the abort for the in-flight call as soon as there is one
      * (JCLAW-1183). It is what lets a watcher on another thread release this one, which is
      * otherwise reachable only by interrupting it — barred here, because this thread's retry path
-     * writes to H2 and the JDK closes a file database's channel on interrupt. Cancelling surfaces
+     * writes to H2 and the JDK closes a file database's channel on interrupt. Canceling surfaces
      * as {@code onFailure}, so the await below unwinds through the ordinary path.
      */
     @SuppressWarnings("java:S107") // the SSE callback surface plus the cancel handle it publishes

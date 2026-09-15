@@ -449,11 +449,11 @@ public final class WorkspaceFiles {
      * agent. Throws on failure so the caller's transaction rolls the rename back
      * rather than leaving the entity renamed with a stranded directory. Freeing
      * the old name also closes the reuse-leak: a new agent taking it later
-     * materialises a fresh, empty workspace via {@link #createWorkspace}.
+     * materializes a fresh, empty workspace via {@link #createWorkspace}.
      */
     static void moveWorkspaceDirectory(@Nullable Path src, Path dest) {
         try {
-            if (src == null || !Files.exists(src)) return;   // workspace never materialised
+            if (src == null || !Files.exists(src)) return;   // workspace never materialized
             if (Files.exists(dest)) {
                 throw new IllegalStateException("workspace target already exists: " + dest);
             }

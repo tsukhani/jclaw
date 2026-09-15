@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /**
- * The Telegram behaviour keys, edited under Channel defaults on the Channels &gt; Telegram page,
+ * The Telegram behavior keys, edited under Channel defaults on the Channels &gt; Telegram page,
  * and the rules {@code ConfigService.setWithSideEffects} applies when one is written. The webhook
  * hardening keys ({@code telegram.webhook.*}) are read from application.conf and are not here.
  */

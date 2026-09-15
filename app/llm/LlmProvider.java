@@ -82,7 +82,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     private static final long RETRY_AFTER_MAX_SECONDS = 60;
 
     // OpenAI-compatible JSON field names used across request/response (de)serialization
-    // and chunk-usage augmentation. Centralised so a typo can't drift one call site
+    // and chunk-usage augmentation. Centralized so a typo can't drift one call site
     // off the wire shape without the compiler catching it.
     private static final String JSON_USAGE = "usage";
     private static final String JSON_MODEL = "model";

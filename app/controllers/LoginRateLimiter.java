@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * nor forces unbounded 600k-iteration PBKDF2 verifies (a CPU-exhaustion
  * amplifier). A successful login clears the source's counter immediately, so a
  * legitimate operator who eventually types the right password is never
- * penalised for earlier typos.
+ * penalized for earlier typos.
  *
  * <p>Single-JVM by design — mirrors {@link channels.TelegramWebhookRateLimiter}.
  * JClaw runs as one JVM, so an in-memory counter is the right granularity; a

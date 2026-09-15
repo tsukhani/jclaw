@@ -31,9 +31,9 @@ import java.util.concurrent.TimeUnit;
  * <ul>
  *   <li>{@code tailscale status --json} — preflight (is the node connected?) and to
  *       derive the public URL from {@code .Self.DNSName}.</li>
- *   <li>{@code tailscale funnel --bg --yes <port>} — start funnelling the local port
+ *   <li>{@code tailscale funnel --bg --yes <port>} — start funneling the local port
  *       (public listener defaults to 443; Funnel only allows 443/8443/10000).</li>
- *   <li>{@code tailscale funnel reset} — stop funnelling.</li>
+ *   <li>{@code tailscale funnel reset} — stop funneling.</li>
  * </ul>
  *
  * <p>The command runner is injectable ({@link Runner}) so the parsing and dispatch
@@ -105,14 +105,14 @@ public final class TailscaleFunnel {
      *  otherwise leave it running with nothing to tear it down. */
     private static volatile boolean funnelStartedHere = false;
 
-    /** Start funnelling {@code localPort} to the public internet (idempotent). */
+    /** Start funneling {@code localPort} to the public internet (idempotent). */
     public static boolean enable(int localPort) {
         boolean ok = enable(localPort, PROCESS_RUNNER);
         invalidateStatusCache();
         return ok;
     }
 
-    /** Stop funnelling (idempotent — safe even when nothing is configured). */
+    /** Stop funneling (idempotent — safe even when nothing is configured). */
     public static boolean disable() {
         boolean ok = disable(PROCESS_RUNNER);
         invalidateStatusCache();

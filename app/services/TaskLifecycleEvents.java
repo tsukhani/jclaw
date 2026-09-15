@@ -53,7 +53,7 @@ import java.util.Map;
  * </ul>
  *
  * <h2>Why a separate helper class</h2>
- * The {@code recordXxx} emit methods centralise the format of the
+ * The {@code recordXxx} emit methods centralize the format of the
  * {@code details} JSON payload (run id + duration on COMPLETED,
  * reason on FAILED, delivery spec on DELIVERED / DELIVERY_FAILED,
  * stale seconds on LOST) so consumers parsing the events for
