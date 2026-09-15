@@ -487,7 +487,7 @@ function closePeek() {
       v-if="!hasNoData"
       class="flex flex-wrap gap-3 mb-4"
     >
-      <div class="flex-1 min-w-[280px]">
+      <div class="flex-1 min-w-[280px] max-sm:min-w-0">
         <FilterBar
           ref="filterBar"
           storage-key="subagents"

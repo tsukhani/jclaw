@@ -113,9 +113,9 @@ const expanded = ref(false)
       <div
         v-for="entry in unmanaged"
         :key="entry.key"
-        class="px-4 py-2 flex items-center gap-3"
+        class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
       >
-        <span class="text-xs font-mono text-fg-muted w-64 shrink-0 truncate">{{ entry.key }}</span>
+        <span class="text-xs font-mono text-fg-muted w-64 max-sm:w-full shrink-0 truncate">{{ entry.key }}</span>
         <span class="flex-1 text-sm text-fg-muted font-mono truncate">{{ entry.value }}</span>
       </div>
     </div>

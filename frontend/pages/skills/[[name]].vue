@@ -1513,11 +1513,11 @@ function totalSkillCount(agentId: number) {
       </div>
 
       <div
-        class="flex gap-4"
+        class="flex max-sm:flex-col gap-4"
         style="min-height: 500px;"
       >
         <!-- File sidebar -->
-        <div class="w-52 shrink-0 bg-surface-elevated border border-border overflow-y-auto">
+        <div class="w-52 max-sm:w-full shrink-0 bg-surface-elevated border border-border overflow-y-auto">
           <div class="px-3 py-2 border-b border-border">
             <span class="text-[10px] font-medium text-fg-muted uppercase tracking-wider">Files</span>
           </div>
@@ -1531,8 +1531,8 @@ function totalSkillCount(agentId: number) {
         <!-- File editor -->
         <div class="flex-1 flex flex-col bg-surface-elevated border border-border min-w-0">
           <template v-if="activeFile">
-            <div class="px-4 py-2 border-b border-border flex items-center gap-2">
-              <span class="text-xs font-mono text-fg-muted">{{ activeFile }}</span>
+            <div class="px-4 py-2 border-b border-border flex max-sm:flex-wrap items-center gap-2">
+              <span class="text-xs font-mono text-fg-muted max-sm:min-w-0 max-sm:truncate">{{ activeFile }}</span>
               <span class="text-xs text-fg-muted">(read-only — edit via skill-creator)</span>
               <div
                 v-if="isMarkdownFile"

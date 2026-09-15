@@ -71,8 +71,8 @@ async function saveShellField(configKey: string, value: string) {
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
         <!-- Allowlist -->
-        <div class="px-4 py-2.5 flex items-start gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 pt-0.5">allowlist</span>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 pt-0.5">allowlist</span>
           <template v-if="editingShellField === 'allowlist'">
             <textarea
               v-model="shellAllowlistEdit"
@@ -118,8 +118,8 @@ async function saveShellField(configKey: string, value: string) {
           </template>
         </div>
         <!-- Default timeout -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">defaultTimeoutSeconds</span>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">defaultTimeoutSeconds</span>
           <template v-if="editingShellField === 'timeout'">
             <input
               v-model="shellTimeoutEdit"

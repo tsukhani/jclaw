@@ -143,8 +143,8 @@ async function saveSubagentModel(value: string) {
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-56 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0 flex items-center gap-1.5">
             maxDepth
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -200,8 +200,8 @@ async function saveSubagentModel(value: string) {
             </button>
           </template>
         </div>
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-56 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0 flex items-center gap-1.5">
             maxChildrenPerParent
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -259,8 +259,8 @@ async function saveSubagentModel(value: string) {
         </div>
         <!-- JCLAW-812: global default for subagent_spawn runTimeoutSeconds.
              A call-site value overrides; must be positive. -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-56 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0 flex items-center gap-1.5">
             defaultRunTimeoutSeconds
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -318,8 +318,8 @@ async function saveSubagentModel(value: string) {
         </div>
         <!-- JCLAW-812: global default for subagent_yield timeoutSeconds.
              A call-site value overrides; 0 disables the yield watchdog. -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-56 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0 flex items-center gap-1.5">
             defaultYieldTimeoutSeconds
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -377,8 +377,8 @@ async function saveSubagentModel(value: string) {
         </div>
         <!-- JCLAW-422: model subagents run on. Default (inherit) tracks the
              conversation's model; a specific value pins all fan-outs. -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-56 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0 flex items-center gap-1.5">
             model
             <span class="relative group/tip">
               <InformationCircleIcon

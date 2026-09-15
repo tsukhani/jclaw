@@ -38,8 +38,8 @@ async function saveChatField(configKey: string, value: string) {
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             maxToolRounds
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -95,8 +95,8 @@ async function saveChatField(configKey: string, value: string) {
             </button>
           </template>
         </div>
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             maxContextMessages
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -180,8 +180,8 @@ async function saveChatField(configKey: string, value: string) {
         class="divide-y divide-border border-t border-border"
       >
         <!-- chat.compactionReserveTokens -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-60 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">
             compactionReserveTokens
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -239,8 +239,8 @@ async function saveChatField(configKey: string, value: string) {
           </template>
         </div>
         <!-- chat.compactionMinTurns -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-60 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">
             compactionMinTurns
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -297,8 +297,8 @@ async function saveChatField(configKey: string, value: string) {
           </template>
         </div>
         <!-- chat.compactionKeepMessages -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-60 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">
             compactionKeepMessages
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -355,8 +355,8 @@ async function saveChatField(configKey: string, value: string) {
           </template>
         </div>
         <!-- jtokkit.safetyMultiplier.unmatched -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-60 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-60 max-sm:w-full shrink-0 flex items-center gap-1.5">
             jtokkit safety multiplier
             <span class="relative group/tip">
               <InformationCircleIcon

@@ -181,9 +181,9 @@ async function save(key: string, value: string) {
             v-for="field in group.fields"
             :key="field.key"
             :data-testid="`web-scrape-row-${labelOf(field)}`"
-            class="px-4 py-2.5 flex items-center gap-3"
+            class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
           >
-            <span class="text-xs font-mono text-fg-muted w-56 shrink-0 flex items-center gap-1.5">
+            <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0 flex items-center gap-1.5">
               {{ labelOf(field) }}
               <span class="relative group/tip">
                 <InformationCircleIcon

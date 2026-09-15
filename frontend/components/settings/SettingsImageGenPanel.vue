@@ -322,8 +322,8 @@ onUnmounted(() => stopImagegenLocalPolling())
               class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — set it below</span>
           </label>
-          <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Black Forest Labs API key</span>
+          <div class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Black Forest Labs API key</span>
             <template v-if="editingKey === 'provider.bfl.apiKey'">
               <input
                 v-model="editValue"
@@ -434,8 +434,8 @@ onUnmounted(() => stopImagegenLocalPolling())
               class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — set it below</span>
           </label>
-          <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Replicate API key</span>
+          <div class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Replicate API key</span>
             <template v-if="editingKey === 'provider.replicate.apiKey'">
               <input
                 v-model="editValue"
@@ -484,9 +484,9 @@ onUnmounted(() => stopImagegenLocalPolling())
                  Shown when Replicate is the active backend, mirroring the Self-Hosted download UI below. -->
           <div
             v-if="imagegenProvider === 'replicate'"
-            class="border-t border-border px-4 py-2.5 flex items-center gap-3"
+            class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
           >
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Model</span>
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Model</span>
             <select
               :value="imagegenModel"
               :disabled="saving"
@@ -702,8 +702,8 @@ onUnmounted(() => stopImagegenLocalPolling())
                 class="text-fg-primary hover:text-fg-strong underline ml-1"
               >Get a token → huggingface.co/settings/tokens</a>
             </div>
-            <div class="px-4 py-2.5 flex items-center gap-3">
-              <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Hugging Face token (optional)</span>
+            <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+              <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Hugging Face token (optional)</span>
               <template v-if="editingKey === 'imagegen.local.hfToken'">
                 <input
                   v-model="editValue"

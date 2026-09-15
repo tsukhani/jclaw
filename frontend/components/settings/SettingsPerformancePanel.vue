@@ -47,8 +47,8 @@ async function savePerfField(configKey: string, value: string) {
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">
             maxRequestsPerHost
           </span>
           <template v-if="editingPerfField === 'maxRequestsPerHost'">
@@ -95,8 +95,8 @@ async function savePerfField(configKey: string, value: string) {
             </button>
           </template>
         </div>
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">
             maxRequests
           </span>
           <template v-if="editingPerfField === 'maxRequests'">

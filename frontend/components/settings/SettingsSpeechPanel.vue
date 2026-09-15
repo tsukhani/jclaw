@@ -440,9 +440,9 @@ onUnmounted(() => stopTtsPolling())
         -->
         <div
           v-if="selectedEngine === 'sidecar'"
-          class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
+          class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3 border-t border-border"
         >
-          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Keep warm</span>
+          <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Keep warm</span>
           <input
             :value="idleTimeoutMinutes"
             type="number"

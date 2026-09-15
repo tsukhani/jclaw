@@ -340,6 +340,13 @@ html.dark .guide-section blockquote {
   border-collapse: collapse;
   table-layout: auto;
 }
+
+@media (width <= 639.98px) {
+  .guide-section table {
+    display: block;
+    overflow-x: auto;
+  }
+}
 .guide-section thead tr { border-bottom: 1px solid var(--border); }
 .guide-section tbody tr { border-bottom: 1px solid hsl(0 0% 80% / 40%); }
 .guide-section tbody tr:last-child { border-bottom: 0; }

@@ -79,8 +79,8 @@ async function saveTasksField(configKey: string, value: string) {
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             retentionDays
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -139,8 +139,8 @@ async function saveTasksField(configKey: string, value: string) {
         <!-- JCLAW-261: default IANA timezone for CRON / SCHEDULED tasks
              that don't carry their own. Saved to Config DB, which
              overrides application.conf at runtime. -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             defaultTimezone
             <span class="relative group/tip">
               <InformationCircleIcon

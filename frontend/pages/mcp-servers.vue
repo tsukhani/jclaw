@@ -314,7 +314,7 @@ function removeHeaderRow(i: number) {
         <div class="flex items-end gap-4">
           <label
             :for="`${formId}-name`"
-            class="flex-1 block"
+            class="flex-1 min-w-0 block"
           >
             <span class="block text-xs text-fg-muted mb-1">Name</span>
             <input
@@ -340,7 +340,7 @@ function removeHeaderRow(i: number) {
           </label>
         </div>
 
-        <fieldset>
+        <fieldset class="min-w-0">
           <legend class="block text-xs text-fg-muted mb-1">
             Transport
           </legend>
@@ -403,7 +403,7 @@ function removeHeaderRow(i: number) {
               class="w-full bg-surface border border-input text-sm text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
             />
           </label>
-          <fieldset>
+          <fieldset class="min-w-0">
             <legend class="block text-xs text-fg-muted mb-1">
               Environment variables
             </legend>
@@ -418,14 +418,14 @@ function removeHeaderRow(i: number) {
                   type="text"
                   placeholder="KEY"
                   aria-label="Environment variable name"
-                  class="flex-1 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                  class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                 >
                 <input
                   v-model="row.value"
                   type="text"
                   placeholder="value"
                   aria-label="Environment variable value"
-                  class="flex-1 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                  class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                 >
                 <button
                   type="button"
@@ -466,7 +466,7 @@ function removeHeaderRow(i: number) {
               class="w-full bg-surface border border-input text-sm text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
             >
           </label>
-          <fieldset>
+          <fieldset class="min-w-0">
             <legend class="block text-xs text-fg-muted mb-1">
               Headers
             </legend>
@@ -481,14 +481,14 @@ function removeHeaderRow(i: number) {
                   type="text"
                   placeholder="Header-Name"
                   aria-label="Header name"
-                  class="flex-1 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                  class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                 >
                 <input
                   v-model="row.value"
                   type="text"
                   placeholder="value"
                   aria-label="Header value"
-                  class="flex-1 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                  class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                 >
                 <button
                   type="button"
@@ -724,7 +724,7 @@ function removeHeaderRow(i: number) {
                   <div class="flex items-end gap-4">
                     <label
                       :for="`edit-${server.id}-name`"
-                      class="flex-1 block"
+                      class="flex-1 min-w-0 block"
                     >
                       <span class="block text-xs text-fg-muted mb-1">Name</span>
                       <input
@@ -749,7 +749,7 @@ function removeHeaderRow(i: number) {
                     </label>
                   </div>
 
-                  <fieldset>
+                  <fieldset class="min-w-0">
                     <legend class="block text-xs text-fg-muted mb-1">
                       Transport
                     </legend>
@@ -810,7 +810,7 @@ function removeHeaderRow(i: number) {
                         class="w-full bg-surface border border-input text-sm text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                       />
                     </label>
-                    <fieldset>
+                    <fieldset class="min-w-0">
                       <legend class="block text-xs text-fg-muted mb-1">
                         Environment variables
                       </legend>
@@ -825,14 +825,14 @@ function removeHeaderRow(i: number) {
                             type="text"
                             placeholder="KEY"
                             aria-label="Environment variable name"
-                            class="flex-1 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                            class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                           >
                           <input
                             v-model="row.value"
                             type="text"
                             placeholder="value"
                             aria-label="Environment variable value"
-                            class="flex-1 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                            class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                           >
                           <button
                             type="button"
@@ -872,7 +872,7 @@ function removeHeaderRow(i: number) {
                         class="w-full bg-surface border border-input text-sm text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                       >
                     </label>
-                    <fieldset>
+                    <fieldset class="min-w-0">
                       <legend class="block text-xs text-fg-muted mb-1">
                         Headers
                       </legend>
@@ -887,14 +887,14 @@ function removeHeaderRow(i: number) {
                             type="text"
                             placeholder="Header-Name"
                             aria-label="Header name"
-                            class="flex-1 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                            class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                           >
                           <input
                             v-model="row.value"
                             type="text"
                             placeholder="value"
                             aria-label="Header value"
-                            class="flex-1 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                            class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                           >
                           <button
                             type="button"

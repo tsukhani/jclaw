@@ -2192,7 +2192,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           </div>
           <!-- Text aggressiveness: a slider with the live % value. Gated by master AND Text. -->
           <div
-            class="px-4 py-2.5 flex items-center justify-between gap-4"
+            class="px-4 py-2.5 flex max-sm:flex-wrap items-center justify-between gap-4"
             :class="(compressionEnabled && compressionText) ? '' : 'opacity-50'"
           >
             <div>
@@ -2318,47 +2318,49 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <span class="font-mono text-fg-muted">commands:</span>
             and disappear when you disable or remove the skill.
           </p>
-          <table class="w-full text-xs">
-            <thead>
-              <tr class="text-fg-muted text-[10px] uppercase tracking-wide">
-                <th class="text-left font-medium py-1 pr-4">
-                  Command
-                </th>
-                <th class="text-left font-medium py-1">
-                  Source
-                </th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border">
-              <tr
-                v-for="cmd in effectiveAllowlist.global"
-                :key="'g:' + cmd"
-              >
-                <td class="py-1 pr-4 font-mono text-fg-primary">
-                  {{ cmd }}
-                </td>
-                <td class="py-1 text-fg-muted">
-                  Global (shell.allowlist)
-                </td>
-              </tr>
-              <template
-                v-for="(cmds, skillName) in effectiveAllowlist.bySkill"
-                :key="skillName"
-              >
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-fg-muted text-[10px] uppercase tracking-wide">
+                  <th class="text-left font-medium py-1 pr-4">
+                    Command
+                  </th>
+                  <th class="text-left font-medium py-1">
+                    Source
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border">
                 <tr
-                  v-for="cmd in cmds"
-                  :key="skillName + ':' + cmd"
+                  v-for="cmd in effectiveAllowlist.global"
+                  :key="'g:' + cmd"
                 >
-                  <td class="py-1 pr-4 font-mono text-cyan-700 dark:text-cyan-400">
+                  <td class="py-1 pr-4 font-mono text-fg-primary">
                     {{ cmd }}
                   </td>
                   <td class="py-1 text-fg-muted">
-                    Skill: <span class="font-mono text-fg-muted">{{ skillName }}</span>
+                    Global (shell.allowlist)
                   </td>
                 </tr>
-              </template>
-            </tbody>
-          </table>
+                <template
+                  v-for="(cmds, skillName) in effectiveAllowlist.bySkill"
+                  :key="skillName"
+                >
+                  <tr
+                    v-for="cmd in cmds"
+                    :key="skillName + ':' + cmd"
+                  >
+                    <td class="py-1 pr-4 font-mono text-cyan-700 dark:text-cyan-400">
+                      {{ cmd }}
+                    </td>
+                    <td class="py-1 text-fg-muted">
+                      Skill: <span class="font-mono text-fg-muted">{{ skillName }}</span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -2404,7 +2406,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :class="skillDisabledTools(skill).length ? 'blur-[0.4px]' : ''"
             >
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-sm text-fg-strong font-mono">{{ skill.name }}</span>
+                <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ skill.name }}</span>
                 <span
                   v-if="skill.isGlobal"
                   class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
@@ -2552,7 +2554,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     />
                   </div>
                   <div class="flex-1 min-w-0">
-                    <span class="text-sm text-fg-strong font-mono">{{ row.group }}</span>
+                    <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ row.group }}</span>
                     <div class="mt-1.5">
                       <span class="text-xs font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
                         {{ row.functionCount }} function{{ row.functionCount === 1 ? '' : 's' }}
@@ -2592,7 +2594,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     />
                   </div>
                   <div class="flex-1 min-w-0">
-                    <span class="text-sm text-fg-strong font-mono">{{ row.tool.name }}</span>
+                    <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ row.tool.name }}</span>
                     <div class="flex flex-wrap gap-1 mt-1.5">
                       <span
                         v-for="fn in (getToolMeta(row.tool.name)?.functions ?? [])"
@@ -2671,7 +2673,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 />
               </button>
               <div class="flex-1 min-w-0">
-                <span class="text-sm text-fg-strong font-mono">{{ row.server }}</span>
+                <span class="text-sm text-fg-strong font-mono max-sm:[overflow-wrap:anywhere]">{{ row.server }}</span>
                 <div class="mt-1.5">
                   <span class="text-xs font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400">
                     {{ row.actions.length }} action{{ row.actions.length === 1 ? '' : 's' }}
@@ -2756,7 +2758,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         class="bg-surface-elevated border border-border"
       >
         <div class="flex items-center justify-between border-b border-border">
-          <div class="flex">
+          <div class="flex min-w-0 overflow-x-auto">
             <button
               v-for="file in workspaceFiles"
               :key="file"
@@ -2770,7 +2772,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           <!-- MacDown-style pane toggles: editor, preview, or both (split). At
                least one stays on, so a pressed-looking button can't be un-toggled
                into an empty panel. -->
-          <div class="flex items-center gap-1 pr-2">
+          <div class="flex items-center gap-1 pr-2 shrink-0">
             <button
               type="button"
               :class="showWorkspaceEditor ? 'text-fg-strong bg-muted' : 'text-fg-muted'"
@@ -3172,147 +3174,149 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <h4 class="text-[11px] text-fg-muted uppercase tracking-wide mb-1.5">
               Prompt sections
             </h4>
-            <table
-              class="w-full text-xs font-mono table-fixed"
-            >
-              <colgroup>
-                <col>
-                <col class="w-24">
-                <col class="w-24">
-                <col class="w-24">
-              </colgroup>
-              <thead class="text-xs text-fg-muted border-b border-border">
-                <tr>
-                  <th class="text-left py-1 pr-2">
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
-                      :class="sectionsSortBy === 'name' ? 'text-fg-strong' : ''"
-                      @click="cycleSectionsSort('name')"
-                    >
-                      Section
-                      <ChevronUpIcon
-                        v-if="sectionsSortBy === 'name' && sectionsSortDir === 'asc'"
-                        class="w-3 h-3"
-                        aria-hidden="true"
-                      />
-                      <ChevronDownIcon
-                        v-else-if="sectionsSortBy === 'name' && sectionsSortDir === 'desc'"
-                        class="w-3 h-3"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </th>
-                  <th class="text-right py-1 px-2">
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
-                      :class="sectionsSortBy === 'chars' ? 'text-fg-strong' : ''"
-                      @click="cycleSectionsSort('chars')"
-                    >
-                      Chars
-                      <ChevronUpIcon
-                        v-if="sectionsSortBy === 'chars' && sectionsSortDir === 'asc'"
-                        class="w-3 h-3"
-                        aria-hidden="true"
-                      />
-                      <ChevronDownIcon
-                        v-else-if="sectionsSortBy === 'chars' && sectionsSortDir === 'desc'"
-                        class="w-3 h-3"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </th>
-                  <th class="text-right py-1 px-2 whitespace-nowrap">
-                    ≈ Tokens
-                  </th>
-                  <th class="text-right py-1 pl-2 whitespace-nowrap">
-                    % of total
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <template
-                  v-for="s in sortedSections"
-                  :key="'section-' + s.name"
-                >
-                  <tr
-                    class="border-b border-neutral-900/50"
-                    :class="s.name === 'Skills' && promptBreakdownData.skills.length > 0 ? 'cursor-pointer hover:bg-neutral-900/30' : ''"
-                    @click="s.name === 'Skills' && promptBreakdownData.skills.length > 0 ? (skillsExpanded = !skillsExpanded) : null"
-                  >
-                    <td class="py-1 pr-2 text-fg-primary">
-                      {{ s.name }}<ChevronRightIcon
-                        v-if="s.name === 'Skills' && promptBreakdownData.skills.length > 0"
-                        class="inline-block w-2.5 h-2.5 ml-1 align-middle transition-transform"
-                        :class="skillsExpanded ? 'rotate-90' : ''"
-                        aria-hidden="true"
-                      />
-                    </td>
-                    <td class="py-1 px-2 text-right text-fg-muted">
-                      {{ formatChars(s.chars) }}
-                    </td>
-                    <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300">
-                      {{ formatTokens(s.tokens) }}
-                    </td>
-                    <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
-                      {{ percentOfTotal(s.chars, promptBreakdownData.totalChars) }}
-                    </td>
+            <div class="overflow-x-auto">
+              <table
+                class="w-full min-w-[28rem] text-xs font-mono table-fixed"
+              >
+                <colgroup>
+                  <col>
+                  <col class="w-24">
+                  <col class="w-24">
+                  <col class="w-24">
+                </colgroup>
+                <thead class="text-xs text-fg-muted border-b border-border">
+                  <tr>
+                    <th class="text-left py-1 pr-2">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
+                        :class="sectionsSortBy === 'name' ? 'text-fg-strong' : ''"
+                        @click="cycleSectionsSort('name')"
+                      >
+                        Section
+                        <ChevronUpIcon
+                          v-if="sectionsSortBy === 'name' && sectionsSortDir === 'asc'"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                        <ChevronDownIcon
+                          v-else-if="sectionsSortBy === 'name' && sectionsSortDir === 'desc'"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </th>
+                    <th class="text-right py-1 px-2">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
+                        :class="sectionsSortBy === 'chars' ? 'text-fg-strong' : ''"
+                        @click="cycleSectionsSort('chars')"
+                      >
+                        Chars
+                        <ChevronUpIcon
+                          v-if="sectionsSortBy === 'chars' && sectionsSortDir === 'asc'"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                        <ChevronDownIcon
+                          v-else-if="sectionsSortBy === 'chars' && sectionsSortDir === 'desc'"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </th>
+                    <th class="text-right py-1 px-2 whitespace-nowrap">
+                      ≈ Tokens
+                    </th>
+                    <th class="text-right py-1 pl-2 whitespace-nowrap">
+                      % of total
+                    </th>
                   </tr>
-                  <!-- Inlined skill itemization: indented child rows under
+                </thead>
+                <tbody>
+                  <template
+                    v-for="s in sortedSections"
+                    :key="'section-' + s.name"
+                  >
+                    <tr
+                      class="border-b border-neutral-900/50"
+                      :class="s.name === 'Skills' && promptBreakdownData.skills.length > 0 ? 'cursor-pointer hover:bg-neutral-900/30' : ''"
+                      @click="s.name === 'Skills' && promptBreakdownData.skills.length > 0 ? (skillsExpanded = !skillsExpanded) : null"
+                    >
+                      <td class="py-1 pr-2 text-fg-primary">
+                        {{ s.name }}<ChevronRightIcon
+                          v-if="s.name === 'Skills' && promptBreakdownData.skills.length > 0"
+                          class="inline-block w-2.5 h-2.5 ml-1 align-middle transition-transform"
+                          :class="skillsExpanded ? 'rotate-90' : ''"
+                          aria-hidden="true"
+                        />
+                      </td>
+                      <td class="py-1 px-2 text-right text-fg-muted">
+                        {{ formatChars(s.chars) }}
+                      </td>
+                      <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300">
+                        {{ formatTokens(s.tokens) }}
+                      </td>
+                      <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
+                        {{ percentOfTotal(s.chars, promptBreakdownData.totalChars) }}
+                      </td>
+                    </tr>
+                    <!-- Inlined skill itemization: indented child rows under
                        the Skills section row. Chars/tokens are *inside*
                        the Skills row's totals, not additive — same pattern
                        as the dashboard's per-model rollup under Total.
                        The trailing "matching instructions" row absorbs
                        the prose preamble + <available_skills> wrapper so
                        all subrows together equal the parent. -->
-                  <tr
-                    v-for="sk in (s.name === 'Skills' && skillsExpanded ? promptBreakdownData.skills : [])"
-                    :key="'skill-' + sk.name"
-                  >
-                    <td class="py-0.5 pr-2 pl-6 text-fg-muted text-[11px]">
-                      <span class="text-fg-muted mr-1">└</span>{{ sk.name }}
+                    <tr
+                      v-for="sk in (s.name === 'Skills' && skillsExpanded ? promptBreakdownData.skills : [])"
+                      :key="'skill-' + sk.name"
+                    >
+                      <td class="py-0.5 pr-2 pl-6 text-fg-muted text-[11px]">
+                        <span class="text-fg-muted mr-1">└</span>{{ sk.name }}
+                      </td>
+                      <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
+                        {{ formatChars(sk.chars) }}
+                      </td>
+                      <td class="py-0.5 px-2 text-right text-amber-700 dark:text-amber-300 text-[11px]">
+                        {{ formatTokens(sk.tokens) }}
+                      </td>
+                      <td class="py-0.5 pl-2 text-right text-[11px]" />
+                    </tr>
+                    <tr
+                      v-if="s.name === 'Skills' && skillsExpanded && promptBreakdownData.skills.length > 0 && skillsMatchingGap.chars > 0"
+                      class="border-b border-neutral-900/50"
+                    >
+                      <td class="py-0.5 pr-2 pl-6 text-fg-muted text-[11px]">
+                        <span class="text-fg-muted mr-1">└</span>matching instructions
+                      </td>
+                      <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
+                        {{ formatChars(skillsMatchingGap.chars) }}
+                      </td>
+                      <td class="py-0.5 px-2 text-right text-amber-700 dark:text-amber-300 text-[11px]">
+                        {{ formatTokens(skillsMatchingGap.tokens) }}
+                      </td>
+                      <td class="py-0.5 pl-2 text-right text-[11px]" />
+                    </tr>
+                  </template>
+                  <tr class="border-t border-border">
+                    <td class="py-1 pr-2 text-fg-primary font-semibold">
+                      Total
                     </td>
-                    <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
-                      {{ formatChars(sk.chars) }}
+                    <td class="py-1 px-2 text-right text-fg-primary font-semibold">
+                      {{ formatChars(sectionsAggregate.chars) }}
                     </td>
-                    <td class="py-0.5 px-2 text-right text-amber-700 dark:text-amber-300 text-[11px]">
-                      {{ formatTokens(sk.tokens) }}
+                    <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300 font-semibold">
+                      {{ formatTokens(sectionsAggregate.tokens) }}
                     </td>
-                    <td class="py-0.5 pl-2 text-right text-[11px]" />
+                    <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400 font-semibold">
+                      {{ percentOfTotal(sectionsAggregate.chars, promptBreakdownData.totalChars) }}
+                    </td>
                   </tr>
-                  <tr
-                    v-if="s.name === 'Skills' && skillsExpanded && promptBreakdownData.skills.length > 0 && skillsMatchingGap.chars > 0"
-                    class="border-b border-neutral-900/50"
-                  >
-                    <td class="py-0.5 pr-2 pl-6 text-fg-muted text-[11px]">
-                      <span class="text-fg-muted mr-1">└</span>matching instructions
-                    </td>
-                    <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
-                      {{ formatChars(skillsMatchingGap.chars) }}
-                    </td>
-                    <td class="py-0.5 px-2 text-right text-amber-700 dark:text-amber-300 text-[11px]">
-                      {{ formatTokens(skillsMatchingGap.tokens) }}
-                    </td>
-                    <td class="py-0.5 pl-2 text-right text-[11px]" />
-                  </tr>
-                </template>
-                <tr class="border-t border-border">
-                  <td class="py-1 pr-2 text-fg-primary font-semibold">
-                    Total
-                  </td>
-                  <td class="py-1 px-2 text-right text-fg-primary font-semibold">
-                    {{ formatChars(sectionsAggregate.chars) }}
-                  </td>
-                  <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300 font-semibold">
-                    {{ formatTokens(sectionsAggregate.tokens) }}
-                  </td>
-                  <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400 font-semibold">
-                    {{ percentOfTotal(sectionsAggregate.chars, promptBreakdownData.totalChars) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <!-- Tools table -->
@@ -3323,100 +3327,102 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <p class="text-xs text-fg-muted mb-1">
               Sent separately as the <code class="text-fg-muted">tools</code> array, not part of the prompt string, but counted as input tokens by every provider.
             </p>
-            <table
-              class="w-full text-xs font-mono table-fixed"
-            >
-              <colgroup>
-                <col>
-                <col class="w-24">
-                <col class="w-24">
-                <col class="w-24">
-              </colgroup>
-              <thead class="text-xs text-fg-muted border-b border-border">
-                <tr>
-                  <th class="text-left py-1 pr-2">
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
-                      :class="toolsSortBy === 'name' ? 'text-fg-strong' : ''"
-                      @click="cycleToolsSort('name')"
-                    >
-                      Tool
-                      <ChevronUpIcon
-                        v-if="toolsSortBy === 'name' && toolsSortDir === 'asc'"
-                        class="w-3 h-3"
-                        aria-hidden="true"
-                      />
-                      <ChevronDownIcon
-                        v-else-if="toolsSortBy === 'name' && toolsSortDir === 'desc'"
-                        class="w-3 h-3"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </th>
-                  <th class="text-right py-1 px-2">
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
-                      :class="toolsSortBy === 'chars' ? 'text-fg-strong' : ''"
-                      @click="cycleToolsSort('chars')"
-                    >
-                      Chars
-                      <ChevronUpIcon
-                        v-if="toolsSortBy === 'chars' && toolsSortDir === 'asc'"
-                        class="w-3 h-3"
-                        aria-hidden="true"
-                      />
-                      <ChevronDownIcon
-                        v-else-if="toolsSortBy === 'chars' && toolsSortDir === 'desc'"
-                        class="w-3 h-3"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </th>
-                  <th class="text-right py-1 px-2 whitespace-nowrap">
-                    ≈ Tokens
-                  </th>
-                  <th class="text-right py-1 pl-2 whitespace-nowrap">
-                    % of total
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="t in sortedTools"
-                  :key="'tool-' + t.name"
-                  class="border-b border-neutral-900/50"
-                >
-                  <td class="py-1 pr-2 text-fg-primary">
-                    {{ t.name }}
-                  </td>
-                  <td class="py-1 px-2 text-right text-fg-muted">
-                    {{ formatChars(t.chars) }}
-                  </td>
-                  <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300">
-                    {{ formatTokens(t.tokens) }}
-                  </td>
-                  <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
-                    {{ percentOfTotal(t.chars, promptBreakdownData.totalChars) }}
-                  </td>
-                </tr>
-                <tr class="border-t border-border">
-                  <td class="py-1 pr-2 text-fg-primary font-semibold">
-                    Total
-                  </td>
-                  <td class="py-1 px-2 text-right text-fg-primary font-semibold">
-                    {{ formatChars(toolSchemasAggregate.chars) }}
-                  </td>
-                  <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300 font-semibold">
-                    {{ formatTokens(toolSchemasAggregate.tokens) }}
-                  </td>
-                  <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400 font-semibold">
-                    {{ percentOfTotal(toolSchemasAggregate.chars, promptBreakdownData.totalChars) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="overflow-x-auto">
+              <table
+                class="w-full min-w-[28rem] text-xs font-mono table-fixed"
+              >
+                <colgroup>
+                  <col>
+                  <col class="w-24">
+                  <col class="w-24">
+                  <col class="w-24">
+                </colgroup>
+                <thead class="text-xs text-fg-muted border-b border-border">
+                  <tr>
+                    <th class="text-left py-1 pr-2">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
+                        :class="toolsSortBy === 'name' ? 'text-fg-strong' : ''"
+                        @click="cycleToolsSort('name')"
+                      >
+                        Tool
+                        <ChevronUpIcon
+                          v-if="toolsSortBy === 'name' && toolsSortDir === 'asc'"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                        <ChevronDownIcon
+                          v-else-if="toolsSortBy === 'name' && toolsSortDir === 'desc'"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </th>
+                    <th class="text-right py-1 px-2">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
+                        :class="toolsSortBy === 'chars' ? 'text-fg-strong' : ''"
+                        @click="cycleToolsSort('chars')"
+                      >
+                        Chars
+                        <ChevronUpIcon
+                          v-if="toolsSortBy === 'chars' && toolsSortDir === 'asc'"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                        <ChevronDownIcon
+                          v-else-if="toolsSortBy === 'chars' && toolsSortDir === 'desc'"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </th>
+                    <th class="text-right py-1 px-2 whitespace-nowrap">
+                      ≈ Tokens
+                    </th>
+                    <th class="text-right py-1 pl-2 whitespace-nowrap">
+                      % of total
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="t in sortedTools"
+                    :key="'tool-' + t.name"
+                    class="border-b border-neutral-900/50"
+                  >
+                    <td class="py-1 pr-2 text-fg-primary">
+                      {{ t.name }}
+                    </td>
+                    <td class="py-1 px-2 text-right text-fg-muted">
+                      {{ formatChars(t.chars) }}
+                    </td>
+                    <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300">
+                      {{ formatTokens(t.tokens) }}
+                    </td>
+                    <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
+                      {{ percentOfTotal(t.chars, promptBreakdownData.totalChars) }}
+                    </td>
+                  </tr>
+                  <tr class="border-t border-border">
+                    <td class="py-1 pr-2 text-fg-primary font-semibold">
+                      Total
+                    </td>
+                    <td class="py-1 px-2 text-right text-fg-primary font-semibold">
+                      {{ formatChars(toolSchemasAggregate.chars) }}
+                    </td>
+                    <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300 font-semibold">
+                      {{ formatTokens(toolSchemasAggregate.tokens) }}
+                    </td>
+                    <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400 font-semibold">
+                      {{ percentOfTotal(toolSchemasAggregate.chars, promptBreakdownData.totalChars) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

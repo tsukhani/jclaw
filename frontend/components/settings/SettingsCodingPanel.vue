@@ -225,8 +225,8 @@ async function saveAcpModel(value: string) {
       <div class="divide-y divide-border">
         <!-- JCLAW-499: external-harness (ACP) runtime command. Empty disables
              runtime="acp" subagents; the harness is operator-set, never model-supplied. -->
-        <div class="px-4 py-2.5 flex items-start gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5 pt-1">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5 pt-1">
             acp.command
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -320,8 +320,8 @@ async function saveAcpModel(value: string) {
         </div>
         <!-- Auto-detected harnesses on this host. Click an available one to fill
              acp.command + acp.harness so runtime="acp" is ready with no typing. -->
-        <div class="px-4 py-2.5 flex items-start gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5 pt-1">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5 pt-1">
             detected
             <span class="relative group/tip">
               <InformationCircleIcon
@@ -417,8 +417,8 @@ async function saveAcpModel(value: string) {
         </div>
         <!-- Model the acp coding harness runs with. Default = the harness's own
              model; a specific provider/model is bound per harness on the backend. -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
             acp.model
             <span class="relative group/tip">
               <InformationCircleIcon

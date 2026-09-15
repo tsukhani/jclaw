@@ -645,7 +645,7 @@ const groupedProviders = computed(() => {
           :aria-pressed="priceRefreshEnabled"
           aria-label="Auto-update model prices nightly"
           :class="priceRefreshEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-          class="relative w-9 h-5 rounded-full transition-colors"
+          class="relative w-9 h-5 shrink-0 rounded-full transition-colors"
           @click="togglePriceRefresh"
         >
           <span
@@ -661,7 +661,7 @@ const groupedProviders = computed(() => {
       <div class="px-4 py-2.5 border-t border-border text-xs text-fg-muted space-y-2">
         <p>
           Most provider APIs don't return pricing in their model lists. When this is on, JClaw fetches the community-maintained
-          <span class="font-mono">model_prices_and_context_window.json</span>
+          <span class="font-mono max-sm:[overflow-wrap:anywhere]">model_prices_and_context_window.json</span>
           from
           <span class="font-mono">github.com/BerriAI/litellm</span>
           once a night and fills in missing prices on your configured models. Prices you've set manually are never overwritten.
@@ -747,7 +747,7 @@ const groupedProviders = computed(() => {
                 ? 'Hide this provider from the model selector'
                 : 'Show this provider in the model selector'"
               :class="isProviderEnabled(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-              class="ml-auto relative w-9 h-5 rounded-full transition-colors"
+              class="ml-auto relative w-9 h-5 shrink-0 rounded-full transition-colors"
               @click="toggleProviderEnabled(name)"
             >
               <span
@@ -776,9 +776,9 @@ const groupedProviders = computed(() => {
           <div
             v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models') && !e.key.endsWith('.paymentModality') && !e.key.endsWith('.subscriptionMonthlyUsd') && !e.key.endsWith('.keepAlive'))"
             :key="entry.key"
-            class="px-4 py-2 flex items-center gap-3"
+            class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
           >
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">{{ entry.key.split('.').slice(2).join('.') }}</span>
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">{{ entry.key.split('.').slice(2).join('.') }}</span>
             <template v-if="editingKey === entry.key">
               <input
                 v-model="editValue"
@@ -829,9 +829,9 @@ const groupedProviders = computed(() => {
                  modality is meaningless. -->
           <div
             v-if="supportedModalitiesFor(name).length > 0"
-            class="px-4 py-2 flex items-center gap-3"
+            class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
           >
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
               paymentModality
               <span class="relative group/tip">
                 <InformationCircleIcon
@@ -910,9 +910,9 @@ const groupedProviders = computed(() => {
                  subsection by (window_days / 30). -->
           <div
             v-if="paymentModalityFor(name) === 'SUBSCRIPTION' && supportedModalitiesFor(name).includes('SUBSCRIPTION')"
-            class="px-4 py-2 flex items-center gap-3"
+            class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
           >
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
               subscriptionMonthlyUsd
               <span class="relative group/tip">
                 <InformationCircleIcon
@@ -972,9 +972,9 @@ const groupedProviders = computed(() => {
           <!-- keepAlive — local Ollama daemons only (see KEEP_ALIVE_PROVIDERS) -->
           <div
             v-if="KEEP_ALIVE_PROVIDERS.has(name)"
-            class="px-4 py-2 flex items-center gap-3"
+            class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
           >
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
               keepAlive
               <span class="relative group/tip">
                 <InformationCircleIcon
@@ -1028,8 +1028,8 @@ const groupedProviders = computed(() => {
             </template>
           </div>
           <!-- Models row -->
-          <div class="px-4 py-2 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">models</span>
+          <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">models</span>
             <span class="flex-1 text-sm text-fg-primary">{{ getProviderModels(name).length }} model{{ getProviderModels(name).length !== 1 ? 's' : '' }}</span>
             <button
               :disabled="discoveryLoading && discoveryProvider === name"

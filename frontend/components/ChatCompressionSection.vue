@@ -184,7 +184,7 @@ function fmt(n: number) {
 
 <template>
   <div class="bg-surface-elevated border border-border mb-8">
-    <div class="px-4 py-3 border-b border-border grid grid-cols-[auto_1fr_auto] items-center gap-3">
+    <div class="px-4 py-3 border-b border-border grid grid-cols-[auto_1fr_auto] max-sm:flex max-sm:flex-wrap items-center gap-3">
       <!-- Left: title + view toggle -->
       <div class="flex items-center gap-3 min-w-0">
         <h2 class="text-sm font-medium text-fg-primary shrink-0">
@@ -373,41 +373,43 @@ function fmt(n: number) {
               </span>
             </div>
           </div>
-          <table
+          <div
             v-else
-            class="w-full text-xs"
+            class="overflow-x-auto"
           >
-            <thead>
-              <tr class="text-fg-muted text-left">
-                <th class="font-normal py-1">
-                  Type
-                </th>
-                <th class="font-normal py-1 text-right">
-                  Saved
-                </th>
-                <th class="font-normal py-1 text-right">
-                  Reduction
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="t in agg.byType"
-                :key="t.type"
-                class="border-t border-border"
-              >
-                <td class="py-1 text-fg-strong">
-                  {{ t.type }}
-                </td>
-                <td class="py-1 text-right text-fg-strong tabular-nums">
-                  {{ fmt(t.saved) }}
-                </td>
-                <td class="py-1 text-right text-fg-muted tabular-nums">
-                  {{ 100 - pct(t.ratio) }}%
-                </td>
-              </tr>
-            </tbody>
-          </table>
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-fg-muted text-left">
+                  <th class="font-normal py-1">
+                    Type
+                  </th>
+                  <th class="font-normal py-1 text-right">
+                    Saved
+                  </th>
+                  <th class="font-normal py-1 text-right">
+                    Reduction
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="t in agg.byType"
+                  :key="t.type"
+                  class="border-t border-border"
+                >
+                  <td class="py-1 text-fg-strong">
+                    {{ t.type }}
+                  </td>
+                  <td class="py-1 text-right text-fg-strong tabular-nums">
+                    {{ fmt(t.saved) }}
+                  </td>
+                  <td class="py-1 text-right text-fg-muted tabular-nums">
+                    {{ 100 - pct(t.ratio) }}%
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <!-- Algorithm usage -->
@@ -434,41 +436,43 @@ function fmt(n: number) {
               <span class="text-xs text-fg-muted tabular-nums w-12 text-right shrink-0">{{ a.count }}</span>
             </div>
           </div>
-          <table
+          <div
             v-else
-            class="w-full text-xs"
+            class="overflow-x-auto"
           >
-            <thead>
-              <tr class="text-fg-muted text-left">
-                <th class="font-normal py-1">
-                  Algorithm
-                </th>
-                <th class="font-normal py-1 text-right">
-                  Events
-                </th>
-                <th class="font-normal py-1 text-right">
-                  Saved
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="a in agg.byAlgo"
-                :key="a.algorithm"
-                class="border-t border-border"
-              >
-                <td class="py-1 text-fg-strong">
-                  {{ a.algorithm }}
-                </td>
-                <td class="py-1 text-right text-fg-strong tabular-nums">
-                  {{ a.count }}
-                </td>
-                <td class="py-1 text-right text-fg-muted tabular-nums">
-                  {{ fmt(a.saved) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-fg-muted text-left">
+                  <th class="font-normal py-1">
+                    Algorithm
+                  </th>
+                  <th class="font-normal py-1 text-right">
+                    Events
+                  </th>
+                  <th class="font-normal py-1 text-right">
+                    Saved
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="a in agg.byAlgo"
+                  :key="a.algorithm"
+                  class="border-t border-border"
+                >
+                  <td class="py-1 text-fg-strong">
+                    {{ a.algorithm }}
+                  </td>
+                  <td class="py-1 text-right text-fg-strong tabular-nums">
+                    {{ a.count }}
+                  </td>
+                  <td class="py-1 text-right text-fg-muted tabular-nums">
+                    {{ fmt(a.saved) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <!--

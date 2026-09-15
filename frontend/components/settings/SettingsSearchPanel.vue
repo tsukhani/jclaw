@@ -269,8 +269,8 @@ function onSearchDragEnd() {
       </div>
       <div class="divide-y divide-border">
         <!-- apiKey -->
-        <div class="px-4 py-2 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">apiKey</span>
+        <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">apiKey</span>
           <template v-if="editingKey === `search.${id}.apiKey`">
             <input
               v-model="editValue"
@@ -315,8 +315,8 @@ function onSearchDragEnd() {
           </template>
         </div>
         <!-- baseUrl -->
-        <div class="px-4 py-2 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">baseUrl</span>
+        <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">baseUrl</span>
           <template v-if="editingKey === `search.${id}.baseUrl`">
             <input
               v-model="editValue"
@@ -362,10 +362,10 @@ function onSearchDragEnd() {
         <!-- recencyFilter (Perplexity only) -->
         <div
           v-if="id === 'perplexity'"
-          class="px-4 py-2 flex items-center gap-3"
+          class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
         >
           <span
-            class="text-xs font-mono text-fg-muted w-48 shrink-0"
+            class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0"
             title="Server-side recency filter on Perplexity /search. Narrows results to content indexed within the selected window; 'none' disables filtering. Narrower windows prevent the LLM from echoing stale snippets."
           >recencyFilter</span>
           <select

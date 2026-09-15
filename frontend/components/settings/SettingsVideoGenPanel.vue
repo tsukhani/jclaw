@@ -267,8 +267,8 @@ onUnmounted(() => stopVideoCapPolling())
             >no API key — set in Image Generation</span>
           </label>
           <!-- Model — picked from Replicate's curated text-to-video collection (GET /api/videogen/models). -->
-          <div class="border-t border-border px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">Model</span>
+          <div class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Model</span>
             <select
               :value="videogenModel"
               :disabled="saving"

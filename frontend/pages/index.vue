@@ -447,7 +447,7 @@ onBeforeUnmount(() => {
       -->
       <!-- min-h matches the height this header takes once its data-gated view toggle
            renders, so the toggle appearing does not nudge the panel. -->
-      <div class="px-4 py-3 border-b border-border grid grid-cols-[auto_1fr_auto] items-center gap-3 min-h-[55px]">
+      <div class="px-4 py-3 border-b border-border grid grid-cols-[auto_1fr_auto] max-sm:flex max-sm:flex-wrap items-center gap-3 min-h-[55px]">
         <div class="flex items-center gap-3 min-w-0">
           <h2 class="text-sm font-medium text-fg-primary shrink-0">
             Chat Performance
@@ -771,7 +771,7 @@ onBeforeUnmount(() => {
 
     <!-- Recent Events -->
     <div class="bg-surface-elevated border border-border">
-      <div class="px-4 py-3 border-b border-border flex items-center gap-3">
+      <div class="px-4 py-3 border-b border-border flex max-sm:flex-wrap items-center gap-3">
         <h2 class="text-sm font-medium text-fg-primary shrink-0">
           Recent Activity
         </h2>

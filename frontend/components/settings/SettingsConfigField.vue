@@ -74,9 +74,9 @@ async function save(next: string) {
 
 <template>
   <div :data-testid="`config-field-${configKey}`">
-    <div class="px-4 py-2.5 flex items-center gap-3">
+    <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
       <span
-        class="text-xs font-mono text-fg-muted shrink-0 flex items-center gap-1.5"
+        class="text-xs font-mono text-fg-muted shrink-0 max-sm:w-full flex items-center gap-1.5"
         :class="labelWidth"
       >
         {{ label }}

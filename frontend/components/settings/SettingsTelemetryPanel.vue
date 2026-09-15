@@ -157,8 +157,8 @@ const rows: { field: Field, label: string, hint: string }[] = [
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
         <!-- Enabled -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">enabled</span>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">enabled</span>
           <label
             for="otel-enabled"
             class="flex items-center gap-2 text-sm text-fg-primary"
@@ -193,10 +193,10 @@ const rows: { field: Field, label: string, hint: string }[] = [
         <div
           v-for="row in rows"
           :key="row.field"
-          class="px-4 py-2.5 flex items-center gap-3"
+          class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
         >
           <span
-            class="text-xs font-mono text-fg-muted w-48 shrink-0"
+            class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0"
             :title="row.hint"
           >{{ row.label }}</span>
           <template v-if="editing === row.field">

@@ -101,8 +101,8 @@ async function saveSPField(configKey: string, value: string) {
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
         <!-- Provider -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">provider</span>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">provider</span>
           <template v-if="editingSPField === 'provider'">
             <select
               v-model="spFieldEdit"
@@ -158,8 +158,8 @@ async function saveSPField(configKey: string, value: string) {
           </template>
         </div>
         <!-- Model -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">model</span>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">model</span>
           <template v-if="editingSPField === 'model'">
             <select
               v-if="spAvailableModels.length"
@@ -230,8 +230,8 @@ async function saveSPField(configKey: string, value: string) {
           </template>
         </div>
         <!-- Timeout -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">timeoutSeconds</span>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">timeoutSeconds</span>
           <template v-if="editingSPField === 'timeout'">
             <input
               v-model="spFieldEdit"
@@ -277,8 +277,8 @@ async function saveSPField(configKey: string, value: string) {
           </template>
         </div>
         <!-- Batch Size KB -->
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 shrink-0">batchSizeKb</span>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">batchSizeKb</span>
           <template v-if="editingSPField === 'batchKb'">
             <input
               v-model="spFieldEdit"

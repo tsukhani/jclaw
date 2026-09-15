@@ -91,7 +91,7 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
             : 'Backend dependency is not installed — toggle is disabled'"
           :disabled="!backend.available"
           :class="[
-            'relative w-9 h-5 rounded-full transition-colors',
+            'relative w-9 h-5 shrink-0 rounded-full transition-colors',
             backend.available
               ? (backend.enabled ? 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer' : 'bg-muted hover:bg-muted cursor-pointer')
               : 'bg-muted cursor-not-allowed',

@@ -521,9 +521,9 @@ const lastOp = computed(() => {
         <div
           v-for="b in status?.backups ?? []"
           :key="b.id"
-          class="px-4 py-2 flex items-center gap-3 text-xs"
+          class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3 text-xs"
         >
-          <span class="font-mono text-fg-primary truncate">{{ b.id }}</span>
+          <span class="font-mono text-fg-primary truncate min-w-0 max-sm:basis-full">{{ b.id }}</span>
           <span class="text-fg-muted tabular-nums shrink-0">{{ when(b.createdAt) }}</span>
           <span class="text-fg-muted tabular-nums shrink-0">{{ formatSize(b.bytes) }}</span>
           <span class="ml-auto flex items-center gap-1 shrink-0">

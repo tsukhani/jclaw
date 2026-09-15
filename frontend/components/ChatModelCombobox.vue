@@ -145,7 +145,7 @@ function onCloseAutoFocus(event: Event) {
     -->
     <PopoverContent
       align="start"
-      class="w-[440px] p-2 rounded-[10px] border-[#dfe7e3] dark:border-[#2e3035]"
+      class="w-[440px] max-w-[calc(100vw-2rem)] p-2 rounded-[10px] border-[#dfe7e3] dark:border-[#2e3035]"
       @close-auto-focus="onCloseAutoFocus"
     >
       <div class="space-y-2">
