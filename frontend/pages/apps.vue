@@ -426,10 +426,10 @@ async function deleteApp(app: AppEntry) {
             />
           </div>
           <div class="text-center min-w-0 w-full">
-            <div class="text-sm font-medium text-fg-strong truncate">
+            <div class="text-sm font-medium text-fg-strong break-words">
               {{ app.name }}
             </div>
-            <div class="text-[11px] text-fg-muted truncate">
+            <div class="text-[11px] text-fg-muted break-words">
               v{{ app.version }}<span v-if="app.creator"> · {{ app.creator }}</span>
             </div>
             <div

@@ -234,12 +234,12 @@ function toggleAllExpanded() {
               </div>
             </div>
 
-            <!-- Description — clamped to 3 lines with a min-height floor so short
-                 descriptions don't collapse the card. Footer alignment across a row
-                 is handled by mt-auto on the Functions header below, not by this
-                 min-height (3 clamped lines can exceed 4rem, so a min-height alone
-                 leaves taller cards' footers lower). -->
-            <p class="px-4 pb-4 text-xs text-fg-muted leading-relaxed min-h-[4rem] line-clamp-3">
+            <!-- Description — never clamped: it is shown nowhere else, so a clamp loses
+                 text under WCAG 1.4.12 spacing. The min-height floor stops short
+                 descriptions collapsing the card; footer alignment across a row is
+                 handled by mt-auto on the Functions header below, not by this
+                 min-height (a longer description can exceed 4rem). -->
+            <p class="px-4 pb-4 text-xs text-fg-muted leading-relaxed min-h-[4rem]">
               {{ card.description }}
             </p>
 

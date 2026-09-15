@@ -233,7 +233,7 @@ function formatTimestamp(iso: string): string {
                   :title="event.agentId ? String(event.agentId) : ''"
                   class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5 max-sm:hidden"
                 >{{ event.agentId || '—' }}</span>
-                <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
+                <span class="text-sm text-fg-primary min-w-0 break-words">{{ event.message }}</span>
                 <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5 max-sm:w-auto max-sm:shrink">{{ formatTimestamp(event.timestamp) }}</span>
               </div>
               <!-- Details payload offset matches the (chevron + level +
@@ -279,7 +279,7 @@ function formatTimestamp(iso: string): string {
                   :title="event.agentId ? String(event.agentId) : ''"
                   class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5 max-sm:hidden"
                 >{{ event.agentId || '—' }}</span>
-                <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
+                <span class="text-sm text-fg-primary min-w-0 break-words">{{ event.message }}</span>
                 <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5 max-sm:w-auto max-sm:shrink">{{ formatTimestamp(event.timestamp) }}</span>
               </div>
             </div>
