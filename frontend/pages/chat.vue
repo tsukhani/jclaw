@@ -1059,7 +1059,7 @@ function exportConversation() {
                 <span class="text-fg-muted">{{ formatAttachmentSize(f.size) }}</span>
                 <button
                   type="button"
-                  class="ml-0.5 text-fg-muted hover:text-fg-strong transition-colors"
+                  class="-my-1.5 -mr-1.5 -ml-1 p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
                   title="Remove"
                   @click="removeAttachment(idx)"
                 >
@@ -1077,7 +1077,7 @@ function exportConversation() {
                 <span>{{ overrideError }}</span>
                 <button
                   type="button"
-                  class="text-red-700 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
+                  class="-m-1.5 p-1.5 text-red-700 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
                   title="Dismiss"
                   @click="overrideError = null"
                 >
@@ -1094,7 +1094,7 @@ function exportConversation() {
                 <span>{{ attachError }}</span>
                 <button
                   type="button"
-                  class="text-red-700 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
+                  class="-m-1.5 p-1.5 text-red-700 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
                   title="Dismiss"
                   @click="attachError = null"
                 >

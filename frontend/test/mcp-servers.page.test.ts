@@ -220,7 +220,8 @@ describe('MCP Servers page', () => {
     const c = await mountSuspended(McpServers)
     await flushPromises()
 
-    await clickLabel(c, 'Disable github')
+    expect(c.find('button[role="switch"][aria-label="github server"]').attributes('aria-checked')).toBe('true')
+    await clickLabel(c, 'github server')
     await vi.waitFor(() => expect(putBody).toBeTruthy())
     expect(putBody!.enabled).toBe(false)
     // The row toggle is a partial update — sending the whole server would let a stale

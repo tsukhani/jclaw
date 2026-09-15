@@ -83,7 +83,9 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
           >{{ backend.version }}</span>
         </div>
         <button
-          :aria-label="`${backend.available && backend.enabled ? 'Disable' : 'Enable'} ${backend.displayName}`"
+          role="switch"
+          :aria-checked="backend.available && backend.enabled"
+          :aria-label="backend.displayName"
           :title="backend.available
             ? (backend.enabled ? 'Disable this backend' : 'Enable this backend')
             : 'Backend dependency is not installed — toggle is disabled'"

@@ -299,7 +299,7 @@ function removeHeaderRow(i: number) {
         </h2>
         <button
           type="button"
-          class="text-fg-muted hover:text-fg-strong"
+          class="p-0.5 -m-0.5 text-fg-muted hover:text-fg-strong"
           aria-label="Cancel"
           @click="cancelEdit"
         >
@@ -613,7 +613,9 @@ function removeHeaderRow(i: number) {
                     class="relative w-9 h-5 rounded-full transition-colors"
                     :class="server.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-neutral-300'"
                     :title="server.enabled ? 'Disable' : 'Enable'"
-                    :aria-label="server.enabled ? `Disable ${server.name}` : `Enable ${server.name}`"
+                    role="switch"
+                    :aria-checked="server.enabled"
+                    :aria-label="`${server.name} server`"
                     @click="toggleEnabled(server)"
                   >
                     <span

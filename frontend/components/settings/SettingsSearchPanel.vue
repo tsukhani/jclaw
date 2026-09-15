@@ -247,6 +247,9 @@ function onSearchDragEnd() {
           :class="searchEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
           class="relative w-9 h-5 rounded-full transition-colors"
           :title="searchEnabled(id) ? 'Disable provider' : 'Enable provider'"
+          role="switch"
+          :aria-checked="searchEnabled(id)"
+          :aria-label="`${SEARCH_PROVIDERS[id]!.label} search provider`"
           @click="toggleSearchEnabled(id)"
         >
           <span

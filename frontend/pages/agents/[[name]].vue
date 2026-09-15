@@ -1592,6 +1592,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
                 class="relative w-9 h-5 rounded-full transition-colors"
                 :title="agent.enabled ? 'Disable agent' : 'Enable agent'"
+                role="switch"
+                :aria-checked="agent.enabled"
+                :aria-label="`${agent.name} agent`"
                 @click="toggleAgentEnabled(agent)"
               >
                 <span
@@ -1881,6 +1884,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             :title="acpAllowed ? 'Revoke ACP runtime' : 'Allow ACP runtime'"
             :disabled="savingAcpAllowed"
             class="shrink-0 disabled:opacity-50"
+            role="switch"
+            :aria-checked="acpAllowed"
+            aria-label="ACP runtime"
             @click="toggleAcpAllowed"
           >
             <div
@@ -1917,6 +1923,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             :title="memoryAutocaptureEnabled ? 'Turn auto-capture off' : 'Turn auto-capture on'"
             :disabled="savingMemory"
             class="shrink-0 disabled:opacity-50"
+            role="switch"
+            :aria-checked="memoryAutocaptureEnabled"
+            aria-label="Memory auto-capture"
             @click="toggleMemoryAutocapture"
           >
             <div
@@ -2070,6 +2079,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             :title="compressionEnabled ? 'Disable content compression' : 'Enable content compression'"
             :disabled="savingCompression"
             class="shrink-0 disabled:opacity-50"
+            role="switch"
+            :aria-checked="compressionEnabled"
+            aria-label="Content compression"
             @click="toggleCompression"
           >
             <div
@@ -2100,6 +2112,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :title="compressionJson ? 'Disable JSON compression' : 'Enable JSON compression'"
               :disabled="savingCompression || !compressionEnabled"
               class="shrink-0"
+              role="switch"
+              :aria-checked="compressionEnabled && compressionJson"
+              aria-label="JSON compression"
               @click="toggleCompressionJson"
             >
               <div
@@ -2128,6 +2143,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :title="compressionCode ? 'Disable code compression' : 'Enable code compression'"
               :disabled="savingCompression || !compressionEnabled"
               class="shrink-0"
+              role="switch"
+              :aria-checked="compressionEnabled && compressionCode"
+              aria-label="Code compression"
               @click="toggleCompressionCode"
             >
               <div
@@ -2156,6 +2174,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :title="compressionText ? 'Disable text compression' : 'Enable text compression'"
               :disabled="savingCompression || !compressionEnabled"
               class="shrink-0"
+              role="switch"
+              :aria-checked="compressionEnabled && compressionText"
+              aria-label="Text compression"
               @click="toggleCompressionText"
             >
               <div
@@ -2355,6 +2376,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             v-if="toggleableAgentSkills.length"
             :title="allAgentSkillsEnabled ? 'Disable all skills for this agent' : 'Enable all skills for this agent'"
             class="shrink-0"
+            role="switch"
+            :aria-checked="allAgentSkillsEnabled"
+            aria-label="All skills for this agent"
             @click="toggleAllAgentSkills()"
           >
             <div
@@ -2437,6 +2461,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 : skill.enabled ? 'Disable skill' : 'Enable skill'"
               class="shrink-0 pt-0.5"
               :class="skillDisabledTools(skill).length ? 'cursor-not-allowed' : ''"
+              role="switch"
+              :aria-checked="!skillDisabledTools(skill).length && skill.enabled"
+              :aria-disabled="skillDisabledTools(skill).length > 0"
+              :aria-label="`${skill.name} skill`"
               @click="if (!skillDisabledTools(skill).length) { skill.enabled = !skill.enabled; toggleSkill(skill.name, skill.enabled) }"
             >
               <div
@@ -2473,6 +2501,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             v-if="toggleableAgentTools.length"
             :title="allAgentToolsEnabled ? 'Disable all tools for this agent' : 'Enable all tools for this agent'"
             class="shrink-0"
+            role="switch"
+            :aria-checked="allAgentToolsEnabled"
+            aria-label="All tools for this agent"
             @click="toggleAllAgentTools()"
           >
             <div
@@ -2530,7 +2561,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   </div>
                   <button
                     :title="row.enabled ? `Disable ${row.group} for this agent` : `Enable ${row.group} for this agent`"
-                    :aria-label="row.enabled ? `Disable ${row.group} for this agent` : `Enable ${row.group} for this agent`"
+                    role="switch"
+                    :aria-checked="row.enabled"
+                    :aria-label="`${row.group} for this agent`"
                     class="shrink-0"
                     @click="toggleToolGroup(row.group, !row.enabled)"
                   >
@@ -2574,6 +2607,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   <button
                     :title="row.tool.enabled ? 'Disable tool for this agent' : 'Enable tool for this agent'"
                     class="shrink-0"
+                    role="switch"
+                    :aria-checked="row.tool.enabled"
+                    :aria-label="`${row.tool.name} tool for this agent`"
                     @click="row.tool.enabled = !row.tool.enabled; toggleTool(row.tool.name, row.tool.enabled)"
                   >
                     <div
@@ -2644,7 +2680,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </div>
               <button
                 :title="row.enabled ? `Disable ${row.server} for this agent` : `Enable ${row.server} for this agent`"
-                :aria-label="row.enabled ? `Disable ${row.server} for this agent` : `Enable ${row.server} for this agent`"
+                role="switch"
+                :aria-checked="row.enabled"
+                :aria-label="`${row.server} for this agent`"
                 class="shrink-0"
                 @click="toggleToolGroup(row.server, !row.enabled)"
               >

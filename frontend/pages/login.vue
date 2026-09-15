@@ -43,7 +43,7 @@ const passwordId = useId()
 </script>
 
 <template>
-  <div
+  <main
     class="relative min-h-screen flex items-center justify-center p-6
            bg-white dark:bg-surface"
   >
@@ -134,7 +134,7 @@ const passwordId = useId()
             >
             <button
               type="button"
-              class="absolute inset-y-0 right-3 flex items-center text-fg-muted hover:text-fg-strong
+              class="absolute inset-y-0 right-2.5 flex items-center px-0.5 text-fg-muted hover:text-fg-strong
                      transition-colors"
               :title="showPassword ? 'Hide password' : 'Show password'"
               @click="showPassword = !showPassword"
@@ -167,5 +167,5 @@ const passwordId = useId()
         </button>
       </form>
     </div>
-  </div>
+  </main>
 </template>

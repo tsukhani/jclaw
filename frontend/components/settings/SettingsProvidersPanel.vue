@@ -740,7 +740,9 @@ const groupedProviders = computed(() => {
             <!-- JCLAW-110: per-provider enable/disable toggle. Hidden from
                    the /model selector and chat dropdown when off. -->
             <button
-              :aria-label="`${isProviderEnabled(name) ? 'Disable' : 'Enable'} ${name} provider`"
+              role="switch"
+              :aria-checked="isProviderEnabled(name)"
+              :aria-label="`${name} provider`"
               :title="isProviderEnabled(name)
                 ? 'Hide this provider from the model selector'
                 : 'Show this provider in the model selector'"

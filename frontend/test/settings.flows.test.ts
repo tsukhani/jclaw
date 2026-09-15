@@ -189,11 +189,11 @@ describe('Settings page — provider enable/disable toggle (JCLAW-110/113)', () 
     setupDefaultApi({ capturePost: b => captured.push(b) })
     const component = await mountSettingsSection('providers')
 
-    // The toggle is the button with aria-label="Disable ollama-cloud provider"
-    // when enabled, or "Enable" when disabled. Default fixture has all providers
-    // enabled, so it reads "Disable …".
-    const disableBtn = component.find('button[aria-label="Disable ollama-cloud provider"]')
+    // The toggle is the switch named "ollama-cloud provider"; the default
+    // fixture has every provider enabled, so it starts checked.
+    const disableBtn = component.find('button[role="switch"][aria-label="ollama-cloud provider"]')
     expect(disableBtn.exists()).toBe(true)
+    expect(disableBtn.attributes('aria-checked')).toBe('true')
     await disableBtn.trigger('click')
     await flushPromises()
 
@@ -1213,8 +1213,9 @@ describe('Settings page — OCR toggle round-trip', () => {
     setupDefaultApi({ capturePost: b => captured.push(b) })
     const component = await mountSettingsSection('ocr')
 
-    const toggle = component.find('button[aria-label="Disable Tesseract OCR"]')
+    const toggle = component.find('button[role="switch"][aria-label="Tesseract OCR"]')
     expect(toggle.exists()).toBe(true)
+    expect(toggle.attributes('aria-checked')).toBe('true')
     expect(toggle.attributes('disabled')).toBeUndefined()
     await toggle.trigger('click')
     await flushPromises()

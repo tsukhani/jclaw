@@ -443,7 +443,7 @@ async function deleteApp(app: AppEntry) {
         <button
           type="button"
           :data-testid="`update-app-${app.id}`"
-          class="absolute top-1 left-1 p-1 rounded-md text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-emerald-700 dark:hover:text-emerald-400 transition-opacity"
+          class="absolute top-1 left-1 p-[5px] rounded-md text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-emerald-700 dark:hover:text-emerald-400 transition-opacity"
           title="Update this app"
           aria-label="Update this app"
           @click="startUpdate(app)"
@@ -457,7 +457,7 @@ async function deleteApp(app: AppEntry) {
           type="button"
           :data-testid="`delete-app-${app.id}`"
           :disabled="deletingId === app.id"
-          class="absolute top-1 right-1 p-1 rounded-md text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+          class="absolute top-1 right-1 p-[5px] rounded-md text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
           title="Delete this app"
           aria-label="Delete this app"
           @click="deleteApp(app)"

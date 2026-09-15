@@ -656,7 +656,7 @@ const navGroups: NavGroup[] = [
         >
           <span class="text-xs text-fg-muted">{{ username || 'admin' }}</span>
           <button
-            class="text-xs text-fg-muted hover:text-fg-primary transition-colors"
+            class="py-1 -my-1 text-xs text-fg-muted hover:text-fg-primary transition-colors"
             @click="logout()"
           >
             Sign out
