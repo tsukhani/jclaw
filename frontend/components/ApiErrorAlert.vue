@@ -6,6 +6,14 @@
  * Styled with the `text-danger` token, which `assets/css/tailwind.css` tunes to ≥4.5:1 on both
  * `--muted` and `--surface-elevated` in either theme. The raw `text-red-700 dark:text-red-400`
  * pair most panels still use is not that token and is not tuned against those backgrounds.
+ *
+ * It also supplies `bg-surface-elevated` itself (JCLAW-1213). Without a background of its own the
+ * guarantee above held only where a caller happened to drop it on one of those two surfaces —
+ * measured at 4.64:1 inside the providers panel's `bg-blue-50` container, which clears AA but by
+ * 0.14, and no gate here can see composed contrast: jsdom has no computed colour and stylelint
+ * checks declarations, not what they compose to. Owning the surface makes the claim true wherever
+ * the component is placed, and lifts the floor to 4.93:1 — `--surface-elevated` is the roomier of
+ * the two tuned backgrounds, `--muted` being the 4.64 one the token was tuned to just clear.
  */
 import type { ApiErrorDetails } from '~/types/api'
 
@@ -21,7 +29,7 @@ withDefaults(defineProps<{
 <template>
   <div
     v-if="error"
-    class="text-xs text-danger space-y-0.5"
+    class="text-xs text-danger bg-surface-elevated space-y-0.5"
     role="alert"
     data-testid="api-error"
   >

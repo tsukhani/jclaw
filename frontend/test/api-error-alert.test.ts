@@ -89,4 +89,18 @@ describe('ApiErrorAlert', () => {
       expect(text).not.toContain('502 Bad Gateway')
     })
   })
+
+  /**
+   * JCLAW-1213: contrast must be a property of the component, not of where a caller drops it.
+   * Measured live, the alert rendered at 4.64:1 inside the providers panel's bg-blue-50 container
+   * — passing, but on a background nobody tuned against, and jsdom cannot see composed contrast
+   * so no other test here can catch it drifting. Owning a tuned surface is what makes the
+   * docstring's >=4.5:1 claim true wherever it is placed; this pins that it keeps owning one.
+   */
+  it('supplies its own tuned background rather than inheriting the container', async () => {
+    const component = await mountSuspended(ApiErrorAlert, {
+      props: { error: { code: 'not_found', message: 'gone', template: null } },
+    })
+    expect(component.get('[data-testid="api-error"]').classes()).toContain('bg-surface-elevated')
+  })
 })
