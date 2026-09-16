@@ -14,6 +14,7 @@ import services.ConfigService;
 import services.InternalApiTokenService;
 import services.LoadTestRunner;
 import services.LoggerLevelService;
+import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 
 import java.util.List;
@@ -137,7 +138,8 @@ public class ApiConfigController extends Controller {
 
         var rejection = ConfigService.setWithSideEffects(key, value);
         if (rejection != null) {
-            ApiResponses.error(403, ApiResponses.FORBIDDEN, rejection);
+            ApiResponses.errorWithTemplate(403, ApiResponses.FORBIDDEN, rejection,
+                    ApiErrorTemplates.configValueRejected());
         }
 
         renderJSON(gson.toJson(new ConfigSaveResponse(

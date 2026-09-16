@@ -16,10 +16,26 @@ import static utils.ErrorTemplateSupport.e;
  * the ~214 API call sites already funnel through {@code ApiResponses}, so they gain a remedy
  * from this table without being edited. Only a site whose default is too generic to help needs
  * to supply its own.
+ *
+ * <p>Public only for those sites' factories, such as {@link #configValueRejected}.
  */
-final class ApiErrorTemplates {
+public final class ApiErrorTemplates {
 
     private ApiErrorTemplates() {}
+
+    /** A config write {@code ConfigService.setWithSideEffects} refused on its value. */
+    public static final String CONFIG_VALUE_REJECTED = "config_value_rejected";
+
+    /**
+     * Sent under the wire code {@code forbidden}, whose own row reads as a missing permission and
+     * would send the operator looking for one; the rejection names a value to correct.
+     */
+    public static ErrorTemplate configValueRejected() {
+        return new ErrorTemplate(CONFIG_VALUE_REJECTED,
+                "The value was refused, so nothing was saved.",
+                "The reason above names the rule the value broke. The previous value is still in effect.",
+                "Correct the value and save again.");
+    }
 
     private static final Map<String, ErrorTemplate> TEMPLATES = Map.ofEntries(
             e(ApiResponses.INVALID_REQUEST, "The request was not in a form the server could accept.",

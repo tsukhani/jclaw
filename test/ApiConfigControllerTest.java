@@ -107,6 +107,22 @@ class ApiConfigControllerTest extends FunctionalTest {
         assertTrue(getContent(resp).contains("\"status\":\"ok\""));
     }
 
+    /**
+     * A refused value keeps the wire code the SPA knows, but its template names a value to correct:
+     * the {@code forbidden} row reads as a missing permission, which a typo'd zone is not.
+     */
+    @Test
+    void aRefusedValueExplainsTheValueNotAPermission() {
+        login();
+        var resp = POST("/api/config", "application/json",
+                "{\"key\":\"app.timezone\",\"value\":\"Not/A/Zone\"}");
+        var body = getContent(resp);
+        assertEquals(403, resp.status.intValue(), body);
+        assertTrue(body.contains("\"code\":\"forbidden\""), body);
+        assertTrue(body.contains("Correct the value and save again."), body);
+        assertFalse(body.contains("operator-only"), "not a permission problem: " + body);
+    }
+
     @Test
     void deleteRejectsReservedKeyPrefix() {
         login();
