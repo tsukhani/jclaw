@@ -653,9 +653,7 @@ describe('Settings page — model management', () => {
     expect(component.text()).not.toContain('discover-plain')
   })
 
-  // JCLAW-1131 AC4: the upstream status is what the backend passes through; the panel must
-  // name the provider and offer the retry path rather than leading with that status.
-  it('names the provider and offers the retry path when discovery fails', async () => {
+  async function failDiscovery(status: number, message: string, howToRetry: string | null) {
     registerEndpoint('/api/agents', () => [])
     registerEndpoint('/api/channels', () => [])
     registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
@@ -666,16 +664,12 @@ describe('Settings page — model management', () => {
     registerEndpoint('/api/providers/ollama-cloud/discover-models', {
       method: 'POST',
       handler: (event) => {
-        setResponseStatus(event, 502)
+        setResponseStatus(event, status)
         return {
           type: 'error',
           code: 'upstream_error',
-          message: 'Provider returned HTTP 401',
-          template: {
-            whatBroke: 'An upstream service returned an error.',
-            whatToCheck: 'Open Logs and find the matching entry.',
-            howToRetry: 'Retry. If it repeats, check the provider\'s status page.',
-          },
+          message,
+          template: { whatBroke: 'Discovery did not complete.', whatToCheck: 'Open Logs.', howToRetry },
         }
       },
     })
@@ -683,12 +677,29 @@ describe('Settings page — model management', () => {
     const component = await mountSettingsSection('providers')
     await component.find('button[title="Discover models from provider"]').trigger('click')
     await flushPromises()
+    return component
+  }
+
+  // JCLAW-1131 AC4: the upstream status is what the backend passes through; the panel must
+  // name the provider and offer the retry path rather than leading with that status.
+  it('names the provider and offers the retry path when discovery fails', async () => {
+    const component = await failDiscovery(502, 'Provider returned HTTP 401',
+      'Retry. If it repeats, check the provider\'s status page.')
 
     const alert = component.find('[data-testid="api-error"]')
     expect(alert.exists()).toBe(true)
-    expect(alert.text()).toContain('Could not reach ollama-cloud.')
+    expect(alert.text()).toContain('Could not fetch models from ollama-cloud.')
     expect(alert.text()).toContain('How to retry')
-    expect(alert.text()).toContain('check the provider\'s status page')
+    expect(alert.find('[data-testid="api-error-retry"]').exists()).toBe(true)
+  })
+
+  // A refused base URL never reached the provider: repeating the call cannot help, so no button.
+  it('offers no retry when the failure has no retry path', async () => {
+    const component = await failDiscovery(400, 'Provider base URL rejected by SSRF guard', null)
+
+    const alert = component.find('[data-testid="api-error"]')
+    expect(alert.exists()).toBe(true)
+    expect(alert.find('[data-testid="api-error-retry"]').exists()).toBe(false)
   })
 })
 

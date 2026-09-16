@@ -31,6 +31,9 @@ public final class LlmErrorTemplates {
 
     private LlmErrorTemplates() {}
 
+    /** Not a {@link Remedy}: nothing was sent, so there is no call for the classifier to read. */
+    public static final String BASE_URL_REFUSED = "llm_base_url_refused";
+
     private static final String CHECK_LOGS = "Open Logs and find the matching entry — it carries "
             + "the status and the provider's own message, which this one deliberately omits.";
 
@@ -128,6 +131,20 @@ public final class LlmErrorTemplates {
                     CHECK_LOGS,
                     "Retry. If it repeats the same way, check %s's status page.".formatted(provider));
         };
+    }
+
+    /**
+     * A provider call refused before it was sent, on the configured base URL. No retry: the same
+     * URL is refused the same way until the operator changes it.
+     */
+    public static ErrorTemplate baseUrlRefused(@NonNull String provider) {
+        return new ErrorTemplate(BASE_URL_REFUSED,
+                "%s was not called: its base URL is missing or points somewhere this instance never fetches."
+                        .formatted(provider),
+                ("Settings → Providers → %s: the base URL must be an http or https URL with a host. "
+                        + "Loopback and LAN addresses are allowed for local inference; link-local "
+                        + "addresses such as the 169.254.169.254 metadata endpoint are not.").formatted(provider),
+                null);
     }
 
     private static String contextExceeded(String provider, @Nullable String model,

@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -516,6 +517,25 @@ class ApiProvidersControllerTest extends FunctionalTest {
             assertFalse(body.contains("rejected the API key"),
                     "a 500 is not a key problem: " + body);
         }
+    }
+
+    /**
+     * A refused base URL never reached the provider, so its template points at the URL and offers
+     * no retry — the SPA shows a Retry button only where one can help, and repeating this cannot.
+     */
+    @Test
+    void discoverModelsPointsARefusedBaseUrlAtTheUrlWithNoRetry() {
+        login();
+        ConfigService.set("provider.test-provider.baseUrl", "http://169.254.169.254/");
+        ConfigService.set("provider.test-provider.apiKey", "sk-test");
+
+        var resp = POST("/api/providers/test-provider/discover-models", "application/json", "{}");
+        var body = getContent(resp);
+        assertEquals(400, resp.status.intValue(), body);
+        var template = JsonParser.parseString(body).getAsJsonObject().getAsJsonObject("template");
+        assertTrue(template.get("whatToCheck").getAsString().contains("base URL"), body);
+        assertTrue(template.get("howToRetry").isJsonNull(), "retrying a refused URL cannot help: " + body);
+        assertFalse(body.contains("status page"), "nothing upstream failed: " + body);
     }
 
     // --- reachable: the live-probe path (baseUrl configured, not the "not configured" short-circuit) ---

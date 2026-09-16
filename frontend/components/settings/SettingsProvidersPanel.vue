@@ -504,6 +504,10 @@ async function startDiscovery(providerName: string) {
   }
 }
 
+function discoveryRetryable(error: ApiErrorDetails): boolean {
+  return !error.code || !!error.template?.howToRetry
+}
+
 function toggleDiscoverySelect(modelId: string) {
   const s = new Set(discoverySelected.value)
   if (s.has(modelId)) s.delete(modelId)
@@ -1642,11 +1646,12 @@ const groupedProviders = computed(() => {
             class="px-4 py-4"
           >
             <!-- JCLAW-1137: discovery returns a model list and persists nothing, so repeating it is
-                 safe — and a provider that was briefly down is the likeliest failure here. -->
+                 safe. Offered only where it can help: a transport failure (no code), or a template
+                 with a retry path — a refused base URL has none. -->
             <ApiErrorAlert
               :error="discoveryError"
-              :headline="`Could not reach ${name}.`"
-              :retry="() => startDiscovery(name)"
+              :headline="`Could not fetch models from ${name}.`"
+              :retry="discoveryRetryable(discoveryError) ? () => startDiscovery(name) : undefined"
               :retrying="discoveryLoading"
             />
           </div>

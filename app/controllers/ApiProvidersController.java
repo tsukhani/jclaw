@@ -143,7 +143,7 @@ public class ApiProvidersController extends Controller {
                     renderJSON(gson.toJson(new DiscoverModelsResponse(models, models.size())));
             case DiscoveryResult.Error(var statusCode, var message) ->
                     ApiResponses.errorWithTemplate(statusCode, ApiResponses.UPSTREAM_ERROR, message,
-                            discoveryRemedy(name, message));
+                            discoveryRemedy(name, statusCode, message));
         }
     }
 
@@ -218,7 +218,7 @@ public class ApiProvidersController extends Controller {
             }
             case DiscoveryResult.Error(var statusCode, var message) ->
                     ApiResponses.errorWithTemplate(statusCode, ApiResponses.UPSTREAM_ERROR, message,
-                            discoveryRemedy(name, message));
+                            discoveryRemedy(name, statusCode, message));
         }
     }
 
@@ -227,9 +227,11 @@ public class ApiProvidersController extends Controller {
      * The remedy for a failed discovery probe, so a test-connection failure names the provider
      * and where to fix it rather than reporting "Provider returned HTTP 401" (JCLAW-1131 AC4).
      * The upstream status is the only classifier available here — discovery reads /models, so
-     * there is no response body to parse the way the chat path does.
+     * there is no response body to parse the way the chat path does. A 400 never reached the
+     * provider: discovery refused the base URL itself, and no retry changes that.
      */
-    private static ErrorTemplate discoveryRemedy(String provider, String message) {
+    private static ErrorTemplate discoveryRemedy(String provider, int statusCode, String message) {
+        if (statusCode == 400) return LlmErrorTemplates.baseUrlRefused(provider);
         var remedy = switch (upstreamStatusIn(message)) {
             case 401, 403 -> LlmErrorTemplates.Remedy.INVALID_KEY;
             case 429 -> LlmErrorTemplates.Remedy.RATE_LIMITED;
