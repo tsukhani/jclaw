@@ -326,7 +326,9 @@ public final class TaskSchedulingService {
                     "Task '%s' resumed".formatted(t.name));
             return t;
         });
-        if (task != null) reArmOneShotIfDropped(task);
+        // After commit: through the API this joins the request's transaction, and a past-due re-arm
+        // fires at once, so armed earlier the handler reads the old paused=true and drops the row.
+        if (task != null) Tx.afterCommit(() -> reArmOneShotIfDropped(task));
     }
 
     /**

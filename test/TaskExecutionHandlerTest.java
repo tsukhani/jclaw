@@ -861,10 +861,35 @@ class TaskExecutionHandlerTest extends UnitTest {
         TaskSchedulingService.pause(task.id);
         stub.scheduleIfNotExists.clear();
         TaskSchedulingService.resume(task.id);
+        commitAndReopen();
 
         assertEquals(1, stub.scheduleIfNotExists.size(),
                 () -> "resume must re-arm a one-shot; calls=" + stub.scheduleIfNotExists.size());
         assertEquals(task.id.toString(), stub.scheduleIfNotExists.getFirst().instance.getId());
+    }
+
+    /**
+     * Through the API, resume joins the request's transaction, and a past-due re-arm fires at once
+     * under enableImmediateExecution: armed before the commit, the handler reads the old
+     * paused=true and drops the row again.
+     */
+    @Test
+    void resumeReArmsOnlyAfterTheClearedFlagCommits() {
+        var agent = createAgent("resume-commit-agent");
+        var task = persistTask(agent, "Paused one-shot", "Later.",
+                Task.Type.SCHEDULED, Instant.now().plusSeconds(3600), null, null);
+        commitAndReopen();
+
+        TaskSchedulingService.pause(task.id);
+        commitAndReopen();
+        stub.scheduleIfNotExists.clear();
+        TaskSchedulingService.resume(task.id);
+
+        assertTrue(stub.scheduleIfNotExists.isEmpty(),
+                "re-armed before paused=false committed; the fire would read paused=true and drop the row");
+        commitAndReopen();
+        assertEquals(1, stub.scheduleIfNotExists.size(),
+                () -> "resume must re-arm once the flag commits; calls=" + stub.scheduleIfNotExists.size());
     }
 
     /**
@@ -883,6 +908,7 @@ class TaskExecutionHandlerTest extends UnitTest {
         TaskSchedulingService.pause(task.id);
         stub.schedules.clear();
         TaskSchedulingService.resume(task.id);
+        commitAndReopen();
 
         assertTrue(stub.schedules.isEmpty(),
                 "resume must not call schedule() — that throws on an existing row");
@@ -902,6 +928,7 @@ class TaskExecutionHandlerTest extends UnitTest {
         TaskSchedulingService.pause(task.id);
         stub.scheduleIfNotExists.clear();
         TaskSchedulingService.resume(task.id);
+        commitAndReopen();
 
         assertTrue(stub.scheduleIfNotExists.isEmpty(),
                 "a recurring Task keeps its row through a pause; re-arming double-schedules it");
