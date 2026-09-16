@@ -137,7 +137,12 @@ Run this from the **worktree**, against its own dev server, so the primary tree'
 
 6. Check that a visible focus indicator appears on keyboard focus, and measure its contrast against the adjacent surface (≥ 3:1). Note that scripted `.focus()` does not always trigger `:focus-visible`, so a computed-style diff shows an indicator *exists*, not that it clears 3:1.
 
-7. **When measured values disagree with declared tokens, trust the measured values.**
+7. **Trigger error states — a sweep of each page as it loads never sees them.** A component that renders only on failure is absent from the DOM until something fails, so it stays unmeasured on a page that otherwise reads clean. Find the renderers with `grep -rl "<ApiErrorAlert" frontend/` rather than trusting a list, and trigger each one:
+   - **Prefer a read-only call that fails for real.** Settings → LLM Providers → *Discover models* on a provider that isn't running locally (vllm, llama-cpp) returns a genuine 502 and changes nothing.
+   - **Never provoke a failure by submitting a write.** A create that fails after partly succeeding can leave a duplicate behind — and one error ref can serve both kinds: the prompt form uses the same one for an idempotent edit and a non-idempotent create (JCLAW-1137).
+   - Measure the rendered component in both themes like any other element. On 2026-09-16 the error box measured 4.64:1 in light — passing, but 0.14 over the threshold — before JCLAW-1213 gave it a background of its own. Nothing in a load-time sweep would have shown it.
+
+8. **When measured values disagree with declared tokens, trust the measured values.**
 
 If no server can be reached, **say so, continue static-only, and mark the live gap in the report** — don't silently skip it.
 
