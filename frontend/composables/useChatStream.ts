@@ -180,8 +180,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       return await uploadAttachments(selectedAgentId.value)
     }
     catch (e: unknown) {
-      const err = e as { data?: { error?: string }, message?: string } | undefined
-      attachError.value = 'Upload failed: ' + (err?.data?.error || err?.message || 'unknown error')
+      // No fallback text: for a network failure the transport's own message says more than a stock phrase.
+      attachError.value = 'Upload failed: ' + apiErrorDetails(e).message
       return null
     }
   }

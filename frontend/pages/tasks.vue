@@ -460,8 +460,7 @@ async function saveDelivery(task: Task) {
   catch (e) {
     // $fetch surfaces the backend's 400 body on e.data; prefer its message so
     // the operator sees the validation reason rather than a generic "400".
-    const data = (e as { data?: { error?: string } }).data
-    deliveryError.value = data?.error ?? (e instanceof Error ? e.message : 'Failed to save channel')
+    deliveryError.value = apiErrorDetails(e, 'Failed to save channel').message
   }
   finally {
     savingDelivery.value = false
@@ -516,8 +515,7 @@ async function saveTimezone(task: Task) {
     refresh()
   }
   catch (e) {
-    const data = (e as { data?: { error?: string } }).data
-    timezoneError.value = data?.error ?? (e instanceof Error ? e.message : 'Failed to save timezone')
+    timezoneError.value = apiErrorDetails(e, 'Failed to save timezone').message
   }
   finally {
     savingTimezone.value = false

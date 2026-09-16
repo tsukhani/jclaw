@@ -4,6 +4,8 @@ import play.Play;
 import play.mvc.Before;
 import play.mvc.Controller;
 import play.mvc.Http;
+import utils.ApiErrorTemplates;
+import utils.ApiResponses;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -90,7 +92,7 @@ public class LoadtestAuthCheck extends Controller {
     }
 
     private static void denied() {
-        response.status = 403;
-        renderJSON("{\"error\":\"Forbidden\"}");
+        ApiResponses.errorWithTemplate(403, ApiResponses.FORBIDDEN, "Forbidden",
+                ApiErrorTemplates.loadtestAccessDenied());
     }
 }

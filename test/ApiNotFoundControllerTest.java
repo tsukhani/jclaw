@@ -16,6 +16,21 @@ class ApiNotFoundControllerTest extends FunctionalTest {
         assertTrue(getContent(resp).contains("Not found"), getContent(resp));
     }
 
+    /**
+     * JCLAW-1218: the canonical envelope rather than a hand-built {"error":...} body, carrying a
+     * template for a missing endpoint. The not_found code's own row assumes a deleted record and
+     * says to pick one from the list, which cannot help a request to a path that never existed.
+     */
+    @Test
+    void unknownApiPathReturnsTheCanonicalEnvelope() {
+        var body = getContent(GET("/api/graphql"));
+        assertTrue(body.contains("\"type\":\"error\""), body);
+        assertTrue(body.contains("\"code\":\"not_found\""), body);
+        assertFalse(body.contains("\"error\":"), "no retired error key: " + body);
+        assertTrue(body.contains("missing endpoint"), "the path template, not the record one: " + body);
+        assertFalse(body.contains("pick the record"), body);
+    }
+
     @Test
     void unknownDeepApiPathReturns404() {
         assertStatus(404, GET("/api/nope/deeper/path"));

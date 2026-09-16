@@ -323,8 +323,7 @@ async function writeConfig(key: string, value: string): Promise<boolean> {
     return true
   }
   catch (e) {
-    const data = (e as { data?: { error?: string, message?: string } })?.data
-    failure.value = data?.error ?? data?.message ?? (e instanceof Error ? e.message : 'Save failed')
+    failure.value = apiErrorDetails(e, 'Save failed').message
     return false
   }
 }

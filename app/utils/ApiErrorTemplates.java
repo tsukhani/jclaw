@@ -37,6 +37,37 @@ public final class ApiErrorTemplates {
                 "Correct the value and save again.");
     }
 
+    /** An {@code /api} path no route matches (JCLAW-1218). */
+    public static final String API_PATH_NOT_FOUND = "api_path_not_found";
+
+    /**
+     * Sent under the wire code {@code not_found}, whose own row assumes a deleted record and says to
+     * pick one from the list; here nothing was ever at the path.
+     */
+    public static ErrorTemplate apiPathNotFound() {
+        return new ErrorTemplate(API_PATH_NOT_FOUND,
+                "No API endpoint matches that path.",
+                "Check the path and the HTTP method: the route may have been renamed, or the request "
+                        + "may carry a typo. This is a missing endpoint, not a missing record.",
+                "Correct the path and send the request again.");
+    }
+
+    /** A request the load-test gate refused (JCLAW-1218). */
+    public static final String LOADTEST_ACCESS_DENIED = "loadtest_access_denied";
+
+    /**
+     * Sent under the wire code {@code forbidden}, whose own row assumes a signed-in operator lacking a
+     * permission. Names the gate's requirements but never the value its header must carry: this
+     * reaches whoever sent the refused request.
+     */
+    public static ErrorTemplate loadtestAccessDenied() {
+        return new ErrorTemplate(LOADTEST_ACCESS_DENIED,
+                "The load-test endpoints refused this request.",
+                "They accept only a request from this machine that carries the X-Loadtest-Auth header. "
+                        + "A request from another host, or one without the right header, is refused.",
+                "Run the load test from this machine through ./jclaw.sh loadtest, which supplies the header.");
+    }
+
     private static final Map<String, ErrorTemplate> TEMPLATES = Map.ofEntries(
             e(ApiResponses.INVALID_REQUEST, "The request was not in a form the server could accept.",
                     "Check the fields you submitted for missing or malformed values.",

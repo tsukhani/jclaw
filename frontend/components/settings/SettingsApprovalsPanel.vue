@@ -61,8 +61,7 @@ async function save(value: string) {
   catch (e) {
     // A ceiling in application.conf refuses a loosening value with a 403 naming it
     // (JCLAW-1022). Surface that instead of silently reverting the select.
-    const detail = (e as { data?: { error?: string } })?.data?.error
-    error.value = detail ?? 'Could not save the approval policy.'
+    error.value = apiErrorDetails(e, 'Could not save the approval policy.').message
     selected.value = policy.value
   }
   finally {

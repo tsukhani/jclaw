@@ -159,11 +159,13 @@ describe('Tasks page — JCLAW-420 inline channel editor → PATCH', () => {
     expect(captured[0]!.body).toEqual({ delivery: 'telegram:999' })
   })
 
+  // JCLAW-1218: this mocked { error: "..." }, a body the backend never sends, so it passed while
+  // the real page showed "Failed to save channel". Mock the canonical envelope it actually returns.
   it('surfaces the backend 400 error message when the value is invalid', async () => {
     registerTaskMounts({
       tasks: [task({ id: 1, name: 'tool task', delivery: 'tool:send_gmail_message' })],
       patchResponse: () => new Response(
-        JSON.stringify({ error: 'Unknown channel: carrierpigeon' }),
+        JSON.stringify({ type: 'error', code: 'invalid_request', message: 'Unknown channel: carrierpigeon' }),
         { status: 400, headers: { 'content-type': 'application/json' } },
       ),
     })

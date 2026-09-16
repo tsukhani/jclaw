@@ -525,6 +525,15 @@ class ApiMetricsControllerTest extends FunctionalTest {
         var req = loadtestRequest("127.0.0.1", null);
         var response = POST(req, "/api/metrics/loadtest", "application/json", "{}");
         assertEquals(403, response.status.intValue());
+        // JCLAW-1218: the canonical envelope, not a hand-built {"error":...} body. The wire code
+        // stays forbidden; the template names the gate rather than a missing permission, and
+        // never the value its header must carry, since this reaches whoever was refused.
+        var body = getContent(response);
+        assertTrue(body.contains("\"type\":\"error\""), body);
+        assertTrue(body.contains("\"code\":\"forbidden\""), body);
+        assertFalse(body.contains("\"error\":"), "no retired error key: " + body);
+        assertTrue(body.contains("X-Loadtest-Auth"), "names the gate: " + body);
+        assertFalse(body.contains("signed in"), "not the missing-permission template: " + body);
     }
 
     @Test

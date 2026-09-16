@@ -38,6 +38,25 @@ export default withNuxt(
       'vue/multi-word-component-names': 'off',
     },
   },
+  {
+    // JCLAW-1218: the API error envelope is type/code/message. Five surfaces read a retired `error`
+    // key off the response body and showed a stock fallback instead of the server's reason, while
+    // a test mocking that same retired key kept passing. Read failures through apiErrorDetails().
+    files: ['**/*.{ts,vue}'],
+    ignores: ['test/**', 'tests/**'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: 'MemberExpression[property.name=\'error\'][object.property.name=\'data\']',
+          message: 'API errors carry `message`, not `error`. Use apiErrorDetails(e, fallback).message.',
+        },
+        {
+          selector: 'MemberExpression[property.name=\'error\'][object.name=\'data\']',
+          message: 'API errors carry `message`, not `error`. Use apiErrorDetails(e, fallback).message.',
+        },
+      ],
+    },
+  },
   // Vue accessibility (WCAG) rules, Vue SFCs only.
   ...vueA11y.configs['flat/recommended'],
 )
