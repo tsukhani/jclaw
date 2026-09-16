@@ -284,9 +284,10 @@ public class WhatsAppChannel implements Channel {
                 // JCLAW-1135: a business rule, not a fault — logged at INFO and worded as a
                 // constraint, so an operator is not sent looking for a break that is not there.
                 EventLogger.info(CHANNEL, null, WHATSAPP, ChannelErrorTemplates.render(
-                        ChannelErrorTemplates.whatsAppOutsideWindow(bindingId),
+                        ChannelErrorTemplates.whatsAppOutsideWindow(bindingId,
+                                templateName != null && !templateName.isBlank()),
                         ErrorRendering.PLAIN, EventLogger.MESSAGE_MAX_CHARS));
-                return SendResult.FAILED;
+                return SendResult.REJECTED;
             }
             EventLogger.warn(CHANNEL, null, WHATSAPP,
                     "WhatsApp API error (HTTP %d): %s".formatted(response.code(), responseBody));

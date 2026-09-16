@@ -487,6 +487,21 @@ class ChannelTest extends UnitTest {
         assertFalse(channel.sendWithRetry("peer", "hello"));
     }
 
+    /** A platform-rule refusal (WhatsApp's 24-hour window) fails identically on a resend. */
+    @Test
+    void channelSendWithRetryDoesNotRetryARejection() {
+        var channel = new Channel() {
+            int attempts = 0;
+            @Override public String channelName() { return "test"; }
+            @Override public SendResult trySend(String peer, String text) {
+                attempts++;
+                return SendResult.REJECTED;
+            }
+        };
+        assertFalse(channel.sendWithRetry("peer", "hello"));
+        assertEquals(1, channel.attempts, "a rejection must not be retried");
+    }
+
     @Test
     void channelSendWithRetryRunsRetryOnSchedulerThreadNotCaller() {
         // Regression: the original implementation called Thread.sleep on the

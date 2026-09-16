@@ -1,3 +1,4 @@
+import channels.Channel;
 import channels.WhatsAppChannel;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -5,12 +6,18 @@ import models.ChannelConfig;
 import models.EventLog;
 import models.WhatsAppBinding;
 import models.WhatsAppConversationWindow;
+import okhttp3.Interceptor;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.EventLogger;
+import utils.HttpFactories;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -217,6 +224,29 @@ class WhatsAppChannelTest extends UnitTest {
                 "in-window the free-form send is attempted despite the configured template");
     }
 
+    /**
+     * Meta's 131047 is a business rule a resend cannot change, so it maps to REJECTED — which the
+     * shared retry neither resends nor escalates to an ERROR — and a binding that does have a
+     * template is not told it has none. The canned transport stands in for the Graph host.
+     */
+    @Test
+    void anOutsideWindowRejectionIsNotRetryableAndRespectsTheConfiguredTemplate() {
+        var binding = new WhatsAppBinding();
+        binding.id = 987_654L;
+        binding.phoneNumberId = "1550001";
+        binding.accessToken = "EAAG-tok";
+        binding.templateName = "reopen_conversation";
+        var body = "{\"error\":{\"message\":\"Re-engagement message\",\"code\":131047}}";
+
+        var result = HttpFactories.callWith(cannedClient(400, body),
+                () -> WhatsAppChannel.forBinding(binding).trySend("447900987654", "hello"));
+
+        assertEquals(Channel.SendResult.REJECTED, result);
+        assertTrue(logExists("%binding 987654 held a reply%"), "the rejection is logged");
+        assertFalse(logExists("%binding 987654 held a reply%none configured%"),
+                "this binding has a template, so the log must not say it has none");
+    }
+
     // ── verifySignature guard ──
 
     @Test
@@ -307,6 +337,18 @@ class WhatsAppChannelTest extends UnitTest {
     private static boolean logExists(String likePattern) {
         EventLogger.flush();
         return EventLog.count("message like ?1", likePattern) > 0;
+    }
+
+    /** A transport whose interceptor answers every request with {@code code} and {@code body}. */
+    private static OkHttpClient cannedClient(int code, String body) {
+        Interceptor canned = chain -> new Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(code)
+                .message("canned")
+                .body(ResponseBody.create(body, null))
+                .build();
+        return new OkHttpClient.Builder().addInterceptor(canned).build();
     }
 
     private static JsonObject json(String raw) {

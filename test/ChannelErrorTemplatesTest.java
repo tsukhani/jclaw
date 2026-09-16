@@ -158,7 +158,8 @@ class ChannelErrorTemplatesTest extends UnitTest {
         for (var t : new ErrorTemplate[]{
                 ChannelErrorTemplates.slackSignatureMismatch(42L, "T0123ABCD"),
                 ChannelErrorTemplates.telegramTokenRejected(42L),
-                ChannelErrorTemplates.whatsAppOutsideWindow(42L)}) {
+                ChannelErrorTemplates.whatsAppOutsideWindow(42L, false),
+                ChannelErrorTemplates.whatsAppOutsideWindow(42L, true)}) {
             var stored = ChannelErrorTemplates.render(t, ErrorRendering.PLAIN, cap);
             assertTrue(stored.length() <= cap, t.code() + " exceeds the log cap: " + stored.length());
             assertTrue(stored.contains(t.howToRetry()),
@@ -190,11 +191,24 @@ class ChannelErrorTemplatesTest extends UnitTest {
     /** The story's AC: an out-of-window rejection reads as an expected constraint, not a fault. */
     @Test
     void theWhatsAppWindowRejectionReadsAsAConstraintNotAnError() {
-        var t = ChannelErrorTemplates.whatsAppOutsideWindow(42L);
-        var all = (t.whatBroke() + " " + t.whatToCheck()).toLowerCase();
-        assertFalse(all.contains("error"), "must not be framed as an error: " + all);
-        assertFalse(all.contains("failed"), all);
-        assertTrue(t.whatToCheck().contains("Expected"), t.whatToCheck());
+        for (var templateConfigured : new boolean[]{false, true}) {
+            var t = ChannelErrorTemplates.whatsAppOutsideWindow(42L, templateConfigured);
+            var all = (t.whatBroke() + " " + t.whatToCheck()).toLowerCase();
+            assertFalse(all.contains("error"), "must not be framed as an error: " + all);
+            assertFalse(all.contains("failed"), all);
+            assertTrue(t.whatToCheck().contains("Expected"), t.whatToCheck());
+        }
+    }
+
+    /** Telling an operator who configured a template that there is none sends them the wrong way. */
+    @Test
+    void theWhatsAppWindowRejectionOnlyAsksForATemplateWhenThereIsNone() {
+        assertTrue(ChannelErrorTemplates.whatsAppOutsideWindow(42L, false).whatToCheck()
+                .contains("none configured"));
+        var withTemplate = ChannelErrorTemplates.whatsAppOutsideWindow(42L, true);
+        assertFalse(withTemplate.whatToCheck().contains("none configured"), withTemplate.whatToCheck());
+        assertFalse(withTemplate.howToRetry().contains("Set an approved message template"),
+                withTemplate.howToRetry());
     }
 
     @Test

@@ -150,13 +150,21 @@ public final class ChannelErrorTemplates {
      * operator told "error" goes looking for a break that is not there, when the fix is a
      * configuration step or simply waiting for the customer.
      */
-    public static ErrorTemplate whatsAppOutsideWindow(@Nullable Long bindingId) {
-        return new ErrorTemplate(WHATSAPP_OUTSIDE_WINDOW,
-                "WhatsApp binding %s held a reply: the customer is outside Meta's 24-hour window."
-                        .formatted(bindingId == null ? "(unbound)" : String.valueOf(bindingId)),
-                "Expected, not a fault. Meta allows free-form replies only within 24 hours of the "
-                        + "customer's last message; after that it accepts only a pre-approved "
-                        + "template, and this binding has none configured to reopen the conversation.",
+    public static ErrorTemplate whatsAppOutsideWindow(@Nullable Long bindingId, boolean templateConfigured) {
+        var broke = "WhatsApp binding %s held a reply: the customer is outside Meta's 24-hour window."
+                .formatted(bindingId == null ? "(unbound)" : String.valueOf(bindingId));
+        var rule = "Expected, not a fault. Meta allows free-form replies only within 24 hours of the "
+                + "customer's last message; after that it accepts only a pre-approved template";
+        if (templateConfigured) {
+            return new ErrorTemplate(WHATSAPP_OUTSIDE_WINDOW, broke,
+                    rule + ". This binding has one, but JClaw sends it only ahead of a text reply its "
+                            + "own window record places outside the window; this message was not one, "
+                            + "so it went free-form.",
+                    "Nothing to change on the binding — the window reopens the moment the customer "
+                            + "writes again.");
+        }
+        return new ErrorTemplate(WHATSAPP_OUTSIDE_WINDOW, broke,
+                rule + ", and this binding has none configured to reopen the conversation.",
                 "Set an approved message template on the binding so JClaw can reopen the "
                         + "conversation, or wait — the window reopens the moment the customer writes again.");
     }

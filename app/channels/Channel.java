@@ -31,6 +31,8 @@ public interface Channel {
      *                      milliseconds {@link #sendWithRetry} should wait
      *                      before the next attempt; {@code 0} when no hint
      *                      was provided
+     * @param permanent     true when a resend cannot succeed, so
+     *                      {@link #sendWithRetry} does not attempt one
      */
     // Sonar java:S1845 flags OK/FAILED constants as case-clashing with the
     // record's `ok` component, but constant-instances-named-after-the-concept
@@ -38,11 +40,13 @@ public interface Channel {
     // and is the form every call site already uses. Renaming would be net
     // negative for readability.
     @SuppressWarnings("java:S1845")
-    record SendResult(boolean ok, long retryAfterMs) {
-        public static final SendResult OK = new SendResult(true, 0L);
-        public static final SendResult FAILED = new SendResult(false, 0L);
+    record SendResult(boolean ok, long retryAfterMs, boolean permanent) {
+        public static final SendResult OK = new SendResult(true, 0L, false);
+        public static final SendResult FAILED = new SendResult(false, 0L, false);
+        /** Refused by a platform rule; the channel has already logged why. */
+        public static final SendResult REJECTED = new SendResult(false, 0L, true);
         public static SendResult rateLimited(long retryAfterMs) {
-            return new SendResult(false, retryAfterMs);
+            return new SendResult(false, retryAfterMs, false);
         }
     }
 
@@ -52,9 +56,10 @@ public interface Channel {
     /**
      * Attempt a single delivery of {@code text} to {@code peerId}. Returns
      * {@link SendResult#OK} on success, {@link SendResult#FAILED} on generic
-     * failure, or {@link SendResult#rateLimited(long)} when the platform
-     * surfaced a back-off hint. Must not throw — log warnings and return a
-     * failed result on transient errors.
+     * failure, {@link SendResult#REJECTED} when a platform rule refused it, or
+     * {@link SendResult#rateLimited(long)} when the platform surfaced a back-off
+     * hint. Must not throw — log warnings and return a failed result on transient
+     * errors.
      */
     SendResult trySend(String peerId, String text);
 
@@ -62,7 +67,7 @@ public interface Channel {
      * Send a message with a single retry on failure. The delay between attempts
      * is taken from the prior {@link SendResult#retryAfterMs()} when non-zero,
      * or 1 s otherwise, capped at 60 s so a buggy platform response can't stall
-     * an agent response indefinitely.
+     * an agent response indefinitely. A {@link SendResult#REJECTED} is not retried.
      *
      * <p>The retry is scheduled via {@link RetryScheduler} on a platform-thread
      * carrier so a virtual-thread caller (the agent dispatch path) unmounts
@@ -72,6 +77,7 @@ public interface Channel {
     default boolean sendWithRetry(String peerId, String text) {
         SendResult result = trySend(peerId, text);
         if (result.ok()) return true;
+        if (result.permanent()) return false;
         long delayMs = Math.min(result.retryAfterMs() > 0 ? result.retryAfterMs() : 1000L, 60_000L);
         try {
             // 5 s slack covers the scheduler hop + the second trySend's own latency.
