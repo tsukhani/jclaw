@@ -630,13 +630,14 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         // Plain: Telegram rejects stray markup, and an error that fails to send because of its
         // own formatting is the worst outcome on this path. TELEGRAM_MAX is the API's hard cap.
         TelegramChannel.forToken(botToken).sendTurn(chatId,
-                ChannelErrorTemplates.render(ChannelErrorTemplates.forTurnFailure(e),
+                ChannelErrorTemplates.render(ChannelErrorTemplates.forChannelReader(),
                         ErrorRendering.PLAIN, TELEGRAM_MAX_CHARS),
                 agent, replyToMessageId, messageThreadId);
         clearStreamCheckpoint();
         ackError();
-        EventLogger.error(LOG_CATEGORY, agentName(), LOG_SOURCE,
-                "Streaming error: " + (e != null ? e.getMessage() : "(null)"));
+        EventLogger.record("ERROR", LOG_CATEGORY, agentName(), LOG_SOURCE,
+                "Streaming error: " + (e != null ? e.getMessage() : "(null)"),
+                ChannelErrorTemplates.operatorDetail(e));
     }
 
     // ── Visible for tests ──────────────────────────────────────────────

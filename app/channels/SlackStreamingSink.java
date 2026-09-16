@@ -278,13 +278,14 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     /** Error: append a notice to the native stream, edit the draft in place, or
      *  post one — then finalize. */
     public void errorFallback(Exception e) {
-        EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
-                "Streaming error: %s".formatted(e != null ? e.getMessage() : "unknown"));
+        EventLogger.record("WARN", LOG_CATEGORY, null, LOG_SOURCE,
+                "Streaming error: %s".formatted(e != null ? e.getMessage() : "unknown"),
+                ChannelErrorTemplates.operatorDetail(e));
         // Rich, then converted: ErrorRendering.RICH emits CommonMark (**bold**), and Slack's
         // mrkdwn uses *single* asterisks — sending the former renders the asterisks literally.
         // SlackMarkdownFormatter is the same converter seal() puts its content through.
         String msg = "⚠️ " + SlackMarkdownFormatter.format(ChannelErrorTemplates.render(
-                ChannelErrorTemplates.forTurnFailure(e), ErrorRendering.RICH,
+                ChannelErrorTemplates.forChannelReader(), ErrorRendering.RICH,
                 SlackOutboundPlanner.CAPTION_MAX));
         if (nativeMode && streamTs != null) {
             slacker.appendStream(channelId, streamTs, "\n\n" + msg);

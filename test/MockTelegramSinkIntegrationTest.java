@@ -1,6 +1,7 @@
 import channels.TelegramChannel;
 import channels.TelegramStreamingSink;
 import channels.TelegramStreamingSinkTestHooks;
+import llm.LlmProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import services.AgentService;
 import services.AttachmentService;
 import services.ConversationService;
 import services.Tx;
+import utils.LlmErrorTemplates;
 
 import java.util.List;
 
@@ -414,10 +416,17 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
 
         int beforeSends = (int) server.countRequests("sendMessage");
 
-        sink.errorFallback(new RuntimeException("boom"));
+        // Classified, so a sink that sent the operator's remedy would name the provider below.
+        var failure = new LlmErrorTemplates.Failure(
+                LlmErrorTemplates.Remedy.INVALID_KEY, "openrouter", "gpt-4.1", null, null);
+        sink.errorFallback(new LlmProvider.LlmException.ClientError("HTTP 401 from openrouter", failure));
 
         assertTrue(server.countRequests("deleteMessage") >= 1,
                 "errorFallback must delete the placeholder");
+        assertTrue(server.requests().stream()
+                        .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                        .noneMatch(r -> r.body().contains("openrouter")),
+                "a group guest must not learn which provider rejected which key");
         // JCLAW-1133: the notice is the 3-part template rather than the old fixed apology, and it
         // goes out plain — Telegram rejects stray markup, and an error that fails to send because
         // of its own formatting is the worst outcome on this path.

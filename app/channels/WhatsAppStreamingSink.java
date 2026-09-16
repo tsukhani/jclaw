@@ -73,11 +73,12 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
         if (channel != null) {
             // Plain: WhatsApp's formatting is its own dialect, so emit none.
             channel.sendText(peerId, ChannelErrorTemplates.render(
-                    ChannelErrorTemplates.forTurnFailure(e), ErrorRendering.PLAIN,
+                    ChannelErrorTemplates.forChannelReader(), ErrorRendering.PLAIN,
                     WHATSAPP_MAX_CHARS), agent);
         }
-        EventLogger.error(LOG_CATEGORY, agentName(), channelName(),
-                "Streaming error: " + (e != null ? e.getMessage() : "(null)"));
+        EventLogger.record("ERROR", LOG_CATEGORY, agentName(), channelName(),
+                "Streaming error: " + (e != null ? e.getMessage() : "(null)"),
+                ChannelErrorTemplates.operatorDetail(e));
     }
 
     @Override

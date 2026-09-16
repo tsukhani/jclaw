@@ -10,11 +10,13 @@ import java.util.Map;
  * Templates for a turn that failed before it could answer, rendered for the channel the person is
  * reading in (JCLAW-1133).
  *
- * <p>Every channel sink previously ended a failed turn with a fixed sentence — "Sorry, an error
- * occurred processing your message." — which names nothing and offers nothing. The remedy is
- * usually knowable: a provider failure already arrives carrying {@link
- * utils.LlmErrorTemplates.Failure}, classified at the call that failed, so the reader can be told
- * the key was rejected rather than that something went wrong.
+ * <p>Two audiences, two templates. The operator's ({@link #forTurnFailure}) reuses the {@link
+ * utils.LlmErrorTemplates.Failure} classified at the call that failed, so it names the provider,
+ * the model, and whether the key or the balance is at fault. A channel reader never gets that one:
+ * a Slack channel, a Telegram group with guests and a WhatsApp customer all read the sink's reply,
+ * none of them can fix a key, and each would learn which provider the deployment runs on and that
+ * its billing lapsed. They get {@link #forChannelReader}; the operator's remedy goes to the event
+ * log through {@link #operatorDetail}.
  *
  * <p>Nothing static registers here: the useful templates are parameterised by the failing call, so
  * {@link #forTurnFailure} builds them and {@link ErrorTemplates#forCode} falls back for the codes.
@@ -23,6 +25,9 @@ public final class ChannelErrorTemplates {
 
     /** A turn that failed for a reason the classifier could not name. */
     public static final String TURN_FAILED = "channel_turn_failed";
+
+    /** What a channel reader is told about any failed turn. */
+    public static final String REPLY_UNAVAILABLE = "channel_reply_unavailable";
 
     // --- binding failures an operator acts on (JCLAW-1135) ---
     public static final String SLACK_SIGNATURE_MISMATCH = "slack_signature_mismatch";
@@ -38,22 +43,46 @@ public final class ChannelErrorTemplates {
     private ChannelErrorTemplates() {}
 
     /**
-     * The template for a failed turn, reusing the provider classification when the failure carries
-     * one (JCLAW-1134 attaches it to {@code LlmException}) rather than re-deriving it from a
-     * message string. A cause chain is walked because the runner wraps provider failures before
-     * they reach a sink.
+     * The operator's template for a failed turn, reusing the provider classification when the
+     * failure carries one (JCLAW-1134 attaches it to {@code LlmException}) rather than re-deriving
+     * it from a message string. For the web chat, whose reader is the operator — never a channel
+     * sink's reply, which gets {@link #forChannelReader}.
      */
     public static ErrorTemplate forTurnFailure(@Nullable Throwable t) {
-        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
-            if (c instanceof LlmProvider.LlmException le && le.failure() != null) {
-                return LlmErrorTemplates.forFailure(le.failure());
-            }
-        }
+        var failure = classifiedFailure(t);
+        if (failure != null) return LlmErrorTemplates.forFailure(failure);
         return new ErrorTemplate(TURN_FAILED,
                 "The reply could not be produced.",
                 "Nothing on your side — the failure was inside JClaw, and the log entry for this "
                         + "turn carries what actually broke.",
                 "Send the message again. If it fails the same way twice, the log is the thing to read.");
+    }
+
+    /** The reply a Slack, Telegram or WhatsApp reader gets for any failed turn, however classified. */
+    public static ErrorTemplate forChannelReader() {
+        return new ErrorTemplate(REPLY_UNAVAILABLE,
+                "This message could not be answered.",
+                "Nothing on your side — the problem is at this end, and it has been logged for "
+                        + "whoever runs this assistant.",
+                "Send the message again later.");
+    }
+
+    /**
+     * The operator's remedy for a classified failure, rendered for {@code EventLog.details}, or
+     * null when the failure is unclassified: the raw message on the same log line then says more
+     * than the generic template would.
+     */
+    public static @Nullable String operatorDetail(@Nullable Throwable t) {
+        var failure = classifiedFailure(t);
+        return failure == null ? null : ErrorRendering.PLAIN.render(LlmErrorTemplates.forFailure(failure));
+    }
+
+    /** Walks the cause chain: the runner wraps provider failures before they reach a sink. */
+    private static LlmErrorTemplates.@Nullable Failure classifiedFailure(@Nullable Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
+            if (c instanceof LlmProvider.LlmException le && le.failure() != null) return le.failure();
+        }
+        return null;
     }
 
     /**

@@ -1,12 +1,12 @@
+import channels.WhatsAppChannel;
 import llm.LlmProvider;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.EventLogger;
 import utils.ChannelErrorTemplates;
 import utils.ErrorRendering;
 import utils.ErrorTemplate;
 import utils.LlmErrorTemplates;
-import channels.WhatsAppChannel;
-import services.EventLogger;
 
 /**
  * JCLAW-1133: a failed turn reaches the reader as three actionable parts, rendered for what the
@@ -58,6 +58,36 @@ class ChannelErrorTemplatesTest extends UnitTest {
         var rendered = ErrorRendering.PLAIN.render(t);
         assertFalse(rendered.contains("Bar.java"), "stack detail must not reach the reader: " + rendered);
         assertFalse(rendered.contains("NullPointerException"), rendered);
+    }
+
+    /**
+     * A channel reader is not the operator — a group guest, a WhatsApp customer — so no
+     * classification may put the provider, the model, the key or the balance in front of them.
+     */
+    @Test
+    void theChannelReaderTemplateDisclosesNothingAboutTheDeployment() {
+        var rendered = ErrorRendering.PLAIN.render(ChannelErrorTemplates.forChannelReader()).toLowerCase();
+        for (var word : new String[]{"provider", "model", "key", "credit", "quota", "settings", "log entry"}) {
+            assertFalse(rendered.contains(word), "'" + word + "' reached the reader: " + rendered);
+        }
+        assertNotNull(ChannelErrorTemplates.forChannelReader().howToRetry());
+    }
+
+    @Test
+    void theOperatorDetailCarriesTheClassifiedRemedy() {
+        var failure = new LlmErrorTemplates.Failure(
+                LlmErrorTemplates.Remedy.QUOTA_EXHAUSTED, "together", "llama-4", null, null);
+        var detail = ChannelErrorTemplates.operatorDetail(new RuntimeException("turn failed",
+                new LlmProvider.LlmException.ClientError("HTTP 402", failure)));
+        assertNotNull(detail);
+        assertTrue(detail.contains("together") && detail.contains("credit"), detail);
+    }
+
+    /** Unclassified, the raw message already on the log line says more than the generic template. */
+    @Test
+    void anUnclassifiedFailureHasNoOperatorDetail() {
+        assertNull(ChannelErrorTemplates.operatorDetail(new IllegalStateException("boom")));
+        assertNull(ChannelErrorTemplates.operatorDetail(null));
     }
 
     @Test

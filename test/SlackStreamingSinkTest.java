@@ -1,11 +1,13 @@
 import channels.SlackStreamingSink;
 import channels.SlackStreamingSink.Slacker;
+import llm.LlmProvider;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
 import services.AttachmentService;
 import services.ConversationService;
 import services.Tx;
+import utils.LlmErrorTemplates;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -134,6 +136,21 @@ class SlackStreamingSinkTest extends UnitTest {
         assertTrue(posted.contains("What broke"), posted);
         assertTrue(posted.contains("How to retry"), posted);
         assertFalse(posted.contains("**"), "mrkdwn, not raw CommonMark: " + posted);
+    }
+
+    /** Everyone in the channel reads the notice, so the classified remedy stays in the log. */
+    @Test
+    void errorNoticeNeverShowsTheChannelTheProviderOrItsKey() {
+        var f = new FakeSlacker();
+        var sink = new SlackStreamingSink("C1", null, "U1", f, 0L);
+        sink.begin();
+        var failure = new LlmErrorTemplates.Failure(
+                LlmErrorTemplates.Remedy.INVALID_KEY, "openrouter", "gpt-4.1", null, null);
+        sink.errorFallback(new LlmProvider.LlmException.ClientError("HTTP 401 from openrouter", failure));
+        var posted = f.fallbackPosts.get(0);
+        assertFalse(posted.contains("openrouter"), posted);
+        assertFalse(posted.contains("gpt-4.1"), posted);
+        assertFalse(posted.contains("API key"), posted);
     }
 
     // ── JCLAW-346: off-thread chat.update draft preview ──

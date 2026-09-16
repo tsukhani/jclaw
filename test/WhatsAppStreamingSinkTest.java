@@ -1,7 +1,9 @@
 import channels.Channel;
 import channels.WhatsAppStreamingSink;
+import llm.LlmProvider;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import utils.LlmErrorTemplates;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -56,6 +58,20 @@ class WhatsAppStreamingSinkTest extends UnitTest {
         var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
         sink.seal("   ");
         assertTrue(ch.sent.isEmpty(), "a blank reply is not sent");
+    }
+
+    /** The customer reading this is not the operator: the classified remedy stays in the log. */
+    @Test
+    void errorFallbackNeverShowsTheCustomerTheProviderOrItsBilling() {
+        var ch = new RecordingChannel();
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
+        var failure = new LlmErrorTemplates.Failure(
+                LlmErrorTemplates.Remedy.QUOTA_EXHAUSTED, "openrouter", "gpt-4.1", null, null);
+        sink.errorFallback(new LlmProvider.LlmException.ClientError("HTTP 402 from openrouter", failure));
+        var sent = ch.sent.get(0);
+        assertFalse(sent.contains("openrouter"), sent);
+        assertFalse(sent.contains("gpt-4.1"), sent);
+        assertFalse(sent.toLowerCase().contains("credit"), sent);
     }
 
     @Test
