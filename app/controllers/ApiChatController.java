@@ -28,6 +28,8 @@ import slash.Commands;
 import tools.SubagentSpawnTool;
 import utils.ApiResponses;
 import utils.AppClock;
+import utils.ChannelErrorTemplates;
+import utils.ErrorRendering;
 import utils.InactivityTimer;
 import utils.LatencyTrace;
 import utils.TokenCoalescer;
@@ -574,7 +576,11 @@ public class ApiChatController extends Controller {
                     reasoningCoalescer.drain();
                     SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
                     close.finished().set(true);
-                    sse.send(Map.of("type", "error", KEY_CONTENT, "An error occurred: " + error.getMessage()));
+                    // JCLAW-1133: the reader gets the 3-part template, rich because the web chat
+                    // renders Markdown; the raw throwable text stays in the EventLogger line below.
+                    // It used to be sent verbatim, which is the one thing the epic rules out —
+                    // technical detail belongs in event_log, never in front of a person.
+                    sse.send(webErrorFrame(error));
                     sse.close();
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
@@ -631,5 +637,16 @@ public class ApiChatController extends Controller {
                     JsonParser.parseString(ev.generatedAttachmentsJson()));
         }
         sse.send(payload);
+    }
+
+    /**
+     * The SSE frame a web reader sees when a turn fails (JCLAW-1133): the 3-part template, rich
+     * because the chat renders Markdown. Never the throwable's own message — that goes to
+     * event_log alongside. Extracted so the choice is testable without driving a real LLM stream,
+     * which this controller's tests deliberately avoid.
+     */
+    public static Map<String, Object> webErrorFrame(Throwable error) {
+        return Map.of("type", "error", KEY_CONTENT,
+                ErrorRendering.RICH.render(ChannelErrorTemplates.forTurnFailure(error)));
     }
 }
