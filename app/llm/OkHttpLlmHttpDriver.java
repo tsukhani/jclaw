@@ -1,5 +1,6 @@
 package llm;
 
+import llm.LlmFailureClassifier.CallSite;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -89,8 +90,8 @@ final class OkHttpLlmHttpDriver {
      * writes to H2 and the JDK closes a file database's channel on interrupt. Canceling surfaces
      * as {@code onFailure}, so the await below unwinds through the ordinary path.
      */
-    @SuppressWarnings("java:S107") // the SSE callback surface plus the cancel handle it publishes
-    static void streamSse(URI uri, String authHeader, String jsonBody,
+    @SuppressWarnings("java:S107") // the SSE callback surface, the cancel handle, and the call's identity
+    static void streamSse(URI uri, String authHeader, String jsonBody, CallSite site,
                           Consumer<String> onEvent, Runnable onComplete, Consumer<Throwable> onError,
                           Consumer<Runnable> publishCancel, @Nullable String channel) {
         var builder = new Request.Builder()
@@ -118,7 +119,7 @@ final class OkHttpLlmHttpDriver {
                         var body = "";
                         try { body = resp.body().string(); }
                         catch (IOException _) { /* body already consumed or absent */ }
-                        onError.accept(classify(resp.code(), sanitizeErrorBody(body, authHeader)));
+                        onError.accept(classify(resp.code(), body, authHeader, site));
                     } else {
                         onError.accept(t != null ? t
                                 : new LlmProvider.LlmException("SSE failed without cause"));
@@ -148,14 +149,20 @@ final class OkHttpLlmHttpDriver {
     /**
      * Classify a non-200 SSE status the way {@code LlmProvider.attemptRequest} classifies a
      * single-shot one (JCLAW-1166), so a caller can tell a provider fault from a request of
-     * ours. The message is unchanged: {@code ToolCapabilityMemo} matches on its text.
+     * ours, and attach the remedy it needs (JCLAW-1134). The message keeps the body text:
+     * {@code ToolCapabilityMemo} matches on it.
+     *
+     * <p>The remedy is read off the raw body and the message off the sanitized one — redaction
+     * and the length cap can land mid-code, and only the sanitized copy may be surfaced.
      */
-    private static LlmProvider.LlmException classify(int status, String body) {
-        var message = "HTTP %d: %s".formatted(status, body);
-        if (status == 429) return new LlmProvider.LlmException.RateLimited(message);
-        if (status >= 500) return new LlmProvider.LlmException.ServerError(message);
-        if (status >= 400) return new LlmProvider.LlmException.ClientError(message);
-        return new LlmProvider.LlmException(message);
+    private static LlmProvider.LlmException classify(int status, String body, String authHeader,
+                                                     CallSite site) {
+        var failure = site.classifying(status, body);
+        var message = "HTTP %d: %s".formatted(status, sanitizeErrorBody(body, authHeader));
+        if (status == 429) return new LlmProvider.LlmException.RateLimited(message, null, failure);
+        if (status >= 500) return new LlmProvider.LlmException.ServerError(message, null, failure);
+        if (status >= 400) return new LlmProvider.LlmException.ClientError(message, failure);
+        return new LlmProvider.LlmException(message, null, failure);
     }
 
     private static Optional<Long> parseRetryAfter(String value) {

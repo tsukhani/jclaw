@@ -1,3 +1,4 @@
+import llm.LlmFailureClassifier;
 import llm.LlmResilience;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ProviderConfig;
@@ -200,13 +201,15 @@ class LlmStreamTransportReleaseTest extends UnitTest {
         try {
             var cls = Class.forName("llm.OkHttpLlmHttpDriver");
             var m = cls.getDeclaredMethod("streamSse", URI.class, String.class, String.class,
-                    Consumer.class, Runnable.class, Consumer.class, Consumer.class, String.class);
+                    LlmFailureClassifier.CallSite.class, Consumer.class, Runnable.class,
+                    Consumer.class, Consumer.class, String.class);
             m.setAccessible(true);
             Consumer<String> onEvent = _ -> { };
             Runnable onComplete = () -> completed.set(true);
             Consumer<Throwable> onError = error::set;
             Consumer<Runnable> onCancel = publishCancel::set;
             m.invoke(null, URI.create(url), "Bearer sk-test", "{}",
+                    new LlmFailureClassifier.CallSite("stream-release", "m", null),
                     onEvent, onComplete, onError, onCancel, null);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError(e);
