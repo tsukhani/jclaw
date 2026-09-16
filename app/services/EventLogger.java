@@ -14,6 +14,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class EventLogger {
 
+    /**
+     * The stored message cap, matching {@code EventLog.message}'s column length. Longer messages are
+     * cut from the tail — so a caller whose message must keep its last part (an actionable error's
+     * retry instruction) renders to this cap itself rather than letting the tail be dropped here.
+     */
+    public static final int MESSAGE_MAX_CHARS = 500;
+
     private EventLogger() {}
 
     private static final String LEVEL_ERROR = "ERROR";
@@ -119,8 +126,8 @@ public class EventLogger {
         event.category = category;
         event.agentId = agentId;
         event.channel = channel;
-        event.message = message != null && message.length() > 500
-                ? message.substring(0, 497) + "..." : message;
+        event.message = message != null && message.length() > MESSAGE_MAX_CHARS
+                ? message.substring(0, MESSAGE_MAX_CHARS - 3) + "..." : message;
         event.details = details;
         pending.add(event);
 

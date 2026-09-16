@@ -5,6 +5,8 @@ import utils.ChannelErrorTemplates;
 import utils.ErrorRendering;
 import utils.ErrorTemplate;
 import utils.LlmErrorTemplates;
+import channels.WhatsAppChannel;
+import services.EventLogger;
 
 /**
  * JCLAW-1133: a failed turn reaches the reader as three actionable parts, rendered for what the
@@ -110,5 +112,74 @@ class ChannelErrorTemplatesTest extends UnitTest {
         var t = new ErrorTemplate("x", "It broke.", "Nothing to check.", null);
         var out = ChannelErrorTemplates.render(t, ErrorRendering.PLAIN, 4096);
         assertFalse(out.contains("How to retry"), out);
+    }
+
+    // --- JCLAW-1135: binding failures, read by an operator through /logs ---
+
+    /**
+     * Regression guard for a defect found while validating the secret-safety test: EventLog.message
+     * is capped at 500 and EventLogger cuts from the tail, so the Slack template — 610 chars — lost
+     * its retry instruction, the one part the operator acts on. Every binding template must keep
+     * its full retry once rendered to the log cap. WhatsApp sat at 499, one character from failing.
+     */
+    @Test
+    void everyBindingTemplateKeepsItsRetryInstructionWithinTheLogCap() {
+        var cap = EventLogger.MESSAGE_MAX_CHARS;
+        for (var t : new ErrorTemplate[]{
+                ChannelErrorTemplates.slackSignatureMismatch(42L, "T0123ABCD"),
+                ChannelErrorTemplates.telegramTokenRejected(42L),
+                ChannelErrorTemplates.whatsAppOutsideWindow(42L)}) {
+            var stored = ChannelErrorTemplates.render(t, ErrorRendering.PLAIN, cap);
+            assertTrue(stored.length() <= cap, t.code() + " exceeds the log cap: " + stored.length());
+            assertTrue(stored.contains(t.howToRetry()),
+                    t.code() + " lost its retry instruction to truncation: " + stored);
+        }
+    }
+
+    @Test
+    void theSlackMismatchNamesTheBindingAndTheSecretItConcerns() {
+        var t = ChannelErrorTemplates.slackSignatureMismatch(42L, "T0123ABCD");
+        assertTrue(t.whatBroke().contains("42") && t.whatBroke().contains("T0123ABCD"), t.whatBroke());
+        assertTrue(t.whatToCheck().contains("Signing Secret"), t.whatToCheck());
+    }
+
+    /** Verified against Slack's docs: a regenerated secret keeps the old one valid for 24 hours. */
+    @Test
+    void theSlackMismatchExplainsWhyItStartsADayAfterRegeneration() {
+        assertTrue(ChannelErrorTemplates.slackSignatureMismatch(1L, null).whatToCheck()
+                .contains("24 hours"));
+    }
+
+    @Test
+    void theTelegramTemplateNamesTheBindingAndSaysItWasDisabled() {
+        var t = ChannelErrorTemplates.telegramTokenRejected(42L);
+        assertTrue(t.whatBroke().contains("42") && t.whatBroke().contains("disabled"), t.whatBroke());
+        assertTrue(t.howToRetry().contains("re-enable"), t.howToRetry());
+    }
+
+    /** The story's AC: an out-of-window rejection reads as an expected constraint, not a fault. */
+    @Test
+    void theWhatsAppWindowRejectionReadsAsAConstraintNotAnError() {
+        var t = ChannelErrorTemplates.whatsAppOutsideWindow(42L);
+        var all = (t.whatBroke() + " " + t.whatToCheck()).toLowerCase();
+        assertFalse(all.contains("error"), "must not be framed as an error: " + all);
+        assertFalse(all.contains("failed"), all);
+        assertTrue(t.whatToCheck().contains("Expected"), t.whatToCheck());
+    }
+
+    @Test
+    void metaTheOutOfWindowCodeIsRecognisedFromAGraphApiErrorBody() {
+        var body = "{\"error\":{\"message\":\"Re-engagement message\",\"type\":\"OAuthException\","
+                + "\"code\":131047,\"fbtrace_id\":\"AbC\"}}";
+        assertEquals(ChannelErrorTemplates.META_OUTSIDE_WINDOW, WhatsAppChannel.metaErrorCode(body));
+    }
+
+    /** Runs on the failure path, so it must never throw on a body it cannot read. */
+    @Test
+    void metaErrorCodeIsTolerantOfBodiesItCannotParse() {
+        for (var bad : new String[]{null, "", "   ", "not json", "[1,2]", "{}", "{\"error\":\"x\"}",
+                "{\"error\":{\"code\":\"nan\"}}"}) {
+            assertEquals(-1, WhatsAppChannel.metaErrorCode(bad), "for body: " + bad);
+        }
     }
 }

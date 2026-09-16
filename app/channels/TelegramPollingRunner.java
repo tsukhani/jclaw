@@ -14,6 +14,8 @@ import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import services.EventLogger;
 import services.Tx;
+import utils.ChannelErrorTemplates;
+import utils.ErrorRendering;
 import utils.Strings;
 
 import java.util.ArrayList;
@@ -328,10 +330,9 @@ public final class TelegramPollingRunner {
         for (var target : targets) {
             try {
                 if (target.token() == null || !tokenRejectedCheck.test(target.token())) continue;
-                EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
-                        ("Polling binding %d disabled: Telegram rejected its bot token (getMe "
-                                + "401/403/404). The token is invalid or revoked — fix it and "
-                                + "re-enable the binding.").formatted(target.id()));
+                EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE, ChannelErrorTemplates.render(
+                        ChannelErrorTemplates.telegramTokenRejected(target.id()),
+                        ErrorRendering.PLAIN, EventLogger.MESSAGE_MAX_CHARS));
                 disableAndUnregisterRejected(target);
             } catch (Exception e) {
                 // One bad binding must not abort the rest of the sweep.

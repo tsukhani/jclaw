@@ -160,6 +160,41 @@ class WebhookSlackControllerTest extends FunctionalTest {
         assertEquals(401, response.status.intValue());
     }
 
+    /**
+     * JCLAW-1135: a signature mismatch tells the operator which binding and what to fix, and leaks
+     * neither the stored secret nor the signature Slack sent.
+     *
+     * <p>Driven through the real webhook rather than the template factory: the factory takes no
+     * secret by construction, so asserting on it alone would prove only that code never passed
+     * what it was never given. What has to hold is that nothing on the actual rejection path —
+     * this controller, its logging — writes either value, and that is only visible end to end.
+     */
+    @Test
+    void signatureMismatchNamesTheBindingAndLeaksNoSecret() {
+        var id = seedBinding();
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        var sentSignature = "v0=canary0deadbeef0canary";
+        assertEquals(401, postWithSlackHeaders(id, "{}", ts, sentSignature).status.intValue());
+
+        EventLogger.flush();
+        var rejection = EventLog.findRecent(20).stream()
+                .filter(e -> "WEBHOOK_SIGNATURE_FAILURE".equals(e.category) && "slack".equals(e.channel))
+                .filter(e -> e.message != null && e.message.contains("binding " + id))
+                .findFirst();
+        assertTrue(rejection.isPresent(), "the operator-facing entry must name binding " + id);
+
+        var logged = rejection.get().message + " " + rejection.get().details;
+        assertTrue(logged.contains("Signing Secret"), "points at what to fix: " + logged);
+        // The retry's tail, asserted on the STORED message. EventLog.message is capped at 500 and
+        // EventLogger cuts from the tail, so a call site that skips the capped renderer silently
+        // loses the instruction the operator acts on — the Slack template alone is 610 chars.
+        assertTrue(rejection.get().message.contains("Slack's next retry will verify"),
+                "the retry instruction was truncated out of the log: " + rejection.get().message);
+        assertFalse(logged.contains(SIGNING_SECRET), "the stored secret leaked: " + logged);
+        assertFalse(logged.contains("canary0deadbeef0canary"), "the received signature leaked: " + logged);
+        assertFalse(logged.contains("xoxb-"), "a bot token leaked: " + logged);
+    }
+
     @Test
     void rejectsStaleTimestamp() {
         // Slack's verifySignature rejects timestamps more than 5 minutes off. We

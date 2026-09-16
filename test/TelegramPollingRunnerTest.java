@@ -372,8 +372,10 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "a binding with a rejected token must be unregistered");
         assertFalse(TelegramBinding.<TelegramBinding>findById(id).enabled,
                 "a binding with a rejected token must be disabled so reconcile won't re-register it");
+        // Keyed to the binding id rather than pinned wording (JCLAW-1135): the operator alert must
+        // name the binding it concerns, and a sentence match breaks on any rewording.
         long alerts = EventLog.count("category = ?1 AND message LIKE ?2",
-                "channel", "%disabled: Telegram rejected its bot token%");
+                "channel", "%Telegram binding " + id + " was disabled%");
         assertEquals(1L, alerts, "the operator is alerted that Telegram rejected the token");
     }
 

@@ -439,7 +439,9 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                 "an accepted token's session must stay registered");
         assertTrue(TelegramBinding.<TelegramBinding>findById(id).enabled,
                 "an accepted token's binding must stay enabled");
-        assertEquals(0L, channelEvents("%disabled: Telegram rejected its bot token%"),
+        // Negative assertion: it must key to the live wording. Against the retired sentence it
+        // would pass vacuously — green even if a healthy token did trigger a disable alert.
+        assertEquals(0L, channelEvents("%Telegram binding " + id + " was disabled%"),
                 "no operator alert for a healthy token");
     }
 
@@ -503,8 +505,8 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                     "a 401 getMe means a revoked/invalid token → the binding is disabled");
             assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                     "the live session is unregistered after the disable");
-            assertEquals(1L, channelEvents("%disabled: Telegram rejected its bot token%"),
-                    "the operator alert names the token rejection");
+            assertEquals(1L, channelEvents("%Telegram binding " + id + " was disabled%"),
+                    "the operator alert names the binding whose token was rejected");
             assertEquals(2L, mock.countRequests("getMe"),
                     "exactly one getMe per probe run went over the wire");
         } finally {

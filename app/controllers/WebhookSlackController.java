@@ -9,6 +9,8 @@ import play.mvc.Http;
 import services.BindingService;
 import services.EventLogger;
 import utils.ApiResponses;
+import utils.ChannelErrorTemplates;
+import utils.ErrorRendering;
 import utils.WebhookUtil;
 
 import java.net.URLDecoder;
@@ -122,8 +124,13 @@ public class WebhookSlackController extends Controller {
         }
         if (!SlackChannel.verifySignature(binding.signingSecret,
                 timestamp.value(), rawBody, signature.value())) {
+            // JCLAW-1135: name the binding and point at the secret. The template takes neither the
+            // stored secret nor the received signature, so neither can reach the log. The 401 body
+            // Slack receives is unchanged — it is for Slack's servers, not a person.
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
-                    INVALID_SIGNATURE);
+                    ChannelErrorTemplates.render(
+                            ChannelErrorTemplates.slackSignatureMismatch(bindingId, binding.teamId),
+                            ErrorRendering.PLAIN, EventLogger.MESSAGE_MAX_CHARS));
             unauthorized(INVALID_SIGNATURE);
         }
         return new Verified(binding, rawBody);

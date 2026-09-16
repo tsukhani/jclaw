@@ -24,6 +24,17 @@ public final class ChannelErrorTemplates {
     /** A turn that failed for a reason the classifier could not name. */
     public static final String TURN_FAILED = "channel_turn_failed";
 
+    // --- binding failures an operator acts on (JCLAW-1135) ---
+    public static final String SLACK_SIGNATURE_MISMATCH = "slack_signature_mismatch";
+    public static final String TELEGRAM_TOKEN_REJECTED = "telegram_token_rejected";
+    public static final String WHATSAPP_OUTSIDE_WINDOW = "whatsapp_outside_window";
+
+    /**
+     * Meta's error code for a free-form message sent outside the 24-hour customer-service window.
+     * A business rule, not a fault: Meta requires an approved template to reopen the conversation.
+     */
+    public static final int META_OUTSIDE_WINDOW = 131047;
+
     private ChannelErrorTemplates() {}
 
     /**
@@ -73,6 +84,52 @@ public final class ChannelErrorTemplates {
         var kept = check.length() <= room ? check : check.substring(0, Math.max(0, room - 1)) + "…";
         return mode.render(new ErrorTemplate(template.code(), template.whatBroke(), kept,
                 template.howToRetry()));
+    }
+
+    // --- binding failures (JCLAW-1135) ---
+    // Operator-facing, read through /logs: the audience is whoever configures the binding, not the
+    // person chatting. Each names the binding it concerns — an operator with several cannot act on
+    // "a signature failed" — and none takes a secret as a parameter, so none can render one: the
+    // signing secret, the signature Slack sent, and every bot or access token stay out of reach of
+    // the message by construction rather than by care at each call site.
+
+    public static ErrorTemplate slackSignatureMismatch(long bindingId, @Nullable String teamId) {
+        return new ErrorTemplate(SLACK_SIGNATURE_MISMATCH,
+                "Slack binding %d%s rejected an incoming event: its signature did not verify."
+                        .formatted(bindingId, teamId == null ? "" : " (team " + teamId + ")"),
+                "Almost always a stale signing secret — the one stored on this binding no longer "
+                        + "matches Settings → Basic Information → App Credentials → Signing Secret in "
+                        + "the Slack app. Regenerating it there does not update it here, and Slack keeps "
+                        + "the old secret valid for 24 hours, so this typically starts a day after "
+                        + "someone regenerated it rather than at the moment they did.",
+                "Copy the current Signing Secret from the Slack app into this binding, save, and "
+                        + "Slack's next retry will verify.");
+    }
+
+    public static ErrorTemplate telegramTokenRejected(long bindingId) {
+        return new ErrorTemplate(TELEGRAM_TOKEN_REJECTED,
+                "Telegram binding %d was disabled: Telegram no longer accepts its bot token."
+                        .formatted(bindingId),
+                "The token was revoked in BotFather — /revoke issues a new token and the old one stops "
+                        + "working at once, with no grace period. JClaw disabled the binding rather than "
+                        + "keep polling with a token that cannot work.",
+                "Paste the current token from BotFather into this binding and re-enable it.");
+    }
+
+    /**
+     * The out-of-window case is worded as an expected constraint, not a fault (the story's AC): an
+     * operator told "error" goes looking for a break that is not there, when the fix is a
+     * configuration step or simply waiting for the customer.
+     */
+    public static ErrorTemplate whatsAppOutsideWindow(@Nullable Long bindingId) {
+        return new ErrorTemplate(WHATSAPP_OUTSIDE_WINDOW,
+                "WhatsApp binding %s held a reply: the customer is outside Meta's 24-hour window."
+                        .formatted(bindingId == null ? "(unbound)" : String.valueOf(bindingId)),
+                "Expected, not a fault. Meta allows free-form replies only within 24 hours of the "
+                        + "customer's last message; after that it accepts only a pre-approved "
+                        + "template, and this binding has none configured to reopen the conversation.",
+                "Set an approved message template on the binding so JClaw can reopen the "
+                        + "conversation, or wait — the window reopens the moment the customer writes again.");
     }
 
     static Map<String, ErrorTemplate> templates() {

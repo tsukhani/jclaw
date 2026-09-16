@@ -14,6 +14,8 @@ import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 import utils.AppClock;
+import utils.ChannelErrorTemplates;
+import utils.ErrorRendering;
 import utils.GsonHolder;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -278,6 +280,14 @@ public class WhatsAppChannel implements Channel {
                 return SendResult.OK;
             }
             var responseBody = response.body().string();
+            if (metaErrorCode(responseBody) == ChannelErrorTemplates.META_OUTSIDE_WINDOW) {
+                // JCLAW-1135: a business rule, not a fault — logged at INFO and worded as a
+                // constraint, so an operator is not sent looking for a break that is not there.
+                EventLogger.info(CHANNEL, null, WHATSAPP, ChannelErrorTemplates.render(
+                        ChannelErrorTemplates.whatsAppOutsideWindow(bindingId),
+                        ErrorRendering.PLAIN, EventLogger.MESSAGE_MAX_CHARS));
+                return SendResult.FAILED;
+            }
             EventLogger.warn(CHANNEL, null, WHATSAPP,
                     "WhatsApp API error (HTTP %d): %s".formatted(response.code(), responseBody));
             return SendResult.FAILED;
@@ -289,6 +299,25 @@ public class WhatsAppChannel implements Channel {
     }
 
     // ── JCLAW-447 outbound helpers ──
+
+    /**
+     * The numeric {@code error.code} from a Graph API error body, or -1 when absent or unparseable.
+     * Never throws: this runs on the failure path, where a parse error must not turn a handled
+     * rejection into an unhandled one.
+     */
+    public static int metaErrorCode(@Nullable String body) {
+        if (body == null || body.isBlank()) return -1;
+        try {
+            var root = JsonParser.parseString(body);
+            if (!root.isJsonObject()) return -1;
+            var err = root.getAsJsonObject().get("error");
+            if (err == null || !err.isJsonObject()) return -1;
+            var code = err.getAsJsonObject().get("code");
+            return code != null && code.isJsonPrimitive() ? code.getAsInt() : -1;
+        } catch (RuntimeException _) {
+            return -1;
+        }
+    }
 
     /**
      * Split {@code text} into ordered chunks no longer than {@code limit} chars.
