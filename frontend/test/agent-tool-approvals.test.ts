@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import AgentToolApprovals from '~/components/AgentToolApprovals.vue'
 
@@ -60,6 +61,37 @@ describe('AgentToolApprovals', () => {
 
     expect(deleted).toBe(true)
     expect(component.text()).toContain('Every dangerous action is prompted')
+  })
+
+  // JCLAW-1131: a refused revoke used to be dropped on the floor — `mutate` returned null
+  // and nothing was rendered, so the grant stayed on screen looking revoked-in-progress.
+  it('reports a refused revoke with the three parts the backend supplied', async () => {
+    registerEndpoint('/api/agents/11/tool-approvals', () => [{ id: 1, toolName: 'exec' }])
+    registerEndpoint('/api/agents/11/tool-approvals/exec', {
+      method: 'DELETE',
+      handler: (event) => {
+        setResponseStatus(event, 403)
+        return {
+          type: 'error',
+          code: 'operator_only',
+          message: 'Only the operator may revoke a grant.',
+          template: {
+            whatBroke: 'Only the operator can make this change — an agent cannot.',
+            whatToCheck: 'This is a deliberate boundary.',
+            howToRetry: 'Make the change yourself in the admin UI.',
+          },
+        }
+      },
+    })
+
+    const component = await mountSuspended(AgentToolApprovals, { props: { agentId: 11 } })
+    await flushPromises()
+    await component.find('[data-testid="revoke-exec"]').trigger('click')
+    await flushPromises()
+
+    const alert = component.find('[data-testid="api-error"]')
+    expect(alert.text()).toContain('Only the operator may revoke a grant.')
+    expect(alert.text()).toContain('Make the change yourself in the admin UI.')
   })
 
   it('warns that a grant ignores which channel the agent is reached on', async () => {

@@ -953,3 +953,30 @@ export interface ProviderModelsResponse {
   models: ModelRef[]
   count: number
 }
+
+/** JCLAW-1130/1131: the three actionable parts every API error carries under `template`. */
+export interface ApiErrorTemplate {
+  whatBroke: string
+  whatToCheck: string
+  /** Null when the failure has no retry path — a breached password is replaceable, not retryable. */
+  howToRetry: string | null
+}
+
+/** The canonical error body (`utils.ApiResponses.errorBody`). */
+export interface ApiErrorBody {
+  type: 'error'
+  code: string
+  message: string
+  template: ApiErrorTemplate
+}
+
+/**
+ * A failed call, normalized for rendering. `code` and `template` are null when the failure
+ * produced no envelope — a transport error, a timeout, a proxy's own status page — which is
+ * what tells a caller that `message` is raw HTTP status text rather than the server's own.
+ */
+export interface ApiErrorDetails {
+  code: string | null
+  message: string
+  template: ApiErrorTemplate | null
+}

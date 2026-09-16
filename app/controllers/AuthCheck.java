@@ -30,9 +30,7 @@ import utils.ApiResponses;
  */
 public class AuthCheck extends Controller {
 
-    /** The 401 body every unauthenticated path renders; the %s carries the reason code. */
-    private static final String AUTH_REQUIRED_JSON =
-            "{\"error\":\"Authentication required\",\"code\":\"%s\"}";
+    private static final String AUTH_REQUIRED = "Authentication required";
 
     @Before
     static void checkAuthentication() {
@@ -59,9 +57,7 @@ public class AuthCheck extends Controller {
         // one exempt from the instance-wide gates.
         requireProvisionedInstance();
         if (AppOriginGate.isBlocked()) {
-            response.status = 403;
-            renderJSON("{\"error\":\"App may only invoke its own agent\",\"code\":\"%s\"}"
-                    .formatted(ApiResponses.APP_SCOPE));
+            ApiResponses.error(403, ApiResponses.APP_SCOPE, "App may only invoke its own agent");
         }
 
         // Bearer-token path takes precedence over session cookie. If the
@@ -82,20 +78,14 @@ public class AuthCheck extends Controller {
             case null -> { /* live operator session */ }
             case CREDENTIALS_CHANGED -> {
                 session.clear();
-                response.status = 401;
-                renderJSON(AUTH_REQUIRED_JSON
-                        .formatted(ApiResponses.CREDENTIALS_CHANGED));
+                ApiResponses.error(401, ApiResponses.CREDENTIALS_CHANGED, AUTH_REQUIRED);
             }
             case REVOKED -> {
                 session.clear();
-                response.status = 401;
-                renderJSON(AUTH_REQUIRED_JSON
-                        .formatted(ApiResponses.SESSION_REVOKED));
+                ApiResponses.error(401, ApiResponses.SESSION_REVOKED, AUTH_REQUIRED);
             }
-            case NOT_AUTHENTICATED -> {
-                response.status = 401;
-                renderJSON("{\"error\":\"Authentication required\"}");
-            }
+            case NOT_AUTHENTICATED ->
+                    ApiResponses.error(401, ApiResponses.AUTHENTICATION_REQUIRED, AUTH_REQUIRED);
         }
 
     }
@@ -115,9 +105,7 @@ public class AuthCheck extends Controller {
         var hash = ConfigService.get(ApiAuthController.PASSWORD_HASH_KEY);
         if (hash == null || hash.isBlank()) {
             session.clear();
-            response.status = 401;
-            renderJSON(AUTH_REQUIRED_JSON
-                    .formatted(ApiResponses.PASSWORD_UNSET));
+            ApiResponses.error(401, ApiResponses.PASSWORD_UNSET, AUTH_REQUIRED);
         }
     }
 
@@ -169,10 +157,8 @@ public class AuthCheck extends Controller {
         // Rejection renders outside the block — a Result thrown from inside
         // would unwind through the transaction on its way out.
         if (ownerUsername == null) {
-            response.status = 401;
-            renderJSON("{\"error\":\"Invalid token\",\"code\":\"%s\"}"
-                    .formatted(ApiResponses.INVALID_TOKEN));
-            return;
+            ApiResponses.error(401, ApiResponses.INVALID_TOKEN, "Invalid token");
+            throw ApiResponses.unreachable();
         }
 
         // Stash identity in the request-local session so controllers that

@@ -6,6 +6,7 @@ import {
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import type { ApiErrorDetails } from '~/types/api'
 
 const { configData, saving, refresh } = useSettingsConfig()
 
@@ -116,18 +117,12 @@ function isOn(field: SettingField): boolean {
 const editingKey = ref<string | null>(null)
 // v-model on a type="number" input yields a number once the text parses.
 const draft = ref<string | number>('')
-const saveError = ref<string | null>(null)
+const saveError = ref<ApiErrorDetails | null>(null)
 
 function startEdit(field: SettingField) {
   editingKey.value = field.key
   draft.value = valueOf(field)
   saveError.value = null
-}
-
-function messageOf(e: unknown): string {
-  // A refused write is 403 {type, code, message}, where message is setWithSideEffects' rejection.
-  const data = (e as { data?: { message?: string } })?.data
-  return data?.message ?? (e instanceof Error ? e.message : 'Save failed')
 }
 
 async function save(key: string, value: string) {
@@ -139,7 +134,8 @@ async function save(key: string, value: string) {
     await refresh()
   }
   catch (e) {
-    saveError.value = messageOf(e)
+    // A refused write is 403 {type, code, message, template}; message is setWithSideEffects' rejection.
+    saveError.value = apiErrorDetails(e, 'Save failed')
   }
   finally {
     saving.value = false
@@ -160,13 +156,7 @@ async function save(key: string, value: string) {
       agent can request a smaller crawl, never a larger one. Changes apply live; no
       restart needed.
     </p>
-    <p
-      v-if="saveError"
-      class="text-xs text-red-700 dark:text-red-400"
-      role="alert"
-    >
-      {{ saveError }}
-    </p>
+    <ApiErrorAlert :error="saveError" />
     <template
       v-for="group in GROUPS"
       :key="group.label"

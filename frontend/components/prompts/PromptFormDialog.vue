@@ -26,8 +26,8 @@ const content = ref('')
 const category = ref('')
 const tags = ref('')
 
-const { mutate, loading: saving, error: saveError } = useApiMutation()
-const { mutate: genMutate, loading: generating, error: generateError } = useApiMutation()
+const { mutate, loading: saving, errorDetails: saveError } = useApiMutation()
+const { mutate: genMutate, loading: generating, errorDetails: generateError } = useApiMutation()
 
 // Reset each time the dialog opens: edit → form (pre-filled); create → describe.
 watch(() => props.open, (isOpen) => {
@@ -121,12 +121,7 @@ async function save() {
         <p class="text-xs text-fg-muted">
           The prompt, category, and tags are generated from this — you can edit them all before saving.
         </p>
-        <p
-          v-if="generateError"
-          class="text-xs text-red-600 dark:text-red-400"
-        >
-          {{ generateError }}
-        </p>
+        <ApiErrorAlert :error="generateError" />
         <DialogFooter class="gap-2">
           <button
             type="button"
@@ -224,12 +219,7 @@ async function save() {
             class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
           >
         </label>
-        <p
-          v-if="saveError"
-          class="text-xs text-red-600 dark:text-red-400"
-        >
-          {{ saveError }}
-        </p>
+        <ApiErrorAlert :error="saveError" />
         <DialogFooter class="gap-2 sm:justify-between">
           <button
             v-if="!isEdit"

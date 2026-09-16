@@ -18,7 +18,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { isDeclaredToolIncapable, isLocalProvider } from '~/composables/useProviders'
-import type { Agent, ConfigEntry, DiscoveredModel, DiscoverModelsResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
+import type { Agent, ApiErrorDetails, ConfigEntry, DiscoveredModel, DiscoverModelsResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
 import SettingsConfigField from './SettingsConfigField.vue'
 
 const { configData, saving, refresh, getProviderModels, editingKey, editValue, startEdit, updateEntry, providersData } = useSettingsConfig()
@@ -365,7 +365,7 @@ async function deleteModel(providerName: string, idx: number) {
 // --- Model discovery ---
 const discoveryProvider = ref<string | null>(null)
 const discoveryLoading = ref(false)
-const discoveryError = ref('')
+const discoveryError = ref<ApiErrorDetails | null>(null)
 const discoveredModels = ref<DiscoveredModel[]>([])
 const discoverySearch = ref('')
 const discoverySelected = ref<Set<string>>(new Set())
@@ -476,7 +476,7 @@ const discoveryHasRankings = computed(() =>
 async function startDiscovery(providerName: string) {
   discoveryProvider.value = providerName
   discoveryLoading.value = true
-  discoveryError.value = ''
+  discoveryError.value = null
   discoveredModels.value = []
   discoverySearch.value = ''
   discoverySelected.value = new Set()
@@ -496,8 +496,8 @@ async function startDiscovery(providerName: string) {
     discoveredModels.value = (res.models || []).filter(m => !existing.has(m.id))
   }
   catch (e: unknown) {
-    const err = e as { data?: { message?: string }, message?: string } | undefined
-    discoveryError.value = err?.data?.message || err?.message || 'Failed to fetch models'
+    // No fallback: the render names the provider itself, and suppresses a message with no code.
+    discoveryError.value = apiErrorDetails(e)
   }
   finally {
     discoveryLoading.value = false
@@ -1639,9 +1639,12 @@ const groupedProviders = computed(() => {
           <!-- Error -->
           <div
             v-else-if="discoveryError"
-            class="px-4 py-4 text-center"
+            class="px-4 py-4"
           >
-            <span class="text-xs text-red-700 dark:text-red-400">{{ discoveryError }}</span>
+            <ApiErrorAlert
+              :error="discoveryError"
+              :headline="`Could not reach ${name}.`"
+            />
           </div>
 
           <!-- Results -->

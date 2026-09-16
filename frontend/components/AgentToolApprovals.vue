@@ -9,16 +9,18 @@
  * Management lives here rather than in Settings because a grant is per-agent; the
  * Settings panel carries a read-only roll-up that links back to these pages.
  */
+import type { ApiErrorDetails } from '~/types/api'
+
 const props = defineProps<{ agentId: number | null }>()
 
 interface Grant { id: number, toolName: string }
 
 const grants = ref<Grant[]>([])
 const loading = ref(false)
-const error = ref<string | null>(null)
+const error = ref<ApiErrorDetails | null>(null)
 const revoking = ref<string | null>(null)
 
-const { mutate } = useApiMutation()
+const { mutate, errorDetails: revokeError } = useApiMutation()
 
 async function load() {
   if (!props.agentId) {
@@ -30,8 +32,8 @@ async function load() {
   try {
     grants.value = await $fetch<Grant[]>(`/api/agents/${props.agentId}/tool-approvals`)
   }
-  catch {
-    error.value = 'Could not load standing approvals.'
+  catch (e) {
+    error.value = apiErrorDetails(e, 'Could not load standing approvals.')
   }
   finally {
     loading.value = false
@@ -70,12 +72,11 @@ defineExpose({ reload: load })
       group chats where guests can reach it.
     </p>
 
-    <p
+    <ApiErrorAlert
       v-if="error"
-      class="px-4 pb-3 text-xs text-danger"
-    >
-      {{ error }}
-    </p>
+      :error="error"
+      class="px-4 pb-3"
+    />
 
     <p
       v-else-if="loading"
@@ -112,5 +113,10 @@ defineExpose({ reload: load })
         </button>
       </div>
     </div>
+
+    <ApiErrorAlert
+      :error="revokeError"
+      class="px-4 py-2.5 border-t border-border"
+    />
   </div>
 </template>

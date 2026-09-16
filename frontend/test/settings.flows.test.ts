@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -651,6 +651,44 @@ describe('Settings page — model management', () => {
     await flushPromises()
     expect(component.text()).toContain('discover-vidcap')
     expect(component.text()).not.toContain('discover-plain')
+  })
+
+  // JCLAW-1131 AC4: the upstream status is what the backend passes through; the panel must
+  // name the provider and offer the retry path rather than leading with that status.
+  it('names the provider and offers the retry path when discovery fails', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: defaultConfigEntries() }) })
+    registerEndpoint('/api/config', { method: 'POST', handler: () => ({ ok: true }) })
+    registerEndpoint('/api/providers/ollama-cloud/discover-models', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return {
+          type: 'error',
+          code: 'upstream_error',
+          message: 'Provider returned HTTP 401',
+          template: {
+            whatBroke: 'An upstream service returned an error.',
+            whatToCheck: 'Open Logs and find the matching entry.',
+            howToRetry: 'Retry. If it repeats, check the provider\'s status page.',
+          },
+        }
+      },
+    })
+
+    const component = await mountSettingsSection('providers')
+    await component.find('button[title="Discover models from provider"]').trigger('click')
+    await flushPromises()
+
+    const alert = component.find('[data-testid="api-error"]')
+    expect(alert.exists()).toBe(true)
+    expect(alert.text()).toContain('Could not reach ollama-cloud.')
+    expect(alert.text()).toContain('How to retry')
+    expect(alert.text()).toContain('check the provider\'s status page')
   })
 })
 

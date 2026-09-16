@@ -18,8 +18,10 @@ import java.util.Map;
  * <p>Wire contract (locked):
  * <ul>
  *   <li>success — <code>{"status":"ok", &lt;extras&gt;}</code></li>
- *   <li>error   — <code>{"type":"error","code":"&lt;code&gt;","message":"&lt;message&gt;"}</code>
- *       rendered with the supplied HTTP status</li>
+ *   <li>error   — <code>{"type":"error","code":"&lt;code&gt;","message":"&lt;message&gt;",
+ *       "template":{"whatBroke":…,"whatToCheck":…,"howToRetry":…}}</code>
+ *       rendered with the supplied HTTP status. {@code template} was appended by JCLAW-1131;
+ *       the three fields before it keep their name, position and meaning.</li>
  * </ul>
  *
  * <p>Each method THROWS a Play {@link RenderJson} result — exactly like the
@@ -103,6 +105,7 @@ public final class ApiResponses {
 
     private static final Gson GSON = GsonHolder.GSON;
     private static final String LOG_CATEGORY = "api";
+
 
     private ApiResponses() {}
 
@@ -208,6 +211,20 @@ public final class ApiResponses {
         body.put("type", "error");
         body.put("code", code);
         body.put("message", message);
+        body.put("template", templateBody(ErrorTemplates.forCode(code)));
         return body;
+    }
+
+    /**
+     * The three actionable parts (JCLAW-1130) the admin UI renders under the message.
+     * {@code howToRetry} is an explicit null when the failure has no retry path rather than an
+     * absent key, so a consumer never has to distinguish "no retry" from "old server".
+     */
+    private static Map<String, Object> templateBody(ErrorTemplate template) {
+        var parts = new LinkedHashMap<String, Object>();
+        parts.put("whatBroke", template.whatBroke());
+        parts.put("whatToCheck", template.whatToCheck());
+        parts.put("howToRetry", template.howToRetry());
+        return parts;
     }
 }
