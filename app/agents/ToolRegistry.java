@@ -12,6 +12,8 @@ import play.cache.CacheConfig;
 import play.cache.Caches;
 import services.LoadTestRunner;
 import services.Tx;
+import utils.ErrorTemplate;
+import utils.ToolErrorTemplates;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -91,6 +93,20 @@ public class ToolRegistry {
         }
 
         public static ToolResult text(String text) { return new ToolResult(text, null, List.of(), null); }
+
+        /**
+         * JCLAW-1132: a tool that ran and failed, carrying the failure's
+         * {@link ErrorTemplate} as well as the text the model reads.
+         *
+         * <p>Still {@code DISPATCHED} — the tool ran. The template rides in
+         * {@code structuredJson}, which already persists to
+         * {@code message.tool_result_structured}, so a transcript recorded before this
+         * simply has null there.
+         */
+        public static ToolResult error(ErrorTemplate template) {
+            return new ToolResult(ToolErrorTemplates.render(template),
+                    ToolErrorTemplates.structuredJson(template), List.of(), null, Outcome.DISPATCHED);
+        }
 
         /** A call the registry declined to dispatch, and why. */
         public static ToolResult refused(String text, Outcome outcome) {

@@ -5,6 +5,8 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import tools.FsSupport.FsOutcome;
+import utils.ToolErrorTemplates;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -147,6 +149,22 @@ public class FileSystemTools implements ToolRegistry.Tool {
 
     @Override
     public String execute(String argsJson, Agent agent) {
+        return executeRich(argsJson, agent).text();
+    }
+
+    /**
+     * JCLAW-1132: a failure carries its {@code ErrorTemplate} in {@code structuredJson} as
+     * well as in the text the model reads.
+     */
+    @Override
+    public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
+        var outcome = run(argsJson, agent);
+        return outcome.failed()
+                ? ToolRegistry.ToolResult.error(outcome.resolvedError())
+                : ToolRegistry.ToolResult.text(outcome.text());
+    }
+
+    private FsOutcome run(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         var action = args.get(ARG_ACTION).getAsString();
 
@@ -157,17 +175,17 @@ public class FileSystemTools implements ToolRegistry.Tool {
         }
 
         var resolved = FsPaths.resolveTargetPath(args, agent, action);
-        if (resolved.error() != null) return resolved.error();
+        if (resolved.error() != null) return FsOutcome.fail(resolved.resolvedError());
 
         if (FsPaths.isMutatingAction(action)) {
             var guardError = FsPaths.checkSkillCreatorReadOnly(agent, resolved.resolvedWorkspace(), resolved.resolvedTarget());
-            if (guardError != null) return guardError;
+            if (guardError != null) return FsOutcome.fail(guardError);
         }
 
         return dispatchAction(action, args, agent, resolved.resolvedTarget());
     }
 
-    private String dispatchAction(String action, JsonObject args, Agent agent, Path target) {
+    private FsOutcome dispatchAction(String action, JsonObject args, Agent agent, Path target) {
         return switch (action) {
             case ACTION_READ_FILE -> FsReader.readFile(target);
             case ACTION_LIST_FILES -> FsReader.listFiles(target);
@@ -175,18 +193,17 @@ public class FileSystemTools implements ToolRegistry.Tool {
             case ACTION_APPEND_FILE -> FsLocks.withLock(target, () -> FsWriter.appendFile(target, stringArg(args, ARG_CONTENT)));
             case ACTION_EDIT_FILE -> FsLocks.withLock(target, () -> {
                 if (!args.has(ARG_EDITS) || !args.get(ARG_EDITS).isJsonArray()) {
-                    return "Error: editFile requires an 'edits' array";
+                    return FsOutcome.fail(ToolErrorTemplates.fsEditRejected("editFile requires an 'edits' array"));
                 }
                 return FsTextEditor.editFile(target, args.getAsJsonArray(ARG_EDITS));
             });
             case ACTION_EDIT_LINES -> FsLocks.withLock(target, () -> {
                 if (!args.has(ARG_OPERATIONS) || !args.get(ARG_OPERATIONS).isJsonArray()) {
-                    return "Error: editLines requires an 'operations' array";
+                    return FsOutcome.fail(ToolErrorTemplates.fsLineOpRejected("editLines requires an 'operations' array"));
                 }
                 return FsLineEditor.editLines(agent, target, args.getAsJsonArray(ARG_OPERATIONS));
             });
-            default -> "Error: Unknown action '%s'. Valid actions: %s"
-                    .formatted(action, String.join(", ", ACTIONS));
+            default -> FsOutcome.fail(ToolErrorTemplates.fsUnknownAction(action, String.join(", ", ACTIONS)));
         };
     }
 

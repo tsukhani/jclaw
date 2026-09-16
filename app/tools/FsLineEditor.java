@@ -6,6 +6,9 @@ import com.google.gson.JsonObject;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import tools.FsSupport.FsOutcome;
+import utils.ErrorTemplate;
+import utils.ToolErrorTemplates;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -34,12 +37,13 @@ final class FsLineEditor {
      * encoding are preserved. An event-log entry describing the edit is emitted on
      * successful write.
      */
-    static String editLines(Agent agent, Path target, JsonArray opsJson) {
+    static FsOutcome editLines(Agent agent, Path target, JsonArray opsJson) {
         if (opsJson.isEmpty()) {
-            return "Error: editLines requires a non-empty 'operations' array";
+            return FsOutcome.fail(ToolErrorTemplates.fsLineOpRejected(
+                    "editLines requires a non-empty 'operations' array"));
         }
         var loaded = FsSupport.loadEditableFile(target);
-        if (loaded.error() != null) return loaded.error();
+        if (loaded.error() != null) return FsOutcome.fail(loaded.resolvedError());
         var original = loaded.resolvedContent();
 
         // Detect native line ending before splitting so we can preserve it on write.
@@ -56,7 +60,7 @@ final class FsLineEditor {
         var parsed = new ArrayList<LineOp>();
         for (int i = 0; i < opsJson.size(); i++) {
             var parsedOp = parseLineOpEntry(opsJson.get(i), lineCount, i + 1);
-            if (parsedOp.error != null) return parsedOp.error;
+            if (parsedOp.error != null) return FsOutcome.fail(parsedOp.error);
             parsed.add(parsedOp.op);
         }
 
@@ -70,14 +74,14 @@ final class FsLineEditor {
         }
 
         var writeResult = FsWriter.writeFile(target, joined);
-        if (writeResult.startsWith(FsSupport.ERROR_PREFIX)) return writeResult;
+        if (writeResult.failed()) return writeResult;
 
         var summary = "editLines: %d replace / %d insert / %d delete on %s"
                 .formatted(counts.replaced, counts.inserted, counts.deleted, target.getFileName());
         EventLogger.info("Files", agent.name, null, summary);
 
-        return "File written successfully: " + target.getFileName()
-                + " (%d replace, %d insert, %d delete)".formatted(counts.replaced, counts.inserted, counts.deleted);
+        return FsOutcome.ok("File written successfully: " + target.getFileName()
+                + " (%d replace, %d insert, %d delete)".formatted(counts.replaced, counts.inserted, counts.deleted));
     }
 
     private record OpCounts(int replaced, int inserted, int deleted) {}
@@ -85,21 +89,21 @@ final class FsLineEditor {
     /** Parse a single JSON line-op entry, validating shape, startLine type, and bounds. */
     private static ParsedOp parseLineOpEntry(JsonElement entry, int lineCount, int index) {
         if (!entry.isJsonObject()) {
-            return ParsedOp.err("Error: operation #%d must be an object".formatted(index));
+            return ParsedOp.err("operation #%d must be an object".formatted(index));
         }
         var opObj = entry.getAsJsonObject();
         if (!opObj.has("op") || !opObj.has(FileSystemTools.ARG_START_LINE)) {
-            return ParsedOp.err("Error: operation #%d must include 'op' and 'startLine' fields".formatted(index));
+            return ParsedOp.err("operation #%d must include 'op' and 'startLine' fields".formatted(index));
         }
         var op = opObj.get("op").getAsString();
         int startLine;
         try {
             startLine = opObj.get(FileSystemTools.ARG_START_LINE).getAsInt();
         } catch (NumberFormatException | UnsupportedOperationException _) {
-            return ParsedOp.err("Error: operation #%d startLine must be an integer".formatted(index));
+            return ParsedOp.err("operation #%d startLine must be an integer".formatted(index));
         }
         if (startLine < 1) {
-            return ParsedOp.err("Error: operation #%d startLine must be ≥ 1 (got %d)".formatted(index, startLine));
+            return ParsedOp.err("operation #%d startLine must be ≥ 1 (got %d)".formatted(index, startLine));
         }
         return parseLineOp(op, startLine, opObj, lineCount, index);
     }
@@ -154,19 +158,21 @@ final class FsLineEditor {
         return new OpCounts(replaced, inserted, deleted);
     }
 
-    private record ParsedOp(@Nullable LineOp op, @Nullable String error) {
+    private record ParsedOp(@Nullable LineOp op, @Nullable ErrorTemplate error) {
         static ParsedOp ok(LineOp op) { return new ParsedOp(op, null); }
-        static ParsedOp err(String error) { return new ParsedOp(null, error); }
+        static ParsedOp err(String whatBroke) {
+            return new ParsedOp(null, ToolErrorTemplates.fsLineOpRejected(whatBroke));
+        }
     }
 
     private static ParsedOp parseLineOp(String op, int startLine, JsonObject opObj, int lineCount, int index) {
         return switch (op) {
             case FileSystemTools.OP_REPLACE -> {
                 if (!opObj.has(FileSystemTools.ARG_END_LINE)) {
-                    yield ParsedOp.err("Error: operation #%d (replace) requires 'endLine'".formatted(index));
+                    yield ParsedOp.err("operation #%d (replace) requires 'endLine'".formatted(index));
                 }
                 if (!opObj.has(FileSystemTools.ARG_CONTENT)) {
-                    yield ParsedOp.err("Error: operation #%d (replace) requires 'content'".formatted(index));
+                    yield ParsedOp.err("operation #%d (replace) requires 'content'".formatted(index));
                 }
                 int endLine = opObj.get(FileSystemTools.ARG_END_LINE).getAsInt();
                 var bounds = checkBounds(index, startLine, endLine, lineCount, FileSystemTools.OP_REPLACE);
@@ -175,7 +181,7 @@ final class FsLineEditor {
             }
             case FileSystemTools.OP_DELETE -> {
                 if (!opObj.has(FileSystemTools.ARG_END_LINE)) {
-                    yield ParsedOp.err("Error: operation #%d (delete) requires 'endLine'".formatted(index));
+                    yield ParsedOp.err("operation #%d (delete) requires 'endLine'".formatted(index));
                 }
                 int endLine = opObj.get(FileSystemTools.ARG_END_LINE).getAsInt();
                 var bounds = checkBounds(index, startLine, endLine, lineCount, FileSystemTools.OP_DELETE);
@@ -184,30 +190,30 @@ final class FsLineEditor {
             }
             case FileSystemTools.OP_INSERT -> {
                 if (!opObj.has(FileSystemTools.ARG_CONTENT)) {
-                    yield ParsedOp.err("Error: operation #%d (insert) requires 'content'".formatted(index));
+                    yield ParsedOp.err("operation #%d (insert) requires 'content'".formatted(index));
                 }
                 // insert allows startLine == lineCount + 1 to append at the end.
                 if (startLine > lineCount + 1) {
-                    yield ParsedOp.err("Error: operation #%d (insert) startLine %d is beyond end of file (%d lines; max allowed %d for append)"
+                    yield ParsedOp.err("operation #%d (insert) startLine %d is beyond end of file (%d lines; max allowed %d for append)"
                             .formatted(index, startLine, lineCount, lineCount + 1));
                 }
                 yield ParsedOp.ok(new LineOp.Insert(startLine, opObj.get(FileSystemTools.ARG_CONTENT).getAsString()));
             }
-            default -> ParsedOp.err("Error: operation #%d has unknown op '%s' (expected replace, insert, or delete)"
+            default -> ParsedOp.err("operation #%d has unknown op '%s' (expected replace, insert, or delete)"
                     .formatted(index, op));
         };
     }
 
     private static @Nullable String checkBounds(int index, int startLine, int endLine, int lineCount, String opName) {
         if (endLine < startLine) {
-            return "Error: operation #%d (%s) endLine %d < startLine %d".formatted(index, opName, endLine, startLine);
+            return "operation #%d (%s) endLine %d < startLine %d".formatted(index, opName, endLine, startLine);
         }
         if (startLine > lineCount) {
-            return "Error: operation #%d (%s) startLine %d exceeds file length (%d lines)"
+            return "operation #%d (%s) startLine %d exceeds file length (%d lines)"
                     .formatted(index, opName, startLine, lineCount);
         }
         if (endLine > lineCount) {
-            return "Error: operation #%d (%s) endLine %d exceeds file length (%d lines)"
+            return "operation #%d (%s) endLine %d exceeds file length (%d lines)"
                     .formatted(index, opName, endLine, lineCount);
         }
         return null;

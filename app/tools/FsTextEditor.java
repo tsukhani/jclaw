@@ -3,6 +3,8 @@ package tools;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import tools.FsSupport.EditResult;
+import tools.FsSupport.FsOutcome;
+import utils.ToolErrorTemplates;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -30,12 +32,13 @@ final class FsTextEditor {
      * final content is handed to {@link FsWriter#writeFile} so the SKILL.md version-bump
      * pipeline fires exactly once against the fully-edited state.
      */
-    static String editFile(Path target, JsonArray editsJson) {
+    static FsOutcome editFile(Path target, JsonArray editsJson) {
         if (editsJson.isEmpty()) {
-            return "Error: editFile requires a non-empty 'edits' array";
+            return FsOutcome.fail(ToolErrorTemplates.fsEditRejected(
+                    "editFile requires a non-empty 'edits' array"));
         }
         var loaded = FsSupport.loadEditableFile(target);
-        if (loaded.error() != null) return loaded.error();
+        if (loaded.error() != null) return FsOutcome.fail(loaded.resolvedError());
 
         var working = loaded.resolvedContent();
         var notes = new ArrayList<String>();
@@ -46,7 +49,7 @@ final class FsTextEditor {
 
         for (int i = 0; i < editsJson.size(); i++) {
             var applied = applyEditAtIndex(editsJson.get(i), working, i + 1, regexCache);
-            if (applied.error() != null) return applied.error();
+            if (applied.error() != null) return FsOutcome.fail(applied.resolvedError());
             working = applied.resolvedResult();
             if (applied.note() != null) notes.add(applied.note());
         }
@@ -56,26 +59,27 @@ final class FsTextEditor {
         }
 
         var writeResult = FsWriter.writeFile(target, working);
-        if (writeResult.startsWith(FsSupport.ERROR_PREFIX)) return writeResult;
-
-        if (notes.isEmpty()) return writeResult;
-        return writeResult + " " + String.join(" ", notes);
+        if (writeResult.failed() || notes.isEmpty()) return writeResult;
+        return FsOutcome.ok(writeResult.text() + " " + String.join(" ", notes));
     }
 
     private static EditResult applyEditAtIndex(JsonElement entry, String working, int editIndex,
                                          Map<String, Pattern> regexCache) {
         if (!entry.isJsonObject()) {
-            return EditResult.err("Error: edit #%d must be an object with oldText and newText fields".formatted(editIndex));
+            return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                    "edit #%d must be an object with oldText and newText fields".formatted(editIndex)));
         }
         var edit = entry.getAsJsonObject();
         if (!edit.has(FileSystemTools.ARG_OLD_TEXT) || !edit.has(FileSystemTools.ARG_NEW_TEXT)) {
-            return EditResult.err("Error: edit #%d must include oldText and newText fields".formatted(editIndex));
+            return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                    "edit #%d must include oldText and newText fields".formatted(editIndex)));
         }
         var oldText = edit.get(FileSystemTools.ARG_OLD_TEXT).getAsString();
         var newText = edit.get(FileSystemTools.ARG_NEW_TEXT).getAsString();
         var isRegex = edit.has(FileSystemTools.ARG_REGEX) && edit.get(FileSystemTools.ARG_REGEX).getAsBoolean();
         if (oldText.isEmpty()) {
-            return EditResult.err("Error: edit #%d has an empty oldText".formatted(editIndex));
+            return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                    "edit #%d has an empty oldText".formatted(editIndex)));
         }
         return applySingleEdit(working, oldText, newText, isRegex, editIndex, regexCache);
     }
@@ -95,7 +99,8 @@ final class FsTextEditor {
             try {
                 pattern = Pattern.compile(oldText);
             } catch (PatternSyntaxException e) {
-                return EditResult.err("Error: edit #%d has an invalid regex: %s".formatted(editIndex, e.getMessage()));
+                return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                        "edit #%d has an invalid regex: %s".formatted(editIndex, e.getMessage())));
             }
             regexCache.put(oldText, pattern);
         }
@@ -108,14 +113,16 @@ final class FsTextEditor {
         }
         if (total > 1) {
             var lines = matchStarts.stream().map(start -> lineNumberAt(working, start)).toList();
-            return EditResult.err(("Error: edit #%d regex /%s/ matched %d times (expected exactly one). "
-                    + "First match line numbers: %s. Tighten the regex or include more context.")
-                    .formatted(editIndex, oldText, total, lines));
+            return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                    ("edit #%d regex /%s/ matched %d times (expected exactly one). "
+                            + "First match line numbers: %s. Tighten the regex or include more context.")
+                            .formatted(editIndex, oldText, total, lines)));
         }
         if (total == 0) {
             var snippet = capSnippet("regex /%s/ did not match. File begins with:\n%s"
                     .formatted(oldText, firstNLines(working, 40)));
-            return EditResult.err("Error: edit #%d failed — %s".formatted(editIndex, snippet));
+            return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                    "edit #%d failed — %s".formatted(editIndex, snippet)));
         }
         // replaceFirst interprets $1/$2 as backreferences and \$ as a literal $.
         return EditResult.ok(pattern.matcher(working).replaceFirst(newText));
@@ -128,9 +135,10 @@ final class FsTextEditor {
         }
         if (count > 1) {
             var lines = occurrenceLineNumbers(working, oldText, 3);
-            return EditResult.err(("Error: edit #%d oldText is not unique (found %d occurrences at lines %s). "
-                    + "Include more surrounding context to disambiguate.")
-                    .formatted(editIndex, count, lines));
+            return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                    ("edit #%d oldText is not unique (found %d occurrences at lines %s). "
+                            + "Include more surrounding context to disambiguate.")
+                            .formatted(editIndex, count, lines)));
         }
 
         // Zero literal matches — try CRLF → LF normalization once.
@@ -151,15 +159,16 @@ final class FsTextEditor {
         }
         if (normalizedCount > 1) {
             var lines = occurrenceLineNumbers(normalizedWorking, normalizedOld, 3);
-            return EditResult.err(("Error: edit #%d oldText is not unique after CRLF→LF normalization "
-                    + "(found %d occurrences at lines %s). Include more surrounding context.")
-                    .formatted(editIndex, normalizedCount, lines));
+            return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                    ("edit #%d oldText is not unique after CRLF→LF normalization "
+                            + "(found %d occurrences at lines %s). Include more surrounding context.")
+                            .formatted(editIndex, normalizedCount, lines)));
         }
 
         // Still zero — produce a diagnostic snippet.
         var snippet = nearestPartialMatchSnippet(working, oldText);
-        return EditResult.err(capSnippet("Error: edit #%d oldText not found in file.\n%s"
-                .formatted(editIndex, snippet)));
+        return EditResult.err(ToolErrorTemplates.fsEditRejected(
+                capSnippet("edit #%d oldText not found in file.\n%s".formatted(editIndex, snippet))));
     }
 
     /**

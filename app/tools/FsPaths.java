@@ -4,6 +4,8 @@ import com.google.gson.JsonObject;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
+import utils.ErrorTemplate;
+import utils.ToolErrorTemplates;
 import utils.WorkspacePathGuard;
 
 import java.nio.file.Path;
@@ -17,9 +19,15 @@ final class FsPaths {
 
     private FsPaths() {}
 
-    record TargetPath(@Nullable Path workspace, @Nullable Path target, @Nullable String error) {
+    record TargetPath(@Nullable Path workspace, @Nullable Path target, @Nullable ErrorTemplate error) {
         static TargetPath ok(Path workspace, Path target) { return new TargetPath(workspace, target, null); }
-        static TargetPath err(String error) { return new TargetPath(null, null, error); }
+        static TargetPath err(ErrorTemplate error) { return new TargetPath(null, null, error); }
+
+        /** Valid only once {@link #error()} has been checked non-null. */
+        ErrorTemplate resolvedError() {
+            if (error == null) throw new IllegalStateException("path resolved");
+            return error;
+        }
 
         /** Valid only once {@link #error()} has been checked null — {@code err()} carries no paths. */
         Path resolvedWorkspace() { return require(workspace); }
@@ -35,7 +43,7 @@ final class FsPaths {
 
     static TargetPath resolveTargetPath(JsonObject args, Agent agent, String action) {
         if (!args.has("path")) {
-            return TargetPath.err("Error: action '%s' requires a 'path' field".formatted(action));
+            return TargetPath.err(ToolErrorTemplates.fsPathMissing(action));
         }
         var relativePath = args.get("path").getAsString();
         var workspace = AgentService.workspacePath(agent.name);
@@ -43,7 +51,7 @@ final class FsPaths {
             var target = AgentService.acquireWorkspacePath(agent.name, relativePath);
             return TargetPath.ok(workspace, target);
         } catch (SecurityException e) {
-            return TargetPath.err(FsSupport.ERROR_PREFIX_COLON + e.getMessage());
+            return TargetPath.err(ToolErrorTemplates.fsPathRefused(e.getMessage()));
         }
     }
 
@@ -55,18 +63,14 @@ final class FsPaths {
     /**
      * Skill-creator is read-only for every agent except 'main'. Only the main agent may
      * modify the skill-creator skill itself; other agents can use it to create and refactor
-     * OTHER skills but cannot alter skill-creator. Returns an error string if blocked, or
-     * null if the path is OK to mutate.
+     * OTHER skills but cannot alter skill-creator. Returns the refusal's template if blocked,
+     * or null if the path is OK to mutate.
      */
-    static @Nullable String checkSkillCreatorReadOnly(Agent agent, Path workspace, Path target) {
+    static @Nullable ErrorTemplate checkSkillCreatorReadOnly(Agent agent, Path workspace, Path target) {
         if ("main".equalsIgnoreCase(agent.name)) return null;
         var skillCreatorDir = WorkspacePathGuard.resolveContained(workspace, "skills/skill-creator");
         if (skillCreatorDir != null && target.startsWith(skillCreatorDir)) {
-            return "Error: The 'skill-creator' skill is read-only for agent '"
-                    + agent.name
-                    + "'. Only the 'main' agent can modify skill-creator. "
-                    + "To get an updated skill-creator, ask the user to drag skill-creator "
-                    + "from the global skills registry onto this agent's card.";
+            return ToolErrorTemplates.fsReadOnly(agent.name);
         }
         return null;
     }

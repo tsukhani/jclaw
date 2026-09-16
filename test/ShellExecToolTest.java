@@ -70,8 +70,8 @@ class ShellExecToolTest extends UnitTest {
     void blockedCommandRejected() {
         var error = tool.validateAllowlist("rm -rf /");
         assertNotNull(error);
-        assertTrue(error.contains("not in the allowed commands list"));
-        assertTrue(error.contains("rm"));
+        assertTrue(error.whatBroke().contains("not in the allowed commands list"));
+        assertTrue(error.whatBroke().contains("rm"));
     }
 
     @Test
@@ -111,7 +111,7 @@ class ShellExecToolTest extends UnitTest {
         ConfigService.set("shell.allowlist", "wacli");
         var error = tool.validateAllowlist("./skills/foo/rm -rf /");
         assertNotNull(error, "a binary whose basename is not in the allowlist must be rejected");
-        assertTrue(error.contains("not in the allowed commands list"));
+        assertTrue(error.whatBroke().contains("not in the allowed commands list"));
     }
 
     // ==================== Working Directory Resolution ====================
@@ -279,6 +279,49 @@ class ShellExecToolTest extends UnitTest {
                 {"command": "  "}
                 """, agent);
         assertTrue(result.contains("Error"));
+    }
+
+    /** JCLAW-1132 AC: a failed command names itself, its status, and what to check. */
+    @Test
+    void aNonZeroExitCarriesTheCommandTheStatusAndARemedy() {
+        var result = tool.execute("""
+                {"command": "sh -c 'exit 3'", "why": "provoke a non-zero exit"}
+                """, agent);
+
+        var envelope = com.google.gson.JsonParser.parseString(result).getAsJsonObject();
+        assertEquals(3, envelope.get("exitCode").getAsInt(), "the envelope contract is unchanged");
+        assertTrue(envelope.has("output"), "the command's own output is still there");
+        var error = envelope.getAsJsonObject("error");
+        assertNotNull(error, "a failed command must carry its template: " + result);
+        assertEquals("shell_exit_nonzero", error.get("code").getAsString());
+        assertTrue(error.get("whatBroke").getAsString().contains("exit 3"),
+                "the command itself: " + error);
+        assertTrue(error.get("whatBroke").getAsString().contains("status 3"),
+                "the exit status: " + error);
+        assertFalse(error.get("whatToCheck").getAsString().isBlank());
+    }
+
+    @Test
+    void aSuccessfulCommandCarriesNoErrorMember() {
+        var result = tool.execute("""
+                {"command": "echo hi", "why": "smoke"}
+                """, agent);
+
+        assertFalse(com.google.gson.JsonParser.parseString(result).getAsJsonObject().has("error"),
+                "a success must look exactly as it did before this story: " + result);
+    }
+
+    /** A refusal before the process starts renders the template rather than the envelope. */
+    @Test
+    void aBlockedCommandStatesWhatToCheckAndHowToRetry() {
+        var result = tool.execute("""
+                {"command": "rm -rf /", "why": "provoke the allowlist"}
+                """, agent);
+
+        assertTrue(result.startsWith("Error: Command 'rm' is not in the allowed commands list"),
+                "got: " + result);
+        assertTrue(result.contains("What to check: "), "got: " + result);
+        assertTrue(result.contains("How to retry: "), "got: " + result);
     }
 
     @Test

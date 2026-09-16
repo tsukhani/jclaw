@@ -71,13 +71,13 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var missing = tool.execute("""
                 {"action": "editFile", "path": "x.txt"}
                 """, agent);
-        assertEquals("Error: editFile requires an 'edits' array", missing);
+        assertTrue(missing.startsWith("Error: editFile requires an 'edits' array"), "got: " + missing);
 
         // Wrong JSON type (string instead of array) hits the same validation.
         var wrongType = tool.execute("""
                 {"action": "editFile", "path": "x.txt", "edits": "not-an-array"}
                 """, agent);
-        assertEquals("Error: editFile requires an 'edits' array", wrongType);
+        assertTrue(wrongType.startsWith("Error: editFile requires an 'edits' array"), "got: " + wrongType);
     }
 
     @Test
@@ -85,12 +85,12 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var missing = tool.execute("""
                 {"action": "editLines", "path": "x.txt"}
                 """, agent);
-        assertEquals("Error: editLines requires an 'operations' array", missing);
+        assertTrue(missing.startsWith("Error: editLines requires an 'operations' array"), "got: " + missing);
 
         var wrongType = tool.execute("""
                 {"action": "editLines", "path": "x.txt", "operations": 42}
                 """, agent);
-        assertEquals("Error: editLines requires an 'operations' array", wrongType);
+        assertTrue(wrongType.startsWith("Error: editLines requires an 'operations' array"), "got: " + wrongType);
     }
 
     @Test
@@ -167,7 +167,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "readFile", "path": "does-not-exist.txt"}
                 """, agent);
-        assertEquals("Error: File not found: does-not-exist.txt", result);
+        assertTrue(result.startsWith("Error: File not found: does-not-exist.txt"), "got: " + result);
     }
 
     @Test
@@ -176,7 +176,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "readFile", "path": "iam-a-dir"}
                 """, agent);
-        assertTrue(result.startsWith("Error reading file:"), "got: " + result);
+        assertTrue(result.startsWith("Error: Reading the file failed:"), "got: " + result);
     }
 
     @Test
@@ -194,7 +194,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "writeFile", "path": "write-blocker.txt/child.txt", "content": "nested"}
                 """, agent);
-        assertTrue(result.startsWith("Error writing file:"), "got: " + result);
+        assertTrue(result.startsWith("Error: Writing the file failed:"), "got: " + result);
         assertEquals("i am a file", Files.readString(workspace.resolve("write-blocker.txt")),
                 "the blocking file must be untouched");
     }
@@ -205,7 +205,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "appendFile", "path": "append-blocker.txt/child.txt", "content": "nested"}
                 """, agent);
-        assertTrue(result.startsWith("Error appending to file:"), "got: " + result);
+        assertTrue(result.startsWith("Error: Appending to the file failed:"), "got: " + result);
         assertEquals("i am a file", Files.readString(workspace.resolve("append-blocker.txt")));
     }
 
@@ -215,7 +215,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "listFiles", "path": "plain.txt"}
                 """, agent);
-        assertEquals("Error: Not a directory: plain.txt", result);
+        assertTrue(result.startsWith("Error: Not a directory: plain.txt"), "got: " + result);
     }
 
     @Test
@@ -273,7 +273,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "editFile", "path": "entry-shape.txt", "edits": [42]}
                 """, agent);
-        assertEquals("Error: edit #1 must be an object with oldText and newText fields", result);
+        assertTrue(result.startsWith("Error: edit #1 must be an object with oldText and newText fields"), "got: " + result);
         assertEquals("alpha\n", Files.readString(workspace.resolve("entry-shape.txt")));
     }
 
@@ -284,7 +284,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editFile", "path": "entry-fields.txt",
                  "edits": [{"oldText": "alpha"}]}
                 """, agent);
-        assertEquals("Error: edit #1 must include oldText and newText fields", result);
+        assertTrue(result.startsWith("Error: edit #1 must include oldText and newText fields"), "got: " + result);
     }
 
     @Test
@@ -294,7 +294,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editFile", "path": "empty-old.txt",
                  "edits": [{"oldText": "", "newText": "y"}]}
                 """, agent);
-        assertEquals("Error: edit #1 has an empty oldText", result);
+        assertTrue(result.startsWith("Error: edit #1 has an empty oldText"), "got: " + result);
     }
 
     @Test
@@ -304,7 +304,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editFile", "path": "edit-a-dir",
                  "edits": [{"oldText": "a", "newText": "b"}]}
                 """, agent);
-        assertTrue(result.startsWith("Error reading file:"), "got: " + result);
+        assertTrue(result.startsWith("Error: Reading the file failed:"), "got: " + result);
     }
 
     @Test
@@ -456,10 +456,13 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                  "edits": [{"oldText": "@@absent-needle@@", "newText": "x"}]}
                 """, agent);
         assertTrue(result.startsWith("Error"), "got: " + result);
-        assertTrue(result.endsWith("… (truncated)"),
+        // The cap applies to the diagnostic itself, which the template renders ahead of its
+        // fixed remedy sections (JCLAW-1132).
+        var diagnostic = result.substring(0, result.indexOf("\n\nWhat to check: "));
+        assertTrue(diagnostic.endsWith("… (truncated)"),
                 "oversize diagnostic must end with the truncation marker: " + result);
-        assertTrue(result.length() <= 1600,
-                "capped payload, got length " + result.length());
+        assertTrue(diagnostic.length() <= 1600,
+                "capped payload, got length " + diagnostic.length());
     }
 
     // ==================== editLines operation validation ====================
@@ -470,7 +473,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "editLines", "path": "lr-shape.txt", "operations": [5]}
                 """, agent);
-        assertEquals("Error: operation #1 must be an object", result);
+        assertTrue(result.startsWith("Error: operation #1 must be an object"), "got: " + result);
         assertEquals("one\n", Files.readString(workspace.resolve("lr-shape.txt")));
     }
 
@@ -481,7 +484,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editLines", "path": "lr-nostart.txt",
                  "operations": [{"op": "delete", "endLine": 2}]}
                 """, agent);
-        assertEquals("Error: operation #1 must include 'op' and 'startLine' fields", result);
+        assertTrue(result.startsWith("Error: operation #1 must include 'op' and 'startLine' fields"), "got: " + result);
     }
 
     @Test
@@ -491,7 +494,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editLines", "path": "lr-nan.txt",
                  "operations": [{"op": "insert", "startLine": "abc", "content": "x"}]}
                 """, agent);
-        assertEquals("Error: operation #1 startLine must be an integer", result);
+        assertTrue(result.startsWith("Error: operation #1 startLine must be an integer"), "got: " + result);
     }
 
     @Test
@@ -511,13 +514,13 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editLines", "path": "lr-req.txt",
                  "operations": [{"op": "replace", "startLine": 1, "content": "x"}]}
                 """, agent);
-        assertEquals("Error: operation #1 (replace) requires 'endLine'", noEnd);
+        assertTrue(noEnd.startsWith("Error: operation #1 (replace) requires 'endLine'"), "got: " + noEnd);
 
         var noContent = tool.execute("""
                 {"action": "editLines", "path": "lr-req.txt",
                  "operations": [{"op": "replace", "startLine": 1, "endLine": 1}]}
                 """, agent);
-        assertEquals("Error: operation #1 (replace) requires 'content'", noContent);
+        assertTrue(noContent.startsWith("Error: operation #1 (replace) requires 'content'"), "got: " + noContent);
         assertEquals("one\ntwo\n", Files.readString(workspace.resolve("lr-req.txt")));
     }
 
@@ -528,7 +531,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editLines", "path": "lr-delreq.txt",
                  "operations": [{"op": "delete", "startLine": 1}]}
                 """, agent);
-        assertEquals("Error: operation #1 (delete) requires 'endLine'", result);
+        assertTrue(result.startsWith("Error: operation #1 (delete) requires 'endLine'"), "got: " + result);
     }
 
     @Test
@@ -538,7 +541,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editLines", "path": "lr-insreq.txt",
                  "operations": [{"op": "insert", "startLine": 1}]}
                 """, agent);
-        assertEquals("Error: operation #1 (insert) requires 'content'", result);
+        assertTrue(result.startsWith("Error: operation #1 (insert) requires 'content'"), "got: " + result);
     }
 
     @Test
@@ -582,7 +585,7 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 {"action": "editLines", "path": "lr-dir",
                  "operations": [{"op": "delete", "startLine": 1, "endLine": 1}]}
                 """, agent);
-        assertTrue(result.startsWith("Error reading file:"), "got: " + result);
+        assertTrue(result.startsWith("Error: Reading the file failed:"), "got: " + result);
     }
 
     // ==================== editLines EOL / trailing-newline semantics ====================
@@ -661,6 +664,28 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
                 """, agent);
         assertTrue(result.startsWith("File written"), "got: " + result);
         assertEquals("a\r\nB\r\nc\r\n", Files.readString(workspace.resolve("lr-mixed-eol.txt")));
+    }
+
+    /** JCLAW-1132: the failure's template rides in structuredJson; a success carries none. */
+    @Test
+    void aFailureCarriesItsTemplateInStructuredJsonAndASuccessCarriesNone() throws Exception {
+        Files.writeString(workspace.resolve("present.txt"), "hello\n");
+
+        var failure = tool.executeRich("""
+                {"action": "readFile", "path": "does-not-exist.txt"}
+                """, agent);
+        var error = com.google.gson.JsonParser.parseString(
+                java.util.Objects.requireNonNull(failure.structuredJson()))
+                .getAsJsonObject().getAsJsonObject("error");
+        assertEquals("fs_not_found", error.get("code").getAsString());
+        assertTrue(failure.dispatched(), "the tool ran and reported a problem");
+
+        var success = tool.executeRich("""
+                {"action": "readFile", "path": "present.txt"}
+                """, agent);
+        assertNull(success.structuredJson(),
+                "a success must persist exactly as it did before this story");
+        assertEquals("hello\n", success.text());
     }
 
     // ==================== Helpers ====================
