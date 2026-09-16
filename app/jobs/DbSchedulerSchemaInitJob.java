@@ -6,6 +6,8 @@ import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
+import utils.ErrorRendering;
+import utils.StartupErrorTemplates;
 
 import java.io.File;
 import java.io.IOException;
@@ -44,10 +46,28 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
         try {
             ensureSchema();
         } catch (SQLException | IOException e) {
-            EventLogger.error("system",
-                    "db-scheduler schema init failed: " + e.getMessage());
+            // The three-part message goes to the log line; the exception keeps a one-line
+            // message so the stack trace Play prints on top of it does not repeat the paragraph.
+            EventLogger.error("system", bootFailureMessage(e));
             throw new IllegalStateException("db-scheduler schema init failed", e);
         }
+    }
+
+    /**
+     * The actionable console message for a boot failure (JCLAW-1136): the two causes have
+     * different remedies — a database that will not take a connection, and shipped DDL that
+     * cannot be read — so they are not merged into one "schema init failed".
+     *
+     * <p>Rendered {@link ErrorRendering#PLAIN}: nothing on the boot path has a request, a markup
+     * parser or a guarantee of terminal colour.
+     *
+     * <p>Public because test sources are the default package.
+     */
+    public static String bootFailureMessage(Exception cause) {
+        var template = cause instanceof IOException
+                ? StartupErrorTemplates.schemaDdlUnreadable(cause.getMessage())
+                : StartupErrorTemplates.databaseUnavailable(cause.getMessage());
+        return ErrorRendering.PLAIN.render(template);
     }
 
     /**

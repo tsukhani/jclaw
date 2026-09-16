@@ -31,7 +31,9 @@ import services.voice.VoiceSettings;
 import tools.DocumentsTool;
 import tools.SubagentSpawnTool;
 import tools.scrape.WebScrapeSettings;
+import utils.ErrorRendering;
 import utils.HttpFactories;
+import utils.StartupErrorTemplates;
 import utils.TokenCoalescer;
 
 import java.time.Duration;
@@ -40,6 +42,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
 
 public class ConfigService {
@@ -91,6 +95,7 @@ public class ConfigService {
         try {
             return Integer.parseInt(raw);
         } catch (NumberFormatException _) {
+            reportParseFailure(key, raw, "a whole number", String.valueOf(defaultValue));
             return defaultValue;
         }
     }
@@ -101,6 +106,7 @@ public class ConfigService {
         try {
             return Long.parseLong(raw);
         } catch (NumberFormatException _) {
+            reportParseFailure(key, raw, "a whole number", String.valueOf(defaultValue));
             return defaultValue;
         }
     }
@@ -118,10 +124,45 @@ public class ConfigService {
             double parsed = Double.parseDouble(raw.trim());
             // parseDouble accepts "NaN"/"Infinity" without throwing, so the catch below never
             // sees them (JCLAW-1016) — and NaN passes any caller's own `v < lo || v > hi` check.
-            return Double.isFinite(parsed) ? parsed : defaultValue;
+            if (Double.isFinite(parsed)) return parsed;
         } catch (NumberFormatException _) {
-            return defaultValue;
+            // Reported below, with the non-finite case, so both reach the operator the same way.
         }
+        reportParseFailure(key, raw, "a finite number", String.valueOf(defaultValue));
+        return defaultValue;
+    }
+
+    // JCLAW-1136: a typo'd numeric value used to be discarded at the three getters above, which
+    // left the instance running on a value the operator never chose with nothing anywhere saying
+    // so. One entry per key, holding the value last reported, so a key is bounded and a corrected
+    // (or newly broken) value shouts again.
+    private static final ConcurrentMap<String, String> reportedParseFailures = new ConcurrentHashMap<>();
+
+    private static void reportParseFailure(String key, String raw, String expected, String fallback) {
+        var report = parseFailureReport(key, raw, expected, fallback);
+        if (report != null) EventLogger.error("config", report);
+    }
+
+    /**
+     * The three-part message for a value a numeric getter rejected, or null when this key has
+     * already reported this same value.
+     *
+     * <p>Config is read on the request path, not just at boot — one key can be read thousands of
+     * times a minute — so the first read of a given bad value shouts and the rest stay quiet
+     * until the stored value changes. Rendered {@link ErrorRendering#PLAIN}: this goes to the log
+     * and the console, neither of which parses markup.
+     *
+     * <p>Public because test sources are the default package. Calling it marks the value as
+     * reported, so a test uses a key name of its own.
+     */
+    public static @Nullable String parseFailureReport(String key, String raw, String expected,
+                                                      String fallback) {
+        // A cleared field means "use the default", which is exactly what happens — shouting about
+        // it would train the operator to ignore the message that matters.
+        if (raw.isBlank()) return null;
+        if (raw.equals(reportedParseFailures.put(key, raw))) return null;
+        return ErrorRendering.PLAIN.render(
+                StartupErrorTemplates.configParseFailure(key, raw, expected, fallback));
     }
 
     public static void set(String key, String value) {
