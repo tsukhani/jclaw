@@ -4,6 +4,7 @@ import play.mvc.Http;
 import play.mvc.results.RenderJson;
 import play.test.UnitTest;
 import utils.ApiResponses;
+import utils.ErrorTemplates;
 
 import java.util.Map;
 
@@ -60,6 +61,41 @@ class ApiResponsesTest extends UnitTest {
             assertEquals("not_found", b.get("code"));
             assertEquals("no such thing", b.get("message"));
             assertEquals(Integer.valueOf(404), response.status);
+        } finally {
+            Http.Response.current.remove();
+        }
+    }
+
+    /** JCLAW-1131: {@code template} is appended, so the three locked fields keep their position. */
+    @Test
+    void errorAppendsTheTemplatePartsAfterTheCanonicalFields() {
+        Http.Response response = new Http.Response();
+        Http.Response.current.set(response);
+        try {
+            RenderJson r = assertThrows(RenderJson.class,
+                    () -> ApiResponses.error(404, ApiResponses.NOT_FOUND, "no such thing"));
+            assertTrue(r.getJson().startsWith(
+                            "{\"type\":\"error\",\"code\":\"not_found\",\"message\":\"no such thing\","),
+                    r.getJson());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> parts = (Map<String, Object>) body(r).get("template");
+            var expected = ErrorTemplates.forCode(ApiResponses.NOT_FOUND);
+            assertEquals(expected.whatBroke(), parts.get("whatBroke"));
+            assertEquals(expected.whatToCheck(), parts.get("whatToCheck"));
+            assertEquals(expected.howToRetry(), parts.get("howToRetry"));
+        } finally {
+            Http.Response.current.remove();
+        }
+    }
+
+    @Test
+    void aFailureWithNoRetryPathRendersAnExplicitNullRatherThanDroppingTheKey() {
+        Http.Response response = new Http.Response();
+        Http.Response.current.set(response);
+        try {
+            RenderJson r = assertThrows(RenderJson.class,
+                    () -> ApiResponses.error(403, ApiResponses.FORBIDDEN, "not allowed"));
+            assertTrue(r.getJson().contains("\"howToRetry\":null"), r.getJson());
         } finally {
             Http.Response.current.remove();
         }
