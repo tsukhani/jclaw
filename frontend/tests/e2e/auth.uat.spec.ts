@@ -19,7 +19,11 @@ test.describe('UAT-1 authentication', () => {
   test('unauthenticated API request is rejected with 401 JSON', async ({ request }) => {
     const res = await request.get('/api/agents')
     expect(res.status()).toBe(401)
-    expect(await res.json()).toHaveProperty('error')
+    // Assert the envelope's stable parts, not a field name: this pinned the retired "error"
+    // key until JCLAW-1131 moved auth rejections onto the canonical type/code/message envelope.
+    const body = await res.json()
+    expect(body.type).toBe('error')
+    expect(body.code).toBe('authentication_required')
   })
 
   test('unauthenticated app route redirects to the login page', async ({ page }) => {
