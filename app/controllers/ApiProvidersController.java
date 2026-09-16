@@ -28,7 +28,9 @@ import services.discovery.DiscoveryResult;
 import services.video.VideoInterpretationClient;
 import services.video.VideoInterpretationRouter;
 import utils.ApiResponses;
+import utils.ErrorTemplate;
 import utils.JsonArgs;
+import utils.LlmErrorTemplates;
 import utils.Strings;
 
 import java.math.BigDecimal;
@@ -36,6 +38,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static utils.GsonHolder.GSON;
 
@@ -139,7 +142,8 @@ public class ApiProvidersController extends Controller {
             case DiscoveryResult.Ok(var models) ->
                     renderJSON(gson.toJson(new DiscoverModelsResponse(models, models.size())));
             case DiscoveryResult.Error(var statusCode, var message) ->
-                    ApiResponses.error(statusCode, ApiResponses.UPSTREAM_ERROR, message);
+                    ApiResponses.errorWithTemplate(statusCode, ApiResponses.UPSTREAM_ERROR, message,
+                            discoveryRemedy(name, message));
         }
     }
 
@@ -212,9 +216,36 @@ public class ApiProvidersController extends Controller {
                 }
                 renderJSON(gson.toJson(new ProviderModelsResponse(name, refs, refs.size())));
             }
-            case DiscoveryResult.Error(var statusCode, var message) -> ApiResponses.error(statusCode, ApiResponses.UPSTREAM_ERROR, message);
+            case DiscoveryResult.Error(var statusCode, var message) ->
+                    ApiResponses.errorWithTemplate(statusCode, ApiResponses.UPSTREAM_ERROR, message,
+                            discoveryRemedy(name, message));
         }
     }
+
+
+    /**
+     * The remedy for a failed discovery probe, so a test-connection failure names the provider
+     * and where to fix it rather than reporting "Provider returned HTTP 401" (JCLAW-1131 AC4).
+     * The upstream status is the only classifier available here — discovery reads /models, so
+     * there is no response body to parse the way the chat path does.
+     */
+    private static ErrorTemplate discoveryRemedy(String provider, String message) {
+        var remedy = switch (upstreamStatusIn(message)) {
+            case 401, 403 -> LlmErrorTemplates.Remedy.INVALID_KEY;
+            case 429 -> LlmErrorTemplates.Remedy.RATE_LIMITED;
+            default -> LlmErrorTemplates.Remedy.UNCLASSIFIED;
+        };
+        return LlmErrorTemplates.forFailure(
+                new LlmErrorTemplates.Failure(remedy, provider, null, null, null));
+    }
+
+    /** The upstream status the strategy embedded in its message, or 0 when it named none. */
+    private static int upstreamStatusIn(String message) {
+        var m = UPSTREAM_STATUS.matcher(message);
+        return m.find() ? Integer.parseInt(m.group(1)) : 0;
+    }
+
+    private static final Pattern UPSTREAM_STATUS = Pattern.compile("HTTP (\\d{3})");
 
     /**
      * GET /api/providers/{name}/models — the provider's operator-configured

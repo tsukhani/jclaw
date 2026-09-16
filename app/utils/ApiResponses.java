@@ -206,6 +206,22 @@ public final class ApiResponses {
         return new AssertionError("unreachable: the preceding call throws");
     }
 
+    /**
+     * Render an error carrying a template built at the call site rather than looked up by
+     * {@code code} (JCLAW-1131 follow-up). The registry can only answer for a failure whose
+     * remedy is the same every time; the ones worth reading rarely are — naming the provider
+     * that rejected the key, or the command that exited non-zero, takes the failing call as
+     * input. {@code code} stays the wire value the SPA branches on, so attaching a specific
+     * template never moves a client off its existing branch.
+     */
+    public static void errorWithTemplate(int httpStatus, @NonNull String code,
+                                         @NonNull String message, @NonNull ErrorTemplate template) {
+        Http.Response.current().status = httpStatus;
+        var body = errorBody(code, message);
+        body.put("template", templateBody(template));
+        throw new RenderJson(GSON.toJson(body));
+    }
+
     private static Map<String, Object> errorBody(String code, String message) {
         var body = new LinkedHashMap<String, Object>();
         body.put("type", "error");

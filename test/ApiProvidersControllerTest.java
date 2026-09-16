@@ -472,6 +472,52 @@ class ApiProvidersControllerTest extends FunctionalTest {
         }
     }
 
+    /**
+     * JCLAW-1131 AC4: a test-connection failure names the provider and offers the retry path
+     * rather than surfacing the raw upstream status. The wire code stays upstream_error so no
+     * client branch moves; only the template it carries becomes specific.
+     */
+    @Test
+    void discoverModelsNamesTheProviderOnAnAuthFailure() throws Exception {
+        login();
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.test-provider.baseUrl", server.url("/").toString());
+            ConfigService.set("provider.test-provider.apiKey", "sk-wrong");
+            enqueueJson(server, 401, "{\"error\":\"invalid_api_key\"}");
+
+            var resp = POST("/api/providers/test-provider/discover-models",
+                    "application/json", "{}");
+            var body = getContent(resp);
+            assertEquals(502, resp.status.intValue());
+            assertTrue(body.contains("\"code\":\"upstream_error\""), body);
+            assertTrue(body.contains("test-provider"),
+                    "the remedy must name the provider, not just the status: " + body);
+            assertTrue(body.contains("Settings"),
+                    "the remedy must point at where the key is set: " + body);
+        }
+    }
+
+    /**
+     * A non-auth upstream failure falls to the generic model-call remedy rather than telling the
+     * operator to check a key that is fine — the wrong remedy is worse than a vague one.
+     */
+    @Test
+    void discoverModelsDoesNotBlameTheKeyOnAServerError() throws Exception {
+        login();
+        try (var server = new mockwebserver3.MockWebServer()) {
+            server.start();
+            ConfigService.set("provider.test-provider.baseUrl", server.url("/").toString());
+            ConfigService.set("provider.test-provider.apiKey", "sk-test");
+            enqueueJson(server, 500, "{\"error\":\"boom\"}");
+
+            var body = getContent(POST("/api/providers/test-provider/discover-models",
+                    "application/json", "{}"));
+            assertFalse(body.contains("rejected the API key"),
+                    "a 500 is not a key problem: " + body);
+        }
+    }
+
     // --- reachable: the live-probe path (baseUrl configured, not the "not configured" short-circuit) ---
 
     @Test
