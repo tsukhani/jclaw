@@ -84,13 +84,15 @@ type SortColumn = 'id' | 'parent' | 'conversation' | 'child' | 'status' | 'start
 const sortBy = ref<SortColumn>('conversation')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
-const filterBar = ref<{ removeKey: (key: string) => void } | null>(null)
+const filterBar = ref<{ removeKey: (key: string) => void, focusQuery: () => void } | null>(null)
 const clearConversationFilterButton = ref<HTMLButtonElement | null>(null)
 
 // A parentConversation token left in the bar would re-apply its id on the bar's next edit.
 function clearConversationFilter() {
   filterBar.value?.removeKey('parentConversation')
   parentConversationFilter.value = ''
+  // The chip holding this button unmounts with the filter, so focus would fall to the body (JCLAW-1210).
+  void nextTick(() => filterBar.value?.focusQuery())
 }
 
 function applyConversationFilter(conversationId: number) {

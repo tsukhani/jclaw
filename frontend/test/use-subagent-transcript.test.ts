@@ -283,4 +283,59 @@ describe('useSubagentTranscript', () => {
     expect(server.offsets).toEqual([0, 2, 0])
     wrapper.unmount()
   })
+
+  // Two completed rounds before the poll: the calls aggregate onto the newest assistant row, and a
+  // window may not start before it, so a shorter transcript can only ever be fetched whole.
+  function toolOnlyRun() {
+    return [
+      row(1, { role: 'user', content: 'go' }),
+      row(2, { content: null, toolCalls: [{ id: 'c1', function: { name: 'web_search', arguments: '{}' } }] }),
+      row(3, { role: 'tool', content: 'first result', toolResults: 'c1' }),
+      row(4, { content: null, toolCalls: [{ id: 'c2', function: { name: 'web_fetch', arguments: '{}' } }] }),
+      row(5, { role: 'tool', content: 'second result', toolResults: 'c2' }),
+    ]
+  }
+
+  it('polls a run made only of tool calls from a non-zero offset, merging as one full fetch would (JCLAW-1209)', async () => {
+    fakePollTimer()
+    const server = serve(116, toolOnlyRun())
+    const { api, wrapper } = mountTranscript(116, 'RUNNING')
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 2, 3, 4, 5]))
+
+    server.rows.push(
+      row(6, { content: null, toolCalls: [{ id: 'c3', function: { name: 'web_search', arguments: '{}' } }] }),
+      row(7, { role: 'tool', content: 'third result', toolResults: 'c3' }),
+    )
+    vi.advanceTimersByTime(5000)
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 2, 3, 4, 5, 6, 7]))
+    expect(server.offsets.slice(1).every(o => o > 0), `offsets were ${server.offsets}`).toBe(true)
+
+    // Across every row, so a call left on the row it was handed off from shows up as a duplicate.
+    const calls = api.messages.value.flatMap(m => m.toolCalls ?? [])
+    expect(calls.map(tc => tc.id)).toEqual(['c1', 'c2', 'c3'])
+    expect(calls.map(tc => tc.resultText)).toEqual(['first result', 'second result', 'third result'])
+    wrapper.unmount()
+  })
+
+  it('hands a window\'s calls and the ones earlier polls aggregated to the content row that lands (JCLAW-1209)', async () => {
+    fakePollTimer()
+    const server = serve(117, toolOnlyRun())
+    const { api, wrapper } = mountTranscript(117, 'RUNNING')
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 2, 3, 4, 5]))
+
+    server.rows.push(
+      row(6, { content: null, toolCalls: [{ id: 'c3', function: { name: 'web_search', arguments: '{}' } }] }),
+      row(7, { role: 'tool', content: 'third result', toolResults: 'c3' }),
+      row(8, { content: 'done' }),
+    )
+    vi.advanceTimersByTime(5000)
+    await vi.waitFor(() => expect(ids(api)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]))
+    expect(server.offsets.slice(1).every(o => o > 0), `offsets were ${server.offsets}`).toBe(true)
+
+    const carrying = api.messages.value.filter(m => m.toolCalls?.length)
+    expect(carrying).toHaveLength(1)
+    expect(carrying[0]!.content).toBe('done')
+    expect(carrying[0]!.toolCalls!.map(tc => tc.id)).toEqual(['c1', 'c2', 'c3'])
+    wrapper.unmount()
+  })
 })

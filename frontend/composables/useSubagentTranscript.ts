@@ -66,13 +66,25 @@ async function fetchMessagesFrom(conversationId: number, offset: number, active:
 }
 
 // Hydration carries calls forward to the next assistant row with content, so a window can only begin
-// just after such a row, and no later than the first row still waiting on a call's result.
+// just after such a row, and no later than the first row still waiting on a call's result. A run made
+// only of tool calls has no content row until it ends (JCLAW-1209), so a completed result anchors a
+// window too; either way the window starts no later than the row the calls aggregate onto, which must
+// be re-hydrated or the calls a later row takes over would render twice.
 function incrementalStart(shown: Message[]): number {
   let limit = shown.findIndex(m => m.toolCalls?.some(tc => tc.resultText == null))
   if (limit < 0) limit = shown.length
+  for (let i = shown.length - 1; i >= 0; i--) {
+    if (shown[i]!.toolCalls?.length) {
+      limit = Math.min(limit, i)
+      break
+    }
+  }
   for (let i = limit; i > 0; i--) {
     const before = shown[i - 1]!
     if (before.role === 'assistant' && before.content) return i
+  }
+  for (let i = limit; i > 0; i--) {
+    if (shown[i - 1]!.role === 'tool') return i
   }
   return 0
 }
@@ -93,6 +105,27 @@ function applyToolCallDefaults(m: Message): void {
 
 function sameToolCalls(a: ToolCall[], b: ToolCall[]): boolean {
   return a.length === b.length && a.every((tc, i) => tc.id === b[i]!.id && tc.resultText === b[i]!.resultText)
+}
+
+// Prev order first, the fresh copy winning for a call both hold — it may have gained its result.
+function unionCalls(prev: ToolCall[], next: ToolCall[]): ToolCall[] {
+  const freshById = new Map(next.map(tc => [tc.id, tc]))
+  const out = prev.map(tc => freshById.get(tc.id) ?? tc)
+  const held = new Set(prev.map(tc => tc.id))
+  for (const tc of next) if (!held.has(tc.id)) out.push(tc)
+  return out
+}
+
+// A row that hands its calls to a newer one leaves them behind: give them to whichever row in the
+// window now carries calls, so the transcript matches what a single full fetch renders.
+function adoptCarried(window: Message[], carried: ToolCall[]): boolean {
+  for (let i = window.length - 1; i >= 0; i--) {
+    const m = window[i]!
+    if (!m.toolCalls?.length) continue
+    m.toolCalls = unionCalls(carried, m.toolCalls)
+    return true
+  }
+  return false
 }
 
 function sameAttachments(a: MessageAttachment[], b: MessageAttachment[]): boolean {
@@ -131,15 +164,24 @@ function merge(entry: CachedTranscript, fresh: Message[], from: number): void {
   const seen = new Set<number>()
   const additions: Message[] = []
   const window: Message[] = []
+  // A window hydrates only its own rows, so a row's earlier calls would be replaced by the partial
+  // list; union them instead, and carry forward any a row has since handed on (JCLAW-1209).
+  const carried: ToolCall[] = []
   let changed = false
   for (const m of fresh) {
     if (typeof m.id !== 'number' || seen.has(m.id)) continue
     seen.add(m.id)
     const shown = shownById.get(m.id)
+    if (shown && from > 0) {
+      const prevCalls = shown.toolCalls ?? []
+      if (m.toolCalls?.length) m.toolCalls = unionCalls(prevCalls, m.toolCalls)
+      else if (prevCalls.length) carried.push(...prevCalls)
+    }
     if (!shown) additions.push(m)
     else if (syncHydratedFields(shown, m)) changed = true
     window.push(shown ?? m)
   }
+  if (carried.length && adoptCarried(window, carried)) changed = true
   additions.forEach(applyToolCallDefaults)
   // Additions only: re-collapsing every row would fold a thinking card the reader just opened.
   initCollapsedState(additions)

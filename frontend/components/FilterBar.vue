@@ -105,7 +105,14 @@ function removeKey(key: string) {
   emit('update:filters', filters.value)
 }
 
-defineExpose({ removeKey })
+const queryInputEl = ref<HTMLInputElement | null>(null)
+
+// A page whose own control unmounts when a filter changes has nowhere to put focus (JCLAW-1210).
+function focusQuery() {
+  queryInputEl.value?.focus()
+}
+
+defineExpose({ removeKey, focusQuery })
 
 // ── Saved views (localStorage) ──────────────────────────────────────────────
 const savedViewsKey = computed(() => `jclaw-filters-${props.storageKey}`)
@@ -194,6 +201,7 @@ function handleInputKeydown(e: KeyboardEvent) {
 
       <!-- Query input -->
       <input
+        ref="queryInputEl"
         v-model="queryInput"
         type="text"
         :placeholder="filters.length ? 'Add filter...' : placeholder"

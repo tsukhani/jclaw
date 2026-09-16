@@ -431,6 +431,22 @@ describe('Subagents — parent conversation filter', () => {
     component.unmount()
   })
 
+  it('moves focus to the filter query input when the chip that held it clears the filter (JCLAW-1210)', async () => {
+    const component = await mountSuspended(Subagents, { attachTo: document.body })
+    await flushPromises()
+    await component.find('button[aria-label="Show only runs from conversation #5"]').trigger('click')
+    const clear = await vi.waitFor(() => {
+      const el = component.find('button[aria-label="Clear conversation filter"]')
+      expect(el.exists()).toBe(true)
+      return el
+    })
+    ;(clear.element as HTMLButtonElement).focus()
+
+    await clear.trigger('click')
+    await vi.waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Filter query'))
+    component.unmount()
+  })
+
   it('ignores a list response that lands after a newer request for another view', async () => {
     totalCount = 42
     let staleServed = false
