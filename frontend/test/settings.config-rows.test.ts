@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
+import type { ApiErrorTemplate } from '~/types/api'
 
 /** Rows for DB-backed settings that had no Settings surface: Voice Mode, chat streaming, approval timeout. */
 
@@ -11,10 +12,12 @@ type Body = { key?: string, value?: string }
 
 let posted: Body[] = []
 let refusal: string | null = null
+let refusalTemplate: ApiErrorTemplate | null = null
 
 function stubEndpoints() {
   posted = []
   refusal = null
+  refusalTemplate = null
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
@@ -26,7 +29,7 @@ function stubEndpoints() {
     handler: async (event) => {
       if (refusal) {
         setResponseStatus(event, 403)
-        return { type: 'error', code: 'forbidden', message: refusal }
+        return { type: 'error', code: 'forbidden', message: refusal, template: refusalTemplate }
       }
       posted.push(await readBody(event) as Body)
       return { ok: true }
@@ -83,6 +86,29 @@ describe('Settings page — Voice Mode', () => {
     await flushPromises()
 
     expect(base.find('[role="alert"]').text()).toContain('must not exceed')
+  })
+
+  // JCLAW-1131: the refusal reason stays the headline; the registry's parts follow it.
+  it('renders the three parts a refused write carries', async () => {
+    const component = await mountSettingsSection('voice')
+    refusal = 'voice.endpoint.baseSilenceMs must not exceed voice.endpoint.maxSilenceMs (1500).'
+    refusalTemplate = {
+      whatBroke: 'The request was not in a form the server could accept.',
+      whatToCheck: 'Check the fields you submitted for missing or malformed values.',
+      howToRetry: 'Correct the highlighted fields and submit again.',
+    }
+
+    const base = row(component, 'voice.endpoint.baseSilenceMs')
+    await base.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    await base.find('input').setValue('2000')
+    await base.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    const alert = base.find('[data-testid="api-error"]')
+    expect(alert.text()).toContain('must not exceed')
+    expect(alert.text()).toContain('What to check')
+    expect(alert.text()).toContain('Correct the highlighted fields and submit again.')
   })
 })
 

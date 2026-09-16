@@ -6,6 +6,7 @@ import {
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import type { ApiErrorDetails } from '~/types/api'
 
 const props = withDefaults(defineProps<{
   configKey: string
@@ -35,7 +36,7 @@ const isOn = computed(() => value.value.trim().toLowerCase() !== 'false')
 const editing = ref(false)
 // v-model on a type="number" input yields a number once the text parses.
 const draft = ref<string | number>('')
-const error = ref<string | null>(null)
+const error = ref<ApiErrorDetails | null>(null)
 
 function startEdit() {
   draft.value = value.value
@@ -48,12 +49,6 @@ function cancel() {
   error.value = null
 }
 
-function messageOf(e: unknown): string {
-  // A refused write is 403 {type, code, message}, where message is setWithSideEffects' rejection.
-  const data = (e as { data?: { message?: string } })?.data
-  return data?.message ?? (e instanceof Error ? e.message : 'Save failed')
-}
-
 async function save(next: string) {
   saving.value = true
   error.value = null
@@ -63,7 +58,8 @@ async function save(next: string) {
     await refresh()
   }
   catch (e) {
-    error.value = messageOf(e)
+    // A refused write is 403 {type, code, message, template}; message is setWithSideEffects' rejection.
+    error.value = apiErrorDetails(e, 'Save failed')
   }
   finally {
     saving.value = false
@@ -167,12 +163,9 @@ async function save(next: string) {
         </button>
       </template>
     </div>
-    <p
-      v-if="error"
-      class="px-4 pb-2.5 text-xs text-red-700 dark:text-red-400"
-      role="alert"
-    >
-      {{ error }}
-    </p>
+    <ApiErrorAlert
+      :error="error"
+      class="px-4 pb-2.5"
+    />
   </div>
 </template>

@@ -9,6 +9,7 @@ import {
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import type { ApiErrorDetails } from '~/types/api'
 
 const { configData, saving, refresh } = useSettingsConfig()
 
@@ -60,7 +61,7 @@ const { data: status, refresh: refreshStatus } = useLazyFetch<TelemetryStatus>('
 
 const editing = ref<Field | null>(null)
 const draft = ref('')
-const saveError = ref<string | null>(null)
+const saveError = ref<ApiErrorDetails | null>(null)
 const testing = ref(false)
 const testResult = ref<TestResult | null>(null)
 
@@ -69,12 +70,6 @@ function startEdit(field: Field) {
   saveError.value = null
   // The stored headers come back masked, so the editor starts empty: what is typed replaces them.
   draft.value = field === 'headers' ? '' : otel.value[field]
-}
-
-function messageOf(e: unknown): string {
-  // The API answers a refused write with 403 {error}; a transport-level failure carries {message}.
-  const data = (e as { data?: { error?: string, message?: string } })?.data
-  return data?.error ?? data?.message ?? (e instanceof Error ? e.message : 'Save failed')
 }
 
 async function save(field: Field) {
@@ -94,7 +89,7 @@ async function save(field: Field) {
     await Promise.all([refresh(), refreshStatus()])
   }
   catch (e) {
-    saveError.value = messageOf(e)
+    saveError.value = apiErrorDetails(e, 'Save failed')
   }
   finally {
     saving.value = false
@@ -111,7 +106,7 @@ async function toggleEnabled(event: Event) {
     await Promise.all([refresh(), refreshStatus()])
   }
   catch (e) {
-    saveError.value = messageOf(e)
+    saveError.value = apiErrorDetails(e, 'Save failed')
   }
   finally {
     saving.value = false
@@ -126,7 +121,7 @@ async function sendTestSpan() {
     await refreshStatus()
   }
   catch (e) {
-    testResult.value = { delivered: false, traceId: '', error: messageOf(e) }
+    testResult.value = { delivered: false, traceId: '', error: apiErrorDetails(e).message }
   }
   finally {
     testing.value = false
@@ -264,13 +259,7 @@ const rows: { field: Field, label: string, hint: string }[] = [
       </div>
     </div>
 
-    <p
-      v-if="saveError"
-      class="text-xs text-red-700 dark:text-red-400"
-      role="alert"
-    >
-      {{ saveError }}
-    </p>
+    <ApiErrorAlert :error="saveError" />
 
     <!-- Delivery check -->
     <div class="flex items-center gap-3">
