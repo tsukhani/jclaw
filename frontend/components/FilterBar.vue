@@ -90,12 +90,16 @@ function commitQuery() {
 function removeFilter(index: number) {
   filters.value = filters.value.filter((_, i) => i !== index)
   emit('update:filters', filters.value)
+  // The chip unmounts with its token, taking the focused control with it (JCLAW-1212).
+  focusQuery()
 }
 
 function clearAll() {
   filters.value = []
   queryInput.value = ''
   emit('update:filters', filters.value)
+  // Clear renders only while a filter exists, so it unmounts itself here (JCLAW-1212).
+  focusQuery()
 }
 
 // Lets a page that also sets a key from outside the bar drop its token, so the two never disagree.

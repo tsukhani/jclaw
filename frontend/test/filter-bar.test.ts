@@ -166,4 +166,41 @@ describe('FilterBar', () => {
     const chip = component.find('[aria-label="Filter: agent is main"]')
     expect(chip.exists()).toBe(true)
   })
+
+  // Attached to the document: focus assertions are meaningless on a detached tree.
+  it('moves focus to the query input when a chip\'s remove control unmounts (JCLAW-1212)', async () => {
+    const component = await mountSuspended(FilterBar, {
+      props: { storageKey: 'test-remove-focus' },
+      attachTo: document.body,
+    })
+    const input = component.find('input[type="text"]')
+    await input.setValue('agent:main channel:web')
+    await input.trigger('keydown', { key: 'Enter' })
+
+    const remove = component.findAll('[aria-label^="Remove filter"]')[0]!
+    ;(remove.element as HTMLButtonElement).focus()
+    expect(document.activeElement).toBe(remove.element)
+
+    await remove.trigger('click')
+    expect(document.activeElement).toBe(input.element)
+    component.unmount()
+  })
+
+  it('moves focus to the query input when Clear removes the last chip (JCLAW-1212)', async () => {
+    const component = await mountSuspended(FilterBar, {
+      props: { storageKey: 'test-clear-focus' },
+      attachTo: document.body,
+    })
+    const input = component.find('input[type="text"]')
+    await input.setValue('agent:main')
+    await input.trigger('keydown', { key: 'Enter' })
+
+    const clear = component.find('[title="Clear all filters"]')
+    ;(clear.element as HTMLButtonElement).focus()
+    expect(document.activeElement).toBe(clear.element)
+
+    await clear.trigger('click')
+    expect(document.activeElement).toBe(input.element)
+    component.unmount()
+  })
 })
