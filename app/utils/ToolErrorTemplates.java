@@ -55,6 +55,12 @@ public final class ToolErrorTemplates {
     public static final String WEB_FETCH_FAILED = "web_fetch_failed";
     public static final String WEB_BAD_URL = "web_bad_url";
 
+    public static final String MCP_BAD_ARGUMENTS = "mcp_bad_arguments";
+    public static final String MCP_NOT_ALLOWED = "mcp_not_allowed";
+    public static final String MCP_CONNECTION_FAILED = "mcp_connection_failed";
+    public static final String MCP_PROTOCOL_FAILED = "mcp_protocol_failed";
+    public static final String MCP_TOOL_REPORTED_ERROR = "mcp_tool_reported_error";
+
     // === rendering ===
 
     /**
@@ -328,6 +334,59 @@ public final class ToolErrorTemplates {
                 "The request reached the transport and came back with an error the ladder could not "
                         + "get past — commonly a 4xx or 5xx from the site itself.",
                 "Try a different URL on the same site, or a search to find another source for the content.");
+    }
+
+    // --- MCP (JCLAW-1132 follow-up) ---
+    // The AC asks an MCP failure to say whether it was connection, protocol or tool-level.
+    // That distinction already exists on the wire and was being collapsed: the invoker declares
+    // `throws IOException, McpException`, where IOException is transport and McpException is a
+    // JSON-RPC error, a contract violation or a timeout. These factories keep them apart, and
+    // every one names the server — an operator running several cannot act on "an MCP tool failed".
+
+    public static ErrorTemplate mcpConnectionFailed(String server, String tool, String detail) {
+        return new ErrorTemplate(MCP_CONNECTION_FAILED,
+                "Could not reach MCP server '%s' to run `%s`: %s".formatted(server, tool, detail),
+                ("The failure was at the transport, so the server never answered — it may be "
+                        + "stopped, still starting, or listening somewhere other than its configured "
+                        + "address. Settings → MCP Servers → %s shows its connection state.")
+                        .formatted(server),
+                "Reconnect '%s' from Settings, then run the tool again.".formatted(server));
+    }
+
+    public static ErrorTemplate mcpProtocolFailed(String server, String tool, String detail) {
+        return new ErrorTemplate(MCP_PROTOCOL_FAILED,
+                "MCP server '%s' answered `%s` with a protocol error: %s".formatted(server, tool, detail),
+                ("The server is reachable and replied, so this is not a connection problem — it "
+                        + "returned a JSON-RPC error, broke the protocol contract, or took longer "
+                        + "than the request timeout. A version mismatch between the server and its "
+                        + "declared tool schema produces this too."),
+                "Retry once in case it was a timeout; if it repeats, the server's own log is the "
+                        + "thing to read.");
+    }
+
+    public static ErrorTemplate mcpToolReportedError(String server, String tool, String detail) {
+        return new ErrorTemplate(MCP_TOOL_REPORTED_ERROR,
+                "`%s` on MCP server '%s' ran and reported a failure: %s".formatted(tool, server, detail),
+                "The call reached the tool and the tool rejected it, so the server and the "
+                        + "connection are both fine — the argument values are what to look at.",
+                "Correct the arguments and call it again.");
+    }
+
+    public static ErrorTemplate mcpNotAllowed(String server, String tool, String agent) {
+        return new ErrorTemplate(MCP_NOT_ALLOWED,
+                "`%s` on MCP server '%s' is not on the allowlist for agent '%s'."
+                        .formatted(tool, server, agent),
+                "A per-agent grant, not a connection problem: the server can be connected and its "
+                        + "tools still ungranted, which is the default for a newly connected server.",
+                "Grant the agent this server's tools in the agent editor, then call it again.");
+    }
+
+    public static ErrorTemplate mcpBadArguments(String server, String tool, String detail) {
+        return new ErrorTemplate(MCP_BAD_ARGUMENTS,
+                "The arguments for `%s` on MCP server '%s' were not valid JSON: %s"
+                        .formatted(tool, server, detail),
+                "Nothing reached the server — the call was rejected here, before the wire.",
+                "Re-send the call with a JSON object for the arguments.");
     }
 
     /**

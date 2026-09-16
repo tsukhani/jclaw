@@ -8,7 +8,9 @@ import models.Agent;
 import models.EventLog;
 import models.McpServer;
 import services.Tx;
+import utils.ApiResponses;
 import utils.AppClock;
+import utils.ToolErrorTemplates;
 
 import java.io.IOException;
 import java.util.List;
@@ -71,7 +73,8 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
             var parsed = JsonParser.parseString(argsJson);
             args = parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject();
         } catch (RuntimeException e) {
-            return "Error parsing arguments for MCP tool '%s': %s".formatted(name(), e.getMessage());
+            return ToolErrorTemplates.render(
+                    ToolErrorTemplates.mcpBadArguments(serverName, def.name(), ApiResponses.messageOf(e)));
         }
         // JCLAW-32: gate + audit in one atomic Tx. The check (isAllowed) and
         // the audit log (MCP_TOOL_INVOKE) MUST commit together so an attacker
@@ -89,21 +92,31 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
                 return grant;
             });
         } catch (RuntimeException e) {
-            return "Error checking MCP allowlist for '%s': %s".formatted(name(), e.getMessage());
+            return ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
+                    serverName, def.name(), "allowlist check failed: " + ApiResponses.messageOf(e)));
         }
         if (!allowed) {
-            return "MCP tool '%s' is not on the allowlist for agent '%s'. "
-                   .formatted(name(), agent != null ? agent.name : "<unknown>")
-                   + "Connect the server or grant the agent first.";
+            return ToolErrorTemplates.render(ToolErrorTemplates.mcpNotAllowed(
+                    serverName, def.name(), agent != null ? agent.name : "<unknown>"));
         }
         try {
             var result = invoker.invoke(serverName, def.name(), args);
             if (result.isError()) {
-                return "MCP tool '%s' reported error: %s".formatted(name(), result.content());
+                return ToolErrorTemplates.render(ToolErrorTemplates.mcpToolReportedError(
+                        serverName, def.name(), result.content()));
             }
             return result.content();
-        } catch (Exception e) {
-            return "Error invoking MCP tool '%s': %s".formatted(name(), e.getMessage());
+        } catch (IOException e) {
+            // Transport: the server never answered. Kept apart from McpException below because
+            // the remedies differ — reconnect the server versus read what it replied.
+            return ToolErrorTemplates.render(ToolErrorTemplates.mcpConnectionFailed(
+                    serverName, def.name(), ApiResponses.messageOf(e)));
+        } catch (McpException e) {
+            return ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
+                    serverName, def.name(), ApiResponses.messageOf(e)));
+        } catch (RuntimeException e) {
+            return ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
+                    serverName, def.name(), ApiResponses.messageOf(e)));
         }
     }
 
