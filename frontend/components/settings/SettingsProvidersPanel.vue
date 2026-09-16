@@ -1641,9 +1641,13 @@ const groupedProviders = computed(() => {
             v-else-if="discoveryError"
             class="px-4 py-4"
           >
+            <!-- JCLAW-1137: discovery returns a model list and persists nothing, so repeating it is
+                 safe — and a provider that was briefly down is the likeliest failure here. -->
             <ApiErrorAlert
               :error="discoveryError"
               :headline="`Could not reach ${name}.`"
+              :retry="() => startDiscovery(name)"
+              :retrying="discoveryLoading"
             />
           </div>
 

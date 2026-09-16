@@ -103,4 +103,40 @@ describe('ApiErrorAlert', () => {
     })
     expect(component.get('[data-testid="api-error"]').classes()).toContain('bg-surface-elevated')
   })
+
+  // --- JCLAW-1137: retry is opt-in per call ---
+
+  const ERR = { code: 'internal_error', message: 'boom', template: null }
+
+  /** Default is no button: only the caller knows whether the failed request is safe to repeat. */
+  it('renders no retry control unless the caller supplies one', async () => {
+    const component = await mountSuspended(ApiErrorAlert, { props: { error: ERR } })
+    expect(component.find('[data-testid="api-error-retry"]').exists()).toBe(false)
+  })
+
+  it('renders a retry control that re-runs the call when one is supplied', async () => {
+    let calls = 0
+    const component = await mountSuspended(ApiErrorAlert, {
+      props: { error: ERR, retry: () => { calls++ } } })
+    await component.get('[data-testid="api-error-retry"]').trigger('click')
+    expect(calls).toBe(1)
+  })
+
+  /** A second click while the first retry is in flight must not fire a second request. */
+  it('disables the retry control while the retry is in flight', async () => {
+    let calls = 0
+    const component = await mountSuspended(ApiErrorAlert, {
+      props: { error: ERR, retry: () => { calls++ }, retrying: true } })
+    const button = component.get('[data-testid="api-error-retry"]')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.text()).toBe('Retrying…')
+    await button.trigger('click')
+    expect(calls, 'a disabled button must not re-run the call').toBe(0)
+  })
+
+  it('renders nothing at all — including no retry — when there is no error', async () => {
+    const component = await mountSuspended(ApiErrorAlert, {
+      props: { error: null, retry: () => {} } })
+    expect(component.find('[data-testid="api-error-retry"]').exists()).toBe(false)
+  })
 })

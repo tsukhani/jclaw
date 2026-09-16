@@ -219,7 +219,14 @@ async function save() {
             class="w-full px-2 py-1.5 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
           >
         </label>
-        <ApiErrorAlert :error="saveError" />
+        <!-- JCLAW-1137: retry only an edit. Editing is a PUT to a known id, so repeating it cannot
+             duplicate anything. Creating is a POST, and if the first attempt succeeded but its
+             response was lost, a retry makes a second prompt — so a failed create gets no button. -->
+        <ApiErrorAlert
+          :error="saveError"
+          :retry="editing ? save : undefined"
+          :retrying="saving"
+        />
         <DialogFooter class="gap-2 sm:justify-between">
           <button
             v-if="!isEdit"

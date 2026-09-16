@@ -21,8 +21,20 @@ withDefaults(defineProps<{
   error: ApiErrorDetails | null
   /** Replaces the headline where the caller knows more than the server did — which provider, which form. */
   headline?: string
+  /**
+   * Re-runs the failed call (JCLAW-1137). Absent means no button, and absent is the default on
+   * purpose: only the caller knows whether the request that failed is safe to repeat, and the
+   * component cannot tell. One error ref can cover operations of opposite safety — the prompt
+   * form uses the same ref for an idempotent PUT and a non-idempotent POST — so a caller passes
+   * this per call, never per component.
+   */
+  retry?: () => unknown
+  /** True while the retry is in flight, so a second click cannot fire a second request. */
+  retrying?: boolean
 }>(), {
   headline: undefined,
+  retry: undefined,
+  retrying: false,
 })
 </script>
 
@@ -51,5 +63,15 @@ withDefaults(defineProps<{
         <span class="font-semibold">How to retry</span> — {{ error.template.howToRetry }}
       </p>
     </template>
+    <button
+      v-if="retry"
+      type="button"
+      class="mt-1 text-xs font-medium underline underline-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
+      :disabled="retrying"
+      data-testid="api-error-retry"
+      @click="retry()"
+    >
+      {{ retrying ? 'Retrying…' : 'Retry' }}
+    </button>
   </div>
 </template>
