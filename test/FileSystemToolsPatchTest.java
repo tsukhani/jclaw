@@ -49,7 +49,7 @@ class FileSystemToolsPatchTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "applyPatch"}
                 """, agent);
-        assertEquals("Error: applyPatch requires a non-empty 'patch' field", result);
+        assertTrue(result.startsWith("Error: applyPatch requires a non-empty 'patch' field"), "got: " + result);
     }
 
     @Test
@@ -57,7 +57,7 @@ class FileSystemToolsPatchTest extends UnitTest {
         var result = tool.execute("""
                 {"action": "applyPatch", "patch": "   \\n  "}
                 """, agent);
-        assertEquals("Error: applyPatch requires a non-empty 'patch' field", result);
+        assertTrue(result.startsWith("Error: applyPatch requires a non-empty 'patch' field"), "got: " + result);
     }
 
     @Test
@@ -66,7 +66,7 @@ class FileSystemToolsPatchTest extends UnitTest {
                 *** Begin Patch
                 *** End Patch
                 """);
-        assertEquals("Error: patch contains no file operations", result);
+        assertTrue(result.startsWith("Error: patch contains no file operations"), "got: " + result);
     }
 
     // ==================== Parser errors (line-numbered) ====================
@@ -399,7 +399,7 @@ class FileSystemToolsPatchTest extends UnitTest {
                 *** End of File
                 *** End Patch
                 """);
-        assertTrue(result.startsWith("Error applying Add File"), "got: " + result);
+        assertTrue(result.startsWith("Error: applying Add File"), "got: " + result);
         assertEquals("original\n", Files.readString(workspace.resolve("rollback-a.txt")),
                 "committed update must be rolled back after the later op fails");
         assertEquals("i am a file", Files.readString(workspace.resolve("rollback-blocker.txt")),

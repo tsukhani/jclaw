@@ -12,7 +12,9 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import utils.ErrorTemplate;
 import utils.SubprocessEnv;
+import utils.ToolErrorTemplates;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
@@ -140,6 +142,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     private static final String FIELD_DURATION_MS = "durationMs";
     private static final String FIELD_TRUNCATED = "truncated";
     private static final String FIELD_TIMED_OUT = "timedOut";
+    private static final String FIELD_ERROR = "error";
 
     /** Atomically cached parsed allowlist: invalidated when the raw config string changes. */
     private record AllowlistCache(String raw, Set<String> set) {}
@@ -252,6 +255,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return exitCode > 0 ? Optional.of("command exited " + exitCode) : Optional.empty();
     }
 
+    /**
+     * No {@code executeRich} override (JCLAW-1132): this tool's result text already IS a JSON
+     * envelope, so a failure's {@link ErrorTemplate} goes inside it rather than into a
+     * {@code structuredJson} copy the model would never see.
+     */
     @Override
     public String execute(String argsJson, Agent agent) {
         long startTime = System.currentTimeMillis();
@@ -259,7 +267,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
         var command = args.has(PARAM_COMMAND) ? args.get(PARAM_COMMAND).getAsString().strip() : "";
         if (command.isEmpty()) {
-            return "Error: command is required and must not be empty.";
+            return ToolErrorTemplates.render(ToolErrorTemplates.shellEmptyCommand());
         }
         // JClaw operator audit trail: the schema marks `why` required so the model
         // articulates intent, but execution never hard-fails on a missing rationale
@@ -273,7 +281,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 ConfigService.get("agent." + agent.name + ".shell.bypassAllowlist", "false"));
         if (!bypassAllowlist) {
             var allowlistError = validateAllowlist(command, agent);
-            if (allowlistError != null) return allowlistError;
+            if (allowlistError != null) return ToolErrorTemplates.render(allowlistError);
         }
 
         // Working directory resolution (allowGlobalPaths only for the main agent)
@@ -284,7 +292,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         try {
             workdir = resolveWorkdir(args, workspace, agentAllowGlobal, agent.name);
         } catch (IllegalArgumentException e) {
-            return "Error: " + e.getMessage();
+            return ToolErrorTemplates.render(
+                    ToolErrorTemplates.shellWorkdirRefused(String.valueOf(e.getMessage())));
         }
 
         var defaultTimeout = ConfigService.getInt("shell.defaultTimeoutSeconds", 30);
@@ -315,7 +324,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * through {@link #validateAllowlist(String, Agent)} so the agent's enabled
      * skills can contribute commands.
      */
-    public @Nullable String validateAllowlist(String command) {
+    public @Nullable ErrorTemplate validateAllowlist(String command) {
         return validateAllowlist(command, null);
     }
 
@@ -328,21 +337,17 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * {@code ./wacli}, or {@code ./path/to/wacli}). When {@code agent} is
      * null, only the global allowlist is consulted.
      */
-    public @Nullable String validateAllowlist(String command, @Nullable Agent agent) {
+    public @Nullable ErrorTemplate validateAllowlist(String command, @Nullable Agent agent) {
         var firstToken = extractFirstToken(command);
         if (firstToken.isEmpty()) {
-            return "Error: command is required and must not be empty.";
+            return ToolErrorTemplates.shellEmptyCommand();
         }
 
         var effective = effectiveAllowlistFor(agent);
-        if (effective.isEmpty()) {
-            return "Error: Command '%s' is not in the allowed commands list. Allowed: %s"
-                    .formatted(firstToken, String.join(", ", effective));
-        }
         var basename = commandBasename(firstToken);
-        if (!effective.contains(firstToken) && (basename.isEmpty() || !effective.contains(basename))) {
-            return "Error: Command '%s' is not in the allowed commands list. Allowed: %s"
-                    .formatted(firstToken, String.join(", ", effective));
+        if (effective.isEmpty()
+                || (!effective.contains(firstToken) && (basename.isEmpty() || !effective.contains(basename)))) {
+            return ToolErrorTemplates.shellNotAllowed(firstToken, String.join(", ", effective));
         }
         return null;
     }
@@ -519,20 +524,37 @@ public class ShellExecTool implements ToolRegistry.Tool {
             long durationMs = System.currentTimeMillis() - startTime;
             var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(out.toString(), agent);
 
+            int exitCode = timedOut.get() ? -1 : process.exitValue();
             var result = new JsonObject();
-            result.addProperty(FIELD_EXIT_CODE, timedOut.get() ? -1 : process.exitValue());
+            result.addProperty(FIELD_EXIT_CODE, exitCode);
             result.addProperty(FIELD_OUTPUT, processedOutput + (timedOut.get() ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec) : ""));
             result.addProperty(FIELD_DURATION_MS, durationMs);
             result.addProperty(FIELD_TRUNCATED, readResult.truncated());
             result.addProperty(FIELD_TIMED_OUT, timedOut.get());
+
+            // Inside the envelope, not replacing it — the model needs the output as well as the remedy.
+            var failure = failureTemplate(command, exitCode, timedOut.get(), timeoutSec);
+            if (failure != null) result.add(FIELD_ERROR, ToolErrorTemplates.asJsonObject(failure));
             return result.toString();
 
         } catch (IOException e) {
-            return "Error: Failed to execute command: " + e.getMessage();
+            return ToolErrorTemplates.render(
+                    ToolErrorTemplates.shellSpawnFailed(command, String.valueOf(e.getMessage())));
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            return "Error: Command execution interrupted.";
+            return ToolErrorTemplates.render(ToolErrorTemplates.shellInterrupted(command));
         }
+    }
+
+    /**
+     * A negative exit is {@link #buildTerminalImageEarlyReturn}'s deliberate
+     * still-running marker unless the watchdog killed the process, so only a timeout or a
+     * positive status is a failure — the same split {@link #postConditionFailure} makes.
+     */
+    private static @Nullable ErrorTemplate failureTemplate(String command, int exitCode,
+                                                           boolean timedOut, int timeoutSec) {
+        if (timedOut) return ToolErrorTemplates.shellTimedOut(command, timeoutSec);
+        return exitCode > 0 ? ToolErrorTemplates.shellExitNonZero(command, exitCode) : null;
     }
 
     /**

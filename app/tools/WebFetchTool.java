@@ -13,11 +13,15 @@ import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeRung;
 import tools.scrape.ScrapeLadder;
+import utils.ErrorTemplate;
 import utils.SsrfGuard;
+import utils.ToolErrorTemplates;
 import utils.WebExtraction;
 
 import javax.net.ssl.SSLException;
 
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -188,6 +192,12 @@ public class WebFetchTool implements ToolRegistry.Tool {
 
     @Override
     public String execute(String argsJson, Agent agent) {
+        return executeRich(argsJson, agent).text();
+    }
+
+    /** JCLAW-1132: every failure carries its {@code ErrorTemplate} in {@code structuredJson}. */
+    @Override
+    public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         var url = args.get("url").getAsString();
         var mode = args.has("mode") ? args.get("mode").getAsString() : "text";
@@ -198,24 +208,26 @@ public class WebFetchTool implements ToolRegistry.Tool {
             var best = climb(url, fetched, text, null, agent);
             var body = best.fetched() == null ? fetched : best.fetched();
             var extracted = best.text() == null ? text : best.text();
-            return "html".equals(mode) ? rawHtml(body, url, agent) : extracted;
+            return ToolRegistry.ToolResult.text(
+                    "html".equals(mode) ? rawHtml(body, url, agent) : extracted);
         } catch (WebExtraction.HostNotAllowedException e) {
-            return e.getMessage();
+            // Already a three-part refusal, authored where the allowlist lives.
+            return ToolRegistry.ToolResult.text(e.getMessage());
         } catch (SecurityException e) {
-            // SsrfGuard rejected a scheme or host — surface plainly so the LLM
-            // understands why and doesn't keep retrying the same URL.
-            return "Error: URL rejected by SSRF guard: %s".formatted(e.getMessage());
+            return ToolRegistry.ToolResult.error(
+                    ToolErrorTemplates.webBlocked(String.valueOf(e.getMessage())));
         } catch (UnknownHostException e) {
-            return "Error: URL rejected: %s".formatted(e.getMessage());
+            return ToolRegistry.ToolResult.error(
+                    ToolErrorTemplates.webHostUnresolved(url, String.valueOf(e.getMessage())));
         } catch (SocketTimeoutException _) {
-            return "Error: Request timed out after %d seconds fetching %s".formatted(TIMEOUT_SECONDS, url);
+            return ToolRegistry.ToolResult.error(ToolErrorTemplates.webTimedOut(url, TIMEOUT_SECONDS));
         } catch (SSLException e) {
-            return "Error: SSL/TLS certificate verification failed for %s: %s. The site may have an expired, self-signed, or invalid certificate."
-                    .formatted(url, e.getMessage());
+            return ToolRegistry.ToolResult.error(
+                    ToolErrorTemplates.webTlsFailed(url, String.valueOf(e.getMessage())));
         } catch (Exception e) {
             if (e.getCause() instanceof SSLException sslEx) {
-                return "Error: SSL/TLS certificate verification failed for %s: %s. The site may have an expired, self-signed, or invalid certificate."
-                        .formatted(url, sslEx.getMessage());
+                return ToolRegistry.ToolResult.error(
+                        ToolErrorTemplates.webTlsFailed(url, String.valueOf(sslEx.getMessage())));
             }
             // A refusal is the case escalation exists for — an HTTP 403 arrives here as
             // an IOException, and giving up on it is exactly what left the higher rungs
@@ -225,11 +237,27 @@ public class WebFetchTool implements ToolRegistry.Tool {
             var escalated = climb(url, null, null, e.getMessage(), agent);
             if (escalated.usable()) {
                 var escalatedBody = escalated.fetched();
-                return "html".equals(mode) && escalatedBody != null
-                        ? rawHtml(escalatedBody, url, agent) : escalated.resolvedText();
+                return ToolRegistry.ToolResult.text("html".equals(mode) && escalatedBody != null
+                        ? rawHtml(escalatedBody, url, agent) : escalated.resolvedText());
             }
-            return "Error fetching URL: %s".formatted(e.getMessage());
+            return ToolRegistry.ToolResult.error(classifyFetchFailure(url, e));
         }
+    }
+
+    /**
+     * A connection refused or unroutable host reaches the generic branch rather than its own
+     * catch, because those are the failures the escalation ladder exists to get past. Once the
+     * ladder has given up they still need their own remedy: a timeout means wait, a refused
+     * connection means the port or scheme is wrong, and retrying longer cannot fix the second.
+     */
+    private static ErrorTemplate classifyFetchFailure(String url, Exception e) {
+        var cause = e.getCause();
+        boolean unreachable = e instanceof ConnectException || e instanceof NoRouteToHostException
+                || cause instanceof ConnectException || cause instanceof NoRouteToHostException;
+        var detail = String.valueOf(e.getMessage());
+        return unreachable
+                ? ToolErrorTemplates.webHostUnreachable(url, detail)
+                : ToolErrorTemplates.webFetchFailed(url, detail);
     }
 
     /** Hand one URL to the ladder, classifying the plain attempt the way the crawler and

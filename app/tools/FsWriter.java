@@ -1,6 +1,8 @@
 package tools;
 
 import agents.SkillLoader;
+import tools.FsSupport.FsOutcome;
+import utils.ToolErrorTemplates;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,7 +19,7 @@ final class FsWriter {
 
     private FsWriter() {}
 
-    static String writeFile(Path path, String content) {
+    static FsOutcome writeFile(Path path, String content) {
         try {
             Files.createDirectories(path.getParent());
 
@@ -44,9 +46,10 @@ final class FsWriter {
             }
 
             Files.writeString(path, finalContent);
-            return "File written successfully: " + path.getFileName() + versionNote;
+            return FsOutcome.ok("File written successfully: " + path.getFileName() + versionNote);
         } catch (IOException e) {
-            return "Error writing file: %s".formatted(e.getMessage());
+            return FsOutcome.fail(ToolErrorTemplates.fsIoFailure(
+                    "Writing the file failed: %s".formatted(e.getMessage())));
         }
     }
 
@@ -59,26 +62,25 @@ final class FsWriter {
      * an append is ambiguous against the version-management semantics and the
      * LLM should use writeFile (or editFile) for skill authoring.
      */
-    static String appendFile(Path path, String content) {
+    static FsOutcome appendFile(Path path, String content) {
         try {
             if (isSkillDefinitionFile(path)) {
-                return "Error: appendFile is not supported for SKILL.md files. "
-                        + "Use writeFile for a full replacement (version bumps are handled automatically) "
-                        + "or editFile to patch specific sections.";
+                return FsOutcome.fail(ToolErrorTemplates.fsAppendUnsupported());
             }
             Files.createDirectories(path.getParent());
             if (Files.exists(path)) {
                 Files.writeString(path, content,
                         StandardOpenOption.APPEND);
                 long size = Files.size(path);
-                return "Appended %d chars to %s (total %d bytes)"
-                        .formatted(content.length(), path.getFileName(), size);
+                return FsOutcome.ok("Appended %d chars to %s (total %d bytes)"
+                        .formatted(content.length(), path.getFileName(), size));
             }
             Files.writeString(path, content);
-            return "File created (appendFile on missing file): " + path.getFileName()
-                    + " (" + content.length() + " chars)";
+            return FsOutcome.ok("File created (appendFile on missing file): " + path.getFileName()
+                    + " (" + content.length() + " chars)");
         } catch (IOException e) {
-            return "Error appending to file: %s".formatted(e.getMessage());
+            return FsOutcome.fail(ToolErrorTemplates.fsIoFailure(
+                    "Appending to the file failed: %s".formatted(e.getMessage())));
         }
     }
 

@@ -32,7 +32,7 @@ final class FsLocks {
         return target.toAbsolutePath().normalize().toString();
     }
 
-    static String withLock(Path target, Supplier<String> block) {
+    static <T> T withLock(Path target, Supplier<T> block) {
         var lock = FILE_LOCKS.computeIfAbsent(lockKey(target), _ -> new ReentrantLock());
         lock.lock();
         try {
@@ -47,7 +47,7 @@ final class FsLocks {
      * order (deadlock-free across concurrent applyPatch calls on overlapping file sets) and
      * run {@code block} inside that critical section. Duplicate paths collapse to one lock.
      */
-    static String runUnderFileLocks(List<Path> targets, Supplier<String> block) {
+    static <T> T runUnderFileLocks(List<Path> targets, Supplier<T> block) {
         var lockKeys = new LinkedHashSet<String>();
         for (var t : targets) {
             lockKeys.add(lockKey(t));

@@ -17,6 +17,7 @@ import tools.scrape.SitemapSeeder;
 import tools.scrape.WebScrapeSettings;
 import utils.RobotsCache;
 import utils.SsrfGuard;
+import utils.ToolErrorTemplates;
 import utils.WebExtraction;
 
 import java.net.URI;
@@ -200,12 +201,19 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     @Override
     public String execute(String argsJson, Agent agent) {
+        return executeRich(argsJson, agent).text();
+    }
+
+    /** JCLAW-1132: the two admission refusals carry their {@code ErrorTemplate}. */
+    @Override
+    public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         URI seed;
         try {
             seed = URI.create(args.get(ARG_URL).getAsString().strip());
         } catch (RuntimeException e) {
-            return "Error: could not parse url: %s".formatted(e.getMessage());
+            return ToolRegistry.ToolResult.error(
+                    ToolErrorTemplates.webBadUrl(String.valueOf(e.getMessage())));
         }
 
         int maxPages = Math.clamp(
@@ -225,12 +233,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         try {
             SsrfGuard.assertSafeScheme(seed);
         } catch (SecurityException e) {
-            return "Error: URL rejected by SSRF guard: %s".formatted(e.getMessage());
+            return ToolRegistry.ToolResult.error(
+                    ToolErrorTemplates.webBlocked(String.valueOf(e.getMessage())));
         }
         var language = args.has(ARG_LANGUAGE) && !args.get(ARG_LANGUAGE).isJsonNull()
                 ? args.get(ARG_LANGUAGE).getAsString().strip()
                 : languageDefault();
-        return crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots, language);
+        return ToolRegistry.ToolResult.text(
+                crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots, language));
     }
 
     /**

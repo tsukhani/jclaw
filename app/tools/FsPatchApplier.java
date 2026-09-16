@@ -4,10 +4,13 @@ import models.Agent;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import tools.FsSupport.EditResult;
+import tools.FsSupport.FsOutcome;
 import tools.UnifiedPatchParser.FileOp;
 import tools.UnifiedPatchParser.PatchChunk;
 import tools.UnifiedPatchParser.PatchLine;
 import tools.UnifiedPatchParser.PatchParseException;
+import utils.ErrorTemplate;
+import utils.ToolErrorTemplates;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -50,25 +53,25 @@ final class FsPatchApplier {
      * application IO error, best-effort rollback restores pre-edit content and removes
      * newly-created files.
      */
-    static String applyPatch(Agent agent, String patchBody) {
+    static FsOutcome applyPatch(Agent agent, String patchBody) {
         if (patchBody == null || patchBody.isBlank()) {
-            return "Error: applyPatch requires a non-empty 'patch' field";
+            return rejected("applyPatch requires a non-empty 'patch' field");
         }
 
         List<FileOp> ops;
         try {
             ops = UnifiedPatchParser.parse(patchBody);
         } catch (PatchParseException e) {
-            return "Error: malformed patch at line %d: %s".formatted(e.line, e.getMessage());
+            return rejected("malformed patch at line %d: %s".formatted(e.line, e.getMessage()));
         }
 
         if (ops.isEmpty()) {
-            return "Error: patch contains no file operations";
+            return rejected("patch contains no file operations");
         }
 
         var workspace = AgentService.workspacePath(agent.name);
         var resolution = resolvePatchOps(ops, agent, workspace);
-        if (resolution.error != null) return resolution.error;
+        if (resolution.error != null) return FsOutcome.fail(resolution.error);
 
         var resolvedOps = resolution.resolvedOps();
         var lockTargets = new ArrayList<Path>();
@@ -79,9 +82,14 @@ final class FsPatchApplier {
         return FsLocks.runUnderFileLocks(lockTargets, () -> applyPatchLocked(resolvedOps));
     }
 
-    private record PatchResolution(@Nullable List<ResolvedOp> resolved, @Nullable String error) {
+    /** The patch family's failures all share one code and one remedy. */
+    private static FsOutcome rejected(String whatBroke) {
+        return FsOutcome.fail(ToolErrorTemplates.fsPatchRejected(whatBroke));
+    }
+
+    private record PatchResolution(@Nullable List<ResolvedOp> resolved, @Nullable ErrorTemplate error) {
         static PatchResolution ok(List<ResolvedOp> resolved) { return new PatchResolution(resolved, null); }
-        static PatchResolution err(String error) { return new PatchResolution(null, error); }
+        static PatchResolution err(ErrorTemplate error) { return new PatchResolution(null, error); }
 
         /** Valid only once {@link #error()} has been checked null — {@code err()} resolves no ops. */
         List<ResolvedOp> resolvedOps() {
@@ -101,7 +109,7 @@ final class FsPatchApplier {
             try {
                 target = AgentService.acquireWorkspacePath(agent.name, op.path());
             } catch (SecurityException e) {
-                return PatchResolution.err(FsSupport.ERROR_PREFIX_COLON + e.getMessage());
+                return PatchResolution.err(ToolErrorTemplates.fsPathRefused(e.getMessage()));
             }
             var guardError = FsPaths.checkSkillCreatorReadOnly(agent, workspace, target);
             if (guardError != null) return PatchResolution.err(guardError);
@@ -115,7 +123,7 @@ final class FsPatchApplier {
                 try {
                     moveTarget = AgentService.acquireWorkspacePath(agent.name, newPathOpt.get());
                 } catch (SecurityException e) {
-                    return PatchResolution.err(FsSupport.ERROR_PREFIX_COLON + e.getMessage());
+                    return PatchResolution.err(ToolErrorTemplates.fsPathRefused(e.getMessage()));
                 }
                 var moveGuard = FsPaths.checkSkillCreatorReadOnly(agent, workspace, moveTarget);
                 if (moveGuard != null) return PatchResolution.err(moveGuard);
@@ -125,12 +133,12 @@ final class FsPatchApplier {
         return PatchResolution.ok(resolved);
     }
 
-    private static String applyPatchLocked(List<ResolvedOp> resolved) {
+    private static FsOutcome applyPatchLocked(List<ResolvedOp> resolved) {
         // === Phase 1: validate every op and compute the post-patch content for Add/Update ops. ===
         var plans = new ArrayList<OpPlan>();
         for (int i = 0; i < resolved.size(); i++) {
             var planned = planOp(resolved.get(i), i + 1);
-            if (planned.error != null) return planned.error;
+            if (planned.error != null) return FsOutcome.fail(planned.error);
             plans.add(planned.plan);
         }
 
@@ -141,7 +149,7 @@ final class FsPatchApplier {
                 var err = applyPlannedOp(plan, committed);
                 if (err != null) {
                     rollback(committed);
-                    return err;
+                    return rejected(err);
                 }
             }
         } catch (RuntimeException rt) {
@@ -149,12 +157,15 @@ final class FsPatchApplier {
             throw rt;
         }
 
-        return summarizeCommittedOps(committed);
+        return FsOutcome.ok(summarizeCommittedOps(committed));
     }
 
-    private record PlannedOp(@Nullable OpPlan plan, @Nullable String error) {
+    private record PlannedOp(@Nullable OpPlan plan, @Nullable ErrorTemplate error) {
         static PlannedOp ok(OpPlan plan) { return new PlannedOp(plan, null); }
-        static PlannedOp err(String error) { return new PlannedOp(null, error); }
+        static PlannedOp err(String whatBroke) {
+            return new PlannedOp(null, ToolErrorTemplates.fsPatchRejected(whatBroke));
+        }
+        static PlannedOp err(ErrorTemplate error) { return new PlannedOp(null, error); }
     }
 
     /**
@@ -165,32 +176,32 @@ final class FsPatchApplier {
         return switch (r.op) {
             case FileOp.Add(var path, var content) -> {
                 if (Files.exists(r.target)) {
-                    yield PlannedOp.err("Error: op #%d Add File '%s' failed — file already exists".formatted(opIndex, path));
+                    yield PlannedOp.err("op #%d Add File '%s' failed — file already exists".formatted(opIndex, path));
                 }
                 yield PlannedOp.ok(new OpPlan(r, content, null));
             }
             case FileOp.Delete(var path) -> {
                 if (!Files.exists(r.target)) {
-                    yield PlannedOp.err("Error: op #%d Delete File '%s' failed — file does not exist".formatted(opIndex, path));
+                    yield PlannedOp.err("op #%d Delete File '%s' failed — file does not exist".formatted(opIndex, path));
                 }
                 try {
                     yield PlannedOp.ok(new OpPlan(r, null, Files.readString(r.target)));
                 } catch (IOException e) {
-                    yield PlannedOp.err("Error: op #%d Delete File '%s' snapshot failed — %s".formatted(opIndex, path, e.getMessage()));
+                    yield PlannedOp.err("op #%d Delete File '%s' snapshot failed — %s".formatted(opIndex, path, e.getMessage()));
                 }
             }
             case FileOp.Update upd -> {
                 if (!Files.exists(r.target)) {
-                    yield PlannedOp.err("Error: op #%d Update File '%s' failed — file does not exist".formatted(opIndex, upd.path()));
+                    yield PlannedOp.err("op #%d Update File '%s' failed — file does not exist".formatted(opIndex, upd.path()));
                 }
                 String snapshot;
                 try {
                     snapshot = Files.readString(r.target);
                 } catch (IOException e) {
-                    yield PlannedOp.err("Error: op #%d Update File '%s' read failed — %s".formatted(opIndex, upd.path(), e.getMessage()));
+                    yield PlannedOp.err("op #%d Update File '%s' read failed — %s".formatted(opIndex, upd.path(), e.getMessage()));
                 }
                 var applied = applyUpdateChunks(snapshot, upd.chunks(), upd.path(), opIndex);
-                if (applied.error() != null) yield PlannedOp.err(applied.error());
+                if (applied.error() != null) yield PlannedOp.err(applied.resolvedError());
                 yield PlannedOp.ok(new OpPlan(r, applied.resolvedResult(), snapshot));
             }
         };
@@ -213,8 +224,8 @@ final class FsPatchApplier {
 
     private static @Nullable String applyAddOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, String path) {
         var result = FsWriter.writeFile(r.target, plan.content());
-        if (result.startsWith(FsSupport.ERROR_PREFIX)) {
-            return "Error applying Add File '%s': %s".formatted(path, result);
+        if (result.failed()) {
+            return "applying Add File '%s' failed: %s".formatted(path, result.resolvedError().whatBroke());
         }
         committed.add(new CommittedOp.Added(r.target));
         return null;
@@ -226,14 +237,14 @@ final class FsPatchApplier {
             committed.add(new CommittedOp.Deleted(r.target, plan.snapshot()));
             return null;
         } catch (IOException e) {
-            return "Error applying Delete File '%s': %s".formatted(path, e.getMessage());
+            return "applying Delete File '%s' failed: %s".formatted(path, e.getMessage());
         }
     }
 
     private static @Nullable String applyUpdateInPlaceOp(ResolvedOp r, OpPlan plan, List<CommittedOp> committed, FileOp.Update upd) {
         var result = FsWriter.writeFile(r.target, plan.content());
-        if (result.startsWith(FsSupport.ERROR_PREFIX)) {
-            return "Error applying Update File '%s': %s".formatted(upd.path(), result);
+        if (result.failed()) {
+            return "applying Update File '%s' failed: %s".formatted(upd.path(), result.resolvedError().whatBroke());
         }
         committed.add(new CommittedOp.Updated(r.target, plan.snapshot()));
         return null;
@@ -242,9 +253,9 @@ final class FsPatchApplier {
     private static @Nullable String applyUpdateMoveOp(ResolvedOp r, Path moveTarget, OpPlan plan,
                                                       List<CommittedOp> committed, FileOp.Update upd) {
         var writeResult = FsWriter.writeFile(moveTarget, plan.content());
-        if (writeResult.startsWith(FsSupport.ERROR_PREFIX)) {
-            return "Error applying Update+Move '%s'→'%s': %s"
-                    .formatted(upd.path(), upd.newPath().orElse(""), writeResult);
+        if (writeResult.failed()) {
+            return "applying Update+Move '%s'→'%s' failed: %s"
+                    .formatted(upd.path(), upd.newPath().orElse(""), writeResult.resolvedError().whatBroke());
         }
         committed.add(new CommittedOp.Added(moveTarget));
         try {
@@ -252,7 +263,7 @@ final class FsPatchApplier {
             committed.add(new CommittedOp.Deleted(r.target, plan.snapshot()));
             return null;
         } catch (IOException e) {
-            return "Error applying Update+Move '%s'→'%s': %s"
+            return "applying Update+Move '%s'→'%s' failed: %s"
                     .formatted(upd.path(), upd.newPath().orElse(""), e.getMessage());
         }
     }
@@ -317,9 +328,10 @@ final class FsPatchApplier {
         var oldText = oldBlock.toString();
         var newText = newBlock.toString();
         if (oldText.isEmpty()) {
-            return EditResult.err(("Error: op #%d Update File '%s' chunk #%d has no removal or context lines — "
-                    + "a chunk must include at least one '-' or ' ' line to anchor the edit.")
-                    .formatted(opIndex, path, chunkIndex));
+            return EditResult.err(ToolErrorTemplates.fsPatchRejected(
+                    ("op #%d Update File '%s' chunk #%d has no removal or context lines — "
+                            + "a chunk must include at least one '-' or ' ' line to anchor the edit.")
+                            .formatted(opIndex, path, chunkIndex)));
         }
 
         var anchorOpt = chunk.anchor();
@@ -328,23 +340,28 @@ final class FsPatchApplier {
             var anchor = anchorOpt.get();
             var anchorIdx = working.indexOf(anchor);
             if (anchorIdx < 0) {
-                return EditResult.err(("Error: op #%d Update File '%s' chunk #%d anchor '%s' not found in file")
-                        .formatted(opIndex, path, chunkIndex, anchor));
+                return EditResult.err(ToolErrorTemplates.fsPatchRejected(
+                        "op #%d Update File '%s' chunk #%d anchor '%s' not found in file"
+                                .formatted(opIndex, path, chunkIndex, anchor)));
             }
             searchStart = anchorIdx;
         }
 
         var hit = working.indexOf(oldText, searchStart);
         if (hit < 0) {
-            return EditResult.err(("Error: op #%d Update File '%s' chunk #%d context did not match the current file content. "
-                    + "Regenerate the chunk against the latest file state.").formatted(opIndex, path, chunkIndex));
+            return EditResult.err(ToolErrorTemplates.fsPatchRejected(
+                    ("op #%d Update File '%s' chunk #%d context did not match the current file content. "
+                            + "Regenerate the chunk against the latest file state.")
+                            .formatted(opIndex, path, chunkIndex)));
         }
         // For non-anchored chunks, require uniqueness to avoid accidental mis-apply.
         if (anchorOpt.isEmpty()) {
             var second = working.indexOf(oldText, hit + oldText.length());
             if (second >= 0) {
-                return EditResult.err(("Error: op #%d Update File '%s' chunk #%d context is not unique. "
-                        + "Add an @@ anchor @@ line or include more context.").formatted(opIndex, path, chunkIndex));
+                return EditResult.err(ToolErrorTemplates.fsPatchRejected(
+                        ("op #%d Update File '%s' chunk #%d context is not unique. "
+                                + "Add an @@ anchor @@ line or include more context.")
+                                .formatted(opIndex, path, chunkIndex)));
             }
         }
         return EditResult.ok(working.substring(0, hit) + newText + working.substring(hit + oldText.length()));
