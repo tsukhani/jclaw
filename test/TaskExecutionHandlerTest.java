@@ -838,11 +838,6 @@ class TaskExecutionHandlerTest extends UnitTest {
         }
     }
 
-    /**
-     * Dynamic-Proxy SchedulerClient stub. Captures schedule() calls for
-     * the self-reschedule assertions and surfaces a configurable set of
-     * "already-scheduled" ids for the BootConsistencyCheck sweep.
-     */
     // === resume() re-arms a one-shot whose fire was dropped during the pause ===
 
     /**
@@ -934,6 +929,65 @@ class TaskExecutionHandlerTest extends UnitTest {
                 "a recurring Task keeps its row through a pause; re-arming double-schedules it");
     }
 
+    /**
+     * A resume that commits while a paused fire is still skipping finds that fire's row and does not
+     * re-arm; the fire's completion then drops the row. The completion re-reads the flag after the
+     * drop, so it re-arms in that case instead of stranding the Task.
+     */
+    @Test
+    void pausedOneShotFireReArmsWhenResumeCommitsBeforeItsRowIsDropped() throws Exception {
+        var agent = createAgent("midskip-resume-agent");
+        var task = persistTask(agent, "Paused one-shot", "Earlier.",
+                Task.Type.SCHEDULED, Instant.now().minusSeconds(60), null, null);
+        commitAndReopen();
+        TaskSchedulingService.pause(task.id);
+        commitAndReopen();
+
+        var handler = driveFireCaptureHandler(task.id);
+
+        stub.scheduleIfNotExistsReturns = false; // the in-flight fire still holds its row
+        TaskSchedulingService.resume(task.id);
+        commitAndReopen();
+        JPA.em().clear();
+        stub.scheduleIfNotExistsReturns = true;
+        stub.scheduleIfNotExists.clear();
+
+        var ops = new RecordingExecutionOperations(new Execution(Instant.now(), instance(task.id)));
+        handler.complete(ExecutionComplete.success(
+                ops.execution(), Instant.now().minusSeconds(1), Instant.now()), ops);
+
+        assertTrue(ops.stopped, "the skipped fire must still drop its own row");
+        assertEquals(1, stub.scheduleIfNotExists.size(),
+                () -> "a resume that landed mid-skip must be re-armed by the fire; calls="
+                        + stub.scheduleIfNotExists.size());
+        assertTrue(listRunsForTask(task.id).isEmpty(), "the fire read paused=true, so its body must not run");
+    }
+
+    @Test
+    void pausedOneShotFireStaysDroppedWhileTheTaskIsStillPaused() throws Exception {
+        var agent = createAgent("still-paused-agent");
+        var task = persistTask(agent, "Paused one-shot", "Earlier.",
+                Task.Type.SCHEDULED, Instant.now().minusSeconds(60), null, null);
+        commitAndReopen();
+        TaskSchedulingService.pause(task.id);
+        commitAndReopen();
+
+        var handler = driveFireCaptureHandler(task.id);
+        stub.scheduleIfNotExists.clear();
+
+        var ops = new RecordingExecutionOperations(new Execution(Instant.now(), instance(task.id)));
+        handler.complete(ExecutionComplete.success(
+                ops.execution(), Instant.now().minusSeconds(1), Instant.now()), ops);
+
+        assertTrue(ops.stopped, "a paused one-shot's fire drops its row");
+        assertTrue(stub.scheduleIfNotExists.isEmpty(), "still paused, so nothing may re-arm it");
+    }
+
+    /**
+     * Dynamic-Proxy SchedulerClient stub. Captures schedule() calls for
+     * the self-reschedule assertions and surfaces a configurable set of
+     * "already-scheduled" ids for the BootConsistencyCheck sweep.
+     */
     static class RecordingSchedulerStub {
         static class ScheduleCall {
             final TaskInstance<?> instance;

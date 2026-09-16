@@ -136,7 +136,8 @@ public final class TaskExecutionHandler {
                 // Recurring Tasks still self-reschedule so the cadence
                 // resumes when {@link Task#paused} clears, without
                 // operator intervention.
-                return scheduleNextIfRecurring(jclawTask);
+                return jclawTask.type == Task.Type.CRON || jclawTask.type == Task.Type.INTERVAL
+                        ? scheduleNextIfRecurring(jclawTask) : dropThenReArmIfResumed(jclawTask);
             }
 
             // JCLAW-803: dedup guard. db-scheduler revives a fire it believes
@@ -283,6 +284,20 @@ public final class TaskExecutionHandler {
     /** OnCompleteRemove drops the current scheduled_tasks row. */
     private static CompletionHandler<Void> defaultCompletion() {
         return new CompletionHandler.OnCompleteRemove<>();
+    }
+
+    /**
+     * A paused one-shot's completion: drop the row, then re-read the flag. A resume that committed
+     * mid-skip found this row still present and did not re-arm. Dropping before reading, with resume
+     * re-arming after its commit, leaves one of the two re-arming after both; scheduleIfNotExists
+     * admits only one insert.
+     */
+    private static CompletionHandler<Void> dropThenReArmIfResumed(Task task) {
+        return (_, executionOperations) -> {
+            stopCurrentRow(task, executionOperations);
+            var fresh = Tx.run(() -> (Task) Task.findById(task.id));
+            if (fresh != null && !fresh.paused) TaskSchedulingService.reArmOneShotIfDropped(fresh);
+        };
     }
 
     /**

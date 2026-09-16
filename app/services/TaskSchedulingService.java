@@ -333,17 +333,17 @@ public final class TaskSchedulingService {
 
     /**
      * Re-arm a one-shot whose {@code scheduled_tasks} row was dropped while it
-     * was paused: {@link TaskExecutionHandler} returns OnCompleteRemove for a
-     * paused one-shot, so a fire that arrived during the pause deleted the row
-     * and clearing the flag alone would leave the Task PENDING forever with
-     * nothing left to fire it. A past-due time re-arms at that time, which
-     * db-scheduler picks up on its next poll — the same "or immediately if that
-     * time has already passed" behaviour {@code reenable} has.
+     * was paused: {@link TaskExecutionHandler} drops a paused one-shot's row
+     * when its fire arrives, so clearing the flag alone would leave the Task
+     * PENDING forever with nothing left to fire it. A past-due time re-arms at
+     * that time, which db-scheduler picks up on its next poll — the same "or
+     * immediately if that time has already passed" behaviour {@code reenable} has.
      *
      * <p>Recurring Tasks self-reschedule through a pause, so re-arming one
-     * would double-schedule it.
+     * would double-schedule it. Also called by the handler, for a resume that
+     * committed while that fire was still skipping.
      */
-    private static void reArmOneShotIfDropped(Task task) {
+    static void reArmOneShotIfDropped(Task task) {
         if (task.type == Task.Type.CRON || task.type == Task.Type.INTERVAL) return;
         if (isTerminal(task.status)) return;
         SchedulerClient client = client();

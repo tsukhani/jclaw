@@ -110,6 +110,11 @@ public final class TaskListQueryService {
         return new TaskListResult(tasks, total, false);
     }
 
+    private static void bindPausedParams(Query q) {
+        q.setParameter("livePending", Task.Status.PENDING);
+        q.setParameter("liveActive", Task.Status.ACTIVE);
+    }
+
     /**
      * JCLAW-304: resolve a {@code q} keyword to the matching Task ids
      * via the TASK Lucene scope. Same null / empty / non-empty contract
@@ -118,11 +123,6 @@ public final class TaskListQueryService {
      * backend errors fall through as "no FTS filter" so the operator sees
      * equality-only results rather than a 500 on a stray Lucene IO hiccup.
      */
-private static void bindPausedParams(Query q) {
-        q.setParameter("livePending", Task.Status.PENDING);
-        q.setParameter("liveActive", Task.Status.ACTIVE);
-    }
-
     @SuppressWarnings("java:S1168") // null vs empty-list is a deliberate tri-state (see query())
     private static @Nullable List<Long> ftsTaskIds(String q) {
         if (q == null || q.isBlank()) return null;
