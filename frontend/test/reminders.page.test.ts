@@ -54,7 +54,7 @@ function reminderRows() {
 registerEndpoint('/api/tasks', () => reminderRows())
 registerEndpoint('/api/tasks/stats', () => ({
   runsToday: 0, successRate: null, avgDurationMs: null, runningCount: 0,
-  activeCount: 1, pendingCount: 1, failedCount: 0,
+  activeCount: 1, pendingCount: 1, pausedCount: 2, failedCount: 0,
 }))
 
 beforeEach(() => {
@@ -118,6 +118,14 @@ describe('reminders page (JCLAW-438)', () => {
     // Select mode: a select-all checkbox + a Cancel button appear.
     expect(component.find('input[aria-label="Select all reminders"]').exists()).toBe(true)
     expect(component.findAll('button').some(b => b.text() === 'Cancel')).toBe(true)
+  })
+
+  // The backend counts a paused reminder under Paused only, so without this tile it vanishes
+  // from every count on the page.
+  it('KPI strip shows paused reminders on a tile of their own', async () => {
+    const component = await mountSuspended(Reminders)
+    const tile = component.findAll('.bg-surface-elevated').find(c => c.text().startsWith('Paused'))
+    expect(tile?.text()).toMatch(/^Paused\s*2$/)
   })
 
   it('renders the filter/search bar', async () => {

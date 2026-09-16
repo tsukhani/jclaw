@@ -313,10 +313,12 @@ const statusColors: Record<string, string> = {
     <!-- Reminder KPI strip — reminders never run through the LLM, so per-run
          metrics (Runs today / Success rate) are meaningless here; we only track
          the lifecycle states that matter: Pending (one-shot waiting), Active
-         (recurring ongoing), and Failed. Scoped to payloadType=reminder. -->
+         (recurring ongoing), Paused, and Failed. Scoped to payloadType=reminder.
+         Paused has its own tile because the backend counts a paused reminder there
+         and not under Active/Pending. -->
     <div
       v-if="reminderStats"
-      class="grid grid-cols-3 gap-2 mb-4"
+      class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4"
     >
       <div class="bg-surface-elevated border border-border px-3 py-2">
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
@@ -338,6 +340,17 @@ const statusColors: Record<string, string> = {
           :class="reminderStats.pendingCount > 0 ? 'text-yellow-700 dark:text-yellow-400' : 'text-fg-strong'"
         >
           {{ reminderStats.pendingCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Paused
+        </div>
+        <div
+          class="text-lg font-semibold"
+          :class="reminderStats.pausedCount > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-fg-strong'"
+        >
+          {{ reminderStats.pausedCount }}
         </div>
       </div>
       <div class="bg-surface-elevated border border-border px-3 py-2">
