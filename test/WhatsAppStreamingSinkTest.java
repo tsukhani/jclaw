@@ -64,8 +64,13 @@ class WhatsAppStreamingSinkTest extends UnitTest {
         var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
         sink.errorFallback(new RuntimeException("boom"));
         assertEquals(1, ch.sent.size());
-        assertTrue(ch.sent.get(0).toLowerCase().contains("error"),
-                "the user gets an error notice");
+        // JCLAW-1133: a 3-part notice, plain — WhatsApp formatting is its own dialect, so the
+        // renderer emits none. The old assertion pinned the word "error", which the template
+        // deliberately avoids: naming what broke beats labelling it.
+        var sent = ch.sent.get(0);
+        assertTrue(sent.contains("What broke"), sent);
+        assertTrue(sent.contains("How to retry"), sent);
+        assertFalse(sent.contains("**"), "no markdown on the plain path: " + sent);
     }
 
     @Test

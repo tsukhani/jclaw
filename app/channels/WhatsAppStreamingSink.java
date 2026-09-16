@@ -2,6 +2,8 @@ package channels;
 
 import models.Agent;
 import services.EventLogger;
+import utils.ChannelErrorTemplates;
+import utils.ErrorRendering;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -21,6 +23,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@code COMPOSING}).
  */
 public final class WhatsAppStreamingSink implements ChannelStreamingSink {
+
+    /** WhatsApp Cloud API's body cap for a text message. */
+    private static final int WHATSAPP_MAX_CHARS = 4096;
 
     private static final String LOG_CATEGORY = "channel";
 
@@ -66,7 +71,10 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
     public void errorFallback(Exception e) {
         if (!sealed.compareAndSet(false, true)) return;
         if (channel != null) {
-            channel.sendText(peerId, "Sorry, an error occurred processing your message.", agent);
+            // Plain: WhatsApp's formatting is its own dialect, so emit none.
+            channel.sendText(peerId, ChannelErrorTemplates.render(
+                    ChannelErrorTemplates.forTurnFailure(e), ErrorRendering.PLAIN,
+                    WHATSAPP_MAX_CHARS), agent);
         }
         EventLogger.error(LOG_CATEGORY, agentName(), channelName(),
                 "Streaming error: " + (e != null ? e.getMessage() : "(null)"));

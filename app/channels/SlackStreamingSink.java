@@ -4,6 +4,8 @@ import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
+import utils.ChannelErrorTemplates;
+import utils.ErrorRendering;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -278,7 +280,12 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     public void errorFallback(Exception e) {
         EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
                 "Streaming error: %s".formatted(e != null ? e.getMessage() : "unknown"));
-        String msg = "⚠️ Sorry — something went wrong handling that.";
+        // Rich, then converted: ErrorRendering.RICH emits CommonMark (**bold**), and Slack's
+        // mrkdwn uses *single* asterisks — sending the former renders the asterisks literally.
+        // SlackMarkdownFormatter is the same converter seal() puts its content through.
+        String msg = "⚠️ " + SlackMarkdownFormatter.format(ChannelErrorTemplates.render(
+                ChannelErrorTemplates.forTurnFailure(e), ErrorRendering.RICH,
+                SlackOutboundPlanner.CAPTION_MAX));
         if (nativeMode && streamTs != null) {
             slacker.appendStream(channelId, streamTs, "\n\n" + msg);
             slacker.stopStream(channelId, streamTs);

@@ -128,7 +128,12 @@ class SlackStreamingSinkTest extends UnitTest {
         sink.begin();
         sink.errorFallback(new RuntimeException("boom"));
         assertEquals(1, f.fallbackPosts.size());
-        assertTrue(f.fallbackPosts.get(0).contains("something went wrong"));
+        // JCLAW-1133: the notice is the 3-part template, converted to Slack mrkdwn — CommonMark
+        // ** would arrive as literal asterisks, which is what SlackMarkdownFormatter prevents.
+        var posted = f.fallbackPosts.get(0);
+        assertTrue(posted.contains("What broke"), posted);
+        assertTrue(posted.contains("How to retry"), posted);
+        assertFalse(posted.contains("**"), "mrkdwn, not raw CommonMark: " + posted);
     }
 
     // ── JCLAW-346: off-thread chat.update draft preview ──
@@ -247,7 +252,10 @@ class SlackStreamingSinkTest extends UnitTest {
         sink.errorFallback(new RuntimeException("boom"));
         assertEquals(List.of("partial"), f.posted);
         assertEquals(1, f.edited.size(), "error edits the draft in place");
-        assertTrue(f.edited.get(0).contains("something went wrong"));
+        var edited = f.edited.get(0);
+        assertTrue(edited.contains("What broke"), edited);
+        assertTrue(edited.contains("How to retry"), edited);
+        assertFalse(edited.contains("**"), "mrkdwn, not raw CommonMark: " + edited);
         assertTrue(f.fallbackPosts.isEmpty());
     }
 }

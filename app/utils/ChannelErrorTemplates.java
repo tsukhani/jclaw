@@ -1,17 +1,79 @@
 package utils;
 
+import llm.LlmProvider;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
+
 import java.util.Map;
 
 /**
- * Templates for channel delivery failures — the seam JCLAW-1133/JCLAW-1135 fills (JCLAW-60).
+ * Templates for a turn that failed before it could answer, rendered for the channel the person is
+ * reading in (JCLAW-1133).
  *
- * <p>Empty on purpose. Each surface owns a file so the stories that populate them land on
- * disjoint paths instead of contending for one table; a table with no rows registers nothing
- * and {@link ErrorTemplates#forCode} keeps falling back for those codes until it has some.
+ * <p>Every channel sink previously ended a failed turn with a fixed sentence — "Sorry, an error
+ * occurred processing your message." — which names nothing and offers nothing. The remedy is
+ * usually knowable: a provider failure already arrives carrying {@link
+ * utils.LlmErrorTemplates.Failure}, classified at the call that failed, so the reader can be told
+ * the key was rejected rather than that something went wrong.
+ *
+ * <p>Nothing static registers here: the useful templates are parameterised by the failing call, so
+ * {@link #forTurnFailure} builds them and {@link ErrorTemplates#forCode} falls back for the codes.
  */
-final class ChannelErrorTemplates {
+public final class ChannelErrorTemplates {
+
+    /** A turn that failed for a reason the classifier could not name. */
+    public static final String TURN_FAILED = "channel_turn_failed";
 
     private ChannelErrorTemplates() {}
+
+    /**
+     * The template for a failed turn, reusing the provider classification when the failure carries
+     * one (JCLAW-1134 attaches it to {@code LlmException}) rather than re-deriving it from a
+     * message string. A cause chain is walked because the runner wraps provider failures before
+     * they reach a sink.
+     */
+    public static ErrorTemplate forTurnFailure(@Nullable Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
+            if (c instanceof LlmProvider.LlmException le && le.failure() != null) {
+                return LlmErrorTemplates.forFailure(le.failure());
+            }
+        }
+        return new ErrorTemplate(TURN_FAILED,
+                "The reply could not be produced.",
+                "Nothing on your side — the failure was inside JClaw, and the log entry for this "
+                        + "turn carries what actually broke.",
+                "Send the message again. If it fails the same way twice, the log is the thing to read.");
+    }
+
+    /**
+     * Render for a channel, honouring what it can display and how much of it.
+     *
+     * <p>Truncation takes from the middle, never the end. The natural thing — cut the tail — drops
+     * the retry instruction, which is the only part the reader acts on; a message that explains a
+     * failure and then stops short of what to do about it is the shape this epic exists to remove.
+     * If even the first and last sections do not fit, the check section goes entirely rather than
+     * the message being cut mid-word.
+     *
+     * @param maxChars the channel's hard message cap
+     */
+    public static String render(@NonNull ErrorTemplate template, @NonNull ErrorRendering mode,
+                                int maxChars) {
+        var full = mode.render(template);
+        if (full.length() <= maxChars) return full;
+
+        var withoutCheck = mode.render(new ErrorTemplate(template.code(), template.whatBroke(),
+                "…", template.howToRetry()));
+        if (withoutCheck.length() >= maxChars) {
+            // Even the ends do not fit; hard-cut rather than emit an over-cap message the channel
+            // would reject outright.
+            return full.substring(0, Math.max(0, maxChars - 1)) + "…";
+        }
+        var room = maxChars - (withoutCheck.length() - 1);
+        var check = template.whatToCheck();
+        var kept = check.length() <= room ? check : check.substring(0, Math.max(0, room - 1)) + "…";
+        return mode.render(new ErrorTemplate(template.code(), template.whatBroke(), kept,
+                template.howToRetry()));
+    }
 
     static Map<String, ErrorTemplate> templates() {
         return Map.of();

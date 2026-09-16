@@ -15,6 +15,8 @@ import services.AttachmentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import utils.ChannelErrorTemplates;
+import utils.ErrorRendering;
 import utils.VirtualThreads;
 
 import java.util.List;
@@ -80,6 +82,9 @@ import java.util.regex.Pattern;
  * mutable state is guarded by {@code stateLock}.
  */
 public final class TelegramStreamingSink implements ChannelStreamingSink {
+
+    /** Telegram's hard per-message cap; a longer sendMessage is rejected outright. */
+    private static final int TELEGRAM_MAX_CHARS = 4096;
 
     private static final String LOG_CATEGORY = "channel";
     private static final String LOG_SOURCE = "telegram";
@@ -622,9 +627,12 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         if (messageId != null) deletePlaceholderSafely();
         // JCLAW-369: the error reply replaces the placeholder for this turn, so
         // it carries the same reply target + topic thread.
+        // Plain: Telegram rejects stray markup, and an error that fails to send because of its
+        // own formatting is the worst outcome on this path. TELEGRAM_MAX is the API's hard cap.
         TelegramChannel.forToken(botToken).sendTurn(chatId,
-                "Sorry, an error occurred processing your message.", agent,
-                replyToMessageId, messageThreadId);
+                ChannelErrorTemplates.render(ChannelErrorTemplates.forTurnFailure(e),
+                        ErrorRendering.PLAIN, TELEGRAM_MAX_CHARS),
+                agent, replyToMessageId, messageThreadId);
         clearStreamCheckpoint();
         ackError();
         EventLogger.error(LOG_CATEGORY, agentName(), LOG_SOURCE,

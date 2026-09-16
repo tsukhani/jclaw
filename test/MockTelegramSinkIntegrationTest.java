@@ -418,10 +418,13 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
 
         assertTrue(server.countRequests("deleteMessage") >= 1,
                 "errorFallback must delete the placeholder");
+        // JCLAW-1133: the notice is the 3-part template rather than the old fixed apology, and it
+        // goes out plain — Telegram rejects stray markup, and an error that fails to send because
+        // of its own formatting is the worst outcome on this path.
         boolean sawErrorBody = server.requests().stream()
                 .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
-                .anyMatch(r -> r.body().contains("an error occurred")
-                        || r.body().contains("processing your message"));
+                .anyMatch(r -> r.body().contains("What broke")
+                        && r.body().contains("How to retry"));
         assertTrue(sawErrorBody,
                 "errorFallback must emit a user-facing error sendMessage; bodies="
                         + server.requests().stream()

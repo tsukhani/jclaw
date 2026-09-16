@@ -6,8 +6,13 @@ import org.jspecify.annotations.NonNull;
  * How an {@link ErrorTemplate} is turned into text (JCLAW-1130).
  *
  * <p>Two modes, because the surfaces divide two ways and not more: destinations that render
- * markup ({@link #RICH} — the web chat, Slack, the admin UI) and destinations that do not
+ * markup ({@link #RICH} — the web chat, the admin UI) and destinations that do not
  * ({@link #PLAIN} — Telegram, WhatsApp, the console at boot, a tool result read by a model).
+ *
+ * <p>{@link #RICH} emits <em>CommonMark</em>. Slack is a rich destination but does not read it:
+ * its mrkdwn marks bold with a single asterisk, so {@code **bold**} arrives as literal asterisks.
+ * Slack therefore takes RICH through {@code SlackMarkdownFormatter} rather than directly — the
+ * same conversion its normal content already goes through (JCLAW-1133).
  *
  * <p>An enum rather than an interface with two implementations: the set is closed, both cases
  * are pure functions of the template, and a caller picking a mode should not be able to supply
