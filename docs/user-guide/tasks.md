@@ -39,8 +39,8 @@ For something that should happen **once** on a given day, use the absolute date-
 |-----------------------|-------------------------------------------------------------------------------------------------------------|
 | `createTask`          | Create a task with any of the schedule shapes above.                                                        |
 | `updateTask`          | Partial update by name — fields you don't provide stay as-is.                                               |
-| `pause`               | Stop a recurring task from firing while keeping its cadence. Resume later without re-typing the schedule.   |
-| `resume`              | Re-enable a paused recurring task.                                                                          |
+| `pause`               | Stop a task from firing while keeping its schedule. Resume later without re-typing it.                      |
+| `resume`              | Re-enable a paused task, re-arming a one-off fire that lapsed during the pause.                              |
 | `runNow`              | Fire a task immediately by name. Revives `CANCELLED` rows on the way through.                               |
 | `cancelTask`          | Set status to `CANCELLED` — stops fires but keeps the row so `runNow` can revive it later.                  |
 | `deleteTask`          | Permanently delete the task and its run history. Irreversible.                                              |
@@ -62,7 +62,7 @@ The [Tasks](/tasks) page shows every task, with two view modes — Table and Cal
 
 ### Dashboard stats
 
-A KPI strip above the list shows seven tiles: **Runs today**, **Success rate**, **Avg duration**, and the live **Running / Active / Pending / Failed** task counts. The first three are derived from your task **run history**. To clear them, click the **Reset stats** control (the circular-arrow icon in the page header, next to the retention label): it deletes completed/failed/cancelled run history — in-flight runs are kept — so the run-derived KPIs reset. The live task-status counts are unaffected, since they reflect current task state, not history.
+A KPI strip above the list shows eight tiles: **Runs today**, **Success rate**, **Avg duration**, and the live **Running / Paused / Active / Pending / Failed** task counts. **Paused** counts schedules you've suspended; they're excluded from **Active** and **Pending** so a paused task is counted once, not twice. The first three are derived from your task **run history**. To clear them, click the **Reset stats** control (the circular-arrow icon in the page header, next to the retention label): it deletes completed/failed/cancelled run history — in-flight runs are kept — so the run-derived KPIs reset. The live task-status counts are unaffected, since they reflect current task state, not history.
 
 ### Filters
 
@@ -71,7 +71,7 @@ The top of the page is a filter bar accepting free-text keywords and typed keys:
 | Key       | Example              | Matches                                                                          |
 |-----------|----------------------|----------------------------------------------------------------------------------|
 | `q:`      | `q:summary`          | Lucene full-text on task name + description.                                     |
-| `status:` | `status:PENDING`     | One of `PENDING`, `ACTIVE`, `RUNNING`, `LOST`, `COMPLETED`, `FAILED`, `CANCELLED`. |
+| `status:` | `status:PENDING`     | One of `PENDING`, `ACTIVE`, `RUNNING`, `LOST`, `COMPLETED`, `FAILED`, `CANCELLED` — or `PAUSED`, which matches suspended live schedules. |
 | `type:`   | `type:CRON`          | `IMMEDIATE`, `SCHEDULED`, `INTERVAL`, or `CRON`.                                 |
 | `agent:`  | `agent:morning-bot`  | Tasks owned by an agent matching this string.                                    |
 | `transcript:` | `transcript:"daily briefing"` | Full-text search over the transcripts of past fires. Hits are listed in a panel below the bar rather than filtering the table; click one to open that run's trace. Quote phrases; `AND` / `OR` / `NOT` and a trailing `*` prefix wildcard work. |
@@ -103,6 +103,7 @@ Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks
 | `COMPLETED` | Terminal for one-shot tasks. Recurring tasks never reach `COMPLETED` unless explicitly cancelled.              |
 | `FAILED`    | Hit the retry cap. Click **Retry** to requeue.                                                                 |
 | `CANCELLED` | `cancelTask` was called. Row is preserved; `runNow` revives it.                                                |
+| `PAUSED`    | Shown in place of `PENDING`/`ACTIVE` while you've suspended the schedule. Display-only — pause sets a flag and keeps the underlying state, which is why **Resume** picks a recurring cadence straight back up. A one-off whose moment passes while paused has its fire dropped; resuming re-arms it (immediately, if that moment is now in the past). |
 
 ### Lifecycle
 
@@ -138,10 +139,9 @@ Walking the transitions:
 
 | Icon             | Appears when                                              | Effect                                                                                |
 |------------------|-----------------------------------------------------------|---------------------------------------------------------------------------------------|
-| ▶ Run now        | Recurring and live (`PENDING`/`ACTIVE`), not paused, no fire in flight | Fires immediately; the next scheduled run is unchanged.                  |
+| ▶ Run once       | Recurring and live (`PENDING`/`ACTIVE`), no fire in flight | Fires immediately; the next scheduled run is unchanged. Greyed out while paused — a paused task's fire body is skipped, so running it would do nothing. |
 | ⏹ Cancel running fire | Recurring with a fire in flight                      | Stops that fire at the next safe point; the schedule is untouched.                    |
-| ⏸ Pause          | Recurring and live, not paused                            | Suspends the schedule without losing it.                                              |
-| ▶ Resume         | Recurring and live, paused                                | Picks the schedule back up.                                                           |
+| ⏸ Pause          | Any live task (`PENDING`/`ACTIVE`), recurring or one-off   | A toggle, not a one-way action: click to suspend the schedule, click again to resume. It stays a pause icon and lights amber while engaged, and the row's status reads `PAUSED`. On a one-off it is the reversible alternative to **Cancel**. |
 | 🚫 Cancel        | One-off with status `PENDING`                             | Stops it firing. The row is kept; **Re-enable** or `runNow` revives it.               |
 | ↺ Re-enable      | Status is `CANCELLED`                                     | Re-arms a one-off's fire, or resumes a recurring task at its next scheduled fire.     |
 | ↻ Retry          | Status is `FAILED` or `LOST`                              | Requeues for another attempt.                                                         |

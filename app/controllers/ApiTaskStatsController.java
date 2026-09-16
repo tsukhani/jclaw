@@ -37,20 +37,20 @@ public class ApiTaskStatsController extends Controller {
     /**
      * Operator dashboard KPIs for the Tasks surface (JCLAW-22 slice K):
      * today's fire count, success rate, and average duration, plus the
-     * current pending-queue depth, running count, and failed-needing-
-     * attention count. "Today" is midnight in the operator's effective
+     * current pending-queue depth, running count, paused count, and failed-
+     * needing-attention count. "Today" is midnight in the operator's effective
      * default zone. {@code successRate} / {@code avgDurationMs} are null
      * when there's nothing to average yet (no terminal / completed runs
      * today) so the UI renders an em dash rather than 0.
      */
     private record TaskStatsView(long runsToday, @Nullable Double successRate,
                                  @Nullable Double avgDurationMs,
-                                 long pendingCount, long runningCount, long activeCount,
-                                 long failedCount, int retentionDays) {}
+                                 long pendingCount, long runningCount, long pausedCount,
+                                 long activeCount, long failedCount, int retentionDays) {}
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
-    @Operation(summary = "Task dashboard KPIs (runs today, success rate, avg duration, pending/running/active/failed counts, retention days)")
+    @Operation(summary = "Task dashboard KPIs (runs today, success rate, avg duration, pending/running/paused/active/failed counts, retention days)")
     public static void stats(String payloadType, String excludePayloadType) {
         var zone = TimezoneResolver.currentDefault();
         var since = LocalDate.ofInstant(AppClock.now(), zone).atStartOfDay(zone).toInstant();
@@ -73,15 +73,18 @@ public class ApiTaskStatsController extends Controller {
 
         var payload = new TaskStatsView(
                 runsToday, successRate, avgDurationMs,
-                TaskStatsService.countTasks(Task.Status.PENDING, payloadType, excludePayloadType),
+                TaskStatsService.countTasks(Task.Status.PENDING, false, payloadType, excludePayloadType),
                 // RUNNING is the only live-execution stat that lives on the
                 // TaskRun, not the Task: a recurring task stays ACTIVE (a
                 // one-shot stays PENDING) while its run executes, so count
                 // RUNNING runs — the same signal the UI's runningRunId uses —
                 // rather than Task.Status.RUNNING, which nothing currently sets.
                 TaskStatsService.countRunningRuns(payloadType, excludePayloadType),
-                TaskStatsService.countTasks(Task.Status.ACTIVE, payloadType, excludePayloadType),
-                TaskStatsService.countTasks(Task.Status.FAILED, payloadType, excludePayloadType),
+                // Pending/Active pass paused=false so a suspended schedule is
+                // counted once, under Paused, instead of twice.
+                TaskStatsService.countPausedTasks(payloadType, excludePayloadType),
+                TaskStatsService.countTasks(Task.Status.ACTIVE, false, payloadType, excludePayloadType),
+                TaskStatsService.countTasks(Task.Status.FAILED, null, payloadType, excludePayloadType),
                 // JCLAW-259: carry the effective retention TTL so the page
                 // header renders it without a separate config fetch (which
                 // 404s when the key is unset). Resolved server-side so the

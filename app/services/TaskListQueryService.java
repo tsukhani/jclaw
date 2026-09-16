@@ -1,5 +1,6 @@
 package services;
 
+import jakarta.persistence.Query;
 import models.Task;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
@@ -25,6 +26,11 @@ public final class TaskListQueryService {
 
     private static final String KEY_PAYLOAD_TYPE = "payloadType";
 
+    /** Matches what the KPI strip's Paused tile counts (TaskStatsService.countPausedTasks):
+     *  a suspended schedule, never a terminal task carrying a stale flag. */
+    private static final String PAUSED_CLAUSE =
+            "t.paused = TRUE AND t.status IN (:livePending, :liveActive)";
+
     /**
      * Outcome of a task-list query: the page of {@code tasks}, the {@code
      * total} matching the same WHERE clause (ignoring limit/offset), and {@code
@@ -36,8 +42,13 @@ public final class TaskListQueryService {
     public static TaskListResult query(String status, String type, Long agentId, String q,
                                        String payloadType, String excludePayloadType,
                                        Integer limit, Integer offset) {
+        // PAUSED is a display status, not a Task.Status: pause sets a flag and leaves
+        // the row PENDING/ACTIVE. The pill shows it and the filter bar sits right above
+        // it, so untranslated it reaches Status.valueOf and 500s the list.
+        var pausedOnly = "PAUSED".equalsIgnoreCase(status);
         var filter = new JpqlFilter()
-                .eq("status", status != null && !status.isBlank() ? Task.Status.valueOf(status.toUpperCase()) : null)
+                .eq("status", !pausedOnly && status != null && !status.isBlank()
+                        ? Task.Status.valueOf(status.toUpperCase()) : null)
                 .eq("type", type != null && !type.isBlank() ? Task.Type.valueOf(type.toUpperCase()) : null)
                 .eq("agent.id", agentId)
                 // payloadType filters: the frontend's /tasks page passes
@@ -58,6 +69,9 @@ public final class TaskListQueryService {
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
         var where = filter.toWhereClause();
+        if (pausedOnly) {
+            where = where.isEmpty() ? PAUSED_CLAUSE : where + " AND " + PAUSED_CLAUSE;
+        }
         if (ftsTaskIds != null && ftsTaskIds.isEmpty()) {
             return new TaskListResult(List.of(), 0L, true);
         }
@@ -73,6 +87,7 @@ public final class TaskListQueryService {
             jpaQ.setParameter(i + 1, params.get(i));
         }
         if (ftsTaskIds != null) jpaQ.setParameter("fts", ftsTaskIds);
+        if (pausedOnly) bindPausedParams(jpaQ);
         List<Task> tasks = jpaQ.setFirstResult(effectiveOffset)
                 .setMaxResults(effectiveLimit).getResultList();
 
@@ -89,6 +104,7 @@ public final class TaskListQueryService {
             countQ.setParameter(i + 1, params.get(i));
         }
         if (ftsTaskIds != null) countQ.setParameter("fts", ftsTaskIds);
+        if (pausedOnly) bindPausedParams(countQ);
         Long total = countQ.getSingleResult();
 
         return new TaskListResult(tasks, total, false);
@@ -102,6 +118,11 @@ public final class TaskListQueryService {
      * backend errors fall through as "no FTS filter" so the operator sees
      * equality-only results rather than a 500 on a stray Lucene IO hiccup.
      */
+private static void bindPausedParams(Query q) {
+        q.setParameter("livePending", Task.Status.PENDING);
+        q.setParameter("liveActive", Task.Status.ACTIVE);
+    }
+
     @SuppressWarnings("java:S1168") // null vs empty-list is a deliberate tri-state (see query())
     private static @Nullable List<Long> ftsTaskIds(String q) {
         if (q == null || q.isBlank()) return null;

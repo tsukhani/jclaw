@@ -4,7 +4,6 @@ import {
   ArrowDownIcon,
   ArrowPathIcon,
   ArrowUpIcon,
-  BoltIcon,
   CalendarDaysIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -98,6 +97,17 @@ const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/t
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
 
+// Every operator action that moves a task between KPI tiles calls this, not a
+// bare refresh(): the strip refetches itself only on a fire lifecycle event
+// (scheduleLiveRefresh), and no operator action emits one. Pausing a task
+// redrew its row as PAUSED while the Paused and Active tiles kept their
+// pre-click numbers — found in UAT, and the same gap applied to cancel,
+// re-enable, retry and delete.
+function refreshAll() {
+  refresh()
+  refreshStats()
+}
+
 // JCLAW-259: surface the retention TTL in the page header so operators
 // know when terminal tasks will auto-delete. The effective value rides on
 // the stats payload (TaskCleanupJob.resolveRetentionDays, resolved
@@ -131,7 +141,7 @@ const {
 } = useBulkSelect<Task>({
   rows: tasks,
   deleteOne: id => $fetch<unknown>(`/api/tasks/${id}`, { method: 'DELETE' }),
-  onComplete: () => refresh(),
+  onComplete: () => refreshAll(),
   confirmCopy: count => ({
     title: 'Delete tasks',
     message: `Permanently delete ${count} task${count === 1 ? '' : 's'} and their run history? This cannot be undone.`,
@@ -140,7 +150,7 @@ const {
 
 async function cancelTask(id: number) {
   await mutate(`/api/tasks/${id}/cancel`, { method: 'POST' })
-  refresh()
+  refreshAll()
 }
 
 // Pause/resume — the reversible suspend for recurring tasks. Pause keeps the
@@ -148,24 +158,24 @@ async function cancelTask(id: number) {
 // paused, and resume clears the flag so the next scheduled fire runs.
 async function pauseTask(id: number) {
   await mutate(`/api/tasks/${id}/pause`, { method: 'POST' })
-  refresh()
+  refreshAll()
 }
 
 async function resumeTask(id: number) {
   await mutate(`/api/tasks/${id}/resume`, { method: 'POST' })
-  refresh()
+  refreshAll()
 }
 
 // Re-enable — restore a CANCELLED task's schedule at its next natural fire
 // (no immediate run for CRON). The one-off counterpart to resume.
 async function reenableTask(id: number) {
   await mutate(`/api/tasks/${id}/reenable`, { method: 'POST' })
-  refresh()
+  refreshAll()
 }
 
 async function retryTask(id: number) {
   await mutate(`/api/tasks/${id}/retry`, { method: 'POST' })
-  refresh()
+  refreshAll()
 }
 
 // Run now — fire a recurring task's next occurrence immediately, out of band.
@@ -174,7 +184,7 @@ async function retryTask(id: number) {
 // because a paused task's fire body is skipped, which would make this a no-op.
 async function runNowTask(id: number) {
   await mutate(`/api/tasks/${id}/run`, { method: 'POST' })
-  refresh()
+  refreshAll()
 }
 
 // Cancel an in-progress run (JCLAW-414). Flips the run's cooperative-cancel
@@ -183,7 +193,7 @@ async function runNowTask(id: number) {
 // refresh the row so the icon swaps back to the bolt.
 async function cancelRunningRun(runId: number) {
   await mutate(`/api/task-runs/${runId}/cancel`, { method: 'POST' })
-  refresh()
+  refreshAll()
 }
 
 // Per-type action model: recurring tasks (CRON/INTERVAL) use Pause/Resume
@@ -211,7 +221,7 @@ async function deleteTask(task: Task) {
   })
   if (!ok) return
   await mutate(`/api/tasks/${task.id}`, { method: 'DELETE' })
-  refresh()
+  refreshAll()
 }
 
 // Reset the run-derived KPIs (Runs Today / Success Rate / Avg Duration) by
@@ -227,9 +237,8 @@ async function resetStats() {
   })
   if (!ok) return
   await $fetch('/api/task-runs/reset?excludePayloadType=reminder', { method: 'POST' })
-  refresh()
-  refreshStats()
-  // refresh()/refreshStats() update the task list and KPIs, but the per-task
+  refreshAll()
+  // refreshAll() updates the task list and KPIs, but the per-task
   // RUN HISTORY shown in an expanded panel reads from the runsByTask cache,
   // which still holds the now-deleted terminal rows. Re-pull runs for every
   // task whose history has been loaded so open panels drop the cleared rows
@@ -755,8 +764,7 @@ function scheduleLiveRefresh() {
   liveRefreshHandle = setTimeout(() => {
     if (editingId.value != null || editingDeliveryId.value != null || editingNameId.value != null
       || editingTimezoneId.value != null) return
-    refresh()
-    refreshStats()
+    refreshAll()
     for (const id of expandedIds) void loadRuns(id)
   }, 400)
 }
@@ -771,6 +779,7 @@ for (const evt of ['task.started', 'task.completed', 'task.failed', 'task.delive
 const statusColors: Record<string, string> = {
   PENDING: 'text-yellow-700 dark:text-yellow-400',
   ACTIVE: 'text-emerald-700 dark:text-emerald-400',
+  PAUSED: 'text-amber-700 dark:text-amber-400',
   RUNNING: 'text-blue-700 dark:text-blue-400',
   LOST: 'text-orange-700 dark:text-orange-400',
   COMPLETED: 'text-green-700 dark:text-green-400',
@@ -783,6 +792,12 @@ const statusColors: Record<string, string> = {
 // "ACTIVE" directly from the API, so we no longer need a per-row mapping
 // helper. statusColors[task.status] resolves correctly for both PENDING
 // (one-shot waiting) and ACTIVE (recurring ongoing).
+
+/** PAUSED is display-only: pause sets a flag and leaves the row ACTIVE/PENDING,
+ *  so without this the pill reads ACTIVE on a schedule that will not fire. */
+function displayStatus(t: Task): string {
+  return t.paused && isLive(t) ? 'PAUSED' : t.status
+}
 
 /**
  * JCLAW-420: humanize a task's `delivery` (output channel) for display,
@@ -934,7 +949,7 @@ function zoneForTaskRender(task: Task): string | undefined {
          lifecycle events so the counts stay current. -->
     <div
       v-if="stats"
-      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2 mb-4"
+      class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-2 mb-4"
     >
       <div class="bg-surface-elevated border border-border px-3 py-2">
         <div class="text-[10px] uppercase tracking-wider text-fg-muted">
@@ -969,6 +984,17 @@ function zoneForTaskRender(task: Task): string | undefined {
           :class="stats.runningCount > 0 ? 'text-blue-700 dark:text-blue-400' : 'text-fg-strong'"
         >
           {{ stats.runningCount }}
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border px-3 py-2">
+        <div class="text-[10px] uppercase tracking-wider text-fg-muted">
+          Paused
+        </div>
+        <div
+          class="text-lg font-semibold"
+          :class="stats.pausedCount > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-fg-strong'"
+        >
+          {{ stats.pausedCount }}
         </div>
       </div>
       <div class="bg-surface-elevated border border-border px-3 py-2">
@@ -1218,9 +1244,9 @@ function zoneForTaskRender(task: Task): string | undefined {
               </td>
               <td class="px-4 py-2.5">
                 <span
-                  :class="statusColors[task.status]"
+                  :class="statusColors[displayStatus(task)]"
                   class="text-xs font-mono"
-                >{{ task.status }}</span>
+                >{{ displayStatus(task) }}</span>
               </td>
               <td class="px-4 py-2.5 text-fg-muted">
                 {{ task.agentName || '—' }}
@@ -1236,16 +1262,24 @@ function zoneForTaskRender(task: Task): string | undefined {
               </td>
               <td class="px-4 py-2.5 text-right">
                 <div class="inline-flex items-center gap-1">
-                  <!-- Recurring + live + idle → Run now (fire immediately; cadence kept). -->
+                  <!-- Recurring + live + idle → Run once (fires immediately; cadence kept).
+                       Disabled, not hidden, while paused: TaskExecutionHandler skips a
+                       paused task's fire body, so the POST would 200 and do nothing. -->
                   <button
-                    v-if="!selectMode && isRecurring(task) && isLive(task) && !task.paused && !task.runningRunId"
+                    v-if="!selectMode && isRecurring(task) && isLive(task) && !task.runningRunId"
                     type="button"
-                    class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                    :title="`Run “${task.name}” now — fires immediately, next scheduled run unchanged`"
+                    :disabled="task.paused"
+                    class="p-1 transition-colors"
+                    :class="task.paused
+                      ? 'text-fg-muted opacity-40 cursor-not-allowed'
+                      : 'text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400'"
+                    :title="task.paused
+                      ? `“${task.name}” is paused — resume it to run`
+                      : `Run “${task.name}” once now — fires immediately, next scheduled run unchanged`"
                     :aria-label="`Run ${task.name} now`"
                     @click.stop="runNowTask(task.id)"
                   >
-                    <BoltIcon
+                    <PlayIcon
                       class="w-4 h-4"
                       aria-hidden="true"
                     />
@@ -1269,37 +1303,34 @@ function zoneForTaskRender(task: Task): string | undefined {
                       aria-hidden="true"
                     />
                   </button>
-                  <!-- Recurring + live + running → Pause (reversible suspend). -->
+                  <!-- Live (recurring or one-shot) → Pause toggle. One icon that
+                       latches amber: swapping the glyph to Play read as "that ran",
+                       not "this is off". A paused one-shot whose time passes has its
+                       scheduler row dropped; resume re-arms it server-side. -->
                   <button
-                    v-if="!selectMode && isRecurring(task) && isLive(task) && !task.paused"
+                    v-if="!selectMode && isLive(task)"
                     type="button"
-                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                    :title="`Pause schedule for “${task.name}”`"
-                    :aria-label="`Pause ${task.name}`"
-                    @click.stop="pauseTask(task.id)"
+                    :aria-pressed="task.paused"
+                    class="p-1 transition-colors"
+                    :class="task.paused
+                      ? 'text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300'
+                      : 'text-fg-muted hover:text-fg-strong'"
+                    :title="task.paused
+                      ? `Paused — resume schedule for “${task.name}”`
+                      : `Pause schedule for “${task.name}”`"
+                    :aria-label="`Pause schedule for ${task.name}`"
+                    @click.stop="task.paused ? resumeTask(task.id) : pauseTask(task.id)"
                   >
                     <PauseIcon
                       class="w-4 h-4"
                       aria-hidden="true"
                     />
                   </button>
-                  <!-- Recurring + live + paused → Resume. -->
+                  <!-- One-off waiting → Cancel (won't fire). Standalone v-if, not a
+                       v-else-if off the toggle above: the toggle now matches one-shots
+                       too, and would otherwise swallow this branch entirely. -->
                   <button
-                    v-else-if="!selectMode && isRecurring(task) && isLive(task) && task.paused"
-                    type="button"
-                    class="p-1 text-emerald-700 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
-                    :title="`Resume schedule for “${task.name}”`"
-                    :aria-label="`Resume ${task.name}`"
-                    @click.stop="resumeTask(task.id)"
-                  >
-                    <PlayIcon
-                      class="w-4 h-4"
-                      aria-hidden="true"
-                    />
-                  </button>
-                  <!-- One-off waiting → Cancel (won't fire). -->
-                  <button
-                    v-else-if="!selectMode && !isRecurring(task) && task.status === 'PENDING'"
+                    v-if="!selectMode && !isRecurring(task) && task.status === 'PENDING'"
                     type="button"
                     class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
                     :title="`Cancel “${task.name}” — it won't fire`"

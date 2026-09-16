@@ -730,6 +730,13 @@ export interface TaskStats {
   avgDurationMs?: number | null
   pendingCount: number
   runningCount: number
+  /**
+   * Live schedules suspended by the operator. Task.paused is a flag, not a
+   * status, so these rows are still PENDING/ACTIVE server-side — the backend
+   * excludes them from pendingCount/activeCount so the two never count one
+   * task twice.
+   */
+  pausedCount: number
   activeCount: number
   failedCount: number
   /**

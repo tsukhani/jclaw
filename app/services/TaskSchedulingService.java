@@ -309,22 +309,56 @@ public final class TaskSchedulingService {
 
     /**
      * Flip {@link Task#paused} to false. Companion to {@link #pause}.
-     * Does not re-register the row — the existing scheduled_tasks
-     * row continues firing on schedule; the handler just stops
-     * skipping the body once the flag clears.
+     * A recurring Task's {@code scheduled_tasks} row survived the pause
+     * (the handler self-rescheduled through it), so clearing the flag is
+     * all it needs. A one-shot's may not have — see
+     * {@link #reArmOneShotIfDropped}.
      */
     public static void resume(Long taskId) {
         Objects.requireNonNull(taskId, PARAM_TASK_ID);
-        Tx.run(() -> {
-            var task = (Task) Task.findById(taskId);
-            if (task == null) return null;
-            task.paused = false;
-            task.save();
+        var task = Tx.run(() -> {
+            var t = (Task) Task.findById(taskId);
+            if (t == null) return null;
+            t.paused = false;
+            t.save();
+            EventLogger.info("task",
+                    t.agent != null ? t.agent.name : null, null,
+                    "Task '%s' resumed".formatted(t.name));
+            return t;
+        });
+        if (task != null) reArmOneShotIfDropped(task);
+    }
+
+    /**
+     * Re-arm a one-shot whose {@code scheduled_tasks} row was dropped while it
+     * was paused: {@link TaskExecutionHandler} returns OnCompleteRemove for a
+     * paused one-shot, so a fire that arrived during the pause deleted the row
+     * and clearing the flag alone would leave the Task PENDING forever with
+     * nothing left to fire it. A past-due time re-arms at that time, which
+     * db-scheduler picks up on its next poll — the same "or immediately if that
+     * time has already passed" behaviour {@code reenable} has.
+     *
+     * <p>Recurring Tasks self-reschedule through a pause, so re-arming one
+     * would double-schedule it.
+     */
+    private static void reArmOneShotIfDropped(Task task) {
+        if (task.type == Task.Type.CRON || task.type == Task.Type.INTERVAL) return;
+        if (isTerminal(task.status)) return;
+        SchedulerClient client = client();
+        if (client == null) return;
+        Instant fire = computeFirstFire(task);
+        if (fire == null) return;
+        // scheduleIfNotExists, not schedule: a row that outlived the pause (the
+        // fire time had not arrived yet) keeps the time it already holds, and
+        // the check is atomic against a poll landing between look and leap.
+        boolean armed = client.scheduleIfNotExists(
+                new TaskInstance<>(TaskExecutionHandler.TASK_NAME, task.id.toString()), fire);
+        if (armed) {
             EventLogger.info("task",
                     task.agent != null ? task.agent.name : null, null,
-                    "Task '%s' resumed".formatted(task.name));
-            return null;
-        });
+                    "Task '%s' resumed: re-armed a one-shot fire dropped during the pause, for %s"
+                            .formatted(task.name, fire));
+        }
     }
 
     private static void scheduleFire(Task task, Instant when) {

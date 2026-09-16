@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Functional HTTP tests for {@code GET /api/tasks/stats} (JCLAW-22 slice K):
  * the dashboard KPI aggregate — today's run count, success rate, average
- * duration, and the pending / running / failed task counts.
+ * duration, and the pending / running / paused / failed task counts.
  */
 class ApiTasksControllerStatsTest extends FunctionalTest {
 
@@ -161,6 +161,69 @@ class ApiTasksControllerStatsTest extends FunctionalTest {
         var rem = getContent(GET("/api/tasks/stats?payloadType=reminder"));
         assertTrue(rem.contains("\"pendingCount\":1"), rem);
         assertTrue(rem.contains("\"runsToday\":1"), rem);
+    }
+
+    /**
+     * Paused is a flag, not a status: a paused recurring task is still ACTIVE
+     * and a paused one-shot still PENDING. The KPI strip shows both a Paused
+     * card and Active/Pending cards, so the counts must partition the live
+     * tasks — a suspended schedule appears under Paused and nowhere else, or
+     * the strip sums to more tasks than exist.
+     */
+    @Test
+    void pausedTasksCountOnceUnderPausedAndNotUnderActiveOrPending() {
+        seedPaused();
+
+        var resp = GET("/api/tasks/stats");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        // 1 paused ACTIVE + 1 paused PENDING; the two unpaused siblings stay put.
+        assertTrue(body.contains("\"pausedCount\":2"), body);
+        assertTrue(body.contains("\"activeCount\":1"), body);
+        assertTrue(body.contains("\"pendingCount\":1"), body);
+        // A terminal task's stale paused flag has no schedule left to suspend.
+        assertTrue(body.contains("\"failedCount\":1"), body);
+    }
+
+    /**
+     * Seed one paused + one unpaused task in each of the two live states, plus
+     * a FAILED task carrying a stale paused flag (only re-enable clears it).
+     */
+    private static void seedPaused() {
+        var err = new AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                services.Tx.run(() -> {
+                    var agent = new Agent();
+                    agent.name = "paused-agent";
+                    agent.modelProvider = "openrouter";
+                    agent.modelId = "gpt-4.1";
+                    agent.enabled = true;
+                    agent.save();
+
+                    mkPausedTask(agent, "active-paused", Task.Status.ACTIVE);
+                    mkPausedTask(agent, "pending-paused", Task.Status.PENDING);
+                    mkPausedTask(agent, "failed-stale-flag", Task.Status.FAILED);
+                    mkTask(agent, "active-live", Task.Status.ACTIVE);
+                    mkTask(agent, "pending-live", Task.Status.PENDING);
+                });
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+    }
+
+    private static void mkPausedTask(Agent agent, String name, Task.Status status) {
+        var t = mkTask(agent, name, status);
+        t.paused = true;
+        t.save();
     }
 
     /**

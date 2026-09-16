@@ -35,6 +35,7 @@ public final class TaskStatsService {
     private static final String PARAM_RUNNING = "running";
     private static final String RUN_TASK_ALIAS = "r.task";
     private static final String PARAM_RSTATUS = "rstatus";
+    private static final String PARAM_PAUSED = "paused";
 
     public static long countRunsSince(Instant since, TaskRun.@Nullable Status status,
                                       String payloadType, String excludePayloadType) {
@@ -60,10 +61,36 @@ public final class TaskStatsService {
         return (Double) q.getSingleResult();
     }
 
-    public static long countTasks(Task.Status status, String payloadType, String excludePayloadType) {
+    /**
+     * Count tasks in a status. {@code paused} null counts both; false excludes
+     * suspended schedules, so Pending/Active and {@link #countPausedTasks}
+     * partition the live tasks instead of double-counting one — {@link
+     * Task#paused} is a flag, not a status.
+     */
+    public static long countTasks(Task.Status status, @Nullable Boolean paused,
+                                  String payloadType, String excludePayloadType) {
         var jpql = "SELECT COUNT(t) FROM Task t WHERE t.status = :status"
+                + (paused != null ? " AND t.paused = :paused" : "")
                 + payloadTypeWhere("t", payloadType, excludePayloadType);
         var q = JPA.em().createQuery(jpql, Long.class).setParameter("status", status);
+        if (paused != null) q.setParameter(PARAM_PAUSED, paused);
+        bindPayloadType(q, payloadType, excludePayloadType);
+        return q.getSingleResult();
+    }
+
+    /**
+     * Count suspended schedules — paused tasks in the two states pause applies
+     * to (PENDING one-shot waiting, ACTIVE recurring ongoing). A terminal
+     * task's stale flag never counts: it has no scheduler row left to suspend.
+     */
+    public static long countPausedTasks(String payloadType, String excludePayloadType) {
+        var jpql = "SELECT COUNT(t) FROM Task t WHERE t.paused = :paused "
+                + "AND t.status IN (:pending, :active)"
+                + payloadTypeWhere("t", payloadType, excludePayloadType);
+        var q = JPA.em().createQuery(jpql, Long.class)
+                .setParameter(PARAM_PAUSED, true)
+                .setParameter("pending", Task.Status.PENDING)
+                .setParameter("active", Task.Status.ACTIVE);
         bindPayloadType(q, payloadType, excludePayloadType);
         return q.getSingleResult();
     }

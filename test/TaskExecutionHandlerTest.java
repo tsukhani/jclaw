@@ -21,6 +21,7 @@ import play.test.UnitTest;
 import services.ConfigService;
 import services.EventLogger;
 import services.TaskExecutionHandler;
+import services.TaskSchedulingService;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -842,6 +843,70 @@ class TaskExecutionHandlerTest extends UnitTest {
      * the self-reschedule assertions and surfaces a configurable set of
      * "already-scheduled" ids for the BootConsistencyCheck sweep.
      */
+    // === resume() re-arms a one-shot whose fire was dropped during the pause ===
+
+    /**
+     * A paused one-shot that reaches its fire time loses its scheduled_tasks
+     * row: the handler skips the body and returns OnCompleteRemove. Clearing
+     * the flag alone would leave the Task PENDING with nothing left to fire it,
+     * so resume re-arms it.
+     */
+    @Test
+    void resumeReArmsAOneShotWhoseFireWasDroppedWhilePaused() {
+        var agent = createAgent("resume-oneshot-agent");
+        var task = persistTask(agent, "Paused one-shot", "Later.",
+                Task.Type.SCHEDULED, Instant.now().plusSeconds(3600), null, null);
+        commitAndReopen();
+
+        TaskSchedulingService.pause(task.id);
+        stub.scheduleIfNotExists.clear();
+        TaskSchedulingService.resume(task.id);
+
+        assertEquals(1, stub.scheduleIfNotExists.size(),
+                () -> "resume must re-arm a one-shot; calls=" + stub.scheduleIfNotExists.size());
+        assertEquals(task.id.toString(), stub.scheduleIfNotExists.getFirst().instance.getId());
+    }
+
+    /**
+     * scheduleIfNotExists, not schedule: a one-shot paused and resumed before
+     * its fire time still holds its row, and re-arming must leave that row's
+     * time alone rather than throwing on a duplicate.
+     */
+    @Test
+    void resumeLeavesASurvivingOneShotRowAlone() {
+        var agent = createAgent("resume-intact-agent");
+        var task = persistTask(agent, "Intact one-shot", "Later.",
+                Task.Type.SCHEDULED, Instant.now().plusSeconds(3600), null, null);
+        commitAndReopen();
+
+        stub.scheduleIfNotExistsReturns = false; // the row is still there
+        TaskSchedulingService.pause(task.id);
+        stub.schedules.clear();
+        TaskSchedulingService.resume(task.id);
+
+        assertTrue(stub.schedules.isEmpty(),
+                "resume must not call schedule() — that throws on an existing row");
+    }
+
+    /**
+     * A recurring Task self-reschedules through a pause, so its row always
+     * survives; re-arming one would double-schedule it.
+     */
+    @Test
+    void resumeDoesNotReArmARecurringTask() {
+        var agent = createAgent("resume-cron-agent");
+        var task = persistTask(agent, "Cron task", "Recur.",
+                Task.Type.CRON, null, "0 0 4 1 1 *", null);
+        commitAndReopen();
+
+        TaskSchedulingService.pause(task.id);
+        stub.scheduleIfNotExists.clear();
+        TaskSchedulingService.resume(task.id);
+
+        assertTrue(stub.scheduleIfNotExists.isEmpty(),
+                "a recurring Task keeps its row through a pause; re-arming double-schedules it");
+    }
+
     static class RecordingSchedulerStub {
         static class ScheduleCall {
             final TaskInstance<?> instance;
@@ -849,9 +914,12 @@ class TaskExecutionHandlerTest extends UnitTest {
             ScheduleCall(TaskInstance<?> i, Instant w) { instance = i; when = w; }
         }
         final List<ScheduleCall> schedules = new ArrayList<>();
+        final List<ScheduleCall> scheduleIfNotExists = new ArrayList<>();
         final List<TaskInstanceId> cancels = new ArrayList<>();
         final List<String> scheduledIds = new ArrayList<>();
         boolean throwOnSchedule = false;
+        /** What scheduleIfNotExists reports: true = no row existed, so it armed one. */
+        boolean scheduleIfNotExistsReturns = true;
 
         SchedulerClient proxy() {
             return (SchedulerClient) Proxy.newProxyInstance(
@@ -869,6 +937,12 @@ class TaskExecutionHandlerTest extends UnitTest {
                 if (throwOnSchedule) throw new RuntimeException("Stub: schedule failed");
                 schedules.add(new ScheduleCall(inst, when));
                 return null;
+            }
+            if ("scheduleIfNotExists".equals(name) && args != null && args.length == 2
+                    && args[0] instanceof TaskInstance<?> inst
+                    && args[1] instanceof Instant when) {
+                scheduleIfNotExists.add(new ScheduleCall(inst, when));
+                return scheduleIfNotExistsReturns;
             }
             if ("cancel".equals(name) && args != null && args.length == 1
                     && args[0] instanceof TaskInstanceId id) {
