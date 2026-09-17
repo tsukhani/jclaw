@@ -12,16 +12,14 @@ import type { ApiErrorBody, ApiErrorDetails } from '~/types/api'
 /**
  * Normalize a thrown `$fetch` error into the canonical envelope (JCLAW-1131). `$fetch`
  * surfaces the parsed body as `error.data`; a failure that never reached the server has none,
- * which is what leaves `code` and `template` null.
- *
- * @param fallback stands in for the raw HTTP status text `$fetch` throws when there is no
- *   envelope. Omit it to keep that text, which is all a transport failure has to say.
+ * which is what leaves `code` and `template` null. `message` then is the transport's own text
+ * (method, URL, and the status or `<no response>`), which is all such a failure has to say.
  */
-export function apiErrorDetails(e: unknown, fallback?: string): ApiErrorDetails {
+export function apiErrorDetails(e: unknown): ApiErrorDetails {
   const data = (e as { data?: Partial<ApiErrorBody> } | undefined)?.data
   return {
     code: data?.code ?? null,
-    message: data?.message ?? fallback ?? (e instanceof Error ? e.message : 'Request failed'),
+    message: data?.message ?? (e instanceof Error ? e.message : 'Request failed'),
     template: data?.template ?? null,
   }
 }

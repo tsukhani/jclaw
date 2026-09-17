@@ -28,13 +28,6 @@ describe('apiErrorDetails', () => {
     expect(details.template).toBeNull()
     expect(details.message).toBe('[GET] "/api/x": 502 Bad Gateway')
   })
-
-  it('prefers a supplied fallback over the raw status text, but never over the envelope', () => {
-    expect(apiErrorDetails(new Error('502 Bad Gateway'), 'Save failed').message)
-      .toBe('Save failed')
-    expect(apiErrorDetails({ data: { code: 'forbidden', message: 'reserved key' } }, 'Save failed').message)
-      .toBe('reserved key')
-  })
 })
 
 describe('useApiMutation', () => {
