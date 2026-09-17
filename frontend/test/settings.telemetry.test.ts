@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { createError, readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -13,7 +13,7 @@ import Settings from '~/pages/settings.vue'
 
 let posted: Array<Record<string, unknown>> = []
 
-function baseEndpoints(opts: { entries?: Array<{ key: string, value: string }>, rejectSave?: string } = {}) {
+function baseEndpoints(opts: { entries?: Array<{ key: string, value: string }>, rejectSave?: string, proxyPage?: boolean } = {}) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
@@ -23,9 +23,15 @@ function baseEndpoints(opts: { entries?: Array<{ key: string, value: string }>, 
     method: 'POST',
     handler: async (event) => {
       posted.push(await readBody(event))
+      if (opts.proxyPage) {
+        // A reverse proxy answering in place of the backend: an error page, not the API's envelope.
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      }
       if (opts.rejectSave) {
-        // The mock server only fails a request by throwing; the message is what the panel relays.
-        throw createError({ statusCode: 403, message: opts.rejectSave })
+        // The envelope ApiResponses.error sends; an h3 createError body carries no message the panel reads.
+        setResponseStatus(event, 403)
+        return { type: 'error', code: 'forbidden', message: opts.rejectSave }
       }
       return { status: 'ok' }
     },
@@ -96,8 +102,35 @@ describe('Settings page — Telemetry', () => {
     await component.find('input[aria-label="exporter.endpoint"]').setValue('collector:4318')
     await component.find('button[title="Save"]').trigger('click')
     await vi.waitFor(() => expect(component.find('[role="alert"]').exists()).toBe(true))
+    expect(component.find('[role="alert"]').text()).toContain('must be an absolute http(s) URL')
     expect(posted).toEqual([{ key: 'otel.exporter.endpoint', value: 'collector:4318' }])
     // The editor only closes on success; a refused write leaves it open with the alert beside it.
     expect(component.find('input[aria-label="exporter.endpoint"]').exists()).toBe(true)
+  })
+
+  it('names the request when a field save meets a proxy page instead of the error envelope (JCLAW-1221)', async () => {
+    baseEndpoints({ proxyPage: true })
+    const component = await mountTelemetry()
+    await component.find('button[title="Edit exporter.endpoint"]').trigger('click')
+    await component.find('input[aria-label="exporter.endpoint"]').setValue('http://collector:4318')
+    await component.find('button[title="Save"]').trigger('click')
+    await vi.waitFor(() => expect(component.find('[role="alert"]').exists()).toBe(true))
+
+    const shown = component.find('[role="alert"]').text()
+    expect(shown).toContain('/api/config')
+    expect(shown).toContain('502')
+    expect(shown).not.toContain('Save failed')
+  })
+
+  it('names the request when the export toggle meets a proxy page instead of the error envelope (JCLAW-1221)', async () => {
+    baseEndpoints({ proxyPage: true })
+    const component = await mountTelemetry()
+    await component.find('input[aria-label="Export telemetry"]').setValue(true)
+    await vi.waitFor(() => expect(component.find('[role="alert"]').exists()).toBe(true))
+
+    const shown = component.find('[role="alert"]').text()
+    expect(shown).toContain('/api/config')
+    expect(shown).toContain('502')
+    expect(shown).not.toContain('Save failed')
   })
 })

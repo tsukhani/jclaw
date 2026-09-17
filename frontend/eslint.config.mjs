@@ -48,11 +48,11 @@ export default withNuxt(
       'no-restricted-syntax': ['error',
         {
           selector: 'MemberExpression[property.name=\'error\'][object.property.name=\'data\']',
-          message: 'API errors carry `message`, not `error`. Use apiErrorDetails(e, fallback).message.',
+          message: 'API errors carry `message`, not `error`. Use apiErrorDetails(e).message.',
         },
         {
           selector: 'MemberExpression[property.name=\'error\'][object.name=\'data\']',
-          message: 'API errors carry `message`, not `error`. Use apiErrorDetails(e, fallback).message.',
+          message: 'API errors carry `message`, not `error`. Use apiErrorDetails(e).message.',
         },
       ],
     },

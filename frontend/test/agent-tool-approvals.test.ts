@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { setResponseStatus } from 'h3'
@@ -92,6 +92,34 @@ describe('AgentToolApprovals', () => {
     const alert = component.find('[data-testid="api-error"]')
     expect(alert.text()).toContain('Only the operator may revoke a grant.')
     expect(alert.text()).toContain('Make the change yourself in the admin UI.')
+  })
+
+  it('names the request when the list load meets a proxy page instead of the error envelope (JCLAW-1221)', async () => {
+    registerEndpoint('/api/agents/12/tool-approvals', (event) => {
+      setResponseStatus(event, 502)
+      return '<html><body>Bad Gateway</body></html>'
+    })
+
+    const component = await mountSuspended(AgentToolApprovals, { props: { agentId: 12 } })
+    // ofetch retries a GET once on a 502 before it throws.
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+
+    const shown = component.find('[data-testid="api-error"]').text()
+    expect(shown).toContain('/api/agents/12/tool-approvals')
+    expect(shown).toContain('502')
+    expect(shown).not.toContain('Could not load standing approvals.')
+  })
+
+  it('shows the server\'s message when it refuses the list load', async () => {
+    registerEndpoint('/api/agents/13/tool-approvals', (event) => {
+      setResponseStatus(event, 404)
+      return { type: 'error', code: 'not_found', message: 'Agent not found' }
+    })
+
+    const component = await mountSuspended(AgentToolApprovals, { props: { agentId: 13 } })
+    await flushPromises()
+
+    expect(component.find('[data-testid="api-error"]').text()).toContain('Agent not found')
   })
 
   it('warns that a grant ignores which channel the agent is reached on', async () => {

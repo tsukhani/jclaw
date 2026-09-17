@@ -33,7 +33,7 @@ async function load() {
     grants.value = await $fetch<Grant[]>(`/api/agents/${props.agentId}/tool-approvals`)
   }
   catch (e) {
-    error.value = apiErrorDetails(e, 'Could not load standing approvals.')
+    error.value = apiErrorDetails(e)
   }
   finally {
     loading.value = false

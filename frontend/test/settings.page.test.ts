@@ -606,6 +606,26 @@ describe('Settings page — Web Scraping section', () => {
     expect(component.find('[role="alert"]').text())
       .toContain('web_scrape.max-pages must be a whole number of at least 1.')
   })
+
+  it('names the request when a proxy answers with a page instead of the error envelope (JCLAW-1221)', async () => {
+    stubOtherEndpoints()
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: [] }) })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    const component = await mountSettingsSection('web-scraping')
+
+    await editLimit(component, 'max-pages', '30')
+
+    const shown = component.find('[role="alert"]').text()
+    expect(shown).toContain('/api/config')
+    expect(shown).toContain('502')
+    expect(shown).not.toContain('Save failed')
+  })
 })
 
 describe('Settings page — discovery surface', () => {

@@ -89,7 +89,7 @@ async function save(field: Field) {
     await Promise.all([refresh(), refreshStatus()])
   }
   catch (e) {
-    saveError.value = apiErrorDetails(e, 'Save failed')
+    saveError.value = apiErrorDetails(e)
   }
   finally {
     saving.value = false
@@ -106,7 +106,7 @@ async function toggleEnabled(event: Event) {
     await Promise.all([refresh(), refreshStatus()])
   }
   catch (e) {
-    saveError.value = apiErrorDetails(e, 'Save failed')
+    saveError.value = apiErrorDetails(e)
   }
   finally {
     saving.value = false

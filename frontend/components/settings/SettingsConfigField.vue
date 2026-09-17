@@ -59,7 +59,7 @@ async function save(next: string) {
   }
   catch (e) {
     // A refused write is 403 {type, code, message, template}; message is setWithSideEffects' rejection.
-    error.value = apiErrorDetails(e, 'Save failed')
+    error.value = apiErrorDetails(e)
   }
   finally {
     saving.value = false

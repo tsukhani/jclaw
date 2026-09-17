@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 import { sectionGroups } from '~/components/settings/sections'
@@ -63,6 +64,49 @@ describe('Settings page — Tool Approvals', () => {
     const select = component.find('[data-testid="approval-off-channel-policy"]')
     expect(select.exists()).toBe(true)
     expect((select.element as HTMLSelectElement).value).toBe('allow')
+  })
+
+  async function choosePolicy(component: Awaited<ReturnType<typeof mountSettingsSection>>, value: string) {
+    await component.find('[data-testid="approval-off-channel-policy"]').setValue(value)
+    await flushPromises()
+    await flushPromises()
+    return component.find('[data-testid="approval-policy-error"]')
+  }
+
+  it('shows the reason a capped policy is refused and puts the select back (JCLAW-1221)', async () => {
+    baseEndpoints([{ key: 'tool.approval.offChannelPolicy', value: 'ask' }])
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 403)
+        return { type: 'error', code: 'forbidden', message: 'tool.approval.offChannelPolicy is capped at ask by application.conf.' }
+      },
+    })
+    const component = await mountSettingsSection('approvals')
+
+    const error = await choosePolicy(component, 'allow')
+
+    expect(error.text()).toBe('tool.approval.offChannelPolicy is capped at ask by application.conf.')
+    const select = component.find('[data-testid="approval-off-channel-policy"]')
+    expect((select.element as HTMLSelectElement).value).toBe('ask')
+  })
+
+  it('names the request when a proxy answers with a page instead of the error envelope (JCLAW-1221)', async () => {
+    baseEndpoints([{ key: 'tool.approval.offChannelPolicy', value: 'ask' }])
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    const component = await mountSettingsSection('approvals')
+
+    const shown = (await choosePolicy(component, 'deny')).text()
+
+    expect(shown).toContain('/api/config')
+    expect(shown).toContain('502')
+    expect(shown).not.toBe('Could not save the approval policy.')
   })
 
   it('renders the stored policy', async () => {

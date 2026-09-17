@@ -13,11 +13,14 @@ type Body = { key?: string, value?: string }
 let posted: Body[] = []
 let refusal: string | null = null
 let refusalTemplate: ApiErrorTemplate | null = null
+// A reverse proxy answering in place of the backend: an error page, not the API's envelope.
+let proxyPage = false
 
 function stubEndpoints() {
   posted = []
   refusal = null
   refusalTemplate = null
+  proxyPage = false
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
@@ -27,6 +30,10 @@ function stubEndpoints() {
   registerEndpoint('/api/config', {
     method: 'POST',
     handler: async (event) => {
+      if (proxyPage) {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      }
       if (refusal) {
         setResponseStatus(event, 403)
         return { type: 'error', code: 'forbidden', message: refusal, template: refusalTemplate }
@@ -109,6 +116,23 @@ describe('Settings page — Voice Mode', () => {
     expect(alert.text()).toContain('must not exceed')
     expect(alert.text()).toContain('What to check')
     expect(alert.text()).toContain('Correct the highlighted fields and submit again.')
+  })
+
+  it('names the request when a proxy answers with a page instead of the error envelope (JCLAW-1221)', async () => {
+    const component = await mountSettingsSection('voice')
+    proxyPage = true
+
+    const base = row(component, 'voice.endpoint.baseSilenceMs')
+    await base.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    await base.find('input').setValue('900')
+    await base.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    const shown = base.find('[role="alert"]').text()
+    expect(shown).toContain('/api/config')
+    expect(shown).toContain('502')
+    expect(shown).not.toContain('Save failed')
   })
 })
 
