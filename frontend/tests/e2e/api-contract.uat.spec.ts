@@ -83,7 +83,10 @@ test.describe('UAT-2 read-side API contract', () => {
     const res = await request.get('/api/there-is-no-such-endpoint')
     expect(res.status()).toBe(404)
     const body = await res.json()
-    expect(body).toEqual({ error: 'Not found' })
+    // Assert the envelope's stable parts: this pinned the retired "error" key until JCLAW-1218
+    // moved the 404 onto the canonical type/code/message envelope.
+    expect(body.type).toBe('error')
+    expect(body.code).toBe('not_found')
     const text = JSON.stringify(body)
     expect(text).not.toContain('play.')
     expect(text).not.toContain('Exception')
