@@ -4,7 +4,7 @@
 // the app in a new tab at /apps/<slug>/. Pricing is metadata-only — a label.
 // The "Create app" affordance (slice 3) will sit above the grid.
 import { MagnifyingGlassIcon, PencilSquareIcon, PlusIcon, Squares2X2Icon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
-import type { Agent } from '~/types/api'
+import type { Agent, ApiErrorDetails } from '~/types/api'
 
 interface AppEntry {
   id: string
@@ -151,6 +151,7 @@ function cancelUpdate() {
 // app is purely a public/apps/<slug>/ directory (no DB row), so the DELETE fully
 // removes it. `deletingId` disables just this card while the request is in flight.
 const deletingId = ref<string | null>(null)
+const deleteError = ref<ApiErrorDetails | null>(null)
 
 async function deleteApp(app: AppEntry) {
   const ok = await confirm({
@@ -161,13 +162,14 @@ async function deleteApp(app: AppEntry) {
   })
   if (!ok) return
   deletingId.value = app.id
+  deleteError.value = null
   try {
     await $fetch(`/api/apps/${app.id}`, { method: 'DELETE' })
     if (updatingApp.value?.id === app.id) cancelUpdate() // close the update form if it targeted this app
     await refresh()
   }
   catch (e) {
-    console.error('Failed to delete app:', e)
+    deleteError.value = apiErrorDetails(e)
   }
   finally {
     deletingId.value = null
@@ -185,6 +187,10 @@ async function deleteApp(app: AppEntry) {
       <span class="font-mono">public/apps/&lt;slug&gt;/</span>. Click an app to open it in a new tab.
     </p>
 
+    <ApiErrorAlert
+      :error="deleteError"
+      class="mb-4"
+    />
     <!-- Create / update affordance: describe the app (or the changes), hand it to the app-creator skill in Chat. -->
     <div class="mb-6">
       <!-- Update form (per-card): scoped to an existing app + instructs a version bump. -->

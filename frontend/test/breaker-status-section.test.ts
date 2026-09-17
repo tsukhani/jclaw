@@ -130,3 +130,27 @@ describe('BreakerStatusSection', () => {
     expect(tripped).toBe(false)
   })
 })
+
+describe('BreakerStatusSection — a failed restore (JCLAW-1221)', () => {
+  it('says why instead of doing nothing', async () => {
+    registerEndpoint('/api/breakers', () => [breaker({ state: 'OPEN', reason: 'FAILURE_RATE' })])
+    const off = registerEndpoint('/api/breakers/reset', {
+      method: 'POST',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const wrapper = await mountSuspended(BreakerStatusSection)
+      await flushPromises()
+      await wrapper.findAll('button').filter(b => b.text() === 'Restore')[0]!.trigger('click')
+      await vi.waitFor(() => expect(wrapper.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(wrapper.find('[data-testid="api-error"]').text()).toContain('/api/breakers/reset')
+    }
+    finally {
+      off()
+    }
+  })
+})

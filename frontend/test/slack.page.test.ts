@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
@@ -191,5 +191,29 @@ describe('slack bindings page — health probe (JCLAW-441)', () => {
     const result = c.find('[data-testid="probe-result-7"]')
     expect(result.exists()).toBe(true)
     expect(result.text()).toContain('invalid_auth')
+  })
+})
+
+describe('Slack page — a failed binding switch (JCLAW-1221)', () => {
+  it('says why the binding did not change', async () => {
+    bindingsResponse = [binding({ id: 9, enabled: false })]
+    const off = registerEndpoint('/api/channels/slack/bindings/9', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const c = await mountSuspended(Slack)
+      await flushPromises()
+      await c.find('button[aria-label="Enable binding"]').trigger('click')
+      await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(c.find('[data-testid="api-error"]').text()).toContain('/api/channels/slack/bindings/9')
+    }
+    finally {
+      off()
+    }
   })
 })

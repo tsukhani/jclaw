@@ -7,7 +7,7 @@ import {
   TrashIcon,
   VideoCameraIcon,
 } from '@heroicons/vue/24/outline'
-import type { Agent, LatencyHistogram, LogEvent } from '~/types/api'
+import type { Agent, ApiErrorDetails, LatencyHistogram, LogEvent } from '~/types/api'
 
 // --- Latency metrics (chat performance panel) ---
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
@@ -234,8 +234,17 @@ function formatStat(key: string, value: number): string {
   return isCountSegment(key) ? String(Math.round(value)) : formatMs(value)
 }
 
+const resetLatencyError = ref<ApiErrorDetails | null>(null)
+
 async function resetLatency() {
-  await $fetch('/api/metrics/latency/rows', { method: 'DELETE' })
+  resetLatencyError.value = null
+  try {
+    await $fetch('/api/metrics/latency/rows', { method: 'DELETE' })
+  }
+  catch (e) {
+    resetLatencyError.value = apiErrorDetails(e)
+    return
+  }
   await refreshLatency()
 }
 
@@ -569,6 +578,10 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="resetLatencyError"
+        class="px-4 py-2.5"
+      />
 
       <!-- Body reserves its last-known height — see useStableHeight. 692px here,
            but it scales with the segment count, hence the remembered value. -->

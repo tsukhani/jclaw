@@ -29,7 +29,7 @@ interface Breaker {
 }
 
 const { data, refresh } = useLazyFetch<Breaker[]>('/api/breakers')
-const { mutate, loading } = useApiMutation()
+const { mutate, loading, errorDetails } = useApiMutation()
 const { confirm } = useConfirm()
 
 const breakers = computed(() => data.value ?? [])
@@ -124,6 +124,10 @@ async function restore(b: Breaker) {
         Calls turned away here never reach the graphs below.
       </span>
     </div>
+    <ApiErrorAlert
+      :error="errorDetails"
+      class="px-4 py-2.5 border-b border-border"
+    />
 
     <section
       v-for="g in groups"

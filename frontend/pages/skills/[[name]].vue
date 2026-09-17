@@ -565,7 +565,7 @@ async function onAgentDrop(e: DragEvent, agent: Agent) {
           agentSkillsMap.value[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
         }
         catch (err) {
-          console.error('Failed to re-enable skill:', err)
+          showDragError(apiErrorDetails(err).message)
         }
       }
       dragging.value = null

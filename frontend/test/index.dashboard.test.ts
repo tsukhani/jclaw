@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
@@ -176,5 +176,29 @@ describe('Dashboard — workspace disk footprint line', () => {
     await flushPromises()
 
     expect(c.find('[data-testid="workspace-size"]').exists()).toBe(false)
+  })
+})
+
+describe('Dashboard — a failed latency reset (JCLAW-1221)', () => {
+  it('says why the latency metrics were not cleared', async () => {
+    setupApi()
+    const off = registerEndpoint('/api/metrics/latency/rows', {
+      method: 'DELETE',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(Index)
+      await flushPromises()
+      await component.find('button[title="Clear latency metrics"]').trigger('click')
+      await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="api-error"]').text()).toContain('/api/metrics/latency/rows')
+    }
+    finally {
+      off()
+    }
   })
 })

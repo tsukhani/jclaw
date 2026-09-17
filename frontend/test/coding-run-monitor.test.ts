@@ -207,3 +207,29 @@ describe('CodingRunMonitor — harness kind labels', () => {
     expect(text).toContain('Created fib.py and test_fib.py.')
   })
 })
+
+describe('CodingRunMonitor — a failed kill (JCLAW-1221)', () => {
+  it('says why the run was not stopped', async () => {
+    registerEndpoint('/api/subagent-runs/7/steps', () => [])
+    const off = registerEndpoint('/api/subagent-runs/7/kill', {
+      method: 'POST',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(KillHarness)
+      await flushPromises()
+      await component.findAll('button').find(b => b.text().trim() === 'Kill')!.trigger('click')
+      await flushPromises()
+      Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(b => (b.textContent ?? '').trim() === 'Kill run')!.click()
+      await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="api-error"]').text()).toContain('/api/subagent-runs/7/kill')
+    }
+    finally {
+      off()
+    }
+  })
+})

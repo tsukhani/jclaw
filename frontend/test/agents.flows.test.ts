@@ -1474,3 +1474,57 @@ describe('Agents page — Delete All that fails part-way', () => {
     }
   })
 })
+
+describe('Agents page — list and workspace actions that fail', () => {
+  afterEach(async () => {
+    await useRouter().replace('/agents')
+  })
+
+  it('says why an agent enable switch did not take', async () => {
+    setupAgentsApi()
+    const off = registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(Agents)
+      await flushPromises()
+      await component.findAll('button').find(b => b.attributes('title') === 'Disable agent')!.trigger('click')
+      await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="api-error"]').text()).toContain('/api/agents/2')
+    }
+    finally {
+      off()
+    }
+  })
+
+  it('says why a workspace file did not save, and keeps it unsaved', async () => {
+    setupAgentsApi()
+    const off = registerEndpoint('/api/agents/2/workspace/AGENT.md', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(Agents, { route: '/agents/helper' })
+      await vi.waitFor(() => expect(component.find('textarea').exists()).toBe(true))
+      await flushPromises()
+      const editor = component.findAll('textarea').find(t => (t.element as HTMLTextAreaElement).value === 'helper instructions')!
+      await editor.setValue('helper instructions, revised')
+      await component.find('button[title="Save file"]').trigger('click')
+      const alerts = () => component.findAll('[data-testid="api-error"]').map(a => a.text())
+      await vi.waitFor(() => expect(alerts().some(t => t.includes('/api/agents/2/workspace/AGENT.md'))).toBe(true))
+      expect(component.find('button[title="Save file"]').attributes('disabled')).toBeUndefined()
+    }
+    finally {
+      off()
+    }
+  })
+})

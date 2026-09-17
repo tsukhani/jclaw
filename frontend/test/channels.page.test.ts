@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
@@ -82,5 +82,29 @@ describe('channels page — binding-link cards (JCLAW-441/444) + Tailscale Funne
     expect(button?.attributes('disabled')).toBeUndefined()
     // enabled (unavailable) is a self-healing state, not a stuck one — say so.
     expect(component.text()).toContain('The funnel will resume automatically when Tailscale reconnects.')
+  })
+})
+
+describe('channels page — a failed Funnel toggle (JCLAW-1221)', () => {
+  it('says why instead of doing nothing', async () => {
+    tailscaleResponse = { enabled: false, available: true, publicUrl: null, error: null }
+    const off = registerEndpoint('/api/tailscale', {
+      method: 'POST',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(Channels)
+      await flushPromises()
+      await component.findAll('button').find(b => b.text() === 'Enable Funnel')!.trigger('click')
+      await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="api-error"]').text()).toContain('/api/tailscale')
+    }
+    finally {
+      off()
+    }
   })
 })

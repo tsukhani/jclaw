@@ -134,7 +134,7 @@ watch(() => steps.value.length, () => {
   })
 })
 
-const { mutate, loading: killing } = useApiMutation()
+const { mutate, loading: killing, errorDetails: killError } = useApiMutation()
 const { confirm } = useConfirm()
 
 async function killRun(): Promise<void> {
@@ -239,6 +239,7 @@ function attachmentIcon(kind: MessageAttachment['kind']): typeof DocumentIcon {
           {{ killing ? 'Killing…' : 'Kill' }}
         </button>
       </div>
+      <ApiErrorAlert :error="killError" />
 
       <!-- Step stream. -->
       <div

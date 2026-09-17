@@ -427,3 +427,31 @@ describe('Apps page', () => {
     expect(c.find('#apps-search').exists()).toBe(false)
   })
 })
+
+describe('Apps page — a failed delete (JCLAW-1221)', () => {
+  it('says why the app was not removed', async () => {
+    const off = registerEndpoint('/api/apps/stuck', {
+      method: 'DELETE',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    appsEndpoint([
+      { id: 'stuck', url: '/apps/stuck/', name: 'Stuck', version: '1.0.0', creator: null, icon: null, price: null, description: null, agent: null },
+    ])
+    try {
+      const c = await mountSuspended(AppsHarness)
+      await flushPromises()
+      await c.find('[data-testid="delete-app-stuck"]').trigger('click')
+      await flushPromises()
+      Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(b => (b.textContent ?? '').trim() === 'Delete')!.click()
+      await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(c.find('[data-testid="api-error"]').text()).toContain('/api/apps/stuck')
+    }
+    finally {
+      off()
+    }
+  })
+})

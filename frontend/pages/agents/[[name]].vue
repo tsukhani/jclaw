@@ -403,6 +403,9 @@ const saveError = ref<string | null>(null)
 // card's trash button so an in-flight delete disables just that row.
 const deletingAll = ref(false)
 const deleteAllError = ref<ApiErrorDetails | null>(null)
+// A failed enable switch or capability pill on either list.
+const agentListError = ref<ApiErrorDetails | null>(null)
+const workspaceError = ref<ApiErrorDetails | null>(null)
 const deletingId = ref<number | null>(null)
 
 // A11y: stable ids for label/control association in the edit form
@@ -903,12 +906,13 @@ async function toggleListingCapability(agent: Agent | undefined, capability: 'th
       ? null
       : defaultThinkingLevel(modelForAgent(agent))
   }
+  agentListError.value = null
   try {
     await $fetch(`/api/agents/${agent.id}`, { method: 'PUT', body })
     refresh()
   }
   catch (e) {
-    console.error('Failed to toggle capability:', e)
+    agentListError.value = apiErrorDetails(e)
   }
 }
 
@@ -1430,6 +1434,7 @@ async function saveAgent() {
 // edit form. The PUT endpoint accepts partial updates, so we only send the
 // enabled field — other fields fall through to their existing values.
 async function toggleAgentEnabled(agent: Agent) {
+  agentListError.value = null
   try {
     await $fetch(`/api/agents/${agent.id}`, {
       method: 'PUT',
@@ -1438,7 +1443,7 @@ async function toggleAgentEnabled(agent: Agent) {
     refresh()
   }
   catch (e) {
-    console.error('Failed to toggle agent enabled:', e)
+    agentListError.value = apiErrorDetails(e)
   }
 }
 
@@ -1503,6 +1508,7 @@ async function deleteAll() {
 
 async function loadWorkspaceFile(agentId: number, filename: string) {
   workspaceTab.value = filename
+  workspaceError.value = null
   try {
     const data = await $fetch<WorkspaceFileContent>(`/api/agents/${agentId}/workspace/${filename}`)
     workspaceContent.value = data.content ?? ''
@@ -1516,10 +1522,18 @@ async function loadWorkspaceFile(agentId: number, filename: string) {
 async function saveWorkspaceFile() {
   if (!editing.value || !workspaceDirty.value) return
   const saved = workspaceContent.value
-  await $fetch(`/api/agents/${editing.value.id}/workspace/${workspaceTab.value}`, {
-    method: 'PUT',
-    body: { content: saved },
-  })
+  workspaceError.value = null
+  try {
+    await $fetch(`/api/agents/${editing.value.id}/workspace/${workspaceTab.value}`, {
+      method: 'PUT',
+      body: { content: saved },
+    })
+  }
+  catch (e) {
+    // The baseline stays put, so the file still reads as unsaved beside the reason.
+    workspaceError.value = apiErrorDetails(e)
+    return
+  }
   // Snapshot the just-persisted value so the save button disables until the
   // textarea diverges again. Capture before the await resolved so a late
   // keystroke doesn't get clobbered into the baseline.
@@ -1571,6 +1585,11 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       >Settings</NuxtLink> and add an API key first.
     </div>
 
+    <ApiErrorAlert
+      v-if="!editing && !creating"
+      :error="agentListError"
+      class="mb-4"
+    />
     <!-- Main Agent section -->
     <div
       v-if="!editing && !creating"
@@ -2974,6 +2993,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             />
           </button>
         </div>
+        <ApiErrorAlert
+          :error="workspaceError"
+          class="px-4 pb-2.5"
+        />
       </div>
     </div>
 

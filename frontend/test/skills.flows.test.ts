@@ -579,3 +579,37 @@ describe('Skills page — inline rename flow', () => {
     expect(renameCalled).toBe(false)
   })
 })
+
+describe('Skills page — a failed re-enable on drop (JCLAW-1221)', () => {
+  it('says why the skill was not switched back on', async () => {
+    setupApi({ agentSkills: { 1: [], 2: [{ name: 'web-search', folderName: 'web-search', enabled: false, version: '1.0.0' }] } })
+    const off = registerEndpoint('/api/agents/2/skills/web-search', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(Skills)
+      await flushPromises()
+      // The drop handler is driven directly: this case is about its failure path, not drag plumbing.
+      const vm = component.vm as unknown as {
+        agentSkillsMap: Record<number, unknown[]>
+        dragging: { name: string, folderName: string, version: string } | null
+        dragSource: string | null
+        onAgentDrop: (e: Event, agent: { id: number, name: string }) => Promise<void>
+      }
+      vm.agentSkillsMap = { 1: [], 2: [{ name: 'web-search', folderName: 'web-search', enabled: false, version: '1.0.0' }] }
+      vm.dragging = { name: 'web-search', folderName: 'web-search', version: '1.0.0' }
+      vm.dragSource = 'global'
+      await vm.onAgentDrop(new Event('drop'), { id: 2, name: 'helper' })
+      await flushPromises()
+      expect(component.text()).toContain('/api/agents/2/skills/web-search')
+    }
+    finally {
+      off()
+    }
+  })
+})

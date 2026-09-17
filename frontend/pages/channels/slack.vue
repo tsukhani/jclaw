@@ -31,6 +31,8 @@ const editing = ref<SlackBindingSummary | null>(null)
 const { availableAgents } = useBindingAgents(agents, bindings, editing)
 
 const { mutate, loading: saving } = useApiMutation()
+// The card switch and delete: kept apart from the form's mutation so its error is not shown twice.
+const { mutate: mutateBinding, errorDetails: bindingError } = useApiMutation()
 const { confirm } = useConfirm()
 
 interface BindingForm {
@@ -235,7 +237,7 @@ async function save() {
 
 async function toggleEnabled(binding: SlackBindingSummary) {
   const next = !binding.enabled
-  const result = await mutate(`/api/channels/slack/bindings/${binding.id}`, {
+  const result = await mutateBinding(`/api/channels/slack/bindings/${binding.id}`, {
     method: 'PUT',
     body: { enabled: next },
   })
@@ -249,7 +251,7 @@ async function remove(binding: SlackBindingSummary) {
     confirmText: 'Delete',
   })
   if (!ok) return
-  const result = await mutate(`/api/channels/slack/bindings/${binding.id}`, { method: 'DELETE' })
+  const result = await mutateBinding(`/api/channels/slack/bindings/${binding.id}`, { method: 'DELETE' })
   if (result !== null) refresh()
 }
 
@@ -368,6 +370,10 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
       (it carries the binding id), which you paste into that app's Event Subscriptions.
     </p>
 
+    <ApiErrorAlert
+      :error="bindingError"
+      class="mb-4"
+    />
     <div
       v-if="!bindings?.length"
       class="bg-surface-elevated border border-border p-6 text-sm text-fg-muted"

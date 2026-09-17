@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
@@ -67,5 +67,29 @@ describe('ChatCompressionSection', () => {
     const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: [] } })
     await flushPromises()
     expect(wrapper.text()).toContain('No compression activity')
+  })
+})
+
+describe('ChatCompressionSection — a failed reset (JCLAW-1221)', () => {
+  it('says why the metrics were not cleared', async () => {
+    registerEndpoint('/api/metrics/compression', () => payload())
+    const off = registerEndpoint('/api/metrics/compression', {
+      method: 'DELETE',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const wrapper = await mountSuspended(ChatCompressionSection, { props: { agents: AGENTS as never } })
+      await flushPromises()
+      await wrapper.find('button[title="Reset compression metrics"]').trigger('click')
+      await vi.waitFor(() => expect(wrapper.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(wrapper.find('[data-testid="api-error"]').text()).toContain('/api/metrics/compression')
+    }
+    finally {
+      off()
+    }
   })
 })

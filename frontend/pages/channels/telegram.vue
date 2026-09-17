@@ -44,6 +44,8 @@ const editing = ref<TelegramBindingSummary | null>(null)
 const { availableAgents } = useBindingAgents(agents, bindings, editing)
 
 const { mutate, loading: saving } = useApiMutation()
+// The card switch and delete: kept apart from the form's mutation so its error is not shown twice.
+const { mutate: mutateBinding, errorDetails: bindingError } = useApiMutation()
 const { confirm } = useConfirm()
 
 interface BindingForm {
@@ -259,7 +261,7 @@ async function save() {
 
 async function toggleEnabled(binding: TelegramBindingSummary) {
   const next = !binding.enabled
-  const result = await mutate(`/api/channels/telegram/bindings/${binding.id}`, {
+  const result = await mutateBinding(`/api/channels/telegram/bindings/${binding.id}`, {
     method: 'PUT',
     body: { enabled: next },
   })
@@ -273,7 +275,7 @@ async function remove(binding: TelegramBindingSummary) {
     confirmText: 'Delete',
   })
   if (!ok) return
-  const result = await mutate(`/api/channels/telegram/bindings/${binding.id}`, { method: 'DELETE' })
+  const result = await mutateBinding(`/api/channels/telegram/bindings/${binding.id}`, { method: 'DELETE' })
   if (result !== null) refresh()
 }
 
@@ -342,6 +344,10 @@ async function testBinding(binding: TelegramBindingSummary) {
       across users would leak memories between them.
     </p>
 
+    <ApiErrorAlert
+      :error="bindingError"
+      class="mb-4"
+    />
     <div
       v-if="!bindings?.length"
       class="bg-surface-elevated border border-border p-6 text-sm text-fg-muted"

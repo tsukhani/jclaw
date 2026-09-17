@@ -94,7 +94,7 @@ const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/t
 // JCLAW-440: the calendar view (month/week/day grids, fire projection, run
 // blocks) moved to the shared <ScheduleCalendar> component, which owns its own
 // range state + runs fetch. This page just renders it in the calendar view.
-const { mutate } = useApiMutation()
+const { mutate, errorDetails: rowActionError } = useApiMutation()
 const { confirm } = useConfirm()
 
 // Every operator action that moves a task between KPI tiles calls this, not a
@@ -946,6 +946,10 @@ function zoneForTaskRender(task: Task): string | undefined {
     </div>
     <ApiErrorAlert
       :error="bulkError"
+      class="mb-4"
+    />
+    <ApiErrorAlert
+      :error="rowActionError"
       class="mb-4"
     />
 

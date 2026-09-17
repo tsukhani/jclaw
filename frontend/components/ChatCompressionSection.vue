@@ -7,7 +7,7 @@
  * breakdowns, and a reset (trash) that clears the recorded metrics.
  */
 import { ChartBarIcon, ExclamationTriangleIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
-import type { Agent } from '~/types/api'
+import type { Agent, ApiErrorDetails } from '~/types/api'
 
 const props = defineProps<{ agents: Agent[] | null | undefined }>()
 
@@ -159,15 +159,18 @@ const maxTypeSaved = computed(() => Math.max(1, ...agg.value.byType.map(t => t.s
 const maxAlgoCount = computed(() => Math.max(1, ...agg.value.byAlgo.map(a => a.count)))
 const windowLabel = computed(() => WINDOWS.find(w => w.key === selectedWindow.value)?.label ?? '')
 
+const resetError = ref<ApiErrorDetails | null>(null)
+
 async function resetMetrics() {
   if (resetting.value) return
   resetting.value = true
+  resetError.value = null
   try {
     await $fetch('/api/metrics/compression', { method: 'DELETE' })
     await refresh()
   }
   catch (e) {
-    console.error('Failed to reset compression metrics:', e)
+    resetError.value = apiErrorDetails(e)
   }
   finally {
     resetting.value = false
@@ -281,6 +284,10 @@ function fmt(n: number) {
         </button>
       </div>
     </div>
+    <ApiErrorAlert
+      :error="resetError"
+      class="px-4 py-2.5"
+    />
 
     <!-- Body reserves its last-known height so the tiles landing don't move the
          page. See useStableHeight. -->

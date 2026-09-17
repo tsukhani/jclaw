@@ -256,3 +256,27 @@ describe('MCP Servers page', () => {
     await vi.waitFor(() => expect(deleted).toBe(true))
   })
 })
+
+describe('MCP servers page — a failed row action (JCLAW-1221)', () => {
+  it('says why a server switch did not take', async () => {
+    setupApi([server()])
+    const off = registerEndpoint('/api/mcp-servers/1', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const c = await mountSuspended(McpServers)
+      await flushPromises()
+      await clickLabel(c, 'github server')
+      await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(c.find('[data-testid="api-error"]').text()).toContain('/api/mcp-servers/1')
+    }
+    finally {
+      off()
+    }
+  })
+})

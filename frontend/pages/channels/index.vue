@@ -15,7 +15,7 @@ const [
 // never gates the page render; shared across the channel pages via the composable.
 const { data: tailscale, refresh: refreshTailscale, status: tailscaleStatus } = useTailscaleStatus()
 
-const { mutate } = useApiMutation()
+const { mutate, errorDetails: funnelError } = useApiMutation()
 
 // JCLAW-84: app-level Tailscale Funnel toggle. Exposes this whole instance (one
 // port serves every channel webhook), so it's one switch, not per-channel.
@@ -129,6 +129,10 @@ onActivated(() => {
           class="text-xs font-mono"
         >{{ tailscaleStatus === 'pending' ? 'checking…' : (tailscale?.enabled ? (tailscale?.available ? 'active' : 'enabled (unavailable)') : 'off') }}</span>
       </div>
+      <ApiErrorAlert
+        :error="funnelError"
+        class="mb-3"
+      />
       <p class="text-xs text-fg-muted mb-3">
         Exposes this JClaw instance to the public internet over HTTPS via Tailscale
         Funnel, so webhook channels (e.g. the Slack Events API) get a reachable

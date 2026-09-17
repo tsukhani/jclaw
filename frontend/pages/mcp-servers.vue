@@ -4,6 +4,8 @@ import { ArrowPathIcon, BeakerIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon,
 
 const { data: servers, refresh } = await useFetch<McpServer[]>('/api/mcp-servers')
 const { mutate, error: mutationError } = useApiMutation()
+// The row switch and delete: kept apart from the form's mutation so its error is not shown twice.
+const { mutate: mutateServer, errorDetails: serverError } = useApiMutation()
 const { confirm } = useConfirm()
 
 type TransportKind = 'STDIO' | 'HTTP'
@@ -183,7 +185,7 @@ async function saveForm() {
 }
 
 async function toggleEnabled(s: McpServer) {
-  await mutate<McpServer>(`/api/mcp-servers/${s.id}`, {
+  await mutateServer<McpServer>(`/api/mcp-servers/${s.id}`, {
     method: 'PUT',
     body: { enabled: !s.enabled },
   })
@@ -203,7 +205,7 @@ async function deleteServer(s: McpServer) {
     variant: 'danger',
   })
   if (!ok) return
-  await mutate(`/api/mcp-servers/${s.id}`, { method: 'DELETE' })
+  await mutateServer(`/api/mcp-servers/${s.id}`, { method: 'DELETE' })
   await refresh()
 }
 
@@ -536,6 +538,10 @@ function removeHeaderRow(i: number) {
       </form>
     </div>
 
+    <ApiErrorAlert
+      :error="serverError"
+      class="mb-4"
+    />
     <div class="bg-surface-elevated border border-border overflow-x-auto">
       <table class="w-full text-sm">
         <thead>

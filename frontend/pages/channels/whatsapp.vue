@@ -34,6 +34,8 @@ const availableAgents = computed(() => {
 })
 
 const { mutate, loading: saving, error: mutationError } = useApiMutation()
+// The card switch and delete: kept apart from the form's mutation so its error is not shown twice.
+const { mutate: mutateBinding, errorDetails: bindingError } = useApiMutation()
 const { confirm } = useConfirm()
 
 const creating = ref(false)
@@ -190,7 +192,7 @@ async function save() {
 
 async function toggleEnabled(binding: WhatsAppBindingSummary) {
   const next = !binding.enabled
-  const result = await mutate(`/api/channels/whatsapp/bindings/${binding.id}`, {
+  const result = await mutateBinding(`/api/channels/whatsapp/bindings/${binding.id}`, {
     method: 'PUT',
     body: { enabled: next },
   })
@@ -204,7 +206,7 @@ async function remove(binding: WhatsAppBindingSummary) {
     confirmText: 'Delete',
   })
   if (!ok) return
-  const result = await mutate(`/api/channels/whatsapp/bindings/${binding.id}`, { method: 'DELETE' })
+  const result = await mutateBinding(`/api/channels/whatsapp/bindings/${binding.id}`, { method: 'DELETE' })
   if (result !== null) refresh()
 }
 
@@ -328,6 +330,10 @@ onBeforeUnmount(stopPoll)
       chats, but a real risk of the number being banned).
     </p>
 
+    <ApiErrorAlert
+      :error="bindingError"
+      class="mb-4"
+    />
     <div
       v-if="!bindings?.length"
       class="bg-surface-elevated border border-border p-6 text-sm text-fg-muted"

@@ -255,6 +255,7 @@ const killing = ref<Set<number>>(new Set())
 
 async function killRun(id: number) {
   killing.value.add(id)
+  actionError.value = null
   try {
     await $fetch(`/api/subagent-runs/${id}/kill`, {
       method: 'POST',
@@ -263,7 +264,7 @@ async function killRun(id: number) {
     await refresh()
   }
   catch (e) {
-    console.error('Failed to kill subagent run:', e)
+    actionError.value = apiErrorDetails(e)
   }
   finally {
     killing.value.delete(id)
@@ -307,7 +308,8 @@ const allRunsSelected = computed(() => selectableRuns.value.length > 0 && select
 const someRunsSelected = computed(() => selectedIds.value.size > 0 && !allRunsSelected.value)
 
 const deletingAll = ref(false)
-const deleteAllError = ref<ApiErrorDetails | null>(null)
+// Delete all and a row's kill: single requests whose failure would otherwise reach only the console.
+const actionError = ref<ApiErrorDetails | null>(null)
 
 /**
  * Filter object for the DELETE /api/subagent-runs body. Mirrors the param
@@ -374,7 +376,7 @@ async function deleteAll() {
   })
   if (!ok) return
   deletingAll.value = true
-  deleteAllError.value = null
+  actionError.value = null
   try {
     await $fetch('/api/subagent-runs', {
       method: 'DELETE',
@@ -385,7 +387,7 @@ async function deleteAll() {
     await refresh()
   }
   catch (e) {
-    deleteAllError.value = apiErrorDetails(e)
+    actionError.value = apiErrorDetails(e)
   }
   finally {
     deletingAll.value = false
@@ -455,7 +457,7 @@ function closePeek() {
       </div>
     </div>
     <ApiErrorAlert
-      :error="bulkError ?? deleteAllError"
+      :error="bulkError ?? actionError"
       class="mb-4"
     />
 

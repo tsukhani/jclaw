@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
@@ -285,5 +285,29 @@ describe('Tasks page — paused state', () => {
     await flushPromises()
 
     expect(counter.n).toBeGreaterThan(before)
+  })
+})
+
+describe('Tasks page — a failed row action (JCLAW-1221)', () => {
+  it('says why a pause did not take', async () => {
+    registerTaskMounts([task({ id: 31, name: 'zz-refused', type: 'SCHEDULED', status: 'PENDING' })])
+    const off = registerEndpoint('/api/tasks/31/pause', {
+      method: 'POST',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(Tasks)
+      await flushPromises()
+      await component.find('button[aria-label="Pause schedule for zz-refused"]').trigger('click')
+      await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="api-error"]').text()).toContain('/api/tasks/31/pause')
+    }
+    finally {
+      off()
+    }
   })
 })

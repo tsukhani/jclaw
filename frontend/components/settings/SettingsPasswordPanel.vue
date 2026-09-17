@@ -2,11 +2,13 @@
 // Password / account management settings panel (JCLAW-680). Resets the admin
 // password hash in the Config DB and signs the operator out. Moved verbatim from
 // pages/settings.vue; owns its own useAuth() / useConfirm() composable calls.
+import type { ApiErrorDetails } from '~/types/api'
 
 // ──────────────────── Password / account management ─────────────────────
 const { resetPassword } = useAuth()
 const { confirm } = useConfirm()
 const resettingPassword = ref(false)
+const resetError = ref<ApiErrorDetails | null>(null)
 
 async function handleResetPassword() {
   // Destructive — confirm via the shared in-app dialog (same pattern as
@@ -23,11 +25,18 @@ async function handleResetPassword() {
   })
   if (!ok) return
   resettingPassword.value = true
-  const success = await resetPassword()
-  resettingPassword.value = false
-  if (success) {
-    navigateTo('/setup-password')
+  resetError.value = null
+  try {
+    await resetPassword()
   }
+  catch (e) {
+    resetError.value = apiErrorDetails(e)
+    return
+  }
+  finally {
+    resettingPassword.value = false
+  }
+  navigateTo('/setup-password')
 }
 </script>
 
@@ -60,6 +69,10 @@ async function handleResetPassword() {
           {{ resettingPassword ? 'Resetting…' : 'Reset' }}
         </button>
       </div>
+      <ApiErrorAlert
+        :error="resetError"
+        class="px-4 pb-2.5"
+      />
     </div>
   </div>
 </template>

@@ -151,3 +151,71 @@ describe('Prompts Library page', () => {
     expect(deleteCalls).toBe(1)
   })
 })
+
+describe('Prompts page — a failed delete (JCLAW-1221)', () => {
+  beforeEach(() => {
+    clearNuxtData()
+    registerEndpoint('/api/prompts', () => samplePrompts())
+    registerEndpoint('/api/prompts/categories', () => CATEGORIES)
+  })
+
+  afterEach(() => {
+    const { _state, _resolve } = useConfirm()
+    if (_state.open) _resolve(false)
+  })
+
+  it('says why the prompt was not removed', async () => {
+    const off = registerEndpoint('/api/prompts/1', {
+      method: 'DELETE',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const c = await mountSuspended(Prompts)
+      await vi.waitFor(() => expect(c.find('[data-testid="prompt-delete-1"]').exists()).toBe(true))
+      await c.find('[data-testid="prompt-delete-1"]').trigger('click')
+      await flushPromises()
+      useConfirm()._resolve(true)
+      await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(c.find('[data-testid="api-error"]').text()).toContain('/api/prompts/1')
+    }
+    finally {
+      off()
+    }
+  })
+})
+
+describe('Prompts page — a failed import (JCLAW-1221)', () => {
+  beforeEach(() => {
+    clearNuxtData()
+    registerEndpoint('/api/prompts', () => samplePrompts())
+    registerEndpoint('/api/prompts/categories', () => CATEGORIES)
+  })
+
+  it('says why and keeps the mode picker so the import can be retried', async () => {
+    const off = registerEndpoint('/api/prompts/import', {
+      method: 'POST',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const c = await mountSuspended(Prompts)
+      await flushPromises()
+      ;(c.vm as unknown as { pendingImport: { prompts: unknown[] } | null }).pendingImport = { prompts: [{ title: 'X', content: 'y' }] }
+      await flushPromises()
+      await c.find('[data-testid="import-mode-picker"]').findAll('button').find(b => b.text().includes('Merge'))!.trigger('click')
+      await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(c.find('[data-testid="api-error"]').text()).toContain('/api/prompts/import')
+      expect(c.find('[data-testid="import-mode-picker"]').exists()).toBe(true)
+    }
+    finally {
+      off()
+    }
+  })
+})

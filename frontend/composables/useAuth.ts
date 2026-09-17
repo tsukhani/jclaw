@@ -104,18 +104,13 @@ export function useAuth() {
    * Wipe the admin password hash from the DB and sign the user out. Used
    * by the Settings → Password section; the server clears the session
    * atomically with the config delete, so the next navigation hits the
-   * middleware's unset-password path and routes to /setup-password.
+   * middleware's unset-password path and routes to /setup-password. Throws
+   * when the server does not reset, so the caller can say why.
    */
-  async function resetPassword(): Promise<boolean> {
-    try {
-      await $fetch('/api/auth/reset-password', { method: 'POST' })
-      authenticated.value = false
-      username.value = null
-      return true
-    }
-    catch {
-      return false
-    }
+  async function resetPassword(): Promise<void> {
+    await $fetch('/api/auth/reset-password', { method: 'POST' })
+    authenticated.value = false
+    username.value = null
   }
 
   return {

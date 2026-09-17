@@ -412,3 +412,30 @@ describe('memories admin page — importance input shows the saved value (JCLAW-
     expect(input.value).toBe('0.7')
   })
 })
+
+describe('memories admin page — a failed delete (JCLAW-1221)', () => {
+  it('says why the selected memories were not deleted', async () => {
+    memoriesResponse = [mem(), mem({ id: '11', text: 'Second memory' })]
+    const off = registerEndpoint('/api/memories', {
+      method: 'DELETE',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const c = await mountSuspended(Memory)
+      await flushPromises()
+      await c.findAll('[data-testid="select-memory"]')[1]!.setValue(true)
+      await c.find('[data-testid="delete-selected"]').trigger('click')
+      await flushPromises()
+      useConfirm()._resolve(true)
+      await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(c.find('[data-testid="api-error"]').text()).toContain('/api/memories')
+    }
+    finally {
+      off()
+    }
+  })
+})

@@ -6,7 +6,7 @@
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import PromptCard from '~/components/prompts/PromptCard.vue'
 import PromptFormDialog from '~/components/prompts/PromptFormDialog.vue'
-import type { Prompt, PromptCategory } from '~/types/api'
+import type { ApiErrorDetails, Prompt, PromptCategory } from '~/types/api'
 
 const { data: promptsData, pending, refresh } = useLazyFetch<Prompt[]>('/api/prompts', { default: () => [] })
 const { data: categoriesData } = useLazyFetch<PromptCategory[]>('/api/prompts/categories', { default: () => [] })
@@ -68,6 +68,9 @@ function openEdit(p: Prompt) {
 }
 
 // ---- delete ----
+// A failed delete or import, which would otherwise reach only the console.
+const actionError = ref<ApiErrorDetails | null>(null)
+
 async function remove(p: Prompt) {
   const ok = await confirm({
     title: 'Delete prompt',
@@ -76,7 +79,14 @@ async function remove(p: Prompt) {
     variant: 'danger',
   })
   if (!ok) return
-  await $fetch(`/api/prompts/${p.id}`, { method: 'DELETE' })
+  actionError.value = null
+  try {
+    await $fetch(`/api/prompts/${p.id}`, { method: 'DELETE' })
+  }
+  catch (e) {
+    actionError.value = apiErrorDetails(e)
+    return
+  }
   await refresh()
 }
 
@@ -131,6 +141,7 @@ async function onImportFile(e: Event) {
 async function doImport(mode: 'merge' | 'replace') {
   if (!pendingImport.value) return
   importing.value = true
+  actionError.value = null
   try {
     await $fetch('/api/prompts/import', {
       method: 'POST',
@@ -138,6 +149,10 @@ async function doImport(mode: 'merge' | 'replace') {
     })
     pendingImport.value = null
     await refresh()
+  }
+  catch (e) {
+    // The mode picker stays open, so the same choice can be retried.
+    actionError.value = apiErrorDetails(e)
   }
   finally {
     importing.value = false
@@ -207,6 +222,10 @@ async function doImport(mode: 'merge' | 'replace') {
       </button>
     </div>
 
+    <ApiErrorAlert
+      :error="actionError"
+      class="mb-4"
+    />
     <!-- Import mode picker (inline; appears after a file is chosen) -->
     <div
       v-if="pendingImport"

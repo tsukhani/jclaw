@@ -255,3 +255,33 @@ describe('Subagents admin page', () => {
     expect(killSpy).toHaveBeenCalledOnce()
   })
 })
+
+describe('Subagents admin page — a failed kill (JCLAW-1221)', () => {
+  it('says why the run was not stopped', async () => {
+    setupAgents()
+    routeQuery.value = {}
+    registerEndpoint('/api/subagent-runs', () => [
+      { id: 41, parentAgentId: 1, parentAgentName: 'main', childAgentId: 2, childAgentName: 'main-sub-live',
+        parentConversationId: 5, childConversationId: 42, mode: 'session', status: 'RUNNING',
+        startedAt: '2026-05-14T10:00:00Z', endedAt: null, outcome: null },
+    ])
+    const off = registerEndpoint('/api/subagent-runs/41/kill', {
+      method: 'POST',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(Subagents)
+      await flushPromises()
+      await component.findAll('button').find(b => (b.attributes('title') ?? '').toLowerCase().includes('kill'))!.trigger('click')
+      await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="api-error"]').text()).toContain('/api/subagent-runs/41/kill')
+    }
+    finally {
+      off()
+    }
+  })
+})
