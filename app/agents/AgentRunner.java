@@ -4,6 +4,7 @@ import channels.ChannelStreamingSink;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
+import llm.routing.RoutedTurn;
 import memory.MemoryAutoCapture;
 import models.Agent;
 import models.Conversation;
@@ -447,6 +448,20 @@ public class AgentRunner {
         var stubConv = new Conversation();
         stubConv.agent = agent;
 
+        var route = TurnRouting.decide(agent, stubConv, userPrompt, null, null);
+        if (route == null && TurnRouting.usesRouter(agent, stubConv)) {
+            Tx.run(() -> sink.appendAssistantMessage(TurnRouting.ROUTER_UNAVAILABLE_ERROR, null));
+            return new ToolCallLoopRunner.LoopOutcome(TurnRouting.ROUTER_UNAVAILABLE_ERROR);
+        }
+        if (route == null) return runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv);
+        return RoutedTurn.callWith(route, stubConv,
+                () -> runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv));
+    }
+
+    /** A task fire from prologue to persisted reply, against {@code stubConv}; see {@link #runForTask}. */
+    private static ToolCallLoopRunner.LoopOutcome runTaskTurn(Agent agent, String userPrompt, AgentExecutionSink sink,
+                                                              @Nullable Set<String> allowedTools,
+                                                              @Nullable String taskName, Conversation stubConv) {
         // The fire path runs on db-scheduler's virtual-thread carrier with
         // no inherited JPA Tx — the chat path inherits one from the
         // [agent-stream] thread's request-scoped context, but Tasks have no
@@ -481,7 +496,7 @@ public class AgentRunner {
             Tx.run(() -> sink.appendAssistantMessage(error, null));
             return new ToolCallLoopRunner.LoopOutcome(error);
         }
-        var fallback = ModelResolver.fallbackFor(agent);
+        var fallback = ModelResolver.fallbackFor(agent, stubConv);
 
         EventLogger.info("llm", agent.name, null,
                 "Task fire: calling %s / %s".formatted(
@@ -556,74 +571,97 @@ public class AgentRunner {
             // queue ownership (trace end/flush/processQueueDrain).
             checkSubagentCancel(conversation);
 
-            // Short setup transaction: persist user message, assemble prompt, resolve provider.
-            // Re-fetch the conversation by ID so it is managed in this persistence context.
-            // Callers on virtual threads (TaskExecutionHandler, webhooks) pass entities that were
-            // loaded in a separate, already-committed Tx.run() — those are detached and
-            // would throw PersistentObjectException on save().
-            var preparedOpt = AgentPromptPreparer.prepareSyncData(agent, userMessage, attachments,
-                    skipUserAppend, conversationId, sink, trace);
-
-            if (preparedOpt.isEmpty()) {
-                return new RunResult(NO_LLM_PROVIDER_ERROR,
+            // JCLAW-1222: a conversation on the model router gets its model first, bound for the whole turn.
+            var route = TurnRouting.decide(agent, conversation, userMessage, attachments, conversation.channelType);
+            if (route == null && TurnRouting.usesRouter(agent, conversation)) {
+                Tx.run(() -> {
+                    if (!skipUserAppend) sink.appendUserMessage(userMessage, attachments);
+                    sink.appendAssistantMessage(TurnRouting.ROUTER_UNAVAILABLE_ERROR, null);
+                });
+                return new RunResult(TurnRouting.ROUTER_UNAVAILABLE_ERROR,
                         Tx.run(() -> ConversationService.findById(conversationId)));
             }
-            var prepared = preparedOpt.get();
-
-            trace.mark(LatencyTrace.PROLOGUE_PROMPT_BUILT);
-
-            // Compression → compaction → context-window trim → audio/vision/video
-            // capability rewrite, all outside the prologue Tx (LLM calls inside).
-            prepared = AgentPromptPreparer.rewriteSyncMedia(prepared, agent, conversation, conversationId, userMessage);
-            trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
-
-            trace.mark(LatencyTrace.PROLOGUE_DONE);
-            // LLM call loop — no transaction open, JDBC connection back in pool
-            var outcome = ToolCallLoopRunner.callWithToolLoop(agent, conversation, conversationId,
-                    prepared.messages(), prepared.tools(), prepared.primary(), prepared.fallback(),
-                    prepared.audioBearers(), prepared.imageBearers(), sink, null);  // JCLAW-414: chat path is not task-cancellable
-            var response = outcome.content();
-            var truncated = outcome.truncated();
-            trace.mark(LatencyTrace.STREAM_BODY_END);
-
-            // JCLAW-273: yielded response — no final assistant message to
-            // persist. The parent agent's turn ended cleanly after the
-            // subagent_yield tool call; the resume re-invocation will
-            // arrive from tools.SubagentSpawnTool#runAsyncAndAnnounce once
-            // the child terminates. Return immediately so the caller sees
-            // YIELDED_RESPONSE on the RunResult.
-            if (YIELDED_RESPONSE.equals(response)) {
-                EventLogger.info(EVT_CATEGORY_AGENT, agent.name, conversation.channelType,
-                        "Parent turn suspended via subagent_yield");
-                var updatedConv = Tx.run(() -> ConversationService.findById(conversationId));
-                return new RunResult(response, updatedConv);
+            if (route == null) {
+                return runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace);
             }
-
-            // Short persistence transaction: final assistant message.
-            // Conversation may have been deleted between LLM call and persist
-            // (loadtest cleanup, manual UI delete, etc.); ConversationSink
-            // logs + skips internally rather than inserting a row with a
-            // null FK.
-            Tx.run(() ->
-                    sink.appendAssistantMessage(response, null, null, null, truncated));
-
-            EventLogger.info("llm", agent.name, conversation.channelType,
-                    "Response generated (%d chars%s)".formatted(response.length(),
-                            truncated ? ", TRUNCATED" : ""));
-
-            // JCLAW-39: async memory auto-capture for the completed turn. Runs on
-            // its own virtual thread after the reply is persisted, so it never
-            // blocks the response. No-op in test mode / when disabled.
-            MemoryAutoCapture.captureAsync(agent, conversationId, userMessage, response);
-
-            var updatedConversation = Tx.run(() -> ConversationService.findById(conversationId));
-            return new RunResult(response, updatedConversation, truncated);
+            return RoutedTurn.callWith(route, conversation,
+                    () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace));
         } finally {
             trace.mark(LatencyTrace.TERMINAL_SENT);
             trace.end();
             EventLogger.flush();
             QueueDrainOrchestrator.processQueueDrain(conversationId);
         }
+    }
+
+    /** The sync turn from prologue to persisted reply; {@link #runAfterAcquire} owns the trace and the queue. */
+    private static RunResult runPreparedTurn(Agent agent, Conversation conversation, String userMessage,
+                                             @Nullable List<AttachmentService.Input> attachments,
+                                             boolean skipUserAppend, AgentExecutionSink sink, LatencyTrace trace) {
+        final Long conversationId = conversation.id;
+
+        // Short setup transaction: persist user message, assemble prompt, resolve provider.
+        // Re-fetch the conversation by ID so it is managed in this persistence context.
+        // Callers on virtual threads (TaskExecutionHandler, webhooks) pass entities that were
+        // loaded in a separate, already-committed Tx.run() — those are detached and
+        // would throw PersistentObjectException on save().
+        var preparedOpt = AgentPromptPreparer.prepareSyncData(agent, userMessage, attachments,
+                skipUserAppend, conversationId, sink, trace);
+
+        if (preparedOpt.isEmpty()) {
+            return new RunResult(NO_LLM_PROVIDER_ERROR,
+                    Tx.run(() -> ConversationService.findById(conversationId)));
+        }
+        var prepared = preparedOpt.get();
+
+        trace.mark(LatencyTrace.PROLOGUE_PROMPT_BUILT);
+
+        // Compression → compaction → context-window trim → audio/vision/video
+        // capability rewrite, all outside the prologue Tx (LLM calls inside).
+        prepared = AgentPromptPreparer.rewriteSyncMedia(prepared, agent, conversation, conversationId, userMessage);
+        trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
+
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
+        // LLM call loop — no transaction open, JDBC connection back in pool
+        var outcome = ToolCallLoopRunner.callWithToolLoop(agent, conversation, conversationId,
+                prepared.messages(), prepared.tools(), prepared.primary(), prepared.fallback(),
+                prepared.audioBearers(), prepared.imageBearers(), sink, null);  // JCLAW-414: chat path is not task-cancellable
+        var response = outcome.content();
+        var truncated = outcome.truncated();
+        trace.mark(LatencyTrace.STREAM_BODY_END);
+
+        // JCLAW-273: yielded response — no final assistant message to
+        // persist. The parent agent's turn ended cleanly after the
+        // subagent_yield tool call; the resume re-invocation will
+        // arrive from tools.SubagentSpawnTool#runAsyncAndAnnounce once
+        // the child terminates. Return immediately so the caller sees
+        // YIELDED_RESPONSE on the RunResult.
+        if (YIELDED_RESPONSE.equals(response)) {
+            EventLogger.info(EVT_CATEGORY_AGENT, agent.name, conversation.channelType,
+                    "Parent turn suspended via subagent_yield");
+            var updatedConv = Tx.run(() -> ConversationService.findById(conversationId));
+            return new RunResult(response, updatedConv);
+        }
+
+        // Short persistence transaction: final assistant message.
+        // Conversation may have been deleted between LLM call and persist
+        // (loadtest cleanup, manual UI delete, etc.); ConversationSink
+        // logs + skips internally rather than inserting a row with a
+        // null FK.
+        Tx.run(() ->
+                sink.appendAssistantMessage(response, null, null, null, truncated));
+
+        EventLogger.info("llm", agent.name, conversation.channelType,
+                "Response generated (%d chars%s)".formatted(response.length(),
+                        truncated ? ", TRUNCATED" : ""));
+
+        // JCLAW-39: async memory auto-capture for the completed turn. Runs on
+        // its own virtual thread after the reply is persisted, so it never
+        // blocks the response. No-op in test mode / when disabled.
+        MemoryAutoCapture.captureAsync(agent, conversationId, userMessage, response);
+
+        var updatedConversation = Tx.run(() -> ConversationService.findById(conversationId));
+        return new RunResult(response, updatedConversation, truncated);
     }
 
     /**

@@ -132,7 +132,7 @@ final class AgentPromptPreparer {
                 sink.appendAssistantMessage(error, null);
                 return Optional.empty();
             }
-            var fallback = ModelResolver.fallbackFor(agent);
+            var fallback = ModelResolver.fallbackFor(agent, conv);
 
             // Conversation-aware overload: lazy-load MCP tool schemas
             // based on which servers the model has discovered via

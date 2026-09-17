@@ -1,5 +1,6 @@
 package services;
 
+import llm.routing.RoutedTurn;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
@@ -28,6 +29,10 @@ import org.jspecify.annotations.Nullable;
  * AgentRunner LLM dispatch path, the Telegram model picker, and the slash
  * command handlers all read the same source — no risk of a fourth call
  * site rolling its own slightly-different copy.
+ *
+ * <p><b>Routed turns.</b> Inside a turn the model router is serving (JCLAW-1222), the pair is the
+ * model the router chose for that conversation rather than the stored {@code router/auto}, so every
+ * helper of the turn sizes, prompts and records for the model actually on the wire.
  */
 public final class ModelOverrideResolver {
 
@@ -55,6 +60,8 @@ public final class ModelOverrideResolver {
 
     /** Effective provider name. See {@link #resolve} for precedence. */
     public static @Nullable String provider(@Nullable Conversation conversation, @Nullable Agent agent) {
+        var routed = RoutedTurn.current(conversation);
+        if (routed != null) return routed.active().provider();
         if (conversation != null && hasOverride(conversation)) {
             return conversation.modelProviderOverride;
         }
@@ -81,6 +88,8 @@ public final class ModelOverrideResolver {
 
     /** Effective model id. See {@link #resolve} for precedence. */
     public static @Nullable String modelId(@Nullable Conversation conversation, @Nullable Agent agent) {
+        var routed = RoutedTurn.current(conversation);
+        if (routed != null) return routed.active().modelId();
         if (conversation != null && hasOverride(conversation)) {
             return conversation.modelIdOverride;
         }

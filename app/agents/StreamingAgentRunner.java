@@ -6,6 +6,8 @@ import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
+import llm.routing.RoutedTurn;
+import llm.routing.SubscriptionUsage;
 import memory.MemoryAutoCapture;
 import models.Agent;
 import models.ChannelType;
@@ -100,7 +102,8 @@ final class StreamingAgentRunner {
                 if (CancellationManager.checkCancelled(isCancelled, agent, channelType, tracedCb)) return;
 
                 // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
-                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, tracedCb, trace);
+                streamRoutedLlmLoop(agent, conversation, channelType, userMessage, attachments,
+                        isCancelled, tracedCb, trace);
 
             } catch (Exception e) {
                 if (e instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -237,6 +240,33 @@ final class StreamingAgentRunner {
     }
 
     /**
+     * Phase 2 entry: a conversation on the model router (JCLAW-1222) gets its model chosen first and the
+     * whole loop bound to that choice; any other conversation runs the loop as it is.
+     */
+    @SuppressWarnings("java:S107") // streamLlmLoop's call surface plus the turn's attachments
+    private static void streamRoutedLlmLoop(Agent agent, Conversation conversation, String channelType,
+                                            String userMessage, @Nullable List<AttachmentService.Input> attachments,
+                                            AtomicBoolean isCancelled, AgentRunner.StreamingCallbacks cb,
+                                            LatencyTrace trace)
+            throws InterruptedException {
+        var route = TurnRouting.decide(agent, conversation, userMessage, attachments, channelType);
+        if (route == null) {
+            if (TurnRouting.usesRouter(agent, conversation)) {
+                cb.onError().accept(new RuntimeException(TurnRouting.ROUTER_UNAVAILABLE_ERROR));
+                return;
+            }
+            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
+            return;
+        }
+        // Emitted before the prologue so the chat shows the model while the reply is still streaming.
+        cb.onStatus().accept("{\"route\":%s}".formatted(route.toJson(route.primary(), false)));
+        RoutedTurn.callWith(route, conversation, () -> {
+            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
+            return null;
+        });
+    }
+
+    /**
      * Phase 2 of streaming: assemble the prompt, resolve the provider, and run
      * the streaming LLM call loop (including tool-call continuation, retry on
      * transient errors, truncation handling, and usage reporting).
@@ -302,19 +332,38 @@ final class StreamingAgentRunner {
         var effectiveModelIdForCall = Objects.requireNonNull(
                 ModelResolver.effectiveModelId(agent, conversation), "agent has no model configured");
         // JCLAW-1190: resolved once per turn; round 1 and every continuation round share it.
-        var fallback = ModelResolver.fallbackFor(agent);
+        var fallback = ModelResolver.fallbackFor(agent, conversation);
+        // A routed turn fails over by promotion below, which moves the whole turn; the provider-level
+        // failover would switch this one call and leave the rest of the turn on the model that refused.
+        var routed = RoutedTurn.current(conversation);
         // Round-1 stream, with a transient-5xx retry and (JCLAW) an audio-format-rejection →
         // Whisper-transcript re-stream. When the audio fallback fires it rewrites the message to the
         // transcript and returns it, so the tool-call continuation loop below reuses the rewritten
         // (no-longer-audio) messages rather than re-sending the rejected audio.
         var round1 = streamRound1WithAudioFallback(primary, effectiveModelIdForCall, messages, tools, cb,
                 maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, supportsAudioForStream,
-                fallback);
+                routed != null ? null : fallback);
         if (round1 == null) return; // canceled mid-stream
         var accumulator = round1.accumulator();
         messages = round1.messages();
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
+
+        if (accumulator.error() != null) SubscriptionUsage.noteFailure(accumulator.error());
+        var promoted = routed != null ? promoteRoutedFailover(routed, accumulator, agent, channelType, cb) : null;
+        if (promoted != null) {
+            primary = promoted;
+            effectiveModelIdForCall = Objects.requireNonNull(
+                    ModelResolver.effectiveModelId(agent, conversation), "agent has no model configured");
+            thinkingMode = ModelResolver.resolveThinkingMode(agent, conversation, primary);
+            maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, messages, tools);
+            modelInfo = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
+            fallback = ModelResolver.fallbackFor(agent, conversation);
+            accumulator = streamFirstRoundWithRetry(primary, effectiveModelIdForCall, messages, tools, cb,
+                    maxTokens, thinkingMode, channelType, isCancelled, agent, fallback);
+            if (accumulator == null) return; // canceled mid-stream
+            if (accumulator.error() != null) SubscriptionUsage.noteFailure(accumulator.error());
+        }
 
         // The AUDIO_PASSTHROUGH_OUTCOME log already fired inside the helper; here we only surface a
         // terminal round-1 error to the caller (a streamed error can't be un-sent, so this ends the turn).
@@ -357,6 +406,31 @@ final class StreamingAgentRunner {
         // Placed after finalize (response persisted + terminal emitted) so it
         // never blocks delivery; the YIELDED_RESPONSE path above already returned.
         MemoryAutoCapture.captureAsync(agent, conversation.id, userMessage, post.content());
+    }
+
+    /**
+     * JCLAW-1222: hand a routed turn to the router's next-best model when round 1 failed before the user
+     * saw anything — no content, reasoning or tool call — and a fallback on another provider exists.
+     * Once anything has streamed the failure stands, for the reason JCLAW-1182 gives: a second model
+     * cannot silently take over an answer already on screen. Returns the promoted provider, or null.
+     */
+    private static @Nullable LlmProvider promoteRoutedFailover(RoutedTurn.Binding routed,
+                                                               LlmProvider.StreamAccumulator accumulator,
+                                                               Agent agent, String channelType,
+                                                               AgentRunner.StreamingCallbacks cb) {
+        if (!(accumulator.error() instanceof LlmProvider.LlmException failure)) return null;
+        if (!accumulator.content().isEmpty() || !accumulator.toolCalls().isEmpty() || accumulator.reasoningChars() > 0) {
+            return null;
+        }
+        var from = routed.active();
+        var to = routed.fallback();
+        var provider = to != null ? ProviderRegistry.get(to.provider()) : null;
+        if (to == null || provider == null) return null;
+        routed.promote();
+        EventLogger.warn("router", agent.name, channelType, "Failing over from %s to %s: %s"
+                .formatted(from.describe(), to.describe(), failure.getMessage()));
+        cb.onStatus().accept("{\"route\":%s}".formatted(routed.decision().toJson(to, true)));
+        return provider;
     }
 
     /**

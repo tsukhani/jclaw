@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
+import llm.routing.RoutedTurn;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
@@ -196,16 +197,21 @@ public final class UsageMetricsBuilder {
     /**
      * JCLAW-107 / JCLAW-108: capture per-turn model identity so the
      * cost aggregator can attribute each turn without needing live
-     * provider lookup. Writes the RESOLVED values (conversation
-     * override when present, agent's default otherwise) — this is
-     * the identity of the model that actually ran the turn, which
-     * is what cost attribution needs.
+     * provider lookup. Writes the RESOLVED values (the routed model in
+     * a routed turn, else the conversation override when present, else
+     * the agent's default) — this is the identity of the model that
+     * actually ran the turn, which is what cost attribution needs.
      */
     private static void addResolvedModelIdentity(JsonObject usageMap, Agent agent, Conversation conversation) {
         var resolvedProvider = ModelResolver.effectiveModelProvider(agent, conversation);
         var resolvedModelId = ModelResolver.effectiveModelId(agent, conversation);
         if (resolvedProvider != null) usageMap.addProperty("modelProvider", resolvedProvider);
         if (resolvedModelId != null) usageMap.addProperty("modelId", resolvedModelId);
+        // JCLAW-1222: a routed turn also records why this model answered; the next turn reads it back.
+        var routed = RoutedTurn.current(conversation);
+        if (routed != null) {
+            usageMap.add("route", routed.decision().toJson(routed.active(), routed.failedOver()));
+        }
     }
 
     /**

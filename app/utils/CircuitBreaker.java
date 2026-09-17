@@ -289,6 +289,16 @@ public final class CircuitBreaker {
         return state;
     }
 
+    /**
+     * True while OPEN and still inside its cooldown, when {@link #admit()} would refuse. Unlike
+     * {@link #state()} it turns false once the cooldown elapses, and unlike {@code admit()} it moves
+     * no state and takes no permit — so a caller choosing between providers can skip one without
+     * starving it of the probe that would close it.
+     */
+    public synchronized boolean isCoolingDown() {
+        return state == State.OPEN && nanoTime.getAsLong() - openedAtNanos < cooldownNanos;
+    }
+
     public synchronized @NonNull Stats stats() {
         return new Stats(state, count, failures, slowCalls, lastReason);
     }

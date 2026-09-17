@@ -2,6 +2,8 @@ package agents;
 
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
+import llm.ProviderRegistry;
+import llm.routing.RoutedTurn;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
@@ -65,13 +67,19 @@ public final class ModelResolver {
     }
 
     /**
-     * The operator's fallback for {@code agent} (JCLAW-1190): where a turn goes when the
-     * primary's breaker refuses it. Null when none is set, or when the chosen provider has since
-     * lost its configuration — logged, so a fallback that silently stopped existing is visible.
-     * Not subject to the conversation override: the fallback is the agent's, and a per-turn
-     * provider override that lands on it is handled by the failover entry points.
+     * Where a turn goes when its primary fails it. In a routed turn (JCLAW-1222) that is the router's
+     * next-best model on another provider; otherwise, or when the router found none, the operator's
+     * fallback for {@code agent} (JCLAW-1190). Null when neither exists, or when the chosen provider
+     * has since lost its configuration — logged by {@link LlmProvider.Fallback#forAgent}, so a
+     * fallback that silently stopped existing is visible. Not subject to the conversation override:
+     * the fallback is the agent's, and a per-turn provider override that lands on it is handled by
+     * the failover entry points.
      */
-    public static LlmProvider.@Nullable Fallback fallbackFor(@Nullable Agent agent) {
+    public static LlmProvider.@Nullable Fallback fallbackFor(@Nullable Agent agent, @Nullable Conversation conv) {
+        var routed = RoutedTurn.current(conv);
+        var target = routed != null ? routed.fallback() : null;
+        var provider = target != null ? ProviderRegistry.get(target.provider()) : null;
+        if (target != null && provider != null) return new LlmProvider.Fallback(provider, target.modelId());
         return LlmProvider.Fallback.forAgent(agent);
     }
 

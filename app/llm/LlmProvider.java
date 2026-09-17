@@ -26,6 +26,7 @@ import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
 import llm.ToolCallChunkMerger.ToolCallBuilder;
+import llm.routing.SubscriptionUsage;
 import models.Agent;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
@@ -919,6 +920,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         try {
             return primary.chat(model, messages, tools, maxTokens, thinkingMode, channel);
         } catch (LlmException e) {
+            SubscriptionUsage.noteFailure(e);
             if (fallback != null && fallback.coversFor(primary)) {
                 EventLogger.warn("llm", "Failing over from %s to %s: %s"
                         .formatted(primary.config().name(), fallback.describe(), e.getMessage()));
