@@ -14,6 +14,7 @@ import services.ConfigService;
 import services.InternalApiTokenService;
 import services.LoadTestRunner;
 import services.LoggerLevelService;
+import services.PrivilegedConfig;
 import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 
@@ -82,7 +83,7 @@ public class ApiConfigController extends Controller {
                 .filter(c -> !isReservedKey(c.key))
                 .map(c -> new ConfigEntry(
                         c.key,
-                        ConfigService.maskValue(c.key, c.value),
+                        ConfigService.maskValue(c.key, effectiveValue(c)),
                         c.updatedAt.toString()))
                 .toList();
         renderJSON(gson.toJson(new ConfigListResponse(entries)));
@@ -99,8 +100,17 @@ public class ApiConfigController extends Controller {
         }
         renderJSON(gson.toJson(new ConfigEntry(
                 config.key,
-                ConfigService.maskValue(config.key, config.value),
+                ConfigService.maskValue(config.key, effectiveValue(config)),
                 config.updatedAt.toString())));
+    }
+
+    /**
+     * The row's value once an application.conf ceiling applies, which is what takes effect. A stored
+     * row can hold a looser value than the ceiling allows, and showing it would present that as live.
+     */
+    private static String effectiveValue(Config row) {
+        var reconciled = PrivilegedConfig.reconcile(row.key, row.value);
+        return reconciled != null ? reconciled : row.value;
     }
 
     /** Reject the agent principal on the two config writes. The table holds the instance's own

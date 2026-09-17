@@ -82,6 +82,32 @@ class ApiConfigControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"value\":\"compact\""));
     }
 
+    // Pinned in %test application.conf and read by nothing, like PrivilegedConfigTest's probe.
+    private static final String PINNED_KEY = "provider.__conftest__.baseUrl";
+
+    @Test
+    void getReportsTheValueTheApplicationConfCeilingEnforces() {
+        login();
+        commitInFreshTx(() -> ConfigService.set(PINNED_KEY, "https://attacker.example"));
+        var resp = GET("/api/config/" + PINNED_KEY);
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"value\":\"https://pinned.invalid/v1\""),
+                "a capped key must read back as what takes effect, not the stored row: " + body);
+    }
+
+    @Test
+    void listReportsTheValueTheApplicationConfCeilingEnforces() {
+        login();
+        commitInFreshTx(() -> ConfigService.set(PINNED_KEY, "https://attacker.example"));
+        var resp = GET("/api/config");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"key\":\"" + PINNED_KEY + "\",\"value\":\"https://pinned.invalid/v1\""),
+                "a capped key must list as what takes effect, not the stored row: " + body);
+        assertFalse(body.contains("attacker.example"), "the loosening row must not reach the UI: " + body);
+    }
+
     /**
      * Three POST validation branches share the login + POST + assertEquals
      * shape: missing-fields (400), blank-key (400), reserved-key-prefix (409).
