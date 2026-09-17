@@ -3,6 +3,7 @@ package utils;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
+import java.io.Serializable;
 import java.util.Locale;
 import java.util.Map;
 
@@ -76,7 +77,8 @@ public final class LlmErrorTemplates {
      *                          the model is not listed
      */
     public record Failure(@NonNull Remedy remedy, @NonNull String provider, @Nullable String model,
-                          @Nullable Long retryAfterSeconds, @Nullable Integer contextWindow) {}
+                          @Nullable Long retryAfterSeconds, @Nullable Integer contextWindow)
+            implements Serializable {}
 
     /**
      * The remedy for {@code failure}, or a generic model-call template when the failure carries

@@ -10,7 +10,6 @@ import play.exceptions.DatabaseException;
 import utils.ErrorRendering;
 import utils.StartupErrorTemplates;
 
-import java.sql.Connection;
 import java.sql.Driver;
 import java.sql.SQLException;
 import java.util.Properties;
@@ -33,7 +32,7 @@ public class DatabaseBootCheckPlugin extends PlayPlugin {
     public void onApplicationStart() {
         // A dev-mode restart that kept its pool is already connected; opening and closing a
         // connection then gains nothing.
-        if (DB.datasource != null) return;
+        if (DB.getDataSource() != null) return;
         for (var name : Configuration.getDbNames()) {
             var config = new Configuration(name);
             var message = failureMessage(config.getProperty("db", ""), config.getProperty("db.url"),
@@ -73,7 +72,7 @@ public class DatabaseBootCheckPlugin extends PlayPlugin {
         var info = new Properties();
         if (user != null) info.put("user", user);
         if (pass != null) info.put("password", pass);
-        try (Connection _ = driver.connect(url, info)) {
+        try (var _ = driver.connect(url, info)) {
             return null;
         } catch (SQLException e) {
             return ErrorRendering.PLAIN.render(StartupErrorTemplates.databaseUnavailable(e.getMessage()));

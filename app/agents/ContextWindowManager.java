@@ -153,12 +153,15 @@ public final class ContextWindowManager {
      */
     public static double resolveSafetyMultiplier(@Nullable String providerName,
                                                  @Nullable String modelId) {
-        var tiers = providerName == null
-                ? new String[] {SAFETY_MULTIPLIER_KEY}
-                : modelId == null
-                        ? new String[] {SAFETY_MULTIPLIER_PREFIX + providerName, SAFETY_MULTIPLIER_KEY}
-                        : new String[] {SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId,
-                                SAFETY_MULTIPLIER_PREFIX + providerName, SAFETY_MULTIPLIER_KEY};
+        String[] tiers;
+        if (providerName == null) {
+            tiers = new String[] {SAFETY_MULTIPLIER_KEY};
+        } else if (modelId == null) {
+            tiers = new String[] {SAFETY_MULTIPLIER_PREFIX + providerName, SAFETY_MULTIPLIER_KEY};
+        } else {
+            tiers = new String[] {SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId,
+                    SAFETY_MULTIPLIER_PREFIX + providerName, SAFETY_MULTIPLIER_KEY};
+        }
         // A rejected tier falls through like an unset one, but is reported once the value that
         // took its place is known, so the message can name it.
         String rejectedKey = null;

@@ -107,12 +107,10 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
             }
             return result.content();
         } catch (IOException e) {
-            // Transport: the server never answered. Kept apart from McpException below because
-            // the remedies differ — reconnect the server versus read what it replied.
+            // Transport: the server never answered. Kept apart from McpException, which the
+            // RuntimeException catch below takes, because the remedies differ — reconnect the
+            // server versus read what it replied.
             return ToolErrorTemplates.render(ToolErrorTemplates.mcpConnectionFailed(
-                    serverName, def.name(), ApiResponses.messageOf(e)));
-        } catch (McpException e) {
-            return ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
                     serverName, def.name(), ApiResponses.messageOf(e)));
         } catch (RuntimeException e) {
             return ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(

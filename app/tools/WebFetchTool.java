@@ -225,23 +225,28 @@ public class WebFetchTool implements ToolRegistry.Tool {
             return ToolRegistry.ToolResult.error(
                     ToolErrorTemplates.webTlsFailed(url, String.valueOf(e.getMessage())));
         } catch (Exception e) {
-            if (e.getCause() instanceof SSLException sslEx) {
-                return ToolRegistry.ToolResult.error(
-                        ToolErrorTemplates.webTlsFailed(url, String.valueOf(sslEx.getMessage())));
-            }
-            // A refusal is the case escalation exists for — an HTTP 403 arrives here as
-            // an IOException, and giving up on it is exactly what left the higher rungs
-            // unreachable (JCLAW-1099). The SSRF, host-allowlist and TLS branches above
-            // deliberately do NOT escalate: those are our own refusals, and retrying
-            // them through a different transport would be a way around the guard.
-            var escalated = climb(url, null, null, e.getMessage(), agent);
-            if (escalated.usable()) {
-                var escalatedBody = escalated.fetched();
-                return ToolRegistry.ToolResult.text("html".equals(mode) && escalatedBody != null
-                        ? rawHtml(escalatedBody, url, agent) : escalated.resolvedText());
-            }
-            return ToolRegistry.ToolResult.error(classifyFetchFailure(url, e));
+            return escalateOrReport(url, mode, agent, e);
         }
+    }
+
+    /** The failures {@link #executeRich} has no specific catch for: a wrapped TLS failure, or one to escalate. */
+    private ToolRegistry.ToolResult escalateOrReport(String url, String mode, Agent agent, Exception e) {
+        if (e.getCause() instanceof SSLException sslEx) {
+            return ToolRegistry.ToolResult.error(
+                    ToolErrorTemplates.webTlsFailed(url, String.valueOf(sslEx.getMessage())));
+        }
+        // A refusal is the case escalation exists for — an HTTP 403 arrives here as
+        // an IOException, and giving up on it is exactly what left the higher rungs
+        // unreachable (JCLAW-1099). The SSRF, host-allowlist and TLS branches above
+        // deliberately do NOT escalate: those are our own refusals, and retrying
+        // them through a different transport would be a way around the guard.
+        var escalated = climb(url, null, null, e.getMessage(), agent);
+        if (escalated.usable()) {
+            var escalatedBody = escalated.fetched();
+            return ToolRegistry.ToolResult.text("html".equals(mode) && escalatedBody != null
+                    ? rawHtml(escalatedBody, url, agent) : escalated.resolvedText());
+        }
+        return ToolRegistry.ToolResult.error(classifyFetchFailure(url, e));
     }
 
     /**

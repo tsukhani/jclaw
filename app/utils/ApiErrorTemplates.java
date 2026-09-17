@@ -86,17 +86,17 @@ public final class ApiErrorTemplates {
                 "Install the skill on the agent, then switch it on again.");
     }
 
-    private static final String PASSWORD_LENGTH_CHECK =
+    private static final String LENGTH_RULE_CHECK =
             "Length is the only rule — there are no composition requirements.";
 
-    private static final String PASSWORD_CAP_CHECK =
+    private static final String LENGTH_CAP_CHECK =
             "The cap bounds how long each sign-in takes to check; it is not a strength judgement.";
 
     /** A setup or reset password under the minimum, naming the minimum rather than only its existence. */
     public static ErrorTemplate passwordTooShort(int minLength) {
         return new ErrorTemplate(ApiResponses.PASSWORD_TOO_SHORT,
                 "That password is shorter than %d characters, the minimum.".formatted(minLength),
-                PASSWORD_LENGTH_CHECK,
+                LENGTH_RULE_CHECK,
                 "Choose a password of at least %d characters and submit again.".formatted(minLength));
     }
 
@@ -104,7 +104,7 @@ public final class ApiErrorTemplates {
     public static ErrorTemplate passwordTooLong(int maxLength) {
         return new ErrorTemplate(ApiResponses.PASSWORD_TOO_LONG,
                 "That password is longer than %d characters, the maximum.".formatted(maxLength),
-                PASSWORD_CAP_CHECK,
+                LENGTH_CAP_CHECK,
                 "Choose a password of at most %d characters and submit again.".formatted(maxLength));
     }
 
@@ -168,9 +168,9 @@ public final class ApiErrorTemplates {
                     "Setup only applies to an instance that has none — this one is past that point.",
                     "Sign in instead, or reset the password if you no longer have it."),
             e(ApiResponses.PASSWORD_TOO_SHORT, "That password is shorter than the minimum length.",
-                    PASSWORD_LENGTH_CHECK, "Choose a longer password and submit again."),
+                    LENGTH_RULE_CHECK, "Choose a longer password and submit again."),
             e(ApiResponses.PASSWORD_TOO_LONG, "That password is longer than the maximum length.",
-                    PASSWORD_CAP_CHECK, "Shorten it and submit again."),
+                    LENGTH_CAP_CHECK, "Shorten it and submit again."),
             e(ApiResponses.PASSWORD_BREACHED, "That password appears in a known breach corpus.",
                     "The check is against published breach data, not a judgement of its strength.",
                     "Choose a different password. This one cannot be used even if retried."),
