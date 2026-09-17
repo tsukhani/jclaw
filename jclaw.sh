@@ -3995,14 +3995,6 @@ do_diagnostics() {
     node "$SCRIPT_DIR/bin/diagnostics.mjs" ${DIAGNOSTICS_ARGS[@]+"${DIAGNOSTICS_ARGS[@]}"}
 }
 
-# ─── Consolidated test runner ───
-
-# Runs the full pre-push validation suite: backend tests (play autotest),
-# frontend tests (pnpm test), and frontend quality gates (stylelint, lint,
-# typecheck). Streams each check's output and prints a consolidated summary
-# at the end. Continues past failures so the user sees every result in one
-# round-trip — the whole point of this subcommand. Exits non-zero if any
-
 # A boot failure JClaw explains prints a "What broke:" block (utils.StartupErrorTemplates), and the
 # stack traces Play logs after it push that block out of the 20-line tail below.
 print_startup_error_block() {
@@ -4126,6 +4118,13 @@ do_e2e() {
     (cd "$SCRIPT_DIR/frontend" && JCLAW_E2E_BASE_URL="$base" pnpm test:e2e)
 }
 
+# ─── Consolidated test runner ───
+
+# Runs the full pre-push validation suite: backend tests (play autotest),
+# frontend tests (pnpm test), and frontend quality gates (stylelint, lint,
+# typecheck). Streams each check's output and prints a consolidated summary
+# at the end. Continues past failures so the user sees every result in one
+# round-trip — the whole point of this subcommand. Exits non-zero if any
 # check failed so CI/git hooks can depend on it.
 #
 # play autotest sometimes returns 0 even when assertions fail, so we also
