@@ -1949,4 +1949,18 @@ describe('Chat page — composer error chips', () => {
     expect(component.find('[data-testid="override-error"]').exists()).toBe(true)
     expect(component.find('[data-testid="override-error"]').text()).toContain('The model override was refused.')
   })
+  it('shows why a regenerate stopped short, and dismisses it', async () => {
+    setupBaseChatApi()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    ;(component.vm as unknown as { actionError: string | null }).actionError = '[DELETE] "/api/conversations/5/messages/11": 502 Bad Gateway'
+    await flushPromises()
+
+    const chip = component.find('[data-testid="action-error"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('/api/conversations/5/messages/11')
+    await chip.find('button[title="Dismiss"]').trigger('click')
+    expect(component.find('[data-testid="action-error"]').exists()).toBe(false)
+  })
 })

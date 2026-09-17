@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { setResponseStatus, type H3Event } from 'h3'
 import { defineComponent, h, ref, shallowRef } from 'vue'
 import type { Message } from '~/types/api'
 import {
@@ -120,5 +121,72 @@ describe('useChatMessageActions', () => {
     await api.regenerateMessage(messages.value[1]!)
     expect(sendMessage).not.toHaveBeenCalled()
     expect(messages.value).toHaveLength(2)
+  })
+})
+
+describe('useChatMessageActions — regenerate when the server keeps a message (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  function answer(url: string, code: number) {
+    unregister.push(registerEndpoint(url, {
+      method: 'DELETE',
+      handler: (event: H3Event) => {
+        setResponseStatus(event, code)
+        return code === 404 ? { type: 'error', code: 'not_found', message: 'Not found' } : '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+  }
+
+  function turn() {
+    return shallowRef<Message[]>([
+      msg({ id: 10, role: 'user', content: 'question' }),
+      msg({ id: 11, role: 'assistant', content: 'answer' }),
+    ])
+  }
+
+  it('keeps the whole turn, re-sends nothing and names the request when the reply cannot be deleted', async () => {
+    answer('/api/conversations/5/messages/11', 502)
+    const messages = turn()
+    const sendMessage = vi.fn()
+    const input = ref('')
+    const { api } = await mountActions({ messages, sendMessage, input })
+
+    await api.regenerateMessage(messages.value[1]!)
+
+    expect(messages.value.map(m => m.id)).toEqual([10, 11])
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(input.value).toBe('')
+    expect(api.actionError.value).toContain('/api/conversations/5/messages/11')
+  })
+
+  it('shows only what the server still holds when the prompt cannot be deleted after the reply was', async () => {
+    answer('/api/conversations/5/messages/10', 502)
+    const messages = turn()
+    const sendMessage = vi.fn()
+    const { api } = await mountActions({ messages, sendMessage })
+
+    await api.regenerateMessage(messages.value[1]!)
+
+    expect(messages.value.map(m => m.id)).toEqual([10])
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(api.actionError.value).toContain('/api/conversations/5/messages/10')
+  })
+
+  it('treats a message that is already gone as deleted and regenerates', async () => {
+    answer('/api/conversations/5/messages/11', 404)
+    const messages = turn()
+    const sendMessage = vi.fn()
+    const { api } = await mountActions({ messages, sendMessage })
+
+    await api.regenerateMessage(messages.value[1]!)
+
+    expect(messages.value).toHaveLength(0)
+    expect(sendMessage).toHaveBeenCalledOnce()
+    expect(api.actionError.value).toBeNull()
   })
 })

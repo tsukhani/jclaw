@@ -21,6 +21,8 @@ export interface UseChatMessageActionsDeps {
 }
 
 export interface UseChatMessageActions {
+  /** Why the last regenerate stopped short, for the composer's error chip; null when it did not. */
+  actionError: Ref<string | null>
   copiedMessageId: Ref<string | number | null>
   tokStatsHoverKey: Ref<string | number | null>
   copyMessage: (msg: Message) => Promise<void>
@@ -111,18 +113,35 @@ export function useChatMessageActions(deps: UseChatMessageActionsDeps): UseChatM
     return -1
   }
 
+  const actionError = ref<string | null>(null)
+
   /**
-   * Best-effort server-side delete of messages [startIdx..end). Failures are
-   * swallowed because the local truncate happens regardless.
+   * Deletes messages [startIdx..end) newest first, dropping each from the transcript once the server
+   * confirms it, so a failure part-way leaves the transcript matching the server. Resolves false, with
+   * {@code actionError} set, when a message could not be deleted.
    */
-  async function deleteServerMessagesFrom(convoId: number, startIdx: number) {
-    for (let i = startIdx; i < messages.value.length; i++) {
-      const m = messages.value[i]!
-      if (!m.id) continue
-      try {
-        await $fetch(`/api/conversations/${convoId}/messages/${m.id}`, { method: 'DELETE' })
+  async function deleteServerMessagesFrom(convoId: number, startIdx: number): Promise<boolean> {
+    try {
+      for (let i = messages.value.length - 1; i >= startIdx; i--) {
+        const m = messages.value[i]!
+        if (m.id) {
+          try {
+            await $fetch(`/api/conversations/${convoId}/messages/${m.id}`, { method: 'DELETE' })
+          }
+          catch (e) {
+            // Already gone is what the rewind wants; any other failure leaves the model reading this message.
+            if ((e as { statusCode?: number }).statusCode !== 404) {
+              actionError.value = apiErrorDetails(e).message
+              return false
+            }
+          }
+        }
+        messages.value.splice(i, 1)
       }
-      catch { /* best-effort — local truncate still happens */ }
+      return true
+    }
+    finally {
+      triggerRef(messages)
     }
   }
 
@@ -141,7 +160,8 @@ export function useChatMessageActions(deps: UseChatMessageActionsDeps): UseChatM
     const userIdx = findPriorUserMessageIdx(idx)
     if (userIdx < 0) return
     const userContent = messages.value[userIdx]!.content ?? ''
-    if (convoId) await deleteServerMessagesFrom(convoId, userIdx)
+    actionError.value = null
+    if (convoId && !(await deleteServerMessagesFrom(convoId, userIdx))) return
     messages.value = messages.value.slice(0, userIdx)
     input.value = userContent
     await nextTick()
@@ -206,6 +226,7 @@ export function useChatMessageActions(deps: UseChatMessageActionsDeps): UseChatM
   }
 
   return {
+    actionError,
     copiedMessageId,
     tokStatsHoverKey,
     copyMessage,

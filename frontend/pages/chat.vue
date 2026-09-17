@@ -596,6 +596,7 @@ const formatAttachmentSize = formatSize
 // (sendMessage). Its refs (copiedMessageId, tokStatsHoverKey) + handlers wire
 // straight into the ChatMessage rows.
 const {
+  actionError,
   copiedMessageId,
   tokStatsHoverKey,
   copyMessage,
@@ -1033,7 +1034,7 @@ function exportConversation() {
             @paste="handlePaste"
           >
             <div
-              v-if="attachedFiles.length || attachError || overrideError"
+              v-if="attachedFiles.length || attachError || overrideError || actionError"
               class="px-3 pt-2.5 pb-1 flex flex-wrap gap-1.5"
             >
               <span
@@ -1080,6 +1081,24 @@ function exportConversation() {
                   class="-m-1.5 p-1.5 text-red-700 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
                   title="Dismiss"
                   @click="overrideError = null"
+                >
+                  <XMarkIcon
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                </button>
+              </span>
+              <span
+                v-if="actionError"
+                data-testid="action-error"
+                class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-[11px] text-red-700 dark:text-red-300"
+              >
+                <span>{{ actionError }}</span>
+                <button
+                  type="button"
+                  class="-m-1.5 p-1.5 text-red-700 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
+                  title="Dismiss"
+                  @click="actionError = null"
                 >
                   <XMarkIcon
                     class="w-3 h-3"
