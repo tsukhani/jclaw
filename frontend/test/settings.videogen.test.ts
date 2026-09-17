@@ -243,3 +243,91 @@ describe('Settings — Video Generation radios put the saved choice back when a 
     await chooseAndExpectPutBack(component, '#videogen-engine-ltx-int8', '#videogen-engine-ltx')
   })
 })
+
+describe('Settings — Video Generation Self-Hosted radio when the probe selects nothing', () => {
+  let unregister: Array<() => void> = []
+  let posted: Array<{ key?: string, value?: string }> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+    posted = []
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  type Snapshot = { uvAvailable: boolean, uvReason: null, state: string, capability: unknown, error: string | null }
+  const needsProbe: Snapshot = { uvAvailable: true, uvReason: null, state: 'NEEDS_PROBE', capability: null, error: null }
+  function ready(runnable: boolean): Snapshot {
+    return {
+      uvAvailable: true,
+      uvReason: null,
+      state: 'READY',
+      capability: {
+        kind: 'cuda',
+        gpu: 'Test GPU',
+        freeVramGb: 24,
+        totalVramGb: 24,
+        models: [{ id: 'ltx', label: 'LTX', provider: 'ltx-local', minVramGb: 8, tier: runnable ? 'ready' : 'no', runnable, reason: runnable ? null : 'too little VRAM' }],
+      },
+      error: null,
+    }
+  }
+
+  // Each probe settles on the next snapshot in `results`.
+  function probeSettlesOn(results: Snapshot[]) {
+    let snapshot = needsProbe
+    setupApi({
+      capturePost: b => posted.push(b),
+      extraEntries: [
+        { key: 'provider.replicate.apiKey', value: 'r8_****' },
+        { key: 'videogen.provider', value: 'replicate' },
+      ],
+    })
+    unregister.push(registerEndpoint('/api/videogen/capability', () => snapshot))
+    unregister.push(registerEndpoint('/api/videogen/capability/probe', {
+      method: 'POST',
+      handler: () => {
+        snapshot = results.shift() ?? snapshot
+        return { state: 'PROBING' }
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  const checked = (component: any, id: string) => (component.find(id).element as HTMLInputElement).checked
+
+  it('puts the saved backend back when no engine can run here', async () => {
+    probeSettlesOn([ready(false)])
+    const component = await mountSettingsSection('video-generation')
+    await vi.waitFor(() => expect((component.find('#videogen-provider-local').element as HTMLInputElement).disabled).toBe(false))
+
+    await component.find('#videogen-provider-local').setValue(true)
+    await vi.waitFor(() => expect(component.text()).toContain('can\'t run local video generation'))
+
+    expect(checked(component, '#videogen-provider-replicate')).toBe(true)
+    expect(checked(component, '#videogen-provider-local')).toBe(false)
+    expect(posted).toEqual([])
+  })
+
+  it('puts the saved backend back when the probe fails, and a later detect does not switch it', async () => {
+    probeSettlesOn([{ ...needsProbe, state: 'ERROR', error: 'probe crashed' }, ready(true)])
+    const component = await mountSettingsSection('video-generation')
+    await vi.waitFor(() => expect((component.find('#videogen-provider-local').element as HTMLInputElement).disabled).toBe(false))
+
+    await component.find('#videogen-provider-local').setValue(true)
+    await vi.waitFor(() => expect(component.text()).toContain('probe crashed'))
+    expect(checked(component, '#videogen-provider-replicate')).toBe(true)
+    expect(checked(component, '#videogen-provider-local')).toBe(false)
+
+    const detect = component.findAll('button').find((b: { text: () => string }) => b.text() === 'detect GPU')
+    await detect!.trigger('click')
+    await vi.waitFor(() => expect(component.find('#videogen-engine-ltx').exists()).toBe(true))
+    await flushPromises()
+
+    expect(posted).toEqual([])
+    expect(checked(component, '#videogen-provider-replicate')).toBe(true)
+  })
+})

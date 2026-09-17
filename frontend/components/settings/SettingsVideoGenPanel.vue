@@ -202,10 +202,12 @@ async function selectSelfHosted() {
   }
 }
 watch(videoCapState, (s) => {
-  if (s !== 'READY' || !pendingLocalAutoSelect.value) return
+  if (!pendingLocalAutoSelect.value || (s !== 'READY' && s !== 'ERROR' && s !== 'UNAVAILABLE')) return
   pendingLocalAutoSelect.value = false
-  const best = videoEngines.value.find(e => e.runnable)
-  if (best) void selectLocalEngine(best) // nothing runnable -> leave provider as-is; the list shows why
+  const best = s === 'READY' ? videoEngines.value.find(e => e.runnable) : undefined
+  if (best) void selectLocalEngine(best)
+  // Nothing to select: the panel says why, and the radio goes back to the backend that is still saved.
+  else chosenVideogenBackend.value = videogenBackend.value
 })
 // State loads lazily, so a probe already PROBING when the panel opens only
 // becomes visible once the fetch resolves — resume the capability poll then.
