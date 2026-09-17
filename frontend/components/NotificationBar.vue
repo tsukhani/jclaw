@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { BellAlertIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import type { ApiErrorDetails } from '~/types/api'
 
 /**
  * Global notification toast overlay (JCLAW reminders feature).
@@ -50,12 +51,32 @@ async function fetchUnread() {
   }
 }
 
+const toastErrors = reactive(new Map<number, ApiErrorDetails>())
+
+// A 404 means another surface already removed the row, which is what the click asked for.
+function alreadyGone(e: unknown): boolean {
+  return (e as { statusCode?: number } | undefined)?.statusCode === 404
+}
+
+async function deleteIfPresent(url: string) {
+  try {
+    await $fetch(url, { method: 'DELETE' })
+  }
+  catch (e) {
+    if (!alreadyGone(e)) throw e
+  }
+}
+
 async function acknowledge(id: number) {
+  toastErrors.delete(id)
   try {
     await $fetch(`/api/notifications/${id}/ack`, { method: 'POST' })
   }
   catch (e) {
-    console.warn('Acknowledge failed:', e)
+    if (!alreadyGone(e)) {
+      toastErrors.set(id, apiErrorDetails(e))
+      return
+    }
   }
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
@@ -69,19 +90,14 @@ async function dismiss(id: number) {
   // gone from a prior delete on a different surface.
   const toast = toasts.value.find(t => t.id === id)
   const sourceTaskId = toast?.sourceTaskId ?? null
-  if (sourceTaskId != null) {
-    try {
-      await $fetch(`/api/tasks/${sourceTaskId}`, { method: 'DELETE' })
-    }
-    catch (e) {
-      console.warn('Source task delete failed (likely already gone):', e)
-    }
-  }
+  toastErrors.delete(id)
   try {
-    await $fetch(`/api/notifications/${id}`, { method: 'DELETE' })
+    if (sourceTaskId != null) await deleteIfPresent(`/api/tasks/${sourceTaskId}`)
+    await deleteIfPresent(`/api/notifications/${id}`)
   }
   catch (e) {
-    console.warn('Notification delete failed:', e)
+    toastErrors.set(id, apiErrorDetails(e))
+    return
   }
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
@@ -168,6 +184,10 @@ onUnmounted(() => {
                   />
                 </button>
               </div>
+              <ApiErrorAlert
+                :error="toastErrors.get(t.id) ?? null"
+                class="mt-2"
+              />
             </div>
             <button
               class="text-zinc-600 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300"
