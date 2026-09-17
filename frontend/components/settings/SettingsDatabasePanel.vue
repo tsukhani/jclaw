@@ -356,8 +356,7 @@ async function saveSchedule() {
 }
 
 async function turnOffSchedule() {
-  scheduleDraft.value = ''
-  await writeConfig('db.backup.schedule', '')
+  if (await writeConfig('db.backup.schedule', '')) scheduleDraft.value = ''
 }
 
 /** How long a finished restore or repair stays on screen, measured from when it started. */

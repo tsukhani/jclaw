@@ -294,6 +294,29 @@ describe('Settings → Database — the backup schedule', () => {
     expect(posts).toEqual([{ url: 'DELETE /api/config/db.backup.schedule', body: null }])
   })
 
+  it('keeps the stored time in the picker when turning the schedule off fails (JCLAW-1221)', async () => {
+    status = healthy({ schedule: '03:30' })
+    const off = registerEndpoint('/api/config/db.backup.schedule', {
+      method: 'DELETE',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const c = await mount()
+
+      await c.find('[data-testid="db-schedule-off"]').trigger('click')
+      await settle()
+
+      expect(c.text()).toContain('/api/config/db.backup.schedule')
+      expect((c.find('#db-schedule-time').element as HTMLInputElement).value).toBe('03:30')
+    }
+    finally {
+      off()
+    }
+  })
+
   it('surfaces a failed scheduled backup', async () => {
     status = healthy({ schedule: '03:30', scheduledBackupError: 'No space left on device' })
     const c = await mount()
