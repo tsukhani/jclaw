@@ -1246,3 +1246,132 @@ describe('Agents page — Shell Exec privilege switches', () => {
     expect(toggle().attributes('aria-checked')).toBe('true')
   })
 })
+
+describe('Agents page — tool, skill and MCP switches roll back a failed save', () => {
+  let unregister: Array<() => void> = []
+
+  afterEach(async () => {
+    unregister.forEach(off => off())
+    unregister = []
+    await useRouter().replace('/agents')
+  })
+
+  function stubPut(url: string, handler: (event: H3Event) => unknown) {
+    unregister.push(registerEndpoint(url, { method: 'PUT', handler }))
+  }
+
+  async function badGateway(event: H3Event) {
+    const { setResponseStatus } = await import('h3')
+    setResponseStatus(event, 502)
+    return '<html><body>Bad Gateway</body></html>'
+  }
+
+  async function openHelper(switchLabel: string) {
+    const component = await mountSuspended(Agents, { route: '/agents/helper' })
+    await vi.waitFor(() => expect(component.find(`button[aria-label="${switchLabel}"]`).exists()).toBe(true))
+    await flushPromises()
+    return component
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  const checked = (component: any, label: string) => component.find(`button[aria-label="${label}"]`).attributes('aria-checked')
+
+  it('puts a tool switch back and names the request when its save fails', async () => {
+    setupAgentsApi()
+    stubPut('/api/agents/2/tools/filesystem', badGateway)
+    const component = await openHelper('filesystem tool for this agent')
+
+    await component.find('button[aria-label="filesystem tool for this agent"]').trigger('click')
+    const alert = '[data-testid="agent-tools"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+
+    expect(component.find(alert).text()).toContain('/api/agents/2/tools/filesystem')
+    expect(checked(component, 'filesystem tool for this agent')).toBe('true')
+  })
+
+  it('puts back only the tools whose save failed when all tools are switched on', async () => {
+    setupAgentsApi()
+    stubPut('/api/agents/2/tools/exec', badGateway)
+    stubPut('/api/agents/2/tools/filesystem', () => ({ status: 'ok' }))
+    const component = await openHelper('All tools for this agent')
+
+    await component.find('button[aria-label="All tools for this agent"]').trigger('click')
+    const alert = '[data-testid="agent-tools"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+
+    expect(component.find(alert).text()).toContain('/api/agents/2/tools/exec')
+    expect(checked(component, 'exec tool for this agent')).toBe('false')
+    expect(checked(component, 'filesystem tool for this agent')).toBe('true')
+    expect(checked(component, 'All tools for this agent')).toBe('false')
+  })
+
+  it('puts an MCP server switch back when its save fails', async () => {
+    setupAgentsApi({
+      agent2Tools: [
+        { name: 'exec', description: 'Execute shell', system: false, enabled: false },
+        { name: 'mcp_github', description: 'GitHub', system: false, enabled: true, group: 'github' },
+        { name: 'github_search_issues', description: 'Search issues', system: false, enabled: true, group: 'github' },
+      ],
+    })
+    stubPut('/api/agents/2/tool-groups/github', badGateway)
+    const component = await openHelper('exec tool for this agent')
+    const mcp = component.find('[data-testid="agent-mcp-servers"]')
+    await mcp.find('button[aria-label="github for this agent"]').trigger('click')
+    const alert = '[data-testid="agent-mcp-servers"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+
+    expect(component.find(alert).text()).toContain('/api/agents/2/tool-groups/github')
+    expect(component.find('[data-testid="agent-mcp-servers"] button[aria-label="github for this agent"]').attributes('aria-checked')).toBe('true')
+  })
+
+  it('puts a skill switch back when enabling a skill that is not installed is refused', async () => {
+    setupAgentsApi()
+    // The backend sends this refusal as plain text, not the error envelope.
+    stubPut('/api/agents/2/skills/code-review', async (event) => {
+      const { setResponseStatus } = await import('h3')
+      setResponseStatus(event, 400)
+      return 'Skill \'code-review\' is not installed on agent \'helper\'.'
+    })
+    const component = await openHelper('code-review skill')
+
+    await component.find('button[aria-label="code-review skill"]').trigger('click')
+    const alert = '[data-testid="agent-skills"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+
+    expect(component.find(alert).text()).toContain('400')
+    expect(checked(component, 'code-review skill')).toBe('false')
+  })
+
+  it('leaves a skill whose tool is disabled untouched when its switch is clicked', async () => {
+    let put = false
+    setupAgentsApi({
+      agent2Skills: [{ name: 'shell-helper', enabled: false, isGlobal: false, tools: ['exec'] }],
+    })
+    stubPut('/api/agents/2/skills/shell-helper', () => {
+      put = true
+      return { status: 'ok' }
+    })
+    const component = await openHelper('shell-helper skill')
+
+    await component.find('button[aria-label="shell-helper skill"]').trigger('click')
+    await flushPromises()
+
+    expect(put).toBe(false)
+    expect(checked(component, 'shell-helper skill')).toBe('false')
+  })
+
+  it('puts every skill back when switching all skills on never reaches the server', async () => {
+    setupAgentsApi()
+    stubPut('/api/agents/2/skills/web-search', badGateway)
+    stubPut('/api/agents/2/skills/code-review', badGateway)
+    const component = await openHelper('All skills for this agent')
+
+    await component.find('button[aria-label="All skills for this agent"]').trigger('click')
+    const alert = '[data-testid="agent-skills"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+
+    expect(checked(component, 'code-review skill')).toBe('false')
+    expect(checked(component, 'web-search skill')).toBe('true')
+    expect(checked(component, 'All skills for this agent')).toBe('false')
+  })
+})

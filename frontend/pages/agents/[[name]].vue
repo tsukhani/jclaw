@@ -126,6 +126,13 @@ function toggleWorkspacePreview() {
 }
 const agentTools = ref<AgentTool[]>([])
 const agentSkills = ref<AgentSkill[]>([])
+// One save per section at a time: a rollback that lands after a later save to the same row would undo it.
+const savingTools = ref(false)
+const savingSkills = ref(false)
+const savingMcp = ref(false)
+const toolsError = ref<ApiErrorDetails | null>(null)
+const skillsError = ref<ApiErrorDetails | null>(null)
+const mcpError = ref<ApiErrorDetails | null>(null)
 // Effective shell allowlist for the current agent: global entries + per-skill
 // contributions. Derived server-side so the UI doesn't have to re-compute the
 // join. Populated on agent edit and refreshed whenever skill enable/disable or
@@ -799,6 +806,9 @@ function editAgent(agent: Agent) {
   memoryAutocaptureModel.value = agent.memoryAutocaptureModel
   creating.value = false
   saveError.value = null
+  toolsError.value = null
+  skillsError.value = null
+  mcpError.value = null
   loadWorkspaceFile(agent.id, 'AGENT.md')
   loadAgentTools(agent.id)
   loadAgentSkills(agent.id)
@@ -907,17 +917,30 @@ async function loadAgentTools(agentId: number) {
   }
 }
 
-async function toggleTool(toolName: string, enabled: boolean) {
-  if (!editing.value) return
+/** Flips the switch, saves, and puts it back if the save fails. Resolves to whether the server took it. */
+async function saveToolEnabled(tool: AgentTool, enabled: boolean): Promise<boolean> {
+  if (!editing.value) return false
+  const previous = tool.enabled
+  tool.enabled = enabled
   try {
-    await $fetch(`/api/agents/${editing.value.id}/tools/${toolName}`, {
+    await $fetch(`/api/agents/${editing.value.id}/tools/${tool.name}`, {
       method: 'PUT',
       body: { enabled },
     })
+    return true
   }
   catch (e) {
-    console.error('Failed to toggle tool:', e)
+    tool.enabled = previous
+    toolsError.value = apiErrorDetails(e)
+    return false
   }
+}
+
+async function toggleTool(tool: AgentTool) {
+  savingTools.value = true
+  toolsError.value = null
+  await saveToolEnabled(tool, !tool.enabled)
+  savingTools.value = false
 }
 
 /**
@@ -935,7 +958,10 @@ async function toggleToolGroup(group: string, enabled: boolean) {
   // default policy in ApiToolsController.listForAgent.
   const handleName = `mcp_${group}`
   const handle = agentTools.value.find(t => t.name === handleName)
+  const previous = handle?.enabled ?? false
   if (handle) handle.enabled = enabled
+  savingMcp.value = true
+  mcpError.value = null
   try {
     await $fetch(`/api/agents/${editing.value.id}/tool-groups/${encodeURIComponent(group)}`, {
       method: 'PUT',
@@ -943,7 +969,11 @@ async function toggleToolGroup(group: string, enabled: boolean) {
     })
   }
   catch (e) {
-    console.error('Failed to toggle tool group:', e)
+    if (handle) handle.enabled = previous
+    mcpError.value = apiErrorDetails(e)
+  }
+  finally {
+    savingMcp.value = false
   }
 }
 
@@ -960,10 +990,10 @@ const allAgentToolsEnabled = computed(() =>
 
 async function toggleAllAgentTools() {
   const next = !allAgentToolsEnabled.value
-  toggleableAgentTools.value.forEach((t) => {
-    t.enabled = next
-  })
-  await Promise.all(toggleableAgentTools.value.map(t => toggleTool(t.name, next)))
+  savingTools.value = true
+  toolsError.value = null
+  await Promise.all(toggleableAgentTools.value.map(t => saveToolEnabled(t, next)))
+  savingTools.value = false
 }
 
 // Returns the tool names that a skill depends on but are currently disabled for this agent.
@@ -1000,11 +1030,14 @@ const allAgentSkillsEnabled = computed(() =>
 )
 
 async function toggleAllAgentSkills() {
+  if (!editing.value) return
+  const agentId = editing.value.id
   const next = !allAgentSkillsEnabled.value
-  toggleableAgentSkills.value.forEach((s) => {
-    s.enabled = next
-  })
-  await Promise.all(toggleableAgentSkills.value.map(s => toggleSkill(s.name, next)))
+  savingSkills.value = true
+  skillsError.value = null
+  const saved = await Promise.all(toggleableAgentSkills.value.map(s => saveSkillEnabled(s, next)))
+  if (saved.some(Boolean)) await reloadSkillState(agentId)
+  savingSkills.value = false
 }
 
 async function loadAgentSkills(agentId: number) {
@@ -1278,21 +1311,39 @@ async function toggleExecConfig(key: 'bypassAllowlist' | 'allowGlobalPaths') {
   }
 }
 
-async function toggleSkill(skillName: string, enabled: boolean) {
-  if (!editing.value) return
+/** Flips the switch, saves, and puts it back if the save fails. Resolves to whether the server took it. */
+async function saveSkillEnabled(skill: AgentSkill, enabled: boolean): Promise<boolean> {
+  if (!editing.value) return false
+  const previous = skill.enabled
+  skill.enabled = enabled
   try {
-    await $fetch(`/api/agents/${editing.value.id}/skills/${skillName}`, {
+    await $fetch(`/api/agents/${editing.value.id}/skills/${skill.name}`, {
       method: 'PUT',
       body: { enabled },
     })
-    await loadAgentSkills(editing.value.id)
-    // Skill enable/disable flips which commands count toward the effective
-    // allowlist — refresh the table so the bySkill section matches the toggle.
-    await loadEffectiveAllowlist(editing.value.id)
+    return true
   }
   catch (e) {
-    console.error('Failed to toggle skill:', e)
+    skill.enabled = previous
+    skillsError.value = apiErrorDetails(e)
+    return false
   }
+}
+
+async function reloadSkillState(agentId: number) {
+  await loadAgentSkills(agentId)
+  // Skill enable/disable flips which commands count toward the effective
+  // allowlist — refresh the table so the bySkill section matches the toggle.
+  await loadEffectiveAllowlist(agentId)
+}
+
+async function toggleSkill(skill: AgentSkill) {
+  if (!editing.value || skillDisabledTools(skill).length) return
+  const agentId = editing.value.id
+  savingSkills.value = true
+  skillsError.value = null
+  if (await saveSkillEnabled(skill, !skill.enabled)) await reloadSkillState(agentId)
+  savingSkills.value = false
 }
 
 /**
@@ -2389,6 +2440,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       <div
         v-if="editing"
         class="bg-surface-elevated border border-border"
+        data-testid="agent-skills"
       >
         <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -2398,7 +2450,8 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           <button
             v-if="toggleableAgentSkills.length"
             :title="allAgentSkillsEnabled ? 'Disable all skills for this agent' : 'Enable all skills for this agent'"
-            class="shrink-0"
+            :disabled="savingSkills"
+            class="shrink-0 disabled:opacity-50"
             role="switch"
             :aria-checked="allAgentSkillsEnabled"
             aria-label="All skills for this agent"
@@ -2482,13 +2535,14 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :title="skillDisabledTools(skill).length
                 ? 'Enable ' + skillDisabledTools(skill).join(', ') + ' to use this skill'
                 : skill.enabled ? 'Disable skill' : 'Enable skill'"
-              class="shrink-0 pt-0.5"
+              :disabled="savingSkills"
+              class="shrink-0 pt-0.5 disabled:opacity-50"
               :class="skillDisabledTools(skill).length ? 'cursor-not-allowed' : ''"
               role="switch"
               :aria-checked="!skillDisabledTools(skill).length && skill.enabled"
               :aria-disabled="skillDisabledTools(skill).length > 0"
               :aria-label="`${skill.name} skill`"
-              @click="if (!skillDisabledTools(skill).length) { skill.enabled = !skill.enabled; toggleSkill(skill.name, skill.enabled) }"
+              @click="toggleSkill(skill)"
             >
               <div
                 class="relative w-9 h-5 rounded-full transition-colors duration-200"
@@ -2508,12 +2562,17 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         >
           No skills available
         </div>
+        <ApiErrorAlert
+          :error="skillsError"
+          class="px-4 py-2.5 border-t border-border"
+        />
       </div>
 
       <!-- Tools -->
       <div
         v-if="editing"
         class="bg-surface-elevated border border-border"
+        data-testid="agent-tools"
       >
         <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -2523,7 +2582,8 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           <button
             v-if="toggleableAgentTools.length"
             :title="allAgentToolsEnabled ? 'Disable all tools for this agent' : 'Enable all tools for this agent'"
-            class="shrink-0"
+            :disabled="savingTools"
+            class="shrink-0 disabled:opacity-50"
             role="switch"
             :aria-checked="allAgentToolsEnabled"
             aria-label="All tools for this agent"
@@ -2587,7 +2647,8 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     role="switch"
                     :aria-checked="row.enabled"
                     :aria-label="`${row.group} for this agent`"
-                    class="shrink-0"
+                    :disabled="savingMcp"
+                    class="shrink-0 disabled:opacity-50"
                     @click="toggleToolGroup(row.group, !row.enabled)"
                   >
                     <div
@@ -2629,11 +2690,12 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   </div>
                   <button
                     :title="row.tool.enabled ? 'Disable tool for this agent' : 'Enable tool for this agent'"
-                    class="shrink-0"
+                    :disabled="savingTools"
+                    class="shrink-0 disabled:opacity-50"
                     role="switch"
                     :aria-checked="row.tool.enabled"
                     :aria-label="`${row.tool.name} tool for this agent`"
-                    @click="row.tool.enabled = !row.tool.enabled; toggleTool(row.tool.name, row.tool.enabled)"
+                    @click="toggleTool(row.tool)"
                   >
                     <div
                       class="relative w-9 h-5 rounded-full transition-colors duration-200"
@@ -2656,6 +2718,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         >
           No tools registered
         </div>
+        <ApiErrorAlert
+          :error="toolsError"
+          class="px-4 py-2.5 border-t border-border"
+        />
       </div>
 
       <!-- MCP Servers (JCLAW-281): separate sub-section parallel to Tools.
@@ -2667,6 +2733,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       <div
         v-if="editing && mcpServerRows.length"
         class="bg-surface-elevated border border-border"
+        data-testid="agent-mcp-servers"
       >
         <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -2706,7 +2773,8 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 role="switch"
                 :aria-checked="row.enabled"
                 :aria-label="`${row.server} for this agent`"
-                class="shrink-0"
+                :disabled="savingMcp"
+                class="shrink-0 disabled:opacity-50"
                 @click="toggleToolGroup(row.server, !row.enabled)"
               >
                 <div
@@ -2766,6 +2834,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </div>
           </div>
         </div>
+        <ApiErrorAlert
+          :error="mcpError"
+          class="px-4 py-2.5 border-t border-border"
+        />
       </div>
 
       <!-- Standing tool approvals (JCLAW-1062): sits with Tools and MCP Servers
