@@ -138,8 +138,18 @@ public class ConfigService {
     // (or newly broken) value shouts again.
     private static final ConcurrentMap<String, String> reportedParseFailures = new ConcurrentHashMap<>();
 
-    private static void reportParseFailure(String key, String raw, String expected, String fallback) {
-        var report = parseFailureReport(key, raw, expected, fallback);
+    /**
+     * Report a stored value its reader rejected, once per value — for readers that parse a key
+     * themselves rather than through the getters above.
+     */
+    public static void reportParseFailure(String key, String raw, String expected, String fallback) {
+        reportParseFailure(key, raw, expected, fallback, null);
+    }
+
+    /** The same, for a key whose fallback is another key's value rather than a built-in default. */
+    public static void reportParseFailure(String key, String raw, String expected, String fallback,
+                                          @Nullable String fallbackSource) {
+        var report = parseFailureReport(key, raw, expected, fallback, fallbackSource);
         if (report != null) EventLogger.error("config", report);
     }
 
@@ -157,12 +167,18 @@ public class ConfigService {
      */
     public static @Nullable String parseFailureReport(String key, String raw, String expected,
                                                       String fallback) {
+        return parseFailureReport(key, raw, expected, fallback, null);
+    }
+
+    /** The same, naming the key {@code fallback} came from when it is not the built-in default. */
+    public static @Nullable String parseFailureReport(String key, String raw, String expected,
+                                                      String fallback, @Nullable String fallbackSource) {
         // A cleared field means "use the default", which is exactly what happens — shouting about
         // it would train the operator to ignore the message that matters.
         if (raw.isBlank()) return null;
         if (raw.equals(reportedParseFailures.put(key, raw))) return null;
         return ErrorRendering.PLAIN.render(
-                StartupErrorTemplates.configParseFailure(key, raw, expected, fallback));
+                StartupErrorTemplates.configParseFailure(key, raw, expected, fallback, fallbackSource));
     }
 
     public static void set(String key, String value) {

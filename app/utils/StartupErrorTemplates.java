@@ -27,6 +27,9 @@ public final class StartupErrorTemplates {
     /** A configured numeric value that would not parse; the built-in default is in use instead. */
     public static final String CONFIG_PARSE_FAILED = "config_parse_failed";
 
+    /** The same failure for a value in {@code application.conf}, whose remedy is an edit and a restart. */
+    public static final String APP_CONFIG_PARSE_FAILED = "app_config_parse_failed";
+
     /** The database refused JClaw's connection at boot. */
     public static final String DATABASE_UNAVAILABLE = "database_unavailable";
 
@@ -42,6 +45,12 @@ public final class StartupErrorTemplates {
 
     private static final String CONFIG_RETRY = "Store a bare number, or delete the key to take "
             + "the default deliberately.";
+
+    private static final String APP_CONFIG_CHECK = "The line for this key in conf/application.conf. "
+            + "A unit suffix, a thousands separator or a stray quote is the usual cause.";
+
+    private static final String APP_CONFIG_RETRY = "Set a bare number there and restart JClaw, or "
+            + "delete the line to take the default deliberately.";
 
     private static final String DATABASE_CHECK = "That the database is running and reachable, "
             + "and that db.url, db.user and db.pass name it. A file database also needs its "
@@ -70,6 +79,10 @@ public final class StartupErrorTemplates {
                     "A configured value is not the number its key expects, so the built-in "
                             + "default is in use instead.",
                     CONFIG_CHECK, CONFIG_RETRY),
+            e(APP_CONFIG_PARSE_FAILED,
+                    "A value in application.conf is not the number its key expects, so the built-in "
+                            + "default is in use instead.",
+                    APP_CONFIG_CHECK, APP_CONFIG_RETRY),
             e(DATABASE_UNAVAILABLE,
                     "The database refused the connection JClaw needs to start.",
                     DATABASE_CHECK, DATABASE_RETRY),
@@ -92,10 +105,35 @@ public final class StartupErrorTemplates {
      */
     public static ErrorTemplate configParseFailure(String key, String rejected, String expected,
                                                    String fallback) {
+        return configParseFailure(key, rejected, expected, fallback, null);
+    }
+
+    /**
+     * The same, for a key that falls back to another setting rather than to a built-in default.
+     *
+     * @param fallbackSource the key {@code fallback} was read from, or null for the built-in default
+     */
+    public static ErrorTemplate configParseFailure(String key, String rejected, String expected,
+                                                   String fallback, @Nullable String fallbackSource) {
         return new ErrorTemplate(CONFIG_PARSE_FAILED,
-                "Configuration key '" + key + "' holds '" + rejected + "', which is not "
-                        + expected + ", so the built-in default " + fallback + " is in use instead.",
+                "Configuration key '" + key + "' holds '" + rejected + "', which is not " + expected
+                        + ", so " + inUse(fallback, fallbackSource) + " is in use instead.",
                 CONFIG_CHECK, CONFIG_RETRY);
+    }
+
+    /** A value in {@code application.conf} that would not parse, naming the key and the value. */
+    public static ErrorTemplate appConfigParseFailure(String key, String rejected, String expected,
+                                                      String fallback) {
+        return new ErrorTemplate(APP_CONFIG_PARSE_FAILED,
+                "application.conf key '" + key + "' holds '" + rejected + "', which is not " + expected
+                        + ", so " + inUse(fallback, null) + " is in use instead.",
+                APP_CONFIG_CHECK, APP_CONFIG_RETRY);
+    }
+
+    private static String inUse(String fallback, @Nullable String fallbackSource) {
+        return fallbackSource == null
+                ? "the built-in default " + fallback
+                : fallback + " from '" + fallbackSource + "'";
     }
 
     /** A database that refused the boot-time connection, carrying the driver's own words. */

@@ -90,6 +90,26 @@ class StartupErrorTemplatesTest extends UnitTest {
         assertNull(ConfigService.parseFailureReport(unparseable, "0,62", "a finite number", "0.5"));
     }
 
+    @Test
+    void aValueThatFellBackToAnotherKeyNamesThatKeyRatherThanABuiltInDefault() {
+        var message = StartupErrorTemplates.configParseFailure("jtokkit.safetyMultiplier.p.m", "1,5",
+                "a finite number", "1.8", "jtokkit.safetyMultiplier.p").whatBroke();
+
+        assertTrue(message.contains("so 1.8 from 'jtokkit.safetyMultiplier.p' is in use"), message);
+        assertFalse(message.contains("built-in default"), message);
+    }
+
+    @Test
+    void anApplicationConfValueSendsTheOperatorToTheFileAndARestartNotToSettings() {
+        var template = StartupErrorTemplates.appConfigParseFailure("apps.invoke.limit.windowSeconds", "0",
+                "a whole number of at least 1", "60");
+
+        assertTrue(template.whatBroke().contains("apps.invoke.limit.windowSeconds"), template.whatBroke());
+        assertTrue(template.whatToCheck().contains("conf/application.conf"), template.whatToCheck());
+        assertFalse(template.whatToCheck().contains("Settings"), template.whatToCheck());
+        assertTrue(template.howToRetry().contains("restart"), template.howToRetry());
+    }
+
     // ── database and DDL at boot ──────────────────────────────────────────────
 
     @Test
@@ -137,6 +157,7 @@ class StartupErrorTemplatesTest extends UnitTest {
     @Test
     void theStartupCodesAreRegisteredSoAGenericLookupAlsoHasARemedy() {
         for (var code : new String[] {StartupErrorTemplates.CONFIG_PARSE_FAILED,
+                StartupErrorTemplates.APP_CONFIG_PARSE_FAILED,
                 StartupErrorTemplates.DATABASE_UNAVAILABLE,
                 StartupErrorTemplates.SCHEMA_DDL_UNREADABLE,
                 StartupErrorTemplates.SCHEMA_DDL_FAILED}) {
@@ -151,6 +172,7 @@ class StartupErrorTemplatesTest extends UnitTest {
         // second source of truth.
         for (var specific : new ErrorTemplate[] {
                 StartupErrorTemplates.configParseFailure("a.key", "x", "a whole number", "1"),
+                StartupErrorTemplates.appConfigParseFailure("a.key", "x", "a whole number", "1"),
                 StartupErrorTemplates.databaseUnavailable("Connection refused"),
                 StartupErrorTemplates.schemaDdlUnreadable("Permission denied"),
                 StartupErrorTemplates.schemaDdlFailed("permission denied for schema public")}) {
@@ -167,6 +189,7 @@ class StartupErrorTemplatesTest extends UnitTest {
         // The destination is a terminal and a log file: no markup parser, no colour support.
         for (var template : new ErrorTemplate[] {
                 StartupErrorTemplates.configParseFailure("a.key", "x", "a whole number", "1"),
+                StartupErrorTemplates.appConfigParseFailure("a.key", "x", "a whole number", "1"),
                 StartupErrorTemplates.databaseUnavailable("Connection refused"),
                 StartupErrorTemplates.schemaDdlUnreadable("Permission denied"),
                 StartupErrorTemplates.schemaDdlFailed("permission denied for schema public")}) {

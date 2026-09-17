@@ -153,27 +153,49 @@ public final class ContextWindowManager {
      */
     public static double resolveSafetyMultiplier(@Nullable String providerName,
                                                  @Nullable String modelId) {
-        if (providerName != null && modelId != null) {
-            var specific = parseMultiplier(ConfigService.get(
-                    SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId));
-            if (specific != null) return specific;
+        var tiers = providerName == null
+                ? new String[] {SAFETY_MULTIPLIER_KEY}
+                : modelId == null
+                        ? new String[] {SAFETY_MULTIPLIER_PREFIX + providerName, SAFETY_MULTIPLIER_KEY}
+                        : new String[] {SAFETY_MULTIPLIER_PREFIX + providerName + "." + modelId,
+                                SAFETY_MULTIPLIER_PREFIX + providerName, SAFETY_MULTIPLIER_KEY};
+        // A rejected tier falls through like an unset one, but is reported once the value that
+        // took its place is known, so the message can name it.
+        String rejectedKey = null;
+        String rejectedRaw = null;
+        for (var key : tiers) {
+            var raw = ConfigService.get(key);
+            if (raw == null || raw.isBlank()) continue;
+            var parsed = parseMultiplier(raw);
+            if (parsed != null) {
+                reportRejectedMultiplier(rejectedKey, rejectedRaw, parsed, key);
+                return parsed;
+            }
+            if (rejectedKey == null) {
+                rejectedKey = key;
+                rejectedRaw = raw;
+            }
         }
-        if (providerName != null) {
-            var perProvider = parseMultiplier(ConfigService.get(
-                    SAFETY_MULTIPLIER_PREFIX + providerName));
-            if (perProvider != null) return perProvider;
-        }
-        var global = parseMultiplier(ConfigService.get(SAFETY_MULTIPLIER_KEY));
-        return global != null ? global : DEFAULT_SAFETY_MULTIPLIER;
+        reportRejectedMultiplier(rejectedKey, rejectedRaw, DEFAULT_SAFETY_MULTIPLIER, null);
+        return DEFAULT_SAFETY_MULTIPLIER;
     }
 
-    private static @Nullable Double parseMultiplier(@Nullable String raw) {
-        if (raw == null || raw.isBlank()) return null;
+    /** Null for a value that is not a finite number: {@code Math.clamp} passes NaN through. */
+    private static @Nullable Double parseMultiplier(String raw) {
         try {
-            return Math.clamp(Double.parseDouble(raw), MIN_SAFETY_MULTIPLIER, MAX_SAFETY_MULTIPLIER);
+            var value = Double.parseDouble(raw);
+            return Double.isFinite(value)
+                    ? Math.clamp(value, MIN_SAFETY_MULTIPLIER, MAX_SAFETY_MULTIPLIER)
+                    : null;
         } catch (NumberFormatException _) {
             return null;
         }
+    }
+
+    private static void reportRejectedMultiplier(@Nullable String key, @Nullable String raw,
+                                                 double inUse, @Nullable String inUseKey) {
+        if (key == null || raw == null) return;
+        ConfigService.reportParseFailure(key, raw, "a finite number", String.valueOf(inUse), inUseKey);
     }
 
     /**

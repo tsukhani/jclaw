@@ -1,7 +1,7 @@
 package services;
 
 import org.jspecify.annotations.Nullable;
-import play.Play;
+import utils.PlayConfig;
 
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -47,18 +47,17 @@ public final class AppInvokeLimits {
 
     /** Global default invokes/window from {@code application.conf} ({@link #DEFAULT_LIMIT} fallback). */
     public static int defaultLimit() {
-        return confInt(KEY_DEFAULT, DEFAULT_LIMIT);
+        return PlayConfig.intOr(KEY_DEFAULT, DEFAULT_LIMIT);
     }
 
     /** The authoritative hard ceiling from {@code application.conf} ({@link #DEFAULT_CEILING} fallback). */
     public static int ceiling() {
-        return confInt(KEY_CEILING, DEFAULT_CEILING);
+        return PlayConfig.intOr(KEY_CEILING, DEFAULT_CEILING);
     }
 
     /** The fixed-window length in seconds ({@link #DEFAULT_WINDOW_SECONDS} fallback; never &lt; 1). */
     public static int windowSeconds() {
-        int w = confInt(KEY_WINDOW_SECONDS, DEFAULT_WINDOW_SECONDS);
-        return w < 1 ? DEFAULT_WINDOW_SECONDS : w;
+        return PlayConfig.intAtLeast(KEY_WINDOW_SECONDS, 1, DEFAULT_WINDOW_SECONDS);
     }
 
     /**
@@ -111,17 +110,5 @@ public final class AppInvokeLimits {
     /** {@link #tryAcquire(String, int, long, int)} against the wall clock + live window config. */
     public static boolean tryAcquire(String slug, int limit) {
         return tryAcquire(slug, limit, System.currentTimeMillis(), windowSeconds());
-    }
-
-    private static int confInt(String key, int fallback) {
-        var raw = Play.configuration.getProperty(key);
-        if (raw == null || raw.isBlank()) {
-            return fallback;
-        }
-        try {
-            return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException _) {
-            return fallback;
-        }
     }
 }

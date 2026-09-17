@@ -63,6 +63,28 @@ class ContextWindowSafetyMultiplierTest extends UnitTest {
     }
 
     @Test
+    void aRejectedTierIsReportedNamingTheValueThatTookItsPlace() {
+        // JCLAW-1136: a malformed tier fell through with nothing said, and the value in use came
+        // from another key, so "the built-in default" would have been the wrong thing to report.
+        var modelKey = ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + "test-provider.test-model";
+        var providerKey = ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + "test-provider";
+        ConfigService.set(modelKey, "1,5");
+        ConfigService.set(providerKey, "1.8");
+
+        assertEquals(1.8, ContextWindowManager.resolveSafetyMultiplier("test-provider", "test-model"), 1e-9);
+        assertNull(ConfigService.parseFailureReport(modelKey, "1,5", "a finite number", "1.8", providerKey),
+                "the rejected tier must report through the gate");
+    }
+
+    @Test
+    void aNonFiniteMultiplierFallsThroughRatherThanBecomingTheMultiplier() {
+        // parseDouble accepts "NaN" and Math.clamp passes it through, so it used to be returned.
+        ConfigService.set(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + "test-provider.test-model", "NaN");
+        assertEquals(ContextWindowManager.DEFAULT_SAFETY_MULTIPLIER,
+                ContextWindowManager.resolveSafetyMultiplier("test-provider", "test-model"), 1e-9);
+    }
+
+    @Test
     void resolveSafetyMultiplierIgnoresMalformedValue() {
         ConfigService.set(ContextWindowManager.SAFETY_MULTIPLIER_PREFIX + "test-provider.test-model", "not-a-number");
         // Malformed should fall through to the next tier — default in this case.

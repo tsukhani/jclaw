@@ -1053,10 +1053,13 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         if (raw == null || raw.isBlank()) return DEFAULT_NOTIFIER_RATE_LIMIT_MS;
         try {
             long ms = Long.parseLong(raw.trim());
-            return ms > 0 ? ms : DEFAULT_NOTIFIER_RATE_LIMIT_MS;
+            if (ms > 0) return ms;
         } catch (NumberFormatException _) {
-            return DEFAULT_NOTIFIER_RATE_LIMIT_MS;
+            // Reported below, with the non-positive case.
         }
+        ConfigService.reportParseFailure(CFG_NOTIFIER_COOLDOWN_MS, raw, "a positive whole number",
+                String.valueOf(DEFAULT_NOTIFIER_RATE_LIMIT_MS));
+        return DEFAULT_NOTIFIER_RATE_LIMIT_MS;
     }
 
     /**

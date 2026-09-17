@@ -383,6 +383,24 @@ class TelegramStreamingSinkTest extends UnitTest {
                 "jclaw378-cooldown-none-" + System.nanoTime()));
     }
 
+    @Test
+    void effectiveNotifierCooldownMs_reportsARejectedConfigValueRatherThanSwallowingIt() {
+        // JCLAW-1136: a typo or a non-positive cooldown fell back to the 60s default with nothing
+        // said. The report gate is spent only if the reader went through it.
+        var key = "telegram.notifier.cooldownMs";
+        try {
+            for (var rejected : new String[] {"30s-jclaw1136", "-5"}) {
+                services.ConfigService.set(key, rejected);
+                assertEquals(60_000L, TelegramStreamingSink.effectiveNotifierCooldownMs(
+                        "jclaw1136-cooldown-none-" + System.nanoTime()));
+                assertNull(services.ConfigService.parseFailureReport(key, rejected,
+                        "a positive whole number", "60000"), "must report " + rejected);
+            }
+        } finally {
+            services.ConfigService.delete(key);
+        }
+    }
+
     private static void seedBindingNotifierOverride(String token, String errPolicy, Long cooldownMs) {
         services.Tx.run(() -> {
             var agent = services.AgentService.create(
