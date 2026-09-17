@@ -132,5 +132,7 @@ describe('Settings page — Telemetry', () => {
     expect(shown).toContain('/api/config')
     expect(shown).toContain('502')
     expect(shown).not.toContain('Save failed')
+    // A refused toggle must not keep claiming the state the server never took.
+    expect((component.find('input[aria-label="Export telemetry"]').element as HTMLInputElement).checked).toBe(false)
   })
 })

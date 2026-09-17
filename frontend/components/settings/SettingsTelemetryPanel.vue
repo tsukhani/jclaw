@@ -107,6 +107,8 @@ async function toggleEnabled(event: Event) {
   }
   catch (e) {
     saveError.value = apiErrorDetails(e)
+    // :checked is one-way and otel.enabled never moved, so Vue will not reset the box itself.
+    ;(event.target as HTMLInputElement).checked = otel.value.enabled
   }
   finally {
     saving.value = false
