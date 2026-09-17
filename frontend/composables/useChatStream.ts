@@ -3,6 +3,7 @@ import type { PendingOverrides } from '~/composables/useAgentModel'
 import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import type { UploadedAttachment } from '~/composables/useChatAttachments'
 import type { Message, MessageAttachment, ToolCall } from '~/types/api'
+import type { MessageRoute } from '~/utils/usage-cost'
 
 /**
  * SSE streaming state machine + send flow (JCLAW-690 stage 4g; behaviour
@@ -250,9 +251,24 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
+  /** JCLAW-1222: a `{"route":…}` status frame names the model the router picked, or failed over to. Returns true if consumed. */
+  function tryApplyRouteFromStatusContent(ctx: StreamContext, content: string): boolean {
+    if (!content.startsWith('{"route"')) return false
+    try {
+      const parsed = JSON.parse(content) as { route?: MessageRoute }
+      if (!parsed.route) return false
+      messages.value[ctx.assistantIdx]!._route = parsed.route
+      triggerRef(messages)
+      return true
+    }
+    catch {
+      return false
+    }
+  }
+
   function handleStreamStatusEvent(ctx: StreamContext, event: { content?: string }) {
     const content = event.content
-    if (content && tryApplyUsageFromStatusContent(ctx, content)) return
+    if (content && (tryApplyUsageFromStatusContent(ctx, content) || tryApplyRouteFromStatusContent(ctx, content))) return
     streamStatus.value = content ?? ''
   }
 

@@ -1,4 +1,4 @@
-import type { MessageUsage } from '~/utils/usage-cost'
+import type { MessageRoute, MessageUsage } from '~/utils/usage-cost'
 
 /** An LLM agent configured in the system. */
 export interface Agent {
@@ -311,6 +311,8 @@ export interface Message {
   _thinkingDurationMs?: number | null
   /** Client-only: wall-clock ms when the current assistant stream began producing reasoning. */
   _thinkingStartedAt?: number
+  /** Client-only: the router's choice from the stream's status frame, until the usage record carries it (JCLAW-1222). */
+  _route?: MessageRoute
 }
 
 /** A config entry from /api/config. */

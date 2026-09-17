@@ -53,6 +53,7 @@ const MANAGED_PREFIXES = [
   'tasks.', // JCLAW-259: task retention TTL — Settings (Tasks section)
   'logs.', // Event log retention — Settings (Logging)
   'llm.', // Primary-provider pin and circuit breaker tuning — Settings (LLM Providers)
+  'router.', // Model router lists and budget thresholds — Settings (Model Router)
   'voice.', // Turn detection, live transcripts and speech pacing — Settings (Voice Mode)
   'telegram.', // Channel defaults — Channels page (Telegram); approval timeout — Settings (Tool Approvals)
   'tailscale.', // Funnel enable/port (tailscale.funnel.*) — managed on the Channels page

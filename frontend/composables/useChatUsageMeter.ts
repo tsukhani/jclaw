@@ -40,13 +40,16 @@ export function useChatUsageMeter(
   /**
    * True when message at idx is an assistant turn whose modelProvider/modelId
    * differs from the previous assistant turn. Drives the "Switched to X"
-   * divider between mid-conversation model changes.
+   * divider between mid-conversation model changes. Not between two routed
+   * turns (JCLAW-1222): the router changes model by design, and each of those
+   * turns already names its model in its route badge.
    */
   function shouldShowModelSwitchIndicator(idx: number): boolean {
     const msg = displayMessages.value[idx]
     if (msg?.role !== 'assistant' || !msg.usage?.modelId) return false
     const prior = previousAssistantUsage(idx)
     if (!prior?.modelId) return false
+    if (msg.usage.route && prior.route) return false
     return prior.modelId !== msg.usage.modelId || prior.modelProvider !== msg.usage.modelProvider
   }
 

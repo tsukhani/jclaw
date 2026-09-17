@@ -59,6 +59,26 @@ describe('ChatMessage (JCLAW-690)', () => {
     expect(reasoningBody.text()).toContain('let me think')
   })
 
+  it('names the model the router chose, and says when it failed over (JCLAW-1222)', async () => {
+    const route = { class: 'reasoning', provider: 'openrouter', model: 'deepseek-v4-pro', reason: 'reasoning markers: prove', failover: true }
+    const c = await mountSuspended(ChatMessage, { props: props(msg({ usage: { prompt: 1, completion: 1, total: 2, reasoning: 0, cached: 0, durationMs: 1, route } })) })
+    const badge = c.find('[data-testid="route-badge"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('Reasoning')
+    expect(badge.text()).toContain('deepseek-v4-pro')
+    expect(badge.text()).toContain('failover')
+    expect(badge.attributes('title')).toContain('openrouter/deepseek-v4-pro')
+  })
+
+  it('shows the live route before the usage record lands, and no badge off the router', async () => {
+    const live = msg({ content: '', _route: { class: 'chat', provider: 'ollama-cloud', model: 'glm-5.3-flash', reason: 'no task markers' } })
+    const c = await mountSuspended(ChatMessage, { props: props(live, { streaming: true }) })
+    expect(c.find('[data-testid="route-badge"]').text()).toContain('glm-5.3-flash')
+
+    const plain = await mountSuspended(ChatMessage, { props: props(msg()) })
+    expect(plain.find('[data-testid="route-badge"]').exists()).toBe(false)
+  })
+
   it('emits copy/edit/delete from the user-row action buttons', async () => {
     const m = msg({ role: 'user', content: 'edit me' })
     const c = await mountSuspended(ChatMessage, { props: props(m) })

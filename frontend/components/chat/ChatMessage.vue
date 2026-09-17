@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowPathIcon,
+  ArrowsRightLeftIcon,
   CheckIcon,
   ChevronDownIcon,
   ClipboardIcon,
@@ -14,6 +15,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import { formatTokensPerSec, renderMarkdown } from '~/utils/chat-markdown'
 import { formatUsageCost, formatUsageCostTooltip, providerMetricRows } from '~/utils/usage-cost'
+import { routeClassLabel, routeDescription, routeOf } from '~/utils/model-route'
 import { thinkingHeaderLabel } from '~/utils/thinking'
 import type { VideoJobStatus } from '~/utils/video-job'
 import type { Message, MessageAttachment, ToolCall } from '~/types/api'
@@ -393,6 +395,36 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
              "this isn't the full answer" without parsing finish
              reasons. Same amber chip style as the announce-card
              marker at the SYSTEM-role render path above. -->
+        <!-- JCLAW-1222: the model the router chose. Visible without hovering, unlike the
+             footer below, because on an Auto conversation the model changes from turn to turn.
+             Shown from the stream's route frame, so it names the model while it is answering. -->
+        <div
+          v-if="routeOf(msg)"
+          class="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs text-fg-muted"
+          :title="routeDescription(routeOf(msg)!)"
+          data-testid="route-badge"
+        >
+          <ArrowsRightLeftIcon
+            class="w-3.5 h-3.5 shrink-0"
+            aria-hidden="true"
+          />
+          <span class="sr-only">{{ routeDescription(routeOf(msg)!) }}</span>
+          <span aria-hidden="true">Auto · {{ routeClassLabel(routeOf(msg)!) }} →</span>
+          <span
+            class="font-mono text-fg-strong"
+            aria-hidden="true"
+          >{{ routeOf(msg)!.model }}</span>
+          <span
+            v-if="routeOf(msg)!.failover"
+            class="px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20"
+            aria-hidden="true"
+          >failover</span>
+          <span
+            v-if="routeOf(msg)!.downshifted"
+            class="px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20"
+            aria-hidden="true"
+          >budget</span>
+        </div>
         <div
           v-if="msg.truncated"
           class="flex items-center gap-1.5 mt-1.5 px-2 py-1 text-xs text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded bg-amber-50/50 dark:bg-amber-950/20"
@@ -545,6 +577,34 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
               @focusout="emit('set-tok-stats-hover-key', null)"
             >
               <dl class="grid gap-1.5 text-xs">
+                <div
+                  v-if="msg.usage.modelId"
+                  class="flex items-center justify-between gap-4"
+                >
+                  <dt class="text-muted-foreground">
+                    Model
+                  </dt>
+                  <dd class="font-mono text-right break-all">
+                    {{ formatModelLabel(msg) }}
+                  </dd>
+                </div>
+                <div
+                  v-if="msg.usage.route"
+                  class="flex items-center justify-between gap-4"
+                  :title="msg.usage.route.reason"
+                >
+                  <dt class="text-muted-foreground">
+                    Route
+                  </dt>
+                  <dd class="text-right">
+                    Auto · {{ routeClassLabel(msg.usage.route) }}{{ msg.usage.route.failover ? ' (failover)' : '' }}
+                  </dd>
+                </div>
+                <div
+                  v-if="msg.usage.modelId"
+                  aria-hidden="true"
+                  class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
+                />
                 <div class="flex items-center justify-between gap-4">
                   <dt class="text-muted-foreground">
                     Prompt tokens

@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import { ROUTER_MODEL_ID, ROUTER_PROVIDER } from '~/utils/model-route'
 
 export interface ProviderModel {
   id: string
@@ -173,6 +174,59 @@ function attachProviderModels(entries: ConfigEntry[], providerMap: Map<string, P
   }
 }
 
+const THINKING_LADDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+function ladderRank(level: string): number {
+  const i = THINKING_LADDER.indexOf(level)
+  return i >= 0 ? i : THINKING_LADDER.length
+}
+
+/**
+ * The model router (JCLAW-1222) as one more provider with one virtual model, offered while
+ * `router.chat.models` lists a model — the same rule the backend's RouterPolicy.available applies.
+ * A capability is advertised when any listed model has it, mirroring ModelRouter.catalogModel:
+ * the router steers a turn that needs it to a model that does.
+ */
+export function routerProvider(entries: ConfigEntry[], providers: Map<string, Provider>): Provider | null {
+  const listed: { provider: string, model: string }[] = []
+  let hasChat = false
+  for (const e of entries) {
+    const taskClass = /^router\.([a-z]+)\.models$/.exec(e.key)?.[1]
+    if (!taskClass) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(e.value)
+    }
+    catch {
+      continue
+    }
+    if (!Array.isArray(parsed)) continue
+    for (const c of parsed as { provider?: unknown, model?: unknown }[]) {
+      if (typeof c?.provider !== 'string' || typeof c.model !== 'string') continue
+      listed.push({ provider: c.provider, model: c.model })
+      if (taskClass === 'chat') hasChat = true
+    }
+  }
+  if (!hasChat) return null
+  const models = listed
+    .map(c => providers.get(c.provider)?.models.find(m => m.id === c.model))
+    .filter((m): m is ProviderModel => !!m)
+  const levels = new Set(models.flatMap(m => effectiveThinkingLevels(m)))
+  return {
+    name: ROUTER_PROVIDER,
+    models: [{
+      id: ROUTER_MODEL_ID,
+      name: 'Auto (best value)',
+      contextWindow: Math.max(0, ...models.map(m => m.contextWindow ?? 0)),
+      supportsThinking: models.some(m => m.supportsThinking),
+      thinkingLevels: [...levels].sort((a, b) => ladderRank(a) - ladderRank(b)),
+      supportsVision: models.some(m => m.supportsVision),
+      supportsAudio: models.some(m => m.supportsAudio),
+      supportsVideo: models.some(m => m.supportsVideo),
+    }],
+  }
+}
+
 export function useProviders(configData: Ref<ConfigData | null>) {
   const providers = computed<Provider[]>(() => {
     const entries = configData.value?.entries ?? []
@@ -183,7 +237,8 @@ export function useProviders(configData: Ref<ConfigData | null>) {
     dropDisabledProviders(entries, providerMap)
     attachProviderModels(entries, providerMap)
 
-    return Array.from(providerMap.values())
+    const router = routerProvider(entries, providerMap)
+    return router ? [...providerMap.values(), router] : Array.from(providerMap.values())
   })
 
   return { providers }

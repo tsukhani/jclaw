@@ -67,6 +67,17 @@ describe('useChatUsageMeter', () => {
     expect(api.shouldShowModelSwitchIndicator(0)).toBe(false) // no prior turn
   })
 
+  it('shouldShowModelSwitchIndicator stays quiet between two routed turns, which name their own models (JCLAW-1222)', () => {
+    const route = { class: 'chat', provider: 'ollama-cloud', model: 'a', reason: '' }
+    const { api } = mountMeter([
+      assistant({ modelId: 'a', modelProvider: 'ollama-cloud', route }),
+      assistant({ modelId: 'b', modelProvider: 'ollama-cloud', route: { ...route, model: 'b' } }),
+      assistant({ modelId: 'c', modelProvider: 'openai' }),
+    ])
+    expect(api.shouldShowModelSwitchIndicator(1)).toBe(false)
+    expect(api.shouldShowModelSwitchIndicator(2)).toBe(true) // leaving the router is still a switch
+  })
+
   it('shouldShowModelSwitchIndicator is false when the model is unchanged', () => {
     const { api } = mountMeter([
       assistant({ modelId: 'a', modelProvider: 'openai' }),

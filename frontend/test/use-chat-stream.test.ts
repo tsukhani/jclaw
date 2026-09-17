@@ -145,6 +145,24 @@ describe('useChatStream', () => {
     expect(second).not.toHaveProperty('thinkingMode')
   })
 
+  it('takes the router\'s route frame onto the reply instead of showing it as status text (JCLAW-1222)', async () => {
+    const deps = makeDeps({ input: ref('hello') })
+    const route = { class: 'chat', provider: 'ollama-cloud', model: 'glm-5.3-flash', reason: 'no task markers' }
+    streamWith([
+      'data: {"type":"init","conversationId":42}\n',
+      `data: ${JSON.stringify({ type: 'status', content: JSON.stringify({ route }) })}\n`,
+      `data: ${JSON.stringify({ type: 'status', content: JSON.stringify({ route: { ...route, provider: 'openrouter', failover: true } }) })}\n`,
+      'data: {"type":"token","content":"hi"}\n',
+      'data: {"type":"complete","content":"hi"}\n',
+    ])
+    const { api } = await mountStream(deps)
+    await api.sendMessage()
+    await flushPromises()
+
+    const assistant = deps.messages.value[1]!
+    expect(assistant._route).toMatchObject({ provider: 'openrouter', model: 'glm-5.3-flash', failover: true })
+  })
+
   it('stamps the reasoning→content transition (collapses the thinking card once)', async () => {
     const deps = makeDeps({ input: ref('think then answer') })
     streamWith([

@@ -58,6 +58,22 @@ export interface MessageUsage {
    * `cost_details.upstream_inference_cost`). Absent for providers that report none.
    */
   providerMetrics?: Record<string, number>
+  /** JCLAW-1222: why the model router picked this turn's model. Absent for a turn not on the router. */
+  route?: MessageRoute
+}
+
+/**
+ * JCLAW-1222: the model router's choice for one turn. `provider`/`model` name the model that
+ * answered, which is the fallback when `failover` is set.
+ */
+export interface MessageRoute {
+  class: string
+  provider: string
+  model: string
+  reason: string
+  downshifted?: boolean
+  sticky?: boolean
+  failover?: boolean
 }
 
 export interface UsageCostBreakdown {

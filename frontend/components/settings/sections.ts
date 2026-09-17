@@ -16,6 +16,7 @@
 import type { Component } from 'vue'
 import {
   AdjustmentsHorizontalIcon,
+  ArrowsRightLeftIcon,
   ArrowsUpDownIcon,
   ArrowUpTrayIcon,
   BoltIcon,
@@ -61,6 +62,7 @@ import SettingsMalwarePanel from './SettingsMalwarePanel.vue'
 import SettingsMemoryEmbeddingsPanel from './SettingsMemoryEmbeddingsPanel.vue'
 import SettingsMemoryLimitsPanel from './SettingsMemoryLimitsPanel.vue'
 import SettingsMemoryRerankerPanel from './SettingsMemoryRerankerPanel.vue'
+import SettingsModelRouterPanel from './SettingsModelRouterPanel.vue'
 import SettingsOcrPanel from './SettingsOcrPanel.vue'
 import SettingsPerformancePanel from './SettingsPerformancePanel.vue'
 import SettingsPrintersPanel from './SettingsPrintersPanel.vue'
@@ -123,6 +125,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
     label: 'Providers',
     sections: [
       { id: 'providers', title: 'LLM Providers', icon: CpuChipIcon, component: SettingsProvidersPanel },
+      { id: 'model-router', title: 'Model Router', icon: ArrowsRightLeftIcon, component: SettingsModelRouterPanel },
       { id: 'search', title: 'Search Providers', icon: MagnifyingGlassIcon, component: SettingsSearchPanel },
     ],
   },

@@ -87,7 +87,7 @@ const { providers } = useProviders(configDataRef)
  * Not a `:key` — the row identity stays `msg.id ?? msg._key`.
  */
 function messageRenderKey(msg: Message): string {
-  return `${!!msg.thinkingCollapsed}|${!!msg.toolCallsCollapsed}|${(msg.toolCalls ?? []).map(t => t._expanded ? 1 : 0).join('')}|${(msg.attachments ?? []).map(a => a.deleted ? 1 : 0).join('')}`
+  return `${!!msg.thinkingCollapsed}|${!!msg.toolCallsCollapsed}|${(msg.toolCalls ?? []).map(t => t._expanded ? 1 : 0).join('')}|${(msg.attachments ?? []).map(a => a.deleted ? 1 : 0).join('')}|${msg._route?.model ?? ''}${msg._route?.failover ? '!' : ''}`
 }
 
 /** Broken images inside a rendered markdown body collapse instead of showing
