@@ -10,7 +10,7 @@
  */
 import type { ProviderModelDef, ProviderModelsResponse } from '~/types/api'
 
-const { configValue, saveField, saving, resync, providersData, getProviderModels } = useSettingsConfig()
+const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
 
 /** Mirrors memory.MemoryReranker's keys. */
 const MemoryRerankKeys = {
@@ -89,12 +89,11 @@ async function toggleEnabled() {
 
 async function saveSelection() {
   if (!isDirty.value) return
-  const saved = await attempt(async () => {
+  // saveField refreshes after each write, so one that lands before another fails still shows.
+  await attempt(async () => {
     await saveField(MemoryRerankKeys.provider, selectedProvider.value)
     await saveField(MemoryRerankKeys.model, selectedModel.value)
   })
-  // The two writes can half-land: show what was saved, not what was there before.
-  if (!saved) await resync()
 }
 </script>
 

@@ -72,14 +72,17 @@ async function setEngine(value: string) {
   }
 }
 async function setModel(engine: string, value: string) {
-  await saveField(`tts.${engine}.model`, value)
-  // Voices are per-model (a Kokoro name is meaningless for Qwen3), so reset the
-  // speaker to the model default whenever the model changes.
-  await saveField(`tts.${engine}.voice`, '')
-  refreshTtsState()
+  // saveField refreshes after each write, so a model that lands before the voice reset fails still shows.
+  const saved = await attempt(async () => {
+    await saveField(`tts.${engine}.model`, value)
+    // Voices are per-model (a Kokoro name is meaningless for Qwen3), so reset the
+    // speaker to the model default whenever the model changes.
+    await saveField(`tts.${engine}.voice`, '')
+  })
+  if (saved) refreshTtsState()
 }
 async function setVoice(value: string) {
-  await saveField(`tts.${selectedEngine.value}.voice`, value)
+  await attempt(() => saveField(`tts.${selectedEngine.value}.voice`, value))
 }
 
 // JCLAW-865: Chatterbox and Qwen3-TTS have no named voices — cloning from a short
@@ -176,7 +179,7 @@ async function setIdleTimeout(value: string) {
   // not persist something the daemon will read as nonsense. 0 means never unload.
   const n = Number.parseInt(value, 10)
   const safe = Number.isNaN(n) ? 15 : Math.min(1440, Math.max(0, n))
-  await saveField('tts.local.idleTimeoutMinutes', String(safe))
+  await attempt(() => saveField('tts.local.idleTimeoutMinutes', String(safe)))
 }
 const { saveError, attempt } = useSaveAttempt()
 

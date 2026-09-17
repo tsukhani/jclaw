@@ -13,7 +13,7 @@
 import type { EmbeddingProbeResponse, MemoryReembedStatus, ProviderModelDef, ProviderModelsResponse } from '~/types/api'
 import { MemoryVectorKeys, looksLikeEmbeddingModel } from '~/utils/embeddingModels'
 
-const { configValue, saveField, saving, resync, providersData, getProviderModels } = useSettingsConfig()
+const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
 
 const enabled = computed(() => configValue(MemoryVectorKeys.enabled, 'false') === 'true')
 const savedProvider = computed(() => configValue(MemoryVectorKeys.provider))
@@ -198,13 +198,12 @@ async function toggleEnabled() {
 async function saveSelection() {
   if (!canSave.value || !probe.value) return
   const dimensions = String(probe.value.dimensions)
-  const saved = await attempt(async () => {
+  // saveField refreshes after each write, so one that lands before another fails still shows.
+  await attempt(async () => {
     await saveField(MemoryVectorKeys.provider, selectedProvider.value)
     await saveField(MemoryVectorKeys.model, selectedModel.value)
     await saveField(MemoryVectorKeys.dimensions, dimensions)
   })
-  // The three writes can half-land: show what was saved, not what was there before.
-  if (!saved) await resync()
 }
 </script>
 

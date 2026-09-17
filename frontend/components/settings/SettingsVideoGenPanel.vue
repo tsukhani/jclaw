@@ -182,6 +182,8 @@ watch(activeLocalEngineId, (v) => {
   chosenLocalEngine.value = v
 })
 const videogenBackendError = ref<ApiErrorDetails | null>(null)
+// The Replicate model select and the job timeout, which save on change.
+const { saveError: fieldError, attempt: attemptField } = useSaveAttempt()
 function putBackVideogenChoice(e: unknown) {
   chosenVideogenBackend.value = videogenBackend.value
   chosenLocalEngine.value = activeLocalEngineId.value
@@ -325,7 +327,7 @@ onUnmounted(() => stopVideoCapPolling())
               :disabled="saving"
               aria-label="Replicate video model"
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="saveField('videogen.cloud.model', ($event.target as HTMLSelectElement).value)"
+              @change="attemptField(() => saveField('videogen.cloud.model', ($event.target as HTMLSelectElement).value))"
             >
               <option value="">
                 Provider default (wan-video/wan-2.2-t2v-fast)
@@ -475,6 +477,7 @@ onUnmounted(() => stopVideoCapPolling())
           </div>
         </div>
       </fieldset>
+      <ApiErrorAlert :error="fieldError" />
 
       <!-- Job timeout — jobs RUNNING longer than this are failed by the runner. -->
       <label
@@ -490,7 +493,7 @@ onUnmounted(() => stopVideoCapPolling())
           :disabled="saving"
           class="w-20 px-2 py-1 text-sm text-right bg-surface border border-border text-fg-primary"
           aria-label="Video job timeout in minutes"
-          @change="saveField('videogen.maxJobMinutes', ($event.target as HTMLInputElement).value)"
+          @change="attemptField(() => saveField('videogen.maxJobMinutes', ($event.target as HTMLInputElement).value))"
         >
       </label>
     </template>

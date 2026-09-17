@@ -28,13 +28,12 @@ const videoSampleFrames = computed(() => {
 })
 async function saveVideoSampleFrames(value: string | number) {
   saving.value = true
-  try {
-    const n = Math.max(VIDEO_FRAMES_MIN,
-      Math.min(VIDEO_FRAMES_MAX, Number.parseInt(String(value), 10) || VIDEO_FRAMES_DEFAULT))
+  const n = Math.max(VIDEO_FRAMES_MIN,
+    Math.min(VIDEO_FRAMES_MAX, Number.parseInt(String(value), 10) || VIDEO_FRAMES_DEFAULT))
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'video.sampleFrames', value: String(n) } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 // Sampling density: one frame per N seconds of video (FrameSampler.video.secondsPerFrame).
 // Lower = denser. The actual frame count = clamp(round(duration / secondsPerFrame), 2, sampleFrames),
@@ -52,13 +51,12 @@ const videoSecondsPerFrame = computed(() => {
 })
 async function saveVideoSecondsPerFrame(value: string | number) {
   saving.value = true
-  try {
-    const n = Math.max(VIDEO_SPF_MIN,
-      Math.min(VIDEO_SPF_MAX, Number.parseInt(String(value), 10) || VIDEO_SPF_DEFAULT))
+  const n = Math.max(VIDEO_SPF_MIN,
+    Math.min(VIDEO_SPF_MAX, Number.parseInt(String(value), 10) || VIDEO_SPF_DEFAULT))
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'video.secondsPerFrame', value: String(n) } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 // The default model = the main agent's model (mirrors the Subagents section's resolution).
 const defaultVideoModel = computed<ProviderModelDef | null>(() => {
@@ -229,11 +227,10 @@ async function setVideoProvider(value: string) {
 }
 async function setVideoModel(value: string) {
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'video.model', value } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 </script>
 

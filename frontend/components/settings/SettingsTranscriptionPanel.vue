@@ -147,11 +147,10 @@ async function setDiarizationProvider(value: string) {
 }
 async function setDiarizationModel(value: string) {
   saving.value = true
-  try {
+  if (await attemptDiarization(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 
 // On-device (pyannote-local) per-turn emotion model (SER). The operator picks
@@ -161,12 +160,13 @@ const selectedEmotionModel = computed(() =>
 )
 async function setEmotionModel(value: string) {
   saving.value = true
-  try {
+  if (await attemptDiarization(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.emotionModel', value } })
+  })) {
     refresh()
     refreshDiarizationModels() // the SER repo changed — re-check its download status
   }
-  finally { saving.value = false }
+  saving.value = false
 }
 
 // On-device diarization weights (pyannote diarizer + SER model): download
@@ -276,11 +276,10 @@ async function setTranscriptionProvider(value: string) {
 }
 async function setLocalModel(value: string) {
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.localModel', value } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 
 // Cloud transcription model (transcription.model). The backend defaults to
@@ -291,11 +290,10 @@ const selectedTranscriptionModel = computed(() =>
 )
 async function setTranscriptionModel(value: string) {
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.model', value } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 async function downloadLocalModel(modelId: string) {
   saving.value = true

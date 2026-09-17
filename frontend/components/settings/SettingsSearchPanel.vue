@@ -130,9 +130,13 @@ function searchRecencyFilter(providerId: string): string {
   return entries.find(e => e.key === `search.${providerId}.recencyFilter`)?.value ?? 'month'
 }
 
+// The recency select sits inside its provider card, below the panel's alert, so its failure shows there.
+const { saveError: recencyError, attempt: attemptRecency } = useSaveAttempt()
+
 async function updateSearchRecencyFilter(providerId: string, value: string) {
-  await $fetch('/api/config', { method: 'POST', body: { key: `search.${providerId}.recencyFilter`, value } })
-  refresh()
+  if (await attemptRecency(async () => {
+    await $fetch('/api/config', { method: 'POST', body: { key: `search.${providerId}.recencyFilter`, value } })
+  })) refresh()
 }
 
 function searchPriority(providerId: string): number {
@@ -408,6 +412,11 @@ function onSearchDragEnd() {
             </option>
           </select>
         </div>
+        <ApiErrorAlert
+          v-if="id === 'perplexity'"
+          :error="recencyError"
+          class="px-4 py-2.5"
+        />
       </div>
     </div>
   </div>

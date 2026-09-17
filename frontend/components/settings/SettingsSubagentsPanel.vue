@@ -11,7 +11,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 
-const { configData, saving, refresh, getProviderModels } = useSettingsConfig()
+const { configData, saving, refresh, resync, getProviderModels } = useSettingsConfig()
 
 const { data: agentsList } = await useFetch<Agent[]>('/api/agents')
 
@@ -104,7 +104,7 @@ const allModelOptions = computed(() => {
 
 async function saveSubagentModel(value: string) {
   saving.value = true
-  try {
+  const saved = await attempt(async () => {
     if (value) {
       const sep = value.indexOf('::')
       await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.modelProvider', value: value.slice(0, sep) } })
@@ -114,11 +114,11 @@ async function saveSubagentModel(value: string) {
       await $fetch('/api/config/subagent.modelProvider', { method: 'DELETE' })
       await $fetch('/api/config/subagent.modelId', { method: 'DELETE' })
     }
-    refresh()
-  }
-  finally {
-    saving.value = false
-  }
+  })
+  if (saved) refresh()
+  // The provider and model writes can half-land: show what was saved, not what was there before.
+  else await resync()
+  saving.value = false
 }
 </script>
 

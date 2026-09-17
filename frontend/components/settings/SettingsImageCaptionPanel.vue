@@ -93,11 +93,10 @@ async function setCaptionProvider(value: string) {
 }
 async function setCaptionModel(value: string) {
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'caption.model', value } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 </script>
 

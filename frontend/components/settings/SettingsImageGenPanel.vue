@@ -39,6 +39,8 @@ function defaultImagegenProvider(): string {
   return 'openai'
 }
 const { saveError, attempt } = useSaveAttempt()
+// The Replicate model select sits far below the panel's alert, so its failure shows beside it.
+const { saveError: replicateModelError, attempt: attemptReplicateModel } = useSaveAttempt()
 
 async function toggleImagegenEnabled() {
   saving.value = true
@@ -517,7 +519,7 @@ onUnmounted(() => stopImagegenLocalPolling())
               :disabled="saving"
               aria-label="Replicate image model"
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              @change="saveField('imagegen.replicate.model', ($event.target as HTMLSelectElement).value)"
+              @change="attemptReplicateModel(() => saveField('imagegen.replicate.model', ($event.target as HTMLSelectElement).value))"
             >
               <option value="">
                 Provider default (black-forest-labs/flux-schnell)
@@ -561,6 +563,10 @@ onUnmounted(() => stopImagegenLocalPolling())
               {{ imagegenModelsStatus === 'pending' ? 'discovering…' : 'refresh' }}
             </button>
           </div>
+          <ApiErrorAlert
+            :error="replicateModelError"
+            class="border-t border-border px-4 py-2.5"
+          />
           <!-- Empty-state hint when discovery returned nothing (no API key set, or a transient error). -->
           <div
             v-if="imagegenProvider === 'replicate' && imagegenModelsStatus !== 'pending' && !imagegenModels?.length"
