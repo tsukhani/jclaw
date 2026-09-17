@@ -17,6 +17,7 @@ import play.mvc.Util;
 import services.BreachedPasswordChecker;
 import services.ConfigService;
 import services.EventLogger;
+import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 import utils.AppClock;
 import utils.PasswordHasher;
@@ -279,12 +280,14 @@ public class ApiAuthController extends Controller {
             throw ApiResponses.unreachable();
         }
         if (password.length() < MIN_PASSWORD_LENGTH) {
-            ApiResponses.error(400, ApiResponses.PASSWORD_TOO_SHORT,
-                    "Password must be at least %d characters".formatted(MIN_PASSWORD_LENGTH));
+            ApiResponses.errorWithTemplate(400, ApiResponses.PASSWORD_TOO_SHORT,
+                    "Password must be at least %d characters".formatted(MIN_PASSWORD_LENGTH),
+                    ApiErrorTemplates.passwordTooShort(MIN_PASSWORD_LENGTH));
         }
         if (password.length() > MAX_PASSWORD_LENGTH) {
-            ApiResponses.error(400, ApiResponses.PASSWORD_TOO_LONG,
-                    "Password must be at most %d characters".formatted(MAX_PASSWORD_LENGTH));
+            ApiResponses.errorWithTemplate(400, ApiResponses.PASSWORD_TOO_LONG,
+                    "Password must be at most %d characters".formatted(MAX_PASSWORD_LENGTH),
+                    ApiErrorTemplates.passwordTooLong(MAX_PASSWORD_LENGTH));
         }
         // JCLAW-741: reject passwords found in a known breach. Never blocks on
         // the network — a slow/unreachable HIBP lookup degrades to the offline

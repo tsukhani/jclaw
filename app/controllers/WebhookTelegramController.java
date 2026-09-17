@@ -27,6 +27,7 @@ import play.mvc.results.Result;
 import services.BindingService;
 import services.EventLogger;
 import services.Tx;
+import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 import utils.PlayConfig;
 import utils.Strings;
@@ -107,7 +108,9 @@ public class WebhookTelegramController extends Controller {
         if (contentLengthExceeds(maxBodyBytes)) {
             EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                     "Oversized webhook body (Content-Length) for binding %d from %s".formatted(bindingId, clientIp));
-            ApiResponses.error(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large");
+            ApiResponses.errorWithTemplate(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large",
+                    ApiErrorTemplates.payloadTooLarge(WebhookIngressGate.declaredContentLength(), maxBodyBytes,
+                            CFG_MAX_BODY_BYTES));
         }
 
         if (!verifySecret(ctx, bindingId)) {
@@ -118,10 +121,12 @@ public class WebhookTelegramController extends Controller {
             var rawBody = WebhookUtil.readRawBody();
             // Backstop the Content-Length check against the actual read length
             // (a chunked / unset Content-Length request bypasses the early guard).
-            if (rawBody.getBytes(StandardCharsets.UTF_8).length > maxBodyBytes) {
+            long readBytes = rawBody.getBytes(StandardCharsets.UTF_8).length;
+            if (readBytes > maxBodyBytes) {
                 EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                         "Oversized webhook body (read length) for binding %d from %s".formatted(bindingId, clientIp));
-                ApiResponses.error(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large");
+                ApiResponses.errorWithTemplate(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large",
+                        ApiErrorTemplates.payloadTooLarge(readBytes, maxBodyBytes, CFG_MAX_BODY_BYTES));
             }
             dispatchUpdate(ctx, rawBody, bindingId);
         } catch (Result r) {

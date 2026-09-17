@@ -1,5 +1,8 @@
 package utils;
 
+import org.jspecify.annotations.Nullable;
+
+import java.util.Locale;
 import java.util.Map;
 
 import static utils.ErrorTemplateSupport.CHECK_LOGS;
@@ -83,10 +86,52 @@ public final class ApiErrorTemplates {
                 "Install the skill on the agent, then switch it on again.");
     }
 
+    private static final String PASSWORD_LENGTH_CHECK =
+            "Length is the only rule — there are no composition requirements.";
+
+    private static final String PASSWORD_CAP_CHECK =
+            "The cap bounds how long each sign-in takes to check; it is not a strength judgement.";
+
+    /** A setup or reset password under the minimum, naming the minimum rather than only its existence. */
+    public static ErrorTemplate passwordTooShort(int minLength) {
+        return new ErrorTemplate(ApiResponses.PASSWORD_TOO_SHORT,
+                "That password is shorter than %d characters, the minimum.".formatted(minLength),
+                PASSWORD_LENGTH_CHECK,
+                "Choose a password of at least %d characters and submit again.".formatted(minLength));
+    }
+
+    /** A setup or reset password over the cap, naming the cap. */
+    public static ErrorTemplate passwordTooLong(int maxLength) {
+        return new ErrorTemplate(ApiResponses.PASSWORD_TOO_LONG,
+                "That password is longer than %d characters, the maximum.".formatted(maxLength),
+                PASSWORD_CAP_CHECK,
+                "Choose a password of at most %d characters and submit again.".formatted(maxLength));
+    }
+
+    /**
+     * A webhook body over its endpoint's cap, naming the size when it is known and the cap with the
+     * key that sets it — the only sites that send {@code payload_too_large} are the webhook gates.
+     *
+     * @param bodyBytes the declared or read size, or null when the request did not declare one
+     */
+    public static ErrorTemplate payloadTooLarge(@Nullable Long bodyBytes, long limitBytes,
+                                                String limitKey) {
+        var broke = bodyBytes == null
+                ? String.format(Locale.ROOT,
+                        "The request body is over the %,d-byte limit for this endpoint.", limitBytes)
+                : String.format(Locale.ROOT,
+                        "The request body is %,d bytes, over the %,d-byte limit for this endpoint.",
+                        bodyBytes, limitBytes);
+        return new ErrorTemplate(ApiResponses.PAYLOAD_TOO_LARGE, broke,
+                ("The endpoint refuses a body over the limit %s sets before handling it, so nothing "
+                        + "in this request was processed.").formatted(limitKey),
+                "Send a smaller body, or raise %s in application.conf and restart JClaw.".formatted(limitKey));
+    }
+
     private static final Map<String, ErrorTemplate> TEMPLATES = Map.ofEntries(
             e(ApiResponses.INVALID_REQUEST, "The request was not in a form the server could accept.",
-                    "Check the fields you submitted for missing or malformed values.",
-                    "Correct the highlighted fields and submit again."),
+                    "The message above names the field or value that was refused.",
+                    "Correct that value and submit again."),
             e(ApiResponses.INTERNAL_ERROR, "Something failed on the server while handling the request.",
                     CHECK_LOGS,
                     "Retry the operation. If it fails the same way twice, the log entry is the thing to report."),
@@ -123,11 +168,9 @@ public final class ApiErrorTemplates {
                     "Setup only applies to an instance that has none — this one is past that point.",
                     "Sign in instead, or reset the password if you no longer have it."),
             e(ApiResponses.PASSWORD_TOO_SHORT, "That password is shorter than the minimum length.",
-                    "Length is the only rule — there are no composition requirements.",
-                    "Choose a longer password and submit again."),
+                    PASSWORD_LENGTH_CHECK, "Choose a longer password and submit again."),
             e(ApiResponses.PASSWORD_TOO_LONG, "That password is longer than the maximum length.",
-                    "The cap bounds per-attempt hashing cost; it is not a strength judgement.",
-                    "Shorten it and submit again."),
+                    PASSWORD_CAP_CHECK, "Shorten it and submit again."),
             e(ApiResponses.PASSWORD_BREACHED, "That password appears in a known breach corpus.",
                     "The check is against published breach data, not a judgement of its strength.",
                     "Choose a different password. This one cannot be used even if retried."),
@@ -170,9 +213,11 @@ public final class ApiErrorTemplates {
             e(ApiResponses.NO_INPUT, "The request carried no content to act on.",
                     "Check that a message, file or field was actually included.",
                     "Add the content and submit again."),
-            e(ApiResponses.PAYLOAD_TOO_LARGE, "The upload is larger than the configured limit.",
-                    "The limit is configurable in Settings.",
-                    "Send a smaller file, or raise the limit and retry."),
+            e(ApiResponses.PAYLOAD_TOO_LARGE, "The request body is larger than this endpoint accepts.",
+                    "The endpoint refuses a body over its limit before handling it, so nothing in this "
+                            + "request was processed.",
+                    "Send a smaller body, or raise the endpoint's max-body-bytes setting in application.conf "
+                            + "and restart JClaw."),
             e(ApiResponses.RESERVED_KEY, "That configuration key is reserved and cannot be set here.",
                     "Reserved namespaces are enforced by the server; a stored row could not take effect anyway.",
                     null),

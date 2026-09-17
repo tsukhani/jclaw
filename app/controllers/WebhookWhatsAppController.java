@@ -85,7 +85,7 @@ public class WebhookWhatsAppController extends Controller {
             return; // javac definite-assignment: rawBody is unassigned on this catch path
         }
         // JCLAW-783: read-length backstop for a chunked / lying Content-Length.
-        WebhookIngressGate.enforceReadLength(CHANNEL_WHATSAPP, clientIp, clientIp, rawBody, maxBodyBytes);
+        WebhookIngressGate.enforceReadLength(CHANNEL_WHATSAPP, clientIp, CFG_PREFIX, clientIp, rawBody, maxBodyBytes);
 
         JsonObject payload;
         try {

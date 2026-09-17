@@ -73,6 +73,8 @@ class ApiAuthControllerTest extends FunctionalTest {
                 "{\"password\":\"elevenchar1\"}");
         assertEquals(400, resp.status.intValue());
         assertTrue(getContent(resp).contains("password_too_short"), getContent(resp));
+        assertTrue(getContent(resp).contains("shorter than 12 characters"),
+                "the template names the minimum: " + getContent(resp));
     }
 
     @Test

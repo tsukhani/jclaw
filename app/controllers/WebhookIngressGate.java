@@ -1,8 +1,10 @@
 package controllers;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.mvc.Http;
 import services.EventLogger;
+import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 import utils.PlayConfig;
 
@@ -124,7 +126,9 @@ public final class WebhookIngressGate {
         if (contentLengthExceeds(maxBodyBytes)) {
             EventLogger.warn(CATEGORY_CHANNEL, null, channel,
                     "Oversized webhook body (Content-Length) key %s from %s".formatted(key, clientIp));
-            ApiResponses.error(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large");
+            ApiResponses.errorWithTemplate(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large",
+                    ApiErrorTemplates.payloadTooLarge(declaredContentLength(), maxBodyBytes,
+                            prefix + CFG_MAX_BODY_BYTES));
         }
         return maxBodyBytes;
     }
@@ -135,12 +139,14 @@ public final class WebhookIngressGate {
      * separate from {@link #enforcePreAuth} because the raw body is only in hand
      * after the caller reads it.
      */
-    public static void enforceReadLength(String channel, String key, String clientIp,
+    public static void enforceReadLength(String channel, String key, String prefix, String clientIp,
                                          String rawBody, long maxBodyBytes) {
-        if (rawBody.getBytes(StandardCharsets.UTF_8).length > maxBodyBytes) {
+        long readBytes = rawBody.getBytes(StandardCharsets.UTF_8).length;
+        if (readBytes > maxBodyBytes) {
             EventLogger.warn(CATEGORY_CHANNEL, null, channel,
                     "Oversized webhook body (read length) key %s from %s".formatted(key, clientIp));
-            ApiResponses.error(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large");
+            ApiResponses.errorWithTemplate(413, ApiResponses.PAYLOAD_TOO_LARGE, "Payload Too Large",
+                    ApiErrorTemplates.payloadTooLarge(readBytes, maxBodyBytes, prefix + CFG_MAX_BODY_BYTES));
         }
     }
 
@@ -150,12 +156,18 @@ public final class WebhookIngressGate {
      * read-length backstop catches those).
      */
     public static boolean contentLengthExceeds(long maxBodyBytes) {
+        var declared = declaredContentLength();
+        return declared != null && declared > maxBodyBytes;
+    }
+
+    /** The request's {@code Content-Length}, or null when it is absent or unparseable. */
+    public static @Nullable Long declaredContentLength() {
         var header = Http.Request.current().headers.get("content-length");
-        if (header == null || header.value() == null) return false;
+        if (header == null || header.value() == null) return null;
         try {
-            return Long.parseLong(header.value().trim()) > maxBodyBytes;
+            return Long.parseLong(header.value().trim());
         } catch (NumberFormatException _) {
-            return false;
+            return null;
         }
     }
 

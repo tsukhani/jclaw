@@ -41,8 +41,8 @@ describe('PromptFormDialog', () => {
           message: 'Title is already taken.',
           template: {
             whatBroke: 'The request was not in a form the server could accept.',
-            whatToCheck: 'Check the fields you submitted for missing or malformed values.',
-            howToRetry: 'Correct the highlighted fields and submit again.',
+            whatToCheck: 'The message above names the field or value that was refused.',
+            howToRetry: 'Correct that value and submit again.',
           },
         }
       },
@@ -64,7 +64,7 @@ describe('PromptFormDialog', () => {
 
     expect(alertText()).toContain('Title is already taken.')
     expect(alertText()).toContain('What to check')
-    expect(alertText()).toContain('Correct the highlighted fields and submit again.')
+    expect(alertText()).toContain('Correct that value and submit again.')
   })
 
   it('leaves the dialog clean when nothing has failed', async () => {

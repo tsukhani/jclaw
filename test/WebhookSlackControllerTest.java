@@ -513,6 +513,9 @@ class WebhookSlackControllerTest extends FunctionalTest {
             var ts = String.valueOf(Instant.now().getEpochSecond());
             var response = postWithContentLength(99999L, "{}", ts, "v0=bad", "100000");
             assertEquals(413, response.status.intValue());
+            var body = getContent(response);
+            assertTrue(body.contains("100,000 bytes") && body.contains("slack.webhook.max-body-bytes"),
+                    "the 413 names the declared size and the key that sets the limit: " + body);
         } finally {
             play.Play.configuration.remove("slack.webhook.max-body-bytes");
         }

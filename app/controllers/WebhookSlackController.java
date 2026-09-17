@@ -109,7 +109,7 @@ public class WebhookSlackController extends Controller {
         var rawBody = readRawBodyOrHalt();
         // JCLAW-783: read-length backstop for a chunked / lying Content-Length that
         // slipped past the pre-auth Content-Length check above.
-        WebhookIngressGate.enforceReadLength(CHANNEL_SLACK, gateKey, clientIp, rawBody, maxBodyBytes);
+        WebhookIngressGate.enforceReadLength(CHANNEL_SLACK, gateKey, CFG_PREFIX, clientIp, rawBody, maxBodyBytes);
 
         // Verify against THIS binding's secret before any payload parsing —
         // url_verification challenges are signed by Slack too, so they run through

@@ -101,8 +101,8 @@ describe('Settings page — Voice Mode', () => {
     refusal = 'voice.endpoint.baseSilenceMs must not exceed voice.endpoint.maxSilenceMs (1500).'
     refusalTemplate = {
       whatBroke: 'The request was not in a form the server could accept.',
-      whatToCheck: 'Check the fields you submitted for missing or malformed values.',
-      howToRetry: 'Correct the highlighted fields and submit again.',
+      whatToCheck: 'The message above names the field or value that was refused.',
+      howToRetry: 'Correct that value and submit again.',
     }
 
     const base = row(component, 'voice.endpoint.baseSilenceMs')
@@ -115,7 +115,7 @@ describe('Settings page — Voice Mode', () => {
     const alert = base.find('[data-testid="api-error"]')
     expect(alert.text()).toContain('must not exceed')
     expect(alert.text()).toContain('What to check')
-    expect(alert.text()).toContain('Correct the highlighted fields and submit again.')
+    expect(alert.text()).toContain('Correct that value and submit again.')
   })
 
   it('names the request when a proxy answers with a page instead of the error envelope (JCLAW-1221)', async () => {

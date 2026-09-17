@@ -329,6 +329,7 @@ class WebhookTelegramControllerTest extends FunctionalTest {
             var oversized = "{\"update_id\":1234567890}"; // > 8 bytes
             var response = postWithSecretHeader(bindingId, SECRET, oversized);
             assertEquals(413, response.status.intValue());
+            assertTrue(getContent(response).contains("telegram.webhook.max-body-bytes"), getContent(response));
         } finally {
             play.Play.configuration.remove("telegram.webhook.max-body-bytes");
         }
