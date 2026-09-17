@@ -174,18 +174,21 @@ function goto(p: number) {
   selectedIds.value = new Set()
 }
 
-const { mutate } = useApiMutation()
+const { mutate, errorDetails: mutationError } = useApiMutation()
 const { confirm } = useConfirm()
 
-async function updateImportance(mem: MemoryDto, raw: string) {
-  const parsed = Number.parseFloat(raw)
-  if (Number.isNaN(parsed)) return
-  const value = Math.min(1, Math.max(0, parsed))
-  const res = await mutate(`/api/memories/${mem.id}`, {
-    method: 'PUT',
-    body: { importance: value },
-  })
-  if (res !== null) mem.importance = value
+async function updateImportance(mem: MemoryDto, input: HTMLInputElement) {
+  const parsed = Number.parseFloat(input.value)
+  if (!Number.isNaN(parsed)) {
+    const value = Math.min(1, Math.max(0, parsed))
+    const res = await mutate(`/api/memories/${mem.id}`, {
+      method: 'PUT',
+      body: { importance: value },
+    })
+    if (res !== null) mem.importance = value
+  }
+  // :value is only re-applied on a re-render, which a refused, blank or no-op clamped entry never causes.
+  input.value = String(mem.importance)
 }
 
 // ── Bulk deletion (mirrors the Conversations page: selection-driven Delete
@@ -362,6 +365,10 @@ async function exportMemories() {
       @update:filters="onFiltersChanged"
       @export="exportMemories"
     />
+    <ApiErrorAlert
+      :error="mutationError"
+      class="mb-4"
+    />
 
     <p
       v-if="fetchError"
@@ -476,7 +483,7 @@ async function exportMemories() {
                 data-testid="importance-input"
                 aria-label="Importance"
                 class="w-20 border border-input bg-surface-elevated px-2 py-1 text-fg-strong"
-                @change="updateImportance(mem, ($event.target as HTMLInputElement).value)"
+                @change="updateImportance(mem, $event.target as HTMLInputElement)"
               >
             </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-fg-muted">

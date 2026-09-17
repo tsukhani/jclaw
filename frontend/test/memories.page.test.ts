@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import { useConfirm } from '~/composables/useConfirm'
 import Memory from '~/pages/memories.vue'
@@ -338,5 +339,76 @@ describe('memories admin page — pagination', () => {
     expect(c.text()).toContain('Page 1 of 1')
     expect(c.findAll('button').find(b => b.text() === 'Next')!.attributes('disabled')).toBeDefined()
     expect(c.findAll('button').find(b => b.text() === 'Prev')!.attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('memories admin page — importance input shows the saved value (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  function stubPut(handler: Parameters<typeof registerEndpoint>[1]) {
+    unregister.push(registerEndpoint('/api/memories/10', handler))
+  }
+
+  async function typeImportance(raw: string) {
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+    const input = c.find('[data-testid="importance-input"]')
+    await input.setValue(raw)
+    return { c, input: input.element as HTMLInputElement }
+  }
+
+  it('puts the saved value back and names the request when the save fails', async () => {
+    memoriesResponse = [mem()]
+    stubPut({
+      method: 'PUT',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    const { c, input } = await typeImportance('0.95')
+    await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').exists()).toBe(true))
+
+    expect(c.find('[data-testid="api-error"]').text()).toContain('/api/memories/10')
+    expect(input.value).toBe('0.7')
+  })
+
+  it('shows the clamped value when clamping leaves the importance unchanged', async () => {
+    memoriesResponse = [mem({ importance: 1 })]
+    stubPut({
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { ...mem(), importance: putBody.importance }
+      },
+    })
+    const { input } = await typeImportance('1.5')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+    await flushPromises()
+
+    expect(putBody).toEqual({ importance: 1 })
+    expect(input.value).toBe('1')
+  })
+
+  it('puts the saved value back when the entry is cleared, without saving', async () => {
+    memoriesResponse = [mem()]
+    stubPut({
+      method: 'PUT',
+      handler: () => {
+        putBody = {}
+        return mem()
+      },
+    })
+    const { input } = await typeImportance('')
+    await flushPromises()
+
+    expect(putBody).toBeNull()
+    expect(input.value).toBe('0.7')
   })
 })
