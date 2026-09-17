@@ -331,8 +331,8 @@ public final class ToolErrorTemplates {
     public static ErrorTemplate webFetchFailed(String url, String detail) {
         return new ErrorTemplate(WEB_FETCH_FAILED,
                 "Fetching %s failed: %s".formatted(url, detail),
-                "The request reached the transport and came back with an error the ladder could not "
-                        + "get past — commonly a 4xx or 5xx from the site itself.",
+                "The site answered with an error, commonly a 4xx or 5xx, and every fallback way of "
+                        + "fetching the page failed as well.",
                 "Try a different URL on the same site, or a search to find another source for the content.");
     }
 
@@ -348,9 +348,10 @@ public final class ToolErrorTemplates {
                 "Could not reach MCP server '%s' to run `%s`: %s".formatted(server, tool, detail),
                 ("The failure was at the transport, so the server never answered — it may be "
                         + "stopped, still starting, or listening somewhere other than its configured "
-                        + "address. Settings → MCP Servers → %s shows its connection state.")
+                        + "address. The MCP Servers page shows %s's connection state.")
                         .formatted(server),
-                "Reconnect '%s' from Settings, then run the tool again.".formatted(server));
+                ("Tell the user '%s' is unreachable: only the operator can reconnect it, from the "
+                        + "MCP Servers page. Run the tool again once it is connected.").formatted(server));
     }
 
     public static ErrorTemplate mcpProtocolFailed(String server, String tool, String detail) {
@@ -378,7 +379,8 @@ public final class ToolErrorTemplates {
                         .formatted(tool, server, agent),
                 "A per-agent grant, not a connection problem: the server can be connected and its "
                         + "tools still ungranted, which is the default for a newly connected server.",
-                "Grant the agent this server's tools in the agent editor, then call it again.");
+                "Ask the operator to grant this agent the server's tools in the agent editor. The "
+                        + "grant is theirs to make, so do not call it again until they have.");
     }
 
     public static ErrorTemplate mcpBadArguments(String server, String tool, String detail) {

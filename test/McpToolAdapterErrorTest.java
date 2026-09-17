@@ -42,7 +42,8 @@ class McpToolAdapterErrorTest extends UnitTest {
         var t = ToolErrorTemplates.mcpConnectionFailed(SERVER, "drive_search", "connection refused");
         assertTrue(t.whatBroke().contains(SERVER), "names the server: " + t.whatBroke());
         assertTrue(t.whatToCheck().contains("never answered"), t.whatToCheck());
-        assertTrue(t.howToRetry().contains("Reconnect"), t.howToRetry());
+        // The reader is the model, which cannot reconnect a server; it has to hand that to the operator.
+        assertTrue(t.howToRetry().contains("only the operator can reconnect"), t.howToRetry());
         assertNotNull(out);
     }
 
@@ -82,5 +83,7 @@ class McpToolAdapterErrorTest extends UnitTest {
         var t = ToolErrorTemplates.mcpNotAllowed(SERVER, "drive_search", "main");
         assertTrue(t.whatBroke().contains(SERVER) && t.whatBroke().contains("main"), t.whatBroke());
         assertTrue(t.whatToCheck().contains("not a connection problem"), t.whatToCheck());
+        assertTrue(t.howToRetry().startsWith("Ask the operator"),
+                "the model cannot grant itself tools: " + t.howToRetry());
     }
 }

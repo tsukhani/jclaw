@@ -137,6 +137,13 @@ class ToolErrorTemplatesTest extends UnitTest {
      * Nothing about reading it back may depend on the new payload being there.
      */
     @Test
+    void aFetchFailureDescribesTheFallbacksWithoutTheCodebasesOwnVocabulary() {
+        var t = ToolErrorTemplates.webFetchFailed("https://example.com/", "HTTP 403");
+        assertFalse(t.whatToCheck().contains("ladder"), t.whatToCheck());
+        assertTrue(t.whatToCheck().contains("fallback"), t.whatToCheck());
+    }
+
+    @Test
     void aResultWithNoStructuredPayloadStillRendersAndVerifiesAsBefore() {
         var legacySuccess = ToolRegistry.ToolResult.text("File written successfully: notes.md");
         var legacyFailure = ToolRegistry.ToolResult.text("Error: File not found: notes.md");
