@@ -343,3 +343,57 @@ describe('Settings page — Video Interpretation radios put the saved choice bac
     await chooseAndExpectPutBack(component, '#video-provider-ollama-cloud', '#video-provider-openrouter')
   })
 })
+
+describe('Settings page — a video provider switch whose model reset fails shows the provider that was saved (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  // Saves update the stored config the next read returns, except for keys in `failing`, which answer 502.
+  function statefulConfig(initial: Array<{ key: string, value: string }>, failing: string[]) {
+    const store = new Map(initial.map(e => [e.key, e.value]))
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: [...store].map(([key, value]) => ({ key, value, updatedAt: '2026-09-17T10:00:00Z' })) }),
+    }))
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key: string, value: string }
+        if (failing.includes(body.key)) {
+          setResponseStatus(event, 502)
+          return '<html><body>Bad Gateway</body></html>'
+        }
+        store.set(body.key, body.value)
+        return { ok: true }
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  async function chooseAndExpectLanded(component: any, choose: string) {
+    await component.find(choose).setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    await flushPromises()
+    expect((component.find(choose).element as HTMLInputElement).checked).toBe(true)
+  }
+
+  it('video interpretation', async () => {
+    setupApi()
+    statefulConfig([
+      ...configEntries(undefined, MODELS_TEXT_ONLY),
+      { key: 'video.provider', value: 'openrouter' },
+      { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
+      { key: 'video.model', value: 'google/gemini-2.5-flash' },
+    ], ['video.model'])
+    const component = await mountSettingsSection('video-interpretation')
+    await chooseAndExpectLanded(component, '#video-provider-ollama-cloud')
+  })
+})

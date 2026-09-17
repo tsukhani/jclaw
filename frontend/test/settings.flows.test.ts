@@ -2165,3 +2165,89 @@ describe('Settings page — provider radios put the saved choice back when a sav
     await chooseAndExpectPutBack(component, '#caption-provider-ollama-local', '#caption-provider-openai')
   })
 })
+
+describe('Settings page — a provider switch whose model reset fails shows the provider that was saved (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  // Saves update the stored config the next read returns, except for keys in `failing`, which answer 502.
+  function statefulConfig(initial: Array<{ key: string, value: string }>, failing: string[]) {
+    const store = new Map(initial.map(e => [e.key, e.value]))
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: [...store].map(([key, value]) => ({ key, value, updatedAt: '2026-09-17T10:00:00Z' })) }),
+    }))
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key: string, value: string }
+        if (failing.includes(body.key)) {
+          setResponseStatus(event, 502)
+          return '<html><body>Bad Gateway</body></html>'
+        }
+        store.set(body.key, body.value)
+        return { ok: true }
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  async function chooseAndExpectLanded(component: any, choose: string) {
+    await component.find(choose).setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    await flushPromises()
+    expect((component.find(choose).element as HTMLInputElement).checked).toBe(true)
+  }
+
+  it('image captioning', async () => {
+    setupDefaultApi()
+    statefulConfig([...defaultConfigEntries(), { key: 'caption.provider', value: 'openai' }, { key: 'caption.model', value: 'gpt-4' }], ['caption.model'])
+    const component = await mountSettingsSection('image-caption')
+    await chooseAndExpectLanded(component, '#caption-provider-ollama-local')
+  })
+
+  it('keeps the last saved config on screen when the re-read fails too', async () => {
+    setupDefaultApi()
+    let serverDown = false
+    const entries = [...defaultConfigEntries(), { key: 'caption.provider', value: 'openai' }]
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: (event) => {
+        if (!serverDown) return { entries }
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        serverDown = true
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+    const component = await mountSettingsSection('image-caption')
+
+    await component.find('#caption-provider-ollama-local').setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    await flushPromises()
+
+    expect(component.text()).toContain('Active: cloud captioning via openai')
+    expect((component.find('#caption-provider-openai').element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('diarization', async () => {
+    setupDefaultApi()
+    statefulConfig([...defaultConfigEntries(), { key: 'transcription.diarization.provider', value: 'openai' }, { key: 'transcription.diarization.model', value: 'gpt-4' }], ['transcription.diarization.model'])
+    const component = await mountSettingsSection('transcription')
+    await chooseAndExpectLanded(component, '#diarization-provider-pyannote-local')
+  })
+})

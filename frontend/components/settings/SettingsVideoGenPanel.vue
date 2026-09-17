@@ -7,7 +7,7 @@
 // the shared store; the inline config-row editor + API-key checks injected.
 import type { ApiErrorDetails } from '~/types/api'
 
-const { configData, saving, refresh, saveField, apiKeyConfigured } = useSettingsConfig()
+const { configData, saving, refresh, resync, saveField, apiKeyConfigured } = useSettingsConfig()
 
 const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
 
@@ -126,6 +126,8 @@ async function selectLocalEngine(e: VideoEngine) {
     refresh()
   }
   catch (err) {
+    // The two writes can half-land: show what was saved, not what was there before.
+    await resync()
     putBackVideogenChoice(err)
   }
   finally { saving.value = false }

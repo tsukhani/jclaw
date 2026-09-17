@@ -7,7 +7,7 @@
 // agent's model as the default via its own (Nuxt-deduped) /api/agents fetch.
 import type { Agent, ApiErrorDetails, ProviderModelDef } from '~/types/api'
 
-const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
+const { configData, saving, refresh, resync, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 const openrouterApiKeyConfigured = computed(() => apiKeyConfigured('openrouter'))
 const { data: agentsList } = await useFetch<Agent[]>('/api/agents')
 const mainAgent = computed(() => agentsList.value?.find(a => a.name === 'main') ?? null)
@@ -216,6 +216,8 @@ async function setVideoProvider(value: string) {
     refresh()
   }
   catch (e) {
+    // The two writes can half-land: show what was saved, not what was there before.
+    await resync()
     chosenVideoProvider.value = videoProvider.value
     videoProviderError.value = apiErrorDetails(e)
   }

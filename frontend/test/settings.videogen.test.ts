@@ -331,3 +331,70 @@ describe('Settings — Video Generation Self-Hosted radio when the probe selects
     expect(checked(component, '#videogen-provider-replicate')).toBe(true)
   })
 })
+
+describe('Settings — a Video Generation engine switch whose provider write fails shows the engine that was saved (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  // Saves update the stored config the next read returns, except for keys in `failing`, which answer 502.
+  function statefulConfig(initial: Array<{ key: string, value: string }>, failing: string[]) {
+    const store = new Map(initial.map(e => [e.key, e.value]))
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: [...store].map(([key, value]) => ({ key, value, updatedAt: '2026-09-17T10:00:00Z' })) }),
+    }))
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const body = await readBody(event) as { key: string, value: string }
+        if (failing.includes(body.key)) {
+          setResponseStatus(event, 502)
+          return '<html><body>Bad Gateway</body></html>'
+        }
+        store.set(body.key, body.value)
+        return { ok: true }
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  async function chooseAndExpectLanded(component: any, choose: string) {
+    await component.find(choose).setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    await flushPromises()
+    expect((component.find(choose).element as HTMLInputElement).checked).toBe(true)
+  }
+
+  it('self-hosted engine tier', async () => {
+    setupApi()
+    statefulConfig([
+      { key: 'provider.replicate.apiKey', value: 'r8_****' },
+      { key: 'videogen.provider', value: 'ltx-local' },
+      { key: 'videogen.local.model', value: 'ltx' },
+    ], ['videogen.provider'])
+    unregister.push(registerEndpoint('/api/videogen/capability', () => ({
+      uvAvailable: true,
+      uvReason: null,
+      state: 'READY',
+      capability: {
+        kind: 'cuda',
+        gpu: 'Test GPU',
+        freeVramGb: 24,
+        totalVramGb: 24,
+        models: ['ltx', 'ltx-int8'].map(id => ({ id, label: id, provider: 'ltx-local', minVramGb: 8, tier: 'ready', runnable: true, reason: null })),
+      },
+      error: null,
+    })))
+    const component = await mountSettingsSection('video-generation')
+    await vi.waitFor(() => expect(component.find('#videogen-engine-ltx-int8').exists()).toBe(true))
+    await chooseAndExpectLanded(component, '#videogen-engine-ltx-int8')
+  })
+})

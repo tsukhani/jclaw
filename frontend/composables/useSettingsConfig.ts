@@ -16,6 +16,11 @@ import type { ConfigEntry, ConfigResponse, ProviderInfo, ProviderModelDef } from
 export interface SettingsConfigContext {
   configData: Ref<ConfigResponse | null>
   refresh: () => Promise<void>
+  /**
+   * Re-reads the store, keeping the last good copy when the read fails. For recovering after a failed
+   * write: a failed {@code refresh} resets the data to its default, which empties every panel.
+   */
+  resync: () => Promise<void>
   saving: Ref<boolean>
   /** Value of the config row {@code key}, or {@code fallback} when absent. */
   configValue: (key: string, fallback?: string) => string
@@ -69,6 +74,15 @@ export function useProvideSettingsConfig() {
 
   function configValue(key: string, fallback = ''): string {
     return asyncConfig.data.value?.entries?.find(e => e.key === key)?.value ?? fallback
+  }
+
+  async function resync(): Promise<void> {
+    try {
+      asyncConfig.data.value = await $fetch<ConfigResponse>('/api/config')
+    }
+    catch {
+      // The caller is already showing why its write failed; stale config beats an empty page.
+    }
   }
 
   async function saveField(key: string, value: string): Promise<void> {
@@ -130,6 +144,7 @@ export function useProvideSettingsConfig() {
   const context: SettingsConfigContext = {
     configData: asyncConfig.data as Ref<ConfigResponse | null>,
     refresh: asyncConfig.refresh,
+    resync,
     saving,
     configValue,
     saveField,

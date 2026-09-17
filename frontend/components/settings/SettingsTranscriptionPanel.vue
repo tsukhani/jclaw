@@ -7,7 +7,7 @@
 // catalog are injected from the shared settings-config context.
 import type { ApiErrorDetails, ProviderModelDef } from '~/types/api'
 
-const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
+const { configData, saving, refresh, resync, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 
 const openrouterApiKeyConfigured = computed(() => apiKeyConfigured('openrouter'))
 const openaiApiKeyConfigured = computed(() => apiKeyConfigured('openai'))
@@ -137,6 +137,8 @@ async function setDiarizationProvider(value: string) {
     refresh()
   }
   catch (e) {
+    // The two writes can half-land: show what was saved, not what was there before.
+    await resync()
     chosenDiarizationProvider.value = diarizationProvider.value
     diarizationProviderError.value = apiErrorDetails(e)
   }
