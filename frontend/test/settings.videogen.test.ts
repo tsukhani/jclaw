@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -158,5 +158,88 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
     const hit = captured.find(b => b.key === 'videogen.cloud.model')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('wan-video/wan-2.2-t2v-fast')
+  })
+})
+
+describe('Settings — Video Generation radios put the saved choice back when a save fails (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  function failSaves() {
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  async function chooseAndExpectPutBack(component: any, choose: string, saved: string) {
+    await component.find(choose).setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    expect(component.find('[data-testid="api-error"]').text()).toContain('/api/config')
+    expect((component.find(saved).element as HTMLInputElement).checked).toBe(true)
+    expect((component.find(choose).element as HTMLInputElement).checked).toBe(false)
+  }
+
+  function capability(models: Array<{ id: string, provider: string }>) {
+    unregister.push(registerEndpoint('/api/videogen/capability', () => ({
+      uvAvailable: true,
+      uvReason: null,
+      state: 'READY',
+      capability: {
+        kind: 'cuda',
+        gpu: 'Test GPU',
+        freeVramGb: 24,
+        totalVramGb: 24,
+        models: models.map(m => ({ ...m, label: m.id, minVramGb: 8, tier: 'ready', runnable: true, reason: null })),
+      },
+      error: null,
+    })))
+  }
+
+  it('Replicate, while a self-hosted engine is saved', async () => {
+    setupApi({ extraEntries: [
+      { key: 'provider.replicate.apiKey', value: 'r8_****' },
+      { key: 'videogen.provider', value: 'ltx-local' },
+    ] })
+    failSaves()
+    const component = await mountSettingsSection('video-generation')
+    await chooseAndExpectPutBack(component, '#videogen-provider-replicate', '#videogen-provider-local')
+  })
+
+  it('Self-Hosted, while Replicate is saved', async () => {
+    setupApi({ extraEntries: [
+      { key: 'provider.replicate.apiKey', value: 'r8_****' },
+      { key: 'videogen.provider', value: 'replicate' },
+    ] })
+    capability([{ id: 'ltx', provider: 'ltx-local' }])
+    failSaves()
+    const component = await mountSettingsSection('video-generation')
+    await vi.waitFor(() => expect((component.find('#videogen-provider-local').element as HTMLInputElement).disabled).toBe(false))
+    await chooseAndExpectPutBack(component, '#videogen-provider-local', '#videogen-provider-replicate')
+  })
+
+  it('a self-hosted engine tier', async () => {
+    setupApi({ extraEntries: [
+      { key: 'provider.replicate.apiKey', value: 'r8_****' },
+      { key: 'videogen.provider', value: 'ltx-local' },
+      { key: 'videogen.local.model', value: 'ltx' },
+    ] })
+    capability([{ id: 'ltx', provider: 'ltx-local' }, { id: 'ltx-int8', provider: 'ltx-local' }])
+    failSaves()
+    const component = await mountSettingsSection('video-generation')
+    await vi.waitFor(() => expect(component.find('#videogen-engine-ltx-int8').exists()).toBe(true))
+    await chooseAndExpectPutBack(component, '#videogen-engine-ltx-int8', '#videogen-engine-ltx')
   })
 })

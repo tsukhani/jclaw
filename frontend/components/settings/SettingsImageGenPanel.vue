@@ -8,6 +8,7 @@
 // reads/writes go through the shared store; API-key checks + the shared
 // inline config-row editor are injected from it.
 import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import type { ApiErrorDetails } from '~/types/api'
 
 const { configData, saving, refresh, saveField, apiKeyConfigured, editingKey, editValue, updateEntry } = useSettingsConfig()
 
@@ -21,6 +22,12 @@ const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
 const imagegenProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'imagegen.provider')?.value ?? '',
 )
+// The radios' own selection, so a failed save can put it back; a one-way :checked never re-renders.
+const chosenImagegenProvider = ref(imagegenProvider.value)
+watch(imagegenProvider, (v) => {
+  chosenImagegenProvider.value = v
+})
+const imagegenProviderError = ref<ApiErrorDetails | null>(null)
 const imagegenEnabled = computed(() => imagegenProvider.value.trim().length > 0)
 const bflApiKeyConfigured = computed(() => apiKeyConfigured('bfl'))
 
@@ -42,9 +49,14 @@ async function toggleImagegenEnabled() {
 }
 async function setImagegenProvider(value: string) {
   saving.value = true
+  imagegenProviderError.value = null
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: 'imagegen.provider', value } })
     refresh()
+  }
+  catch (e) {
+    chosenImagegenProvider.value = imagegenProvider.value
+    imagegenProviderError.value = apiErrorDetails(e)
   }
   finally { saving.value = false }
 }
@@ -303,10 +315,10 @@ onUnmounted(() => stopImagegenLocalPolling())
           >
             <input
               id="imagegen-provider-bfl"
+              v-model="chosenImagegenProvider"
               type="radio"
               name="imagegen-provider"
               value="bfl"
-              :checked="imagegenProvider === 'bfl'"
               :disabled="!bflApiKeyConfigured"
               class="accent-emerald-600"
               @change="setImagegenProvider('bfl')"
@@ -382,10 +394,10 @@ onUnmounted(() => stopImagegenLocalPolling())
           >
             <input
               id="imagegen-provider-openai"
+              v-model="chosenImagegenProvider"
               type="radio"
               name="imagegen-provider"
               value="openai"
-              :checked="imagegenProvider === 'openai'"
               :disabled="!openaiApiKeyConfigured"
               class="accent-emerald-600"
               @change="setImagegenProvider('openai')"
@@ -415,10 +427,10 @@ onUnmounted(() => stopImagegenLocalPolling())
           >
             <input
               id="imagegen-provider-replicate"
+              v-model="chosenImagegenProvider"
               type="radio"
               name="imagegen-provider"
               value="replicate"
-              :checked="imagegenProvider === 'replicate'"
               :disabled="!replicateApiKeyConfigured"
               class="accent-emerald-600"
               @change="setImagegenProvider('replicate')"
@@ -560,10 +572,10 @@ onUnmounted(() => stopImagegenLocalPolling())
             >
               <input
                 id="imagegen-provider-flux-local"
+                v-model="chosenImagegenProvider"
                 type="radio"
                 name="imagegen-provider"
                 value="flux-local"
-                :checked="imagegenProvider === 'flux-local'"
                 :disabled="!fluxUvAvailable || imageCapState === 'PROBING' || imageLocalUnsupported"
                 class="accent-emerald-600"
                 @change="setImagegenProvider('flux-local')"
@@ -751,6 +763,7 @@ onUnmounted(() => stopImagegenLocalPolling())
           </div>
         </div>
       </fieldset>
+      <ApiErrorAlert :error="imagegenProviderError" />
     </template>
   </div>
 </template>

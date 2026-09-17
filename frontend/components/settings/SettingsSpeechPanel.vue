@@ -7,6 +7,8 @@
 // model readiness come from /api/tts/state, lazy-fetched so the panel paints
 // immediately (mirrors the Transcription panel). Persisted selection reads from
 // the shared config store and writes go through /api/config.
+import type { ApiErrorDetails } from '~/types/api'
+
 const { configValue, saveField, saving } = useSettingsConfig()
 
 type TtsVoiceEntry = { id: string, label: string }
@@ -35,6 +37,12 @@ const { data: ttsState, refresh: refreshTtsState, status: ttsStateStatus }
 const ttsStateLoading = computed(() => ttsStateStatus.value === 'pending' && !ttsState.value)
 
 const selectedEngine = computed(() => configValue('tts.engine', 'sidecar'))
+// The radios' own selection, so a failed save can put it back; a one-way :checked never re-renders.
+const chosenEngine = ref(selectedEngine.value)
+watch(selectedEngine, (v) => {
+  chosenEngine.value = v
+})
+const engineError = ref<ApiErrorDetails | null>(null)
 const sidecarModel = computed(() => configValue('tts.sidecar.model', 'qwen3-0.6b'))
 const jvmModel = computed(() => configValue('tts.jvm.model', 'piper-en_US-amy-low'))
 
@@ -53,8 +61,15 @@ const activeVoices = computed<TtsVoiceEntry[]>(() => activeModelStatus.value?.vo
 const selectedVoice = computed(() => configValue(`tts.${selectedEngine.value}.voice`, ''))
 
 async function setEngine(value: string) {
-  await saveField('tts.engine', value)
-  refreshTtsState()
+  engineError.value = null
+  try {
+    await saveField('tts.engine', value)
+    refreshTtsState()
+  }
+  catch (e) {
+    chosenEngine.value = selectedEngine.value
+    engineError.value = apiErrorDetails(e)
+  }
 }
 async function setModel(engine: string, value: string) {
   await saveField(`tts.${engine}.model`, value)
@@ -238,10 +253,10 @@ onUnmounted(() => stopTtsPolling())
           >
             <input
               id="tts-engine-sidecar"
+              v-model="chosenEngine"
               type="radio"
               name="tts-engine"
               value="sidecar"
-              :checked="selectedEngine === 'sidecar'"
               class="accent-emerald-600"
               @change="setEngine('sidecar')"
             >
@@ -262,10 +277,10 @@ onUnmounted(() => stopTtsPolling())
           >
             <input
               id="tts-engine-jvm"
+              v-model="chosenEngine"
               type="radio"
               name="tts-engine"
               value="jvm"
-              :checked="selectedEngine === 'jvm'"
               class="accent-emerald-600"
               @change="setEngine('jvm')"
             >
@@ -277,6 +292,10 @@ onUnmounted(() => stopTtsPolling())
           </label>
         </div>
       </fieldset>
+      <ApiErrorAlert
+        :error="engineError"
+        class="px-4 py-2.5 border-t border-border"
+      />
 
       <!-- Voice/model for the selected engine. -->
       <div class="border-t border-border">

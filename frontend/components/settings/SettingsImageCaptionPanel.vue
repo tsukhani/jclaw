@@ -5,7 +5,7 @@
 // a local Ollama VLM. Reads from the shared config store, writes via
 // /api/config; provider API-key checks + vision-model catalog injected from
 // the shared settings-config context.
-import type { ProviderModelDef } from '~/types/api'
+import type { ApiErrorDetails, ProviderModelDef } from '~/types/api'
 
 const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 
@@ -19,6 +19,12 @@ const openaiApiKeyConfigured = computed(() => apiKeyConfigured('openai'))
 const captionProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'caption.provider')?.value ?? '',
 )
+// The radios' own selection, so a failed save can put it back; a one-way :checked never re-renders.
+const chosenCaptionProvider = ref(captionProvider.value)
+watch(captionProvider, (v) => {
+  chosenCaptionProvider.value = v
+})
+const captionProviderError = ref<ApiErrorDetails | null>(null)
 const captionModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'caption.model')?.value ?? '',
 )
@@ -66,6 +72,7 @@ async function toggleCaptionEnabled() {
 }
 async function setCaptionProvider(value: string) {
   saving.value = true
+  captionProviderError.value = null
   try {
     // Reset the model on a provider switch — a model from the previous provider isn't valid for the
     // new one (and would otherwise linger as "(not marked vision)"). Independent keys, fire in parallel.
@@ -74,6 +81,10 @@ async function setCaptionProvider(value: string) {
       $fetch('/api/config', { method: 'POST', body: { key: 'caption.model', value: '' } }),
     ])
     refresh()
+  }
+  catch (e) {
+    chosenCaptionProvider.value = captionProvider.value
+    captionProviderError.value = apiErrorDetails(e)
   }
   finally { saving.value = false }
 }
@@ -159,10 +170,10 @@ async function setCaptionModel(value: string) {
           >
             <input
               id="caption-provider-openrouter"
+              v-model="chosenCaptionProvider"
               type="radio"
               name="caption-provider"
               value="openrouter"
-              :checked="captionProvider === 'openrouter'"
               :disabled="!openrouterApiKeyConfigured"
               class="accent-emerald-600"
               @change="setCaptionProvider('openrouter')"
@@ -188,10 +199,10 @@ async function setCaptionModel(value: string) {
           >
             <input
               id="caption-provider-openai"
+              v-model="chosenCaptionProvider"
               type="radio"
               name="caption-provider"
               value="openai"
-              :checked="captionProvider === 'openai'"
               :disabled="!openaiApiKeyConfigured"
               class="accent-emerald-600"
               @change="setCaptionProvider('openai')"
@@ -213,10 +224,10 @@ async function setCaptionModel(value: string) {
           >
             <input
               id="caption-provider-ollama-local"
+              v-model="chosenCaptionProvider"
               type="radio"
               name="caption-provider"
               value="ollama-local"
-              :checked="captionProvider === 'ollama-local'"
               class="accent-emerald-600"
               @change="setCaptionProvider('ollama-local')"
             >
@@ -230,6 +241,7 @@ async function setCaptionModel(value: string) {
           </label>
         </div>
       </fieldset>
+      <ApiErrorAlert :error="captionProviderError" />
 
       <!-- Vision-model picker — vision-tagged models from the chosen provider's LLM-Providers config
              (cloud provider or local Ollama). -->

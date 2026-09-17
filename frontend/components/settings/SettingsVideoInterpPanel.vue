@@ -5,7 +5,7 @@
 // sampling frames + captioning them, mirroring Transcription/Captioning.
 // Reads the shared config store + provider-model catalog; derives the main
 // agent's model as the default via its own (Nuxt-deduped) /api/agents fetch.
-import type { Agent, ProviderModelDef } from '~/types/api'
+import type { Agent, ApiErrorDetails, ProviderModelDef } from '~/types/api'
 
 const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 const openrouterApiKeyConfigured = computed(() => apiKeyConfigured('openrouter'))
@@ -84,6 +84,12 @@ const defaultVideoStrategy = computed(() => {
 const videoProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'video.provider')?.value ?? '',
 )
+// The radios' own selection, so a failed save can put it back; a one-way :checked never re-renders.
+const chosenVideoProvider = ref(videoProvider.value)
+watch(videoProvider, (v) => {
+  chosenVideoProvider.value = v
+})
+const videoProviderError = ref<ApiErrorDetails | null>(null)
 const videoModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'video.model')?.value ?? '',
 )
@@ -200,6 +206,7 @@ async function toggleVideoEnabled() {
 }
 async function setVideoProvider(value: string) {
   saving.value = true
+  videoProviderError.value = null
   try {
     // Reset the model on a provider switch — a model from the previous provider isn't valid here.
     await Promise.all([
@@ -207,6 +214,10 @@ async function setVideoProvider(value: string) {
       $fetch('/api/config', { method: 'POST', body: { key: 'video.model', value: '' } }),
     ])
     refresh()
+  }
+  catch (e) {
+    chosenVideoProvider.value = videoProvider.value
+    videoProviderError.value = apiErrorDetails(e)
   }
   finally { saving.value = false }
 }
@@ -308,10 +319,10 @@ async function setVideoModel(value: string) {
           >
             <input
               id="video-provider-openrouter"
+              v-model="chosenVideoProvider"
               type="radio"
               name="video-provider"
               value="openrouter"
-              :checked="videoProvider === 'openrouter'"
               :disabled="!openrouterApiKeyConfigured"
               class="accent-emerald-600"
               @change="setVideoProvider('openrouter')"
@@ -337,10 +348,10 @@ async function setVideoModel(value: string) {
           >
             <input
               id="video-provider-vllm"
+              v-model="chosenVideoProvider"
               type="radio"
               name="video-provider"
               value="vllm"
-              :checked="videoProvider === 'vllm'"
               :disabled="!vllmReachable"
               class="accent-emerald-600"
               @change="setVideoProvider('vllm')"
@@ -384,10 +395,10 @@ async function setVideoModel(value: string) {
           >
             <input
               id="video-provider-ollama-local"
+              v-model="chosenVideoProvider"
               type="radio"
               name="video-provider"
               value="ollama-local"
-              :checked="videoProvider === 'ollama-local'"
               :disabled="!ollamaLocalConfigured"
               class="accent-emerald-600"
               @change="setVideoProvider('ollama-local')"
@@ -413,10 +424,10 @@ async function setVideoModel(value: string) {
           >
             <input
               id="video-provider-ollama-cloud"
+              v-model="chosenVideoProvider"
               type="radio"
               name="video-provider"
               value="ollama-cloud"
-              :checked="videoProvider === 'ollama-cloud'"
               :disabled="!ollamaCloudConfigured"
               class="accent-emerald-600"
               @change="setVideoProvider('ollama-cloud')"
@@ -434,6 +445,7 @@ async function setVideoModel(value: string) {
           </label>
         </div>
       </fieldset>
+      <ApiErrorAlert :error="videoProviderError" />
 
       <!-- Video-model picker — video-capable models discovered live from the chosen provider. -->
       <div class="bg-surface-elevated border border-border">

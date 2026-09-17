@@ -5,6 +5,8 @@
 // Replicate API key from Image Generation) or a self-hosted WAN/LTX engine
 // chosen by an adaptive GPU-capability probe. Config reads/writes go through
 // the shared store; the inline config-row editor + API-key checks injected.
+import type { ApiErrorDetails } from '~/types/api'
+
 const { configData, saving, refresh, saveField, apiKeyConfigured } = useSettingsConfig()
 
 const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
@@ -24,9 +26,13 @@ const videogenMaxJobMinutes = computed(() =>
 )
 async function setVideogenProvider(value: string) {
   saving.value = true
+  videogenBackendError.value = null
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.provider', value } })
     refresh()
+  }
+  catch (e) {
+    putBackVideogenChoice(e)
   }
   finally { saving.value = false }
 }
@@ -113,10 +119,14 @@ function isLocalEngineActive(e: VideoEngine): boolean {
 async function selectLocalEngine(e: VideoEngine) {
   if (!e.runnable) return
   saving.value = true
+  videogenBackendError.value = null
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.local.model', value: e.id } })
     await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.provider', value: e.provider } })
     refresh()
+  }
+  catch (err) {
+    putBackVideogenChoice(err)
   }
   finally { saving.value = false }
 }
@@ -146,6 +156,26 @@ const videogenIsLocal = computed(() => {
   const p = videogenProvider.value
   return p !== '' && p !== 'replicate'
 })
+// The radios' own selections, so a failed save can put them back; a one-way :checked never re-renders.
+const videogenBackend = computed(() => {
+  if (videogenIsLocal.value) return 'local'
+  return videogenProvider.value
+})
+const chosenVideogenBackend = ref(videogenBackend.value)
+watch(videogenBackend, (v) => {
+  chosenVideogenBackend.value = v
+})
+const activeLocalEngineId = computed(() => videoEngines.value.find(isLocalEngineActive)?.id ?? '')
+const chosenLocalEngine = ref(activeLocalEngineId.value)
+watch(activeLocalEngineId, (v) => {
+  chosenLocalEngine.value = v
+})
+const videogenBackendError = ref<ApiErrorDetails | null>(null)
+function putBackVideogenChoice(e: unknown) {
+  chosenVideogenBackend.value = videogenBackend.value
+  chosenLocalEngine.value = activeLocalEngineId.value
+  videogenBackendError.value = apiErrorDetails(e)
+}
 // Hardware verdict from the probe: once READY, "unsupported" means no engine can run on this machine
 // (no GPU, or too little free VRAM for even the smallest tier). Drives disabling the Self-Hosted radio.
 const videoLocalUnsupported = computed(() =>
@@ -162,7 +192,14 @@ async function selectSelfHosted() {
     return
   }
   pendingLocalAutoSelect.value = true
-  await probeVideoCapability()
+  videogenBackendError.value = null
+  try {
+    await probeVideoCapability()
+  }
+  catch (e) {
+    pendingLocalAutoSelect.value = false
+    putBackVideogenChoice(e)
+  }
 }
 watch(videoCapState, (s) => {
   if (s !== 'READY' || !pendingLocalAutoSelect.value) return
@@ -232,6 +269,7 @@ onUnmounted(() => stopVideoCapPolling())
         <span class="ml-auto text-[11px] text-fg-muted">{{ videogenEnabled ? 'on' : 'off' }}</span>
       </div>
     </div>
+    <ApiErrorAlert :error="videogenBackendError" />
 
     <template v-if="videogenEnabled">
       <fieldset class="min-w-0 space-y-3">
@@ -249,10 +287,10 @@ onUnmounted(() => stopVideoCapPolling())
           >
             <input
               id="videogen-provider-replicate"
+              v-model="chosenVideogenBackend"
               type="radio"
               name="videogen-provider"
               value="replicate"
-              :checked="videogenProvider === 'replicate'"
               :disabled="!replicateApiKeyConfigured"
               class="accent-emerald-600"
               @change="setVideogenProvider('replicate')"
@@ -320,9 +358,10 @@ onUnmounted(() => stopVideoCapPolling())
             >
               <input
                 id="videogen-provider-local"
+                v-model="chosenVideogenBackend"
                 type="radio"
                 name="videogen-provider"
-                :checked="videogenIsLocal"
+                value="local"
                 :disabled="!videoCapability?.uvAvailable || videoCapState === 'PROBING' || videoLocalUnsupported || saving"
                 class="accent-emerald-600"
                 @change="selectSelfHosted()"
@@ -380,9 +419,10 @@ onUnmounted(() => stopVideoCapPolling())
             >
               <input
                 :id="`videogen-engine-${e.id}`"
+                v-model="chosenLocalEngine"
                 type="radio"
                 name="videogen-engine"
-                :checked="isLocalEngineActive(e)"
+                :value="e.id"
                 :disabled="!e.runnable || saving"
                 class="accent-emerald-600"
                 @change="selectLocalEngine(e)"

@@ -5,7 +5,7 @@
 // from the shared config store and writes go through /api/config, exactly as the
 // pre-extraction monolith did. Provider API-key checks and the audio-model
 // catalog are injected from the shared settings-config context.
-import type { ProviderModelDef } from '~/types/api'
+import type { ApiErrorDetails, ProviderModelDef } from '~/types/api'
 
 const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 
@@ -49,6 +49,12 @@ const transcriptionStateLoading = computed(() =>
 const selectedTranscriptionProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.provider')?.value ?? '',
 )
+// The radios' own selection, so a failed save can put it back; a one-way :checked never re-renders.
+const chosenTranscriptionProvider = ref(selectedTranscriptionProvider.value)
+watch(selectedTranscriptionProvider, (v) => {
+  chosenTranscriptionProvider.value = v
+})
+const transcriptionProviderError = ref<ApiErrorDetails | null>(null)
 // Master toggle: presence of a non-empty transcription.provider IS the
 // "enabled" state. No separate config key needed; toggling off clears the
 // value and toggling on defaults to whisper-local (the only backend that
@@ -83,6 +89,11 @@ async function toggleTranscriptionEnabled() {
 const diarizationProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.diarization.provider')?.value ?? '',
 )
+const chosenDiarizationProvider = ref(diarizationProvider.value)
+watch(diarizationProvider, (v) => {
+  chosenDiarizationProvider.value = v
+})
+const diarizationProviderError = ref<ApiErrorDetails | null>(null)
 const diarizationModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.diarization.model')?.value ?? '',
 )
@@ -116,6 +127,7 @@ async function toggleDiarizationEnabled() {
 }
 async function setDiarizationProvider(value: string) {
   saving.value = true
+  diarizationProviderError.value = null
   try {
     // Reset the model on a provider switch — independent keys, fire in parallel.
     await Promise.all([
@@ -123,6 +135,10 @@ async function setDiarizationProvider(value: string) {
       $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value: '' } }),
     ])
     refresh()
+  }
+  catch (e) {
+    chosenDiarizationProvider.value = diarizationProvider.value
+    diarizationProviderError.value = apiErrorDetails(e)
   }
   finally { saving.value = false }
 }
@@ -243,9 +259,14 @@ const selectedLocalModelDownloadPct = computed(() => {
 
 async function setTranscriptionProvider(value: string) {
   saving.value = true
+  transcriptionProviderError.value = null
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.provider', value } })
     refresh()
+  }
+  catch (e) {
+    chosenTranscriptionProvider.value = selectedTranscriptionProvider.value
+    transcriptionProviderError.value = apiErrorDetails(e)
   }
   finally { saving.value = false }
 }
@@ -398,10 +419,10 @@ onUnmounted(() => stopTranscriptionPolling())
             >
               <input
                 id="transcription-provider-openrouter"
+                v-model="chosenTranscriptionProvider"
                 type="radio"
                 name="transcription-provider"
                 value="openrouter"
-                :checked="selectedTranscriptionProvider === 'openrouter'"
                 :disabled="!openrouterApiKeyConfigured"
                 class="accent-emerald-600"
                 @change="setTranscriptionProvider('openrouter')"
@@ -427,10 +448,10 @@ onUnmounted(() => stopTranscriptionPolling())
             >
               <input
                 id="transcription-provider-openai"
+                v-model="chosenTranscriptionProvider"
                 type="radio"
                 name="transcription-provider"
                 value="openai"
-                :checked="selectedTranscriptionProvider === 'openai'"
                 :disabled="!openaiApiKeyConfigured"
                 class="accent-emerald-600"
                 @change="setTranscriptionProvider('openai')"
@@ -452,10 +473,10 @@ onUnmounted(() => stopTranscriptionPolling())
             >
               <input
                 id="transcription-provider-whisper-local"
+                v-model="chosenTranscriptionProvider"
                 type="radio"
                 name="transcription-provider"
                 value="whisper-local"
-                :checked="selectedTranscriptionProvider === 'whisper-local'"
                 class="accent-emerald-600"
                 @change="setTranscriptionProvider('whisper-local')"
               >
@@ -469,6 +490,10 @@ onUnmounted(() => stopTranscriptionPolling())
             </label>
           </div>
         </fieldset>
+        <ApiErrorAlert
+          :error="transcriptionProviderError"
+          class="px-4 py-2.5 border-t border-border"
+        />
 
         <div
           v-if="selectedTranscriptionProvider === 'whisper-local'"
@@ -629,10 +654,10 @@ onUnmounted(() => stopTranscriptionPolling())
             >
               <input
                 id="diarization-provider-openrouter"
+                v-model="chosenDiarizationProvider"
                 type="radio"
                 name="diarization-provider"
                 value="openrouter"
-                :checked="diarizationProvider === 'openrouter'"
                 :disabled="!openrouterApiKeyConfigured"
                 class="accent-emerald-600"
                 @change="setDiarizationProvider('openrouter')"
@@ -656,10 +681,10 @@ onUnmounted(() => stopTranscriptionPolling())
             >
               <input
                 id="diarization-provider-openai"
+                v-model="chosenDiarizationProvider"
                 type="radio"
                 name="diarization-provider"
                 value="openai"
-                :checked="diarizationProvider === 'openai'"
                 :disabled="!openaiApiKeyConfigured"
                 class="accent-emerald-600"
                 @change="setDiarizationProvider('openai')"
@@ -680,10 +705,10 @@ onUnmounted(() => stopTranscriptionPolling())
             >
               <input
                 id="diarization-provider-llama-cpp"
+                v-model="chosenDiarizationProvider"
                 type="radio"
                 name="diarization-provider"
                 value="llama-cpp"
-                :checked="diarizationProvider === 'llama-cpp'"
                 class="accent-emerald-600"
                 @change="setDiarizationProvider('llama-cpp')"
               >
@@ -702,10 +727,10 @@ onUnmounted(() => stopTranscriptionPolling())
             >
               <input
                 id="diarization-provider-vllm"
+                v-model="chosenDiarizationProvider"
                 type="radio"
                 name="diarization-provider"
                 value="vllm"
-                :checked="diarizationProvider === 'vllm'"
                 class="accent-emerald-600"
                 @change="setDiarizationProvider('vllm')"
               >
@@ -724,10 +749,10 @@ onUnmounted(() => stopTranscriptionPolling())
             >
               <input
                 id="diarization-provider-pyannote-local"
+                v-model="chosenDiarizationProvider"
                 type="radio"
                 name="diarization-provider"
                 value="pyannote-local"
-                :checked="diarizationProvider === 'pyannote-local'"
                 class="accent-emerald-600"
                 @change="setDiarizationProvider('pyannote-local')"
               >
@@ -741,6 +766,10 @@ onUnmounted(() => stopTranscriptionPolling())
             </label>
           </div>
         </fieldset>
+        <ApiErrorAlert
+          :error="diarizationProviderError"
+          class="px-4 py-2.5 border-t border-border"
+        />
         <div
           v-if="!diarizationIsLocal"
           class="border-t border-border"

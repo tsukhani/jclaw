@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { readBody, setResponseStatus } from 'h3'
@@ -2108,5 +2108,60 @@ describe('Settings page — subagent model (JCLAW-422)', () => {
 
     expect(captured.find(b => b.key === 'subagent.modelProvider' && b.value === 'ollama-cloud')).toBeTruthy()
     expect(captured.find(b => b.key === 'subagent.modelId' && b.value === 'kimi-k2.5')).toBeTruthy()
+  })
+})
+
+describe('Settings page — provider radios put the saved choice back when a save fails (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  function setupWithSavedChoice(entries: Array<{ key: string, value: string }>) {
+    setupDefaultApi()
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: [...defaultConfigEntries(), ...entries] }),
+    }))
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  async function chooseAndExpectPutBack(component: any, choose: string, saved: string) {
+    await component.find(choose).setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    expect(component.find('[data-testid="api-error"]').text()).toContain('/api/config')
+    expect((component.find(saved).element as HTMLInputElement).checked).toBe(true)
+    expect((component.find(choose).element as HTMLInputElement).checked).toBe(false)
+  }
+
+  it('transcription backend', async () => {
+    setupWithSavedChoice([{ key: 'transcription.provider', value: 'openai' }])
+    const component = await mountSettingsSection('transcription')
+    await chooseAndExpectPutBack(component, '#transcription-provider-whisper-local', '#transcription-provider-openai')
+  })
+
+  it('diarization provider', async () => {
+    setupWithSavedChoice([{ key: 'transcription.diarization.provider', value: 'openai' }])
+    const component = await mountSettingsSection('transcription')
+    await chooseAndExpectPutBack(component, '#diarization-provider-pyannote-local', '#diarization-provider-openai')
+  })
+
+  it('image captioning backend', async () => {
+    setupWithSavedChoice([{ key: 'caption.provider', value: 'openai' }])
+    const component = await mountSettingsSection('image-caption')
+    await chooseAndExpectPutBack(component, '#caption-provider-ollama-local', '#caption-provider-openai')
   })
 })

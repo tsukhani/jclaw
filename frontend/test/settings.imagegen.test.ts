@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -285,5 +285,44 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     const hit = captured.find(b => b.key === 'provider.replicate.apiKey')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('r8-secret-456')
+  })
+})
+
+describe('Settings page — Image Generation radios put the saved choice back when a save fails (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  function failSaves() {
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  async function chooseAndExpectPutBack(component: any, choose: string, saved: string) {
+    await component.find(choose).setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    expect(component.find('[data-testid="api-error"]').text()).toContain('/api/config')
+    expect((component.find(saved).element as HTMLInputElement).checked).toBe(true)
+    expect((component.find(choose).element as HTMLInputElement).checked).toBe(false)
+  }
+
+  it('image generation backend', async () => {
+    setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', bflKey: 'bfl-****' })
+    failSaves()
+    const component = await mountSettingsSection('image-generation')
+    await chooseAndExpectPutBack(component, '#imagegen-provider-bfl', '#imagegen-provider-openai')
   })
 })

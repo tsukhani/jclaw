@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -343,5 +343,44 @@ describe('Settings page — Speech (JCLAW-789/793)', () => {
       // The mic must not outlive the recording.
       expect(stopTrack).toHaveBeenCalled()
     })
+  })
+})
+
+describe('Settings page — Speech radios put the saved choice back when a save fails (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  function failSaves() {
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  async function chooseAndExpectPutBack(component: any, choose: string, saved: string) {
+    await component.find(choose).setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    expect(component.find('[data-testid="api-error"]').text()).toContain('/api/config')
+    expect((component.find(saved).element as HTMLInputElement).checked).toBe(true)
+    expect((component.find(choose).element as HTMLInputElement).checked).toBe(false)
+  }
+
+  it('text-to-speech engine', async () => {
+    setupApi({ engine: 'sidecar' })
+    failSaves()
+    const component = await mountSettingsSection('speech')
+    await chooseAndExpectPutBack(component, '#tts-engine-jvm', '#tts-engine-sidecar')
   })
 })

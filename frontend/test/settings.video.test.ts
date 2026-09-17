@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -299,5 +299,47 @@ describe('Settings page — Video Interpretation (JCLAW-223)', () => {
     expect(select.exists()).toBe(true)
     const opts = select.findAll('option').map(o => o.text())
     expect(opts.join(' | ')).toContain('qwen3-vl:8b')
+  })
+})
+
+describe('Settings page — Video Interpretation radios put the saved choice back when a save fails (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  function failSaves() {
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+  async function chooseAndExpectPutBack(component: any, choose: string, saved: string) {
+    await component.find(choose).setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+    expect(component.find('[data-testid="api-error"]').text()).toContain('/api/config')
+    expect((component.find(saved).element as HTMLInputElement).checked).toBe(true)
+    expect((component.find(choose).element as HTMLInputElement).checked).toBe(false)
+  }
+
+  it('video interpretation backend', async () => {
+    setupApi({ extraEntries: [
+      { key: 'video.provider', value: 'openrouter' },
+      { key: 'provider.openrouter.apiKey', value: 'sk-or-****' },
+    ] })
+    failSaves()
+    const component = await mountSettingsSection('video-interpretation')
+    await chooseAndExpectPutBack(component, '#video-provider-ollama-cloud', '#video-provider-openrouter')
   })
 })
