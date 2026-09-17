@@ -1033,7 +1033,7 @@ function exportConversation() {
             @paste="handlePaste"
           >
             <div
-              v-if="attachedFiles.length || attachError"
+              v-if="attachedFiles.length || attachError || overrideError"
               class="px-3 pt-2.5 pb-1 flex flex-wrap gap-1.5"
             >
               <span

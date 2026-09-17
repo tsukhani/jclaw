@@ -1936,3 +1936,17 @@ describe('Chat page — completion popup rendering', () => {
     expect(popup.exists()).toBe(false)
   })
 })
+
+describe('Chat page — composer error chips', () => {
+  it('shows a refused model override with no files attached', async () => {
+    setupBaseChatApi()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    ;(component.vm as unknown as { overrideError: string | null }).overrideError = 'The model override was refused.'
+    await flushPromises()
+
+    expect(component.find('[data-testid="override-error"]').exists()).toBe(true)
+    expect(component.find('[data-testid="override-error"]').text()).toContain('The model override was refused.')
+  })
+})
