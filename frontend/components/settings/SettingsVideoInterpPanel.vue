@@ -188,9 +188,11 @@ watch([videoEnabled, videoProvider, vllmReachable], () => {
 
 // Master toggle: off clears the provider (and model); on defaults to OpenRouter (the common
 // video-capable-model host) — the operator then picks a video model. Mirrors caption's toggle.
+const { saveError, attempt } = useSaveAttempt()
+
 async function toggleVideoEnabled() {
   saving.value = true
-  try {
+  const saved = await attempt(async () => {
     if (videoEnabled.value) {
       await Promise.all([
         $fetch('/api/config', { method: 'POST', body: { key: 'video.provider', value: '' } }),
@@ -200,9 +202,11 @@ async function toggleVideoEnabled() {
     else {
       await $fetch('/api/config', { method: 'POST', body: { key: 'video.provider', value: 'openrouter' } })
     }
-    refresh()
-  }
-  finally { saving.value = false }
+  })
+  if (saved) refresh()
+  // Turning off writes two keys, which can half-land: show what was saved.
+  else await resync()
+  saving.value = false
 }
 async function setVideoProvider(value: string) {
   saving.value = true
@@ -303,6 +307,10 @@ async function setVideoModel(value: string) {
         so frames are captioned into a text summary (needs an Image Captioning provider).
       </template>
     </div>
+
+    <ApiErrorAlert
+      :error="saveError"
+    />
 
     <!-- Provider + model picker, when the dedicated model is enabled. -->
     <template v-if="videoEnabled">

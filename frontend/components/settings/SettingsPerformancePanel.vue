@@ -21,9 +21,10 @@ const dispatcherMaxRequests = computed(() =>
 const editingPerfField = ref<string | null>(null)
 const perfFieldEdit = ref('')
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function savePerfField(configKey: string, value: string) {
-  await saveField(configKey, value)
-  editingPerfField.value = null
+  if (await attempt(() => saveField(configKey, value))) editingPerfField.value = null
 }
 </script>
 
@@ -144,6 +145,10 @@ async function savePerfField(configKey: string, value: string) {
           </template>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
   </div>
 

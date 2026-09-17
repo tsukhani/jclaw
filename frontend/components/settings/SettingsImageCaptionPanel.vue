@@ -61,14 +61,15 @@ const captionActiveBackend = computed(() => {
 
 // Master toggle: off clears the provider; on defaults to the local Ollama VLM (no cloud key needed,
 // mirroring transcription defaulting to whisper-local). Requires a vision model pulled in Ollama.
+const { saveError, attempt } = useSaveAttempt()
+
 async function toggleCaptionEnabled() {
   saving.value = true
-  try {
-    const next = captionEnabled.value ? '' : 'ollama-local'
+  const next = captionEnabled.value ? '' : 'ollama-local'
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'caption.provider', value: next } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 async function setCaptionProvider(value: string) {
   saving.value = true
@@ -155,6 +156,9 @@ async function setCaptionModel(value: string) {
         </span>
       </div>
     </div>
+    <ApiErrorAlert
+      :error="saveError"
+    />
 
     <template v-if="captionEnabled">
       <fieldset class="min-w-0 bg-surface-elevated border border-border">

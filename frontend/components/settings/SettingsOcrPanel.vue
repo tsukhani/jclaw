@@ -26,20 +26,22 @@ const { data: ocrStatus, refresh: refreshOcrStatus }
 // runtime probe — a host without the binary cannot flip the toggle on,
 // matching the spec ("disabled and not selectable to be toggled").
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function toggleOcrBackend(backend: { name: string, configKey: string, available: boolean, enabled: boolean }) {
   if (!backend.available) return // probe says unavailable — toggle is inert
   saving.value = true
-  try {
+  const saved = await attempt(async () => {
     await $fetch('/api/config', {
       method: 'POST',
       body: { key: backend.configKey, value: backend.enabled ? 'false' : 'true' },
     })
+  })
+  if (saved) {
     refreshOcrStatus()
     refresh()
   }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 </script>
 
@@ -56,6 +58,9 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
       Backends that extract text from images and scanned PDFs via the <span class="text-fg-muted">documents</span> tool.
       A backend can be toggled only when its system dependency is detected on the host. Install the missing dependency and restart the JVM to enable.
     </p>
+    <ApiErrorAlert
+      :error="saveError"
+    />
     <div
       v-for="backend in (ocrStatus?.providers ?? [])"
       :key="backend.name"

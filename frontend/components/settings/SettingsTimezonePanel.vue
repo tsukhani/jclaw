@@ -34,16 +34,17 @@ const appTimezone = computed(() => {
 const editingGeneralField = ref<string | null>(null)
 const generalFieldEdit = ref('')
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function saveGeneralField(configKey: string, value: string) {
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+  })) {
     editingGeneralField.value = null
     refresh()
   }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 </script>
 
@@ -125,6 +126,10 @@ async function saveGeneralField(configKey: string, value: string) {
           </template>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
   </div>
 </template>

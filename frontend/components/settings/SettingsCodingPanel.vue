@@ -8,7 +8,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 
-const { configData, saving, refresh, getProviderModels } = useSettingsConfig()
+const { configData, saving, refresh, resync, getProviderModels } = useSettingsConfig()
 
 // JCLAW-229: image-generation-only providers are NOT chat LLM providers — their
 // keys are set in the Image Generation section, so skip them when listing the
@@ -101,17 +101,19 @@ function acpBadge(h: DetectedHarness) {
   return ACP_BADGE[h.acpSupport] ?? STDIO_BADGE
 }
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function saveField(configKey: string, value: string) {
   saving.value = true
-  try {
+  const saved = await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+  })
+  if (saved) {
     editingField.value = null
     refresh()
     await refreshPreview()
   }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 
 // One click fills both the command and the adapter id so runtime="acp" is ready.
@@ -185,7 +187,7 @@ const acpModelValue = computed(() => {
 
 async function saveAcpModel(value: string) {
   saving.value = true
-  try {
+  const saved = await attempt(async () => {
     if (value) {
       const sep = value.indexOf('::')
       await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.acp.modelProvider', value: value.slice(0, sep) } })
@@ -195,12 +197,14 @@ async function saveAcpModel(value: string) {
       await $fetch('/api/config/subagent.acp.modelProvider', { method: 'DELETE' })
       await $fetch('/api/config/subagent.acp.modelId', { method: 'DELETE' })
     }
+  })
+  if (saved) {
     refresh()
     await refreshPreview()
   }
-  finally {
-    saving.value = false
-  }
+  // The provider and model writes can half-land: show what was saved, not what was there before.
+  else await resync()
+  saving.value = false
 }
 </script>
 
@@ -441,6 +445,10 @@ async function saveAcpModel(value: string) {
           </select>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
   </div>
 </template>

@@ -64,16 +64,17 @@ const subagentDefaultYieldTimeout = computed(() => {
 const editingSubagentField = ref<string | null>(null)
 const subagentFieldEdit = ref('')
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function saveSubagentField(configKey: string, value: string) {
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+  })) {
     editingSubagentField.value = null
     refresh()
   }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 
 // JCLAW-422: subagent model. Unset (the default) = inherit the conversation's
@@ -395,6 +396,10 @@ async function saveSubagentModel(value: string) {
           </select>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
   </div>
 </template>

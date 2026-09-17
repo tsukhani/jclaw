@@ -159,6 +159,9 @@ async function clearReferenceVoice() {
     await $fetch('/api/tts/reference-voice', { method: 'DELETE' })
     refreshTtsState()
   }
+  catch (e) {
+    refError.value = reasonFor(e, 'could not remove the clip')
+  }
   finally { saving.value = false }
 }
 
@@ -175,14 +178,15 @@ async function setIdleTimeout(value: string) {
   const safe = Number.isNaN(n) ? 15 : Math.min(1440, Math.max(0, n))
   await saveField('tts.local.idleTimeoutMinutes', String(safe))
 }
+const { saveError, attempt } = useSaveAttempt()
+
 async function downloadModel(id: string) {
   if (!id) return
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch(`/api/tts/models/${encodeURIComponent(id)}/download`, { method: 'POST', body: {} })
-    startTtsPolling()
-  }
-  finally { saving.value = false }
+  })) startTtsPolling()
+  saving.value = false
 }
 
 // Poll /api/tts/state while any model is provisioning; stop once settled.
@@ -294,6 +298,10 @@ onUnmounted(() => stopTtsPolling())
       </fieldset>
       <ApiErrorAlert
         :error="engineError"
+        class="px-4 py-2.5 border-t border-border"
+      />
+      <ApiErrorAlert
+        :error="saveError"
         class="px-4 py-2.5 border-t border-border"
       />
 

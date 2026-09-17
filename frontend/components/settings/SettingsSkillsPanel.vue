@@ -11,7 +11,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 
-const { configData, saving, refresh, getProviderModels } = useSettingsConfig()
+const { configData, saving, refresh, resync, getProviderModels } = useSettingsConfig()
 
 // Skills Promotion config
 const { data: agentsList } = await useFetch<Agent[]>('/api/agents')
@@ -71,21 +71,25 @@ const spAvailableModels = computed(() => {
 // Whether an explicit (non-default) provider is selected
 const spHasExplicitProvider = computed(() => !!spProviderRaw.value)
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function saveSPField(configKey: string, value: string) {
   saving.value = true
-  try {
+  const saved = await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
     // When provider changes, also clear the saved model — the old model likely
     // belongs to the previous provider and would be invalid for the new one.
     if (configKey === 'skillsPromotion.provider') {
       await $fetch('/api/config', { method: 'POST', body: { key: 'skillsPromotion.model', value: '' } })
     }
+  })
+  if (saved) {
     editingSPField.value = null
     refresh()
   }
-  finally {
-    saving.value = false
-  }
+  // The provider and model writes can half-land: show what was saved, not what was there before.
+  else await resync()
+  saving.value = false
 }
 </script>
 
@@ -324,6 +328,10 @@ async function saveSPField(configKey: string, value: string) {
           </template>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
   </div>
 </template>

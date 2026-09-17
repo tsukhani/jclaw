@@ -71,14 +71,16 @@ const transcriptionActiveBackend = computed(() => {
   if (selectedTranscriptionProvider.value === 'whisper-local') return 'local'
   return 'none'
 })
+const { saveError, attempt } = useSaveAttempt()
+const { saveError: diarizationSaveError, attempt: attemptDiarization } = useSaveAttempt()
+
 async function toggleTranscriptionEnabled() {
   saving.value = true
-  try {
-    const next = transcriptionEnabled.value ? '' : 'whisper-local'
+  const next = transcriptionEnabled.value ? '' : 'whisper-local'
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.provider', value: next } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 
 // Diarization runs either through an audio-capable chat model — cloud
@@ -117,13 +119,12 @@ const diarizationModelOrphaned = computed(() =>
 const diarizationModelSelectValue = computed(() => (diarizationModelOrphaned.value ? '' : diarizationModel.value))
 async function toggleDiarizationEnabled() {
   saving.value = true
-  try {
-    const defaultProvider = openrouterApiKeyConfigured.value ? 'openrouter' : 'openai'
-    const next = diarizationEnabled.value ? '' : defaultProvider
+  const defaultProvider = openrouterApiKeyConfigured.value ? 'openrouter' : 'openai'
+  const next = diarizationEnabled.value ? '' : defaultProvider
+  if (await attemptDiarization(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.provider', value: next } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 async function setDiarizationProvider(value: string) {
   saving.value = true
@@ -211,11 +212,12 @@ async function refreshDiarizationModels() {
 async function downloadDiarizationModel(repo: string) {
   if (!repo) return
   saving.value = true
-  try {
+  if (await attemptDiarization(async () => {
     await $fetch(`/api/transcription/diarization/download?repo=${encodeURIComponent(repo)}`, { method: 'POST' })
+  })) {
     startDiarizationModelPolling()
   }
-  finally { saving.value = false }
+  saving.value = false
 }
 let diarizationModelPollTimer: ReturnType<typeof setInterval> | null = null
 function anyDiarizationDownloadInFlight(): boolean {
@@ -297,13 +299,13 @@ async function setTranscriptionModel(value: string) {
 }
 async function downloadLocalModel(modelId: string) {
   saving.value = true
-  try {
-    await $fetch(`/api/transcription/models/${encodeURIComponent(modelId)}/download`,
-      { method: 'POST', body: {} })
+  if (await attempt(async () => {
+    await $fetch(`/api/transcription/models/${encodeURIComponent(modelId)}/download`, { method: 'POST', body: {} })
+  })) {
     // Kick off the polling loop so the progress bar starts moving.
     startTranscriptionPolling()
   }
-  finally { saving.value = false }
+  saving.value = false
 }
 
 // Poll /api/transcription/state every 1.5s while any model is in flight,
@@ -392,6 +394,10 @@ onUnmounted(() => stopTranscriptionPolling())
           {{ transcriptionEnabled ? 'on' : 'off' }}
         </span>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
 
       <template v-if="transcriptionEnabled">
         <div
@@ -640,6 +646,10 @@ onUnmounted(() => stopTranscriptionPolling())
         (chat-model API keys come from <span class="text-fg-muted">LLM Providers</span> above).
         Ordinary voice-note transcription stays local and is unaffected.
       </div>
+      <ApiErrorAlert
+        :error="diarizationSaveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
       <template v-if="diarizationEnabled">
         <fieldset class="min-w-0 border-t border-border mt-2.5">
           <legend class="sr-only">

@@ -8,7 +8,7 @@
  * did it silently. So what is set here decides the whole memory footprint of a turn,
  * which is why it belongs in Settings rather than in the config table alone.
  */
-const { configValue, saveField, saving } = useSettingsConfig()
+const { configValue, saveField, saving, resync } = useSettingsConfig()
 
 /** Mirrors the code defaults in agents.SystemPromptAssembler. */
 const MemoryLimitKeys = {
@@ -30,10 +30,16 @@ const isValid = computed(() =>
   Number.isInteger(Number(coreMaxCount.value)) && Number(coreMaxCount.value) >= 1
   && Number.isInteger(Number(recallLimit.value)) && Number(recallLimit.value) >= 1)
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function saveLimits() {
   if (!isDirty.value || !isValid.value) return
-  await saveField(MemoryLimitKeys.coreMaxCount, String(Number(coreMaxCount.value)))
-  await saveField(MemoryLimitKeys.recallLimit, String(Number(recallLimit.value)))
+  const saved = await attempt(async () => {
+    await saveField(MemoryLimitKeys.coreMaxCount, String(Number(coreMaxCount.value)))
+    await saveField(MemoryLimitKeys.recallLimit, String(Number(recallLimit.value)))
+  })
+  // The two writes can half-land: show what was saved, not what was there before.
+  if (!saved) await resync()
 }
 </script>
 
@@ -109,6 +115,10 @@ async function saveLimits() {
           >Both limits must be a whole number of at least 1.</span>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
   </div>
 </template>

@@ -1,5 +1,5 @@
 import type { InjectionKey, Ref } from 'vue'
-import type { ConfigEntry, ConfigResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
+import type { ApiErrorDetails, ConfigEntry, ConfigResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
 
 /**
  * Shared /api/config store for the Settings page and its extracted panels
@@ -46,6 +46,8 @@ export interface SettingsConfigContext {
    */
   editingKey: Ref<string | null>
   editValue: Ref<string>
+  /** Why the open editor's last save was refused; panels render it beside the editor it belongs to. */
+  editError: Ref<ApiErrorDetails | null>
   startEdit: (entry: ConfigEntry) => void
   updateEntry: (key: string) => Promise<void>
   /**
@@ -113,6 +115,11 @@ export function useProvideSettingsConfig() {
   // Page-wide inline config-row editor — single editable key at a time.
   const editingKey = ref<string | null>(null)
   const editValue = ref('')
+  const editError = ref<ApiErrorDetails | null>(null)
+  // Every editor opener sets editingKey, several inline, so opening another editor drops a stale reason here.
+  watch(editingKey, () => {
+    editError.value = null
+  })
 
   function startEdit(entry: ConfigEntry) {
     editingKey.value = entry.key
@@ -121,6 +128,7 @@ export function useProvideSettingsConfig() {
 
   async function updateEntry(key: string) {
     saving.value = true
+    editError.value = null
     try {
       await $fetch('/api/config', {
         method: 'POST',
@@ -134,7 +142,7 @@ export function useProvideSettingsConfig() {
       if (key.startsWith('provider.')) asyncProviders.refresh()
     }
     catch (e) {
-      console.error('Failed to update config:', e)
+      editError.value = apiErrorDetails(e)
     }
     finally {
       saving.value = false
@@ -152,6 +160,7 @@ export function useProvideSettingsConfig() {
     apiKeyConfigured,
     editingKey,
     editValue,
+    editError,
     startEdit,
     updateEntry,
     providersData: asyncProviders.data as Ref<ProviderInfo[] | null>,

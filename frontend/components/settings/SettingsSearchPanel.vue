@@ -9,7 +9,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 
-const { configData, refresh, editingKey, editValue, startEdit, updateEntry } = useSettingsConfig()
+const { configData, refresh, resync, editingKey, editValue, editError, startEdit, updateEntry } = useSettingsConfig()
 
 // --- Search providers ---
 // Display metadata only. All runtime state (enabled, apiKey, baseUrl) lives in the
@@ -112,10 +112,13 @@ function searchActive(providerId: string): boolean {
   return searchEnabled(providerId) && (hasKey || maskedKeySet)
 }
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function toggleSearchEnabled(providerId: string) {
   const next = searchEnabled(providerId) ? 'false' : 'true'
-  await $fetch('/api/config', { method: 'POST', body: { key: `search.${providerId}.enabled`, value: next } })
-  refresh()
+  if (await attempt(async () => {
+    await $fetch('/api/config', { method: 'POST', body: { key: `search.${providerId}.enabled`, value: next } })
+  })) refresh()
 }
 
 // Perplexity-only: server-side recency filter for /search. Valid values are
@@ -181,10 +184,12 @@ async function onSearchDrop(ev: DragEvent, targetId: string) {
   ids.splice(toIdx, 0, sourceId)
 
   // Persist new priorities
-  await Promise.all(ids.map((id, i) =>
+  const saved = await attempt(() => Promise.all(ids.map((id, i) =>
     $fetch('/api/config', { method: 'POST', body: { key: `search.${id}.priority`, value: String(i) } }),
-  ))
-  refresh()
+  )))
+  if (saved) refresh()
+  // One write per provider, which can half-land: show the order that was saved.
+  else await resync()
 }
 
 function onSearchDragEnd() {
@@ -204,6 +209,9 @@ function onSearchDragEnd() {
       Providers are tried in order — drag to reorder. If a provider fails, the next one is tried automatically.
       A provider is only active when both <span class="text-fg-muted">enabled</span> is on and its API key is configured.
     </p>
+    <ApiErrorAlert
+      :error="saveError"
+    />
     <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag-drop reorder: HTML5 drag events have no keyboard equivalent; rule does not differentiate them from click -->
     <div
       v-for="id in sortedSearchProviderIds"
@@ -359,6 +367,11 @@ function onSearchDragEnd() {
             </button>
           </template>
         </div>
+        <ApiErrorAlert
+          v-if="editingKey?.startsWith(`search.${id}.`)"
+          :error="editError"
+          class="px-4 py-2.5"
+        />
         <!-- recencyFilter (Perplexity only) -->
         <div
           v-if="id === 'perplexity'"

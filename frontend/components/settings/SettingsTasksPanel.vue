@@ -44,16 +44,17 @@ const tasksDefaultTimezone = computed(() => {
 const editingTasksField = ref<string | null>(null)
 const tasksFieldEdit = ref('')
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function saveTasksField(configKey: string, value: string) {
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+  })) {
     editingTasksField.value = null
     refresh()
   }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 </script>
 
@@ -204,6 +205,10 @@ async function saveTasksField(configKey: string, value: string) {
           tip="Longest one task run may take, in seconds. When it elapses the run is cancelled at its next safe point, so a wedged run cannot go on for ever. 0 turns the limit off."
         />
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
   </div>
 </template>

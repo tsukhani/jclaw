@@ -13,7 +13,7 @@
 import type { EmbeddingProbeResponse, MemoryReembedStatus, ProviderModelDef, ProviderModelsResponse } from '~/types/api'
 import { MemoryVectorKeys, looksLikeEmbeddingModel } from '~/utils/embeddingModels'
 
-const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
+const { configValue, saveField, saving, resync, providersData, getProviderModels } = useSettingsConfig()
 
 const enabled = computed(() => configValue(MemoryVectorKeys.enabled, 'false') === 'true')
 const savedProvider = computed(() => configValue(MemoryVectorKeys.provider))
@@ -184,8 +184,10 @@ onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
 })
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function toggleEnabled() {
-  await saveField(MemoryVectorKeys.enabled, enabled.value ? 'false' : 'true')
+  await attempt(() => saveField(MemoryVectorKeys.enabled, enabled.value ? 'false' : 'true'))
 }
 
 /**
@@ -195,9 +197,14 @@ async function toggleEnabled() {
  */
 async function saveSelection() {
   if (!canSave.value || !probe.value) return
-  await saveField(MemoryVectorKeys.provider, selectedProvider.value)
-  await saveField(MemoryVectorKeys.model, selectedModel.value)
-  await saveField(MemoryVectorKeys.dimensions, String(probe.value.dimensions))
+  const dimensions = String(probe.value.dimensions)
+  const saved = await attempt(async () => {
+    await saveField(MemoryVectorKeys.provider, selectedProvider.value)
+    await saveField(MemoryVectorKeys.model, selectedModel.value)
+    await saveField(MemoryVectorKeys.dimensions, dimensions)
+  })
+  // The three writes can half-land: show what was saved, not what was there before.
+  if (!saved) await resync()
 }
 </script>
 
@@ -211,6 +218,9 @@ async function saveSelection() {
       recognise a fact you have already stored even when you phrase it differently. With it off,
       memory still works — recall and duplicate detection fall back to keyword matching.
     </p>
+    <ApiErrorAlert
+      :error="saveError"
+    />
 
     <!-- Enable toggle -->
     <div class="bg-surface-elevated border border-border">

@@ -21,9 +21,10 @@ const showAdvancedChat = ref(false)
 const editingChatField = ref<string | null>(null)
 const chatFieldEdit = ref('')
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function saveChatField(configKey: string, value: string) {
-  await saveField(configKey, value)
-  editingChatField.value = null
+  if (await attempt(() => saveField(configKey, value))) editingChatField.value = null
 }
 </script>
 
@@ -147,6 +148,10 @@ async function saveChatField(configKey: string, value: string) {
           </template>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
 
     <!-- Advanced — context window & compaction. Collapsed by default; these

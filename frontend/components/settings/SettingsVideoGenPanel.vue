@@ -137,6 +137,15 @@ async function probeVideoCapability() {
   await refreshVideoCapability()
   startVideoCapPolling()
 }
+async function detectVideoCapability() {
+  videogenBackendError.value = null
+  try {
+    await probeVideoCapability()
+  }
+  catch (e) {
+    videogenBackendError.value = apiErrorDetails(e)
+  }
+}
 let videoCapPollTimer: ReturnType<typeof setInterval> | null = null
 function startVideoCapPolling() {
   if (videoCapPollTimer != null) return
@@ -385,7 +394,7 @@ onUnmounted(() => stopVideoCapPolling())
               type="button"
               class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
               :disabled="videoCapState === 'PROBING'"
-              @click="probeVideoCapability()"
+              @click="detectVideoCapability()"
             >
               {{ videoCapDetectLabel }}
             </button>

@@ -10,7 +10,7 @@
 import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { ApiErrorDetails } from '~/types/api'
 
-const { configData, saving, refresh, saveField, apiKeyConfigured, editingKey, editValue, updateEntry } = useSettingsConfig()
+const { configData, saving, refresh, saveField, apiKeyConfigured, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
 const openaiApiKeyConfigured = computed(() => apiKeyConfigured('openai'))
 const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
@@ -38,14 +38,15 @@ function defaultImagegenProvider(): string {
   if (bflApiKeyConfigured.value) return 'bfl'
   return 'openai'
 }
+const { saveError, attempt } = useSaveAttempt()
+
 async function toggleImagegenEnabled() {
   saving.value = true
-  try {
-    const next = imagegenEnabled.value ? '' : defaultImagegenProvider()
+  const next = imagegenEnabled.value ? '' : defaultImagegenProvider()
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'imagegen.provider', value: next } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 async function setImagegenProvider(value: string) {
   saving.value = true
@@ -208,11 +209,10 @@ const fluxModelDownloadPct = computed(() => {
 // weights). Returns immediately; the poll loop drives the progress bar.
 async function downloadFluxModel() {
   saving.value = true
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/imagegen/local/pull', { method: 'POST', body: {} })
-    startImagegenLocalPolling()
-  }
-  finally { saving.value = false }
+  })) startImagegenLocalPolling()
+  saving.value = false
 }
 
 // Poll /api/imagegen/local/state every 1.5s while a pull is in flight, stop once
@@ -293,6 +293,9 @@ onUnmounted(() => stopImagegenLocalPolling())
         </span>
       </div>
     </div>
+    <ApiErrorAlert
+      :error="saveError"
+    />
 
     <template v-if="imagegenEnabled">
       <!-- Each backend is its own group: the radio sits at the top of a card with
@@ -380,6 +383,11 @@ onUnmounted(() => stopImagegenLocalPolling())
               </button>
             </template>
           </div>
+          <ApiErrorAlert
+            v-if="editingKey === 'provider.bfl.apiKey'"
+            :error="editError"
+            class="px-4 pb-2.5"
+          />
         </div>
 
         <!-- OpenAI (gpt-image-1) — reuses the OpenAI key from LLM Providers above; no inline key. -->
@@ -492,6 +500,11 @@ onUnmounted(() => stopImagegenLocalPolling())
               </button>
             </template>
           </div>
+          <ApiErrorAlert
+            v-if="editingKey === 'provider.replicate.apiKey'"
+            :error="editError"
+            class="px-4 pb-2.5"
+          />
           <!-- Model — picked from Replicate's curated text-to-image collection (GET /api/imagegen/models).
                  Shown when Replicate is the active backend, mirroring the Self-Hosted download UI below. -->
           <div
@@ -596,7 +609,7 @@ onUnmounted(() => stopImagegenLocalPolling())
               type="button"
               class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
               :disabled="imageCapState === 'PROBING'"
-              @click="probeImageCapability()"
+              @click="attempt(probeImageCapability)"
             >
               {{ imageCapDetectLabel }}
             </button>
@@ -760,6 +773,11 @@ onUnmounted(() => stopImagegenLocalPolling())
                 </button>
               </template>
             </div>
+            <ApiErrorAlert
+              v-if="editingKey === 'imagegen.local.hfToken'"
+              :error="editError"
+              class="px-4 pb-2.5"
+            />
           </div>
         </div>
       </fieldset>

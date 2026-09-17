@@ -10,7 +10,7 @@
  */
 import type { ProviderModelDef, ProviderModelsResponse } from '~/types/api'
 
-const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
+const { configValue, saveField, saving, resync, providersData, getProviderModels } = useSettingsConfig()
 
 /** Mirrors memory.MemoryReranker's keys. */
 const MemoryRerankKeys = {
@@ -81,14 +81,20 @@ onMounted(() => {
   if (selectedProvider.value) discoverModels()
 })
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function toggleEnabled() {
-  await saveField(MemoryRerankKeys.enabled, enabled.value ? 'false' : 'true')
+  await attempt(() => saveField(MemoryRerankKeys.enabled, enabled.value ? 'false' : 'true'))
 }
 
 async function saveSelection() {
   if (!isDirty.value) return
-  await saveField(MemoryRerankKeys.provider, selectedProvider.value)
-  await saveField(MemoryRerankKeys.model, selectedModel.value)
+  const saved = await attempt(async () => {
+    await saveField(MemoryRerankKeys.provider, selectedProvider.value)
+    await saveField(MemoryRerankKeys.model, selectedModel.value)
+  })
+  // The two writes can half-land: show what was saved, not what was there before.
+  if (!saved) await resync()
 }
 </script>
 
@@ -102,6 +108,9 @@ async function saveSelection() {
       question rather than by keyword and vector score alone. It costs one extra model call per
       recall, so it is off by default.
     </p>
+    <ApiErrorAlert
+      :error="saveError"
+    />
 
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-2.5 flex items-center justify-between">

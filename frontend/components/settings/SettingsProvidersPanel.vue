@@ -21,7 +21,7 @@ import { isDeclaredToolIncapable, isLocalProvider } from '~/composables/useProvi
 import type { Agent, ApiErrorDetails, ConfigEntry, DiscoveredModel, DiscoverModelsResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
 import SettingsConfigField from './SettingsConfigField.vue'
 
-const { configData, saving, refresh, getProviderModels, editingKey, editValue, startEdit, updateEntry, providersData } = useSettingsConfig()
+const { configData, saving, refresh, getProviderModels, editingKey, editValue, editError, startEdit, updateEntry, providersData } = useSettingsConfig()
 
 // JCLAW-113: agent routing counts come from the panel's own deduped /api/agents
 // fetch (Nuxt keys by URL, so this shares the page's request rather than doubling it).
@@ -55,14 +55,15 @@ function isSensitive(key: string) {
 const priceRefreshEnabled = computed(() =>
   configData.value?.entries?.find(e => e.key === 'pricing.refresh.enabled')?.value === 'true',
 )
+const { saveError: pricingError, attempt: attemptPricing } = useSaveAttempt()
+
 async function togglePriceRefresh() {
   saving.value = true
-  try {
-    const next = priceRefreshEnabled.value ? 'false' : 'true'
+  const next = priceRefreshEnabled.value ? 'false' : 'true'
+  if (await attemptPricing(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'pricing.refresh.enabled', value: next } })
-    refresh()
-  }
-  finally { saving.value = false }
+  })) refresh()
+  saving.value = false
 }
 
 // The backend accepts only a provider the registry lists, which is what /api/providers returns.
@@ -131,13 +132,25 @@ function isProviderEnabled(name: string): boolean {
   return (entry.value ?? '').toLowerCase() !== 'false'
 }
 
+// A failed write on one provider's card, shown in that card rather than at the top of a long panel.
+const providerError = ref<{ provider: string, error: ApiErrorDetails } | null>(null)
+
+async function writeProviderConfig(provider: string, key: string, value: string): Promise<boolean> {
+  providerError.value = null
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key, value } })
+    refresh()
+    return true
+  }
+  catch (e) {
+    providerError.value = { provider, error: apiErrorDetails(e) }
+    return false
+  }
+}
+
 async function toggleProviderEnabled(name: string) {
   const newVal = isProviderEnabled(name) ? 'false' : 'true'
-  await $fetch('/api/config', {
-    method: 'POST',
-    body: { key: `provider.${name}.enabled`, value: newVal },
-  })
-  refresh()
+  await writeProviderConfig(name, `provider.${name}.enabled`, newVal)
 }
 
 // JCLAW-113: count how many agents have this provider as their default.
@@ -285,12 +298,8 @@ function startAddModel() {
   editingModelIdx.value = null
 }
 
-async function saveModels(providerName: string, models: ProviderModelDef[]) {
-  await $fetch('/api/config', {
-    method: 'POST',
-    body: { key: `provider.${providerName}.models`, value: JSON.stringify(models) },
-  })
-  refresh()
+function saveModels(providerName: string, models: ProviderModelDef[]): Promise<boolean> {
+  return writeProviderConfig(providerName, `provider.${providerName}.models`, JSON.stringify(models))
 }
 
 /**
@@ -343,23 +352,20 @@ async function saveEditedModel(providerName: string) {
   if (editingModelIdx.value !== null) {
     models[editingModelIdx.value] = modelFormToSaved()
   }
-  await saveModels(providerName, models)
-  editingModelIdx.value = null
+  if (await saveModels(providerName, models)) editingModelIdx.value = null
 }
 
 async function saveNewModel(providerName: string) {
   if (!modelForm.value.id.trim()) return
   const models = getProviderModels(providerName)
   models.push(modelFormToSaved())
-  await saveModels(providerName, models)
-  addingModel.value = false
+  if (await saveModels(providerName, models)) addingModel.value = false
 }
 
 async function deleteModel(providerName: string, idx: number) {
   const models = getProviderModels(providerName)
   models.splice(idx, 1)
-  await saveModels(providerName, models)
-  editingModelIdx.value = null
+  if (await saveModels(providerName, models)) editingModelIdx.value = null
 }
 
 // --- Model discovery ---
@@ -554,8 +560,7 @@ async function addDiscoveredModels() {
       ...((m.cacheWritePrice ?? -1) >= 0 ? { cacheWritePrice: m.cacheWritePrice } : {}),
     }))
   const merged = [...existing, ...toAdd]
-  await saveModels(discoveryProvider.value, merged)
-  discoveryProvider.value = null
+  if (await saveModels(discoveryProvider.value, merged)) discoveryProvider.value = null
 }
 
 function closeDiscovery() {
@@ -661,6 +666,10 @@ const groupedProviders = computed(() => {
           {{ priceRefreshEnabled ? 'on' : 'off' }}
         </span>
       </div>
+      <ApiErrorAlert
+        :error="pricingError"
+        class="px-4 py-2.5 border-t border-border"
+      />
       <div class="px-4 py-2.5 border-t border-border text-xs text-fg-muted space-y-2">
         <p>
           Most provider APIs don't return pricing in their model lists. When this is on, JClaw fetches the community-maintained
@@ -1024,6 +1033,16 @@ const groupedProviders = computed(() => {
               </button>
             </template>
           </div>
+          <ApiErrorAlert
+            v-if="editingKey?.startsWith(`provider.${name}.`)"
+            :error="editError"
+            class="px-4 py-2.5"
+          />
+          <ApiErrorAlert
+            v-if="providerError?.provider === name"
+            :error="providerError.error"
+            class="px-4 py-2.5"
+          />
           <!-- Models row -->
           <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">models</span>

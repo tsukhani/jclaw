@@ -51,17 +51,17 @@ const uploadMaxFiles = computed(() => {
 const editingUploadField = ref<string | null>(null)
 const uploadFieldEdit = ref('')
 
+const { saveError, attempt } = useSaveAttempt()
+
 async function saveUploadMb(configKey: string, mbValue: string, hardMax: number) {
   const mb = Math.max(1, Math.min(hardMax, Number.parseInt(mbValue, 10) || 0))
   const bytes = mb * 1024 * 1024
-  await saveField(configKey, String(bytes))
-  editingUploadField.value = null
+  if (await attempt(() => saveField(configKey, String(bytes)))) editingUploadField.value = null
 }
 
 async function saveUploadCount(value: string) {
   const n = Math.max(1, Math.min(MAX_FILES, Number.parseInt(value, 10) || 1))
-  await saveField('upload.maxFiles', String(n))
-  editingUploadField.value = null
+  if (await attempt(() => saveField('upload.maxFiles', String(n)))) editingUploadField.value = null
 }
 </script>
 
@@ -297,6 +297,10 @@ async function saveUploadCount(value: string) {
           </template>
         </div>
       </div>
+      <ApiErrorAlert
+        :error="saveError"
+        class="px-4 py-2.5 border-t border-border"
+      />
     </div>
   </div>
 </template>
