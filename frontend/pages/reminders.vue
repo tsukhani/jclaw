@@ -70,6 +70,7 @@ const {
   selectMode,
   selectedIds,
   deletingBulk,
+  bulkError,
   selectableRows,
   enter: enterSelectMode,
   exit: exitSelectMode,
@@ -309,6 +310,10 @@ const statusColors: Record<string, string> = {
         </template>
       </div>
     </div>
+    <ApiErrorAlert
+      :error="bulkError"
+      class="mb-4"
+    />
     <p class="mb-6 text-sm text-zinc-600 dark:text-zinc-400">
       Personal nudges that fire on a schedule and surface as a toast in the corner of the app
       (or via Telegram if you've configured it). They never go through the LLM —

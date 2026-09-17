@@ -132,6 +132,7 @@ const {
   selectMode,
   selectedIds,
   deletingBulk,
+  bulkError,
   selectableRows,
   enter: enterSelectMode,
   exit: exitSelectMode,
@@ -943,6 +944,10 @@ function zoneForTaskRender(task: Task): string | undefined {
         </template>
       </div>
     </div>
+    <ApiErrorAlert
+      :error="bulkError"
+      class="mb-4"
+    />
 
     <!-- JCLAW-22 (slice K): dashboard KPI strip. Refetched live on task
          lifecycle events so the counts stay current. -->

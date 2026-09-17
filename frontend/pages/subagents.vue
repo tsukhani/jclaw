@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Agent, Message } from '~/types/api'
+import type { Agent, ApiErrorDetails, Message } from '~/types/api'
 import { SUBAGENT_STATUS_BADGE } from '~/utils/subagent-status'
 // UsersRound matches the Subagents nav icon (the "spawned children" glyph) so
 // the empty-state landing reads as the same surface.
@@ -283,6 +283,7 @@ const { confirm } = useConfirm()
 const {
   selectedIds,
   deletingBulk,
+  bulkError,
   selectableRows: selectableRuns,
   toggle: toggleSelection,
   toggleAll: toggleSelectAll,
@@ -306,6 +307,7 @@ const allRunsSelected = computed(() => selectableRuns.value.length > 0 && select
 const someRunsSelected = computed(() => selectedIds.value.size > 0 && !allRunsSelected.value)
 
 const deletingAll = ref(false)
+const deleteAllError = ref<ApiErrorDetails | null>(null)
 
 /**
  * Filter object for the DELETE /api/subagent-runs body. Mirrors the param
@@ -372,6 +374,7 @@ async function deleteAll() {
   })
   if (!ok) return
   deletingAll.value = true
+  deleteAllError.value = null
   try {
     await $fetch('/api/subagent-runs', {
       method: 'DELETE',
@@ -382,7 +385,7 @@ async function deleteAll() {
     await refresh()
   }
   catch (e) {
-    console.error('Failed to delete all subagent runs:', e)
+    deleteAllError.value = apiErrorDetails(e)
   }
   finally {
     deletingAll.value = false
@@ -451,6 +454,10 @@ function closePeek() {
         </button>
       </div>
     </div>
+    <ApiErrorAlert
+      :error="bulkError ?? deleteAllError"
+      class="mb-4"
+    />
 
     <!-- Empty-state landing: zero runs AND no active filter. Mirrors the
          conversations page — hides the filter bar / table / pager so the page

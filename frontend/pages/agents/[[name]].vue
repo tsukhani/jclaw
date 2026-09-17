@@ -402,6 +402,7 @@ const saveError = ref<string | null>(null)
 // "Delete All" button (wipes every custom agent); `deletingId` gates a single
 // card's trash button so an in-flight delete disables just that row.
 const deletingAll = ref(false)
+const deleteAllError = ref<ApiErrorDetails | null>(null)
 const deletingId = ref<number | null>(null)
 
 // A11y: stable ids for label/control association in the edit form
@@ -1480,20 +1481,24 @@ async function deleteAll() {
   })
   if (!ok) return
   deletingAll.value = true
+  deleteAllError.value = null
+  let deletedAny = false
   try {
     // Sequential deletes keep per-row error handling simple and avoid thundering
     // the API with parallel DELETEs. The list is small (user-curated).
     for (const agent of targets) {
       await $fetch(`/api/agents/${agent.id}`, { method: 'DELETE' })
+      deletedAny = true
     }
-    refresh()
   }
   catch (e) {
-    console.error('Failed to delete all agents:', e)
+    deleteAllError.value = apiErrorDetails(e)
   }
   finally {
     deletingAll.value = false
   }
+  // Refresh after a failure too, so the agents already deleted leave the list.
+  if (deletedAny) refresh()
 }
 
 async function loadWorkspaceFile(agentId: number, filename: string) {
@@ -1639,6 +1644,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           {{ deletingAll ? 'Deleting…' : 'Delete All' }}
         </button>
       </div>
+      <ApiErrorAlert :error="deleteAllError" />
       <p class="text-xs text-fg-muted">
         Additional agents you create for specific channels, peers, or workflows.
       </p>

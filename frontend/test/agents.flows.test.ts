@@ -1416,3 +1416,61 @@ describe('Agents page — Queue Mode select', () => {
     expect((select().element as HTMLSelectElement).value).toBe('collect')
   })
 })
+
+describe('Agents page — Delete All that fails part-way', () => {
+  it('refreshes the list after the agents it did delete, and says why the rest failed', async () => {
+    const agent = (id: number, name: string, isMain: boolean) => ({
+      id, name, isMain, modelProvider: 'openai', modelId: 'gpt-4', enabled: true, providerConfigured: true,
+      thinkingMode: null, compressionEnabled: false, compressionJson: false, compressionCode: false, compressionText: false,
+      compressionTargetRatio: 0.3, acpAllowed: false, memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
+      memoryAutocaptureProvider: 'openai', memoryAutocaptureModel: 'gpt-4', fallbackProvider: null, fallbackModelId: null,
+      createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
+    })
+    setupAgentsApi({ agents: [agent(1, 'main', true), agent(2, 'helper', false), agent(3, 'helper-two', false)] })
+    let listReads = 0
+    let helperDeleted = false
+    const offs = [
+      registerEndpoint('/api/agents', () => {
+        listReads++
+        return helperDeleted
+          ? [agent(1, 'main', true), agent(3, 'helper-two', false)]
+          : [agent(1, 'main', true), agent(2, 'helper', false), agent(3, 'helper-two', false)]
+      }),
+      registerEndpoint('/api/agents/2', {
+        method: 'DELETE',
+        handler: () => {
+          helperDeleted = true
+          return { status: 'ok' }
+        },
+      }),
+      registerEndpoint('/api/agents/3', {
+        method: 'DELETE',
+        handler: async (event) => {
+          const { setResponseStatus } = await import('h3')
+          setResponseStatus(event, 502)
+          return '<html><body>Bad Gateway</body></html>'
+        },
+      }),
+    ]
+    try {
+      const component = await mountSuspended(AgentsHarness)
+      await flushPromises()
+      const readsBefore = listReads
+
+      await component.findAll('button').find(b => b.text().trim() === 'Delete All')!.trigger('click')
+      await flushPromises()
+      const gateInput = document.body.querySelector<HTMLInputElement>('[role="dialog"] input[type="text"]')!
+      gateInput.value = 'delete'
+      gateInput.dispatchEvent(new Event('input', { bubbles: true }))
+      await flushPromises()
+      Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(b => (b.textContent ?? '').trim() === 'Delete 2')!.click()
+
+      await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="api-error"]').text()).toContain('/api/agents/3')
+      await vi.waitFor(() => expect(listReads).toBeGreaterThan(readsBefore))
+    }
+    finally {
+      offs.forEach(off => off())
+    }
+  })
+})

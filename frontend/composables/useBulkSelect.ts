@@ -18,6 +18,8 @@
  * `useBulkSelect(...)` instead of recreating the wiring.
  */
 
+import type { ApiErrorDetails } from '~/types/api'
+
 /** Minimum row shape — bulk-select only needs a stable id per row. */
 export interface BulkSelectRow {
   id: number
@@ -50,6 +52,7 @@ export function useBulkSelect<T extends BulkSelectRow>(opts: UseBulkSelectOption
   const selectMode = ref(false)
   const selectedIds = ref<Set<number>>(new Set())
   const deletingBulk = ref(false)
+  const bulkError = ref<ApiErrorDetails | null>(null)
 
   const selectableRows = computed(() => {
     const all = opts.rows.value ?? []
@@ -95,29 +98,37 @@ export function useBulkSelect<T extends BulkSelectRow>(opts: UseBulkSelectOption
     })
     if (!ok) return
     deletingBulk.value = true
+    bulkError.value = null
+    const deleted: number[] = []
     try {
       // Sequential — selections are user-curated (small), and parallel
       // fires would contend on per-entity FK-cascade locks for no
-      // observable speedup. Surface per-row errors loudly so the
-      // operator knows which id failed mid-sweep.
+      // observable speedup.
       for (const id of selectedIds.value) {
         await opts.deleteOne(id)
+        deleted.push(id)
       }
       exit()
-      await opts.onComplete?.()
     }
     catch (e) {
-      console.error('Bulk delete failed:', e)
+      // Stop at the failure. What was deleted leaves the selection and, through the refresh, the list;
+      // the rest stay selected so the operator can retry once the reason is fixed.
+      bulkError.value = apiErrorDetails(e)
+      const remaining = new Set(selectedIds.value)
+      for (const id of deleted) remaining.delete(id)
+      selectedIds.value = remaining
     }
     finally {
       deletingBulk.value = false
     }
+    if (deleted.length) await opts.onComplete?.()
   }
 
   return {
     selectMode,
     selectedIds,
     deletingBulk,
+    bulkError,
     selectableRows,
     enter,
     exit,

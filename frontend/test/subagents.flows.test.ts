@@ -518,3 +518,33 @@ describe('Subagents — empty-state landing', () => {
     expect(component.find('input[aria-label="Filter query"]').exists()).toBe(true)
   })
 })
+
+describe('Subagents — delete all that fails', () => {
+  it('says why instead of doing nothing', async () => {
+    const off = registerEndpoint('/api/subagent-runs', {
+      method: 'DELETE',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    try {
+      const component = await mountSuspended(Harness)
+      await flushPromises()
+      await component.findAll('button').find(b => b.text().startsWith('Delete all'))!.trigger('click')
+      await flushPromises()
+      const gateInput = document.body.querySelector<HTMLInputElement>('[role="dialog"] input[type="text"]')!
+      gateInput.value = 'delete'
+      gateInput.dispatchEvent(new Event('input', { bubbles: true }))
+      await flushPromises()
+      Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(b => (b.textContent ?? '').trim() === 'Delete 2')!.click()
+
+      await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="api-error"]').text()).toContain('/api/subagent-runs')
+    }
+    finally {
+      off()
+    }
+  })
+})
