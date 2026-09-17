@@ -58,7 +58,7 @@ const { data: reminders, refresh } = await useFetch<Task[]>(url)
 // search. Matches the /tasks page, whose KPI strip is also search-independent.
 const { data: reminderStats } = await useFetch<TaskStats>('/api/tasks/stats?payloadType=reminder')
 
-const { mutate } = useApiMutation()
+const { mutate, errorDetails: mutationError } = useApiMutation()
 const { confirm } = useConfirm()
 
 const hasActiveFilters = computed(() => !!(qFilter.value || statusFilter.value || typeFilter.value))
@@ -137,8 +137,13 @@ function isOneShot(r: Task): boolean {
 }
 
 // Flip auto-delete-after-fire for a one-off reminder.
-async function toggleAutoDelete(r: Task, on: boolean) {
-  await mutate(`/api/tasks/${r.id}`, { method: 'PATCH', body: { autoDeleteOnComplete: on } })
+async function toggleAutoDelete(r: Task, box: HTMLInputElement) {
+  const saved = await mutate(`/api/tasks/${r.id}`, { method: 'PATCH', body: { autoDeleteOnComplete: box.checked } })
+  if (saved === null) {
+    // :checked is one-way and the row never changed, so Vue would leave the refused click on screen.
+    box.checked = r.autoDeleteOnComplete
+    return
+  }
   await refresh()
 }
 
@@ -379,6 +384,10 @@ const statusColors: Record<string, string> = {
         @export="exportReminders"
       />
     </div>
+    <ApiErrorAlert
+      :error="mutationError"
+      class="mb-4"
+    />
 
     <!-- Empty state — onboarding copy when there are genuinely no reminders;
          a plain "no matches" when a filter is narrowing an otherwise non-empty
@@ -523,7 +532,7 @@ const statusColors: Record<string, string> = {
                   :checked="r.autoDeleteOnComplete"
                   :aria-label="`Auto-delete ${r.name} after it fires`"
                   title="Auto-delete this reminder after a successful fire"
-                  @change="toggleAutoDelete(r, ($event.target as HTMLInputElement).checked)"
+                  @change="toggleAutoDelete(r, $event.target as HTMLInputElement)"
                 >
                 <span
                   v-else

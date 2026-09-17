@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Reminders from '~/pages/reminders.vue'
 
@@ -132,5 +133,32 @@ describe('reminders page (JCLAW-438)', () => {
     const component = await mountSuspended(Reminders)
     const search = component.find('input[aria-label="Filter query"]')
     expect(search.exists()).toBe(true)
+  })
+})
+
+describe('reminders page — auto-delete checkbox (JCLAW-1221)', () => {
+  let unregister: Array<() => void> = []
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  it('puts the checkbox back and names the request when the save fails', async () => {
+    unregister.push(registerEndpoint('/api/tasks/1', {
+      method: 'PATCH',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+    const component = await mountSuspended(Reminders)
+    const box = () => component.find('input[aria-label="Auto-delete meeting-ibrahim after it fires"]')
+
+    await box().setValue(false)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+
+    expect(component.find('[data-testid="api-error"]').text()).toContain('/api/tasks/1')
+    expect((box().element as HTMLInputElement).checked).toBe(true)
   })
 })
