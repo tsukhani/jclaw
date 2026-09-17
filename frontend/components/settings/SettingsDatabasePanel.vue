@@ -323,7 +323,8 @@ async function writeConfig(key: string, value: string): Promise<boolean> {
     return true
   }
   catch (e) {
-    failure.value = apiErrorDetails(e, 'Save failed').message
+    // No fallback: it would outrank the transport's message, hiding whether the server refused or was never reached.
+    failure.value = apiErrorDetails(e).message
     return false
   }
 }

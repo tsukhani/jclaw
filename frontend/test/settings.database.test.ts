@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
+import { createFetchError } from 'ofetch'
 import { clearNuxtData } from '#app'
 import SettingsDatabasePanel from '~/components/settings/SettingsDatabasePanel.vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
@@ -16,6 +17,21 @@ import { sectionGroups } from '~/components/settings/sections'
  * The reconnect poll is a wall-clock interval against a genuinely restarting backend
  * and is not driven here.
  */
+
+// A request that never gets a response. The in-process test server always answers, and the panel's
+// $fetch is bound when Nuxt's #build/fetch.mjs loads, so a later stub of the global never reaches it.
+const unreachable = vi.hoisted(() => new Set<string>())
+mockNuxtImport('$fetch', () => (url: string, opts?: Record<string, unknown>) =>
+  unreachable.has(url) ? Promise.reject(noResponseTo(url, opts)) : untypedFetch(url, opts))
+
+// Nitro types $fetch per route; a plain string URL sends vue-tsc past its stack depth.
+function untypedFetch(url: string, opts?: Record<string, unknown>) {
+  return (globalThis.$fetch as unknown as (u: string, o?: Record<string, unknown>) => Promise<unknown>)(url, opts)
+}
+
+function noResponseTo(url: string, opts?: Record<string, unknown>) {
+  return createFetchError({ request: url, options: opts ?? {}, error: new TypeError('fetch failed') } as never)
+}
 
 /** Mount beside ConfirmDialog so confirm() renders — it reads useConfirm()'s singleton. */
 const Harness = defineComponent({
@@ -344,5 +360,77 @@ describe('Settings → Database — the last operation is transient', () => {
     const c = await mount()
     expect(c.find('[data-testid="db-repair-section"]').text()).not.toContain('Restore complete')
     expect(c.find('[data-testid="db-last-op"]').text()).toBe('Restore: Restore complete')
+  })
+})
+
+/** A failed save must say whether the server refused the value or was never reached (JCLAW-1219). */
+describe('Settings → Database — a config save that fails', () => {
+  /** The /api/config POST handler the rest of this file relies on, put back after an override. */
+  function restoreConfigEndpoint() {
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        posts.push({ url: '/api/config', body: await readBody(event).catch(() => null) })
+        return { status: 'ok', rebuildExpected: false }
+      },
+    })
+  }
+
+  afterEach(() => {
+    unreachable.clear()
+    restoreConfigEndpoint()
+  })
+
+  async function saveRetention(c: Awaited<ReturnType<typeof mount>>) {
+    await c.findAll('button').find(b => b.text() === 'keep 7')!.trigger('click')
+    const input = c.find('input[aria-label="Backups to keep"]')
+    await input.setValue('14')
+    await input.trigger('keydown.enter')
+    await settle()
+  }
+
+  const failureText = (c: Awaited<ReturnType<typeof mount>>) =>
+    c.find('[role="status"] .text-red-700').text()
+
+  it('names the request when the save gets no response at all', async () => {
+    unreachable.add('/api/config')
+    const c = await mount()
+    await saveRetention(c)
+
+    const shown = failureText(c)
+    expect(shown).toContain('/api/config')
+    expect(shown).toContain('<no response>')
+    expect(shown).not.toBe('Save failed')
+  })
+
+  it('names the request when a proxy answers with a page instead of the error envelope', async () => {
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    })
+    const c = await mount()
+    await saveRetention(c)
+
+    const shown = failureText(c)
+    expect(shown).toContain('/api/config')
+    expect(shown).toContain('502')
+    expect(shown).not.toBe('Save failed')
+  })
+
+  it('still shows the server\'s own message when it refuses the value', async () => {
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: (event) => {
+        setResponseStatus(event, 403)
+        return { type: 'error', code: 'forbidden', message: 'Retention must be between 1 and 365.' }
+      },
+    })
+    const c = await mount()
+    await saveRetention(c)
+
+    expect(failureText(c)).toBe('Retention must be between 1 and 365.')
   })
 })
