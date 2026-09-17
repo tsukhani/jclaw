@@ -535,6 +535,10 @@ class ApiSkillsControllerTest extends FunctionalTest {
                 "error must explain the missing-workspace-file condition");
         assertTrue(body.contains("/copy"),
                 "error must point to POST .../copy as the install path");
+        assertTrue(body.contains("\"code\":\"invalid_request\""),
+                "the refusal must be the error envelope the UI reads its reason from, not plain text: " + body);
+        assertTrue(body.contains("drag the skill from the global list onto the agent"),
+                "the template must say how to install the skill, not to fix malformed fields: " + body);
     }
 
     @Test

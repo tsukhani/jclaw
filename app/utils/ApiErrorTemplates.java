@@ -68,6 +68,21 @@ public final class ApiErrorTemplates {
                 "Run the load test from this machine through ./jclaw.sh loadtest, which supplies the header.");
     }
 
+    /** Enabling a skill the agent's workspace has no copy of (JCLAW-1221). */
+    public static final String SKILL_NOT_INSTALLED = "skill_not_installed";
+
+    /**
+     * Sent under the wire code {@code invalid_request}, whose own row says to fix malformed fields; this
+     * request is well formed and names a skill the agent does not have.
+     */
+    public static ErrorTemplate skillNotInstalled() {
+        return new ErrorTemplate(SKILL_NOT_INSTALLED,
+                "The skill is not installed on this agent, so it cannot be enabled.",
+                "Only a skill copied into the agent's workspace can be switched on. On the Skills page, "
+                        + "drag the skill from the global list onto the agent to install it.",
+                "Install the skill on the agent, then switch it on again.");
+    }
+
     private static final Map<String, ErrorTemplate> TEMPLATES = Map.ofEntries(
             e(ApiResponses.INVALID_REQUEST, "The request was not in a form the server could accept.",
                     "Check the fields you submitted for missing or malformed values.",

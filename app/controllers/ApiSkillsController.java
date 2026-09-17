@@ -23,6 +23,7 @@ import services.Tx;
 import services.catalog.CatalogPage;
 import services.catalog.CatalogQuery;
 import services.catalog.CatalogRegistry;
+import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 import utils.WorkspacePathGuard;
 
@@ -474,13 +475,14 @@ public class ApiSkillsController extends Controller {
             var agentSkillDir = AgentService.workspacePath(agent.name)
                     .resolve(SKILLS_DIR).resolve(name);
             if (!Files.exists(agentSkillDir.resolve(SKILL_MD))) {
-                response.status = 400;
-                renderText(("Skill '%s' is not installed on agent '%s'. "
+                ApiResponses.errorWithTemplate(400, ApiResponses.INVALID_REQUEST,
+                        ("Skill '%s' is not installed on agent '%s'. "
                         + "Install it first via POST /api/agents/%d/skills/%s/copy "
                         + "(copies the global skill into the agent's workspace, "
                         + "syncs the shell allowlist, and runs a malware scan); "
                         + "then this toggle endpoint can flip it on/off.")
-                        .formatted(name, agent.name, id, name));
+                        .formatted(name, agent.name, id, name),
+                        ApiErrorTemplates.skillNotInstalled());
             }
         }
 

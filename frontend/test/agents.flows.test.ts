@@ -1326,11 +1326,19 @@ describe('Agents page — tool, skill and MCP switches roll back a failed save',
 
   it('puts a skill switch back when enabling a skill that is not installed is refused', async () => {
     setupAgentsApi()
-    // The backend sends this refusal as plain text, not the error envelope.
     stubPut('/api/agents/2/skills/code-review', async (event) => {
       const { setResponseStatus } = await import('h3')
       setResponseStatus(event, 400)
-      return 'Skill \'code-review\' is not installed on agent \'helper\'.'
+      return {
+        type: 'error',
+        code: 'invalid_request',
+        message: 'Skill \'code-review\' is not installed on agent \'helper\'.',
+        template: {
+          whatBroke: 'The skill is not installed on this agent, so it cannot be enabled.',
+          whatToCheck: 'Only a skill copied into the agent\'s workspace can be switched on.',
+          howToRetry: 'Install the skill on the agent, then switch it on again.',
+        },
+      }
     })
     const component = await openHelper('code-review skill')
 
@@ -1338,7 +1346,8 @@ describe('Agents page — tool, skill and MCP switches roll back a failed save',
     const alert = '[data-testid="agent-skills"] [data-testid="api-error"]'
     await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
 
-    expect(component.find(alert).text()).toContain('400')
+    expect(component.find(alert).text()).toContain('is not installed on agent')
+    expect(component.find(alert).text()).toContain('Install the skill on the agent')
     expect(checked(component, 'code-review skill')).toBe('false')
   })
 
