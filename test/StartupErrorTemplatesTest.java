@@ -3,6 +3,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
 import utils.ErrorRendering;
+import utils.ErrorTemplate;
 import utils.ErrorTemplates;
 import utils.StartupErrorTemplates;
 
@@ -110,6 +111,19 @@ class StartupErrorTemplatesTest extends UnitTest {
     }
 
     @Test
+    void aStatementRefusedOnAWorkingConnectionIsNotReportedAsAConnectionFailure() {
+        // Refused DDL used to render as "the database refused the connection", which sends the
+        // operator to db.url when the fix is a permission.
+        var message = DbSchedulerSchemaInitJob.bootFailureMessage(new DbSchedulerSchemaInitJob.DdlStatementFailed(
+                new SQLException("permission denied for schema public")));
+
+        assertTrue(message.contains("permission denied for schema public"), message);
+        assertFalse(message.contains("refused the connection"), message);
+        assertTrue(message.contains("permission to create tables"), message);
+        assertEquals(3, message.split("\n\n").length, "three parts: " + message);
+    }
+
+    @Test
     void aDriverThatCarriesNoMessageStillRendersACompleteSentence() {
         var message = DbSchedulerSchemaInitJob.bootFailureMessage(new SQLException());
 
@@ -124,7 +138,8 @@ class StartupErrorTemplatesTest extends UnitTest {
     void theStartupCodesAreRegisteredSoAGenericLookupAlsoHasARemedy() {
         for (var code : new String[] {StartupErrorTemplates.CONFIG_PARSE_FAILED,
                 StartupErrorTemplates.DATABASE_UNAVAILABLE,
-                StartupErrorTemplates.SCHEMA_DDL_UNREADABLE}) {
+                StartupErrorTemplates.SCHEMA_DDL_UNREADABLE,
+                StartupErrorTemplates.SCHEMA_DDL_FAILED}) {
             assertTrue(ErrorTemplates.isRegistered(code),
                     code + " must be in the merged registry, not falling back");
         }
@@ -134,23 +149,31 @@ class StartupErrorTemplatesTest extends UnitTest {
     void theFactoriesAndTheRegisteredRowsGiveTheSameRemedy() {
         // A specific message that advised something different from the code's own row would be a
         // second source of truth.
-        var registered = ErrorTemplates.forCode(StartupErrorTemplates.CONFIG_PARSE_FAILED);
-        var specific = StartupErrorTemplates.configParseFailure("a.key", "x", "a whole number", "1");
-
-        assertEquals(registered.whatToCheck(), specific.whatToCheck());
-        assertEquals(registered.howToRetry(), specific.howToRetry());
-        assertNotEquals(registered.whatBroke(), specific.whatBroke(),
-                "only whatBroke carries the specifics");
+        for (var specific : new ErrorTemplate[] {
+                StartupErrorTemplates.configParseFailure("a.key", "x", "a whole number", "1"),
+                StartupErrorTemplates.databaseUnavailable("Connection refused"),
+                StartupErrorTemplates.schemaDdlUnreadable("Permission denied"),
+                StartupErrorTemplates.schemaDdlFailed("permission denied for schema public")}) {
+            var registered = ErrorTemplates.forCode(specific.code());
+            assertEquals(registered.whatToCheck(), specific.whatToCheck(), specific.code());
+            assertEquals(registered.howToRetry(), specific.howToRetry(), specific.code());
+            assertNotEquals(registered.whatBroke(), specific.whatBroke(),
+                    "only whatBroke carries the specifics: " + specific.code());
+        }
     }
 
     @Test
     void theConsoleRenderingCarriesNoMarkup() {
         // The destination is a terminal and a log file: no markup parser, no colour support.
-        var rendered = ErrorRendering.PLAIN.render(
-                StartupErrorTemplates.configParseFailure("a.key", "x", "a whole number", "1"));
-
-        for (var markup : new String[] {"*", "`", "#", "[", "]"}) {
-            assertFalse(rendered.contains(markup), "PLAIN must not emit " + markup + ": " + rendered);
+        for (var template : new ErrorTemplate[] {
+                StartupErrorTemplates.configParseFailure("a.key", "x", "a whole number", "1"),
+                StartupErrorTemplates.databaseUnavailable("Connection refused"),
+                StartupErrorTemplates.schemaDdlUnreadable("Permission denied"),
+                StartupErrorTemplates.schemaDdlFailed("permission denied for schema public")}) {
+            var rendered = ErrorRendering.PLAIN.render(template);
+            for (var markup : new String[] {"*", "`", "#", "[", "]", "\u001b"}) {
+                assertFalse(rendered.contains(markup), "PLAIN must not emit " + markup + ": " + rendered);
+            }
         }
     }
 }

@@ -27,11 +27,14 @@ public final class StartupErrorTemplates {
     /** A configured numeric value that would not parse; the built-in default is in use instead. */
     public static final String CONFIG_PARSE_FAILED = "config_parse_failed";
 
-    /** The database refused the connection the scheduler's schema needs at boot. */
+    /** The database refused JClaw's connection at boot. */
     public static final String DATABASE_UNAVAILABLE = "database_unavailable";
 
     /** The scheduler DDL that ships with the application could not be read. */
     public static final String SCHEMA_DDL_UNREADABLE = "schema_ddl_unreadable";
+
+    /** The database took the connection but refused a statement of the scheduler DDL. */
+    public static final String SCHEMA_DDL_FAILED = "schema_ddl_failed";
 
     private static final String CONFIG_CHECK = "The stored value, in Settings or via "
             + "POST /api/config. A unit suffix, a thousands separator or a stray quote is the "
@@ -54,17 +57,28 @@ public final class StartupErrorTemplates {
     private static final String DDL_RETRY = "Restore the file from the distribution, then start "
             + "JClaw again.";
 
+    private static final String DDL_FAILED_CHECK = "The connection worked, so the connection "
+            + "settings are right. The database user most likely lacks permission to create "
+            + "tables, or a scheduled_tasks table already exists with a different shape.";
+
+    private static final String DDL_FAILED_RETRY = "Give the database user permission to create "
+            + "tables, or run conf/db/db_scheduler_postgres.sql or conf/db/db_scheduler_h2.sql, "
+            + "whichever matches the database, once as a user who has it. Then start JClaw again.";
+
     private static final Map<String, ErrorTemplate> TEMPLATES = Map.ofEntries(
             e(CONFIG_PARSE_FAILED,
                     "A configured value is not the number its key expects, so the built-in "
                             + "default is in use instead.",
                     CONFIG_CHECK, CONFIG_RETRY),
             e(DATABASE_UNAVAILABLE,
-                    "The database refused the connection the scheduler's schema needs at startup.",
+                    "The database refused the connection JClaw needs to start.",
                     DATABASE_CHECK, DATABASE_RETRY),
             e(SCHEMA_DDL_UNREADABLE,
                     "The scheduler schema that ships with the application could not be read.",
-                    DDL_CHECK, DDL_RETRY));
+                    DDL_CHECK, DDL_RETRY),
+            e(SCHEMA_DDL_FAILED,
+                    "The database refused the statements that create the scheduler's table.",
+                    DDL_FAILED_CHECK, DDL_FAILED_RETRY));
 
     static Map<String, ErrorTemplate> templates() {
         return TEMPLATES;
@@ -87,8 +101,7 @@ public final class StartupErrorTemplates {
     /** A database that refused the boot-time connection, carrying the driver's own words. */
     public static ErrorTemplate databaseUnavailable(@Nullable String detail) {
         return new ErrorTemplate(DATABASE_UNAVAILABLE,
-                withDetail("The database refused the connection the scheduler's schema needs at "
-                        + "startup", detail),
+                withDetail("The database refused the connection JClaw needs to start", detail),
                 DATABASE_CHECK, DATABASE_RETRY);
     }
 
@@ -98,6 +111,14 @@ public final class StartupErrorTemplates {
                 withDetail("The scheduler schema that ships with the application could not be "
                         + "read", detail),
                 DDL_CHECK, DDL_RETRY);
+    }
+
+    /** A DDL statement the database refused on a working connection, carrying the driver's own words. */
+    public static ErrorTemplate schemaDdlFailed(@Nullable String detail) {
+        return new ErrorTemplate(SCHEMA_DDL_FAILED,
+                withDetail("The database refused the statements that create the scheduler's table",
+                        detail),
+                DDL_FAILED_CHECK, DDL_FAILED_RETRY);
     }
 
     /** A driver message is nullable and sometimes blank, and a bare trailing colon reads as truncation. */

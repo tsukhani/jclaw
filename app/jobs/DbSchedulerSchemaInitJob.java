@@ -10,6 +10,7 @@ import utils.ErrorRendering;
 import utils.StartupErrorTemplates;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -54,9 +55,10 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
     }
 
     /**
-     * The actionable console message for a boot failure (JCLAW-1136): the two causes have
-     * different remedies — a database that will not take a connection, and shipped DDL that
-     * cannot be read — so they are not merged into one "schema init failed".
+     * The actionable console message for a boot failure (JCLAW-1136): the three causes have
+     * different remedies — a database that will not take a connection, shipped DDL that cannot
+     * be read, and DDL the database refuses on a working connection — so they are not merged
+     * into one "schema init failed".
      *
      * <p>Rendered {@link ErrorRendering#PLAIN}: nothing on the boot path has a request, a markup
      * parser or a guarantee of terminal colour.
@@ -64,9 +66,11 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
      * <p>Public because test sources are the default package.
      */
     public static String bootFailureMessage(Exception cause) {
-        var template = cause instanceof IOException
-                ? StartupErrorTemplates.schemaDdlUnreadable(cause.getMessage())
-                : StartupErrorTemplates.databaseUnavailable(cause.getMessage());
+        var template = switch (cause) {
+            case IOException _ -> StartupErrorTemplates.schemaDdlUnreadable(cause.getMessage());
+            case DdlStatementFailed _ -> StartupErrorTemplates.schemaDdlFailed(cause.getMessage());
+            default -> StartupErrorTemplates.databaseUnavailable(cause.getMessage());
+        };
         return ErrorRendering.PLAIN.render(template);
     }
 
@@ -95,7 +99,7 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
     private static String readDdl(String dialect) throws IOException {
         File path = Play.getFile("conf/db/db_scheduler_" + dialect + ".sql");
         if (!path.isFile()) {
-            throw new IllegalStateException("Missing DDL file: " + path);
+            throw new FileNotFoundException("Missing DDL file: " + path);
         }
         return Files.readString(path.toPath(), StandardCharsets.UTF_8);
     }
@@ -118,7 +122,19 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
             if (trimmed.isEmpty()) continue;
             try (Statement s = conn.createStatement()) {
                 s.execute(trimmed);
+            } catch (SQLException e) {
+                throw new DdlStatementFailed(e);
             }
+        }
+    }
+
+    /**
+     * A statement refused on a connection that worked — a permission or an existing table,
+     * never the connection settings the plain {@link SQLException} remedy points at.
+     */
+    public static final class DdlStatementFailed extends SQLException {
+        public DdlStatementFailed(SQLException cause) {
+            super(cause.getMessage(), cause.getSQLState(), cause.getErrorCode(), cause);
         }
     }
 }

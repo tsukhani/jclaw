@@ -1,2 +1,3 @@
+290:services.DatabaseBootCheckPlugin
 350:services.CaffeineJCacheConfigPlugin
 450:services.telemetry.OtelPlayPlugin

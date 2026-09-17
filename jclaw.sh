@@ -4002,6 +4002,23 @@ do_diagnostics() {
 # typecheck). Streams each check's output and prints a consolidated summary
 # at the end. Continues past failures so the user sees every result in one
 # round-trip — the whole point of this subcommand. Exits non-zero if any
+
+# A boot failure JClaw explains prints a "What broke:" block (utils.StartupErrorTemplates), and the
+# stack traces Play logs after it push that block out of the 20-line tail below.
+print_startup_error_block() {
+    local block
+    block=$(awk '
+        index($0, "What broke: ") { $0 = substr($0, index($0, "What broke: ")); buf = ""; lines = 0; capturing = 1 }
+        capturing { buf = buf $0 "\n"; lines++ }
+        capturing && index($0, "How to retry: ") { last = buf; capturing = 0 }
+        capturing && lines > 12 { capturing = 0 }
+        END { printf "%s", last }
+    ' "$1" 2>/dev/null || true)
+    [[ -n "$block" ]] || return 0
+    echo "       What JClaw reported:" >&2
+    printf '%s\n' "$block" | sed 's/^/         /' >&2
+}
+
 # Block until the backend answers /api/status, so a caller can treat a returned
 # start/restart as "reachable" rather than "process launched". Same shape as the
 # dev-mode loop in do_start_dev: a JVM that dies during startup fails now, not
@@ -4018,6 +4035,7 @@ wait_for_backend_ready() {
         pid=$(cat "$SCRIPT_DIR/server.pid" 2>/dev/null || true)
         if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
             echo "Error: Play backend exited during startup (pid $pid no longer alive)." >&2
+            print_startup_error_block "$SCRIPT_DIR/logs/system.out"
             echo "       Last lines of logs/system.out:" >&2
             tail -20 "$SCRIPT_DIR/logs/system.out" 2>/dev/null | sed 's/^/         /' >&2
             rm -f "$SCRIPT_DIR/server.pid"
