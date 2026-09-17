@@ -1375,3 +1375,35 @@ describe('Agents page — tool, skill and MCP switches roll back a failed save',
     expect(checked(component, 'All skills for this agent')).toBe('false')
   })
 })
+
+describe('Agents page — Queue Mode select', () => {
+  let unregister: Array<() => void> = []
+
+  afterEach(async () => {
+    unregister.forEach(off => off())
+    unregister = []
+    await useRouter().replace('/agents')
+  })
+
+  it('puts the saved mode back and names the request when the save fails', async () => {
+    setupAgentsApi()
+    unregister.push(registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        const { setResponseStatus } = await import('h3')
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      },
+    }))
+    const component = await mountSuspended(Agents, { route: '/agents/helper' })
+    const select = () => component.find('[data-testid="agent-queue-mode"] select')
+    await vi.waitFor(() => expect((select().element as HTMLSelectElement).value).toBe('collect'))
+
+    await select().setValue('interrupt')
+    const alert = '[data-testid="agent-queue-mode"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+
+    expect(component.find(alert).text()).toContain('/api/config')
+    expect((select().element as HTMLSelectElement).value).toBe('collect')
+  })
+})

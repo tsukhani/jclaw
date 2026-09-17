@@ -304,6 +304,9 @@ function toggleMcpExpand(server: string) {
 }
 
 const queueMode = ref('queue')
+const savedQueueMode = ref('queue')
+const savingQueueMode = ref(false)
+const queueModeError = ref<ApiErrorDetails | null>(null)
 // JCLAW-465: per-agent content-compression enable, managed in its own
 // Optimization card (immediate-save on toggle, like Queue Mode). Initialised
 // from the agent's effective value when the edit form opens.
@@ -1059,6 +1062,7 @@ async function loadEffectiveAllowlist(agentId: number) {
 }
 
 async function loadQueueMode(agentName: string) {
+  queueModeError.value = null
   try {
     const config = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.queue.mode`)
     queueMode.value = config.value || 'queue'
@@ -1066,18 +1070,26 @@ async function loadQueueMode(agentName: string) {
   catch {
     queueMode.value = 'queue'
   }
+  savedQueueMode.value = queueMode.value
 }
 
 async function saveQueueMode() {
   if (!editing.value) return
+  savingQueueMode.value = true
+  queueModeError.value = null
   try {
     await $fetch('/api/config', {
       method: 'POST',
       body: { key: `agent.${editing.value.name}.queue.mode`, value: queueMode.value },
     })
+    savedQueueMode.value = queueMode.value
   }
   catch (e) {
-    console.error('Failed to save queue mode:', e)
+    queueMode.value = savedQueueMode.value
+    queueModeError.value = apiErrorDetails(e)
+  }
+  finally {
+    savingQueueMode.value = false
   }
 }
 
@@ -1894,6 +1906,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       <div
         v-if="editing"
         class="bg-surface-elevated border border-border p-4"
+        data-testid="agent-queue-mode"
       >
         <div class="flex items-center justify-between">
           <div>
@@ -1908,7 +1921,8 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <select
                 :id="agentQueueModeId"
                 v-model="queueMode"
-                class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden focus:border-ring"
+                :disabled="savingQueueMode"
+                class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden focus:border-ring disabled:opacity-50"
                 @change="saveQueueMode"
               >
                 <option value="queue">
@@ -1924,6 +1938,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </label>
           </div>
         </div>
+        <ApiErrorAlert
+          :error="queueModeError"
+          class="mt-2"
+        />
       </div>
 
       <!-- JCLAW-500: per-agent ACP external-harness grant. The acp runtime
