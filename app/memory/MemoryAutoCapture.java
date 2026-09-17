@@ -8,6 +8,7 @@ import llm.LlmProvider;
 import llm.LlmResilience;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import models.ChannelType;
 import models.Memory;
@@ -371,14 +372,17 @@ public final class MemoryAutoCapture {
 
     // JCLAW-534: the extractor runs on the agent's per-agent autocapture model —
     // the agent's default model unless an operator set an explicit override in the
-    // agent's Memory section. No global model knob.
+    // agent's Memory section. No global model knob. An agent on the model router
+    // (JCLAW-1222) extracts on the router's chat-class model.
     private static @Nullable LlmProvider resolveProvider(Agent agent) {
-        var p = ProviderRegistry.get(agent.autocaptureProviderEffective());
+        var target = ModelRouter.concrete(agent.autocaptureProviderEffective(), agent.autocaptureModelEffective());
+        var p = target != null ? ProviderRegistry.get(target.provider()) : null;
         return p != null ? p : ProviderRegistry.getPrimary();
     }
 
     private static String resolveModelId(Agent agent) {
-        return agent.autocaptureModelEffective();
+        var target = ModelRouter.concrete(agent.autocaptureProviderEffective(), agent.autocaptureModelEffective());
+        return target != null ? target.modelId() : agent.autocaptureModelEffective();
     }
 
     // ─── Testable core pipeline ──────────────────────────────────────────────

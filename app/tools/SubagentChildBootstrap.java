@@ -2,6 +2,7 @@ package tools;
 
 import agents.ToolRegistry;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import mcp.McpGrants;
 import models.Agent;
 import models.AgentToolConfig;
@@ -505,13 +506,14 @@ final class SubagentChildBootstrap {
         });
         if (snapshot == null || snapshot.isEmpty()) return null;
 
-        var provider = ProviderRegistry.get(parentAgent.modelProvider);
-        if (provider == null) {
+        var target = ModelRouter.concrete(parentAgent.modelProvider, parentAgent.modelId);
+        var provider = target != null ? ProviderRegistry.get(target.provider()) : null;
+        if (target == null || provider == null) {
             throw new IllegalStateException(
                     "Parent provider '" + parentAgent.modelProvider + "' is not configured");
         }
         final var maxOutput = ConfigService.getInt("subagent.parentContextMaxTokens", 4096);
-        final var modelId = parentAgent.modelId;
+        final var modelId = target.modelId();
         SessionCompactor.Summarizer summarizer = sumMsgs -> {
             var resp = provider.chat(modelId, sumMsgs, List.of(), maxOutput, null, null);
             return SessionCompactor.firstChoiceText(resp);

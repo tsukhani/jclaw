@@ -3,6 +3,7 @@ package memory;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import models.Memory;
 import org.jspecify.annotations.Nullable;
@@ -190,8 +191,9 @@ public final class CoreMemoryCapMigration {
 
     /** Raw, unvalidated category strings from the agent's model — empty when it cannot run. */
     private static List<String> askModel(Agent agent, List<String> texts) {
-        var provider = ProviderRegistry.get(agent.modelProvider);
-        if (provider == null || agent.modelId == null || agent.modelId.isBlank()) {
+        var target = ModelRouter.concrete(agent.modelProvider, agent.modelId);
+        var provider = target != null ? ProviderRegistry.get(target.provider()) : null;
+        if (target == null || provider == null || target.modelId().isBlank()) {
             EventLogger.warn(EVENT_CATEGORY,
                     "Agent %s has no usable model, so its core overflow stays core".formatted(agent.name));
             return List.of();
@@ -201,7 +203,7 @@ public final class CoreMemoryCapMigration {
             numbered.append(i).append(": ").append(texts.get(i)).append('\n');
         }
         try {
-            var reply = SessionCompactor.firstChoiceText(provider.chat(agent.modelId,
+            var reply = SessionCompactor.firstChoiceText(provider.chat(target.modelId(),
                     List.of(ChatMessage.system(INSTRUCTIONS), ChatMessage.user(numbered.toString())),
                     List.of(), 1024, null, null));
             var arr = JsonParser.parseString(strip(reply)).getAsJsonArray();

@@ -412,7 +412,7 @@ class TelegramModelSelectorTest extends UnitTest {
         var providers = channels.TelegramModelSelector.userVisibleProviders();
         int bigcoIdx = -1;
         for (int i = 0; i < providers.size(); i++) {
-            if ("bigco".equals(providers.get(i).config().name())) { bigcoIdx = i; break; }
+            if ("bigco".equals(providers.get(i).name())) { bigcoIdx = i; break; }
         }
         assertTrue(bigcoIdx >= 0, "bigco should be in the user-visible list");
 
@@ -469,7 +469,7 @@ class TelegramModelSelectorTest extends UnitTest {
         var providers = channels.TelegramModelSelector.userVisibleProviders();
         int bigcoIdx = -1;
         for (int i = 0; i < providers.size(); i++) {
-            if ("bigco".equals(providers.get(i).config().name())) { bigcoIdx = i; break; }
+            if ("bigco".equals(providers.get(i).name())) { bigcoIdx = i; break; }
         }
         assertTrue(bigcoIdx >= 0, "bigco should be in the user-visible list");
 

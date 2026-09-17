@@ -430,6 +430,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/providers/{name}/models
             GET /api/providers/{name}/reachable
             GET /api/providers/{name}/video-models
+            GET /api/router/status
             GET /api/skills
             GET /api/skills/by-agent
             GET /api/skills/catalog/search

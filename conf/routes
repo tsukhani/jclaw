@@ -193,6 +193,7 @@ GET     /api/events                             ApiEventsController.stream
 
 # Providers API
 GET     /api/providers                          ApiProvidersController.list
+GET     /api/router/status                      ApiRouterController.status
 POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
 GET     /api/providers/{name}/reachable         ApiProvidersController.reachable
 GET     /api/providers/{name}/embedding-models   ApiProvidersController.embeddingModels

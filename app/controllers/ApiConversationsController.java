@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Conversation;
 import models.Message;
 import models.MessageAttachment;
@@ -666,16 +667,14 @@ public class ApiConversationsController extends Controller {
         if (newProvider == null || newProvider.isBlank()
                 || newModelId == null || newModelId.isBlank()) badRequest();
 
-        // Validate against ProviderRegistry — same checks as /model NAME.
-        var provider = ProviderRegistry.get(newProvider);
-        if (provider == null) {
+        // Validate against ProviderRegistry — same checks as /model NAME. The router (JCLAW-1222)
+        // is a catalog entry of its own, present while it has models to route to.
+        if (!ModelRouter.PROVIDER.equals(newProvider) && ProviderRegistry.get(newProvider) == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Provider '" + newProvider + "' is not configured.");
             return;
         }
-        var modelExists = provider.config().models().stream()
-                .anyMatch(m -> newModelId.equals(m.id()));
-        if (!modelExists) {
+        if (ModelRouter.findModel(newProvider, newModelId).isEmpty()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Provider '" + newProvider + "' has no model with id '" + newModelId + "'.");
             return;

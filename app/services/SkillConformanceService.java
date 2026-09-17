@@ -10,6 +10,7 @@ import com.google.gson.stream.JsonReader;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 
@@ -313,14 +314,16 @@ public final class SkillConformanceService {
             if (p != null) return Optional.of(p);
         }
         var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
-        return Optional.ofNullable(main != null ? ProviderRegistry.get(main.modelProvider) : null);
+        var target = main != null ? ModelRouter.concrete(main.modelProvider, main.modelId) : null;
+        return Optional.ofNullable(target != null ? ProviderRegistry.get(target.provider()) : null);
     }
 
     private static Optional<String> resolveModel() {
         var configModel = ConfigService.get("skillsPromotion.model");
         if (configModel != null && !configModel.isBlank()) return Optional.of(configModel);
         var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
-        return Optional.ofNullable(main != null ? main.modelId : null)
+        var target = main != null ? ModelRouter.concrete(main.modelProvider, main.modelId) : null;
+        return Optional.ofNullable(target != null ? target.modelId() : null)
                 .filter(m -> !m.isBlank());
     }
 

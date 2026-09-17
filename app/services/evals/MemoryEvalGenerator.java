@@ -2,6 +2,7 @@ package services.evals;
 
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import memory.JpaMemoryStore;
 import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
@@ -657,13 +658,14 @@ public final class MemoryEvalGenerator {
 
     /** Production question writer: the agent's own model, which is local on this install. */
     public static @Nullable QuestionWriter writerFor(Agent agent) {
-        var provider = ProviderRegistry.get(agent.modelProvider);
-        if (provider == null) return null;
+        var target = ModelRouter.concrete(agent.modelProvider, agent.modelId);
+        var provider = target != null ? ProviderRegistry.get(target.provider()) : null;
+        if (target == null || provider == null) return null;
         return msgs -> {
             // A model that returns no text means "no question"; every caller already
             // rejects a blank one, where a null would have surfaced as a caught NPE.
             var text = SessionCompactor.firstChoiceText(
-                    provider.chat(agent.modelId, msgs, List.of(), 120, null, null));
+                    provider.chat(target.modelId(), msgs, List.of(), 120, null, null));
             return text == null ? "" : text;
         };
     }

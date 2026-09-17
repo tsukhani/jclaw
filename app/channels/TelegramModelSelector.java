@@ -1,8 +1,8 @@
 package channels;
 
-import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import models.Conversation;
 import models.TelegramBinding;
@@ -13,6 +13,7 @@ import services.EventLogger;
 import services.ModelOverrideResolver;
 import services.Tx;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -168,11 +169,21 @@ public final class TelegramModelSelector {
      * {@code callback_data} always line up with what the user saw on
      * screen.
      */
-    public static List<LlmProvider> userVisibleProviders() {
-        return ProviderRegistry.listAll().stream()
-                .filter(p -> !isProviderDisabled(p.config().name()))
-                .toList();
+    public static List<ProviderChoice> userVisibleProviders() {
+        var choices = new ArrayList<ProviderChoice>();
+        for (var p : ProviderRegistry.listAll()) {
+            if (!isProviderDisabled(p.config().name())) {
+                choices.add(new ProviderChoice(p.config().name(), p.config().models()));
+            }
+        }
+        // JCLAW-1222: the model router is picked like any provider, with its one virtual model.
+        var router = ModelRouter.findModel(ModelRouter.PROVIDER, ModelRouter.MODEL_ID);
+        router.ifPresent(model -> choices.add(new ProviderChoice(ModelRouter.PROVIDER, List.of(model))));
+        return choices;
     }
+
+    /** One row of the provider keyboard: a registry provider, or the model router. */
+    public record ProviderChoice(String name, List<ModelInfo> models) {}
 
     private static boolean isProviderDisabled(String name) {
         var flag = ConfigService.get("provider." + name + ".enabled");
@@ -190,9 +201,9 @@ public final class TelegramModelSelector {
         var providers = userVisibleProviders();
         if (providerIdx < 0 || providerIdx >= providers.size()) return Optional.empty();
         var provider = providers.get(providerIdx);
-        var models = provider.config().models();
+        var models = provider.models();
         if (modelIdx < 0 || modelIdx >= models.size()) return Optional.empty();
-        return Optional.of(new ResolvedModel(provider.config().name(), models.get(modelIdx)));
+        return Optional.of(new ResolvedModel(provider.name(), models.get(modelIdx)));
     }
 
     /**

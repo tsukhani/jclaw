@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 
 import java.util.ArrayList;
@@ -73,11 +74,12 @@ public final class SkillSanitizer {
                 EventLogger.warn(EVENT_CATEGORY_SKILLS, "Sanitization skipped: main agent not found");
                 return fileContents;
             }
-            if (provider == null) provider = ProviderRegistry.get(mainAgent.modelProvider);
-            if (modelId == null || modelId.isBlank()) modelId = mainAgent.modelId;
+            var mainModel = ModelRouter.concrete(mainAgent.modelProvider, mainAgent.modelId);
+            if (provider == null && mainModel != null) provider = ProviderRegistry.get(mainModel.provider());
+            if ((modelId == null || modelId.isBlank()) && mainModel != null) modelId = mainModel.modelId();
         }
 
-        if (provider == null) {
+        if (provider == null || modelId == null || modelId.isBlank()) {
             EventLogger.warn(EVENT_CATEGORY_SKILLS, "Sanitization skipped: no provider configured");
             return fileContents;
         }

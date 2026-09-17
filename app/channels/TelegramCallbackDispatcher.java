@@ -173,8 +173,8 @@ public final class TelegramCallbackDispatcher {
         }
         TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(), null, false);
         var provider = providers.get(payload.providerIdx());
-        var providerLabel = TelegramModelKeyboard.providerLabel(provider.config().name());
-        var modelCount = provider.config().models().size();
+        var providerLabel = TelegramModelKeyboard.providerLabel(provider.name());
+        var modelCount = provider.models().size();
         var header = new StringBuilder();
         header.append("⚙️ <b>Model Configuration</b>\n\n");
         if (modelCount == 0) {

@@ -10,6 +10,8 @@ import jobs.ToolRegistrationJob;
 import llm.LlmResilience;
 import llm.ProviderLocality;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
+import llm.routing.RouterPolicy;
 import memory.JpaMemoryStore;
 import memory.MemoryReranker;
 import memory.MemoryStoreFactory;
@@ -340,6 +342,18 @@ public class ConfigService {
             }
         }
 
+        // JCLAW-1222: a model list naming what is not registered would route to nothing, and silently.
+        if (key.startsWith(RouterPolicy.PREFIX)) {
+            var rejected = RouterPolicy.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
+        }
+        // Every model picker lists the router under this name, so no real provider may take it.
+        if (key.startsWith(PROVIDER_KEY_PREFIX + ModelRouter.PROVIDER + ".")) {
+            return "The provider name '" + ModelRouter.PROVIDER + "' is reserved for the model router.";
+        }
+
         // Each of these readers falls back to its default on a bad value, so without a check
         // here a typo saves cleanly and silently changes nothing.
         if (key.equals(DocumentsTool.KEY_OCR_LANGUAGES)
@@ -431,7 +445,8 @@ public class ConfigService {
             TtsSidecarManager.prewarmModelAsync();
         }
 
-        if (key.startsWith(PROVIDER_KEY_PREFIX)) {
+        // An agent on router/auto is enabled exactly while the router has models to route to.
+        if (key.startsWith(PROVIDER_KEY_PREFIX) || key.startsWith(RouterPolicy.PREFIX)) {
             AgentService.syncEnabledStates();
         }
         // The registry otherwise re-reads the pin only once a minute.
@@ -554,7 +569,7 @@ public class ConfigService {
      */
     public static void deleteWithSideEffects(String key) {
         delete(key);
-        if (key.startsWith(PROVIDER_KEY_PREFIX)) {
+        if (key.startsWith(PROVIDER_KEY_PREFIX) || key.startsWith(RouterPolicy.PREFIX)) {
             AgentService.syncEnabledStates();
         }
         if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) {

@@ -1,6 +1,5 @@
 package channels;
 
-import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -50,7 +49,8 @@ public final class TelegramModelKeyboard {
             "together", "TogetherAI",
             "lm-studio", "LM Studio",
             "groq", "Groq",
-            "anthropic", "Anthropic"
+            "anthropic", "Anthropic",
+            "router", "Model Router"
     );
 
     /** Public so {@link TelegramModelSelector} can reuse the same labeling
@@ -78,9 +78,9 @@ public final class TelegramModelKeyboard {
         var row = new ArrayList<InlineKeyboardButton>();
         for (int i = 0; i < providers.size(); i++) {
             var p = providers.get(i);
-            var name = p.config().name();
+            var name = p.name();
             var label = providerLabel(name);
-            var count = p.config().models().size();
+            var count = p.models().size();
             var prefix = name.equals(currentProviderName) ? "✓ " : "";
             var text = prefix + label + " (" + count + ")";
             var button = InlineKeyboardButton.builder()
@@ -174,8 +174,7 @@ public final class TelegramModelKeyboard {
             // caller can render a "provider is gone" message instead.
             return InlineKeyboardMarkup.builder().build();
         }
-        LlmProvider provider = providers.get(providerIdx);
-        List<ModelInfo> models = provider.config().models();
+        List<ModelInfo> models = providers.get(providerIdx).models();
         int totalPages = Math.max(1, (models.size() + MODELS_PER_PAGE - 1) / MODELS_PER_PAGE);
         int clampedPage = Math.clamp(page, 0, totalPages - 1);
         int start = clampedPage * MODELS_PER_PAGE;

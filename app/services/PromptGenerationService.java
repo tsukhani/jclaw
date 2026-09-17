@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import models.Prompt;
 import org.jspecify.annotations.Nullable;
@@ -62,8 +63,9 @@ public final class PromptGenerationService {
      */
     public static @Nullable Generated generate(String description) {
         var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
-        var provider = main != null ? ProviderRegistry.get(main.modelProvider) : null;
-        var model = main != null ? main.modelId : null;
+        var target = main != null ? ModelRouter.concrete(main.modelProvider, main.modelId) : null;
+        var provider = target != null ? ProviderRegistry.get(target.provider()) : null;
+        var model = target != null ? target.modelId() : null;
         if (provider == null || model == null || model.isBlank()) return null;
         try {
             final var p = provider;

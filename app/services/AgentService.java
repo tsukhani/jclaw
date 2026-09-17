@@ -2,6 +2,7 @@ package services;
 
 import llm.LlmTypes;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import mcp.McpAllowlist;
 import models.Agent;
 import models.AgentToolConfig;
@@ -64,12 +65,7 @@ public class AgentService {
      * and {@link #isProviderConfigured}.
      */
     private static Optional<LlmTypes.ModelInfo> findModel(String providerName, String modelId) {
-        if (providerName == null || modelId == null) return Optional.empty();
-        var provider = ProviderRegistry.get(providerName);
-        if (provider == null) return Optional.empty();
-        return provider.config().models().stream()
-                .filter(m -> m.id().equals(modelId))
-                .findFirst();
+        return ModelRouter.findModel(providerName, modelId);
     }
 
     public static Agent create(String name, String modelProvider, String modelId) {
@@ -306,6 +302,7 @@ public class AgentService {
                 keys.add(p.config().name() + ":" + m.id());
             }
         }
+        if (ModelRouter.isAvailable()) keys.add(ModelRouter.PROVIDER + ":" + ModelRouter.MODEL_ID);
         return keys;
     }
 

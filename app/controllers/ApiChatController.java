@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmResilience;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import models.Conversation;
 import models.MessageAttachment;
@@ -214,14 +215,12 @@ public class ApiChatController extends Controller {
     /** Renders a 400 and throws for a pick the provider or model cannot honor; returns for a good one. */
     private static void rejectInvalidOverrides(Agent agent, PendingOverrides o) {
         if (o.modelProvider() != null) {
-            var provider = ProviderRegistry.get(o.modelProvider());
-            if (provider == null) {
+            if (!ModelRouter.PROVIDER.equals(o.modelProvider()) && ProviderRegistry.get(o.modelProvider()) == null) {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                         "Provider '" + o.modelProvider() + "' is not configured.");
                 throw ApiResponses.unreachable();
             }
-            var known = provider.config().models().stream().anyMatch(m -> m.id().equals(o.modelId()));
-            if (!known) {
+            if (ModelRouter.findModel(o.modelProvider(), o.modelId()).isEmpty()) {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                         "Provider '" + o.modelProvider() + "' has no model with id '" + o.modelId() + "'.");
                 throw ApiResponses.unreachable();

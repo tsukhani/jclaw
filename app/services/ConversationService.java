@@ -2,6 +2,7 @@ package services;
 
 import jakarta.persistence.Query;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import models.ChannelType;
 import models.Conversation;
@@ -145,9 +146,10 @@ public class ConversationService {
     public static @Nullable String thinkingOverrideRejection(@Nullable String provider, @Nullable String modelId,
                                                              String mode) {
         if (Conversation.THINKING_OFF.equals(mode)) return null;
-        var p = provider != null ? ProviderRegistry.get(provider) : null;
-        if (p == null) return "Provider '" + provider + "' is not configured.";
-        var model = p.config().models().stream().filter(m -> m.id().equals(modelId)).findFirst();
+        if (!ModelRouter.PROVIDER.equals(provider) && (provider == null || ProviderRegistry.get(provider) == null)) {
+            return "Provider '" + provider + "' is not configured.";
+        }
+        var model = ModelRouter.findModel(provider, modelId);
         if (model.isEmpty()) return "Provider '" + provider + "' has no model with id '" + modelId + "'.";
         if (!model.get().supportsThinking()) return "Model '" + modelId + "' does not support thinking.";
         var levels = model.get().effectiveThinkingLevels();

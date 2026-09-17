@@ -2,9 +2,9 @@ package slash;
 
 import channels.TelegramModelSelector;
 import com.google.gson.JsonParser;
-import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import models.Conversation;
 import models.EventLog;
@@ -436,8 +436,10 @@ public final class Commands {
         }
 
         // Provider selection mirrors AgentRunner.run: override → agent default → registry primary.
-        var resolved = ModelOverrideResolver.resolve(current, agent);
-        var providerName = resolved.provider();
+        // The router (JCLAW-1222) resolves to its chat-class model, as for any call outside a turn.
+        var configured = ModelOverrideResolver.resolve(current, agent);
+        var resolved = ModelRouter.concrete(configured.provider(), configured.modelId());
+        var providerName = resolved != null ? resolved.provider() : configured.provider();
         var primary = ProviderRegistry.get(providerName);
         if (primary == null) primary = ProviderRegistry.getPrimary();
         if (primary == null) {
@@ -446,7 +448,7 @@ public final class Commands {
             return new Result(current, msg, Command.COMPACT);
         }
 
-        var modelId = resolved.modelId();
+        var modelId = resolved != null ? resolved.modelId() : configured.modelId();
         var modelLabel = primary.config().name() + "/" + modelId;
         var maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
 
@@ -811,14 +813,7 @@ public final class Commands {
      * otherwise falls back to the agent's default model.
      */
     private static Optional<ModelInfo> resolveModel(Agent agent, @Nullable Conversation current) {
-        var providerName = effectiveProviderName(agent, current);
-        var modelId = effectiveModelIdFor(agent, current);
-        if (providerName == null || modelId == null) return Optional.empty();
-        LlmProvider provider = ProviderRegistry.get(providerName);
-        if (provider == null) return Optional.empty();
-        return provider.config().models().stream()
-                .filter(m -> modelId.equals(m.id()))
-                .findFirst();
+        return ModelRouter.findModel(effectiveProviderName(agent, current), effectiveModelIdFor(agent, current));
     }
 
     /** Resolve the effective provider name — override when present, else agent default. */
@@ -895,15 +890,12 @@ public final class Commands {
             return "Unrecognized model format. Use `/model provider/model-id` "
                     + "(for example `/model openrouter/google-flash-preview`).";
         }
-        var provider = ProviderRegistry.get(newProvider);
-        if (provider == null) {
+        if (!ModelRouter.PROVIDER.equals(newProvider) && ProviderRegistry.get(newProvider) == null) {
             return "Provider `%s` is not configured. Available providers appear under Settings → Providers; "
                     .formatted(newProvider)
                     + "add one there before switching to it.";
         }
-        var resolved = provider.config().models().stream()
-                .filter(m -> newModelId.equals(m.id()))
-                .findFirst();
+        var resolved = ModelRouter.findModel(newProvider, newModelId);
         if (resolved.isEmpty()) {
             return "Provider `%s` has no model with id `%s`. Run `/model` to see the current model "
                     .formatted(newProvider, newModelId)

@@ -2,6 +2,7 @@ package services.video;
 
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import models.Agent;
 import models.MessageAttachment;
 import org.jspecify.annotations.Nullable;
@@ -122,13 +123,14 @@ public final class TextSummaryVideoAdapter {
     static @Nullable String overviewLine(List<String> captions, Agent agent) {
         if (captions.isEmpty() || agent == null || agent.modelProvider == null) return null;
         try {
-            var provider = ProviderRegistry.get(agent.modelProvider);
-            if (provider == null) return null;
+            var target = ModelRouter.concrete(agent.modelProvider, agent.modelId);
+            var provider = target != null ? ProviderRegistry.get(target.provider()) : null;
+            if (target == null || provider == null) return null;
             var prompt = "These are timestamped descriptions of frames from one video, in order:\n"
                     + String.join("\n", captions)
                     + "\n\nWrite a single concise sentence summarizing what happens in the video. "
                     + "Reply with only that sentence.";
-            var resp = provider.chat(agent.modelId,
+            var resp = provider.chat(target.modelId(),
                     List.of(ChatMessage.user(prompt)), List.of(), 120, null, "video-summary");
             var text = SessionCompactor.firstChoiceText(resp);
             return (text == null || text.isBlank()) ? null : text.trim();
