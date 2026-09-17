@@ -1,9 +1,25 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { readBody } from 'h3'
+import { readBody, setResponseStatus } from 'h3'
+import { createFetchError } from 'ofetch'
 import { clearNuxtData } from '#app'
 import Tasks from '~/pages/tasks.vue'
+
+// A request that never gets a response. The in-process test server always answers, and the page's
+// $fetch is bound when Nuxt's #build/fetch.mjs loads, so a later stub of the global never reaches it.
+const unreachable = vi.hoisted(() => new Set<string>())
+mockNuxtImport('$fetch', () => (url: string, opts?: Record<string, unknown>) =>
+  unreachable.has(url) ? Promise.reject(noResponseTo(url, opts)) : untypedFetch(url, opts))
+
+// Nitro types $fetch per route; a plain string URL sends vue-tsc past its stack depth.
+function untypedFetch(url: string, opts?: Record<string, unknown>) {
+  return (globalThis.$fetch as unknown as (u: string, o?: Record<string, unknown>) => Promise<unknown>)(url, opts)
+}
+
+function noResponseTo(url: string, opts?: Record<string, unknown>) {
+  return createFetchError({ request: url, options: opts ?? {}, error: new TypeError('fetch failed') } as never)
+}
 
 /**
  * JCLAW-1106 — per-task timezone override on the Tasks page.
@@ -145,5 +161,58 @@ describe('Tasks page — per-task timezone', () => {
     mountWith([task({ id: 1, name: 'interval task', type: 'INTERVAL' })])
     const { editBtn } = await expandAndOpenTimezoneEditor('interval task')
     expect(editBtn).toBeUndefined()
+  })
+})
+
+describe('Tasks page — a timezone save that fails (JCLAW-1220)', () => {
+  beforeEach(() => clearNuxtData())
+  afterEach(() => unreachable.clear())
+
+  async function saveZone(zone: string) {
+    const { component, editBtn } = await expandAndOpenTimezoneEditor('cron task')
+    await editBtn!.trigger('click')
+    await flushPromises()
+    await component.find('select[aria-label="Task timezone"]').setValue(zone)
+    await component.findAll('button').find(b => b.text().includes('Save')
+      && b.element.closest('section')?.textContent?.includes('Timezone'))!.trigger('click')
+    await flushPromises()
+    return component.findAll('section p.text-red-700').find(p => p.element.closest('section')?.textContent?.includes('Timezone'))
+  }
+
+  function failPatch(status: number, body: unknown) {
+    registerEndpoint('/api/tasks/1', {
+      method: 'PATCH',
+      handler: (event) => {
+        setResponseStatus(event, status)
+        return body
+      },
+    })
+  }
+
+  it('names the request when the save gets no response at all', async () => {
+    mountWith([task({ id: 1, name: 'cron task' })])
+    unreachable.add('/api/tasks/1')
+
+    const shown = (await saveZone('Asia/Tokyo'))!.text()
+    expect(shown).toContain('/api/tasks/1')
+    expect(shown).toContain('<no response>')
+    expect(shown).not.toBe('Failed to save timezone')
+  })
+
+  it('names the request when a proxy answers with a page instead of the error envelope', async () => {
+    mountWith([task({ id: 1, name: 'cron task' })])
+    failPatch(502, '<html><body>Bad Gateway</body></html>')
+
+    const shown = (await saveZone('Asia/Tokyo'))!.text()
+    expect(shown).toContain('/api/tasks/1')
+    expect(shown).toContain('502')
+    expect(shown).not.toBe('Failed to save timezone')
+  })
+
+  it('still shows the server\'s own message when it refuses the value', async () => {
+    mountWith([task({ id: 1, name: 'cron task' })])
+    failPatch(400, { type: 'error', code: 'invalid_request', message: 'No patchable fields in body' })
+
+    expect((await saveZone('Asia/Tokyo'))!.text()).toBe('No patchable fields in body')
   })
 })

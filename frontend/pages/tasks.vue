@@ -458,9 +458,9 @@ async function saveDelivery(task: Task) {
     void loadDeliveryAdvisory(task.id, true)
   }
   catch (e) {
-    // $fetch surfaces the backend's 400 body on e.data; prefer its message so
-    // the operator sees the validation reason rather than a generic "400".
-    deliveryError.value = apiErrorDetails(e, 'Failed to save channel').message
+    // A 400's body carries the validation reason. No fallback: it would outrank the transport's
+    // message, hiding whether the server refused or was never reached.
+    deliveryError.value = apiErrorDetails(e).message
   }
   finally {
     savingDelivery.value = false
@@ -515,7 +515,8 @@ async function saveTimezone(task: Task) {
     refresh()
   }
   catch (e) {
-    timezoneError.value = apiErrorDetails(e, 'Failed to save timezone').message
+    // No fallback: it would outrank the transport's message, hiding whether the server refused or was never reached.
+    timezoneError.value = apiErrorDetails(e).message
   }
   finally {
     savingTimezone.value = false
