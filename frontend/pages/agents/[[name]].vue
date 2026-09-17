@@ -17,6 +17,7 @@ import type {
   Agent,
   AgentSkill,
   AgentTool,
+  ApiErrorDetails,
   ConfigResponse,
   ConfigValueResponse,
   CoreMigrationStatus,
@@ -373,6 +374,8 @@ const compressionEnabledCount = computed(() => {
 })
 const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
+const savingExec = ref(false)
+const execError = ref<ApiErrorDetails | null>(null)
 const saving = ref(false)
 /**
  * Last save-attempt error surfaced to the operator. Set when the agent
@@ -1239,6 +1242,7 @@ function toggleCompressionText() {
 }
 
 async function loadExecConfig(agentName: string) {
+  execError.value = null
   try {
     const bypass = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.shell.bypassAllowlist`).catch(() => null)
     execBypassAllowlist.value = bypass?.value === 'true'
@@ -1251,16 +1255,26 @@ async function loadExecConfig(agentName: string) {
   }
 }
 
-async function toggleExecConfig(key: string, value: boolean) {
+async function toggleExecConfig(key: 'bypassAllowlist' | 'allowGlobalPaths') {
   if (!editing.value) return
+  const grant = key === 'bypassAllowlist' ? execBypassAllowlist : execAllowGlobalPaths
+  const previous = grant.value
+  grant.value = !previous
+  savingExec.value = true
+  execError.value = null
   try {
     await $fetch('/api/config', {
       method: 'POST',
-      body: { key: `agent.${editing.value.name}.shell.${key}`, value: String(value) },
+      body: { key: `agent.${editing.value.name}.shell.${key}`, value: String(grant.value) },
     })
   }
   catch (e) {
-    console.error('Failed to save exec config:', e)
+    // A 403 here is an application.conf ceiling, and its message is the only place the operator learns that.
+    grant.value = previous
+    execError.value = apiErrorDetails(e)
+  }
+  finally {
+    savingExec.value = false
   }
 }
 
@@ -2223,6 +2237,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       <div
         v-if="editing && editing.isMain"
         class="bg-surface-elevated border border-border"
+        data-testid="agent-shell-exec"
       >
         <div class="px-4 py-2.5 border-b border-border">
           <span class="text-sm font-medium text-fg-strong">Shell Exec Privileges</span>
@@ -2241,9 +2256,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               role="switch"
               :aria-checked="execBypassAllowlist"
               aria-label="Bypass allowlist"
+              :disabled="savingExec"
               :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
-              class="relative w-9 h-5 rounded-full transition-colors shrink-0"
-              @click="execBypassAllowlist = !execBypassAllowlist; toggleExecConfig('bypassAllowlist', execBypassAllowlist)"
+              class="relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50"
+              @click="toggleExecConfig('bypassAllowlist')"
             >
               <span
                 :class="execBypassAllowlist ? 'translate-x-4' : 'translate-x-0.5'"
@@ -2263,9 +2279,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               role="switch"
               :aria-checked="execAllowGlobalPaths"
               aria-label="Allow global paths"
+              :disabled="savingExec"
               :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
-              class="relative w-9 h-5 rounded-full transition-colors shrink-0"
-              @click="execAllowGlobalPaths = !execAllowGlobalPaths; toggleExecConfig('allowGlobalPaths', execAllowGlobalPaths)"
+              class="relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50"
+              @click="toggleExecConfig('allowGlobalPaths')"
             >
               <span
                 :class="execAllowGlobalPaths ? 'translate-x-4' : 'translate-x-0.5'"
@@ -2274,6 +2291,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </button>
           </div>
         </div>
+        <ApiErrorAlert
+          :error="execError"
+          class="px-4 py-2.5 border-t border-border"
+        />
       </div>
 
       <!--

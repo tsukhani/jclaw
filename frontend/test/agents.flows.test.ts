@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
+import type { H3Event } from 'h3'
 import { defineComponent, h } from 'vue'
 import Agents from '~/pages/agents/[[name]].vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
@@ -173,6 +174,10 @@ function setupAgentsApi(opts?: {
   registerEndpoint('/api/config/agent.helper.shell.bypassAllowlist', () => ({ value: 'false' }))
   registerEndpoint('/api/config/agent.helper.shell.allowGlobalPaths', () => ({ value: 'false' }))
 }
+
+// A page left mounted keeps watching the shared router: one whose fixture lacks the agent a later
+// case routes to replaces the URL with /agents and closes that case's editor.
+enableAutoUnmount(afterEach)
 
 beforeEach(() => {
   // useFetch caches by URL across mounts; clear so each case sees its own
@@ -1160,5 +1165,84 @@ describe('Agents page — an unconfigured provider does not disable the agent', 
     // The whole bug in one assertion: the agent was never asked to be disabled.
     expect(putBody!.enabled).toBe(true)
     expect(putBody).toMatchObject({ modelProvider: 'ollama-local', modelId: 'dolphin3:8b' })
+  })
+})
+
+describe('Agents page — Shell Exec privilege switches', () => {
+  let unregister: Array<() => void> = []
+
+  afterEach(async () => {
+    unregister.forEach(off => off())
+    unregister = []
+    await useRouter().replace('/agents')
+  })
+
+  function stubSave(handler: (event: H3Event) => unknown) {
+    unregister.push(registerEndpoint('/api/config', { method: 'POST', handler }))
+  }
+
+  async function openMain() {
+    const component = await mountSuspended(Agents, { route: '/agents/main' })
+    await vi.waitFor(() => expect(component.find('[data-testid="agent-shell-exec"]').exists()).toBe(true))
+    await flushPromises()
+    return component
+  }
+
+  it('saves the grant and shows it on when the server accepts', async () => {
+    let posted: unknown = null
+    setupAgentsApi()
+    stubSave(async (event) => {
+      const { readBody } = await import('h3')
+      posted = await readBody(event)
+      return { key: 'agent.main.shell.bypassAllowlist', value: 'true', status: 'ok' }
+    })
+    const component = await openMain()
+
+    await component.find('button[aria-label="Bypass allowlist"]').trigger('click')
+    await vi.waitFor(() => expect(posted).not.toBeNull())
+    await flushPromises()
+
+    expect(posted).toEqual({ key: 'agent.main.shell.bypassAllowlist', value: 'true' })
+    expect(component.find('button[aria-label="Bypass allowlist"]').attributes('aria-checked')).toBe('true')
+    expect(component.find('[data-testid="agent-shell-exec"] [data-testid="api-error"]').exists()).toBe(false)
+  })
+
+  it('shows the application.conf refusal and leaves the grant off', async () => {
+    const refusal = '\'agent.main.shell.bypassAllowlist\' is capped by application.conf, which allows \'false\'.'
+    setupAgentsApi()
+    stubSave(async (event) => {
+      const { setResponseStatus } = await import('h3')
+      setResponseStatus(event, 403)
+      return { type: 'error', code: 'forbidden', message: refusal }
+    })
+    const component = await openMain()
+
+    await component.find('button[aria-label="Bypass allowlist"]').trigger('click')
+    const alert = '[data-testid="agent-shell-exec"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+
+    expect(component.find(alert).text()).toContain(refusal)
+    expect(component.find('button[aria-label="Bypass allowlist"]').attributes('aria-checked')).toBe('false')
+  })
+
+  it('keeps showing a grant as on when withdrawing it never reached the server', async () => {
+    setupAgentsApi()
+    unregister.push(registerEndpoint('/api/config/agent.main.shell.allowGlobalPaths', () => ({ value: 'true' })))
+    stubSave(async (event) => {
+      const { setResponseStatus } = await import('h3')
+      setResponseStatus(event, 502)
+      return '<html><body>Bad Gateway</body></html>'
+    })
+    const component = await openMain()
+    const toggle = () => component.find('button[aria-label="Allow global paths"]')
+    await vi.waitFor(() => expect(toggle().attributes('aria-checked')).toBe('true'))
+
+    await toggle().trigger('click')
+    const alert = '[data-testid="agent-shell-exec"] [data-testid="api-error"]'
+    await vi.waitFor(() => expect(component.find(alert).exists()).toBe(true))
+
+    expect(component.find(alert).text()).toContain('/api/config')
+    expect(component.find(alert).text()).toContain('502')
+    expect(toggle().attributes('aria-checked')).toBe('true')
   })
 })
