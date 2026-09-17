@@ -1,7 +1,9 @@
 import agents.ConversationSink;
 import agents.GeneratedAttachment;
+import mockwebserver3.Dispatcher;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
+import mockwebserver3.RecordedRequest;
 import models.Agent;
 import models.Conversation;
 import models.MessageAttachment;
@@ -17,6 +19,8 @@ import tools.GenerateImageTool;
 
 import java.nio.file.Files;
 import java.util.Base64;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * JCLAW-228 coverage for the {@code generate_image} tool and its assistant-turn inlining.
@@ -37,6 +41,8 @@ class GenerateImageToolTest extends UnitTest {
     @BeforeEach
     void setUp() throws Exception {
         Fixtures.deleteDatabase();
+        // Config reads are cached; without this a backend set by one test outlives its row.
+        ConfigService.clearCache();
         server = new MockWebServer();
         server.start();
     }
@@ -163,6 +169,116 @@ class GenerateImageToolTest extends UnitTest {
         assertEquals(meta, att.generationMetadata);
         assertEquals("assistant", att.message.role, "the image must hang off the assistant message");
         assertEquals(bytes.length, att.sizeBytes);
+    }
+
+    // ==================== JCLAW-1223: a per-call Replicate model ====================
+
+    /** Curated Kontext slugs: always in the catalog once a Replicate key is set, whatever the cache holds. */
+    private static final String CATALOGUED = "black-forest-labs/flux-kontext-pro";
+    private static final String CONFIGURED = "black-forest-labs/flux-kontext-max";
+
+    /** Paths the mock Replicate API was asked for, so a test can see which model ran, or that none did. */
+    private final List<String> replicatePaths = new CopyOnWriteArrayList<>();
+
+    /** Serve Replicate by path. The collection is empty, which the catalog never caches, so nothing
+     *  leaks into its process-wide cache; the Kontext models are appended regardless. */
+    private void replicateBackend(boolean withKey) {
+        ConfigService.set("imagegen.provider", "replicate");
+        ConfigService.set("provider.replicate.baseUrl", server.url("/").toString());
+        if (withKey) ConfigService.set("provider.replicate.apiKey", "test-key");
+        ConfigService.set("imagegen.replicate.model", CONFIGURED);
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                var path = request.getUrl().encodedPath();
+                replicatePaths.add(path);
+                if (path.endsWith("/collections/text-to-image")) {
+                    return new MockResponse.Builder().code(200).body(jsonBuf("{\"models\":[]}")).build();
+                }
+                if (path.endsWith("/predictions")) {
+                    return new MockResponse.Builder().code(200).body(jsonBuf(
+                            "{\"status\":\"succeeded\",\"output\":[\"" + server.url("/img") + "\"],"
+                                    + "\"urls\":{\"get\":\"" + server.url("/pred") + "\"}}")).build();
+                }
+                if (path.equals("/img")) {
+                    var png = new Buffer();
+                    png.write(new byte[]{(byte) 0x89, 'P', 'N', 'G'});
+                    return new MockResponse.Builder().code(200).addHeader("Content-Type", "image/png").body(png).build();
+                }
+                return new MockResponse.Builder().code(404).build();
+            }
+        });
+    }
+
+    private List<String> predictionPaths() {
+        return replicatePaths.stream().filter(p -> p.endsWith("/predictions")).toList();
+    }
+
+    @Test
+    void aCataloguedModelRunsForThatCallAndLeavesTheSettingAlone() {
+        replicateBackend(true);
+
+        var result = new GenerateImageTool().executeRich(
+                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGUED + "\"}", new Agent());
+
+        assertEquals(1, result.attachments().size(), result.text());
+        assertEquals(List.of("/models/" + CATALOGUED + "/predictions"), predictionPaths());
+        var meta = result.attachments().get(0).metadata();
+        assertTrue(meta.contains("replicate:" + CATALOGUED), meta);
+        assertEquals(CONFIGURED, ConfigService.get("imagegen.replicate.model"),
+                "a per-call model must never rewrite the instance-wide setting");
+    }
+
+    @Test
+    void omittingModelUsesTheConfiguredOne() {
+        replicateBackend(true);
+
+        var result = new GenerateImageTool().executeRich("{\"prompt\":\"a lighthouse\"}", new Agent());
+
+        assertEquals(1, result.attachments().size(), result.text());
+        assertEquals(List.of("/models/" + CONFIGURED + "/predictions"), predictionPaths());
+    }
+
+    @Test
+    void modelIsRefusedOnAnotherBackendWithoutCallingIt() {
+        // The failure d5aaf3e7 fixed: a Replicate slug reaching OpenAI, which 400s on it.
+        ConfigService.set("provider.openai.baseUrl", server.url("/").toString());
+        ConfigService.set("provider.openai.apiKey", "test-key");
+        ConfigService.set("imagegen.provider", "openai");
+
+        var result = new GenerateImageTool().executeRich(
+                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGUED + "\"}", new Agent());
+
+        assertTrue(result.attachments().isEmpty());
+        assertTrue(result.text().contains("only be chosen on the Replicate image backend"), result.text());
+        assertTrue(result.text().contains("'openai'"), result.text());
+        assertEquals(0, server.getRequestCount(), "a refused model must not reach the provider");
+    }
+
+    @Test
+    void anUncataloguedModelIsRefusedWithTheChoices() {
+        replicateBackend(true);
+
+        var result = new GenerateImageTool().executeRich(
+                "{\"prompt\":\"a lighthouse\",\"model\":\"someone/not-offered\"}", new Agent());
+
+        assertTrue(result.attachments().isEmpty());
+        assertTrue(result.text().contains("'someone/not-offered' is not an available Replicate image model"), result.text());
+        assertTrue(result.text().contains(CATALOGUED), "the refusal must list what can be chosen: " + result.text());
+        assertTrue(predictionPaths().isEmpty(), "no prediction may run for a refused model: " + replicatePaths);
+    }
+
+    @Test
+    void modelIsRefusedWhenTheCatalogIsEmpty() {
+        // No Replicate key: the catalog is empty, so there is nothing to check the slug against.
+        replicateBackend(false);
+
+        var result = new GenerateImageTool().executeRich(
+                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGUED + "\"}", new Agent());
+
+        assertTrue(result.attachments().isEmpty());
+        assertTrue(result.text().contains("model list is unavailable"), result.text());
+        assertTrue(predictionPaths().isEmpty(), "no prediction may run for a refused model: " + replicatePaths);
     }
 
     private static Buffer jsonBuf(String s) {

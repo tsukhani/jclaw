@@ -10,10 +10,12 @@ import models.Agent;
 import models.MessageAttachment;
 import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
+import services.ConfigService;
 import services.Tx;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
 import services.imagegen.ImageGenerationService;
+import services.imagegen.ReplicateImageModelCatalog;
 import utils.JsonArgs;
 
 import java.util.List;
@@ -39,6 +41,10 @@ public class GenerateImageTool implements ToolRegistry.Tool {
     private static final String ARG_ASPECT = "aspect_ratio";
     private static final String ARG_USE_REFERENCE = "use_reference_image";
     private static final String ARG_SAVE_TO = "save_to";
+    private static final String ARG_MODEL = "model";
+
+    /** The only backend whose model can be chosen per call: the one with a catalog to check it against. */
+    private static final String REPLICATE = "replicate";
 
     @Override public String name() { return "generate_image"; }
     @Override public String category() { return "Utilities"; }
@@ -59,8 +65,9 @@ public class GenerateImageTool implements ToolRegistry.Tool {
                 an image the user uploaded in this conversation, set 'use_reference_image' true \
                 (image-to-image style transfer / visual consistency); the most recently uploaded \
                 image is used as the reference. The image is produced by the operator-configured \
-                backend (OpenAI gpt-image-1, Black Forest Labs Flux, or a self-hosted engine) and \
-                shown to the user as part of your reply.""";
+                backend (OpenAI gpt-image-1, Black Forest Labs Flux, Replicate, or a self-hosted \
+                engine) and shown to the user as part of your reply. On the Replicate backend, \
+                'model' picks the model for this one image.""";
     }
 
     @Override
@@ -91,7 +98,13 @@ public class GenerateImageTool implements ToolRegistry.Tool {
                                         + "the image to (e.g. \"tea.png\"). Use this whenever you need the file "
                                         + "afterwards — to attach it, send it, or pass it to a command. Without it "
                                         + "the image is only shown inline and NO file exists on disk; do not go "
-                                        + "looking for one.")
+                                        + "looking for one."),
+                        ARG_MODEL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Optional model for this image only, as a Replicate owner/name "
+                                        + "slug (e.g. \"black-forest-labs/flux-kontext-pro\"). Works only when the image "
+                                        + "backend is Replicate, and only for a model in its catalog: an unknown one is "
+                                        + "refused with the list of available models. Omit it to use the configured model; "
+                                        + "choosing one here does not change that setting.")
                 ),
                 SchemaKeys.REQUIRED, List.of(ARG_PROMPT)
         );
@@ -127,6 +140,13 @@ public class GenerateImageTool implements ToolRegistry.Tool {
                             + "Settings → Image Generation.");
         }
 
+        var requestedModel = JsonArgs.optString(args, ARG_MODEL);
+        var model = requestedModel == null || requestedModel.isBlank() ? null : requestedModel.trim();
+        if (model != null) {
+            var refusal = modelRefusal(model);
+            if (refusal != null) return ToolRegistry.ToolResult.text(refusal);
+        }
+
         // JCLAW-694: optional image-to-image reference. When the model asks to reuse the user's
         // uploaded image, resolve the most recent non-generated image in this conversation to raw
         // bytes. Backends that don't yet support references degrade to text-to-image (the default
@@ -140,12 +160,9 @@ public class GenerateImageTool implements ToolRegistry.Tool {
 
         var dims = resolveDimensions(args);
         try {
-            // No model override from here: each provider client resolves its OWN
-            // model from its provider-scoped config (imagegen.<provider>.model) →
-            // built-in default. A single shared key used to leak one provider's
-            // model id into another after a Settings provider switch — e.g. a
-            // Replicate slug sent to OpenAI, which 400s with "model does not exist".
-            var image = serviceOpt.get().generate(prompt, null, dims[0], dims[1], reference);
+            // Null unless modelRefusal admitted a Replicate slug: each client otherwise resolves its
+            // own provider-scoped key, because one shared key once sent a Replicate slug to OpenAI.
+            var image = serviceOpt.get().generate(prompt, model, dims[0], dims[1], reference);
             var metadata = buildMetadata(prompt, image.generatedBy(), dims[0], dims[1]);
 
             // Optional workspace copy, for callers that need the file afterwards — a
@@ -182,6 +199,30 @@ public class GenerateImageTool implements ToolRegistry.Tool {
         } catch (ImageGenerationException e) {
             return ToolRegistry.ToolResult.text("Image generation failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Why a per-call {@code model} cannot be used, or null when it can. It must name a model in the
+     * Replicate catalog while Replicate is the backend: a slug reaching another provider fails there,
+     * and one outside the catalog would run a Replicate model the operator never offered.
+     */
+    private static @Nullable String modelRefusal(String model) {
+        var provider = ConfigService.get("imagegen.provider");
+        if (!REPLICATE.equals(provider)) {
+            return "Error: 'model' can only be chosen on the Replicate image backend, and this instance uses '"
+                    + provider + "'. Omit 'model' to use the configured model.";
+        }
+        var slugs = ReplicateImageModelCatalog.availableModels().stream()
+                .map(ReplicateImageModelCatalog.ImageModel::slug).toList();
+        if (slugs.isEmpty()) {
+            return "Error: the Replicate model list is unavailable, so 'model' cannot be checked. "
+                    + "Omit 'model' to use the configured model.";
+        }
+        if (!slugs.contains(model)) {
+            return "Error: '" + model + "' is not an available Replicate image model. Choose one of: "
+                    + String.join(", ", slugs) + ". Or omit 'model' to use the configured model.";
+        }
+        return null;
     }
 
     /** Signals that the model requested a reference image but none is usable — surfaced to the
