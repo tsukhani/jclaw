@@ -146,7 +146,7 @@ const {
   deleteSelected,
 } = useBulkSelect<Task>({
   rows: tasks,
-  deleteOne: id => $fetch<unknown>(`/api/tasks/${id}`, { method: 'DELETE' }),
+  deleteUrl: id => `/api/tasks/${id}`,
   onComplete: () => refreshAll(),
   confirmCopy: count => ({
     title: 'Delete tasks',
@@ -242,7 +242,7 @@ async function resetStats() {
     variant: 'danger',
   })
   if (!ok) return
-  await $fetch('/api/task-runs/reset?excludePayloadType=reminder', { method: 'POST' })
+  if (await mutate('/api/task-runs/reset?excludePayloadType=reminder', { method: 'POST' }) === null) return
   refreshAll()
   // refreshAll() updates the task list and KPIs, but the per-task
   // RUN HISTORY shown in an expanded panel reads from the runsByTask cache,
@@ -373,22 +373,23 @@ function moveStep(i: number, dir: -1 | 1) {
   arr[j] = a
 }
 
+// One instance serves the four inline editors; each copies the message into its own ref right after its await.
+const inlineEdit = useSaveAttempt()
+
 async function saveSteps(task: Task) {
   savingSteps.value = true
   stepsError.value = null
-  try {
-    const description = serializeTaskSteps(editSteps.value)
-    await $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { description } })
+  const description = serializeTaskSteps(editSteps.value)
+  const ok = await inlineEdit.attempt(() => $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { description } }))
+  if (ok) {
     editingId.value = null
     editSteps.value = []
     refresh()
   }
-  catch (e) {
-    stepsError.value = e instanceof Error ? e.message : 'Failed to save steps'
+  else {
+    stepsError.value = inlineEdit.saveError.value!.message
   }
-  finally {
-    savingSteps.value = false
-  }
+  savingSteps.value = false
 }
 
 // ── JCLAW-426: inline name editor ──
@@ -420,18 +421,16 @@ async function saveName(task: Task) {
   }
   savingName.value = true
   nameError.value = null
-  try {
-    await $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { name } })
+  const ok = await inlineEdit.attempt(() => $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { name } }))
+  if (ok) {
     editingNameId.value = null
     editName.value = ''
     refresh()
   }
-  catch (e) {
-    nameError.value = e instanceof Error ? e.message : 'Failed to save name'
+  else {
+    nameError.value = inlineEdit.saveError.value!.message
   }
-  finally {
-    savingName.value = false
-  }
+  savingName.value = false
 }
 
 // ── JCLAW-420: inline delivery (output channel) editor ──
@@ -460,23 +459,21 @@ function cancelEditDelivery() {
 async function saveDelivery(task: Task) {
   savingDelivery.value = true
   deliveryError.value = null
-  try {
-    const delivery = editDelivery.value.trim()
-    await $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { delivery } })
+  const delivery = editDelivery.value.trim()
+  const ok = await inlineEdit.attempt(() => $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { delivery } }))
+  if (ok) {
     editingDeliveryId.value = null
     editDelivery.value = ''
     refresh()
     // JCLAW-455: the target changed — re-probe so the advisory reflects the new channel.
     void loadDeliveryAdvisory(task.id, true)
   }
-  catch (e) {
+  else {
     // A 400's body carries the validation reason. No fallback: it would outrank the transport's
     // message, hiding whether the server refused or was never reached.
-    deliveryError.value = apiErrorDetails(e).message
+    deliveryError.value = inlineEdit.saveError.value!.message
   }
-  finally {
-    savingDelivery.value = false
-  }
+  savingDelivery.value = false
 }
 
 // JCLAW-1106: per-task timezone override. Offered only for CRON and SCHEDULED —
@@ -519,20 +516,18 @@ function cancelEditTimezone() {
 async function saveTimezone(task: Task) {
   savingTimezone.value = true
   timezoneError.value = null
-  try {
-    // null, not '': the backend reads an explicit null as "clear the override".
-    const timezone = editTimezone.value === '' ? null : editTimezone.value
-    await $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { timezone } })
+  // null, not '': the backend reads an explicit null as "clear the override".
+  const timezone = editTimezone.value === '' ? null : editTimezone.value
+  const ok = await inlineEdit.attempt(() => $fetch(`/api/tasks/${task.id}`, { method: 'PATCH', body: { timezone } }))
+  if (ok) {
     editingTimezoneId.value = null
     refresh()
   }
-  catch (e) {
+  else {
     // No fallback: it would outrank the transport's message, hiding whether the server refused or was never reached.
-    timezoneError.value = apiErrorDetails(e).message
+    timezoneError.value = inlineEdit.saveError.value!.message
   }
-  finally {
-    savingTimezone.value = false
-  }
+  savingTimezone.value = false
 }
 
 // The zone in force, and where it came from — a task showing only "Asia/Tokyo"

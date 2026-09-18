@@ -463,26 +463,16 @@ export async function recordStepReached(step: number): Promise<void> {
   // undercounted in a rapid-click burst (only the backend Math.max would
   // catch it, and only if a later call ever lands). Best-effort here is
   // correct AND simple given the tour is at most 5 Next clicks.
-  if (inFlightRecord) {
-    try {
-      await inFlightRecord
-    }
-    catch {
-      // ignore — we're issuing our own
-    }
-  }
-  inFlightRecord = $fetch('/api/onboarding/tour-progress', {
+  if (inFlightRecord) await inFlightRecord
+  const { attempt } = useSaveAttempt()
+  // A refused write never blocks the UI: worst case the user retakes the tour next login.
+  inFlightRecord = attempt(() => $fetch('/api/onboarding/tour-progress', {
     method: 'POST',
     body: { step },
-  }).finally(() => {
+  })).finally(() => {
     inFlightRecord = null
   })
-  try {
-    await inFlightRecord
-  }
-  catch {
-    // Worst case: user retakes the tour next login. Don't block UI.
-  }
+  await inFlightRecord
 }
 
 /**

@@ -12,7 +12,6 @@
  * rendered dimmed with a "superseded" badge that carries the when/by-whom.
  */
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/vue/24/outline'
-import type { ApiErrorDetails } from '~/types/api'
 
 interface MemoryDto {
   id: string
@@ -180,7 +179,7 @@ function goto(p: number) {
 }
 
 const { mutate, errorDetails: mutationError } = useApiMutation()
-const deleteError = ref<ApiErrorDetails | null>(null)
+const { saveError: deleteError, attempt } = useSaveAttempt()
 const { confirm } = useConfirm()
 
 async function updateImportance(mem: MemoryDto, input: HTMLInputElement) {
@@ -229,21 +228,15 @@ async function deleteSelected() {
   })
   if (!ok) return
   deletingBulk.value = true
-  deleteError.value = null
-  try {
-    await $fetch('/api/memories', {
-      method: 'DELETE',
-      body: { ids: Array.from(selectedIds.value).map(Number) },
-    })
+  const deleted = await attempt(() => $fetch('/api/memories', {
+    method: 'DELETE',
+    body: { ids: Array.from(selectedIds.value).map(Number) },
+  }))
+  if (deleted) {
     selectedIds.value = new Set()
     await refresh()
   }
-  catch (e) {
-    deleteError.value = apiErrorDetails(e)
-  }
-  finally {
-    deletingBulk.value = false
-  }
+  deletingBulk.value = false
 }
 
 const deletingAll = ref(false)
@@ -281,22 +274,16 @@ async function deleteAll() {
   })
   if (!ok) return
   deletingAll.value = true
-  deleteError.value = null
-  try {
-    await $fetch('/api/memories', {
-      method: 'DELETE',
-      body: { filter: activeFilterPayload() },
-    })
+  const deleted = await attempt(() => $fetch('/api/memories', {
+    method: 'DELETE',
+    body: { filter: activeFilterPayload() },
+  }))
+  if (deleted) {
     selectedIds.value = new Set()
     page.value = 1
     await refresh()
   }
-  catch (e) {
-    deleteError.value = apiErrorDetails(e)
-  }
-  finally {
-    deletingAll.value = false
-  }
+  deletingAll.value = false
 }
 
 function fileStamp(): string {

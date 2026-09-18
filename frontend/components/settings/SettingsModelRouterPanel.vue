@@ -46,7 +46,7 @@ const DEFAULT_EXHAUSTED_AT = 0.95
 
 const IMAGE_ONLY_PROVIDERS = new Set(['bfl', 'replicate'])
 
-const { configData, saving, refresh, resync, configValue, getProviderModels, providersData } = useSettingsConfig()
+const { configData, saving, refresh, configValue, getProviderModels, providersData } = useSettingsConfig()
 const { saveError, attempt } = useSaveAttempt()
 
 // Lazy: the status call reads each Ollama Cloud provider's usage over the network, and must not
@@ -110,13 +110,12 @@ function demoted(taskClass: string, candidate: RouterCandidate): boolean {
 
 async function savePreferPrepaid(prefer: boolean) {
   saving.value = true
-  const saved = await attempt(async () => {
+  await attempt(async () => {
     // Checked is the default, so it clears the key rather than storing what absence already means.
     if (prefer) await $fetch('/api/config/router.preferPrepaid', { method: 'DELETE' })
     else await $fetch('/api/config', { method: 'POST', body: { key: 'router.preferPrepaid', value: 'false' } })
   })
-  if (saved) await refresh()
-  else await resync()
+  await refresh()
   saving.value = false
 }
 
@@ -129,7 +128,7 @@ const classifierValue = computed(() => {
 
 async function saveClassifier(value: string) {
   saving.value = true
-  const saved = await attempt(async () => {
+  await attempt(async () => {
     if (value) {
       const sep = value.indexOf('::')
       await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.provider', value: value.slice(0, sep) } })
@@ -140,9 +139,7 @@ async function saveClassifier(value: string) {
       await $fetch('/api/config/router.classifier.model', { method: 'DELETE' })
     }
   })
-  if (saved) await refresh()
-  // The provider and model writes can half-land: show what was saved, not what was there before.
-  else await resync()
+  await refresh()
   saving.value = false
 }
 
@@ -156,13 +153,8 @@ async function saveList(taskClass: string, list: RouterCandidate[]) {
       await $fetch(`/api/config/${modelsKey(taskClass)}`, { method: 'DELETE' })
     }
   })
-  if (saved) {
-    await refresh()
-    refreshStatus()
-  }
-  else {
-    await resync()
-  }
+  await refresh()
+  if (saved) refreshStatus()
   saving.value = false
 }
 
@@ -202,11 +194,9 @@ async function saveThreshold(key: string) {
   const saved = await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key, value } })
   })
-  if (saved) {
-    editingThreshold.value = null
-    await refresh()
-    refreshStatus()
-  }
+  if (saved) editingThreshold.value = null
+  await refresh()
+  if (saved) refreshStatus()
   saving.value = false
 }
 

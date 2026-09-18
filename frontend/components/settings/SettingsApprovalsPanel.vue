@@ -49,24 +49,16 @@ watch(policy, (v) => {
   selected.value = v
 })
 
-const error = ref<string | null>(null)
+const { mutate, error } = useApiMutation()
 
 async function save(value: string) {
   saving.value = true
-  error.value = null
-  try {
-    await $fetch('/api/config', { method: 'POST', body: { key: POLICY_KEY, value } })
-    refresh()
-  }
-  catch (e) {
-    // A ceiling in application.conf refuses a loosening value with a 403 naming it
-    // (JCLAW-1022). Surface that instead of silently reverting the select.
-    error.value = apiErrorDetails(e).message
+  if (await mutate('/api/config', { method: 'POST', body: { key: POLICY_KEY, value } }) === null) {
+    // A ceiling in application.conf refuses a loosening value with a 403 naming it (JCLAW-1022).
     selected.value = policy.value
   }
-  finally {
-    saving.value = false
-  }
+  else refresh()
+  saving.value = false
 }
 </script>
 

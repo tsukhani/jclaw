@@ -11,7 +11,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 
-const { configData, saving, refresh, resync, getProviderModels } = useSettingsConfig()
+const { configData, saving, refresh, getProviderModels } = useSettingsConfig()
 
 // Skills Promotion config
 const { data: agentsList } = await useFetch<Agent[]>('/api/agents')
@@ -83,12 +83,8 @@ async function saveSPField(configKey: string, value: string) {
       await $fetch('/api/config', { method: 'POST', body: { key: 'skillsPromotion.model', value: '' } })
     }
   })
-  if (saved) {
-    editingSPField.value = null
-    refresh()
-  }
-  // The provider and model writes can half-land: show what was saved, not what was there before.
-  else await resync()
+  if (saved) editingSPField.value = null
+  await refresh()
   saving.value = false
 }
 </script>

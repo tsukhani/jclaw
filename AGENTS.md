@@ -44,6 +44,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 
 - Config keys live in the Config DB and are documented in `conf/application.conf`; a key whose absence already means "off" is never seeded.
 - `git grep -P`, never `-E`, for `\b`, `\d`, `\s` — macOS `git grep -E` drops them silently and matches nothing.
+- Frontend API writes go through `useApiMutation().mutate` or inside `useSaveAttempt().attempt`, never a bare `$fetch` with a write method: the ESLint rule `jclaw/no-bare-write-fetch` fails the lint on one. A handler read issued with a bare `$fetch` whose key can change mid-flight takes a `useLatestRequest()` token and returns if it is stale; `useFetch` refetches are already aborted by Nuxt. The Settings store's `refresh()` keeps the last good copy on failure, so call it after a failed write too.
 - `jclaw.sh` targets macOS bash 3.2 under `set -euo pipefail`: brace an interpolation before a non-ASCII character, put `|| true` inside `$( )`, use an `EXIT` trap rather than `ERR`.
 - Tool names are `<singular_noun>_<verb>`: `conversation_send`, `subagent_spawn`.
 - Frontend deps are gated on compile and tests, not release age: keep `minimumReleaseAge: 0`, pin Nuxt exactly, smoke `nuxt dev` on a Nuxt bump.

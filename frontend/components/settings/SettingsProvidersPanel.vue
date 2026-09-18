@@ -55,12 +55,13 @@ function isSensitive(key: string) {
 const priceRefreshEnabled = computed(() =>
   configData.value?.entries?.find(e => e.key === 'pricing.refresh.enabled')?.value === 'true',
 )
-const { saveError: pricingError, attempt: attemptPricing } = useSaveAttempt()
+const pricingSave = useSaveAttempt()
+const pricingError = pricingSave.saveError
 
 async function togglePriceRefresh() {
   saving.value = true
   const next = priceRefreshEnabled.value ? 'false' : 'true'
-  if (await attemptPricing(async () => {
+  if (await pricingSave.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'pricing.refresh.enabled', value: next } })
   })) refresh()
   saving.value = false
@@ -73,6 +74,7 @@ const primaryProviderOptions = computed(() => [
 ])
 
 const priceRefreshStatus = ref<string | null>(null)
+const { mutate: mutatePriceRefresh, error: priceRefreshError } = useApiMutation()
 async function manuallyRefreshPrices() {
   if (!priceRefreshEnabled.value) {
     priceRefreshStatus.value = 'Enable the toggle above first.'
@@ -80,29 +82,26 @@ async function manuallyRefreshPrices() {
   }
   saving.value = true
   priceRefreshStatus.value = 'Refreshing…'
-  try {
-    const result = await $fetch<{
-      skipped: boolean
-      providersScanned: number
-      modelsUpdated: number
-      warnings: string[]
-    }>('/api/providers/refresh-prices', { method: 'POST' })
-    if (result.skipped) {
-      priceRefreshStatus.value = 'Skipped — toggle is off.'
-    }
-    else if (result.warnings.length > 0) {
-      priceRefreshStatus.value = `Updated ${result.modelsUpdated} model(s) across ${result.providersScanned} provider(s) with ${result.warnings.length} warning(s): ${result.warnings.join('; ')}`
-    }
-    else {
-      priceRefreshStatus.value = `Updated ${result.modelsUpdated} model(s) across ${result.providersScanned} provider(s).`
-    }
-    refresh()
+  const result = await mutatePriceRefresh<{
+    skipped: boolean
+    providersScanned: number
+    modelsUpdated: number
+    warnings: string[]
+  }>('/api/providers/refresh-prices', { method: 'POST' })
+  if (result === null) {
+    priceRefreshStatus.value = `Refresh failed: ${priceRefreshError.value ?? 'unknown error'}`
   }
-  catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'unknown error'
-    priceRefreshStatus.value = `Refresh failed: ${msg}`
+  else if (result.skipped) {
+    priceRefreshStatus.value = 'Skipped — toggle is off.'
   }
-  finally { saving.value = false }
+  else if (result.warnings.length > 0) {
+    priceRefreshStatus.value = `Updated ${result.modelsUpdated} model(s) across ${result.providersScanned} provider(s) with ${result.warnings.length} warning(s): ${result.warnings.join('; ')}`
+  }
+  else {
+    priceRefreshStatus.value = `Updated ${result.modelsUpdated} model(s) across ${result.providersScanned} provider(s).`
+  }
+  if (result !== null) refresh()
+  saving.value = false
 }
 
 // Ollama keep_alive, keyed per provider. Only surfaced for ollama-local: it controls
@@ -134,18 +133,16 @@ function isProviderEnabled(name: string): boolean {
 
 // A failed write on one provider's card, shown in that card rather than at the top of a long panel.
 const providerError = ref<{ provider: string, error: ApiErrorDetails } | null>(null)
+const providerSave = useSaveAttempt()
 
 async function writeProviderConfig(provider: string, key: string, value: string): Promise<boolean> {
   providerError.value = null
-  try {
+  const saved = await providerSave.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key, value } })
-    refresh()
-    return true
-  }
-  catch (e) {
-    providerError.value = { provider, error: apiErrorDetails(e) }
-    return false
-  }
+  })
+  if (saved) refresh()
+  else if (providerSave.saveError.value) providerError.value = { provider, error: providerSave.saveError.value }
+  return saved
 }
 
 async function toggleProviderEnabled(name: string) {
@@ -243,21 +240,19 @@ function backfillConfiguredModelPrices(
   return updated
 }
 
+const { mutate: mutateRankDiscovery } = useApiMutation()
 async function fetchRanksForProvider(providerName: string) {
   if (configuredModelRanks.value.has(providerName)) return
-  try {
-    const res = await $fetch<DiscoverModelsResponse>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
-    const { rankMap, discoveredMap } = indexDiscoveredModels(res.models || [])
-    configuredModelRanks.value = new Map(configuredModelRanks.value).set(providerName, rankMap)
+  const res = await mutateRankDiscovery<DiscoverModelsResponse>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
+  // Best-effort — no ranks if discovery fails
+  if (res === null) return
+  const { rankMap, discoveredMap } = indexDiscoveredModels(res.models || [])
+  configuredModelRanks.value = new Map(configuredModelRanks.value).set(providerName, rankMap)
 
-    // Backfill pricing on configured models that are missing it
-    const configured = getProviderModels(providerName)
-    if (backfillConfiguredModelPrices(configured, discoveredMap)) {
-      await saveModels(providerName, configured)
-    }
-  }
-  catch {
-    // Best-effort — no ranks if discovery fails
+  // Backfill pricing on configured models that are missing it
+  const configured = getProviderModels(providerName)
+  if (backfillConfiguredModelPrices(configured, discoveredMap)) {
+    await saveModels(providerName, configured)
   }
 }
 
@@ -372,6 +367,7 @@ async function deleteModel(providerName: string, idx: number) {
 const discoveryProvider = ref<string | null>(null)
 const discoveryLoading = ref(false)
 const discoveryError = ref<ApiErrorDetails | null>(null)
+const { mutate: mutateDiscovery, errorDetails: discoveryMutationError } = useApiMutation()
 const discoveredModels = ref<DiscoveredModel[]>([])
 const discoverySearch = ref('')
 const discoverySelected = ref<Set<string>>(new Set())
@@ -495,22 +491,19 @@ async function startDiscovery(providerName: string) {
   discoveryFilterPopular.value = 'all'
   expandedModelsProvider.value = null
 
-  try {
-    const res = await $fetch<DiscoverModelsResponse>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
-    // The operator can start discovery on another provider before this one answers.
-    if (discoveryProvider.value !== providerName) return
+  const res = await mutateDiscovery<DiscoverModelsResponse>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
+  // The operator can start discovery on another provider before this one answers.
+  if (discoveryProvider.value !== providerName) return
+  if (res === null) {
+    // No fallback: the render names the provider itself, and suppresses a message with no code.
+    discoveryError.value = discoveryMutationError.value
+  }
+  else {
     // Filter out models already configured
     const existing = new Set(getProviderModels(providerName).map(m => m.id))
     discoveredModels.value = (res.models || []).filter(m => !existing.has(m.id))
   }
-  catch (e: unknown) {
-    if (discoveryProvider.value !== providerName) return
-    // No fallback: the render names the provider itself, and suppresses a message with no code.
-    discoveryError.value = apiErrorDetails(e)
-  }
-  finally {
-    if (discoveryProvider.value === providerName) discoveryLoading.value = false
-  }
+  discoveryLoading.value = false
 }
 
 function discoveryRetryable(error: ApiErrorDetails): boolean {

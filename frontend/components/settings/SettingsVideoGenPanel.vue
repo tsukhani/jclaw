@@ -5,9 +5,8 @@
 // Replicate API key from Image Generation) or a self-hosted WAN/LTX engine
 // chosen by an adaptive GPU-capability probe. Config reads/writes go through
 // the shared store; the inline config-row editor + API-key checks injected.
-import type { ApiErrorDetails } from '~/types/api'
 
-const { configData, saving, refresh, resync, saveField, apiKeyConfigured } = useSettingsConfig()
+const { configData, saving, refresh, saveField, apiKeyConfigured } = useSettingsConfig()
 
 const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
 
@@ -26,15 +25,11 @@ const videogenMaxJobMinutes = computed(() =>
 )
 async function setVideogenProvider(value: string) {
   saving.value = true
-  videogenBackendError.value = null
-  try {
+  if (await backendSave.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.provider', value } })
-    refresh()
-  }
-  catch (e) {
-    putBackVideogenChoice(e)
-  }
-  finally { saving.value = false }
+  })) refresh()
+  else putBackVideogenChoice()
+  saving.value = false
 }
 async function toggleVideogenEnabled() {
   // Only Replicate is wired today; enabling selects it (its API key gates the toggle).
@@ -119,32 +114,23 @@ function isLocalEngineActive(e: VideoEngine): boolean {
 async function selectLocalEngine(e: VideoEngine) {
   if (!e.runnable) return
   saving.value = true
-  videogenBackendError.value = null
-  try {
+  const saved = await backendSave.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.local.model', value: e.id } })
     await $fetch('/api/config', { method: 'POST', body: { key: 'videogen.provider', value: e.provider } })
-    refresh()
-  }
-  catch (err) {
-    // The two writes can half-land: show what was saved, not what was there before.
-    await resync()
-    putBackVideogenChoice(err)
-  }
-  finally { saving.value = false }
+  })
+  // The two writes can half-land: show what was saved, not what was there before.
+  await refresh()
+  if (!saved) putBackVideogenChoice()
+  saving.value = false
 }
-async function probeVideoCapability() {
-  await $fetch('/api/videogen/capability/probe', { method: 'POST' })
+async function probeVideoCapability(): Promise<boolean> {
+  const probed = await backendSave.attempt(async () => {
+    await $fetch('/api/videogen/capability/probe', { method: 'POST' })
+  })
+  if (!probed) return false
   await refreshVideoCapability()
   startVideoCapPolling()
-}
-async function detectVideoCapability() {
-  videogenBackendError.value = null
-  try {
-    await probeVideoCapability()
-  }
-  catch (e) {
-    videogenBackendError.value = apiErrorDetails(e)
-  }
+  return true
 }
 let videoCapPollTimer: ReturnType<typeof setInterval> | null = null
 function startVideoCapPolling() {
@@ -181,13 +167,14 @@ const chosenLocalEngine = ref(activeLocalEngineId.value)
 watch(activeLocalEngineId, (v) => {
   chosenLocalEngine.value = v
 })
-const videogenBackendError = ref<ApiErrorDetails | null>(null)
+// The backend radios, the engine picker and the GPU probe all report here.
+const backendSave = useSaveAttempt()
+const videogenBackendError = backendSave.saveError
 // The Replicate model select and the job timeout, which save on change.
 const { saveError: fieldError, attempt: attemptField } = useSaveAttempt()
-function putBackVideogenChoice(e: unknown) {
+function putBackVideogenChoice() {
   chosenVideogenBackend.value = videogenBackend.value
   chosenLocalEngine.value = activeLocalEngineId.value
-  videogenBackendError.value = apiErrorDetails(e)
 }
 // Hardware verdict from the probe: once READY, "unsupported" means no engine can run on this machine
 // (no GPU, or too little free VRAM for even the smallest tier). Drives disabling the Self-Hosted radio.
@@ -205,13 +192,9 @@ async function selectSelfHosted() {
     return
   }
   pendingLocalAutoSelect.value = true
-  videogenBackendError.value = null
-  try {
-    await probeVideoCapability()
-  }
-  catch (e) {
+  if (!await probeVideoCapability()) {
     pendingLocalAutoSelect.value = false
-    putBackVideogenChoice(e)
+    putBackVideogenChoice()
   }
 }
 watch(videoCapState, (s) => {
@@ -396,7 +379,7 @@ onUnmounted(() => stopVideoCapPolling())
               type="button"
               class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
               :disabled="videoCapState === 'PROBING'"
-              @click="detectVideoCapability()"
+              @click="probeVideoCapability()"
             >
               {{ videoCapDetectLabel }}
             </button>

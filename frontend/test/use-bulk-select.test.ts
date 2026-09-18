@@ -1,18 +1,27 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { setResponseStatus, type H3Event } from 'h3'
 import { defineComponent, h, ref } from 'vue'
 import { useBulkSelect } from '~/composables/useBulkSelect'
 import { useConfirm } from '~/composables/useConfirm'
 
 type Api = ReturnType<typeof useBulkSelect<{ id: number }>>
 
-async function harness(deleteOne: (id: number) => Promise<unknown>, onComplete: () => void) {
+/** Rows 1..3; the ids `refuse` names answer their DELETE with a 502 envelope naming the path. */
+async function harness(refuse: (id: number) => boolean, onComplete: () => void) {
+  for (const id of [1, 2, 3]) {
+    registerEndpoint(`/api/tasks/${id}`, (event: H3Event) => {
+      if (!refuse(id)) return { deleted: true }
+      setResponseStatus(event, 502)
+      return { code: 'upstream_unavailable', message: `Bad Gateway for /api/tasks/${id}`, template: null }
+    })
+  }
   let api!: Api
   await mountSuspended(defineComponent({
     setup() {
       api = useBulkSelect({
         rows: ref([{ id: 1 }, { id: 2 }, { id: 3 }]),
-        deleteOne,
+        deleteUrl: id => `/api/tasks/${id}`,
         onComplete,
         confirmCopy: count => ({ title: 'Delete', message: `Delete ${count}?` }),
       })
@@ -31,10 +40,6 @@ async function deleteConfirmed(api: Api) {
   await pending
 }
 
-function refusal(id: number) {
-  return Object.assign(new Error(`[DELETE] "/api/tasks/${id}": 502 Bad Gateway`), { statusCode: 502 })
-}
-
 afterEach(() => {
   const { _state, _resolve } = useConfirm()
   if (_state.open) _resolve(false)
@@ -43,9 +48,7 @@ afterEach(() => {
 describe('useBulkSelect — a sweep that fails part-way (JCLAW-1221)', () => {
   it('drops the rows it deleted, refreshes, and keeps the rest selected with the reason', async () => {
     const onComplete = vi.fn()
-    const api = await harness(async (id) => {
-      if (id === 2) throw refusal(2)
-    }, onComplete)
+    const api = await harness(id => id === 2, onComplete)
 
     await deleteConfirmed(api)
 
@@ -53,13 +56,12 @@ describe('useBulkSelect — a sweep that fails part-way (JCLAW-1221)', () => {
     expect([...api.selectedIds.value]).toEqual([2, 3])
     expect(api.selectMode.value).toBe(true)
     expect(api.bulkError.value?.message).toContain('/api/tasks/2')
+    expect(api.bulkError.value?.code).toBe('upstream_unavailable')
   })
 
   it('refreshes nothing when the first delete fails', async () => {
     const onComplete = vi.fn()
-    const api = await harness(async (id) => {
-      throw refusal(id)
-    }, onComplete)
+    const api = await harness(() => true, onComplete)
 
     await deleteConfirmed(api)
 
@@ -70,7 +72,7 @@ describe('useBulkSelect — a sweep that fails part-way (JCLAW-1221)', () => {
 
   it('leaves select mode and refreshes when every delete succeeds', async () => {
     const onComplete = vi.fn()
-    const api = await harness(async () => {}, onComplete)
+    const api = await harness(() => false, onComplete)
 
     await deleteConfirmed(api)
 

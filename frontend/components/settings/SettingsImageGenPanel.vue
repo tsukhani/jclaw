@@ -8,7 +8,6 @@
 // reads/writes go through the shared store; API-key checks + the shared
 // inline config-row editor are injected from it.
 import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
-import type { ApiErrorDetails } from '~/types/api'
 
 const { configData, saving, refresh, saveField, apiKeyConfigured, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
@@ -27,7 +26,8 @@ const chosenImagegenProvider = ref(imagegenProvider.value)
 watch(imagegenProvider, (v) => {
   chosenImagegenProvider.value = v
 })
-const imagegenProviderError = ref<ApiErrorDetails | null>(null)
+const providerSave = useSaveAttempt()
+const imagegenProviderError = providerSave.saveError
 const imagegenEnabled = computed(() => imagegenProvider.value.trim().length > 0)
 const bflApiKeyConfigured = computed(() => apiKeyConfigured('bfl'))
 
@@ -52,16 +52,9 @@ async function toggleImagegenEnabled() {
 }
 async function setImagegenProvider(value: string) {
   saving.value = true
-  imagegenProviderError.value = null
-  try {
-    await $fetch('/api/config', { method: 'POST', body: { key: 'imagegen.provider', value } })
-    refresh()
-  }
-  catch (e) {
-    chosenImagegenProvider.value = imagegenProvider.value
-    imagegenProviderError.value = apiErrorDetails(e)
-  }
-  finally { saving.value = false }
+  if (await providerSave.attempt(() => $fetch('/api/config', { method: 'POST', body: { key: 'imagegen.provider', value } }))) refresh()
+  else chosenImagegenProvider.value = imagegenProvider.value
+  saving.value = false
 }
 // BFL is image-gen only, so its API key is set here (not in LLM Providers). Reuses the shared
 // editingKey/editValue/updateEntry flow; editValue starts blank so the operator types a fresh key
@@ -181,7 +174,7 @@ function stopImageCapPolling() {
   }
 }
 async function probeImageCapability() {
-  await $fetch('/api/imagegen/capability/probe', { method: 'POST' })
+  if (!await attempt(() => $fetch('/api/imagegen/capability/probe', { method: 'POST' }))) return
   await refreshImageCapability()
   startImageCapPolling()
 }
@@ -615,7 +608,7 @@ onUnmounted(() => stopImagegenLocalPolling())
               type="button"
               class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
               :disabled="imageCapState === 'PROBING'"
-              @click="attempt(probeImageCapability)"
+              @click="probeImageCapability"
             >
               {{ imageCapDetectLabel }}
             </button>

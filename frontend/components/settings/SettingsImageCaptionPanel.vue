@@ -5,9 +5,9 @@
 // a local Ollama VLM. Reads from the shared config store, writes via
 // /api/config; provider API-key checks + vision-model catalog injected from
 // the shared settings-config context.
-import type { ApiErrorDetails, ProviderModelDef } from '~/types/api'
+import type { ProviderModelDef } from '~/types/api'
 
-const { configData, saving, refresh, resync, getProviderModels, apiKeyConfigured } = useSettingsConfig()
+const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 
 const openrouterApiKeyConfigured = computed(() => apiKeyConfigured('openrouter'))
 const openaiApiKeyConfigured = computed(() => apiKeyConfigured('openai'))
@@ -24,7 +24,8 @@ const chosenCaptionProvider = ref(captionProvider.value)
 watch(captionProvider, (v) => {
   chosenCaptionProvider.value = v
 })
-const captionProviderError = ref<ApiErrorDetails | null>(null)
+const providerSave = useSaveAttempt()
+const captionProviderError = providerSave.saveError
 const captionModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'caption.model')?.value ?? '',
 )
@@ -73,23 +74,16 @@ async function toggleCaptionEnabled() {
 }
 async function setCaptionProvider(value: string) {
   saving.value = true
-  captionProviderError.value = null
-  try {
-    // Reset the model on a provider switch — a model from the previous provider isn't valid for the
-    // new one (and would otherwise linger as "(not marked vision)"). Independent keys, fire in parallel.
-    await Promise.all([
-      $fetch('/api/config', { method: 'POST', body: { key: 'caption.provider', value } }),
-      $fetch('/api/config', { method: 'POST', body: { key: 'caption.model', value: '' } }),
-    ])
-    refresh()
-  }
-  catch (e) {
-    // The two writes can half-land: show what was saved, not what was there before.
-    await resync()
-    chosenCaptionProvider.value = captionProvider.value
-    captionProviderError.value = apiErrorDetails(e)
-  }
-  finally { saving.value = false }
+  // Reset the model on a provider switch — a model from the previous provider isn't valid for the
+  // new one (and would otherwise linger as "(not marked vision)"). Independent keys, fire in parallel.
+  const saved = await providerSave.attempt(() => Promise.all([
+    $fetch('/api/config', { method: 'POST', body: { key: 'caption.provider', value } }),
+    $fetch('/api/config', { method: 'POST', body: { key: 'caption.model', value: '' } }),
+  ]))
+  // The two writes can half-land: show what was saved, not what was there before.
+  await refresh()
+  if (!saved) chosenCaptionProvider.value = captionProvider.value
+  saving.value = false
 }
 async function setCaptionModel(value: string) {
   saving.value = true

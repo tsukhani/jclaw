@@ -17,7 +17,6 @@ import type {
   Agent,
   AgentSkill,
   AgentTool,
-  ApiErrorDetails,
   ConfigResponse,
   ConfigValueResponse,
   CoreMigrationStatus,
@@ -131,9 +130,12 @@ const agentSkills = ref<AgentSkill[]>([])
 const savingTools = ref(false)
 const savingSkills = ref(false)
 const savingMcp = ref(false)
-const toolsError = ref<ApiErrorDetails | null>(null)
-const skillsError = ref<ApiErrorDetails | null>(null)
-const mcpError = ref<ApiErrorDetails | null>(null)
+const toolSave = useSaveAttempt()
+const toolsError = toolSave.saveError
+const skillSave = useSaveAttempt()
+const skillsError = skillSave.saveError
+const mcpSave = useSaveAttempt()
+const mcpError = mcpSave.saveError
 // Effective shell allowlist for the current agent: global entries + per-skill
 // contributions. Derived server-side so the UI doesn't have to re-compute the
 // join. Populated on agent edit and refreshed whenever skill enable/disable or
@@ -307,7 +309,8 @@ function toggleMcpExpand(server: string) {
 const queueMode = ref('queue')
 const savedQueueMode = ref('queue')
 const savingQueueMode = ref(false)
-const queueModeError = ref<ApiErrorDetails | null>(null)
+const queueModeSave = useSaveAttempt()
+const queueModeError = queueModeSave.saveError
 // JCLAW-465: per-agent content-compression enable, managed in its own
 // Optimization card (immediate-save on toggle, like Queue Mode). Initialised
 // from the agent's effective value when the edit form opens.
@@ -336,6 +339,7 @@ const acpAllowed = ref(false)
  */
 const coreMigration = ref<CoreMigrationStatus | null>(null)
 const coreMigrationError = ref('')
+const { mutate: startMigration, error: startMigrationError } = useApiMutation()
 
 async function refreshCoreMigration() {
   const agentId = editing.value?.id
@@ -352,15 +356,14 @@ async function refreshCoreMigration() {
 async function startCoreMigration() {
   if (!editing.value?.id) return
   coreMigrationError.value = ''
-  try {
-    coreMigration.value = await $fetch<CoreMigrationStatus>(
-      `/api/agents/${editing.value.id}/core-migration`, { method: 'POST' })
-    pollCoreMigration()
+  const status = await startMigration<CoreMigrationStatus>(
+    `/api/agents/${editing.value.id}/core-migration`, { method: 'POST' })
+  if (status === null) {
+    coreMigrationError.value = startMigrationError.value ?? 'Could not start the migration.'
+    return
   }
-  catch (e) {
-    coreMigrationError.value = (e as { data?: { message?: string } })?.data?.message
-      ?? 'Could not start the migration.'
-  }
+  coreMigration.value = status
+  pollCoreMigration()
 }
 
 /** Poll only while this agent's run is in flight; the status is otherwise static. */
@@ -392,27 +395,26 @@ const compressionEnabledCount = computed(() => {
 const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
 const savingExec = ref(false)
-const execError = ref<ApiErrorDetails | null>(null)
+const execSave = useSaveAttempt()
+const execError = execSave.saveError
 const saving = ref(false)
-/**
- * Last save-attempt error surfaced to the operator. Set when the agent
- * create/update POST/PUT returns a non-2xx; cleared on the next attempt
- * and on form open/close. The backend's `error(409, msg)` from
- * ApiAgentsController sends `msg` as a plain-text body — $fetch puts it
- * on the FetchError's `data` field, which we prefer over the generic
- * status-line `message` so the operator sees the actual cause (e.g.
- * "An agent named 'Testing' already exists" instead of a 409 number).
- */
+/** Why the last agent create/update was refused; cleared on the next attempt and on form open/close. */
 const saveError = ref<string | null>(null)
+const agentSave = useSaveAttempt()
+// The immediate-save partial PUTs and the row delete never read the error; the wrapper's log line is enough.
+const { mutate: mutateAgent } = useApiMutation()
 
 // Delete state for the Custom Agents list. `deletingAll` gates the header's
 // "Delete All" button (wipes every custom agent); `deletingId` gates a single
 // card's trash button so an in-flight delete disables just that row.
 const deletingAll = ref(false)
-const deleteAllError = ref<ApiErrorDetails | null>(null)
+const deleteAllSave = useSaveAttempt()
+const deleteAllError = deleteAllSave.saveError
 // A failed enable switch or capability pill on either list.
-const agentListError = ref<ApiErrorDetails | null>(null)
-const workspaceError = ref<ApiErrorDetails | null>(null)
+const listSave = useSaveAttempt()
+const agentListError = listSave.saveError
+const workspaceSave = useSaveAttempt()
+const workspaceError = workspaceSave.saveError
 const deletingId = ref<number | null>(null)
 
 // A11y: stable ids for label/control association in the edit form
@@ -919,14 +921,7 @@ async function toggleListingCapability(agent: Agent | undefined, capability: 'th
       ? null
       : defaultThinkingLevel(modelForAgent(agent))
   }
-  agentListError.value = null
-  try {
-    await $fetch(`/api/agents/${agent.id}`, { method: 'PUT', body })
-    refresh()
-  }
-  catch (e) {
-    agentListError.value = apiErrorDetails(e)
-  }
+  if (await listSave.attempt(() => $fetch(`/api/agents/${agent.id}`, { method: 'PUT', body }))) refresh()
 }
 
 // The seven per-agent loads editAgent fires are unawaited; opening another agent while one is in
@@ -944,20 +939,15 @@ async function loadAgentTools(agentId: number) {
 /** Flips the switch, saves, and puts it back if the save fails. Resolves to whether the server took it. */
 async function saveToolEnabled(tool: AgentTool, enabled: boolean): Promise<boolean> {
   if (!editing.value) return false
+  const agentId = editing.value.id
   const previous = tool.enabled
   tool.enabled = enabled
-  try {
-    await $fetch(`/api/agents/${editing.value.id}/tools/${tool.name}`, {
-      method: 'PUT',
-      body: { enabled },
-    })
-    return true
-  }
-  catch (e) {
-    tool.enabled = previous
-    toolsError.value = apiErrorDetails(e)
-    return false
-  }
+  const ok = await toolSave.attempt(() => $fetch(`/api/agents/${agentId}/tools/${tool.name}`, {
+    method: 'PUT',
+    body: { enabled },
+  }))
+  if (!ok) tool.enabled = previous
+  return ok
 }
 
 async function toggleTool(tool: AgentTool) {
@@ -985,20 +975,13 @@ async function toggleToolGroup(group: string, enabled: boolean) {
   const previous = handle?.enabled ?? false
   if (handle) handle.enabled = enabled
   savingMcp.value = true
-  mcpError.value = null
-  try {
-    await $fetch(`/api/agents/${editing.value.id}/tool-groups/${encodeURIComponent(group)}`, {
-      method: 'PUT',
-      body: { enabled },
-    })
-  }
-  catch (e) {
-    if (handle) handle.enabled = previous
-    mcpError.value = apiErrorDetails(e)
-  }
-  finally {
-    savingMcp.value = false
-  }
+  const agentId = editing.value.id
+  const ok = await mcpSave.attempt(() => $fetch(`/api/agents/${agentId}/tool-groups/${encodeURIComponent(group)}`, {
+    method: 'PUT',
+    body: { enabled },
+  }))
+  if (!ok && handle) handle.enabled = previous
+  savingMcp.value = false
 }
 
 // JCLAW-281: drives the "Tools" section header count and bulk-toggle.
@@ -1100,21 +1083,14 @@ async function loadQueueMode(agentName: string) {
 async function saveQueueMode() {
   if (!editing.value) return
   savingQueueMode.value = true
-  queueModeError.value = null
-  try {
-    await $fetch('/api/config', {
-      method: 'POST',
-      body: { key: `agent.${editing.value.name}.queue.mode`, value: queueMode.value },
-    })
-    savedQueueMode.value = queueMode.value
-  }
-  catch (e) {
-    queueMode.value = savedQueueMode.value
-    queueModeError.value = apiErrorDetails(e)
-  }
-  finally {
-    savingQueueMode.value = false
-  }
+  const key = `agent.${editing.value.name}.queue.mode`
+  const ok = await queueModeSave.attempt(() => $fetch('/api/config', {
+    method: 'POST',
+    body: { key, value: queueMode.value },
+  }))
+  if (ok) savedQueueMode.value = queueMode.value
+  else queueMode.value = savedQueueMode.value
+  savingQueueMode.value = false
 }
 
 // JCLAW-465: immediate-save the per-agent compression toggle via a partial PUT
@@ -1123,22 +1099,19 @@ async function saveQueueMode() {
 async function saveCompression() {
   if (!editing.value) return
   savingCompression.value = true
-  try {
-    await $fetch(`/api/agents/${editing.value.id}`, {
-      method: 'PUT',
-      body: { compressionEnabled: compressionEnabled.value },
-    })
-    editing.value.compressionEnabled = compressionEnabled.value
-    refresh()
-  }
-  catch (e) {
-    console.error('Failed to save compression setting:', e)
+  const saved = await mutateAgent(`/api/agents/${editing.value.id}`, {
+    method: 'PUT',
+    body: { compressionEnabled: compressionEnabled.value },
+  })
+  if (saved === null) {
     // Revert the toggle to the persisted value on failure.
     compressionEnabled.value = editing.value.compressionEnabled
   }
-  finally {
-    savingCompression.value = false
+  else {
+    editing.value.compressionEnabled = compressionEnabled.value
+    refresh()
   }
+  savingCompression.value = false
 }
 
 // JCLAW-500: immediate-save the per-agent ACP grant via a partial PUT, mirroring
@@ -1146,21 +1119,18 @@ async function saveCompression() {
 async function saveAcpAllowed() {
   if (!editing.value) return
   savingAcpAllowed.value = true
-  try {
-    await $fetch(`/api/agents/${editing.value.id}`, {
-      method: 'PUT',
-      body: { acpAllowed: acpAllowed.value },
-    })
+  const saved = await mutateAgent(`/api/agents/${editing.value.id}`, {
+    method: 'PUT',
+    body: { acpAllowed: acpAllowed.value },
+  })
+  if (saved === null) {
+    acpAllowed.value = editing.value.acpAllowed
+  }
+  else {
     editing.value.acpAllowed = acpAllowed.value
     refresh()
   }
-  catch (e) {
-    console.error('Failed to save ACP grant:', e)
-    acpAllowed.value = editing.value.acpAllowed
-  }
-  finally {
-    savingAcpAllowed.value = false
-  }
+  savingAcpAllowed.value = false
 }
 
 function toggleAcpAllowed() {
@@ -1173,21 +1143,18 @@ function toggleAcpAllowed() {
 async function saveMemoryEnabled() {
   if (!editing.value) return
   savingMemory.value = true
-  try {
-    await $fetch(`/api/agents/${editing.value.id}`, {
-      method: 'PUT',
-      body: { memoryAutocaptureEnabled: memoryAutocaptureEnabled.value },
-    })
+  const saved = await mutateAgent(`/api/agents/${editing.value.id}`, {
+    method: 'PUT',
+    body: { memoryAutocaptureEnabled: memoryAutocaptureEnabled.value },
+  })
+  if (saved === null) {
+    memoryAutocaptureEnabled.value = editing.value.memoryAutocaptureEnabled
+  }
+  else {
     editing.value.memoryAutocaptureEnabled = memoryAutocaptureEnabled.value
     refresh()
   }
-  catch (e) {
-    console.error('Failed to save memory auto-capture setting:', e)
-    memoryAutocaptureEnabled.value = editing.value.memoryAutocaptureEnabled
-  }
-  finally {
-    savingMemory.value = false
-  }
+  savingMemory.value = false
 }
 
 function toggleMemoryAutocapture() {
@@ -1203,27 +1170,24 @@ async function saveMemoryModel() {
   savingMemory.value = true
   const isDefault = memoryAutocaptureProvider.value === editing.value.modelProvider
     && memoryAutocaptureModel.value === editing.value.modelId
-  try {
-    const updated = await $fetch<Agent>(`/api/agents/${editing.value.id}`, {
-      method: 'PUT',
-      body: {
-        memoryAutocaptureProvider: isDefault ? null : memoryAutocaptureProvider.value,
-        memoryAutocaptureModel: isDefault ? null : memoryAutocaptureModel.value,
-      },
-    })
+  const updated = await mutateAgent<Agent>(`/api/agents/${editing.value.id}`, {
+    method: 'PUT',
+    body: {
+      memoryAutocaptureProvider: isDefault ? null : memoryAutocaptureProvider.value,
+      memoryAutocaptureModel: isDefault ? null : memoryAutocaptureModel.value,
+    },
+  })
+  if (updated === null) {
+    memoryAutocaptureProvider.value = editing.value.memoryAutocaptureProvider
+    memoryAutocaptureModel.value = editing.value.memoryAutocaptureModel
+  }
+  else {
     editing.value.memoryAutocaptureProvider = updated.memoryAutocaptureProvider
     editing.value.memoryAutocaptureModel = updated.memoryAutocaptureModel
     editing.value.memoryAutocaptureModelInherited = updated.memoryAutocaptureModelInherited
     refresh()
   }
-  catch (e) {
-    console.error('Failed to save extractor model:', e)
-    memoryAutocaptureProvider.value = editing.value.memoryAutocaptureProvider
-    memoryAutocaptureModel.value = editing.value.memoryAutocaptureModel
-  }
-  finally {
-    savingMemory.value = false
-  }
+  savingMemory.value = false
 }
 
 // The override model id won't exist under a newly-picked provider, so snap it to
@@ -1241,21 +1205,18 @@ async function persistCompressionField(
 ) {
   if (!editing.value) return
   savingCompression.value = true
-  try {
-    await $fetch(`/api/agents/${editing.value.id}`, {
-      method: 'PUT',
-      body: { [key]: model.value },
-    })
+  const saved = await mutateAgent(`/api/agents/${editing.value.id}`, {
+    method: 'PUT',
+    body: { [key]: model.value },
+  })
+  if (saved === null) {
+    model.value = editing.value[key]
+  }
+  else {
     editing.value[key] = model.value
     refresh()
   }
-  catch (e) {
-    console.error('Failed to save compression sub-toggle:', e)
-    model.value = editing.value[key]
-  }
-  finally {
-    savingCompression.value = false
-  }
+  savingCompression.value = false
 }
 
 function saveCompressionJson() {
@@ -1274,21 +1235,18 @@ function saveCompressionText() {
 async function saveCompressionRatio() {
   if (!editing.value) return
   savingCompression.value = true
-  try {
-    await $fetch(`/api/agents/${editing.value.id}`, {
-      method: 'PUT',
-      body: { compressionTargetRatio: compressionTargetRatio.value },
-    })
+  const saved = await mutateAgent(`/api/agents/${editing.value.id}`, {
+    method: 'PUT',
+    body: { compressionTargetRatio: compressionTargetRatio.value },
+  })
+  if (saved === null) {
+    compressionTargetRatio.value = editing.value.compressionTargetRatio
+  }
+  else {
     editing.value.compressionTargetRatio = compressionTargetRatio.value
     refresh()
   }
-  catch (e) {
-    console.error('Failed to save compression ratio:', e)
-    compressionTargetRatio.value = editing.value.compressionTargetRatio
-  }
-  finally {
-    savingCompression.value = false
-  }
+  savingCompression.value = false
 }
 
 // Pill-toggle click handlers: flip the ref, then immediate-save via the
@@ -1327,40 +1285,28 @@ async function toggleExecConfig(key: 'bypassAllowlist' | 'allowGlobalPaths') {
   const previous = grant.value
   grant.value = !previous
   savingExec.value = true
-  execError.value = null
-  try {
-    await $fetch('/api/config', {
-      method: 'POST',
-      body: { key: `agent.${editing.value.name}.shell.${key}`, value: String(grant.value) },
-    })
-  }
-  catch (e) {
-    // A 403 here is an application.conf ceiling, and its message is the only place the operator learns that.
-    grant.value = previous
-    execError.value = apiErrorDetails(e)
-  }
-  finally {
-    savingExec.value = false
-  }
+  const configKey = `agent.${editing.value.name}.shell.${key}`
+  const ok = await execSave.attempt(() => $fetch('/api/config', {
+    method: 'POST',
+    body: { key: configKey, value: String(grant.value) },
+  }))
+  // A 403 here is an application.conf ceiling, and its message is the only place the operator learns that.
+  if (!ok) grant.value = previous
+  savingExec.value = false
 }
 
 /** Flips the switch, saves, and puts it back if the save fails. Resolves to whether the server took it. */
 async function saveSkillEnabled(skill: AgentSkill, enabled: boolean): Promise<boolean> {
   if (!editing.value) return false
+  const agentId = editing.value.id
   const previous = skill.enabled
   skill.enabled = enabled
-  try {
-    await $fetch(`/api/agents/${editing.value.id}/skills/${skill.name}`, {
-      method: 'PUT',
-      body: { enabled },
-    })
-    return true
-  }
-  catch (e) {
-    skill.enabled = previous
-    skillsError.value = apiErrorDetails(e)
-    return false
-  }
+  const ok = await skillSave.attempt(() => $fetch(`/api/agents/${agentId}/skills/${skill.name}`, {
+    method: 'PUT',
+    body: { enabled },
+  }))
+  if (!ok) skill.enabled = previous
+  return ok
 }
 
 async function reloadSkillState(agentId: number) {
@@ -1407,19 +1353,19 @@ watch(() => form.value.modelProvider, (newProvider) => {
 async function saveAgent() {
   saving.value = true
   saveError.value = null
-  try {
-    // Empty string means "reasoning off" — send null so the backend clears the
-    // column. The model also collapses unknown levels to null defensively, but
-    // normalizing on the way out keeps the wire payload honest.
-    const payload = {
-      ...form.value,
-      thinkingMode: form.value.thinkingMode || null,
-      // Blank description clears the column; backend also strips/trims.
-      description: form.value.description.trim() || null,
-      // JCLAW-1190: "None" is null/null; the backend refuses half a pair.
-      fallbackProvider: form.value.fallbackProvider || null,
-      fallbackModelId: form.value.fallbackProvider ? form.value.fallbackModelId || null : null,
-    }
+  // Empty string means "reasoning off" — send null so the backend clears the
+  // column. The model also collapses unknown levels to null defensively, but
+  // normalizing on the way out keeps the wire payload honest.
+  const payload = {
+    ...form.value,
+    thinkingMode: form.value.thinkingMode || null,
+    // Blank description clears the column; backend also strips/trims.
+    description: form.value.description.trim() || null,
+    // JCLAW-1190: "None" is null/null; the backend refuses half a pair.
+    fallbackProvider: form.value.fallbackProvider || null,
+    fallbackModelId: form.value.fallbackProvider ? form.value.fallbackModelId || null : null,
+  }
+  const ok = await agentSave.attempt(async () => {
     if (creating.value) {
       await $fetch('/api/agents', { method: 'POST', body: payload })
       // Create mode navigates back to the list so the user sees the new row.
@@ -1432,35 +1378,21 @@ async function saveAgent() {
       // button disables until the user makes another change.
       formBaseline.value = { ...form.value }
     }
-    refresh()
-  }
-  catch (e) {
-    const fe = e as { data?: unknown, message?: string }
-    saveError.value = typeof fe.data === 'string' && fe.data.length > 0
-      ? fe.data
-      : (fe.message || 'Failed to save agent')
-    console.error('Failed to save agent:', e)
-  }
-  finally {
-    saving.value = false
-  }
+  })
+  if (ok) refresh()
+  else saveError.value = agentSave.saveError.value?.message ?? 'Failed to save agent'
+  saving.value = false
 }
 
 // Toggle a custom agent's enabled flag from the list view without opening the
 // edit form. The PUT endpoint accepts partial updates, so we only send the
 // enabled field — other fields fall through to their existing values.
 async function toggleAgentEnabled(agent: Agent) {
-  agentListError.value = null
-  try {
-    await $fetch(`/api/agents/${agent.id}`, {
-      method: 'PUT',
-      body: { enabled: !agent.enabled },
-    })
-    refresh()
-  }
-  catch (e) {
-    agentListError.value = apiErrorDetails(e)
-  }
+  const ok = await listSave.attempt(() => $fetch(`/api/agents/${agent.id}`, {
+    method: 'PUT',
+    body: { enabled: !agent.enabled },
+  }))
+  if (ok) refresh()
 }
 
 // Delete a single custom agent from its card's trash button. Guarded by a
@@ -1475,16 +1407,8 @@ async function deleteAgent(agent: Agent) {
   })
   if (!ok) return
   deletingId.value = agent.id
-  try {
-    await $fetch(`/api/agents/${agent.id}`, { method: 'DELETE' })
-    refresh()
-  }
-  catch (e) {
-    console.error('Failed to delete agent:', e)
-  }
-  finally {
-    deletingId.value = null
-  }
+  if (await mutateAgent(`/api/agents/${agent.id}`, { method: 'DELETE' }) !== null) refresh()
+  deletingId.value = null
 }
 
 // Wipe every custom agent (the main agent is a singleton and unaffected).
@@ -1502,22 +1426,16 @@ async function deleteAll() {
   })
   if (!ok) return
   deletingAll.value = true
-  deleteAllError.value = null
   let deletedAny = false
-  try {
+  await deleteAllSave.attempt(async () => {
     // Sequential deletes keep per-row error handling simple and avoid thundering
     // the API with parallel DELETEs. The list is small (user-curated).
     for (const agent of targets) {
       await $fetch(`/api/agents/${agent.id}`, { method: 'DELETE' })
       deletedAny = true
     }
-  }
-  catch (e) {
-    deleteAllError.value = apiErrorDetails(e)
-  }
-  finally {
-    deletingAll.value = false
-  }
+  })
+  deletingAll.value = false
   // Refresh after a failure too, so the agents already deleted leave the list.
   if (deletedAny) refresh()
 }
@@ -1540,18 +1458,13 @@ async function loadWorkspaceFile(agentId: number, filename: string) {
 async function saveWorkspaceFile() {
   if (!editing.value || !workspaceDirty.value) return
   const saved = workspaceContent.value
-  workspaceError.value = null
-  try {
-    await $fetch(`/api/agents/${editing.value.id}/workspace/${workspaceTab.value}`, {
-      method: 'PUT',
-      body: { content: saved },
-    })
-  }
-  catch (e) {
-    // The baseline stays put, so the file still reads as unsaved beside the reason.
-    workspaceError.value = apiErrorDetails(e)
-    return
-  }
+  const agentId = editing.value.id
+  const ok = await workspaceSave.attempt(() => $fetch(`/api/agents/${agentId}/workspace/${workspaceTab.value}`, {
+    method: 'PUT',
+    body: { content: saved },
+  }))
+  // The baseline stays put, so the file still reads as unsaved beside the reason.
+  if (!ok) return
   // Snapshot the just-persisted value so the save button disables until the
   // textarea diverges again. Capture before the await resolved so a late
   // keystroke doesn't get clobbered into the baseline.

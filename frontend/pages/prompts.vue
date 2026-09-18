@@ -6,7 +6,7 @@
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import PromptCard from '~/components/prompts/PromptCard.vue'
 import PromptFormDialog from '~/components/prompts/PromptFormDialog.vue'
-import type { ApiErrorDetails, Prompt, PromptCategory } from '~/types/api'
+import type { Prompt, PromptCategory } from '~/types/api'
 
 const { data: promptsData, pending, refresh } = useLazyFetch<Prompt[]>('/api/prompts', { default: () => [] })
 const { data: categoriesData } = useLazyFetch<PromptCategory[]>('/api/prompts/categories', { default: () => [] })
@@ -69,7 +69,7 @@ function openEdit(p: Prompt) {
 
 // ---- delete ----
 // A failed delete or import, which would otherwise reach only the console.
-const actionError = ref<ApiErrorDetails | null>(null)
+const { saveError: actionError, attempt } = useSaveAttempt()
 
 async function remove(p: Prompt) {
   const ok = await confirm({
@@ -79,15 +79,7 @@ async function remove(p: Prompt) {
     variant: 'danger',
   })
   if (!ok) return
-  actionError.value = null
-  try {
-    await $fetch(`/api/prompts/${p.id}`, { method: 'DELETE' })
-  }
-  catch (e) {
-    actionError.value = apiErrorDetails(e)
-    return
-  }
-  await refresh()
+  if (await attempt(() => $fetch(`/api/prompts/${p.id}`, { method: 'DELETE' }))) await refresh()
 }
 
 // ---- run ----
@@ -140,23 +132,14 @@ async function onImportFile(e: Event) {
 
 async function doImport(mode: 'merge' | 'replace') {
   if (!pendingImport.value) return
+  const { prompts } = pendingImport.value
   importing.value = true
-  actionError.value = null
-  try {
-    await $fetch('/api/prompts/import', {
-      method: 'POST',
-      body: { mode, prompts: pendingImport.value.prompts },
-    })
+  // On failure the mode picker stays open, so the same choice can be retried.
+  if (await attempt(() => $fetch('/api/prompts/import', { method: 'POST', body: { mode, prompts } }))) {
     pendingImport.value = null
     await refresh()
   }
-  catch (e) {
-    // The mode picker stays open, so the same choice can be retried.
-    actionError.value = apiErrorDetails(e)
-  }
-  finally {
-    importing.value = false
-  }
+  importing.value = false
 }
 </script>
 

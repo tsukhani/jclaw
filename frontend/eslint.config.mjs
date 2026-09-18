@@ -18,6 +18,7 @@
 
 import withNuxt from './.nuxt/eslint.config.mjs'
 import vueA11y from 'eslint-plugin-vuejs-accessibility'
+import noBareWriteFetch from './eslint/no-bare-write-fetch.mjs'
 
 export default withNuxt(
   {
@@ -55,6 +56,22 @@ export default withNuxt(
           message: 'API errors carry `message`, not `error`. Use apiErrorDetails(e).message.',
         },
       ],
+    },
+  },
+  {
+    // A write's failure has to arrive as ApiErrorDetails; the two wrappers and the Settings store
+    // are the only places a bare write may live. See eslint/no-bare-write-fetch.mjs.
+    files: ['**/*.{ts,vue}'],
+    ignores: ['test/**', 'tests/**'],
+    plugins: { jclaw: { rules: { 'no-bare-write-fetch': noBareWriteFetch } } },
+    rules: {
+      'jclaw/no-bare-write-fetch': ['error', {
+        allowFiles: [
+          'composables/useApiMutation.ts',
+          'composables/useSaveAttempt.ts',
+          'composables/useSettingsConfig.ts',
+        ],
+      }],
     },
   },
   // Vue accessibility (WCAG) rules, Vue SFCs only.

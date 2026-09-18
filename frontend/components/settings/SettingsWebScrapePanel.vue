@@ -6,7 +6,6 @@ import {
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import type { ApiErrorDetails } from '~/types/api'
 
 const { configData, saving, refresh } = useSettingsConfig()
 
@@ -117,7 +116,7 @@ function isOn(field: SettingField): boolean {
 const editingKey = ref<string | null>(null)
 // v-model on a type="number" input yields a number once the text parses.
 const draft = ref<string | number>('')
-const saveError = ref<ApiErrorDetails | null>(null)
+const { saveError, attempt } = useSaveAttempt()
 
 function startEdit(field: SettingField) {
   editingKey.value = field.key
@@ -127,19 +126,12 @@ function startEdit(field: SettingField) {
 
 async function save(key: string, value: string) {
   saving.value = true
-  saveError.value = null
-  try {
-    await $fetch('/api/config', { method: 'POST', body: { key, value: value.trim() } })
+  // A refused write is 403 {type, code, message, template}; message is setWithSideEffects' rejection.
+  if (await attempt(() => $fetch('/api/config', { method: 'POST', body: { key, value: value.trim() } }))) {
     editingKey.value = null
     await refresh()
   }
-  catch (e) {
-    // A refused write is 403 {type, code, message, template}; message is setWithSideEffects' rejection.
-    saveError.value = apiErrorDetails(e)
-  }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 </script>
 

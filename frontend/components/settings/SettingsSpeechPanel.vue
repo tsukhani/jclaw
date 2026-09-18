@@ -98,21 +98,18 @@ function reasonFor(e: unknown, fallback: string) {
   return (e as { data?: { message?: string } })?.data?.message || (e as Error)?.message || fallback
 }
 
+const { mutate: writeReferenceVoice, error: referenceVoiceError } = useApiMutation()
+
 async function postReferenceVoice(file: File) {
   refError.value = ''
   saving.value = true
-  try {
-    const body = new FormData()
-    body.append('file', file)
-    await $fetch('/api/tts/reference-voice', { method: 'POST', body })
-    refreshTtsState()
+  const body = new FormData()
+  body.append('file', file)
+  if (await writeReferenceVoice('/api/tts/reference-voice', { method: 'POST', body }) === null) {
+    refError.value = referenceVoiceError.value ?? 'upload failed'
   }
-  catch (e) {
-    refError.value = reasonFor(e, 'upload failed')
-  }
-  finally {
-    saving.value = false
-  }
+  else refreshTtsState()
+  saving.value = false
 }
 
 async function uploadReferenceVoice(event: Event) {
@@ -158,14 +155,11 @@ async function finishRecording() {
 async function clearReferenceVoice() {
   refError.value = ''
   saving.value = true
-  try {
-    await $fetch('/api/tts/reference-voice', { method: 'DELETE' })
-    refreshTtsState()
+  if (await writeReferenceVoice('/api/tts/reference-voice', { method: 'DELETE' }) === null) {
+    refError.value = referenceVoiceError.value ?? 'could not remove the clip'
   }
-  catch (e) {
-    refError.value = reasonFor(e, 'could not remove the clip')
-  }
-  finally { saving.value = false }
+  else refreshTtsState()
+  saving.value = false
 }
 
 // JCLAW-863: how long the sidecar keeps the model loaded while idle. The key has

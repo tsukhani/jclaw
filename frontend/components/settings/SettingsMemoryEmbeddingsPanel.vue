@@ -120,28 +120,24 @@ watch(selectedModel, () => {
   probe.value = null
 })
 
+const { mutate: probeModel, errorDetails: probeFailure } = useApiMutation()
+
 async function runProbe() {
   if (!selectedProvider.value || !selectedModel.value) return
   probing.value = true
   probe.value = null
-  try {
-    probe.value = await $fetch<EmbeddingProbeResponse>(
-      `/api/providers/${encodeURIComponent(selectedProvider.value)}/embedding-probe`,
-      { method: 'POST', body: { model: selectedModel.value } },
-    )
+  const res = await probeModel<EmbeddingProbeResponse>(
+    `/api/providers/${encodeURIComponent(selectedProvider.value)}/embedding-probe`,
+    { method: 'POST', body: { model: selectedModel.value } },
+  )
+  probe.value = res ?? {
+    provider: selectedProvider.value,
+    model: selectedModel.value,
+    ok: false,
+    dimensions: 0,
+    error: probeFailure.value?.message ?? 'Probe failed',
   }
-  catch (e) {
-    probe.value = {
-      provider: selectedProvider.value,
-      model: selectedModel.value,
-      ok: false,
-      dimensions: 0,
-      error: e instanceof Error ? e.message : 'Probe failed',
-    }
-  }
-  finally {
-    probing.value = false
-  }
+  probing.value = false
 }
 
 // --- re-embed (JCLAW-933) ---
@@ -156,19 +152,14 @@ async function refreshReembed() {
   catch { /* transient — the next poll retries */ }
 }
 
+const { mutate: postReembed, errorDetails: reembedFailure } = useApiMutation()
+
 async function startReembed() {
   reembedError.value = ''
-  try {
-    reembed.value = await $fetch<MemoryReembedStatus>('/api/memories/reembed', { method: 'POST' })
-  }
-  catch (e) {
-    // 409 carries the refusal reason: disabled, already running, or a dimension the
-    // index cannot store. Surfacing it matters — the button otherwise looks inert.
-    // Two shapes reach here: the backend's own {type, code, message} body, and the
-    // Nitro-wrapped {data: {...}} when the proxy layer generates the error.
-    const d = (e as { data?: { message?: string, data?: { message?: string } } })?.data
-    reembedError.value = d?.message ?? d?.data?.message ?? 'Could not start re-embedding.'
-  }
+  const res = await postReembed<MemoryReembedStatus>('/api/memories/reembed', { method: 'POST' })
+  // 409 carries the refusal reason: disabled, already running, or a dimension the index cannot store.
+  if (res === null) reembedError.value = reembedFailure.value?.message ?? 'Could not start re-embedding.'
+  else reembed.value = res
 }
 
 // Poll only while a run is in flight; the status is otherwise static.

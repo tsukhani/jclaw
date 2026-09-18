@@ -258,23 +258,17 @@ function durationSeconds(r: SubagentRun): number | null {
 }
 
 const killing = ref<Set<number>>(new Set())
+// Delete all and a row's kill: single requests whose failure would otherwise reach only the console.
+const { saveError: actionError, attempt } = useSaveAttempt()
 
 async function killRun(id: number) {
   killing.value.add(id)
-  actionError.value = null
-  try {
-    await $fetch(`/api/subagent-runs/${id}/kill`, {
-      method: 'POST',
-      body: { reason: 'Killed by operator via admin page' },
-    })
-    await refresh()
-  }
-  catch (e) {
-    actionError.value = apiErrorDetails(e)
-  }
-  finally {
-    killing.value.delete(id)
-  }
+  const ok = await attempt(() => $fetch(`/api/subagent-runs/${id}/kill`, {
+    method: 'POST',
+    body: { reason: 'Killed by operator via admin page' },
+  }))
+  if (ok) await refresh()
+  killing.value.delete(id)
 }
 
 // confirm() drives the "Delete all" typed-confirmation dialog below; the
@@ -298,7 +292,7 @@ const {
 } = useBulkSelect<SubagentRun>({
   rows: runs,
   selectable: r => r.status !== 'RUNNING',
-  deleteOne: id => $fetch<unknown>(`/api/subagent-runs/${id}`, { method: 'DELETE' }),
+  deleteUrl: id => `/api/subagent-runs/${id}`,
   onComplete: () => refresh(),
   confirmCopy: count => ({
     title: 'Delete subagent runs',
@@ -314,8 +308,6 @@ const allRunsSelected = computed(() => selectableRuns.value.length > 0 && select
 const someRunsSelected = computed(() => selectedIds.value.size > 0 && !allRunsSelected.value)
 
 const deletingAll = ref(false)
-// Delete all and a row's kill: single requests whose failure would otherwise reach only the console.
-const actionError = ref<ApiErrorDetails | null>(null)
 
 /**
  * Filter object for the DELETE /api/subagent-runs body. Mirrors the param
@@ -382,22 +374,16 @@ async function deleteAll() {
   })
   if (!ok) return
   deletingAll.value = true
-  actionError.value = null
-  try {
-    await $fetch('/api/subagent-runs', {
-      method: 'DELETE',
-      body: { filter: activeFilterPayload() },
-    })
+  const deleted = await attempt(() => $fetch('/api/subagent-runs', {
+    method: 'DELETE',
+    body: { filter: activeFilterPayload() },
+  }))
+  if (deleted) {
     selectedIds.value = new Set()
     page.value = 1
     await refresh()
   }
-  catch (e) {
-    actionError.value = apiErrorDetails(e)
-  }
-  finally {
-    deletingAll.value = false
-  }
+  deletingAll.value = false
 }
 
 // ── Quick-preview peek (mirrors the conversations page) ───────────────

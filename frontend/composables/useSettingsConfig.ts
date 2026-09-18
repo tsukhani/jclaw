@@ -15,12 +15,11 @@ import type { ApiErrorDetails, ConfigEntry, ConfigResponse, ProviderInfo, Provid
  */
 export interface SettingsConfigContext {
   configData: Ref<ConfigResponse | null>
-  refresh: () => Promise<void>
   /**
-   * Re-reads the store, keeping the last good copy when the read fails. For recovering after a failed
-   * write: a failed {@code refresh} resets the data to its default, which empties every panel.
+   * Re-reads the store, keeping the last good copy when the read fails, so a handler calls it after a
+   * failed write as well as a successful one: a half-landed pair of writes then shows what was saved.
    */
-  resync: () => Promise<void>
+  refresh: () => Promise<void>
   saving: Ref<boolean>
   /** Value of the config row {@code key}, or {@code fallback} when absent. */
   configValue: (key: string, fallback?: string) => string
@@ -78,20 +77,33 @@ export function useProvideSettingsConfig() {
     return asyncConfig.data.value?.entries?.find(e => e.key === key)?.value ?? fallback
   }
 
-  async function resync(): Promise<void> {
+  // Not Nuxt's refresh(): that resets the data to its default when the read fails, which would
+  // empty every panel during the same outage that failed a write. The caller is already showing why.
+  const configReads = useLatestRequest()
+  async function refresh(): Promise<void> {
+    const request = configReads.begin()
     try {
-      asyncConfig.data.value = await $fetch<ConfigResponse>('/api/config')
+      const fresh = await $fetch<ConfigResponse>('/api/config')
+      if (configReads.isCurrent(request)) asyncConfig.data.value = fresh
     }
-    catch {
-      // The caller is already showing why its write failed; stale config beats an empty page.
+    catch { /* keep the last good copy */ }
+  }
+
+  const providerReads = useLatestRequest()
+  async function refreshProviders(): Promise<void> {
+    const request = providerReads.begin()
+    try {
+      const fresh = await $fetch<ProviderInfo[]>('/api/providers')
+      if (providerReads.isCurrent(request)) asyncProviders.data.value = fresh
     }
+    catch { /* keep the last good copy */ }
   }
 
   async function saveField(key: string, value: string): Promise<void> {
     saving.value = true
     try {
       await $fetch('/api/config', { method: 'POST', body: { key, value } })
-      asyncConfig.refresh()
+      refresh()
     }
     finally {
       saving.value = false
@@ -135,11 +147,11 @@ export function useProvideSettingsConfig() {
         body: { key, value: editValue.value },
       })
       editingKey.value = null
-      asyncConfig.refresh()
+      refresh()
       // JCLAW-280: provider-scoped config rows (modality, subscription price,
       // API keys) feed the /api/providers projection; refresh it so provider
       // billing rows reflect the new value immediately.
-      if (key.startsWith('provider.')) asyncProviders.refresh()
+      if (key.startsWith('provider.')) refreshProviders()
     }
     catch (e) {
       editError.value = apiErrorDetails(e)
@@ -151,8 +163,7 @@ export function useProvideSettingsConfig() {
 
   const context: SettingsConfigContext = {
     configData: asyncConfig.data as Ref<ConfigResponse | null>,
-    refresh: asyncConfig.refresh,
-    resync,
+    refresh,
     saving,
     configValue,
     saveField,
@@ -164,7 +175,7 @@ export function useProvideSettingsConfig() {
     startEdit,
     updateEntry,
     providersData: asyncProviders.data as Ref<ProviderInfo[] | null>,
-    refreshProviders: asyncProviders.refresh,
+    refreshProviders,
   }
   provide(settingsConfigKey, context)
   return { ...context, asyncConfig, asyncProviders }

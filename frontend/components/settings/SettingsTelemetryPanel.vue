@@ -9,7 +9,6 @@ import {
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import type { ApiErrorDetails } from '~/types/api'
 
 const { configData, saving, refresh } = useSettingsConfig()
 
@@ -61,7 +60,8 @@ const { data: status, refresh: refreshStatus } = useLazyFetch<TelemetryStatus>('
 
 const editing = ref<Field | null>(null)
 const draft = ref('')
-const saveError = ref<ApiErrorDetails | null>(null)
+const { saveError, attempt } = useSaveAttempt()
+const { mutate: mutateTestSpan, error: testSpanError } = useApiMutation()
 const testing = ref(false)
 const testResult = ref<TestResult | null>(null)
 
@@ -76,58 +76,48 @@ async function save(field: Field) {
   const key = KEYS[field]
   const value = draft.value.trim()
   saving.value = true
-  saveError.value = null
-  try {
+  const saved = await attempt(async () => {
     if (field === 'headers' && value === '') {
       await $fetch(`/api/config/${key}`, { method: 'DELETE' })
     }
     else {
       await $fetch('/api/config', { method: 'POST', body: { key, value } })
     }
+  })
+  if (saved) {
     editing.value = null
     testResult.value = null
     await Promise.all([refresh(), refreshStatus()])
   }
-  catch (e) {
-    saveError.value = apiErrorDetails(e)
-  }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 
 async function toggleEnabled(event: Event) {
   const on = (event.target as HTMLInputElement).checked
   saving.value = true
-  saveError.value = null
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: KEYS.enabled, value: on ? 'true' : 'false' } })
+  })) {
     testResult.value = null
     await Promise.all([refresh(), refreshStatus()])
   }
-  catch (e) {
-    saveError.value = apiErrorDetails(e)
-    // :checked is one-way and otel.enabled never moved, so Vue will not reset the box itself.
-    ;(event.target as HTMLInputElement).checked = otel.value.enabled
-  }
-  finally {
-    saving.value = false
-  }
+  // :checked is one-way and otel.enabled never moved, so Vue will not reset the box itself.
+  else (event.target as HTMLInputElement).checked = otel.value.enabled
+  saving.value = false
 }
 
 async function sendTestSpan() {
   testing.value = true
   testResult.value = null
-  try {
-    testResult.value = await $fetch<TestResult>('/api/telemetry/test', { method: 'POST' })
+  const res = await mutateTestSpan<TestResult>('/api/telemetry/test', { method: 'POST' })
+  if (res === null) {
+    testResult.value = { delivered: false, traceId: '', error: testSpanError.value }
+  }
+  else {
+    testResult.value = res
     await refreshStatus()
   }
-  catch (e) {
-    testResult.value = { delivered: false, traceId: '', error: apiErrorDetails(e).message }
-  }
-  finally {
-    testing.value = false
-  }
+  testing.value = false
 }
 
 const rows: { field: Field, label: string, hint: string }[] = [

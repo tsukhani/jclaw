@@ -28,57 +28,46 @@ async function checkPasswordSet(): Promise<boolean> {
  *  Stateless (no closure over useAuth refs), so it lives at module scope.
  */
 async function setupPassword(pass: string): Promise<{ ok: boolean, error?: string }> {
-  try {
-    await $fetch('/api/auth/setup', {
-      method: 'POST',
-      body: { password: pass },
-    })
-    return { ok: true }
+  const { saveError, attempt } = useSaveAttempt()
+  const ok = await attempt(() => $fetch('/api/auth/setup', {
+    method: 'POST',
+    body: { password: pass },
+  }))
+  if (ok) return { ok: true }
+  const code = saveError.value?.code
+  if (code === 'already_set') {
+    return { ok: false, error: 'already_set' }
   }
-  catch (e: unknown) {
-    const err = e as { data?: { code?: string, message?: string }, status?: number }
-    const code = err?.data?.code
-    if (err?.status === 409 || code === 'already_set') {
-      return { ok: false, error: 'already_set' }
-    }
-    if (code === 'password_too_short' || code === 'password_too_long' || code === 'password_breached') {
-      return { ok: false, error: code }
-    }
-    return { ok: false, error: 'network' }
+  if (code === 'password_too_short' || code === 'password_too_long' || code === 'password_breached') {
+    return { ok: false, error: code }
   }
+  return { ok: false, error: 'network' }
 }
 
 export function useAuth() {
   const authenticated = useState('auth:authenticated', () => false)
   const username = useState<string | null>('auth:username', () => null)
+  const { saveError, attempt } = useSaveAttempt()
 
   async function login(user: string, pass: string): Promise<boolean> {
-    try {
-      await $fetch('/api/auth/login', {
-        method: 'POST',
-        body: { username: user, password: pass },
-      })
-      authenticated.value = true
-      username.value = user
-      // A new session re-arms the first-run nudges. The "Leave a star!"
-      // pointer is scoped to a login, not to a browser, so signing back in
-      // surfaces it again rather than it being spent forever on whichever
-      // load happened to fire it first.
-      resetStarNudge()
-      return true
-    }
-    catch {
-      return false
-    }
+    const ok = await attempt(() => $fetch('/api/auth/login', {
+      method: 'POST',
+      body: { username: user, password: pass },
+    }))
+    if (!ok) return false
+    authenticated.value = true
+    username.value = user
+    // A new session re-arms the first-run nudges. The "Leave a star!"
+    // pointer is scoped to a login, not to a browser, so signing back in
+    // surfaces it again rather than it being spent forever on whichever
+    // load happened to fire it first.
+    resetStarNudge()
+    return true
   }
 
   async function logout() {
-    try {
-      await $fetch('/api/auth/logout', { method: 'POST' })
-    }
-    catch {
-      // Ignore errors on logout
-    }
+    // A refused logout still signs the client out.
+    await attempt(() => $fetch('/api/auth/logout', { method: 'POST' }))
     authenticated.value = false
     username.value = null
     navigateTo('/login')
@@ -108,7 +97,9 @@ export function useAuth() {
    * when the server does not reset, so the caller can say why.
    */
   async function resetPassword(): Promise<void> {
-    await $fetch('/api/auth/reset-password', { method: 'POST' })
+    const ok = await attempt(() => $fetch('/api/auth/reset-password', { method: 'POST' }))
+    // The panel reads the cause back through apiErrorDetails, which takes it from `data`.
+    if (!ok) throw Object.assign(new Error(saveError.value!.message), { data: saveError.value })
     authenticated.value = false
     username.value = null
   }

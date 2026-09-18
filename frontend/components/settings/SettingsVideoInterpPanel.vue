@@ -5,9 +5,9 @@
 // sampling frames + captioning them, mirroring Transcription/Captioning.
 // Reads the shared config store + provider-model catalog; derives the main
 // agent's model as the default via its own (Nuxt-deduped) /api/agents fetch.
-import type { Agent, ApiErrorDetails, ProviderModelDef } from '~/types/api'
+import type { Agent, ProviderModelDef } from '~/types/api'
 
-const { configData, saving, refresh, resync, getProviderModels, apiKeyConfigured } = useSettingsConfig()
+const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 const openrouterApiKeyConfigured = computed(() => apiKeyConfigured('openrouter'))
 const { data: agentsList } = await useFetch<Agent[]>('/api/agents')
 const mainAgent = computed(() => agentsList.value?.find(a => a.name === 'main') ?? null)
@@ -87,7 +87,8 @@ const chosenVideoProvider = ref(videoProvider.value)
 watch(videoProvider, (v) => {
   chosenVideoProvider.value = v
 })
-const videoProviderError = ref<ApiErrorDetails | null>(null)
+const providerSave = useSaveAttempt()
+const videoProviderError = providerSave.saveError
 const videoModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'video.model')?.value ?? '',
 )
@@ -190,7 +191,7 @@ const { saveError, attempt } = useSaveAttempt()
 
 async function toggleVideoEnabled() {
   saving.value = true
-  const saved = await attempt(async () => {
+  await attempt(async () => {
     if (videoEnabled.value) {
       await Promise.all([
         $fetch('/api/config', { method: 'POST', body: { key: 'video.provider', value: '' } }),
@@ -201,29 +202,21 @@ async function toggleVideoEnabled() {
       await $fetch('/api/config', { method: 'POST', body: { key: 'video.provider', value: 'openrouter' } })
     }
   })
-  if (saved) refresh()
   // Turning off writes two keys, which can half-land: show what was saved.
-  else await resync()
+  await refresh()
   saving.value = false
 }
 async function setVideoProvider(value: string) {
   saving.value = true
-  videoProviderError.value = null
-  try {
-    // Reset the model on a provider switch — a model from the previous provider isn't valid here.
-    await Promise.all([
-      $fetch('/api/config', { method: 'POST', body: { key: 'video.provider', value } }),
-      $fetch('/api/config', { method: 'POST', body: { key: 'video.model', value: '' } }),
-    ])
-    refresh()
-  }
-  catch (e) {
-    // The two writes can half-land: show what was saved, not what was there before.
-    await resync()
-    chosenVideoProvider.value = videoProvider.value
-    videoProviderError.value = apiErrorDetails(e)
-  }
-  finally { saving.value = false }
+  // Reset the model on a provider switch — a model from the previous provider isn't valid here.
+  const saved = await providerSave.attempt(() => Promise.all([
+    $fetch('/api/config', { method: 'POST', body: { key: 'video.provider', value } }),
+    $fetch('/api/config', { method: 'POST', body: { key: 'video.model', value: '' } }),
+  ]))
+  // The two writes can half-land: show what was saved, not what was there before.
+  await refresh()
+  if (!saved) chosenVideoProvider.value = videoProvider.value
+  saving.value = false
 }
 async function setVideoModel(value: string) {
   saving.value = true

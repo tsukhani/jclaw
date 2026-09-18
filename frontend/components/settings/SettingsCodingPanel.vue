@@ -8,7 +8,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 
-const { configData, saving, refresh, resync, getProviderModels } = useSettingsConfig()
+const { configData, saving, refresh, getProviderModels } = useSettingsConfig()
 
 // JCLAW-229: image-generation-only providers are NOT chat LLM providers — their
 // keys are set in the Image Generation section, so skip them when listing the
@@ -119,16 +119,17 @@ async function saveField(configKey: string, value: string) {
 // One click fills both the command and the adapter id so runtime="acp" is ready.
 async function useHarness(h: DetectedHarness) {
   saving.value = true
-  try {
+  const saved = await attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.acp.command', value: h.command } })
     await $fetch('/api/config', { method: 'POST', body: { key: 'subagent.acp.harness', value: h.harness } })
+  })
+  // The command and adapter writes can half-land: show what was saved, not what was there before.
+  await refresh()
+  if (saved) {
     editingField.value = null
-    refresh()
     await refreshPreview()
   }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 
 // Border/text styling for a chip: dim when unavailable, emerald when it's the
@@ -145,33 +146,31 @@ function chipClass(h: DetectedHarness): string {
 // resolves on PATH, and on success it's persisted + shown as a new chip.
 const customCommandInput = ref('')
 const customError = ref('')
-const addingCustom = ref(false)
+const { mutate: mutateCustomHarness, loading: addingCustom, error: customMutationError } = useApiMutation()
 
 async function addCustomHarness() {
   const cmd = customCommandInput.value.trim()
   if (!cmd) return
-  addingCustom.value = true
   customError.value = ''
-  try {
-    const res = await $fetch<DetectedHarness>('/api/subagents/acp-harnesses', {
-      method: 'POST', body: { command: cmd },
-    })
-    if (res.available) {
-      customCommandInput.value = ''
-      await refreshHarnesses()
-    }
-    else {
-      customError.value = res.reason || 'That command’s binary was not found on PATH.'
-    }
+  const res = await mutateCustomHarness<DetectedHarness>('/api/subagents/acp-harnesses', {
+    method: 'POST', body: { command: cmd },
+  })
+  if (res === null) {
+    customError.value = customMutationError.value ?? 'Request failed'
   }
-  finally {
-    addingCustom.value = false
+  else if (res.available) {
+    customCommandInput.value = ''
+    await refreshHarnesses()
+  }
+  else {
+    customError.value = res.reason || 'That command’s binary was not found on PATH.'
   }
 }
 
 async function removeCustomHarness(command: string) {
-  await $fetch('/api/subagents/acp-harnesses', { method: 'DELETE', query: { command } })
-  await refreshHarnesses()
+  if (await attempt(async () => {
+    await $fetch('/api/subagents/acp-harnesses', { method: 'DELETE', query: { command } })
+  })) await refreshHarnesses()
 }
 
 // Model the acp coding harness runs with instead of its own default. Unset (the
@@ -198,12 +197,8 @@ async function saveAcpModel(value: string) {
       await $fetch('/api/config/subagent.acp.modelId', { method: 'DELETE' })
     }
   })
-  if (saved) {
-    refresh()
-    await refreshPreview()
-  }
-  // The provider and model writes can half-land: show what was saved, not what was there before.
-  else await resync()
+  await refresh()
+  if (saved) await refreshPreview()
   saving.value = false
 }
 </script>

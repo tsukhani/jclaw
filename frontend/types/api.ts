@@ -981,4 +981,6 @@ export interface ApiErrorDetails {
   code: string | null
   message: string
   template: ApiErrorTemplate | null
+  /** HTTP status of the refusal, or null when nothing answered. Play's bare notFound() sends no envelope, so a 404 is only readable here. */
+  status?: number | null
 }

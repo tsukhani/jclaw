@@ -63,13 +63,9 @@ export interface UseAgentModel {
   overrideError: Ref<string | null>
 }
 
-function describeRejection(err: unknown): string {
-  const data = (err as { data?: { message?: string } })?.data
-  return data?.message ?? (err instanceof Error ? err.message : 'The change was rejected.')
-}
-
 export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   const { agents, selectedAgentId, selectedConvoId, conversations, providers, refreshConversations } = deps
+  const { saveError, attempt } = useSaveAttempt()
 
   // Fresh-chat picks. They apply to the conversation the next message creates, so
   // they die with a change of agent, and once that conversation's row has arrived
@@ -380,18 +376,12 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
       pendingThinking.value = mode
       return
     }
-    try {
-      await $fetch(`/api/conversations/${convoId}/thinking-override`, {
-        method: 'PUT',
-        body: { thinkingMode: mode },
-      })
-      overrideError.value = null
-      refreshConversations()
-    }
-    catch (err) {
-      overrideError.value = describeRejection(err)
-      refreshConversations()
-    }
+    const ok = await attempt(() => $fetch(`/api/conversations/${convoId}/thinking-override`, {
+      method: 'PUT',
+      body: { thinkingMode: mode },
+    }))
+    overrideError.value = ok ? null : saveError.value!.message
+    refreshConversations()
   }
 
   /**
@@ -418,21 +408,15 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
       // Write the conversation override. Match the refresh-on-success pattern
       // used by updateAgentSetting so the local conversations list realigns
       // with persisted state (including the fields listConversations now
-      // returns — modelProviderOverride / modelIdOverride).
-      try {
-        await $fetch(`/api/conversations/${convoId}/model-override`, {
-          method: 'PUT',
-          body: { modelProvider, modelId },
-        })
-        overrideError.value = null
-        refreshConversations()
-      }
-      catch (err) {
-        // Server rejected (unknown provider/model) or network error. Refetch
-        // to realign the dropdown with persisted state, and say why.
-        overrideError.value = describeRejection(err)
-        refreshConversations()
-      }
+      // returns — modelProviderOverride / modelIdOverride). A rejection
+      // (unknown provider/model, network) refetches too, so the dropdown
+      // realigns with persisted state, and says why.
+      const ok = await attempt(() => $fetch(`/api/conversations/${convoId}/model-override`, {
+        method: 'PUT',
+        body: { modelProvider, modelId },
+      }))
+      overrideError.value = ok ? null : saveError.value!.message
+      refreshConversations()
       return
     }
 

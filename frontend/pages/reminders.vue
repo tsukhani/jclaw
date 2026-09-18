@@ -79,7 +79,7 @@ const {
   deleteSelected,
 } = useBulkSelect<Task>({
   rows: reminders,
-  deleteOne: id => $fetch<unknown>(`/api/tasks/${id}`, { method: 'DELETE' }),
+  deleteUrl: id => `/api/tasks/${id}`,
   onComplete: () => refresh(),
   confirmCopy: count => ({
     title: 'Delete reminders',

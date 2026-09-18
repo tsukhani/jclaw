@@ -170,21 +170,22 @@ const catalogScrapedLabel = computed(() => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString()
 })
 
+// Catalog, rename and delete writes whose failure is only logged; none reads the error back.
+const { mutate: mutateSkill } = useApiMutation()
+
 // Re-download a static catalog's snapshot from its source, then re-browse.
 const catalogRefreshing = ref(false)
 async function refreshCatalog() {
   if (catalogType.value !== 'static' || catalogRefreshing.value) return
   catalogRefreshing.value = true
-  try {
-    await $fetch('/api/skills/catalog/refresh', { method: 'POST', body: { catalog: selectedCatalog.value } })
+  const refreshed = await mutateSkill('/api/skills/catalog/refresh', { method: 'POST', body: { catalog: selectedCatalog.value } })
+  // On failure the prior results stay; the user can retry.
+  if (refreshed !== null) {
     catalogResults.value = []
     resetCatalogNav()
     await runCatalogSearch() // re-downloads + re-indexes lazily
   }
-  catch { /* keep prior results; the user can retry */ }
-  finally {
-    catalogRefreshing.value = false
-  }
+  catalogRefreshing.value = false
 }
 
 function selectCatalog(id: string) {
@@ -250,25 +251,18 @@ async function importSkill(s: CatalogSkill) {
   const key = catalogKey(s)
   importingKey.value = key
   importMessage.value = null
-  try {
-    const res = await $fetch<{ status: string, message?: string, skillName?: string }>(
-      '/api/skills/catalog/import',
-      { method: 'POST', body: { source: s.source, skillId: s.skillId, provider: s.provider, owner: s.owner } },
-    )
-    if (res.status === 'imported') {
-      importedKeys.value.add(key)
-      await refreshSkills() // the new skill appears in the Global Skills panel
-    }
-    else {
-      importMessage.value = `${s.displayName || s.skillId}: ${res.message || 'import failed'}`
-    }
+  const res = await mutateSkill<{ status: string, message?: string, skillName?: string }>(
+    '/api/skills/catalog/import',
+    { method: 'POST', body: { source: s.source, skillId: s.skillId, provider: s.provider, owner: s.owner } },
+  )
+  if (res?.status === 'imported') {
+    importedKeys.value.add(key)
+    await refreshSkills() // the new skill appears in the Global Skills panel
   }
-  catch {
-    importMessage.value = `${s.displayName || s.skillId}: import failed`
+  else {
+    importMessage.value = `${s.displayName || s.skillId}: ${res?.message || 'import failed'}`
   }
-  finally {
-    importingKey.value = null
-  }
+  importingKey.value = null
 }
 
 // Panel filters — case-insensitive substring match against the displayed name.
@@ -488,17 +482,23 @@ function asFetchErrorMessage(err: unknown, fallback: string): string {
   return typeof msg === 'string' ? msg : fallback
 }
 
+// copyToAgent answers 400 and 500 with renderText, a body apiErrorDetails cannot read; keep it as the message.
+function rethrowPlainText(err: unknown, fallback: string): never {
+  throw new Error(asFetchErrorMessage(err, fallback))
+}
+
+// Drag-and-drop writes; a failure is shown on the drag banner.
+const dragSave = useSaveAttempt()
+
 async function updateAgentSkillFromGlobal(agentId: number, skill: AgentSkill) {
   const skillName = (skill.folderName as string) || skill.name
-  try {
+  const ok = await dragSave.attempt(async () => {
     await $fetch(`/api/agents/${agentId}/skills/${skillName}/copy`, { method: 'POST' })
+      .catch(err => rethrowPlainText(err, 'Failed to update skill from global'))
     agentSkillsMap.value[agentId] = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
-    showInfo(`Updated '${skillName}' for this agent`)
-  }
-  catch (err: unknown) {
-    console.error('Failed to update skill from global:', err)
-    showDragError(asFetchErrorMessage(err, 'Failed to update skill from global'))
-  }
+  })
+  if (ok) showInfo(`Updated '${skillName}' for this agent`)
+  else showDragError(dragSave.saveError.value!.message)
 }
 
 // --- Global skill → Agent card (copy to workspace) ---
@@ -558,15 +558,13 @@ async function onAgentDrop(e: DragEvent, agent: Agent) {
     const cmp = compareVersions((existing.version as string) || '0.0.0', globalVersion)
     if (cmp >= 0) {
       if (!existing.enabled) {
-        try {
+        const ok = await dragSave.attempt(async () => {
           await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
             method: 'PUT', body: { enabled: true },
           })
           agentSkillsMap.value[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
-        }
-        catch (err) {
-          showDragError(apiErrorDetails(err).message)
-        }
+        })
+        if (!ok) showDragError(dragSave.saveError.value!.message)
       }
       dragging.value = null
       return
@@ -585,18 +583,13 @@ async function onAgentDrop(e: DragEvent, agent: Agent) {
     }
   }
 
-  try {
+  const ok = await dragSave.attempt(async () => {
     await $fetch(`/api/agents/${agent.id}/skills/${skillName}/copy`, { method: 'POST' })
+      .catch(err => rethrowPlainText(err, 'Failed to add skill to agent.'))
     agentSkillsMap.value[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
-    if (existing) showInfo(`Updated '${skillName}' on agent '${agent.name}' to version ${globalVersion}`)
-  }
-  catch (err: unknown) {
-    // Surface the server's plain-text error message regardless of status code.
-    // The backend uses renderText for both 400 (validation/scan failures) and
-    // 500 (IOException during copy), so the body is always parseable here.
-    console.error('Failed to copy skill:', err)
-    showDragError(asFetchErrorMessage(err, 'Failed to add skill to agent.'))
-  }
+  })
+  if (!ok) showDragError(dragSave.saveError.value!.message)
+  else if (existing) showInfo(`Updated '${skillName}' on agent '${agent.name}' to version ${globalVersion}`)
   dragging.value = null
 }
 
@@ -643,11 +636,11 @@ async function onGlobalSectionDrop(e: DragEvent) {
   promotingSkills.value = new Set([...promotingSkills.value, skillName])
 
   // Send promote request — returns immediately, SSE event will notify on completion
-  $fetch('/api/skills/promote', {
+  void mutateSkill('/api/skills/promote', {
     method: 'POST',
     body: { agentId, skillName },
-  }).catch((err) => {
-    console.error('Failed to promote skill:', err)
+  }).then((accepted) => {
+    if (accepted !== null) return
     const s = new Set(promotingSkills.value)
     s.delete(skillName)
     promotingSkills.value = s
@@ -676,19 +669,12 @@ async function commitRename(skill: Skill) {
     cancelRename()
     return
   }
-  try {
-    await $fetch(`/api/skills/${oldName}/rename`, {
-      method: 'PUT', body: { newName },
-    })
-    refreshSkills()
-  }
-  catch (err: unknown) {
-    console.error('Failed to rename skill:', err)
-  }
-  finally {
-    renamingSkill.value = null
-    renameValue.value = ''
-  }
+  const renamed = await mutateSkill(`/api/skills/${oldName}/rename`, {
+    method: 'PUT', body: { newName },
+  })
+  if (renamed !== null) refreshSkills()
+  renamingSkill.value = null
+  renameValue.value = ''
 }
 
 // --- Skill editing (create / edit form) ---
@@ -823,17 +809,12 @@ async function selectFile(file: SkillFile) {
 
 async function deleteSkill(skill: Skill | AgentSkill) {
   const folderName = (skill.folderName as string) || skill.name
-  try {
-    await $fetch(`/api/skills/${folderName}`, { method: 'DELETE' })
-    editing.value = null
-    skillFiles.value = []
-    activeFile.value = null
-    refreshSkills()
-    loadAllAgentSkills()
-  }
-  catch (e) {
-    console.error('Failed to delete skill:', e)
-  }
+  if (await mutateSkill(`/api/skills/${folderName}`, { method: 'DELETE' }) === null) return
+  editing.value = null
+  skillFiles.value = []
+  activeFile.value = null
+  refreshSkills()
+  loadAllAgentSkills()
 }
 
 async function editAgentSkill(agentId: number, skill: AgentSkill) {
@@ -869,20 +850,15 @@ async function editAgentSkill(agentId: number, skill: AgentSkill) {
 
 async function deleteAgentSkill(agentId: number, skill: Skill | AgentSkill) {
   const name = (skill.folderName as string) || skill.name
-  try {
-    await $fetch(`/api/agents/${agentId}/skills/${name}/delete`, { method: 'DELETE' })
-    editing.value = null
-    editingAgentId.value = null
-    skillFiles.value = []
-    skillTools.value = []
-    skillCommands.value = []
-    skillAuthor.value = ''
-    activeFile.value = null
-    loadAllAgentSkills()
-  }
-  catch (e) {
-    console.error('Failed to delete agent skill:', e)
-  }
+  if (await mutateSkill(`/api/agents/${agentId}/skills/${name}/delete`, { method: 'DELETE' }) === null) return
+  editing.value = null
+  editingAgentId.value = null
+  skillFiles.value = []
+  skillTools.value = []
+  skillCommands.value = []
+  skillAuthor.value = ''
+  activeFile.value = null
+  loadAllAgentSkills()
 }
 
 function clearViewer() {

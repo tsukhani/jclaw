@@ -30,72 +30,44 @@ const logLevelOptions = computed(() => loggingData.value?.validLevels ?? [])
 const knownLoggers = computed(() => loggingData.value?.knownLoggers ?? [])
 const newLoggerName = ref('')
 const newLoggerLevel = ref('DEBUG')
-const loggingError = ref<string | null>(null)
+const { saveError, attempt } = useSaveAttempt()
+const loggingError = computed(() => saveError.value?.message ?? null)
 
 const newLoggerUnknown = computed(() => {
   const n = newLoggerName.value.trim()
   return n.length > 0 && n.toLowerCase() !== 'root' && !knownLoggers.value.includes(n)
 })
 
-// The backend returns the rejection text as the response body on a 400
-// (e.g. an invalid level); surface it rather than a generic "fetch failed".
-function logLevelErrorMessage(e: unknown): string {
-  if (e && typeof e === 'object' && 'data' in e) {
-    const data = (e as { data?: unknown }).data
-    if (typeof data === 'string' && data.trim()) return data
-  }
-  return e instanceof Error ? e.message : 'Request failed'
-}
-
 async function addLoggerLevel() {
   const logger = newLoggerName.value.trim()
   if (!logger) return
   saving.value = true
-  loggingError.value = null
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/logging/levels', {
       method: 'POST',
       body: { logger, level: newLoggerLevel.value },
     })
+  })) {
     newLoggerName.value = ''
     refreshLogging()
   }
-  catch (e) {
-    loggingError.value = logLevelErrorMessage(e)
-  }
-  finally {
-    saving.value = false
-  }
+  saving.value = false
 }
 
 async function updateLoggerLevel(logger: string, level: string) {
   saving.value = true
-  loggingError.value = null
-  try {
+  if (await attempt(async () => {
     await $fetch('/api/logging/levels', { method: 'POST', body: { logger, level } })
-    refreshLogging()
-  }
-  catch (e) {
-    loggingError.value = logLevelErrorMessage(e)
-  }
-  finally {
-    saving.value = false
-  }
+  })) refreshLogging()
+  saving.value = false
 }
 
 async function deleteLoggerLevel(logger: string) {
   saving.value = true
-  loggingError.value = null
-  try {
+  if (await attempt(async () => {
     await $fetch(`/api/logging/levels/${encodeURIComponent(logger)}`, { method: 'DELETE' })
-    refreshLogging()
-  }
-  catch (e) {
-    loggingError.value = logLevelErrorMessage(e)
-  }
-  finally {
-    saving.value = false
-  }
+  })) refreshLogging()
+  saving.value = false
 }
 </script>
 

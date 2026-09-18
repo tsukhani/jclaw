@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { setResponseStatus } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 import { looksLikeEmbeddingModel } from '~/utils/embeddingModels'
@@ -285,14 +286,12 @@ describe('Settings page — Memory Embeddings', () => {
         started = true
         // Mirror ApiResponses.error's real body — {type, code, message} with a 409
         // status — so the panel's extraction is tested against what it will meet.
-        throw createError({
-          statusCode: 409,
-          data: {
-            type: 'error',
-            code: 'conflict',
-            message: 'The configured model is 1536-dimensional, above the 1024 the search index supports.',
-          },
-        })
+        setResponseStatus(event, 409)
+        return {
+          type: 'error',
+          code: 'conflict',
+          message: 'The configured model is 1536-dimensional, above the 1024 the search index supports.',
+        }
       }
       return { running: false, processed: 0, total: 0, model: EMBED_MODEL, error: null, upToDate: false }
     })

@@ -52,31 +52,28 @@ async function fetchUnread() {
 }
 
 const toastErrors = reactive(new Map<number, ApiErrorDetails>())
+const { mutate, errorDetails: writeError } = useApiMutation()
 
 // A 404 means another surface already removed the row, which is what the click asked for.
-function alreadyGone(e: unknown): boolean {
-  return (e as { statusCode?: number } | undefined)?.statusCode === 404
+function alreadyGone(): boolean {
+  const e = writeError.value
+  return e?.code === 'not_found' || e?.status === 404
 }
 
-async function deleteIfPresent(url: string) {
-  try {
-    await $fetch(url, { method: 'DELETE' })
-  }
-  catch (e) {
-    if (!alreadyGone(e)) throw e
-  }
+function failToast(id: number) {
+  if (writeError.value) toastErrors.set(id, writeError.value)
+}
+
+/** Resolves false only when the write failed for a reason other than the row being gone. */
+async function deleteIfPresent(url: string): Promise<boolean> {
+  return await mutate(url, { method: 'DELETE' }) !== null || alreadyGone()
 }
 
 async function acknowledge(id: number) {
   toastErrors.delete(id)
-  try {
-    await $fetch(`/api/notifications/${id}/ack`, { method: 'POST' })
-  }
-  catch (e) {
-    if (!alreadyGone(e)) {
-      toastErrors.set(id, apiErrorDetails(e))
-      return
-    }
+  if (await mutate(`/api/notifications/${id}/ack`, { method: 'POST' }) === null && !alreadyGone()) {
+    failToast(id)
+    return
   }
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
@@ -91,12 +88,9 @@ async function dismiss(id: number) {
   const toast = toasts.value.find(t => t.id === id)
   const sourceTaskId = toast?.sourceTaskId ?? null
   toastErrors.delete(id)
-  try {
-    if (sourceTaskId != null) await deleteIfPresent(`/api/tasks/${sourceTaskId}`)
-    await deleteIfPresent(`/api/notifications/${id}`)
-  }
-  catch (e) {
-    toastErrors.set(id, apiErrorDetails(e))
+  const taskGone = sourceTaskId == null || await deleteIfPresent(`/api/tasks/${sourceTaskId}`)
+  if (!taskGone || !await deleteIfPresent(`/api/notifications/${id}`)) {
+    failToast(id)
     return
   }
   toasts.value = toasts.value.filter(t => t.id !== id)

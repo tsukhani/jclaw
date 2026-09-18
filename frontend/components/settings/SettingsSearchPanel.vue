@@ -9,7 +9,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 
-const { configData, refresh, resync, editingKey, editValue, editError, startEdit, updateEntry } = useSettingsConfig()
+const { configData, refresh, editingKey, editValue, editError, startEdit, updateEntry } = useSettingsConfig()
 
 // --- Search providers ---
 // Display metadata only. All runtime state (enabled, apiKey, baseUrl) lives in the
@@ -131,10 +131,11 @@ function searchRecencyFilter(providerId: string): string {
 }
 
 // The recency select sits inside its provider card, below the panel's alert, so its failure shows there.
-const { saveError: recencyError, attempt: attemptRecency } = useSaveAttempt()
+const recency = useSaveAttempt()
+const recencyError = recency.saveError
 
 async function updateSearchRecencyFilter(providerId: string, value: string) {
-  if (await attemptRecency(async () => {
+  if (await recency.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: `search.${providerId}.recencyFilter`, value } })
   })) refresh()
 }
@@ -193,7 +194,7 @@ async function onSearchDrop(ev: DragEvent, targetId: string) {
   )))
   if (saved) refresh()
   // One write per provider, which can half-land: show the order that was saved.
-  else await resync()
+  else await refresh()
 }
 
 function onSearchDragEnd() {

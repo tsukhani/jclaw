@@ -7,7 +7,7 @@
  * breakdowns, and a reset (trash) that clears the recorded metrics.
  */
 import { ChartBarIcon, ExclamationTriangleIcon, TableCellsIcon, TrashIcon } from '@heroicons/vue/24/outline'
-import type { Agent, ApiErrorDetails } from '~/types/api'
+import type { Agent } from '~/types/api'
 
 const props = defineProps<{ agents: Agent[] | null | undefined }>()
 
@@ -159,22 +159,13 @@ const maxTypeSaved = computed(() => Math.max(1, ...agg.value.byType.map(t => t.s
 const maxAlgoCount = computed(() => Math.max(1, ...agg.value.byAlgo.map(a => a.count)))
 const windowLabel = computed(() => WINDOWS.find(w => w.key === selectedWindow.value)?.label ?? '')
 
-const resetError = ref<ApiErrorDetails | null>(null)
+const { saveError: resetError, attempt } = useSaveAttempt()
 
 async function resetMetrics() {
   if (resetting.value) return
   resetting.value = true
-  resetError.value = null
-  try {
-    await $fetch('/api/metrics/compression', { method: 'DELETE' })
-    await refresh()
-  }
-  catch (e) {
-    resetError.value = apiErrorDetails(e)
-  }
-  finally {
-    resetting.value = false
-  }
+  if (await attempt(() => $fetch('/api/metrics/compression', { method: 'DELETE' }))) await refresh()
+  resetting.value = false
 }
 
 function pct(n: number) {

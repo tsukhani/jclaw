@@ -114,6 +114,8 @@ export function useChatMessageActions(deps: UseChatMessageActionsDeps): UseChatM
   }
 
   const actionError = ref<string | null>(null)
+  const { mutate } = useApiMutation()
+  const { saveError, attempt } = useSaveAttempt()
 
   /**
    * Deletes messages [startIdx..end) newest first, dropping each from the transcript once the server
@@ -125,15 +127,11 @@ export function useChatMessageActions(deps: UseChatMessageActionsDeps): UseChatM
       for (let i = messages.value.length - 1; i >= startIdx; i--) {
         const m = messages.value[i]!
         if (m.id) {
-          try {
-            await $fetch(`/api/conversations/${convoId}/messages/${m.id}`, { method: 'DELETE' })
-          }
-          catch (e) {
-            // Already gone is what the rewind wants; any other failure leaves the model reading this message.
-            if ((e as { statusCode?: number }).statusCode !== 404) {
-              actionError.value = apiErrorDetails(e).message
-              return false
-            }
+          const ok = await attempt(() => $fetch(`/api/conversations/${convoId}/messages/${m.id}`, { method: 'DELETE' }))
+          // Already gone is what the rewind wants; any other failure leaves the model reading this message.
+          if (!ok && saveError.value?.status !== 404) {
+            actionError.value = saveError.value!.message
+            return false
           }
         }
         messages.value.splice(i, 1)
@@ -179,19 +177,14 @@ export function useChatMessageActions(deps: UseChatMessageActionsDeps): UseChatM
     if (!msg.id) return
     const convoId = selectedConvoId.value
     if (!convoId) return
-    try {
-      await $fetch(`/api/conversations/${convoId}/messages/${msg.id}`, { method: 'DELETE' })
-      // Splice optimistically rather than refetching the whole transcript —
-      // keeps the remaining messages' thinkingCollapsed / _thinkingDurationMs
-      // bubble state intact (they're client-only refs that a refetch would lose).
-      const idx = messages.value.findIndex(m => m.id === msg.id)
-      if (idx >= 0) {
-        messages.value.splice(idx, 1)
-        triggerRef(messages)
-      }
-    }
-    catch (e) {
-      console.error('Failed to delete message:', e)
+    if (await mutate(`/api/conversations/${convoId}/messages/${msg.id}`, { method: 'DELETE' }) === null) return
+    // Splice optimistically rather than refetching the whole transcript —
+    // keeps the remaining messages' thinkingCollapsed / _thinkingDurationMs
+    // bubble state intact (they're client-only refs that a refetch would lose).
+    const idx = messages.value.findIndex(m => m.id === msg.id)
+    if (idx >= 0) {
+      messages.value.splice(idx, 1)
+      triggerRef(messages)
     }
   }
 
@@ -202,14 +195,9 @@ export function useChatMessageActions(deps: UseChatMessageActionsDeps): UseChatM
    * and triggerRef (messages is a shallowRef) instead of refetching the transcript.
    */
   async function deleteAttachment(att: MessageAttachment) {
-    try {
-      await $fetch(`/api/attachments/${att.uuid}`, { method: 'DELETE' })
-      att.deleted = true
-      triggerRef(messages)
-    }
-    catch (e) {
-      console.error('Failed to delete attachment:', e)
-    }
+    if (await mutate(`/api/attachments/${att.uuid}`, { method: 'DELETE' }) === null) return
+    att.deleted = true
+    triggerRef(messages)
   }
 
   async function editUserMessage(msg: Message) {

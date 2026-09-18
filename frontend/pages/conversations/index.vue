@@ -26,6 +26,7 @@ const pinnedConversations = ref<Conversation[]>([])
 // Surfaces the pin cap's 409 (and any other failed row action) as a dismissible
 // line rather than a silent no-op.
 const actionNotice = ref<string | null>(null)
+const { mutate } = useApiMutation()
 
 // Id of the row whose Name cell is currently an input. Null = nothing is being
 // renamed; only one row at a time.
@@ -237,20 +238,15 @@ async function deleteSelected() {
   })
   if (!ok) return
   deletingBulk.value = true
-  try {
-    await $fetch('/api/conversations', {
-      method: 'DELETE',
-      body: { ids: Array.from(selectedIds.value) },
-    })
+  const res = await mutate('/api/conversations', {
+    method: 'DELETE',
+    body: { ids: Array.from(selectedIds.value) },
+  })
+  if (res !== null) {
     selectedIds.value = new Set()
     await load()
   }
-  catch (e) {
-    console.error('Failed to delete conversations:', e)
-  }
-  finally {
-    deletingBulk.value = false
-  }
+  deletingBulk.value = false
 }
 
 const deletingAll = ref(false)
@@ -316,21 +312,16 @@ async function deleteAll() {
   })
   if (!ok) return
   deletingAll.value = true
-  try {
-    await $fetch('/api/conversations', {
-      method: 'DELETE',
-      body: { filter: activeFilterPayload() },
-    })
+  const res = await mutate('/api/conversations', {
+    method: 'DELETE',
+    body: { filter: activeFilterPayload() },
+  })
+  if (res !== null) {
     selectedIds.value = new Set()
     page.value = 1
     await load()
   }
-  catch (e) {
-    console.error('Failed to delete all conversations:', e)
-  }
-  finally {
-    deletingAll.value = false
-  }
+  deletingAll.value = false
 }
 
 /**
@@ -340,28 +331,25 @@ async function deleteAll() {
  */
 async function toggleStar(convo: Conversation) {
   actionNotice.value = null
-  try {
-    await $fetch(`/api/conversations/${convo.id}/star`, { method: convo.starred ? 'DELETE' : 'PUT' })
-    await reload()
-  }
-  catch (e) {
-    console.error('Failed to update star:', e)
+  const res = await mutate(`/api/conversations/${convo.id}/star`, { method: convo.starred ? 'DELETE' : 'PUT' })
+  if (res === null) {
     actionNotice.value = 'Could not update the star on that conversation.'
+    return
   }
+  await reload()
 }
 
+const { mutate: mutatePin, errorDetails: pinError } = useApiMutation()
 async function togglePin(convo: Conversation) {
   actionNotice.value = null
-  try {
-    await $fetch(`/api/conversations/${convo.id}/pin`, { method: convo.pinned ? 'DELETE' : 'PUT' })
-    selectedIds.value = new Set()
-    await reload()
-  }
-  catch (e) {
+  const res = await mutatePin(`/api/conversations/${convo.id}/pin`, { method: convo.pinned ? 'DELETE' : 'PUT' })
+  if (res === null) {
     // The pin PUT 409s at the cap; the server's message names the limit.
-    const message = (e as { data?: { message?: string } })?.data?.message
-    actionNotice.value = message ?? 'Could not update the pin on that conversation.'
+    actionNotice.value = pinError.value?.message ?? 'Could not update the pin on that conversation.'
+    return
   }
+  selectedIds.value = new Set()
+  await reload()
 }
 
 function startRename(convo: Conversation) {
@@ -383,14 +371,12 @@ async function commitRename(convo: Conversation, value: string) {
   renamingId.value = null
   const name = value.trim()
   if (!name || name === (convo.preview ?? '')) return
-  try {
-    await $fetch(`/api/conversations/${convo.id}/name`, { method: 'PUT', body: { name } })
-    await reload()
-  }
-  catch (e) {
-    console.error('Failed to rename conversation:', e)
+  const res = await mutate(`/api/conversations/${convo.id}/name`, { method: 'PUT', body: { name } })
+  if (res === null) {
     actionNotice.value = 'Could not rename that conversation.'
+    return
   }
+  await reload()
 }
 
 const peekOpen = ref(false)

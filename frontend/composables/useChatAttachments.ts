@@ -251,6 +251,8 @@ export function useChatAttachments(configData: Ref<ConfigResponse | null>): UseC
     else releaseRecorder()
   })
 
+  const { mutate, errorDetails: uploadError } = useApiMutation()
+
   async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]> {
     if (!attachedFiles.value.length) return []
     const form = new FormData()
@@ -258,10 +260,12 @@ export function useChatAttachments(configData: Ref<ConfigResponse | null>): UseC
     for (const f of attachedFiles.value) {
       form.append('files', f, f.name)
     }
-    const res = await $fetch<{ files: UploadedAttachment[] }>(
+    const res = await mutate<{ files: UploadedAttachment[] }>(
       '/api/chat/upload',
       { method: 'POST', body: form },
     )
+    // useChatStream reads the cause back through apiErrorDetails, which takes it from `data`.
+    if (res === null) throw Object.assign(new Error(uploadError.value!.message), { data: uploadError.value })
     return res.files
   }
 

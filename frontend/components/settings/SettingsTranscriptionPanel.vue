@@ -5,9 +5,9 @@
 // from the shared config store and writes go through /api/config, exactly as the
 // pre-extraction monolith did. Provider API-key checks and the audio-model
 // catalog are injected from the shared settings-config context.
-import type { ApiErrorDetails, ProviderModelDef } from '~/types/api'
+import type { ProviderModelDef } from '~/types/api'
 
-const { configData, saving, refresh, resync, getProviderModels, apiKeyConfigured } = useSettingsConfig()
+const { configData, saving, refresh, getProviderModels, apiKeyConfigured } = useSettingsConfig()
 
 const openrouterApiKeyConfigured = computed(() => apiKeyConfigured('openrouter'))
 const openaiApiKeyConfigured = computed(() => apiKeyConfigured('openai'))
@@ -54,7 +54,8 @@ const chosenTranscriptionProvider = ref(selectedTranscriptionProvider.value)
 watch(selectedTranscriptionProvider, (v) => {
   chosenTranscriptionProvider.value = v
 })
-const transcriptionProviderError = ref<ApiErrorDetails | null>(null)
+const transcriptionProviderSave = useSaveAttempt()
+const transcriptionProviderError = transcriptionProviderSave.saveError
 // Master toggle: presence of a non-empty transcription.provider IS the
 // "enabled" state. No separate config key needed; toggling off clears the
 // value and toggling on defaults to whisper-local (the only backend that
@@ -72,7 +73,8 @@ const transcriptionActiveBackend = computed(() => {
   return 'none'
 })
 const { saveError, attempt } = useSaveAttempt()
-const { saveError: diarizationSaveError, attempt: attemptDiarization } = useSaveAttempt()
+const diarizationSave = useSaveAttempt()
+const diarizationSaveError = diarizationSave.saveError
 
 async function toggleTranscriptionEnabled() {
   saving.value = true
@@ -95,7 +97,8 @@ const chosenDiarizationProvider = ref(diarizationProvider.value)
 watch(diarizationProvider, (v) => {
   chosenDiarizationProvider.value = v
 })
-const diarizationProviderError = ref<ApiErrorDetails | null>(null)
+const diarizationProviderSave = useSaveAttempt()
+const diarizationProviderError = diarizationProviderSave.saveError
 const diarizationModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.diarization.model')?.value ?? '',
 )
@@ -121,33 +124,26 @@ async function toggleDiarizationEnabled() {
   saving.value = true
   const defaultProvider = openrouterApiKeyConfigured.value ? 'openrouter' : 'openai'
   const next = diarizationEnabled.value ? '' : defaultProvider
-  if (await attemptDiarization(async () => {
+  if (await diarizationSave.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.provider', value: next } })
   })) refresh()
   saving.value = false
 }
 async function setDiarizationProvider(value: string) {
   saving.value = true
-  diarizationProviderError.value = null
-  try {
-    // Reset the model on a provider switch — independent keys, fire in parallel.
-    await Promise.all([
-      $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.provider', value } }),
-      $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value: '' } }),
-    ])
-    refresh()
-  }
-  catch (e) {
-    // The two writes can half-land: show what was saved, not what was there before.
-    await resync()
-    chosenDiarizationProvider.value = diarizationProvider.value
-    diarizationProviderError.value = apiErrorDetails(e)
-  }
-  finally { saving.value = false }
+  // Reset the model on a provider switch — independent keys, fire in parallel.
+  const saved = await diarizationProviderSave.attempt(() => Promise.all([
+    $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.provider', value } }),
+    $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value: '' } }),
+  ]))
+  // The two writes can half-land: show what was saved, not what was there before.
+  await refresh()
+  if (!saved) chosenDiarizationProvider.value = diarizationProvider.value
+  saving.value = false
 }
 async function setDiarizationModel(value: string) {
   saving.value = true
-  if (await attemptDiarization(async () => {
+  if (await diarizationSave.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.model', value } })
   })) refresh()
   saving.value = false
@@ -160,7 +156,7 @@ const selectedEmotionModel = computed(() =>
 )
 async function setEmotionModel(value: string) {
   saving.value = true
-  if (await attemptDiarization(async () => {
+  if (await diarizationSave.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.diarization.emotionModel', value } })
   })) {
     refresh()
@@ -215,7 +211,7 @@ async function refreshDiarizationModels() {
 async function downloadDiarizationModel(repo: string) {
   if (!repo) return
   saving.value = true
-  if (await attemptDiarization(async () => {
+  if (await diarizationSave.attempt(async () => {
     await $fetch(`/api/transcription/diarization/download?repo=${encodeURIComponent(repo)}`, { method: 'POST' })
   })) {
     startDiarizationModelPolling()
@@ -266,16 +262,11 @@ const selectedLocalModelDownloadPct = computed(() => {
 
 async function setTranscriptionProvider(value: string) {
   saving.value = true
-  transcriptionProviderError.value = null
-  try {
+  if (await transcriptionProviderSave.attempt(async () => {
     await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.provider', value } })
-    refresh()
-  }
-  catch (e) {
-    chosenTranscriptionProvider.value = selectedTranscriptionProvider.value
-    transcriptionProviderError.value = apiErrorDetails(e)
-  }
-  finally { saving.value = false }
+  })) refresh()
+  else chosenTranscriptionProvider.value = selectedTranscriptionProvider.value
+  saving.value = false
 }
 async function setLocalModel(value: string) {
   saving.value = true

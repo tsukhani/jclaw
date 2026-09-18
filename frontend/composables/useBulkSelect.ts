@@ -34,8 +34,8 @@ export interface UseBulkSelectOptions<T extends BulkSelectRow> {
    * to drop RUNNING rows, which the backend rejects with 409.
    */
   selectable?: (row: T) => boolean
-  /** Per-id DELETE request issued sequentially for each selection. */
-  deleteOne: (id: number) => Promise<unknown>
+  /** URL the composable DELETEs for each selected id, sequentially. */
+  deleteUrl: (id: number) => string
   /** Hook fired after a successful sweep so callers can refresh data. */
   onComplete?: () => void | Promise<void>
   /**
@@ -48,6 +48,8 @@ export interface UseBulkSelectOptions<T extends BulkSelectRow> {
 
 export function useBulkSelect<T extends BulkSelectRow>(opts: UseBulkSelectOptions<T>) {
   const { confirm } = useConfirm()
+
+  const { mutate, errorDetails } = useApiMutation()
 
   const selectMode = ref(false)
   const selectedIds = ref<Set<number>>(new Set())
@@ -100,27 +102,29 @@ export function useBulkSelect<T extends BulkSelectRow>(opts: UseBulkSelectOption
     deletingBulk.value = true
     bulkError.value = null
     const deleted: number[] = []
-    try {
-      // Sequential — selections are user-curated (small), and parallel
-      // fires would contend on per-entity FK-cascade locks for no
-      // observable speedup.
-      for (const id of selectedIds.value) {
-        await opts.deleteOne(id)
-        deleted.push(id)
+    let failed = false
+    // Sequential — selections are user-curated (small), and parallel
+    // fires would contend on per-entity FK-cascade locks for no
+    // observable speedup.
+    for (const id of selectedIds.value) {
+      if (await mutate(opts.deleteUrl(id), { method: 'DELETE' }) === null) {
+        failed = true
+        break
       }
-      exit()
+      deleted.push(id)
     }
-    catch (e) {
+    if (failed) {
       // Stop at the failure. What was deleted leaves the selection and, through the refresh, the list;
       // the rest stay selected so the operator can retry once the reason is fixed.
-      bulkError.value = apiErrorDetails(e)
+      bulkError.value = errorDetails.value ? { ...errorDetails.value } : null
       const remaining = new Set(selectedIds.value)
       for (const id of deleted) remaining.delete(id)
       selectedIds.value = remaining
     }
-    finally {
-      deletingBulk.value = false
+    else {
+      exit()
     }
+    deletingBulk.value = false
     if (deleted.length) await opts.onComplete?.()
   }
 

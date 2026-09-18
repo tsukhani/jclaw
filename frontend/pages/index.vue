@@ -8,7 +8,7 @@ import {
   VideoCameraIcon,
 } from '@heroicons/vue/24/outline'
 import type { Ref } from 'vue'
-import type { Agent, ApiErrorDetails, LatencyHistogram, LogEvent } from '~/types/api'
+import type { Agent, LatencyHistogram, LogEvent } from '~/types/api'
 
 // --- Latency metrics (chat performance panel) ---
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
@@ -239,18 +239,10 @@ function formatStat(key: string, value: number): string {
   return isCountSegment(key) ? String(Math.round(value)) : formatMs(value)
 }
 
-const resetLatencyError = ref<ApiErrorDetails | null>(null)
+const { saveError: resetLatencyError, attempt } = useSaveAttempt()
 
 async function resetLatency() {
-  resetLatencyError.value = null
-  try {
-    await $fetch('/api/metrics/latency/rows', { method: 'DELETE' })
-  }
-  catch (e) {
-    resetLatencyError.value = apiErrorDetails(e)
-    return
-  }
-  await refreshLatency()
+  if (await attempt(() => $fetch('/api/metrics/latency/rows', { method: 'DELETE' }))) await refreshLatency()
 }
 
 // All three dashboard panels (Chat Performance, Recent Activity, Chat Cost)

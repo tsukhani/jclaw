@@ -316,17 +316,16 @@ async function cleanUp() {
 // deletes the row, which is what "no schedule" is — the key's absence, not a blank value.
 async function writeConfig(key: string, value: string): Promise<boolean> {
   failure.value = null
-  try {
-    if (value === '') await $fetch(`/api/config/${key}`, { method: 'DELETE' })
-    else await $fetch('/api/config', { method: 'POST', body: { key, value } })
-    await refresh()
-    return true
-  }
-  catch (e) {
+  const res = value === ''
+    ? await mutate(`/api/config/${key}`, { method: 'DELETE' })
+    : await mutate('/api/config', { method: 'POST', body: { key, value } })
+  if (res === null) {
     // No fallback: it would outrank the transport's message, hiding whether the server refused or was never reached.
-    failure.value = apiErrorDetails(e).message
+    failure.value = mutationError.value
     return false
   }
+  await refresh()
+  return true
 }
 
 const editingRetention = ref(false)
