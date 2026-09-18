@@ -192,9 +192,16 @@ public final class ModelRouter {
             choices = preferring(choices, c -> c.model().supportsAudio(), "no audio input", skipped);
         }
 
+        // Prepaid first by default — the money is already spent, so spending it again per token is the
+        // waste the router exists to stop. An operator who means the opposite turns preferPrepaid off,
+        // and then the list is followed exactly as written.
         var ordered = new ArrayList<Choice>(choices.size());
-        choices.stream().filter(Choice::prepaid).forEach(ordered::add);
-        choices.stream().filter(c -> !c.prepaid()).forEach(ordered::add);
+        if (policy.preferPrepaid()) {
+            choices.stream().filter(Choice::prepaid).forEach(ordered::add);
+            choices.stream().filter(c -> !c.prepaid()).forEach(ordered::add);
+        } else {
+            ordered.addAll(choices);
+        }
 
         var sticky = false;
         var priorTarget = request.priorTarget();
@@ -202,8 +209,12 @@ public final class ModelRouter {
             var index = indexOf(ordered, priorTarget);
             if (index > 0) {
                 var prior = ordered.remove(index);
+                // Stickiness may reorder within a payment group, never across one: keeping last turn's
+                // model must not quietly promote a per-token model over a prepaid one.
                 var front = 0;
-                while (front < ordered.size() && ordered.get(front).prepaid() != prior.prepaid()) front++;
+                if (policy.preferPrepaid()) {
+                    while (front < ordered.size() && ordered.get(front).prepaid() != prior.prepaid()) front++;
+                }
                 ordered.add(front, prior);
                 sticky = front == 0;
             }

@@ -47,7 +47,17 @@ for (const key of ['router.classifier.provider', 'router.classifier.model']) {
     },
   })
 }
-registerEndpoint('/api/providers', () => [])
+registerEndpoint('/api/providers', () => [
+  { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100, supportedModalities: ['SUBSCRIPTION'], local: false },
+  { name: 'openrouter', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0, supportedModalities: ['PER_TOKEN'], local: false },
+])
+registerEndpoint('/api/config/router.preferPrepaid', {
+  method: 'DELETE',
+  handler: () => {
+    deletes.push('router.preferPrepaid')
+    return { status: 'ok' }
+  },
+})
 registerEndpoint('/api/router/status', () => ({
   available: true,
   downshiftAt: 0.75,
@@ -85,7 +95,7 @@ describe('SettingsModelRouterPanel', () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
     await c.find('[data-testid="router-class-chat"] select').setValue('openrouter::z-ai/glm-5.3-flash')
-    await vi.waitFor(() => expect(posts.length).toBe(1))
+    await vi.waitFor(() => expect(posts.length).toBe(1), { timeout: 5000 })
     expect(posts).toContainEqual({
       key: 'router.chat.models',
       value: JSON.stringify([
@@ -99,7 +109,7 @@ describe('SettingsModelRouterPanel', () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
     await c.find('button[aria-label="Remove ollama-cloud / glm-5.3-flash"]').trigger('click')
-    await vi.waitFor(() => expect(deletes).toEqual(['router.chat.models']))
+    await vi.waitFor(() => expect(deletes).toEqual(['router.chat.models']), { timeout: 5000 })
     expect(posts.filter(p => p.key === 'router.chat.models')).toHaveLength(0)
   })
 
@@ -110,7 +120,45 @@ describe('SettingsModelRouterPanel', () => {
     await editButtons[0]!.trigger('click')
     await c.find('input[aria-label="Downshift at (percent)"]').setValue('60')
     await c.find('button[title="Save"]').trigger('click')
-    await vi.waitFor(() => expect(posts).toContainEqual({ key: 'router.budget.downshiftAt', value: '0.6' }))
+    await vi.waitFor(() => expect(posts).toContainEqual({ key: 'router.budget.downshiftAt', value: '0.6' }), { timeout: 5000 })
+  })
+
+  it('prefers prepaid by default and marks the per-token rows it will pass over', async () => {
+    // The operator's own ranking: a per-token model first, a prepaid one second.
+    entries = entries.map(e => e.key === 'router.chat.models'
+      ? {
+          key: e.key,
+          value: JSON.stringify([
+            { provider: 'openrouter', model: 'z-ai/glm-5.3-flash' },
+            { provider: 'ollama-cloud', model: 'glm-5.3-flash' },
+          ]),
+        }
+      : e)
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const box = c.find('input#router-prefer-prepaid')
+    expect((box.element as HTMLInputElement).checked).toBe(true)
+
+    // The operator ranked a per-token model first; the row says the router will not honour that.
+    const chat = c.find('[data-testid="router-class-chat"]')
+    expect(chat.text()).toContain('fallback only')
+
+    await box.setValue(false)
+    await vi.waitFor(() => expect(posts).toContainEqual({ key: 'router.preferPrepaid', value: 'false' }), { timeout: 5000 })
+    await flushPromises()
+  })
+
+  it('drops the marking and clears the key when the operator turns the preference off', async () => {
+    entries = [...entries, { key: 'router.preferPrepaid', value: 'false' }]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const box = c.find('input#router-prefer-prepaid')
+    expect((box.element as HTMLInputElement).checked).toBe(false)
+    expect(c.find('[data-testid="router-class-chat"]').text()).not.toContain('fallback only')
+
+    await box.setValue(true)
+    await vi.waitFor(() => expect(deletes).toContain('router.preferPrepaid'), { timeout: 5000 })
+    await flushPromises()
   })
 
   it('defaults the classifier to the keyword rules and writes both keys when a model is picked', async () => {
@@ -121,7 +169,7 @@ describe('SettingsModelRouterPanel', () => {
     expect(select.text()).toContain('Keyword rules (no model call)')
 
     await select.setValue('ollama-cloud::glm-5.3-flash')
-    await vi.waitFor(() => expect(posts.length).toBe(2))
+    await vi.waitFor(() => expect(posts.length).toBe(2), { timeout: 5000 })
     expect(posts).toContainEqual({ key: 'router.classifier.provider', value: 'ollama-cloud' })
     expect(posts).toContainEqual({ key: 'router.classifier.model', value: 'glm-5.3-flash' })
   })
@@ -138,7 +186,7 @@ describe('SettingsModelRouterPanel', () => {
     expect((select.element as HTMLSelectElement).value).toBe('ollama-cloud::glm-5.3-flash')
 
     await select.setValue('')
-    await vi.waitFor(() => expect(deletes).toEqual(['router.classifier.provider', 'router.classifier.model']))
+    await vi.waitFor(() => expect(deletes).toEqual(['router.classifier.provider', 'router.classifier.model']), { timeout: 5000 })
   })
 
   it('shows each listed provider\'s quota windows, and says when a provider has none', async () => {

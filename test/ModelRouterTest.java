@@ -78,6 +78,11 @@ class ModelRouterTest extends UnitTest {
         return new RouterPolicy(classes, 0.75, 0.95);
     }
 
+    /** The same policy with the prepaid-first preference turned off (JCLAW-1222 follow-up). */
+    private static RouterPolicy inListOrder(Map<TaskClass, List<Candidate>> classes) {
+        return new RouterPolicy(classes, 0.75, 0.95, null, RouterPolicy.DEFAULT_CLASSIFIER_TIMEOUT_SECONDS, false);
+    }
+
     private static RouteRequest request(String message) {
         return new RouteRequest(message, null, null, 0, 0, false, false, true);
     }
@@ -188,6 +193,27 @@ class ModelRouterTest extends UnitTest {
 
         var otherClass = new RouteRequest(CHAT, TaskClass.REASONING, new Target(sub2, "light"), 0, 0, false, false, true);
         assertEquals(new Target(sub, "light"), route(otherClass, p).primary(), "stickiness is per class");
+    }
+
+    @Test
+    void withThePrepaidPreferenceOffTheOperatorsOrderStands() {
+        var classes = Map.of(TaskClass.CHAT, List.of(new Candidate(perToken, "light"), new Candidate(sub, "light")));
+        assertEquals(new Target(sub, "light"), route(request(CHAT), policy(classes)).primary(),
+                "on by default, a prepaid model is tried first whatever the order");
+
+        var d = route(request(CHAT), inListOrder(classes));
+        assertEquals(new Target(perToken, "light"), d.primary(),
+                "off, an operator who ranked a per-token model first gets it");
+        assertEquals(new Target(sub, "light"), d.fallback());
+    }
+
+    @Test
+    void withThePreferenceOffStickinessKeepsThePreviousModelWhateverItsBilling() {
+        var classes = Map.of(TaskClass.CHAT, List.of(new Candidate(sub, "light"), new Candidate(perToken, "light")));
+        var followOn = new RouteRequest(CHAT, TaskClass.CHAT, new Target(perToken, "light"), 0, 0, false, false, true);
+        var d = route(followOn, inListOrder(classes));
+        assertEquals(new Target(perToken, "light"), d.primary());
+        assertTrue(d.sticky());
     }
 
     @Test

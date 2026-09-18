@@ -24,9 +24,11 @@ import java.util.Map;
  * @param exhaustedAt usage fraction at which a prepaid provider is skipped for every class
  * @param classifier  the model that labels each prompt, or null to use the local keyword rules
  * @param classifierTimeoutSeconds how long a classifier call may take before the rules answer instead
+ * @param preferPrepaid whether subscriptions and self-hosted models are tried before per-token ones
+ *                      whatever the listed order; false follows the operator's order exactly
  */
 public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt,
-                           @Nullable Candidate classifier, int classifierTimeoutSeconds) {
+                           @Nullable Candidate classifier, int classifierTimeoutSeconds, boolean preferPrepaid) {
 
     public static final String PREFIX = "router.";
     public static final String DOWNSHIFT_AT = "router.budget.downshiftAt";
@@ -34,6 +36,8 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
     public static final String CLASSIFIER_PROVIDER = "router.classifier.provider";
     public static final String CLASSIFIER_MODEL = "router.classifier.model";
     public static final String CLASSIFIER_TIMEOUT_SECONDS = "router.classifier.timeoutSeconds";
+    /** Absent means true: credit protection is what an operator who has set nothing should get. */
+    public static final String PREFER_PREPAID = "router.preferPrepaid";
     public static final double DEFAULT_DOWNSHIFT_AT = 0.75;
     public static final double DEFAULT_EXHAUSTED_AT = 0.95;
     public static final int DEFAULT_CLASSIFIER_TIMEOUT_SECONDS = 8;
@@ -53,7 +57,13 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
 
     /** Convenience for a policy with no classifier model: the keyword rules label every prompt. */
     public RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt) {
-        this(classes, downshiftAt, exhaustedAt, null, DEFAULT_CLASSIFIER_TIMEOUT_SECONDS);
+        this(classes, downshiftAt, exhaustedAt, null, DEFAULT_CLASSIFIER_TIMEOUT_SECONDS, true);
+    }
+
+    /** Convenience for a policy with a classifier but the default prepaid-first ordering. */
+    public RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt,
+                        @Nullable Candidate classifier, int classifierTimeoutSeconds) {
+        this(classes, downshiftAt, exhaustedAt, classifier, classifierTimeoutSeconds, true);
     }
 
     public static String modelsKey(TaskClass taskClass) {
@@ -70,7 +80,8 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
                 ConfigService.getDouble(DOWNSHIFT_AT, DEFAULT_DOWNSHIFT_AT),
                 ConfigService.getDouble(EXHAUSTED_AT, DEFAULT_EXHAUSTED_AT),
                 configuredClassifier(),
-                ConfigService.getInt(CLASSIFIER_TIMEOUT_SECONDS, DEFAULT_CLASSIFIER_TIMEOUT_SECONDS));
+                ConfigService.getInt(CLASSIFIER_TIMEOUT_SECONDS, DEFAULT_CLASSIFIER_TIMEOUT_SECONDS),
+                ConfigService.getBoolean(PREFER_PREPAID, true));
     }
 
     /** The classifier model, or null unless the operator named both halves of the pair. */
@@ -102,13 +113,20 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         if (key.equals(CLASSIFIER_TIMEOUT_SECONDS)) {
             return timeoutRejection(value);
         }
+        if (key.equals(PREFER_PREPAID)) {
+            // Boolean.parseBoolean maps anything unrecognised to false, which would silently turn the
+            // credit protection off on a typo.
+            return "true".equalsIgnoreCase(String.valueOf(value).trim())
+                    || "false".equalsIgnoreCase(String.valueOf(value).trim())
+                    ? null : PREFER_PREPAID + " must be true or false.";
+        }
         for (var c : TaskClass.values()) {
             if (key.equals(modelsKey(c))) return modelsRejection(key, value);
         }
         return key + " is not a router setting. Use " + modelsKey(TaskClass.CHAT)
                 + " (or another task class: summarize, agentic, reasoning, coding), "
-                + DOWNSHIFT_AT + ", " + EXHAUSTED_AT + ", " + CLASSIFIER_PROVIDER + ", "
-                + CLASSIFIER_MODEL + " or " + CLASSIFIER_TIMEOUT_SECONDS + ".";
+                + DOWNSHIFT_AT + ", " + EXHAUSTED_AT + ", " + PREFER_PREPAID + ", " + CLASSIFIER_PROVIDER
+                + ", " + CLASSIFIER_MODEL + " or " + CLASSIFIER_TIMEOUT_SECONDS + ".";
     }
 
     /**

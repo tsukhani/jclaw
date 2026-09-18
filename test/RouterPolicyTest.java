@@ -110,6 +110,17 @@ class RouterPolicyTest extends UnitTest {
     }
 
     @Test
+    void thePrepaidPreferenceIsABooleanAndDefaultsToOn() {
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.PREFER_PREPAID, "false"));
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.PREFER_PREPAID, "TRUE"));
+        for (var bad : new String[] {"", "yes", "0", "off"}) {
+            assertNotNull(RouterPolicy.rejectionFor(RouterPolicy.PREFER_PREPAID, bad), () -> "accepted " + bad);
+        }
+        assertTrue(new RouterPolicy(Map.of(TaskClass.CHAT, List.of(new Candidate("p", "m"))), 0.75, 0.95)
+                .preferPrepaid(), "an operator who has set nothing gets credit protection");
+    }
+
+    @Test
     void aPolicyWithoutAClassifierUsesTheRules() {
         var policy = new RouterPolicy(Map.of(TaskClass.CHAT, List.of(new Candidate("p", "m"))), 0.75, 0.95);
         assertNull(policy.classifier());

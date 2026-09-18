@@ -46,7 +46,7 @@ const DEFAULT_EXHAUSTED_AT = 0.95
 
 const IMAGE_ONLY_PROVIDERS = new Set(['bfl', 'replicate'])
 
-const { configData, saving, refresh, resync, configValue, getProviderModels } = useSettingsConfig()
+const { configData, saving, refresh, resync, configValue, getProviderModels, providersData } = useSettingsConfig()
 const { saveError, attempt } = useSaveAttempt()
 
 // Lazy: the status call reads each Ollama Cloud provider's usage over the network, and must not
@@ -88,6 +88,37 @@ const modelOptions = computed(() => {
 })
 
 const chatConfigured = computed(() => listFor('chat').length > 0)
+
+// Unset means on: an operator who has set nothing gets credit protection.
+const preferPrepaid = computed(() => configValue('router.preferPrepaid', 'true').toLowerCase() !== 'false')
+
+/**
+ * Prepaid — a subscription, or a self-hosted provider that bills nothing per call. Mirrors the
+ * backend's ModelRouter.isPrepaid so the badge below says what the router will actually do.
+ */
+function isPrepaid(providerName: string): boolean {
+  const p = (providersData.value ?? []).find(x => x.name === providerName)
+  if (!p) return false
+  return p.paymentModality === 'SUBSCRIPTION' || (p.supportedModalities.length === 0 && p.local)
+}
+
+/** True when prepaid-first ordering will pass this row over in favour of a prepaid one below it. */
+function demoted(taskClass: string, candidate: RouterCandidate): boolean {
+  return preferPrepaid.value && !isPrepaid(candidate.provider)
+    && listFor(taskClass).some(c => isPrepaid(c.provider))
+}
+
+async function savePreferPrepaid(prefer: boolean) {
+  saving.value = true
+  const saved = await attempt(async () => {
+    // Checked is the default, so it clears the key rather than storing what absence already means.
+    if (prefer) await $fetch('/api/config/router.preferPrepaid', { method: 'DELETE' })
+    else await $fetch('/api/config', { method: 'POST', body: { key: 'router.preferPrepaid', value: 'false' } })
+  })
+  if (saved) await refresh()
+  else await resync()
+  saving.value = false
+}
 
 // JCLAW-1222: the optional classifier model. Unset means the local keyword rules label every prompt.
 const classifierValue = computed(() => {
@@ -200,9 +231,26 @@ function usageTone(fraction: number): string {
     <p class="text-xs text-fg-muted">
       <span class="font-mono">router/auto</span> appears in every model picker once the Chat list has a
       model. For each prompt it picks a task class, then the first usable model on that class's list.
-      Subscription and self-hosted models are always tried before per-token ones, whatever their order;
-      within each group, order is your preference. The chat window shows which model answered each reply.
+      The chat window shows which model answered each reply.
     </p>
+    <label
+      for="router-prefer-prepaid"
+      class="flex items-start gap-2 text-xs text-fg-muted"
+    >
+      <input
+        id="router-prefer-prepaid"
+        type="checkbox"
+        :checked="preferPrepaid"
+        :disabled="saving"
+        class="mt-0.5 accent-white"
+        @change="savePreferPrepaid(($event.target as HTMLInputElement).checked)"
+      >
+      <span>
+        Prefer subscription and self-hosted models over per-token ones, whatever the order below. On (the
+        default), included credit is spent before money is, and a per-token model only serves when no
+        prepaid one can. Off, the lists are followed exactly as written — the budget guard still applies.
+      </span>
+    </label>
     <p
       class="text-xs"
       :class="chatConfigured ? 'text-fg-muted' : 'text-amber-700 dark:text-amber-400'"
@@ -241,7 +289,13 @@ function usageTone(fraction: number): string {
             class="flex items-center gap-2 text-sm font-mono text-fg-primary"
           >
             <span class="w-5 text-right text-xs text-fg-muted">{{ i + 1 }}.</span>
-            <span class="flex-1 min-w-0 truncate">{{ c.provider }} / {{ c.model }}</span>
+            <span class="min-w-0 truncate">{{ c.provider }} / {{ c.model }}</span>
+            <span
+              v-if="demoted(taskClass, c)"
+              class="shrink-0 px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded text-fg-muted border border-border"
+              title="Per-token: with the preference above on, the prepaid models in this list are tried first, whatever the order here."
+            >fallback only</span>
+            <span class="flex-1" />
             <button
               type="button"
               class="p-1 text-fg-muted hover:text-fg-strong disabled:opacity-40 transition-colors"
