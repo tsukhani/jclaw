@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
  *
  * <p>The rules remain the floor. A classifier that is unreachable, slow, or answers with something that
  * is not a class never fails the turn: the failure is logged once and the rules answer instead. A bare
- * acknowledgement is settled before either runs, so "thanks" never costs a model call.
+ * acknowledgment is settled before either runs, so "thanks" never costs a model call.
  */
 public final class RouterClassifier {
 
@@ -83,7 +83,7 @@ public final class RouterClassifier {
      *
      * <p>The request carries exactly two messages — these instructions and the prompt — and no tools.
      * None of the turn's own context reaches it: no assembled system prompt, no standing orders, no
-     * history, no memories, no tool catalogue. That keeps the call one cheap question about one message,
+     * history, no memories, no tool catalog. That keeps the call one cheap question about one message,
      * and keeps a classifier on a different provider from becoming a second copy of the conversation.
      * {@code RouterClassifierTest.theClassifierRequestCarriesOnlyItsOwnInstructionAndThePrompt} pins it.
      */

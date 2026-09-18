@@ -337,7 +337,7 @@ public final class TaskSchedulingService {
      * when its fire arrives, so clearing the flag alone would leave the Task
      * PENDING forever with nothing left to fire it. A past-due time re-arms at
      * that time, which db-scheduler picks up on its next poll — the same "or
-     * immediately if that time has already passed" behaviour {@code reenable} has.
+     * immediately if that time has already passed" behavior {@code reenable} has.
      *
      * <p>Recurring Tasks self-reschedule through a pause, so re-arming one
      * would double-schedule it. Also called by the handler, for a resume that

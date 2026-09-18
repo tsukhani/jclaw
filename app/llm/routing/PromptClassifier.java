@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  * signals alone.
  *
  * <p>Four questions, in order of how sure each answer is. Does the prompt carry code? Does it ask
- * for an answer that has to be worked out rather than recalled — a proof, a judgement, a comparison,
+ * for an answer that has to be worked out rather than recalled — a proof, a judgment, a comparison,
  * a cause? Does it tell the assistant to <em>do</em> something? Does it ask for a summary? Anything
  * else is chat.
  *
@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  * "Reason about why LLMs cannot reach ASI" stayed on the flash model because the list held "reason
  * through" and not "reason about", and "Run daily briefing skill" needed a second verb to count as
  * agent work. So a cue now fires on the <em>shape</em> of the ask — a leading imperative naming a
- * system action, a negated capability, a judgement noun — and a single unambiguous cue is enough,
+ * system action, a negated capability, a judgment noun — and a single unambiguous cue is enough,
  * while weaker cues need a second one before they escalate. Both rules are what keeps an ordinary
  * question ("Why is the sky blue?") on the cheap model.
  */
@@ -76,7 +76,7 @@ public final class PromptClassifier {
             "rigorous", "rigorously", "justify", "stance", "weigh", "deduce", "what would happen if",
             "devil's advocate", "steelman", "counterargument", "counterarguments");
 
-    /** Cues that only escalate in company: two or more mean the prompt wants judgement, not recall. */
+    /** Cues that only escalate in company: two or more mean the prompt wants judgment, not recall. */
     private static final List<Pattern> MEDIUM_REASONING = phrases("why", "how come", "what if",
             "suppose", "opinion", "opinions", "view on", "implication", "implications", "consequence",
             "consequences", "risk", "risks", "benefit", "benefits", "versus", "vs", "difference between",
@@ -188,7 +188,7 @@ public final class PromptClassifier {
     }
 
     /**
-     * A bare acknowledgement ("yes", "go ahead") carries no ask of its own, so it inherits the previous
+     * A bare acknowledgment ("yes", "go ahead") carries no ask of its own, so it inherits the previous
      * turn's class. Split out because it settles the turn without reading the prompt for cues — which is
      * also what lets {@link RouterClassifier} skip a model call on "thanks".
      */

@@ -10,7 +10,7 @@ import static utils.ErrorTemplateSupport.e;
  * Templates for startup and boot failures — the seam JCLAW-1136 fills (JCLAW-60).
  *
  * <p>Every caller here renders {@link ErrorRendering#PLAIN}: the destination is the console and
- * the log, where there is no request, no markup parser and no guarantee of terminal colour.
+ * the log, where there is no request, no markup parser and no guarantee of terminal color.
  *
  * <p>Public, unlike its sibling tables, because the codes are referenced from {@code services}
  * and {@code jobs} rather than only from this package.

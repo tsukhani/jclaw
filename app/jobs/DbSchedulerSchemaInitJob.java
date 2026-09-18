@@ -61,7 +61,7 @@ public class DbSchedulerSchemaInitJob extends Job<Void> {
      * into one "schema init failed".
      *
      * <p>Rendered {@link ErrorRendering#PLAIN}: nothing on the boot path has a request, a markup
-     * parser or a guarantee of terminal colour.
+     * parser or a guarantee of terminal color.
      *
      * <p>Public because test sources are the default package.
      */
