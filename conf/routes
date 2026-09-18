@@ -111,6 +111,7 @@ GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspace
 GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspaceFile
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
 GET     /api/agents/{id}/workspace-tree         ApiAgentsController.listWorkspaceTree
+DELETE  /api/agents/{id}/workspace-tree/{<.*>path}  ApiAgentsController.deleteWorkspaceEntry
 GET     /api/agents/{id}/workspace-download/{<.+>path}  ApiAgentsController.downloadWorkspaceEntry
 GET     /api/agents/{id}/workspace-backup       ApiAgentsController.backupWorkspace
 

@@ -68,14 +68,16 @@ describe('AgentWorkspaceManager downloads', () => {
     expect(link.attributes('href')).toBe('/api/agents/23/workspace-download/downloads/report%20%231.pdf')
   })
 
-  it('gives every row exactly one action', async () => {
+  it('gives every row a download action, protected rows included', async () => {
     registerEndpoint('/api/agents/24/workspace-tree', () => listing)
 
     const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 24 } })
     await flushPromises()
 
     for (const path of ['downloads', 'AGENT.md']) {
-      expect(component.find(`[data-testid="ws-actions-${path}"]`).element.children.length).toBe(1)
+      expect(component.find(`[data-testid="ws-download-${path}"]`).exists()).toBe(true)
     }
+    // A Standing Orders row offers the download and nothing else; JCLAW-1249 withholds the delete.
+    expect(component.find('[data-testid="ws-actions-AGENT.md"]').element.children.length).toBe(1)
   })
 })
