@@ -157,8 +157,9 @@ public final class SubscriptionUsage {
      * surfaces as a 429 before the fraction next refreshes.
      */
     public static void noteFailure(Throwable failure) {
-        if (!(failure instanceof LlmException e) || e.failure() == null) return;
+        if (!(failure instanceof LlmException e)) return;
         var f = e.failure();
+        if (f == null) return;
         var provider = ProviderRegistry.get(f.provider());
         var usageSource = provider != null && hasUsageSource(provider.config());
         switch (f.remedy()) {

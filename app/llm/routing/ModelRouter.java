@@ -176,9 +176,26 @@ public final class ModelRouter {
         }
         if (eligible.choices().isEmpty()) return null;
 
-        var choices = eligible.choices();
+        var ordered = orderByPayment(narrowToCapable(eligible.choices(), request, skipped), policy);
+        var sticky = promoteSticky(ordered, taskClass, request, policy);
+
+        var primary = ordered.getFirst();
+        var fallback = ordered.stream()
+                .filter(c -> !c.candidate().provider().equals(primary.candidate().provider()))
+                .findFirst()
+                .map(Choice::target)
+                .orElse(null);
+        return new RouteDecision(taskClass, primary.target(), fallback, signals,
+                List.copyOf(new LinkedHashSet<>(skipped)), eligible.downshifted(), sticky, relaxed);
+    }
+
+    /**
+     * Drop what the turn's own demands rule out. Each filter is undone when it would empty the list —
+     * a model that cannot read the image still beats no reply at all.
+     */
+    private static List<Choice> narrowToCapable(List<Choice> eligible, RouteRequest request, List<String> skipped) {
         var tokens = request.estimatedPromptTokens();
-        choices = preferring(choices, c -> tokens <= 0 || c.model().contextWindow() <= 0
+        var choices = preferring(eligible, c -> tokens <= 0 || c.model().contextWindow() <= 0
                 || tokens <= c.model().contextWindow() * CONTEXT_FILL_LIMIT, "context window too small", skipped);
         if (request.needsTools()) {
             choices = preferring(choices, c -> c.model().toolCallingSupported()
@@ -191,43 +208,39 @@ public final class ModelRouter {
         if (request.needsAudio()) {
             choices = preferring(choices, c -> c.model().supportsAudio(), "no audio input", skipped);
         }
+        return choices;
+    }
 
-        // Prepaid first by default — the money is already spent, so spending it again per token is the
-        // waste the router exists to stop. An operator who means the opposite turns preferPrepaid off,
-        // and then the list is followed exactly as written.
+    /**
+     * Prepaid first by default — the money is already spent, so spending it again per token is the
+     * waste the router exists to stop. An operator who means the opposite turns preferPrepaid off, and
+     * then the list is followed exactly as written. Returns a mutable list; {@link #promoteSticky}
+     * reorders it in place.
+     */
+    private static List<Choice> orderByPayment(List<Choice> choices, RouterPolicy policy) {
+        if (!policy.preferPrepaid()) return new ArrayList<>(choices);
         var ordered = new ArrayList<Choice>(choices.size());
-        if (policy.preferPrepaid()) {
-            choices.stream().filter(Choice::prepaid).forEach(ordered::add);
-            choices.stream().filter(c -> !c.prepaid()).forEach(ordered::add);
-        } else {
-            ordered.addAll(choices);
-        }
+        choices.stream().filter(Choice::prepaid).forEach(ordered::add);
+        choices.stream().filter(c -> !c.prepaid()).forEach(ordered::add);
+        return ordered;
+    }
 
-        var sticky = false;
+    /** True when last turn's model kept the lead, which is what protects the provider's prompt cache. */
+    private static boolean promoteSticky(List<Choice> ordered, TaskClass taskClass, RouteRequest request,
+                                         RouterPolicy policy) {
         var priorTarget = request.priorTarget();
-        if (request.priorClass() == taskClass && priorTarget != null) {
-            var index = indexOf(ordered, priorTarget);
-            if (index > 0) {
-                var prior = ordered.remove(index);
-                // Stickiness may reorder within a payment group, never across one: keeping last turn's
-                // model must not quietly promote a per-token model over a prepaid one.
-                var front = 0;
-                if (policy.preferPrepaid()) {
-                    while (front < ordered.size() && ordered.get(front).prepaid() != prior.prepaid()) front++;
-                }
-                ordered.add(front, prior);
-                sticky = front == 0;
-            }
+        if (request.priorClass() != taskClass || priorTarget == null) return false;
+        var index = indexOf(ordered, priorTarget);
+        if (index <= 0) return false;
+        var prior = ordered.remove(index);
+        // Stickiness may reorder within a payment group, never across one: keeping last turn's model
+        // must not quietly promote a per-token model over a prepaid one.
+        var front = 0;
+        if (policy.preferPrepaid()) {
+            while (front < ordered.size() && ordered.get(front).prepaid() != prior.prepaid()) front++;
         }
-
-        var primary = ordered.getFirst();
-        var fallback = ordered.stream()
-                .filter(c -> !c.candidate().provider().equals(primary.candidate().provider()))
-                .findFirst()
-                .map(Choice::target)
-                .orElse(null);
-        return new RouteDecision(taskClass, primary.target(), fallback, signals,
-                List.copyOf(new LinkedHashSet<>(skipped)), eligible.downshifted(), sticky, relaxed);
+        ordered.add(front, prior);
+        return front == 0;
     }
 
     private static List<Choice> resolve(List<Candidate> candidates, List<String> skipped) {

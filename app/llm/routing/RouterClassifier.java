@@ -38,6 +38,9 @@ public final class RouterClassifier {
      */
     private static final int MAX_ANSWER_TOKENS = 256;
 
+    /** Event-log category and the caller tag the provider records for these calls. */
+    private static final String ROUTER = "router";
+
     private static final String INSTRUCTIONS = """
             You route one user message to the model class that should answer it. Reply with exactly one \
             word and nothing else, from this list:
@@ -87,7 +90,7 @@ public final class RouterClassifier {
     private static @Nullable TaskClass askModel(String message, Candidate classifier, int timeoutSeconds) {
         var provider = ProviderRegistry.get(classifier.provider());
         if (provider == null) {
-            EventLogger.warn("router", "Classifier provider '%s' is not configured; using the keyword rules"
+            EventLogger.warn(ROUTER, "Classifier provider '%s' is not configured; using the keyword rules"
                     .formatted(classifier.provider()));
             return null;
         }
@@ -96,16 +99,16 @@ public final class RouterClassifier {
         try {
             response = provider.chat(classifier.model(),
                     List.of(ChatMessage.system(INSTRUCTIONS), ChatMessage.user(prompt)),
-                    List.of(), MAX_ANSWER_TOKENS, null, timeoutSeconds, "router");
+                    List.of(), MAX_ANSWER_TOKENS, null, timeoutSeconds, ROUTER);
         } catch (RuntimeException e) {
-            EventLogger.warn("router", "Classifier %s failed (%s); using the keyword rules"
+            EventLogger.warn(ROUTER, "Classifier %s failed (%s); using the keyword rules"
                     .formatted(classifier.describe(), e.getMessage()));
             return null;
         }
         var answer = firstContent(response);
         var parsed = parse(answer);
         if (parsed == null) {
-            EventLogger.warn("router", "Classifier %s answered with no class (%s); using the keyword rules"
+            EventLogger.warn(ROUTER, "Classifier %s answered with no class (%s); using the keyword rules"
                     .formatted(classifier.describe(), answer == null ? "empty" : abbreviate(answer)));
         }
         return parsed;

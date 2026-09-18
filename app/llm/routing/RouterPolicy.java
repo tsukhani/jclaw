@@ -148,12 +148,11 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         }
         var registered = ProviderRegistry.get(provider);
         if (registered == null) {
-            return "Provider '" + provider + "' is not configured. " + CLASSIFIER_PROVIDER
-                    + " must name a provider from Settings > LLM Providers.";
+            return notConfigured(provider, CLASSIFIER_PROVIDER, "a provider");
         }
         if (model == null || model.isBlank()) return null;
         var known = registered.config().models().stream().anyMatch(m -> m.id().equals(model));
-        return known ? null : "Provider '" + provider + "' has no model with id '" + model + "'.";
+        return known ? null : noSuchModel(provider, model);
     }
 
     private static @Nullable String timeoutRejection(@Nullable String value) {
@@ -184,15 +183,24 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
             }
             var provider = ProviderRegistry.get(candidate.provider());
             if (provider == null) {
-                return "Provider '" + candidate.provider() + "' is not configured. " + key
-                        + " must name providers from Settings > LLM Providers.";
+                return notConfigured(candidate.provider(), key, "providers");
             }
             var registered = provider.config().models().stream().anyMatch(m -> m.id().equals(candidate.model()));
             if (!registered) {
-                return "Provider '" + candidate.provider() + "' has no model with id '" + candidate.model() + "'.";
+                return noSuchModel(candidate.provider(), candidate.model());
             }
         }
         return null;
+    }
+
+    /** {@code noun} carries the count: one key names a single provider, a class list names several. */
+    private static String notConfigured(String provider, String key, String noun) {
+        return "Provider '" + provider + "' is not configured. " + key
+                + " must name " + noun + " from Settings > LLM Providers.";
+    }
+
+    private static String noSuchModel(String provider, String model) {
+        return "Provider '" + provider + "' has no model with id '" + model + "'.";
     }
 
     private static @Nullable String thresholdRejection(String key, @Nullable String value) {

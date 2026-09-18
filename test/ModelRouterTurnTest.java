@@ -56,7 +56,7 @@ class ModelRouterTurnTest extends UnitTest {
     private final AtomicInteger perTokenCalls = new AtomicInteger();
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         var id = UUID.randomUUID().toString().substring(0, 8);
         subscription = "rt-sub-" + id;
         perToken = "rt-pt-" + id;

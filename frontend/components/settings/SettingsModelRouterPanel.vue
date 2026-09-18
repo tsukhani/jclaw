@@ -175,7 +175,9 @@ function moveModel(taskClass: string, index: number, delta: number) {
   const list = listFor(taskClass)
   const target = index + delta
   if (target < 0 || target >= list.length) return
-  ;[list[index], list[target]] = [list[target]!, list[index]!]
+  const moved = list[index]!
+  list[index] = list[target]!
+  list[target] = moved
   saveList(taskClass, list)
 }
 

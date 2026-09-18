@@ -247,9 +247,10 @@ public final class PromptClassifier {
             var first = FIRST_WORD.matcher(clause);
             if (!first.find()) continue;
             var verb = first.group(1);
-            if (SYSTEM_ACTIONS.contains(verb)) {
-                leading.add(verb);
-            } else if (OBJECT_ACTIONS.contains(verb) && !matches(clause, ACTION_OBJECTS).isEmpty()) {
+            // A system action instructs on its own; a create-style verb only when its object is
+            // something JClaw manages.
+            if (SYSTEM_ACTIONS.contains(verb)
+                    || (OBJECT_ACTIONS.contains(verb) && !matches(clause, ACTION_OBJECTS).isEmpty())) {
                 leading.add(verb);
             }
         }

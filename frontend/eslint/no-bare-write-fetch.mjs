@@ -34,7 +34,7 @@ function methodNamed(v) {
 /** @param {any} node */
 function writeMethod(node) {
   const opts = node.arguments[1]
-  if (!opts || opts.type !== 'ObjectExpression') return null
+  if (opts?.type !== 'ObjectExpression') return null
   for (const p of opts.properties) {
     if (p.type !== 'Property' || p.key.type !== 'Identifier' || p.key.name !== 'method') continue
     return methodNamed(p.value)
@@ -47,9 +47,9 @@ function insideAttempt(node) {
   for (let n = node.parent; n; n = n.parent) {
     if (n.type !== 'CallExpression') continue
     const c = n.callee
-    const name = c.type === 'Identifier'
-      ? c.name
-      : (c.type === 'MemberExpression' && c.property.type === 'Identifier' ? c.property.name : null)
+    let name = null
+    if (c.type === 'Identifier') name = c.name
+    else if (c.type === 'MemberExpression' && c.property.type === 'Identifier') name = c.property.name
     if (name === 'attempt') return true
   }
   return false
