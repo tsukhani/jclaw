@@ -1,7 +1,8 @@
 import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { resolveThinkingLock, type ThinkingLock } from '~/utils/thinking-lock'
 import { effectiveThinkingLevels, type Provider, type ProviderModel } from '~/composables/useProviders'
-import type { Agent, Conversation } from '~/types/api'
+import { latestRouteOf, ROUTER_MODEL_ID, ROUTER_PROVIDER } from '~/utils/model-route'
+import type { Agent, Conversation, Message } from '~/types/api'
 
 /**
  * Agent + model + thinking-config state for the chat header/composer (JCLAW-690
@@ -23,6 +24,8 @@ export interface UseAgentModelDeps {
   selectedConvoId: Ref<number | null>
   conversations: Ref<Conversation[] | null | undefined>
   providers: Ref<Provider[]>
+  /** The open conversation's messages; on the router, the latest route frame names the model the pills describe. */
+  messages: Ref<Message[]>
   refreshConversations: () => Promise<void> | void
 }
 
@@ -64,7 +67,7 @@ export interface UseAgentModel {
 }
 
 export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
-  const { agents, selectedAgentId, selectedConvoId, conversations, providers, refreshConversations } = deps
+  const { agents, selectedAgentId, selectedConvoId, conversations, providers, messages, refreshConversations } = deps
   const { saveError, attempt } = useSaveAttempt()
 
   // Fresh-chat picks. They apply to the conversation the next message creates, so
@@ -141,13 +144,25 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   })
 
   /**
-   * ModelInfo for the effective (override-or-agent) model. The Think / Vision /
-   * Audio pills and the thinking-level dropdown all derive from this, so they
-   * reflect the capabilities of the model that will actually run the next
-   * turn — not the agent's default when an override is active.
+   * The model whose capabilities the pills describe. The router (JCLAW-1222) picks a model per
+   * prompt, so on Auto this is the model the conversation's latest route frame named — nothing
+   * before the first one lands, and it changes as the router changes its pick.
+   */
+  const resolvedModel = computed<{ providerName: string | null, modelId: string | null }>(() => {
+    const { providerName, modelId } = effectiveModel.value
+    if (providerName !== ROUTER_PROVIDER || modelId !== ROUTER_MODEL_ID) return effectiveModel.value
+    const route = latestRouteOf(messages.value)
+    return route ? { providerName: route.provider, modelId: route.model } : { providerName: null, modelId: null }
+  })
+
+  /**
+   * ModelInfo for the resolved model. The Think / Vision / Audio pills and the
+   * thinking-level dropdown all derive from this, so they reflect the
+   * capabilities of the model that will actually run the next turn — not the
+   * agent's default when an override is active, and not the router's union.
    */
   const selectedModelInfo = computed<ProviderModel | null>(() => {
-    const { providerName, modelId } = effectiveModel.value
+    const { providerName, modelId } = resolvedModel.value
     if (!providerName || !modelId) return null
     const provider = providers.value.find(p => p.name === providerName)
     return provider?.models.find(m => m.id === modelId) ?? null
@@ -176,8 +191,8 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
   // preference was honored.
   const thinkingLock = computed(() =>
     resolveThinkingLock(
-      effectiveModel.value.providerName,
-      effectiveModel.value.modelId,
+      resolvedModel.value.providerName,
+      resolvedModel.value.modelId,
       selectedModelInfo.value,
     ),
   )

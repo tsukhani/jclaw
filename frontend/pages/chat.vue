@@ -173,6 +173,7 @@ const {
   selectedConvoId,
   conversations,
   providers,
+  messages,
   refreshConversations,
 })
 const input = ref('')

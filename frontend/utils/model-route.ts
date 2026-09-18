@@ -23,6 +23,19 @@ export function routeOf(msg: Message): MessageRoute | null {
   return msg.usage?.route ?? msg._route ?? null
 }
 
+/**
+ * The most recent routed turn in a conversation, or null when no turn has been routed yet. On an
+ * Auto conversation this is the model the composer's capability pills describe: the router picks
+ * per prompt, so before the first route frame there is no model to describe.
+ */
+export function latestRouteOf(messages: readonly Message[]): MessageRoute | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const route = routeOf(messages[i]!)
+    if (route) return route
+  }
+  return null
+}
+
 export function routeClassLabel(route: MessageRoute): string {
   return ROUTE_CLASS_LABELS[route.class] ?? route.class
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { defineComponent, h, ref } from 'vue'
-import type { Agent, Conversation } from '~/types/api'
+import type { Agent, Conversation, Message } from '~/types/api'
 import type { Provider } from '~/composables/useProviders'
 import { useAgentModel, type UseAgentModel, type UseAgentModelDeps } from '~/composables/useAgentModel'
 
@@ -70,6 +70,7 @@ async function mountAgentModel(over: Partial<UseAgentModelDeps> = {}) {
     selectedConvoId: ref<number | null>(null),
     conversations: ref<Conversation[]>([]),
     providers: ref<Provider[]>(PROVIDERS),
+    messages: ref<Message[]>([]),
     refreshConversations: vi.fn(),
     ...over,
   }
@@ -94,6 +95,44 @@ describe('useAgentModel', () => {
     expect(api.visionSupported.value).toBe(true)
     expect(api.audioSupported.value).toBe(false)
     expect(api.thinkingLevels.value).toEqual(['low', 'medium', 'high'])
+  })
+
+  it('shows no capability pills on the router until a turn has been routed, then follows the route (JCLAW-1222)', async () => {
+    const providers = ref<Provider[]>([
+      ...PROVIDERS,
+      // The router's union advertises everything; the composer must not show it.
+      { name: 'router', models: [{ id: 'auto', name: 'Auto (best value)', supportsThinking: true, supportsVision: true, supportsAudio: true, supportsVideo: true }] },
+    ])
+    const messages = ref<Message[]>([])
+    const { api } = await mountAgentModel({
+      agents: ref([agent({ modelProvider: 'router', modelId: 'auto' })]),
+      providers,
+      messages,
+    })
+    expect(api.selectedModelKey.value).toBe('router::auto') // the header still reads Auto
+    expect(api.selectedModelInfo.value).toBeNull()
+    expect(api.thinkingSupported.value).toBe(false)
+    expect(api.visionSupported.value).toBe(false)
+    expect(api.videoSupported.value).toBe(false)
+
+    // The stream's route frame lands on the placeholder before the usage record does.
+    const route = { class: 'chat', provider: 'openai', model: 'gpt-3', reason: '' }
+    messages.value = [{ role: 'assistant', content: '', createdAt: '', _route: route }]
+    await Promise.resolve()
+    expect(api.selectedModelKey.value).toBe('router::auto')
+    expect(api.selectedModelInfo.value?.id).toBe('gpt-3')
+    expect(api.thinkingSupported.value).toBe(false)
+    expect(api.visionSupported.value).toBe(false)
+
+    // The next turn is routed elsewhere; the pills follow it.
+    messages.value = [
+      ...messages.value,
+      { role: 'assistant', content: '', createdAt: '', usage: { route: { ...route, provider: 'anthropic', model: 'opus' } } } as unknown as Message,
+    ]
+    await Promise.resolve()
+    expect(api.selectedModelInfo.value?.id).toBe('opus')
+    expect(api.thinkingSupported.value).toBe(true)
+    expect(api.audioSupported.value).toBe(true)
   })
 
   it('honors a JCLAW-108 per-conversation model override', async () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { routerProvider, type Provider } from '~/composables/useProviders'
-import { routeDescription, routeOf } from '~/utils/model-route'
+import { latestRouteOf, routeDescription, routeOf } from '~/utils/model-route'
 import type { Message } from '~/types/api'
 
 function providers(...list: Provider[]): Map<string, Provider> {
@@ -46,6 +46,14 @@ describe('route display helpers (JCLAW-1222)', () => {
     const m = { role: 'assistant', content: '', createdAt: '', usage: { route }, _route: { ...route, model: 'live' } } as unknown as Message
     expect(routeOf(m)?.model).toBe('glm-5.3-flash')
     expect(routeOf({ role: 'assistant', content: '', createdAt: '' } as Message)).toBeNull()
+  })
+
+  it('names the latest routed turn, and nothing before one exists', () => {
+    const routed = (model: string) => ({ role: 'assistant', content: '', createdAt: '', _route: { ...route, model } }) as Message
+    const plain = { role: 'user', content: 'hi', createdAt: '' } as Message
+    expect(latestRouteOf([])).toBeNull()
+    expect(latestRouteOf([plain])).toBeNull()
+    expect(latestRouteOf([plain, routed('first'), plain, routed('second'), plain])?.model).toBe('second')
   })
 
   it('describes the class, the model and why it was bent', () => {
