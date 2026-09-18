@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
@@ -32,6 +32,13 @@ async function settle() {
   for (let i = 0; i < 3; i++) await flushPromises()
 }
 
+// The query trails the input by a debounce; type, then let it elapse.
+async function typeFilter(component: VueWrapper, text: string) {
+  await component.find('[data-testid="workspace-filter"]').setValue(text)
+  vi.advanceTimersByTime(200)
+  await settle()
+}
+
 function rowPaths(component: VueWrapper) {
   return component.findAll('[data-testid^="ws-row-"]').map(r => r.attributes('data-testid')!.replace('ws-row-', ''))
 }
@@ -54,6 +61,13 @@ describe('AgentWorkspaceManager filter and colours', () => {
   beforeEach(() => {
     clearNuxtData()
     registerEndpoint('/api/agents/31/workspace-tree', () => LISTING)
+    // Only the debounce is faked: flushPromises schedules itself on setTimeout too, so fake
+    // timers must not swallow it — hence the explicit advance in typeFilter.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('colours folders, text files and binaries differently, with a distinct icon per kind', async () => {
@@ -76,23 +90,53 @@ describe('AgentWorkspaceManager filter and colours', () => {
     await settle()
     expect(rowPaths(component)).toEqual(['docs', 'archive.zip', 'notes.md', 'SOUL.md'])
 
-    await component.find('[data-testid="workspace-filter"]').setValue('guide')
-    await settle()
+    await typeFilter(component, 'guide')
     expect(rowPaths(component)).toEqual(['docs', 'docs/guide.md', 'docs/deep', 'docs/deep/guide-notes.txt'])
     expect(component.find('[data-testid="ws-row-docs"] button').attributes('aria-expanded')).toBe('true')
 
-    await component.find('[data-testid="workspace-filter"]').setValue('ZIP')
-    await settle()
+    await typeFilter(component, 'ZIP')
     expect(rowPaths(component)).toEqual(['archive.zip'])
 
-    await component.find('[data-testid="workspace-filter"]').setValue('nothing-here')
-    await settle()
+    await typeFilter(component, 'nothing-here')
     expect(rowPaths(component)).toEqual([])
     expect(component.find('[data-testid="workspace-empty"]').text()).toBe('Nothing matches the filter.')
 
     await component.find('[data-testid="workspace-filter-clear"]').trigger('click')
     await settle()
     expect(rowPaths(component)).toEqual(['docs', 'archive.zip', 'notes.md', 'SOUL.md'])
+    component.unmount()
+  })
+
+  it('walks the tree once for a burst of keystrokes', async () => {
+    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 31 } })
+    await settle()
+    const input = component.find('[data-testid="workspace-filter"]')
+    await input.setValue('g')
+    await input.setValue('gu')
+    await input.setValue('gui')
+    await settle()
+    // Nothing has elapsed: the tree is untouched by the burst.
+    expect(rowPaths(component)).toEqual(['docs', 'archive.zip', 'notes.md', 'SOUL.md'])
+    vi.advanceTimersByTime(200)
+    await settle()
+    expect(rowPaths(component)).toEqual(['docs', 'docs/guide.md', 'docs/deep', 'docs/deep/guide-notes.txt'])
+    component.unmount()
+  })
+
+  it('caps the rendered rows on a huge workspace and says how many are hidden', async () => {
+    const many: WorkspaceListing = {
+      total: 1500,
+      entries: Array.from({ length: 1500 }, (_, i) => file(`bulk-${String(i).padStart(4, '0')}.log`, 1)),
+    }
+    registerEndpoint('/api/agents/32/workspace-tree', () => many)
+    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 32 } })
+    await settle()
+    expect(rowPaths(component)).toHaveLength(1000)
+    expect(component.find('[data-testid="workspace-row-cap"]').text()).toContain('first 1,000 of 1,500 rows')
+
+    await typeFilter(component, 'bulk-09')
+    expect(rowPaths(component)).toHaveLength(100)
+    expect(component.find('[data-testid="workspace-row-cap"]').exists()).toBe(false)
     component.unmount()
   })
 })

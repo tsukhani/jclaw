@@ -15,7 +15,9 @@ import { workspaceEntryStyle } from '~/utils/workspace-files'
 const props = defineProps<{ agentId: number | null }>()
 
 // (1) Data layer: the listing and its total, re-read whenever the agent changes.
-const listing = ref<WorkspaceListing | null>(null)
+// Shallow: a large workspace lists tens of thousands of entries, and a deep proxy over all of
+// them turns every filter walk into a crawl. The tree is replaced whole on each load, never mutated.
+const listing = shallowRef<WorkspaceListing | null>(null)
 const loading = ref(false)
 const error = ref<ApiErrorDetails | null>(null)
 const latest = useLatestRequest()
@@ -101,10 +103,32 @@ onBeforeUnmount(() => {
 interface Row { entry: WorkspaceEntry, depth: number }
 
 const filter = ref('')
-const query = computed(() => filter.value.trim().toLowerCase())
+// The query trails the input by a beat so a burst of keystrokes walks the tree once, not per key.
+const query = ref('')
+const FILTER_DEBOUNCE_MS = 150
+let filterTimer: ReturnType<typeof setTimeout> | null = null
+watch(filter, (value) => {
+  if (filterTimer) clearTimeout(filterTimer)
+  const next = value.trim().toLowerCase()
+  if (!next) {
+    query.value = ''
+    return
+  }
+  filterTimer = setTimeout(() => {
+    query.value = next
+  }, FILTER_DEBOUNCE_MS)
+})
+onBeforeUnmount(() => {
+  if (filterTimer) clearTimeout(filterTimer)
+})
 watch(() => props.agentId, () => {
   filter.value = ''
+  query.value = ''
 })
+
+// The page renders rows as plain DOM, so a bound keeps a one-letter filter over a huge workspace
+// from freezing the tab; the notice tells the operator to narrow the filter or collapse folders.
+const MAX_ROWS = 1000
 
 function isOpen(path: string) {
   return openDirs.value[path] === true
@@ -119,20 +143,31 @@ function isShownOpen(path: string) {
   return query.value ? true : isOpen(path)
 }
 
-function matching(entries: WorkspaceEntry[], depth: number, q: string): Row[] {
-  const out: Row[] = []
+// Appends the matching rows under `entries` to `out` and returns how many it added; a folder is
+// kept when it matches or anything below it does. Loops rather than spreads: a spread of a
+// large subtree's rows is quadratic and can overflow the call stack.
+function appendMatching(entries: WorkspaceEntry[], depth: number, q: string, out: Row[]): number {
+  let added = 0
   for (const entry of entries) {
-    const below = entry.kind === 'dir' && entry.children ? matching(entry.children, depth + 1, q) : []
-    if (!entry.name.toLowerCase().includes(q) && below.length === 0) continue
-    out.push({ entry, depth }, ...below)
+    const mark = out.length
+    out.push({ entry, depth })
+    const below = entry.kind === 'dir' && entry.children ? appendMatching(entry.children, depth + 1, q, out) : 0
+    if (below === 0 && !entry.name.toLowerCase().includes(q)) {
+      out.length = mark
+      continue
+    }
+    added += 1 + below
   }
-  return out
+  return added
 }
 
-const rows = computed<Row[]>(() => {
+const allRows = computed<Row[]>(() => {
   const entries = listing.value?.entries ?? []
-  if (query.value) return matching(entries, 0, query.value)
   const out: Row[] = []
+  if (query.value) {
+    appendMatching(entries, 0, query.value, out)
+    return out
+  }
   const walk = (list: WorkspaceEntry[], depth: number) => {
     for (const entry of list) {
       out.push({ entry, depth })
@@ -142,6 +177,9 @@ const rows = computed<Row[]>(() => {
   walk(entries, 0)
   return out
 })
+
+const rows = computed<Row[]>(() => allRows.value.length > MAX_ROWS ? allRows.value.slice(0, MAX_ROWS) : allRows.value)
+const hiddenRows = computed(() => Math.max(0, allRows.value.length - MAX_ROWS))
 
 // Colour and icon move together so the kind is readable without the colour.
 const STYLE_CLASS = {
@@ -399,6 +437,14 @@ watch(() => props.agentId, () => {
           </template>
         </span>
       </div>
+      <p
+        v-if="hiddenRows > 0"
+        class="px-4 pt-2 text-xs text-fg-muted"
+        data-testid="workspace-row-cap"
+      >
+        Showing the first {{ MAX_ROWS.toLocaleString() }} of {{ allRows.length.toLocaleString() }} rows.
+        {{ query ? 'Narrow the filter to see the rest.' : 'Collapse folders or use the filter to see the rest.' }}
+      </p>
     </div>
   </div>
 </template>
