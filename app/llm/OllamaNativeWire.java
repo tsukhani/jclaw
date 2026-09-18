@@ -64,6 +64,7 @@ public final class OllamaNativeWire implements ChatWire {
     /** Prefix of the {@link LatencyStats} segment each duration is recorded under, in milliseconds. */
     public static final String SEGMENT_PREFIX = "llm_";
 
+    private static final String JSON_MODEL = "model";
     private static final String JSON_MESSAGE = "message";
     private static final String JSON_CONTENT = "content";
     private static final String JSON_TOOL_CALLS = "tool_calls";
@@ -93,7 +94,7 @@ public final class OllamaNativeWire implements ChatWire {
     @Override
     public String serialize(ChatRequest request) {
         var obj = new JsonObject();
-        obj.addProperty("model", request.model());
+        obj.addProperty(JSON_MODEL, request.model());
         obj.add("messages", nativeMessages(request.messages()));
         if (request.tools() != null && !request.tools().isEmpty() && provider.modelSupportsTools(request.model())) {
             obj.add("tools", LlmProvider.gson.toJsonTree(request.tools()));
@@ -243,7 +244,7 @@ public final class OllamaNativeWire implements ChatWire {
                 stringOr(message.getAsJsonObject(), JSON_CONTENT, ""),
                 toolCalls.isEmpty() ? null : toolCalls, null, null);
         var choice = new Choice(0, reply, finishReason(obj, !toolCalls.isEmpty()));
-        return new ChatResponse(null, stringOrNull(obj, "model"), List.of(choice), usageOf(obj, channel));
+        return new ChatResponse(null, stringOrNull(obj, JSON_MODEL), List.of(choice), usageOf(obj, channel));
     }
 
     /** {@code done_reason} as the shim reports it: a stop that produced tool calls reads {@code tool_calls}. */
@@ -261,16 +262,19 @@ public final class OllamaNativeWire implements ChatWire {
             var tc = el.getAsJsonObject();
             var fn = tc.has(JSON_FUNCTION) && tc.get(JSON_FUNCTION).isJsonObject()
                     ? tc.getAsJsonObject(JSON_FUNCTION) : new JsonObject();
-            var args = fn.get(JSON_ARGUMENTS);
-            // The shim hands the arguments on as the string form of whatever object the model produced.
-            var arguments = args == null ? "{}"
-                    : args.isJsonPrimitive() && args.getAsJsonPrimitive().isString() ? args.getAsString()
-                    : LlmProvider.gson.toJson(args);
+            var arguments = argumentsText(fn.get(JSON_ARGUMENTS));
             // The shim emits an empty id when the daemon has none, and the OpenAI path reads it as "".
             out.add(new ToolCall(stringOr(tc, "id", ""), JSON_FUNCTION,
                     new FunctionCall(stringOrNull(fn, "name"), arguments)));
         }
         return out;
+    }
+
+    /** The shim hands the arguments on as the string form of whatever object the model produced. */
+    private static String argumentsText(@Nullable JsonElement args) {
+        if (args == null) return "{}";
+        if (args.isJsonPrimitive() && args.getAsJsonPrimitive().isString()) return args.getAsString();
+        return LlmProvider.gson.toJson(args);
     }
 
     /**
@@ -337,7 +341,7 @@ public final class OllamaNativeWire implements ChatWire {
                 toolCallChunks, emptyToNull(stringOrNull(message, "thinking")), null, null);
         var done = obj.has("done") && obj.get("done").isJsonPrimitive() && obj.get("done").getAsBoolean();
         var choice = new ChunkChoice(0, delta, done ? finishReason(obj, sawToolCalls.get()) : null);
-        return new ChatCompletionChunk(null, stringOrNull(obj, "model"), List.of(choice),
+        return new ChatCompletionChunk(null, stringOrNull(obj, JSON_MODEL), List.of(choice),
                 done ? usageOf(obj, channel) : null);
     }
 
