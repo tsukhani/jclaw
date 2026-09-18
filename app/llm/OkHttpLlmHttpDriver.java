@@ -147,6 +147,41 @@ final class OkHttpLlmHttpDriver {
     }
 
     /**
+     * Streaming POST consuming newline-delimited JSON (JCLAW-1158): Ollama's native
+     * {@code /api/chat} answers one JSON object per line rather than SSE frames. Every non-blank
+     * line reaches {@code onLine}; {@code onComplete} runs when the body ends cleanly;
+     * {@code onError} on transport failure or a non-200 status. Same client and the same cancel
+     * contract as {@link #streamSse}: {@code publishCancel} gets the call's abort, which closes
+     * the socket and unwinds the blocked read below as an {@link IOException}.
+     */
+    @SuppressWarnings("java:S107") // the streaming callback surface, the cancel handle, and the call's identity
+    static void streamNdjson(URI uri, String authHeader, String jsonBody, CallSite site,
+                             Consumer<String> onLine, Runnable onComplete, Consumer<Throwable> onError,
+                             Consumer<Runnable> publishCancel, @Nullable String channel) {
+        var builder = new Request.Builder()
+                .url(uri.toString())
+                .header(HttpKeys.AUTHORIZATION, authHeader)
+                .post(RequestBody.create(jsonBody, JSON));
+        if (channel != null) builder.tag(String.class, channel);
+        var call = OtelRuntime.traced(HttpFactories.llmStreaming()).newCall(builder.build());
+        publishCancel.accept(call::cancel);
+        try (var resp = call.execute()) {
+            if (resp.code() != 200) {
+                onError.accept(classify(resp.code(), resp.body().string(), authHeader, site));
+                return;
+            }
+            var source = resp.body().source();
+            String line;
+            while ((line = source.readUtf8Line()) != null) {
+                if (!line.isBlank()) onLine.accept(line);
+            }
+            onComplete.run();
+        } catch (IOException | RuntimeException e) {
+            onError.accept(e);
+        }
+    }
+
+    /**
      * Classify a non-200 SSE status the way {@code LlmProvider.attemptRequest} classifies a
      * single-shot one (JCLAW-1166), so a caller can tell a provider fault from a request of
      * ours, and attach the remedy it needs (JCLAW-1134). The message keeps the body text:
@@ -158,10 +193,11 @@ final class OkHttpLlmHttpDriver {
     private static LlmProvider.LlmException classify(int status, String body, String authHeader,
                                                      CallSite site) {
         var failure = site.classifying(status, body);
-        var message = "HTTP %d: %s".formatted(status, sanitizeErrorBody(body, authHeader));
+        var sanitized = sanitizeErrorBody(body, authHeader);
+        var message = "HTTP %d: %s".formatted(status, sanitized);
         if (status == 429) return new LlmProvider.LlmException.RateLimited(message, null, failure);
         if (status >= 500) return new LlmProvider.LlmException.ServerError(message, null, failure);
-        if (status >= 400) return new LlmProvider.LlmException.ClientError(message, failure);
+        if (status >= 400) return new LlmProvider.LlmException.ClientError(message, failure, status, sanitized);
         return new LlmProvider.LlmException(message, null, failure);
     }
 

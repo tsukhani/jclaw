@@ -184,6 +184,7 @@ interface LlmStreamCarriers {
         public String content() { return content; }
         public List<ToolCall> toolCalls() { return toolCalls; }
         public @Nullable String finishReason() { return finishReason; }
+        public @Nullable Usage usage() { return usage; }
         public @Nullable Exception error() { return error; }
 
         /**

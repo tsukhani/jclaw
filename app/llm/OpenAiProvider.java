@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import llm.LlmTypes.ChunkDelta;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Standard OpenAI-compatible provider. Handles direct OpenAI API and any
@@ -76,7 +77,7 @@ public final class OpenAiProvider extends LlmProvider {
     }
 
     @Override
-    protected String extractReasoningFromDelta(ChunkDelta delta) {
+    protected @Nullable String extractReasoningFromDelta(ChunkDelta delta) {
         // JCLAW-850: ProviderRegistry routes every unrecognized provider here,
         // which is how LM Studio, vLLM, SGLang and Groq are served. They stream
         // thinking as `reasoning_content` on the delta — verified against a live

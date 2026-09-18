@@ -11,6 +11,7 @@ import {
   formatUsageCostTooltip,
   listChannelsInRows,
   providerMetricRows,
+  formatNanosDuration,
   type FleetCostRow,
   type MessageUsage,
 } from '~/utils/usage-cost'
@@ -690,5 +691,50 @@ describe('providerMetricRows (JCLAW-1147)', () => {
       providerMetrics: { zebra_count: 1, alpha_count: 2 },
     }))
     expect(rows.map(r => r.label)).toEqual(['Alpha count', 'Zebra count'])
+  })
+
+  it('formats a nanosecond duration as time, not as a count (JCLAW-1158)', () => {
+    // What a local Ollama daemon actually reported for one turn, in nanoseconds.
+    const rows = providerMetricRows(usage({
+      providerMetrics: {
+        total_duration: 6777481000,
+        load_duration: 6423727042,
+        prompt_eval_duration: 222321000,
+        eval_duration: 66063999,
+      },
+    }))
+    expect(rows.map(r => [r.label, r.value])).toEqual([
+      ['Eval duration', '66 ms'],
+      ['Load duration', '6.42 s'],
+      ['Prompt eval duration', '222 ms'],
+      ['Total duration', '6.78 s'],
+    ])
+  })
+
+  it('places durations after counts and before costs', () => {
+    const rows = providerMetricRows(usage({
+      providerMetrics: {
+        'cost_details.upstream_inference_cost': 0.001,
+        'eval_duration': 66063999,
+        'eval_count': 4,
+      },
+    }))
+    expect(rows.map(r => r.label)).toEqual(['Eval count', 'Eval duration', 'Upstream inference cost'])
+  })
+})
+
+describe('formatNanosDuration (JCLAW-1158)', () => {
+  it('rounds sub-second values to whole milliseconds', () => {
+    expect(formatNanosDuration(66063999)).toBe('66 ms')
+    expect(formatNanosDuration(999_499_999)).toBe('999 ms')
+  })
+
+  it('keeps two decimals under ten seconds and one above', () => {
+    expect(formatNanosDuration(6_423_727_042)).toBe('6.42 s')
+    expect(formatNanosDuration(42_500_000_000)).toBe('42.5 s')
+  })
+
+  it('splits a minute or more into minutes and seconds', () => {
+    expect(formatNanosDuration(72_000_000_000)).toBe('1m 12s')
   })
 })

@@ -143,6 +143,19 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     public ProviderConfig config() { return config; }
 
+    /** The OpenAI-compatible wire every provider speaks; {@link #wireFor} answers it unless overridden. */
+    private final ChatWire openAiWire = new OpenAiWire();
+
+    /**
+     * The wire protocol {@code request} travels by (JCLAW-1158): OpenAI-compatible chat
+     * completions over SSE unless a provider overrides this. A request on another wire falls
+     * back to this one when that wire reports its endpoint absent before anything has streamed
+     * ({@link ChatWire#endpointAbsent}), in {@link #dispatchChat} and {@link #streamOnce}.
+     */
+    protected ChatWire wireFor(ChatRequest request) {
+        return openAiWire;
+    }
+
     /**
      * Factory method: creates the right {@link LlmProvider} subclass based on
      * the provider name in the config. Matches against known substrings
@@ -360,7 +373,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * <p>Only string content is handled — a block array means a subclass structured the
      * system message itself and owns what the blocks contain.
      */
-    private static void stripCacheBoundaryMarker(JsonObject request) {
+    static void stripCacheBoundaryMarker(JsonObject request) {
         if (!request.has(JSON_MESSAGES) || !request.get(JSON_MESSAGES).isJsonArray()) return;
         // JCLAW-976: every message, not only the first system one. The markers are provider
         // protocol; a user turn or a replayed history row carrying one would otherwise ship
@@ -442,6 +455,51 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
     }
 
+    /** OpenAI-compatible chat completions: the JSON request, SSE {@code data:} frames back. */
+    private final class OpenAiWire implements ChatWire {
+
+        @Override
+        public String name() {
+            return "openai-compat";
+        }
+
+        @Override
+        public URI uri() {
+            return buildUri(HttpKeys.CHAT_COMPLETIONS_PATH);
+        }
+
+        @Override
+        public String serialize(ChatRequest request) {
+            return serializeRequest(request);
+        }
+
+        @Override
+        public ChatResponse parseResponse(String body, @Nullable String channel) {
+            return deserializeResponse(body);
+        }
+
+        @Override
+        public void stream(String json, CallSite site,
+                           Consumer<ChatCompletionChunk> onChunk, Runnable onComplete, Consumer<Throwable> onError,
+                           Consumer<Runnable> publishCancel, @Nullable String channel) {
+            OkHttpLlmHttpDriver.streamSse(uri(), HttpKeys.BEARER_PREFIX + config.apiKey(), json, site,
+                    data -> {
+                        // The server closes the stream right after the [DONE]
+                        // sentinel, so we skip parsing it here.
+                        if ("[DONE]".equals(data)) return;
+                        // Parse once; augmentChunkUsage reuses the tree rather than re-parsing the final-usage chunk.
+                        try {
+                            var root = JsonParser.parseString(data).getAsJsonObject();
+                            var chunk = gson.fromJson(root, ChatCompletionChunk.class);
+                            if (chunk != null) onChunk.accept(augmentChunkUsage(chunk, root));
+                        } catch (Exception _) {
+                            // Skip malformed chunks
+                        }
+                    },
+                    onComplete, onError, publishCancel, channel);
+        }
+    }
+
     // ─── Synchronous chat ────────────────────────────────────────────────
 
     public ChatResponse chat(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
@@ -489,39 +547,22 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                                       @Nullable Integer maxTokens, @Nullable String thinkingMode,
                                       @Nullable Integer timeoutSeconds, @Nullable String channel) {
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
-        var json = serializeRequest(request);
+        var wire = wireFor(request);
         // JCLAW-882: the sync dispatch point. Counted before the wire call so a
         // request that ends in an exception still shows as a call the harness
         // decided to make — the NFR is about decisions, not successes.
         LatencyTrace.countLlmCall();
         var call = GenAiSpans.start(config, GenAiSpans.OPERATION_CHAT, model, false, maxTokens);
         try (var _ = call.makeCurrent()) {
-            String responseBody;
-            try {
-                responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH, json, request.model(),
-                        timeoutSeconds, channel);
-            } catch (RuntimeException e) {
-                // JCLAW-1076: the provider has just told us this model can't use
-                // tools. Retry once without them rather than failing the turn. The
-                // retry carries no tools, so it cannot raise this error again.
-                if (!sentTools(request) || !ToolCapabilityMemo.isToolsUnsupported(e)) throw e;
-                ToolCapabilityMemo.record(config.name(), model);
-                var retry = new ChatRequest(model, messages, List.of(), false, maxTokens, thinkingMode);
-                responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH,
-                        serializeRequest(retry), retry.model(), timeoutSeconds, channel);
-            }
-            // A provider can return a 200 whose body is garbage (truncated JSON, an
-            // HTML error page, a missing "choices" array). deserializeResponse then
-            // throws a raw JsonSyntaxException / IllegalStateException — which
-            // chatWithFailover doesn't catch, so the failover never fires. Wrap it as
-            // an LlmException so provider-side garbage-with-200 is a failover trigger.
             ChatResponse response;
             try {
-                response = deserializeResponse(responseBody);
-            } catch (LlmException e) {
-                throw e;
+                response = sendOnce(wire, request, timeoutSeconds, channel);
             } catch (RuntimeException e) {
-                throw new LlmException("Malformed 200 response from " + config.name(), e);
+                // JCLAW-1158: nothing answers at the wire's endpoint, so the same request travels
+                // the OpenAI-compatible wire, which every provider serves.
+                if (wire == openAiWire || !wire.endpointAbsent(e)) throw e;
+                noteEndpointAbsent(wire, e);
+                response = sendOnce(openAiWire, request, timeoutSeconds, channel);
             }
             noteCachedCall(LatencyTrace.current(), response.usage());
             call.response(response.id(), response.model(), response.usage(), finishReasons(response));
@@ -531,6 +572,47 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             call.failed(e);
             throw e;
         }
+    }
+
+    /** One request on one wire, the JCLAW-1076 tools retry included. */
+    private ChatResponse sendOnce(ChatWire wire, ChatRequest request,
+                                  @Nullable Integer timeoutSeconds, @Nullable String channel) {
+        String responseBody;
+        try {
+            responseBody = executeWithRetry(wire.uri(), wire.serialize(request), request.model(),
+                    timeoutSeconds, channel);
+        } catch (RuntimeException e) {
+            // JCLAW-1076: the provider has just told us this model can't use
+            // tools. Retry once without them rather than failing the turn. The
+            // retry carries no tools, so it cannot raise this error again.
+            if (!sentTools(request) || !ToolCapabilityMemo.isToolsUnsupported(e)) throw e;
+            ToolCapabilityMemo.record(config.name(), request.model());
+            var retry = withoutTools(request);
+            responseBody = executeWithRetry(wire.uri(), wire.serialize(retry), retry.model(),
+                    timeoutSeconds, channel);
+        }
+        // A provider can return a 200 whose body is garbage (truncated JSON, an
+        // HTML error page, a missing "choices" array). Parsing then throws a raw
+        // JsonSyntaxException / IllegalStateException — which chatWithFailover
+        // doesn't catch, so the failover never fires. Wrap it as an LlmException
+        // so provider-side garbage-with-200 is a failover trigger.
+        try {
+            return wire.parseResponse(responseBody, channel);
+        } catch (LlmException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new LlmException("Malformed 200 response from " + config.name(), e);
+        }
+    }
+
+    private static ChatRequest withoutTools(ChatRequest request) {
+        return new ChatRequest(request.model(), request.messages(), List.of(), request.stream(),
+                request.maxTokens(), request.thinkingMode());
+    }
+
+    private void noteEndpointAbsent(ChatWire wire, Throwable failure) {
+        EventLogger.warn("llm", "%s: no %s endpoint at %s (%s); this request falls back to OpenAI-compatible chat completions"
+                .formatted(config.name(), wire.name(), wire.uri(), failure.getMessage()));
     }
 
     private static List<String> finishReasons(ChatResponse response) {
@@ -650,21 +732,24 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         });
         // The transport runs on its own virtual thread, which inherits no OTel context; the
         // wrap carries the span so the HTTP client span nests under it.
+        var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
+        var wire = wireFor(request);
         Thread.ofVirtual().name("llm-stream").start(call.context().wrap(() ->
-                streamOnce(model, messages, tools, observedChunk, observedComplete, observedError,
-                        cancelTransport::set, maxTokens, thinkingMode, channel, true)));
+                streamOnce(wire, request, observedChunk, observedComplete, observedError,
+                        cancelTransport::set, channel, true)));
     }
 
     /**
-     * One streaming attempt. {@code mayRetryWithoutTools} is false on the retry,
-     * so a tools-unsupported error can be handled at most once (JCLAW-1076).
+     * One streaming attempt on {@code wire}. {@code mayRetryWithoutTools} is false on the retry,
+     * so a tools-unsupported error can be handled at most once (JCLAW-1076); a wire whose
+     * endpoint turns out absent hands the request to the OpenAI-compatible wire, once and only
+     * while nothing has streamed (JCLAW-1158).
      */
-    @SuppressWarnings("java:S107") // same shape as chatStream, plus the cancel handle and the retry latch
-    private void streamOnce(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+    @SuppressWarnings("java:S107") // same shape as chatStream, plus the wire, the cancel handle and the retry latch
+    private void streamOnce(ChatWire wire, ChatRequest request,
                             Consumer<ChatCompletionChunk> onChunk,
                             Runnable onComplete, Consumer<Exception> onError,
                             Consumer<Runnable> publishCancel,
-                            @Nullable Integer maxTokens, @Nullable String thinkingMode,
                             @Nullable String channel,
                             boolean mayRetryWithoutTools) {
         // Retrying after tokens have reached the user would replay them. A
@@ -672,40 +757,31 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // yet, but the latch makes that a guarantee rather than an assumption.
         var emitted = new AtomicBoolean(false);
         Consumer<Throwable> handleFailure = t -> {
+            var tools = request.tools();
             var retryable = mayRetryWithoutTools && !emitted.get()
                     && tools != null && !tools.isEmpty()
                     && ToolCapabilityMemo.isToolsUnsupported(t);
             if (retryable) {
-                ToolCapabilityMemo.record(config.name(), model);
-                streamOnce(model, messages, List.of(), onChunk, onComplete, onError,
-                        publishCancel, maxTokens, thinkingMode, channel, false);
+                ToolCapabilityMemo.record(config.name(), request.model());
+                streamOnce(wire, withoutTools(request), onChunk, onComplete, onError,
+                        publishCancel, channel, false);
+                return;
+            }
+            if (wire != openAiWire && !emitted.get() && wire.endpointAbsent(t)) {
+                noteEndpointAbsent(wire, t);
+                streamOnce(openAiWire, request, onChunk, onComplete, onError,
+                        publishCancel, channel, mayRetryWithoutTools);
                 return;
             }
             onError.accept(t instanceof Exception ex ? ex : new LlmException("Stream error", t));
         };
         try {
-            var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
-            var json = serializeRequest(request);
-            OkHttpLlmHttpDriver.streamSse(buildUri(HttpKeys.CHAT_COMPLETIONS_PATH),
-                    HttpKeys.BEARER_PREFIX + config.apiKey(), json, callSite(request.model()),
-                    data -> {
+            wire.stream(wire.serialize(request), callSite(request.model()),
+                    chunk -> {
                         emitted.set(true);
-                        // The server closes the stream right after the [DONE]
-                        // sentinel, so we skip parsing it here.
-                        if ("[DONE]".equals(data)) return;
-                        // Parse once; augmentChunkUsage reuses the tree rather than re-parsing the final-usage chunk.
-                        try {
-                            var root = JsonParser.parseString(data).getAsJsonObject();
-                            var chunk = gson.fromJson(root, ChatCompletionChunk.class);
-                            if (chunk != null) onChunk.accept(augmentChunkUsage(chunk, root));
-                        } catch (Exception _) {
-                            // Skip malformed chunks
-                        }
+                        onChunk.accept(chunk);
                     },
-                    onComplete,
-                    handleFailure,
-                    publishCancel,
-                    channel);
+                    onComplete, handleFailure, publishCancel, channel);
         } catch (Exception e) {
             handleFailure.accept(e);
         }
@@ -1156,7 +1232,12 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      *               to name the one actually rejected (JCLAW-1134). */
     protected String executeWithRetry(String path, String json, String model,
                                       @Nullable Integer timeoutSeconds, @Nullable String channel) {
-        var uri = buildUri(path);
+        return executeWithRetry(buildUri(path), json, model, timeoutSeconds, channel);
+    }
+
+    /** The same retry loop against an absolute endpoint, for a wire not rooted at {@link ProviderConfig#baseUrl} (JCLAW-1158). */
+    protected String executeWithRetry(URI uri, String json, String model,
+                                      @Nullable Integer timeoutSeconds, @Nullable String channel) {
         var auth = HttpKeys.BEARER_PREFIX + config.apiKey();
         var timeout = Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180);
         var site = callSite(model);
@@ -1289,9 +1370,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
 
         if (reply.statusCode() >= 400 && reply.statusCode() < 500) {
-            throw new LlmException.ClientError("HTTP %d from %s: %s".formatted(
-                    reply.statusCode(), config.name(), sanitizeErrorBody(reply.body(), config.apiKey())),
-                    site.classifying(reply.statusCode(), reply.body()));
+            var body = sanitizeErrorBody(reply.body(), config.apiKey());
+            throw new LlmException.ClientError("HTTP %d from %s: %s".formatted(reply.statusCode(), config.name(), body),
+                    site.classifying(reply.statusCode(), reply.body()), reply.statusCode(), body);
         }
 
         return new AttemptOutcome(null, new LlmException.ServerError("HTTP %d from %s: %s".formatted(
@@ -1460,10 +1541,23 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
         /** A 4xx, or a 429 naming an exhausted balance: our request, and retrying never fixes it. */
         public static final class ClientError extends LlmException {
-            public ClientError(String message) { super(message); }
+            private final int status;
+            private final @Nullable String body;
+
+            public ClientError(String message) { this(message, null, 0, null); }
             public ClientError(String message, LlmErrorTemplates.@Nullable Failure failure) {
-                super(message, null, failure);
+                this(message, failure, 0, null);
             }
+            /** @param status the HTTP status behind this error, or 0 when there was none
+             *  @param body   the sanitized answer body, for a caller that has to tell one 4xx from another */
+            public ClientError(String message, LlmErrorTemplates.@Nullable Failure failure,
+                               int status, @Nullable String body) {
+                super(message, null, failure);
+                this.status = status;
+                this.body = body;
+            }
+            public int status() { return status; }
+            public @Nullable String body() { return body; }
         }
 
         /** A 5xx: the provider is unwell. */

@@ -4,11 +4,14 @@ import com.google.gson.JsonObject;
 import llm.LlmTypes.ChatRequest;
 import llm.LlmTypes.ChunkDelta;
 import llm.LlmTypes.ProviderConfig;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 
 /**
  * Ollama provider (local and Ollama Cloud). Uses the OpenAI-compatible
- * {@code /v1/chat/completions} endpoint.
+ * {@code /v1/chat/completions} endpoint, or the daemon's native {@code /api/chat} when
+ * {@code provider.<name>.useNativeApi} is on (JCLAW-1158, {@link OllamaNativeWire}) — same
+ * request semantics, plus the per-request timings only the native response carries.
  *
  * Reasoning: sends {@code reasoning_effort} (accepted values: "low", "medium", "high").
  * Streaming: reads the {@code reasoning} string field from deltas.
@@ -24,8 +27,20 @@ import services.ConfigService;
  */
 public final class OllamaProvider extends LlmProvider {
 
+    /** Config key suffix of the native-transport toggle: {@code provider.<name>.useNativeApi}. */
+    public static final String USE_NATIVE_API_SUFFIX = ".useNativeApi";
+
+    private final ChatWire nativeWire = new OllamaNativeWire(this);
+
     public OllamaProvider(ProviderConfig config) {
         super(config);
+    }
+
+    /** {@code /api/chat} while {@code provider.<name>.useNativeApi} is true; the OpenAI-compatible wire otherwise. */
+    @Override
+    protected ChatWire wireFor(ChatRequest request) {
+        return ConfigService.getBoolean("provider." + config.name() + USE_NATIVE_API_SUFFIX, false)
+                ? nativeWire : super.wireFor(request);
     }
 
     @Override
@@ -47,7 +62,7 @@ public final class OllamaProvider extends LlmProvider {
     }
 
     @Override
-    protected String extractReasoningFromDelta(ChunkDelta delta) {
+    protected @Nullable String extractReasoningFromDelta(ChunkDelta delta) {
         // Ollama sends reasoning text as a simple "reasoning" string field on the delta
         return delta.reasoning();
     }
@@ -78,7 +93,12 @@ public final class OllamaProvider extends LlmProvider {
         // for the full window and they accumulate. On a local box that co-residency costs
         // more (eviction pressure, swap, contention with other Ollama clients sharing the
         // daemon) than the reuse it buys.
+        request.addProperty("keep_alive", keepAlive());
+    }
+
+    /** The residency to ask of the daemon, {@code provider.<name>.keepAlive}; Ollama's own default when unset. */
+    String keepAlive() {
         var keepAlive = ConfigService.get("provider." + config.name() + ".keepAlive");
-        request.addProperty("keep_alive", keepAlive != null && !keepAlive.isBlank() ? keepAlive : "5m");
+        return keepAlive != null && !keepAlive.isBlank() ? keepAlive : "5m";
     }
 }

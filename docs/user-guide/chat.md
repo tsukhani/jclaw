@@ -102,7 +102,16 @@ The most useful today come from OpenRouter, which reports what your call cost *i
 | Upstream inference completions cost | The output half. |
 | Audio / image / video tokens | Per-modality token breakdown, for multimodal turns. |
 
-Ollama (local and Cloud) reports nothing beyond the standard schema over its OpenAI-compatible endpoint, so the section is absent there. Its native API exposes timing fields that this endpoint does not — capturing those is tracked separately.
+Ollama reports nothing beyond the standard schema over its OpenAI-compatible endpoint, so the section is absent there by default. Turn on **useNativeApi** for an Ollama provider in [Settings → LLM Providers](/settings) and its chat requests use the daemon's native API instead, which adds the daemon's own per-request timings, shown as time:
+
+| Row | Meaning |
+|---|---|
+| Total duration | Server-side wall clock for the request, from receipt to the last token. |
+| Load duration | Time spent loading the model into memory. A large value means the model had been evicted since the previous turn — see **keepAlive**. |
+| Prompt eval duration | Time spent evaluating the prompt. |
+| Eval duration | Time spent generating the reply. Completion tokens divided by this is the daemon's own tokens-per-second. |
+
+A local daemon reports all four; Ollama Cloud reports total duration only, since the other three are node-local timings a hosted service does not expose. The same four appear as `llm_*_duration` histograms on the Chat Performance dashboard.
 
 Metrics are summed across every round of a turn, so a turn that made several tool calls shows the total rather than the last round.
 

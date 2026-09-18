@@ -158,8 +158,8 @@ export interface ProviderMetricRow {
  * Keys arrive as the provider's raw dotted path because the backend collects by shape
  * rather than by allow-list — so the label is derived here rather than mapped, and an
  * unrecognised metric still renders readably instead of being dropped. Cost-suffixed
- * keys format as currency; everything else is a count. Nanosecond durations get their
- * own branch when a provider that reports them is actually wired up.
+ * keys format as currency, `_duration` keys as time (Ollama's native API reports them in
+ * nanoseconds, JCLAW-1158), and everything else as a count.
  */
 export function providerMetricRows(usage: MessageUsage): ProviderMetricRow[] {
   const raw = usage?.providerMetrics
@@ -183,8 +183,8 @@ export function providerMetricRows(usage: MessageUsage): ProviderMetricRow[] {
 }
 
 /**
- * Counts first then costs, and within each the provider's own nest, before falling
- * back to the label.
+ * Counts, then durations, then costs, and within each the provider's own nest, before
+ * falling back to the label.
  *
  * Sorting on the label alone wedged the three `cost_details` rows between the token
  * counts, so a modality count could end up stranded below them looking unrelated.
@@ -193,7 +193,7 @@ export function providerMetricRows(usage: MessageUsage): ProviderMetricRow[] {
  * keeps each pair together instead of interleaving the two sides alphabetically.
  */
 function compareMetricRows(a: ProviderMetricRow, b: ProviderMetricRow): number {
-  const kind = Number(isCostMetric(a.key)) - Number(isCostMetric(b.key))
+  const kind = metricKind(a.key) - metricKind(b.key)
   if (kind !== 0) return kind
   const nest = metricParent(a.key).localeCompare(metricParent(b.key))
   if (nest !== 0) return nest
@@ -205,8 +205,18 @@ function metricParent(key: string): string {
   return dot < 0 ? '' : key.slice(0, dot)
 }
 
+function metricKind(key: string): number {
+  if (isCostMetric(key)) return 2
+  if (isDurationMetric(key)) return 1
+  return 0
+}
+
 function isCostMetric(key: string): boolean {
   return key.endsWith('cost')
+}
+
+function isDurationMetric(key: string): boolean {
+  return metricLeaf(key).endsWith('_duration')
 }
 
 function metricLeaf(key: string): string {
@@ -234,7 +244,18 @@ function formatProviderMetric(key: string, value: number): string {
   if (isCostMetric(key)) {
     return value > 0 && value < 0.0001 ? '< $0.0001' : '$' + value.toFixed(4)
   }
+  if (isDurationMetric(key)) return formatNanosDuration(value)
   return value.toLocaleString()
+}
+
+/** `6423727042` → `6.42 s`; `66063999` → `66 ms`; a minute or more as `1m 12s`. */
+export function formatNanosDuration(nanos: number): string {
+  const ms = nanos / 1e6
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  const seconds = ms / 1000
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 2 : 1)} s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`
 }
 
 /**

@@ -8,6 +8,7 @@ import jakarta.transaction.Synchronization;
 import jobs.EventLogCleanupJob;
 import jobs.ToolRegistrationJob;
 import llm.LlmResilience;
+import llm.OllamaProvider;
 import llm.ProviderLocality;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
@@ -302,10 +303,13 @@ public class ConfigService {
         // JCLAW-1102: this classification is what lets memory text reach a host, so a typo
         // must not read as "remote". Boolean.parseBoolean maps anything unrecognized to
         // false, which would leave embeddings refusing a provider the operator declared local.
-        if (key.startsWith(PROVIDER_KEY_PREFIX) && key.endsWith(ProviderLocality.DECLARED_LOCAL_SUFFIX)
+        // JCLAW-1158: the native-transport toggle is read the same way, and a typo would silently
+        // keep the provider on the OpenAI-compatible wire.
+        var booleanSuffix = providerBooleanSuffix(key);
+        if (booleanSuffix != null
                 && value != null && !value.isBlank()
                 && !"true".equalsIgnoreCase(value.trim()) && !"false".equalsIgnoreCase(value.trim())) {
-            return PROVIDER_KEY_PREFIX + "*" + ProviderLocality.DECLARED_LOCAL_SUFFIX + " must be 'true' or 'false'.";
+            return PROVIDER_KEY_PREFIX + "*" + booleanSuffix + " must be 'true' or 'false'.";
         }
 
         // JCLAW-939: embedding a memory ships its full text to the provider, so the vector
@@ -561,6 +565,14 @@ public class ConfigService {
         // Closes the window between the delete and the put above, where a reader that had
         // already loaded the row could still land its stale write after ours.
         Tx.afterCommit(() -> cache.invalidate(key));
+    }
+
+    /** The per-provider boolean key suffix {@code key} ends with, or null when it is not one of them. */
+    private static @Nullable String providerBooleanSuffix(String key) {
+        if (!key.startsWith(PROVIDER_KEY_PREFIX)) return null;
+        if (key.endsWith(ProviderLocality.DECLARED_LOCAL_SUFFIX)) return ProviderLocality.DECLARED_LOCAL_SUFFIX;
+        if (key.endsWith(OllamaProvider.USE_NATIVE_API_SUFFIX)) return OllamaProvider.USE_NATIVE_API_SUFFIX;
+        return null;
     }
 
     /**

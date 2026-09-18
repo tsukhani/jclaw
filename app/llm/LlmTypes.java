@@ -206,17 +206,18 @@ public final class LlmTypes {
 
     // --- Streaming types ---
 
+    /** One streamed frame. Everything but {@code choices} is optional on the wire: the usage rides on the final frame alone. */
     public record ChatCompletionChunk(
-            String id,
-            String model,
+            @Nullable String id,
+            @Nullable String model,
             List<ChunkChoice> choices,
-            Usage usage
+            @Nullable Usage usage
     ) {}
 
     public record ChunkChoice(
             int index,
             ChunkDelta delta,
-            String finishReason
+            @Nullable String finishReason
     ) {}
 
     /**
@@ -233,12 +234,12 @@ public final class LlmTypes {
      * </ul>
      */
     public record ChunkDelta(
-            String role,
-            String content,
-            List<ToolCallChunk> toolCalls,
-            String reasoning,
-            String reasoningContent,
-            List<ReasoningDetail> reasoningDetails
+            @Nullable String role,
+            @Nullable String content,
+            @Nullable List<ToolCallChunk> toolCalls,
+            @Nullable String reasoning,
+            @Nullable String reasoningContent,
+            @Nullable List<ReasoningDetail> reasoningDetails
     ) {}
 
     public record ReasoningDetail(
@@ -248,9 +249,9 @@ public final class LlmTypes {
 
     public record ToolCallChunk(
             int index,
-            String id,
-            String type,
-            FunctionCall function
+            @Nullable String id,
+            @Nullable String type,
+            @Nullable FunctionCall function
     ) {}
 
     // --- Embedding types ---

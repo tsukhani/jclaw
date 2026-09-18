@@ -120,6 +120,26 @@ function keepAliveFor(name: string): string {
   return entries.find(e => e.key === keepAliveKey(name))?.value ?? '5m'
 }
 
+// JCLAW-1158: per-provider native /api/chat toggle, offered wherever the backend routes the
+// provider to OllamaProvider (any name containing "ollama"). An absent key reads as off,
+// matching ConfigService.getBoolean's default on the read side.
+function isOllamaProvider(name: string): boolean {
+  return name.toLowerCase().includes('ollama')
+}
+
+function nativeApiKey(name: string): string {
+  return `provider.${name}.useNativeApi`
+}
+
+function usesNativeApi(name: string): boolean {
+  const entries = configData.value?.entries ?? []
+  return (entries.find(e => e.key === nativeApiKey(name))?.value ?? '').toLowerCase() === 'true'
+}
+
+async function toggleNativeApi(name: string) {
+  await writeProviderConfig(name, nativeApiKey(name), usesNativeApi(name) ? 'false' : 'true')
+}
+
 // JCLAW-110: per-provider enabled flag. A provider is considered enabled
 // unless `provider.NAME.enabled=false` is explicitly set (case-insensitive).
 // Missing key ⇒ enabled, matching the backend TelegramModelSelector filter
@@ -782,7 +802,7 @@ const groupedProviders = computed(() => {
                  constrained to supportedModalities, and a $/mo numeric only when the
                  selected modality is SUBSCRIPTION. -->
           <div
-            v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models') && !e.key.endsWith('.paymentModality') && !e.key.endsWith('.subscriptionMonthlyUsd') && !e.key.endsWith('.keepAlive'))"
+            v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models') && !e.key.endsWith('.paymentModality') && !e.key.endsWith('.subscriptionMonthlyUsd') && !e.key.endsWith('.keepAlive') && !e.key.endsWith('.useNativeApi'))"
             :key="entry.key"
             class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
           >
@@ -1028,6 +1048,38 @@ const groupedProviders = computed(() => {
                 />
               </button>
             </template>
+          </div>
+          <!-- useNativeApi — every Ollama provider (JCLAW-1158) -->
+          <div
+            v-if="isOllamaProvider(name)"
+            class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
+          >
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
+              useNativeApi
+              <InfoTip
+                label="About useNativeApi"
+                content-class="w-64 font-mono"
+              >
+                Send chat requests to Ollama's native <code class="font-mono text-fg-primary">/api/chat</code> instead of the OpenAI-compatible endpoint. Adds the daemon's per-request timings (model load, prompt evaluation, generation) to each message's usage popover and to Chat Performance. A local daemon reports all of them; Ollama Cloud reports total duration only.
+              </InfoTip>
+            </span>
+            <button
+              role="switch"
+              :aria-checked="usesNativeApi(name)"
+              :aria-label="`${name} native API`"
+              :title="usesNativeApi(name)
+                ? 'Send chat requests to the OpenAI-compatible endpoint'
+                : 'Send chat requests to the native /api/chat endpoint'"
+              :class="usesNativeApi(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+              class="relative w-9 h-5 shrink-0 rounded-full transition-colors"
+              @click="toggleNativeApi(name)"
+            >
+              <span
+                :class="usesNativeApi(name) ? 'translate-x-4' : 'translate-x-0.5'"
+                class="block w-4 h-4 bg-white rounded-full transition-transform"
+              />
+            </button>
+            <span class="text-sm text-fg-primary font-mono">{{ usesNativeApi(name) ? 'true' : 'false' }}</span>
           </div>
           <ApiErrorAlert
             v-if="editingKey?.startsWith(`provider.${name}.`)"

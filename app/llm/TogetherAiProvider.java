@@ -3,6 +3,7 @@ package llm;
 import com.google.gson.JsonObject;
 import llm.LlmTypes.ChunkDelta;
 import llm.LlmTypes.ProviderConfig;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Together AI provider. OpenAI-compatible chat completions at
@@ -47,7 +48,7 @@ public final class TogetherAiProvider extends LlmProvider {
     }
 
     @Override
-    protected String extractReasoningFromDelta(ChunkDelta delta) {
+    protected @Nullable String extractReasoningFromDelta(ChunkDelta delta) {
         // Together streams reasoning content as a plain `reasoning` string
         // on each chunk delta — mirrors OpenRouter's simple-string fallback
         // path, not its structured reasoning_details[] array.

@@ -87,7 +87,7 @@ public final class ToolCallChunkMerger {
      *                    number; mutated in place as chunks are folded in
      */
     public static void mergeToolCallChunks(
-            List<ToolCallChunk> chunks,
+            @Nullable List<ToolCallChunk> chunks,
             Map<Integer, ToolCallBuilder> accumulator) {
         if (chunks == null || chunks.isEmpty()) return;
         var seenInDelta = new HashSet<Integer>();

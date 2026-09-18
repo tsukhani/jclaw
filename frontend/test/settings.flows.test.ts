@@ -391,6 +391,38 @@ describe('Settings page — ollama keepAlive', () => {
   })
 })
 
+describe('Settings page — ollama useNativeApi (JCLAW-1158)', () => {
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  it('renders the toggle for every Ollama provider and for no other', async () => {
+    setupDefaultApi()
+    const component = await mountSettingsSection('providers')
+
+    // The fixture configures ollama-cloud and ollama-local beside OpenAI, which never
+    // speaks the native API. Both Ollama providers get the row: Cloud still reports
+    // total_duration over it.
+    expect(component.text().match(/useNativeApi/g) ?? []).toHaveLength(2)
+    expect(component.find('button[aria-label="openai native API"]').exists()).toBe(false)
+  })
+
+  it('reads as off when the key is absent and writes true on the first click', async () => {
+    const posted: Array<{ key?: string, value?: string }> = []
+    setupDefaultApi({ capturePost: body => posted.push(body) })
+    const component = await mountSettingsSection('providers')
+
+    const toggle = component.find('button[aria-label="ollama-local native API"]')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(posted).toEqual([{ key: 'provider.ollama-local.useNativeApi', value: 'true' }])
+  })
+})
+
 describe('Settings page — payment modality / subscription (JCLAW-280)', () => {
   beforeEach(() => {
     clearNuxtData()
