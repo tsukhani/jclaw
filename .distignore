@@ -4,10 +4,9 @@ _bmad-output/
 # docs/architecture/ holds internal design docs — excluded from the dist.
 # docs/user-guide/ is intentionally NOT excluded: it ships in the bundle so the
 # in-app user-guide lookup can read it at runtime (Play.applicationPath/docs/user-guide/).
+# Every other docs/ subdirectory is gitignored, and this task's file list comes
+# from `git ls-files`, so this one prefix leaves user-guide as the only docs in a zip.
 docs/architecture/
-# Internal spike/investigation notes — dev docs, not runtime reading
-# (docs/user-guide/ stays: the in-app guide reads it at runtime).
-docs/spikes/
 test/
 # The frozen ArchUnit capability allowlists (JCLAW-1152) are a build-time
 # baseline read by test/CapabilityRulesTest, never by a running install.
