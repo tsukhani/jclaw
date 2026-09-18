@@ -7,9 +7,10 @@
  * its root agent's shared workspace, because that is the directory it writes into.
  */
 import { ArchiveBoxArrowDownIcon, ArrowDownTrayIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
-import { DocumentIcon, FolderIcon, TrashIcon } from '@heroicons/vue/20/solid'
+import { DocumentIcon, DocumentTextIcon, FolderIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/20/solid'
 import type { ApiErrorDetails, WorkspaceEntry, WorkspaceListing } from '~/types/api'
 import { formatSize } from '~/utils/format'
+import { workspaceEntryStyle } from '~/utils/workspace-files'
 
 const props = defineProps<{ agentId: number | null }>()
 
@@ -95,8 +96,15 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility)
 })
 
-// (2) Tree rendering: the nested listing flattened to the rows currently expanded.
+// (2) Tree rendering: the nested listing flattened to the rows currently expanded, or, while a
+// filter is typed, to every entry whose name matches plus the folders that lead to it.
 interface Row { entry: WorkspaceEntry, depth: number }
+
+const filter = ref('')
+const query = computed(() => filter.value.trim().toLowerCase())
+watch(() => props.agentId, () => {
+  filter.value = ''
+})
 
 function isOpen(path: string) {
   return openDirs.value[path] === true
@@ -106,17 +114,45 @@ function toggle(path: string) {
   openDirs.value[path] = !isOpen(path)
 }
 
-const rows = computed<Row[]>(() => {
+// A filtered folder is shown open, since collapsing it would hide the very match that keeps it visible.
+function isShownOpen(path: string) {
+  return query.value ? true : isOpen(path)
+}
+
+function matching(entries: WorkspaceEntry[], depth: number, q: string): Row[] {
   const out: Row[] = []
-  const walk = (entries: WorkspaceEntry[], depth: number) => {
-    for (const entry of entries) {
+  for (const entry of entries) {
+    const below = entry.kind === 'dir' && entry.children ? matching(entry.children, depth + 1, q) : []
+    if (!entry.name.toLowerCase().includes(q) && below.length === 0) continue
+    out.push({ entry, depth }, ...below)
+  }
+  return out
+}
+
+const rows = computed<Row[]>(() => {
+  const entries = listing.value?.entries ?? []
+  if (query.value) return matching(entries, 0, query.value)
+  const out: Row[] = []
+  const walk = (list: WorkspaceEntry[], depth: number) => {
+    for (const entry of list) {
       out.push({ entry, depth })
       if (entry.kind === 'dir' && entry.children && isOpen(entry.path)) walk(entry.children, depth + 1)
     }
   }
-  walk(listing.value?.entries ?? [], 0)
+  walk(entries, 0)
   return out
 })
+
+// Colour and icon move together so the kind is readable without the colour.
+const STYLE_CLASS = {
+  dir: 'text-sky-600 dark:text-sky-400',
+  text: 'text-emerald-600 dark:text-emerald-400',
+  binary: 'text-amber-600 dark:text-amber-400',
+} as const
+
+function styleOf(entry: WorkspaceEntry) {
+  return workspaceEntryStyle(entry.kind, entry.name)
+}
 
 // (3) Per-row actions: download and delete.
 
@@ -197,6 +233,36 @@ watch(() => props.agentId, () => {
       but protected; edit them in the editor above.
     </p>
 
+    <div
+      v-if="listing"
+      class="px-4 pb-2"
+    >
+      <div class="relative">
+        <input
+          v-model="filter"
+          type="search"
+          aria-label="Filter files and folders"
+          class="w-full rounded border border-border bg-transparent px-2.5 py-1.5 pr-8 text-sm text-fg-primary placeholder:text-fg-muted"
+          placeholder="Filter files and folders…"
+          autocomplete="off"
+          data-testid="workspace-filter"
+        >
+        <button
+          v-if="filter"
+          type="button"
+          class="absolute right-1.5 top-1/2 -translate-y-1/2 border-0 bg-transparent p-1 text-fg-muted hover:text-fg-strong"
+          aria-label="Clear filter"
+          data-testid="workspace-filter-clear"
+          @click="filter = ''"
+        >
+          <XMarkIcon
+            class="w-4 h-4"
+            aria-hidden="true"
+          />
+        </button>
+      </div>
+    </div>
+
     <ApiErrorAlert
       v-if="deleteError"
       :error="deleteError"
@@ -212,8 +278,9 @@ watch(() => props.agentId, () => {
     <p
       v-else-if="listing && rows.length === 0"
       class="px-4 pb-3 text-sm text-fg-muted italic"
+      data-testid="workspace-empty"
     >
-      The workspace is empty.
+      {{ query ? 'Nothing matches the filter.' : 'The workspace is empty.' }}
     </p>
 
     <div
@@ -231,19 +298,24 @@ watch(() => props.agentId, () => {
           v-if="row.entry.kind === 'dir'"
           type="button"
           class="flex items-center gap-1.5 min-w-0 flex-1 text-left text-fg-primary bg-transparent border-0"
-          :aria-expanded="isOpen(row.entry.path)"
+          :aria-expanded="isShownOpen(row.entry.path)"
           @click="toggle(row.entry.path)"
         >
           <ChevronRightIcon
             class="w-3 h-3 shrink-0 text-fg-muted transition-transform"
-            :class="isOpen(row.entry.path) ? 'rotate-90' : ''"
+            :class="isShownOpen(row.entry.path) ? 'rotate-90' : ''"
             aria-hidden="true"
           />
           <FolderIcon
-            class="w-4 h-4 shrink-0 text-fg-muted"
+            class="w-4 h-4 shrink-0"
+            :class="STYLE_CLASS.dir"
             aria-hidden="true"
           />
-          <span class="truncate text-sm font-mono">{{ row.entry.name }}</span>
+          <span
+            class="truncate text-sm font-mono"
+            :class="STYLE_CLASS.dir"
+            data-kind="dir"
+          >{{ row.entry.name }}</span>
         </button>
         <span
           v-else
@@ -253,11 +325,17 @@ watch(() => props.agentId, () => {
             class="w-3 shrink-0"
             aria-hidden="true"
           />
-          <DocumentIcon
-            class="w-4 h-4 shrink-0 text-fg-muted"
+          <component
+            :is="styleOf(row.entry) === 'text' ? DocumentTextIcon : DocumentIcon"
+            class="w-4 h-4 shrink-0"
+            :class="STYLE_CLASS[styleOf(row.entry)]"
             aria-hidden="true"
           />
-          <span class="truncate text-sm font-mono">{{ row.entry.name }}</span>
+          <span
+            class="truncate text-sm font-mono"
+            :class="STYLE_CLASS[styleOf(row.entry)]"
+            :data-kind="styleOf(row.entry)"
+          >{{ row.entry.name }}</span>
         </span>
 
         <span
