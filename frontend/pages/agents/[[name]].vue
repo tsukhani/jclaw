@@ -66,6 +66,7 @@ watch(breadcrumbExtra, (value) => {
 })
 onUnmounted(() => {
   breadcrumbExtra.value = null
+  stopCoreMigrationPoll()
 })
 const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
@@ -337,13 +338,14 @@ const coreMigration = ref<CoreMigrationStatus | null>(null)
 const coreMigrationError = ref('')
 
 async function refreshCoreMigration() {
-  if (!editing.value?.id) return
+  const agentId = editing.value?.id
+  if (!agentId) return
   try {
-    coreMigration.value = await $fetch<CoreMigrationStatus>(
-      `/api/agents/${editing.value.id}/core-migration`)
+    const status = await $fetch<CoreMigrationStatus>(`/api/agents/${agentId}/core-migration`)
+    if (editing.value?.id === agentId) coreMigration.value = status
   }
   catch {
-    coreMigration.value = null
+    if (editing.value?.id === agentId) coreMigration.value = null
   }
 }
 
@@ -362,12 +364,17 @@ async function startCoreMigration() {
 }
 
 /** Poll only while this agent's run is in flight; the status is otherwise static. */
+let coreMigrationTimer: ReturnType<typeof setTimeout> | undefined
 function pollCoreMigration() {
   if (!coreMigration.value?.running) return
-  setTimeout(async () => {
+  coreMigrationTimer = setTimeout(async () => {
     await refreshCoreMigration()
     pollCoreMigration()
   }, 1000)
+}
+function stopCoreMigrationPoll() {
+  if (coreMigrationTimer) clearTimeout(coreMigrationTimer)
+  coreMigrationTimer = undefined
 }
 
 const memoryAutocaptureEnabled = ref(true)
@@ -437,8 +444,11 @@ const promptBreakdownError = ref('')
  */
 const promptBreakdownChannel = ref<'web' | 'telegram' | 'slack' | 'whatsapp'>('web')
 
+// A channel switch or a second agent's modal can overtake an in-flight breakdown or prompt text.
+const promptLoads = useLatestRequest()
 async function loadPromptBreakdown() {
   if (!promptBreakdownAgent.value) return
+  const request = promptLoads.begin()
   promptBreakdownData.value = null
   promptBreakdownError.value = ''
   promptBreakdownLoading.value = true
@@ -447,15 +457,16 @@ async function loadPromptBreakdown() {
   promptTextOpen.value = false
   promptText.value = ''
   try {
-    promptBreakdownData.value = await $fetch<PromptBreakdown>(
+    const breakdown = await $fetch<PromptBreakdown>(
       `/api/agents/${promptBreakdownAgent.value.id}/prompt-breakdown?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`,
     )
+    if (promptLoads.isCurrent(request)) promptBreakdownData.value = breakdown
   }
   catch (e: unknown) {
-    promptBreakdownError.value = e instanceof Error ? e.message : 'Failed to load prompt breakdown'
+    if (promptLoads.isCurrent(request)) promptBreakdownError.value = e instanceof Error ? e.message : 'Failed to load prompt breakdown'
   }
   finally {
-    promptBreakdownLoading.value = false
+    if (promptLoads.isCurrent(request)) promptBreakdownLoading.value = false
   }
 }
 
@@ -553,6 +564,7 @@ const promptTextHtml = computed(() => renderMarkdown(promptText.value))
 
 async function openPromptText() {
   if (!promptBreakdownAgent.value) return
+  const request = promptLoads.begin()
   promptTextOpen.value = true
   promptTextError.value = ''
   promptTextLoading.value = true
@@ -560,13 +572,13 @@ async function openPromptText() {
     const res = await $fetch<{ text: string }>(
       `/api/agents/${promptBreakdownAgent.value.id}/prompt-text?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`,
     )
-    promptText.value = res.text
+    if (promptLoads.isCurrent(request)) promptText.value = res.text
   }
   catch (e: unknown) {
-    promptTextError.value = e instanceof Error ? e.message : 'Failed to load system prompt'
+    if (promptLoads.isCurrent(request)) promptTextError.value = e instanceof Error ? e.message : 'Failed to load system prompt'
   }
   finally {
-    promptTextLoading.value = false
+    if (promptLoads.isCurrent(request)) promptTextLoading.value = false
   }
 }
 
@@ -808,6 +820,7 @@ function editAgent(agent: Agent) {
   memoryAutocaptureEnabled.value = agent.memoryAutocaptureEnabled
   coreMigrationError.value = ''
   coreMigration.value = null
+  stopCoreMigrationPoll()
   refreshCoreMigration()
   memoryAutocaptureProvider.value = agent.memoryAutocaptureProvider
   memoryAutocaptureModel.value = agent.memoryAutocaptureModel
@@ -916,12 +929,15 @@ async function toggleListingCapability(agent: Agent | undefined, capability: 'th
   }
 }
 
+// The seven per-agent loads editAgent fires are unawaited; opening another agent while one is in
+// flight must not land the previous agent's data in the new form, so each checks the editor first.
 async function loadAgentTools(agentId: number) {
   try {
-    agentTools.value = await $fetch<AgentTool[]>(`/api/agents/${agentId}/tools`)
+    const tools = await $fetch<AgentTool[]>(`/api/agents/${agentId}/tools`)
+    if (editing.value?.id === agentId) agentTools.value = tools
   }
   catch {
-    agentTools.value = []
+    if (editing.value?.id === agentId) agentTools.value = []
   }
 }
 
@@ -1050,32 +1066,35 @@ async function toggleAllAgentSkills() {
 
 async function loadAgentSkills(agentId: number) {
   try {
-    agentSkills.value = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
+    const skills = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
+    if (editing.value?.id === agentId) agentSkills.value = skills
   }
   catch {
-    agentSkills.value = []
+    if (editing.value?.id === agentId) agentSkills.value = []
   }
 }
 
 async function loadEffectiveAllowlist(agentId: number) {
   try {
-    effectiveAllowlist.value = await $fetch<EffectiveAllowlist>(`/api/agents/${agentId}/shell/effective-allowlist`)
+    const allowlist = await $fetch<EffectiveAllowlist>(`/api/agents/${agentId}/shell/effective-allowlist`)
+    if (editing.value?.id === agentId) effectiveAllowlist.value = allowlist
   }
   catch {
-    effectiveAllowlist.value = null
+    if (editing.value?.id === agentId) effectiveAllowlist.value = null
   }
 }
 
 async function loadQueueMode(agentName: string) {
   queueModeError.value = null
+  let mode = 'queue'
   try {
     const config = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.queue.mode`)
-    queueMode.value = config.value || 'queue'
+    mode = config.value || 'queue'
   }
-  catch {
-    queueMode.value = 'queue'
-  }
-  savedQueueMode.value = queueMode.value
+  catch { /* the stored default */ }
+  if (editing.value?.name !== agentName) return
+  queueMode.value = mode
+  savedQueueMode.value = mode
 }
 
 async function saveQueueMode() {
@@ -1293,16 +1312,13 @@ function toggleCompressionText() {
 
 async function loadExecConfig(agentName: string) {
   execError.value = null
-  try {
-    const bypass = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.shell.bypassAllowlist`).catch(() => null)
-    execBypassAllowlist.value = bypass?.value === 'true'
-    const globalPaths = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.shell.allowGlobalPaths`).catch(() => null)
-    execAllowGlobalPaths.value = globalPaths?.value === 'true'
-  }
-  catch {
-    execBypassAllowlist.value = false
-    execAllowGlobalPaths.value = false
-  }
+  const [bypass, globalPaths] = await Promise.all([
+    $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.shell.bypassAllowlist`).catch(() => null),
+    $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.shell.allowGlobalPaths`).catch(() => null),
+  ])
+  if (editing.value?.name !== agentName) return
+  execBypassAllowlist.value = bypass?.value === 'true'
+  execAllowGlobalPaths.value = globalPaths?.value === 'true'
 }
 
 async function toggleExecConfig(key: 'bypassAllowlist' | 'allowGlobalPaths') {
@@ -1509,14 +1525,16 @@ async function deleteAll() {
 async function loadWorkspaceFile(agentId: number, filename: string) {
   workspaceTab.value = filename
   workspaceError.value = null
+  let content = ''
   try {
     const data = await $fetch<WorkspaceFileContent>(`/api/agents/${agentId}/workspace/${filename}`)
-    workspaceContent.value = data.content ?? ''
+    content = data.content ?? ''
   }
-  catch {
-    workspaceContent.value = ''
-  }
-  workspaceBaseline.value = workspaceContent.value
+  catch { /* shown as an empty file */ }
+  // The operator may have opened another agent or tab while this file was loading.
+  if (editing.value?.id !== agentId || workspaceTab.value !== filename) return
+  workspaceContent.value = content
+  workspaceBaseline.value = content
 }
 
 async function saveWorkspaceFile() {

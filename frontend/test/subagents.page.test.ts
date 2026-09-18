@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { setResponseStatus, type H3Event } from 'h3'
 import Subagents from '~/pages/subagents.vue'
 
 // JCLAW-326: parentConversationId is URL-driven, so we need to stub
@@ -31,6 +32,20 @@ describe('Subagents admin page', () => {
   beforeEach(() => {
     setupAgents()
     routeQuery.value = {}
+  })
+
+  it('reports a failed list load above the table instead of rendering an empty page', async () => {
+    // The backend's error envelope (JCLAW-1131) is the raw body, not h3's wrapped one.
+    registerEndpoint('/api/subagent-runs', (event: H3Event) => {
+      setResponseStatus(event, 500)
+      return { code: 'db_down', message: 'The database is unavailable', template: null }
+    })
+
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    expect(component.text()).toContain('Could not load subagent runs')
+    expect(component.text()).toContain('The database is unavailable')
   })
 
   it('renders runs from the API including parent/child agent names and statuses', async () => {

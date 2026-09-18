@@ -240,6 +240,8 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
       console.error('Failed to poll for announce:', e)
       return
     }
+    // A tick can land after the operator switched conversations; its rows belong to the old one.
+    if (selectedConvoId.value !== convoId) return
     if (!fresh.length) return
     backfillServerIds(messages.value, fresh)
     const knownIds = new Set<number>()

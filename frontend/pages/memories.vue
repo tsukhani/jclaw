@@ -112,15 +112,19 @@ function supersededTitle(mem: MemoryDto): string {
 const memoriesData = ref<MemoryDto[]>([])
 const total = ref(0)
 const fetchError = ref(false)
+const loads = useLatestRequest()
 async function refresh() {
+  const request = loads.begin()
   try {
     const res = await $fetch.raw<MemoryDto[]>(url.value)
+    if (!loads.isCurrent(request)) return
     memoriesData.value = res._data ?? []
     const h = res.headers.get('x-total-count')
     total.value = h == null ? memoriesData.value.length : Number.parseInt(h, 10)
     fetchError.value = false
   }
   catch (e) {
+    if (!loads.isCurrent(request)) return
     console.error('Failed to load memories:', e)
     fetchError.value = true
   }

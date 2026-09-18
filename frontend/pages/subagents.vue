@@ -161,22 +161,28 @@ const total = ref(0)
 const loading = ref(false)
 // The sort the rows on screen came back in, which lags sortBy until the refetch lands.
 const loadedSort = ref<SortColumn | null>(null)
-let latestRefresh = 0
+// Why the list did not load, rendered above the table; null once a load succeeds.
+const listError = ref<ApiErrorDetails | null>(null)
+const listLoads = useLatestRequest()
 async function refresh() {
-  const request = ++latestRefresh
+  const request = listLoads.begin()
   const requestSort = sortBy.value
   loading.value = true
   try {
     const res = await $fetch.raw<SubagentRun[]>(url.value)
     // A poll started under the previous url can land after the request for the new one.
-    if (request !== latestRefresh) return
+    if (!listLoads.isCurrent(request)) return
     runs.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
     total.value = headerTotal ? Number.parseInt(headerTotal, 10) : runs.value.length
     loadedSort.value = requestSort
+    listError.value = null
+  }
+  catch (e) {
+    if (listLoads.isCurrent(request)) listError.value = apiErrorDetails(e)
   }
   finally {
-    if (request === latestRefresh) loading.value = false
+    if (listLoads.isCurrent(request)) loading.value = false
   }
 }
 await refresh()
@@ -456,6 +462,13 @@ function closePeek() {
         </button>
       </div>
     </div>
+    <ApiErrorAlert
+      :error="listError"
+      headline="Could not load subagent runs"
+      :retry="refresh"
+      :retrying="loading"
+      class="mb-4"
+    />
     <ApiErrorAlert
       :error="bulkError ?? actionError"
       class="mb-4"

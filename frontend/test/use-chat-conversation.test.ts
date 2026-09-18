@@ -95,6 +95,20 @@ describe('useChatConversation', () => {
     expect(ok).toBe(false)
   })
 
+  it('a slow load for the previous conversation cannot overwrite the one opened after it', async () => {
+    let releaseSlow!: () => void
+    registerEndpoint('/api/conversations/8/messages', () => new Promise<unknown[]>((resolve) => {
+      releaseSlow = () => resolve([{ id: 80, role: 'user', content: 'from the slow one' }])
+    }))
+    const { api } = await mountConversation()
+    const slow = api.loadConversation(8)
+    await api.loadConversation(5)
+    releaseSlow()
+    await slow
+    expect(api.selectedConvoId.value).toBe(5)
+    expect(api.messages.value.map(m => m.id)).toEqual([10, 11])
+  })
+
   it('reconcileMessageIds backfills server ids onto id-less local rows', async () => {
     const { api } = await mountConversation()
     api.selectedConvoId.value = 5

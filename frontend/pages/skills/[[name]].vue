@@ -738,13 +738,19 @@ const renderedMarkdown = computed(() => {
   return DOMPurify.sanitize(marked.parse(fileContent.value) as string)
 })
 
+// The viewer follows the route and the file list; a slow load for the previous skill or file
+// must not land in the current one.
+const viewerLoads = useLatestRequest()
+
 async function editSkill(skill: Skill) {
+  const request = viewerLoads.begin()
   try {
     const folderName = skill.folderName || skill.name
     editing.value = { ...skill, folderName }
 
     // Load file listing and tool dependencies
     const res = await $fetch<SkillFilesResponse>(`/api/skills/${folderName}/files`)
+    if (!viewerLoads.isCurrent(request)) return
     skillFiles.value = res.files || []
     skillTools.value = res.tools || []
     skillCommands.value = res.commands || []
@@ -803,8 +809,10 @@ function skillFileApiBase() {
 
 async function selectFile(file: SkillFile) {
   if (!file.isText) return
+  const request = viewerLoads.begin()
   try {
     const res = await $fetch<SkillFileContent>(`${skillFileApiBase()}/${file.path}`)
+    if (!viewerLoads.isCurrent(request)) return
     activeFile.value = file.path
     fileContent.value = res.content
   }
@@ -829,12 +837,14 @@ async function deleteSkill(skill: Skill | AgentSkill) {
 }
 
 async function editAgentSkill(agentId: number, skill: AgentSkill) {
+  const request = viewerLoads.begin()
   try {
     const name = (skill.folderName as string) || skill.name
     editing.value = { ...skill, folderName: name }
     editingAgentId.value = agentId
 
     const res = await $fetch<SkillFilesResponse>(`/api/agents/${agentId}/skills/${name}/files`)
+    if (!viewerLoads.isCurrent(request)) return
     skillFiles.value = res.files || []
     skillTools.value = res.tools || []
     skillCommands.value = res.commands || []

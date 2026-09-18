@@ -65,14 +65,17 @@ const agents = ref<Agent[]>([])
 const conversations = ref<Conversation[]>([])
 const isDark = ref(false)
 
+const opens = useLatestRequest()
 watch(() => props.open, async (isOpen) => {
   if (!isOpen) return
+  const request = opens.begin()
   isDark.value = document.documentElement.classList.contains('dark')
   try {
     const [agentData, convoData] = await Promise.all([
       $fetch<Agent[]>('/api/agents'),
       $fetch<Conversation[]>('/api/conversations?limit=10'),
     ])
+    if (!opens.isCurrent(request)) return
     agents.value = agentData ?? []
     conversations.value = convoData ?? []
   }

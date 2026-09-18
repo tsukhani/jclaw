@@ -7,6 +7,7 @@ import {
   TrashIcon,
   VideoCameraIcon,
 } from '@heroicons/vue/24/outline'
+import type { Ref } from 'vue'
 import type { Agent, ApiErrorDetails, LatencyHistogram, LogEvent } from '~/types/api'
 
 // --- Latency metrics (chat performance panel) ---
@@ -65,18 +66,18 @@ const { data: activeChannels } = useLazyFetch<ActiveChannelsResponse>('/api/chan
 // X-Total-Count header — mirroring the conversation-count pattern
 // below — so the displayed number is accurate regardless of how
 // many task rows exist.
-const { data: activeTaskCount, refresh: refreshActiveTasks }
+const { data: activeTaskCount, refresh: refreshActiveTasks, error: activeTaskError }
   = useLazyAsyncData<number>('dashboard-active-task-count', () => fetchTaskCount('ACTIVE'))
-const { data: runningTaskCount, refresh: refreshRunningTasks }
+const { data: runningTaskCount, refresh: refreshRunningTasks, error: runningTaskError }
   = useLazyAsyncData<number>('dashboard-running-task-count', () => fetchTaskCount('RUNNING'))
-const { data: pendingTaskCount, refresh: refreshPendingTasks }
+const { data: pendingTaskCount, refresh: refreshPendingTasks, error: pendingTaskError }
   = useLazyAsyncData<number>('dashboard-pending-task-count', () => fetchTaskCount('PENDING'))
 
 // Reminders are payloadType=reminder tasks — counted separately for their
 // own card (ACTIVE = recurring, PENDING = one-shot waiting to fire).
-const { data: activeReminderCount, refresh: refreshActiveReminders }
+const { data: activeReminderCount, refresh: refreshActiveReminders, error: activeReminderError }
   = useLazyAsyncData<number>('dashboard-active-reminder-count', () => fetchTaskCount('ACTIVE', 'payloadType=reminder'))
-const { data: pendingReminderCount, refresh: refreshPendingReminders }
+const { data: pendingReminderCount, refresh: refreshPendingReminders, error: pendingReminderError }
   = useLazyAsyncData<number>('dashboard-pending-reminder-count', () => fetchTaskCount('PENDING', 'payloadType=reminder'))
 
 const { data: logs, refresh: refreshLogs, status: logsStatus } = useLazyFetch<{ events: LogEvent[] }>('/api/logs?limit=10')
@@ -86,7 +87,7 @@ const { data: logs, refresh: refreshLogs, status: logsStatus } = useLazyFetch<{ 
 // conversations page uses (see pages/conversations/index.vue). Falls
 // back to the body's array length if the header is missing (test stubs
 // via registerEndpoint don't simulate response headers).
-const { data: conversationCount } = useLazyAsyncData<number>('dashboard-conversation-count', async () => {
+const { data: conversationCount, error: conversationCountError } = useLazyAsyncData<number>('dashboard-conversation-count', async () => {
   const res = await $fetch.raw<unknown[]>('/api/conversations?limit=1')
   const headerTotal = res.headers.get('x-total-count')
   return headerTotal ? Number.parseInt(headerTotal, 10) : (res._data?.length ?? 0)
@@ -107,12 +108,16 @@ const WORKSPACE_WARN_BYTES = 10 * 1024 * 1024 * 1024
 const agentCount = computed(() => agents.value?.length ?? 0)
 const enabledAgents = computed(() => agents.value?.filter(a => a.enabled).length ?? 0)
 const channelCount = computed(() => activeChannels.value?.count ?? 0)
-const activeTasks = computed(() => activeTaskCount.value ?? 0)
-const runningTasks = computed(() => runningTaskCount.value ?? 0)
-const pendingTasks = computed(() => pendingTaskCount.value ?? 0)
-const activeReminders = computed(() => activeReminderCount.value ?? 0)
-const pendingReminders = computed(() => pendingReminderCount.value ?? 0)
-const totalConversations = computed(() => conversationCount.value ?? 0)
+// A count that failed to load reads as a dash, not as a genuine zero.
+function countOrDash(count: Ref<number | null | undefined>, error: Ref<unknown>) {
+  return computed(() => (error.value ? '—' : (count.value ?? 0)))
+}
+const activeTasks = countOrDash(activeTaskCount, activeTaskError)
+const runningTasks = countOrDash(runningTaskCount, runningTaskError)
+const pendingTasks = countOrDash(pendingTaskCount, pendingTaskError)
+const activeReminders = countOrDash(activeReminderCount, activeReminderError)
+const pendingReminders = countOrDash(pendingReminderCount, pendingReminderError)
+const totalConversations = countOrDash(conversationCount, conversationCountError)
 
 // Chat Performance latency is time-windowed + filterable (JCLAW-515): the panel reads
 // server-aggregated percentiles from GET /api/metrics/latency/rows, driven by a 7d/30d/All

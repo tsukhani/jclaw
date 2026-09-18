@@ -199,14 +199,17 @@ const currentSerRepo = computed(() => {
 function downloadedMb(bytes: number): number {
   return Math.round((bytes || 0) / 1e6)
 }
+const modelLoads = useLatestRequest()
 async function refreshDiarizationModels() {
+  const request = modelLoads.begin()
   try {
     const r = await $fetch<{ models: DiarizeModelEntry[], serOptions: SerOption[] }>('/api/transcription/diarization/models')
+    if (!modelLoads.isCurrent(request)) return
     diarizationModels.value = r.models ?? []
     serOptions.value = r.serOptions ?? []
   }
   catch {
-    diarizationModels.value = []
+    if (modelLoads.isCurrent(request)) diarizationModels.value = []
   }
 }
 async function downloadDiarizationModel(repo: string) {

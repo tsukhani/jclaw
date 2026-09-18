@@ -497,16 +497,19 @@ async function startDiscovery(providerName: string) {
 
   try {
     const res = await $fetch<DiscoverModelsResponse>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
+    // The operator can start discovery on another provider before this one answers.
+    if (discoveryProvider.value !== providerName) return
     // Filter out models already configured
     const existing = new Set(getProviderModels(providerName).map(m => m.id))
     discoveredModels.value = (res.models || []).filter(m => !existing.has(m.id))
   }
   catch (e: unknown) {
+    if (discoveryProvider.value !== providerName) return
     // No fallback: the render names the provider itself, and suppresses a message with no code.
     discoveryError.value = apiErrorDetails(e)
   }
   finally {
-    discoveryLoading.value = false
+    if (discoveryProvider.value === providerName) discoveryLoading.value = false
   }
 }
 

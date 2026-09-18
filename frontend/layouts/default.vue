@@ -128,7 +128,10 @@ const versionDotTitle = computed(() => {
   return 'API online'
 })
 
+// Retry and link recovery re-enter checkStatus while a probe is in flight; only the newest answer counts.
+const probes = useLatestRequest()
 async function checkStatus() {
+  const request = probes.begin()
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
@@ -145,6 +148,7 @@ async function checkStatus() {
       retry: 0,
     })
     clearTimeout(timeout)
+    if (!probes.isCurrent(request)) return
     apiVersion.value = data.applicationVersion
     // frameworkVersion landed in the StatusResponse alongside the app
     // version so the sidebar can render Play's own version under the
@@ -159,7 +163,7 @@ async function checkStatus() {
     if (apiOnline.value) void checkForUpdate()
   }
   catch {
-    apiOnline.value = false
+    if (probes.isCurrent(request)) apiOnline.value = false
   }
   finally {
     statusProbed.value = true

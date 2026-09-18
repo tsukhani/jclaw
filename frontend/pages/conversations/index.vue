@@ -13,6 +13,8 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
+// Why the list did not load, rendered above the table; null once a load succeeds.
+const listError = ref<ReturnType<typeof apiErrorDetails> | null>(null)
 
 // Pinned conversations live above the paginated list and never inside it — the
 // two loads ask the same endpoint for disjoint halves (pinned=true / false), so
@@ -51,7 +53,7 @@ const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
 // matching conversations" is a different mental model from "no
 // conversations at all".
 const hasNoData = computed(() =>
-  !loading.value && total.value === 0 && !pinnedConversations.value.length
+  !loading.value && !listError.value && total.value === 0 && !pinnedConversations.value.length
   && activeFilters.value.length === 0,
 )
 
@@ -102,7 +104,9 @@ function filterParams(): URLSearchParams {
   return params
 }
 
+const listLoads = useLatestRequest()
 async function load() {
+  const request = listLoads.begin()
   loading.value = true
   try {
     const params = filterParams()
@@ -110,12 +114,17 @@ async function load() {
     params.set('offset', String((page.value - 1) * pageSize))
     params.set('pinned', 'false')
     const res = await $fetch.raw<Conversation[]>(`/api/conversations?${params.toString()}`)
+    if (!listLoads.isCurrent(request)) return
     conversations.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
     total.value = headerTotal ? Number.parseInt(headerTotal, 10) : conversations.value.length
+    listError.value = null
+  }
+  catch (e) {
+    if (listLoads.isCurrent(request)) listError.value = apiErrorDetails(e)
   }
   finally {
-    loading.value = false
+    if (listLoads.isCurrent(request)) loading.value = false
   }
 }
 
@@ -124,16 +133,19 @@ async function load() {
  * isn't in the current result set, so showing it above one would misrepresent
  * the filter — hence the shared {@link filterParams}.
  */
+const pinnedLoads = useLatestRequest()
 async function loadPinned() {
+  const request = pinnedLoads.begin()
   const params = filterParams()
   params.set('pinned', 'true')
   params.set('limit', String(MAX_PINNED))
   try {
-    pinnedConversations.value = await $fetch<Conversation[]>(`/api/conversations?${params.toString()}`) ?? []
+    const rows = await $fetch<Conversation[]>(`/api/conversations?${params.toString()}`) ?? []
+    if (pinnedLoads.isCurrent(request)) pinnedConversations.value = rows
   }
   catch {
     // A failed pinned fetch must not blank the page the operator came for.
-    pinnedConversations.value = []
+    if (pinnedLoads.isCurrent(request)) pinnedConversations.value = []
   }
 }
 
@@ -701,6 +713,14 @@ const pinnedColumns = columns.filter(c => c.id !== 'select')
           @export="exportAllConversations"
         />
       </div>
+
+      <ApiErrorAlert
+        :error="listError"
+        headline="Could not load conversations"
+        :retry="reload"
+        :retrying="loading"
+        class="mb-3"
+      />
 
       <!-- Row-action failures (most often the pin cap's 409) surface here
            rather than as a console-only error the operator never sees. -->

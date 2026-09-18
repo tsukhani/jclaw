@@ -100,6 +100,7 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     if (!convoId) return
     try {
       const fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`)
+      if (selectedConvoId.value !== convoId) return
       if (!fresh?.length) return
       if (backfillServerIds(messages.value, fresh)) triggerRef(messages)
     }
@@ -171,10 +172,13 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     return true
   }
 
+  const loads = useLatestRequest()
   async function loadConversation(id: number) {
+    const request = loads.begin()
     selectedConvoId.value = id
     hooks.beforeLoad?.() // a prior conversation's poll loop shouldn't leak into this one
     const loaded = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
+    if (!loads.isCurrent(request)) return
     // JCLAW-170: fold persisted tool-role rows into the following assistant
     // message's toolCalls array so the tool-calls block re-renders on reload.
     // Mutates in place, then we also collapse the block by default for

@@ -83,14 +83,19 @@ const url = computed(() => {
   return `/api/tasks?${params}`
 })
 
-const { data: tasks, refresh } = await useFetch<Task[]>(url)
+const { data: tasks, refresh, error: tasksError } = await useFetch<Task[]>(url)
 // JCLAW-22 (slice K): dashboard KPI aggregate. Refetched live on task
 // lifecycle events (see scheduleLiveRefresh) so the counts stay current.
 // Exclude reminders so the KPI strip matches this page's table (which passes
 // excludePayloadType=reminder) and the dashboard Tasks tile; reminder counts +
 // run KPIs live on /reminders. Without this, a pending reminder showed as
 // "Pending 1" here while never appearing in the list below.
-const { data: stats, refresh: refreshStats } = await useFetch<TaskStats>('/api/tasks/stats?excludePayloadType=reminder')
+const { data: stats, refresh: refreshStats, error: statsError } = await useFetch<TaskStats>('/api/tasks/stats?excludePayloadType=reminder')
+// Why the list or the KPI strip did not load, rendered above the table.
+const listError = computed(() => {
+  const e = tasksError.value ?? statsError.value
+  return e ? apiErrorDetails(e) : null
+})
 // JCLAW-440: the calendar view (month/week/day grids, fire projection, run
 // blocks) moved to the shared <ScheduleCalendar> component, which owns its own
 // range state + runs fetch. This page just renders it in the calendar view.
@@ -277,19 +282,25 @@ async function loadDeliveryAdvisory(id: number, force = false) {
   }
 }
 
+// Per task: the 2 s silent poll and an explicit load can overlap, and only the newest answer counts.
+const runsRequest: Record<number, number> = {}
 async function loadRuns(id: number, silent = false) {
+  const request = (runsRequest[id] ?? 0) + 1
+  runsRequest[id] = request
   if (!silent) runsLoading[id] = true
   runsError[id] = null
   try {
-    runsByTask[id] = await $fetch<TaskRunView[]>(`/api/tasks/${id}/runs?limit=20`)
+    const runs = await $fetch<TaskRunView[]>(`/api/tasks/${id}/runs?limit=20`)
+    if (runsRequest[id] !== request) return
+    runsByTask[id] = runs
   }
   catch (e) {
     // A silent poll failure is transient — keep the last good history rather
     // than flashing an error over a row the user is watching.
-    if (!silent) runsError[id] = e instanceof Error ? e.message : 'Failed to load run history'
+    if (!silent && runsRequest[id] === request) runsError[id] = e instanceof Error ? e.message : 'Failed to load run history'
   }
   finally {
-    if (!silent) runsLoading[id] = false
+    if (!silent && runsRequest[id] === request) runsLoading[id] = false
   }
 }
 
@@ -548,7 +559,10 @@ const peekError = ref<string | null>(null)
 const peekRunId = ref<number | null>(null)
 const peekTaskId = ref<number | null>(null)
 
+// Opening another run while a trace or its silent refresh is in flight: only the newest answer counts.
+const traceLoads = useLatestRequest()
 async function loadTrace(runId: number, title: string, subtitle: string, taskId: number | null = null) {
+  const request = traceLoads.begin()
   peekRunId.value = runId
   peekTaskId.value = taskId
   peekTitle.value = title
@@ -558,13 +572,15 @@ async function loadTrace(runId: number, title: string, subtitle: string, taskId:
   peekError.value = null
   peekLoading.value = true
   try {
-    peekMessages.value = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${runId}/messages`)
+    const messages = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${runId}/messages`)
+    if (!traceLoads.isCurrent(request)) return
+    peekMessages.value = messages
   }
   catch (e) {
-    peekError.value = e instanceof Error ? e.message : 'Failed to load trace'
+    if (traceLoads.isCurrent(request)) peekError.value = e instanceof Error ? e.message : 'Failed to load trace'
   }
   finally {
-    peekLoading.value = false
+    if (traceLoads.isCurrent(request)) peekLoading.value = false
   }
 }
 
@@ -572,8 +588,10 @@ async function loadTrace(runId: number, title: string, subtitle: string, taskId:
 // it so new turns of a RUNNING run append in place as the fire proceeds.
 async function refreshOpenTrace() {
   if (peekRunId.value == null) return
+  const request = traceLoads.begin()
   try {
-    peekMessages.value = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${peekRunId.value}/messages`)
+    const messages = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${peekRunId.value}/messages`)
+    if (traceLoads.isCurrent(request)) peekMessages.value = messages
   }
   catch { /* transient — the next tick retries */ }
 }
@@ -772,6 +790,9 @@ function scheduleLiveRefresh() {
 for (const evt of ['task.started', 'task.completed', 'task.failed', 'task.delivered', 'task.delivery_failed', 'task.lost']) {
   onEvent(evt, scheduleLiveRefresh)
 }
+onUnmounted(() => {
+  if (liveRefreshHandle) clearTimeout(liveRefreshHandle)
+})
 
 // LOST sits between RUNNING (blue) and FAILED (red) on the heat axis —
 // the task is stuck but db-scheduler will auto-recover it. Orange
@@ -944,6 +965,12 @@ function zoneForTaskRender(task: Task): string | undefined {
         </template>
       </div>
     </div>
+    <ApiErrorAlert
+      :error="listError"
+      headline="Could not load tasks"
+      :retry="refreshAll"
+      class="mb-4"
+    />
     <ApiErrorAlert
       :error="bulkError"
       class="mb-4"
