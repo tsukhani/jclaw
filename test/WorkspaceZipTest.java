@@ -72,6 +72,20 @@ class WorkspaceZipTest extends UnitTest {
     }
 
     @Test
+    void theWholeWorkspaceZipsWithRootRelativePaths() throws IOException {
+        Files.writeString(root.resolve("AGENT.md"), "standing orders");
+        Files.createDirectories(root.resolve("notes"));
+        Files.writeString(root.resolve("notes/todo.txt"), "todo");
+
+        var entries = zipOf("");
+
+        assertEquals(List.of("AGENT.md", "notes/", "notes/todo.txt"), List.copyOf(entries.keySet()),
+                "a backup of the root carries the Standing Orders files along with everything else");
+        assertEquals("standing orders", entries.get("AGENT.md"));
+        assertEquals("todo", entries.get("notes/todo.txt"));
+    }
+
+    @Test
     void neverFollowsSymlinks() throws IOException {
         Files.createDirectories(root.resolve("data"));
         Files.writeString(root.resolve("data/b.txt"), "hello");

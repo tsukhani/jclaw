@@ -742,6 +742,21 @@ public class ApiAgentsController extends Controller {
         renderBinary(file, file.getName());
     }
 
+    /**
+     * GET /api/agents/{id}/workspace-backup — the whole workspace as one zip named
+     * {@code <agent>-workspace.zip}, Standing Orders files included (JCLAW-1251).
+     */
+    @Operation(summary = "Download an agent's entire workspace as a zip backup")
+    @ChatHidden("downloads any agent's whole workspace, including another agent's persona files")
+    public static void backupWorkspace(Long id) {
+        requireOperatorForWorkspace();
+
+        var agent = requireAgent(id);
+        var root = acquireWorkspaceTarget(agent.name, "");
+        if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) notFound();
+        streamWorkspaceZip(agent.name, "", agent.name + "-workspace.zip");
+    }
+
     /** The guarded on-disk path for a workspace-relative argument; any escape is a 403. */
     private static Path acquireWorkspaceTarget(String agentName, String relative) {
         try {

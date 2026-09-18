@@ -6,7 +6,7 @@
  * and the Standing Orders editor beside it stays the only write path. A sub-agent shows
  * its root agent's shared workspace, because that is the directory it writes into.
  */
-import { ArrowDownTrayIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
+import { ArchiveBoxArrowDownIcon, ArrowDownTrayIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
 import { DocumentIcon, FolderIcon } from '@heroicons/vue/20/solid'
 import type { ApiErrorDetails, WorkspaceEntry, WorkspaceListing } from '~/types/api'
 import { formatSize } from '~/utils/format'
@@ -81,6 +81,10 @@ function downloadHref(entry: WorkspaceEntry) {
   const encoded = entry.path.split('/').map(encodeURIComponent).join('/')
   return `/api/agents/${props.agentId}/workspace-download/${encoded}`
 }
+
+// The archive's name comes from the server's Content-Disposition, which carries the agent name
+// this component never sees.
+const backupHref = computed(() => `/api/agents/${props.agentId}/workspace-backup`)
 </script>
 
 <template>
@@ -97,11 +101,27 @@ function downloadHref(entry: WorkspaceEntry) {
           class="text-xs text-fg-muted"
         >Loading…</span>
       </div>
-      <span
-        v-if="listing"
-        class="text-xs font-mono tabular-nums text-fg-muted"
-        data-testid="workspace-total"
-      >Total {{ formatSize(listing.total) }}</span>
+      <div class="flex items-center gap-3">
+        <a
+          v-if="listing"
+          :href="backupHref"
+          download
+          class="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg-strong transition-colors"
+          title="Download the whole workspace as a zip, Standing Orders included"
+          data-testid="workspace-backup"
+        >
+          <ArchiveBoxArrowDownIcon
+            class="w-4 h-4"
+            aria-hidden="true"
+          />
+          Back up
+        </a>
+        <span
+          v-if="listing"
+          class="text-xs font-mono tabular-nums text-fg-muted"
+          data-testid="workspace-total"
+        >Total {{ formatSize(listing.total) }}</span>
+      </div>
     </div>
 
     <p class="px-4 py-2 text-xs text-fg-muted">
