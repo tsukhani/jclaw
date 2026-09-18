@@ -89,6 +89,32 @@ const modelOptions = computed(() => {
 
 const chatConfigured = computed(() => listFor('chat').length > 0)
 
+// JCLAW-1222: the optional classifier model. Unset means the local keyword rules label every prompt.
+const classifierValue = computed(() => {
+  const p = configValue('router.classifier.provider')
+  const m = configValue('router.classifier.model')
+  return p && m ? `${p}::${m}` : ''
+})
+
+async function saveClassifier(value: string) {
+  saving.value = true
+  const saved = await attempt(async () => {
+    if (value) {
+      const sep = value.indexOf('::')
+      await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.provider', value: value.slice(0, sep) } })
+      await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.model', value: value.slice(sep + 2) } })
+    }
+    else {
+      await $fetch('/api/config/router.classifier.provider', { method: 'DELETE' })
+      await $fetch('/api/config/router.classifier.model', { method: 'DELETE' })
+    }
+  })
+  if (saved) await refresh()
+  // The provider and model writes can half-land: show what was saved, not what was there before.
+  else await resync()
+  saving.value = false
+}
+
 async function saveList(taskClass: string, list: RouterCandidate[]) {
   saving.value = true
   const saved = await attempt(async () => {
@@ -263,6 +289,41 @@ function usageTone(fraction: number): string {
         >
           <option value="">
             Add a model…
+          </option>
+          <option
+            v-for="o in modelOptions"
+            :key="o.value"
+            :value="o.value"
+          >
+            {{ o.label }}
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <h3 class="text-sm font-medium text-fg-muted">
+      Classifier
+    </h3>
+    <p class="text-xs text-fg-muted">
+      How each prompt gets its task class. The built-in keyword rules are free and instant, but they read
+      words rather than intent, so a demanding prompt phrased in ordinary language can stay on the chat
+      model. Naming a model here replaces them: it is asked which class fits and answers with one word.
+      That costs one extra call before the reply starts, and the model sees the first 4000 characters of
+      the prompt — so a remote classifier is one more place your prompts go. If it is unreachable, slow or
+      answers with something else, the keyword rules decide instead and the turn carries on.
+    </p>
+    <div class="bg-surface-elevated border border-border">
+      <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+        <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0">classifier model</span>
+        <select
+          :value="classifierValue"
+          aria-label="Prompt classifier model"
+          :disabled="saving"
+          class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+          @change="saveClassifier(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">
+            Keyword rules (no model call)
           </option>
           <option
             v-for="o in modelOptions"

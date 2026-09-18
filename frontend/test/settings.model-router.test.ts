@@ -38,6 +38,15 @@ registerEndpoint('/api/config/router.chat.models', {
     return { status: 'ok' }
   },
 })
+for (const key of ['router.classifier.provider', 'router.classifier.model']) {
+  registerEndpoint(`/api/config/${key}`, {
+    method: 'DELETE',
+    handler: () => {
+      deletes.push(key)
+      return { status: 'ok' }
+    },
+  })
+}
 registerEndpoint('/api/providers', () => [])
 registerEndpoint('/api/router/status', () => ({
   available: true,
@@ -102,6 +111,34 @@ describe('SettingsModelRouterPanel', () => {
     await c.find('input[aria-label="Downshift at (percent)"]').setValue('60')
     await c.find('button[title="Save"]').trigger('click')
     await vi.waitFor(() => expect(posts).toContainEqual({ key: 'router.budget.downshiftAt', value: '0.6' }))
+  })
+
+  it('defaults the classifier to the keyword rules and writes both keys when a model is picked', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const select = c.find('select[aria-label="Prompt classifier model"]')
+    expect((select.element as HTMLSelectElement).value).toBe('')
+    expect(select.text()).toContain('Keyword rules (no model call)')
+
+    await select.setValue('ollama-cloud::glm-5.3-flash')
+    await vi.waitFor(() => expect(posts.length).toBe(2))
+    expect(posts).toContainEqual({ key: 'router.classifier.provider', value: 'ollama-cloud' })
+    expect(posts).toContainEqual({ key: 'router.classifier.model', value: 'glm-5.3-flash' })
+  })
+
+  it('clears both classifier keys when the operator goes back to the keyword rules', async () => {
+    entries = [
+      ...entries,
+      { key: 'router.classifier.provider', value: 'ollama-cloud' },
+      { key: 'router.classifier.model', value: 'glm-5.3-flash' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const select = c.find('select[aria-label="Prompt classifier model"]')
+    expect((select.element as HTMLSelectElement).value).toBe('ollama-cloud::glm-5.3-flash')
+
+    await select.setValue('')
+    await vi.waitFor(() => expect(deletes).toEqual(['router.classifier.provider', 'router.classifier.model']))
   })
 
   it('shows each listed provider\'s quota windows, and says when a provider has none', async () => {

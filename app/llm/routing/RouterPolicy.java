@@ -22,14 +22,21 @@ import java.util.Map;
  * @param downshiftAt usage fraction of a prepaid provider at which non-chat classes stop using it
  *                    and drop to the chat list
  * @param exhaustedAt usage fraction at which a prepaid provider is skipped for every class
+ * @param classifier  the model that labels each prompt, or null to use the local keyword rules
+ * @param classifierTimeoutSeconds how long a classifier call may take before the rules answer instead
  */
-public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt) {
+public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt,
+                           @Nullable Candidate classifier, int classifierTimeoutSeconds) {
 
     public static final String PREFIX = "router.";
     public static final String DOWNSHIFT_AT = "router.budget.downshiftAt";
     public static final String EXHAUSTED_AT = "router.budget.exhaustedAt";
+    public static final String CLASSIFIER_PROVIDER = "router.classifier.provider";
+    public static final String CLASSIFIER_MODEL = "router.classifier.model";
+    public static final String CLASSIFIER_TIMEOUT_SECONDS = "router.classifier.timeoutSeconds";
     public static final double DEFAULT_DOWNSHIFT_AT = 0.75;
     public static final double DEFAULT_EXHAUSTED_AT = 0.95;
+    public static final int DEFAULT_CLASSIFIER_TIMEOUT_SECONDS = 8;
 
     private static final String MODELS_SUFFIX = ".models";
 
@@ -44,6 +51,11 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         classes = Map.copyOf(classes);
     }
 
+    /** Convenience for a policy with no classifier model: the keyword rules label every prompt. */
+    public RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt) {
+        this(classes, downshiftAt, exhaustedAt, null, DEFAULT_CLASSIFIER_TIMEOUT_SECONDS);
+    }
+
     public static String modelsKey(TaskClass taskClass) {
         return PREFIX + taskClass.id() + MODELS_SUFFIX;
     }
@@ -56,7 +68,17 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         }
         return new RouterPolicy(classes,
                 ConfigService.getDouble(DOWNSHIFT_AT, DEFAULT_DOWNSHIFT_AT),
-                ConfigService.getDouble(EXHAUSTED_AT, DEFAULT_EXHAUSTED_AT));
+                ConfigService.getDouble(EXHAUSTED_AT, DEFAULT_EXHAUSTED_AT),
+                configuredClassifier(),
+                ConfigService.getInt(CLASSIFIER_TIMEOUT_SECONDS, DEFAULT_CLASSIFIER_TIMEOUT_SECONDS));
+    }
+
+    /** The classifier model, or null unless the operator named both halves of the pair. */
+    private static @Nullable Candidate configuredClassifier() {
+        var provider = ConfigService.get(CLASSIFIER_PROVIDER);
+        var model = ConfigService.get(CLASSIFIER_MODEL);
+        if (provider == null || provider.isBlank() || model == null || model.isBlank()) return null;
+        return new Candidate(provider.strip(), model.strip());
     }
 
     public boolean available() {
@@ -74,12 +96,56 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         if (key.equals(DOWNSHIFT_AT) || key.equals(EXHAUSTED_AT)) {
             return thresholdRejection(key, value);
         }
+        if (key.equals(CLASSIFIER_PROVIDER) || key.equals(CLASSIFIER_MODEL)) {
+            return classifierRejection(key, value);
+        }
+        if (key.equals(CLASSIFIER_TIMEOUT_SECONDS)) {
+            return timeoutRejection(value);
+        }
         for (var c : TaskClass.values()) {
             if (key.equals(modelsKey(c))) return modelsRejection(key, value);
         }
         return key + " is not a router setting. Use " + modelsKey(TaskClass.CHAT)
                 + " (or another task class: summarize, agentic, reasoning, coding), "
-                + DOWNSHIFT_AT + " or " + EXHAUSTED_AT + ".";
+                + DOWNSHIFT_AT + ", " + EXHAUSTED_AT + ", " + CLASSIFIER_PROVIDER + ", "
+                + CLASSIFIER_MODEL + " or " + CLASSIFIER_TIMEOUT_SECONDS + ".";
+    }
+
+    /**
+     * The classifier is a pair, so each half is checked against the other's stored value: a provider
+     * that is not configured, a model it does not register, or the router itself — which would ask the
+     * router to classify the prompt it is routing — is refused.
+     */
+    private static @Nullable String classifierRejection(String key, @Nullable String value) {
+        if (value == null || value.isBlank()) return null;
+        var v = value.strip();
+        if (ModelRouter.PROVIDER.equals(v)) {
+            return CLASSIFIER_PROVIDER + " cannot be the router itself; name a concrete model to classify with.";
+        }
+        var provider = key.equals(CLASSIFIER_PROVIDER) ? v : ConfigService.get(CLASSIFIER_PROVIDER);
+        var model = key.equals(CLASSIFIER_MODEL) ? v : ConfigService.get(CLASSIFIER_MODEL);
+        if (provider == null || provider.isBlank()) {
+            return key.equals(CLASSIFIER_MODEL)
+                    ? CLASSIFIER_MODEL + " needs " + CLASSIFIER_PROVIDER + " as well." : null;
+        }
+        var registered = ProviderRegistry.get(provider);
+        if (registered == null) {
+            return "Provider '" + provider + "' is not configured. " + CLASSIFIER_PROVIDER
+                    + " must name a provider from Settings > LLM Providers.";
+        }
+        if (model == null || model.isBlank()) return null;
+        var known = registered.config().models().stream().anyMatch(m -> m.id().equals(model));
+        return known ? null : "Provider '" + provider + "' has no model with id '" + model + "'.";
+    }
+
+    private static @Nullable String timeoutRejection(@Nullable String value) {
+        try {
+            var seconds = Integer.parseInt(value == null ? "" : value.trim());
+            if (seconds >= 1 && seconds <= 60) return null;
+        } catch (NumberFormatException _) {
+            // Falls through to the message below.
+        }
+        return CLASSIFIER_TIMEOUT_SECONDS + " must be a whole number of seconds from 1 to 60.";
     }
 
     private static @Nullable String modelsRejection(String key, @Nullable String value) {

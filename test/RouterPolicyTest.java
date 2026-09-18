@@ -91,6 +91,32 @@ class RouterPolicyTest extends UnitTest {
     }
 
     @Test
+    void theClassifierPairIsCheckedAgainstTheProviderRegistry() {
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, provider));
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, ""), "clearing is allowed");
+        assertTrue(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, "rp-nope").contains("not configured"));
+        assertTrue(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, "router").contains("router itself"),
+                "the router cannot classify the prompt it is routing");
+        // The model half is checked against whatever provider is stored, so a bare model needs one.
+        assertTrue(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "m1").contains("needs"));
+    }
+
+    @Test
+    void theClassifierTimeoutMustBeSecondsInRange() {
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_TIMEOUT_SECONDS, "8"));
+        for (var bad : new String[] {"0", "-1", "61", "soon", ""}) {
+            assertNotNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_TIMEOUT_SECONDS, bad), () -> "accepted " + bad);
+        }
+    }
+
+    @Test
+    void aPolicyWithoutAClassifierUsesTheRules() {
+        var policy = new RouterPolicy(Map.of(TaskClass.CHAT, List.of(new Candidate("p", "m"))), 0.75, 0.95);
+        assertNull(policy.classifier());
+        assertEquals(RouterPolicy.DEFAULT_CLASSIFIER_TIMEOUT_SECONDS, policy.classifierTimeoutSeconds());
+    }
+
+    @Test
     void aClassWithoutItsOwnListUsesTheChatList() {
         var chat = List.of(new Candidate("p", "light"));
         var reasoning = List.of(new Candidate("p", "heavy"));

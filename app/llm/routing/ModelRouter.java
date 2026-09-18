@@ -87,8 +87,8 @@ public final class ModelRouter {
     /** {@link #route(RouteRequest)} under an explicit policy. */
     public static @Nullable RouteDecision route(RouteRequest request, RouterPolicy policy) {
         if (!policy.available()) return null;
-        var classification = PromptClassifier.classify(
-                request.userMessage(), request.priorClass(), request.priorToolCalls());
+        var classification = RouterClassifier.classify(
+                request.userMessage(), request.priorClass(), request.priorToolCalls(), policy);
         return select(policy, classification.taskClass(), classification.signals(), request);
     }
 
