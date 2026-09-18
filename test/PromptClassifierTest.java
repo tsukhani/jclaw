@@ -35,6 +35,25 @@ class PromptClassifierTest extends UnitTest {
     }
 
     @Test
+    void anAskToWorkSomethingOutIsReasoningEvenWithoutTheExactMarkerPhrase() {
+        // Real prompts that the first cut left on the chat model.
+        assertEquals(TaskClass.REASONING, classOf("Reason about why LLMs cannot reach ASI"));
+        assertEquals(TaskClass.REASONING,
+                classOf("Couldn't we create our own DSL for the policy? Why would we need to use JSON?"));
+        assertEquals(TaskClass.REASONING, classOf("What is your opinion on these arguments?"));
+        assertEquals(TaskClass.REASONING,
+                classOf("How could this research paper be applied to JClaw? Does the approach only apply to the models?"));
+    }
+
+    @Test
+    void oneWeakCueIsNotEnoughToLeaveTheCheapModel() {
+        assertEquals(TaskClass.CHAT, classOf("Why is the sky blue?"));
+        assertEquals(TaskClass.CHAT, classOf("What time is my next meeting?"));
+        assertEquals(TaskClass.CHAT, classOf("How does the auto router choose a model?"));
+        assertEquals(TaskClass.CHAT, classOf("Tell me a joke about cats"));
+    }
+
+    @Test
     void explicitReasoningAndMathAreReasoning() {
         assertEquals(TaskClass.REASONING, classOf("Prove that the square root of 2 is irrational"));
         assertEquals(TaskClass.REASONING, classOf("Walk me through the trade-offs of Postgres versus H2 here"));
@@ -50,7 +69,11 @@ class PromptClassifierTest extends UnitTest {
     }
 
     @Test
-    void agentWorkNeedsMoreThanOneActionVerb() {
+    void anInstructionToActIsAgentWorkEvenWithOneVerb() {
+        // The first cut needed two verbs here, which left "Run daily briefing skill" on the chat model.
+        assertEquals(TaskClass.AGENTIC, classOf("Run daily briefing skill"));
+        assertEquals(TaskClass.AGENTIC, classOf("Can you check if radarr has the new documentary?"));
+        assertEquals(TaskClass.AGENTIC, classOf("Spawn one subagent and instruct it to call the date_time tool"));
         assertEquals(TaskClass.AGENTIC,
                 classOf("Research the three cheapest flights to Tokyo, then email me the list"));
         assertEquals(TaskClass.AGENTIC, classOf("""
@@ -58,12 +81,26 @@ class PromptClassifierTest extends UnitTest {
                 1. download the report
                 2. update the spreadsheet
                 """));
-        assertEquals(TaskClass.CHAT, classOf("search for a pancake recipe"),
-                "one lookup is well within a light model's reach");
     }
 
     @Test
-    void aToolHeavyPreviousTurnMakesASingleActionAgentWork() {
+    void createStyleVerbsAreAgentWorkOnlyWhenTheObjectIsSomethingJClawManages() {
+        assertEquals(TaskClass.AGENTIC, classOf("Create a prompt in the prompt library for image styles"));
+        assertEquals(TaskClass.AGENTIC, classOf("generate a cover image for this article"));
+        assertEquals(TaskClass.CHAT, classOf("Create the introductory blurb for this article"),
+                "writing prose is not tool work, whatever the leading verb is");
+        assertEquals(TaskClass.CHAT, classOf("Write a short poem about the sea"));
+    }
+
+    @Test
+    void averbMerelyMentionedIsNotAnInstruction() {
+        assertEquals(TaskClass.CHAT,
+                classOf("Also, you may want to look at the neo4j plugin I wrote, and find out what it does"),
+                "a verb mid-sentence is conversation, not a command");
+    }
+
+    @Test
+    void aToolHeavyPreviousTurnKeepsAContinuationOnAgentWork() {
         var c = PromptClassifier.classify("now check the second server", null, 5);
         assertEquals(TaskClass.AGENTIC, c.taskClass());
         assertTrue(c.signals().contains("previous turn used 5 tool calls"), "signals: " + c.signals());
