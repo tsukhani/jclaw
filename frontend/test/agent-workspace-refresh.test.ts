@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
+import { createError } from 'h3'
 import AgentWorkspaceManager from '~/components/agents/AgentWorkspaceManager.vue'
 import type { WorkspaceListing } from '~/types/api'
 
@@ -147,6 +148,28 @@ describe('AgentWorkspaceManager auto-refresh', () => {
     await settle()
     expect(component.find('[data-testid="workspace-total"]').text()).toBe('Total 2.0 KB')
     expect(component.find('[data-testid="ws-row-report.pdf"]').exists()).toBe(true)
+    component.unmount()
+  })
+
+  it('keeps the last good tree when a background refresh fails', async () => {
+    let seen = 0
+    registerEndpoint('/api/agents/26/workspace-tree', () => {
+      seen += 1
+      if (seen > 1) throw createError({ statusCode: 500, statusMessage: 'walk failed' })
+      return listingOf('notes.md')
+    })
+
+    const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 26 } })
+    await settle()
+    expect(component.find('[data-testid="ws-row-notes.md"]').exists()).toBe(true)
+
+    vi.advanceTimersByTime(REFRESH_MS)
+    await settle()
+    // ofetch retries a GET once on a 500, so the poll costs two requests here, not one.
+    expect(seen).toBeGreaterThanOrEqual(2)
+    expect(component.find('[data-testid="ws-row-notes.md"]').exists()).toBe(true)
+    expect(component.find('[data-testid="workspace-total"]').text()).toBe('Total 1.0 KB')
+    expect(component.text()).not.toContain('walk failed')
     component.unmount()
   })
 

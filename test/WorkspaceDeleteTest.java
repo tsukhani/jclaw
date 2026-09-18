@@ -7,6 +7,7 @@ import services.WorkspaceFiles.DeleteOutcome;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.stream.Stream;
@@ -58,6 +59,31 @@ class WorkspaceDeleteTest extends UnitTest {
 
         assertFalse(Files.exists(root.resolve("downloads")), "the folder and everything under it is gone");
         assertTrue(Files.isDirectory(root), "the workspace root survives its subtree");
+    }
+
+    @Test
+    void unlinksASymlinkWithoutTouchingItsTarget() throws IOException {
+        Files.createDirectories(root.resolve("data"));
+        Files.writeString(root.resolve("data/b.txt"), "hello");
+        Files.createSymbolicLink(root.resolve("inner"), root.resolve("data"));
+
+        assertEquals(DeleteOutcome.DELETED, WorkspaceFiles.deleteWorkspaceEntry(agentName, "inner"));
+
+        assertFalse(Files.exists(root.resolve("inner"), LinkOption.NOFOLLOW_LINKS), "the link is gone");
+        assertTrue(Files.exists(root.resolve("data/b.txt")), "the directory it pointed at is untouched");
+    }
+
+    @Test
+    void aSymlinkInsideADeletedFolderIsUnlinkedNotFollowed() throws IOException {
+        Files.createDirectories(root.resolve("data"));
+        Files.writeString(root.resolve("data/b.txt"), "hello");
+        Files.createDirectories(root.resolve("downloads"));
+        Files.createSymbolicLink(root.resolve("downloads/link"), root.resolve("data"));
+
+        assertEquals(DeleteOutcome.DELETED, WorkspaceFiles.deleteWorkspaceEntry(agentName, "downloads"));
+
+        assertFalse(Files.exists(root.resolve("downloads")));
+        assertTrue(Files.exists(root.resolve("data/b.txt")), "the linked directory survives");
     }
 
     @Test

@@ -96,10 +96,12 @@ public final class WorkspaceFiles {
      */
     public static long directorySizeBytes(Path root) {
         if (!Files.isDirectory(root)) return 0;
+        // Each entry's own bytes, symlinks unfollowed: the rule listWorkspace applies, so the
+        // per-agent totals sum to this figure and a linked subtree is never counted twice.
         try (var files = Files.walk(root)) {
-            return files.filter(Files::isRegularFile).mapToLong(p -> {
+            return files.filter(p -> !Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)).mapToLong(p -> {
                 try {
-                    return Files.size(p);
+                    return Files.readAttributes(p, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).size();
                 } catch (IOException _) {
                     return 0; // vanished mid-walk — count what remains
                 }
@@ -193,7 +195,11 @@ public final class WorkspaceFiles {
      */
     public static DeleteOutcome deleteWorkspaceEntry(String agentName, String relativePath) throws IOException {
         var root = acquireWorkspacePath(agentName, "");
-        var target = acquireContained(root, relativePath);
+        // The guard rules on containment, but its result is canonical: a symlink comes back as
+        // the directory it points at. Delete the lexical path so a link is unlinked, not chased.
+        acquireContained(root, relativePath);
+        var target = root.resolve(relativePath).normalize();
+        if (!target.startsWith(root)) throw new SecurityException("Path escapes workspace root: " + relativePath);
         var relative = root.relativize(target).toString().replace('\\', '/');
         if (relative.isEmpty() || PROTECTED_ROOT_FILES.contains(relative)) return DeleteOutcome.PROTECTED;
         if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) return DeleteOutcome.MISSING;

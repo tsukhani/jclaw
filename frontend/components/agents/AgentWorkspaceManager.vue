@@ -42,6 +42,9 @@ async function load(options?: { silent?: boolean }) {
   }
   catch (e) {
     if (!latest.isCurrent(token)) return
+    // A failed background poll keeps the last good tree on screen; the next tick retries, and a
+    // failure that persists still surfaces on the next agent switch or reload.
+    if (silent && listing.value) return
     error.value = apiErrorDetails(e)
   }
   finally {

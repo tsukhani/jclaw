@@ -121,6 +121,19 @@ class WorkspaceListingTest extends UnitTest {
     }
 
     @Test
+    void theDashboardWalkCountsByTheSameRuleAsTheListing() throws IOException {
+        Files.createDirectories(root.resolve("data"));
+        Files.writeString(root.resolve("data/b.txt"), "hello");
+        Files.writeString(root.resolve(".hidden"), "abc");
+        Files.createSymbolicLink(root.resolve("inner"), root.resolve("data"));
+
+        var listing = WorkspaceFiles.listWorkspace(agentName);
+
+        assertEquals(listing.total(), WorkspaceFiles.directorySizeBytes(root),
+                "the section total and the dashboard figure count every entry once, symlinks unfollowed");
+    }
+
+    @Test
     void aWorkspaceThatWasNeverMaterializedListsAsEmpty() throws IOException {
         var listing = WorkspaceFiles.listWorkspace("jclaw1247-missing-" + System.nanoTime());
         assertEquals(0, listing.total());
