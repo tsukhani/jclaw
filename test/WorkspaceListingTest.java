@@ -112,7 +112,12 @@ class WorkspaceListingTest extends UnitTest {
         var inner = find(listing.entries(), "inner");
         assertEquals("file", inner.kind());
         assertNull(inner.children());
-        assertEquals(5, listing.total(), "the linked directory's bytes are counted once");
+        var data = find(listing.entries(), "data");
+        assertEquals(5, data.size(), "the real directory carries its one file's bytes");
+        // A symlink's own size is the byte length of its target path, so it varies with the
+        // checkout's location: pin the sum, which is what "counted once" actually means.
+        assertEquals(data.size() + inner.size(), listing.total(),
+                "the linked directory's bytes are counted once");
     }
 
     @Test
