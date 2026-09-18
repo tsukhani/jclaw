@@ -193,10 +193,9 @@ public final class ScrapeHarness {
     public record Gate(boolean pass, List<GateCheck> checks) {}
 
     /**
-     * The gate's floors as re-set on 2026-08-21
-     * (docs/spikes/jclaw-1091-scrape-access-gate.md) — regression detectors set below the
-     * observed minimum across three runs, not the original targets, which that doc keeps
-     * as a stretch goal outside the gate.
+     * The gate's floors as re-set on 2026-08-21 (JCLAW-1091) — regression detectors set
+     * below the observed minimum across three runs, not the original targets, which that
+     * spike keeps as a stretch goal outside the gate.
      *
      * <p>They describe the local ladder, so only the ladder lane's verdict is the gate; a
      * single-rung run is scored against them for comparison.

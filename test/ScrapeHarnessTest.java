@@ -261,8 +261,8 @@ class ScrapeHarnessTest extends UnitTest {
 
     @Test
     void aRunThatClearsEveryFloorPasses() throws Exception {
-        // The floors are docs/spikes/jclaw-1091-scrape-access-gate.md's, asserted here so
-        // a silent retune shows up as a test change rather than only as a nicer number.
+        // The floors are JCLAW-1091's, asserted here so a silent retune shows up as a
+        // test change rather than only as a nicer number.
         var rep = ScrapeHarness.run("stub", url -> obs("<html><body>x</body></html>", ARTICLE_TEXT),
                 fourStratumCorpus(), 2);
 
