@@ -21,19 +21,24 @@ const latest = useLatestRequest()
 // Declared here because the immediate watcher below resets it on an agent switch.
 const openDirs = ref<Record<string, boolean>>({})
 
-async function load() {
+async function load(options?: { silent?: boolean }) {
   const id = props.agentId
   const token = latest.begin()
   if (!id) {
     listing.value = null
     return
   }
-  loading.value = true
-  error.value = null
+  // A background poll must not flash the header spinner or blank a visible error mid-flight.
+  const silent = options?.silent === true
+  if (!silent) {
+    loading.value = true
+    error.value = null
+  }
   try {
     const data = await $fetch<WorkspaceListing>(`/api/agents/${id}/workspace-tree`)
     if (!latest.isCurrent(token)) return
     listing.value = data
+    error.value = null
   }
   catch (e) {
     if (!latest.isCurrent(token)) return
@@ -49,6 +54,43 @@ watch(() => props.agentId, () => {
   void load()
 }, { immediate: true })
 defineExpose({ reload: load })
+
+// Polled so a file a running agent writes appears without the operator clicking anything.
+// The listing is an attributes-only walk, so this cadence is affordable.
+const REFRESH_MS = 10_000
+let timer: ReturnType<typeof setInterval> | null = null
+
+function startPolling() {
+  if (timer) return
+  timer = setInterval(() => void load({ silent: true }), REFRESH_MS)
+}
+
+function stopPolling() {
+  if (!timer) return
+  clearInterval(timer)
+  timer = null
+}
+
+function onVisibility() {
+  if (document.visibilityState !== 'visible') {
+    stopPolling()
+    return
+  }
+  // Catch up on what changed while the tab was away rather than waiting out a whole interval.
+  void load({ silent: true })
+  startPolling()
+}
+
+onMounted(() => {
+  // The immediate watcher above already issued the first load.
+  if (document.visibilityState === 'visible') startPolling()
+  document.addEventListener('visibilitychange', onVisibility)
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
+  document.removeEventListener('visibilitychange', onVisibility)
+})
 
 // (2) Tree rendering: the nested listing flattened to the rows currently expanded.
 interface Row { entry: WorkspaceEntry, depth: number }
