@@ -75,7 +75,7 @@ public final class LpdClient {
         // Three digits, per the RFC's cfA<nnn> convention. Derived from the document
         // rather than a counter so the id is stable for a given job and carries no
         // cross-job state; collisions are harmless (the daemon scopes by host).
-        var jobId = String.format("%03d", Math.floorMod(Arrays.hashCode(document), 1000));
+        var jobId = "%03d".formatted(Math.floorMod(Arrays.hashCode(document), 1000));
         var localHost = safeToken(InetAddress.getLocalHost().getHostName());
         var controlName = "cfA" + jobId + localHost;
         var dataName = "dfA" + jobId + localHost;

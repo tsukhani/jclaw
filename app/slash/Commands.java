@@ -1087,7 +1087,7 @@ public final class Commands {
     }
 
     private static String formatTokens(int tokens) {
-        return String.format("%,d", tokens);
+        return "%,d".formatted(tokens);
     }
 
     // ── /subagent ─────────────────────────────────────────────────────────
