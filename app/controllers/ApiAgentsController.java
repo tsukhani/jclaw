@@ -716,4 +716,35 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(listing));
     }
 
+    /**
+     * DELETE /api/agents/{id}/workspace-tree/{path} — remove a workspace file, or a folder with
+     * its whole subtree (JCLAW-1249). An empty path targets the root. The root and the five
+     * Standing Orders files are refused here, not in the UI: hiding the control is a courtesy.
+     */
+    @Operation(summary = "Delete a workspace file or folder subtree; the root and Standing Orders files are refused")
+    @ChatHidden("deletes files from any agent's workspace, including another agent's persona files")
+    public static void deleteWorkspaceEntry(Long id, @Nullable String path) {
+        requireOperatorForWorkspace();
+
+        var agent = requireAgent(id);
+        var relative = path == null ? "" : path;   // an empty trailing segment is the root, refused below
+        WorkspaceFiles.DeleteOutcome outcome;
+        try {
+            outcome = WorkspaceFiles.deleteWorkspaceEntry(agent.name, relative);
+        } catch (SecurityException _) {
+            forbidden();
+            throw ApiResponses.unreachable();
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR,
+                    "Could not delete the workspace entry: " + e.getMessage());
+            throw ApiResponses.unreachable();
+        }
+        switch (outcome) {
+            case PROTECTED -> ApiResponses.error(403, ApiResponses.FORBIDDEN,
+                    "The workspace root and the Standing Orders files cannot be deleted.");
+            case MISSING -> notFound();
+            case DELETED -> ApiResponses.ok("path", relative);
+        }
+    }
+
 }

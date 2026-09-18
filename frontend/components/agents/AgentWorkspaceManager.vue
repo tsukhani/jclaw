@@ -7,7 +7,7 @@
  * its root agent's shared workspace, because that is the directory it writes into.
  */
 import { ChevronRightIcon } from '@heroicons/vue/24/outline'
-import { DocumentIcon, FolderIcon } from '@heroicons/vue/20/solid'
+import { DocumentIcon, FolderIcon, TrashIcon } from '@heroicons/vue/20/solid'
 import type { ApiErrorDetails, WorkspaceEntry, WorkspaceListing } from '~/types/api'
 import { formatSize } from '~/utils/format'
 
@@ -73,7 +73,29 @@ const rows = computed<Row[]>(() => {
   return out
 })
 
-// (3) Per-row actions: download and delete land here in later stories; nothing renders today.
+// (3) Per-row actions: delete lands here; download follows in its own story.
+const { mutate, errorDetails: deleteError } = useApiMutation()
+const pendingDelete = ref<string | null>(null)
+
+// A folder delete takes the whole subtree, so the label says so rather than leaving it to the icon.
+function deleteLabel(entry: WorkspaceEntry) {
+  return entry.kind === 'dir'
+    ? `Delete folder ${entry.name} and everything in it`
+    : `Delete ${entry.name}`
+}
+
+async function confirmDelete(path: string) {
+  const id = props.agentId
+  if (!id) return
+  const encoded = path.split('/').map(encodeURIComponent).join('/')
+  const ack = await mutate(`/api/agents/${id}/workspace-tree/${encoded}`, { method: 'DELETE' })
+  pendingDelete.value = null
+  if (ack) await load()
+}
+
+watch(() => props.agentId, () => {
+  pendingDelete.value = null
+})
 </script>
 
 <template>
@@ -101,6 +123,12 @@ const rows = computed<Row[]>(() => {
       Everything on disk under this agent's workspace. The Standing Orders files are listed
       but protected; edit them in the editor above.
     </p>
+
+    <ApiErrorAlert
+      v-if="deleteError"
+      :error="deleteError"
+      class="px-4 pb-3"
+    />
 
     <ApiErrorAlert
       v-if="error"
@@ -168,11 +196,44 @@ const rows = computed<Row[]>(() => {
 
         <span class="shrink-0 text-xs font-mono tabular-nums text-fg-muted">{{ formatSize(row.entry.size) }}</span>
 
-        <!-- (3) Per-row actions area: download and delete buttons go here. -->
+        <!-- (3) Per-row actions area: delete now, download in its own story. -->
         <span
           class="flex items-center gap-1 shrink-0"
           :data-testid="`ws-actions-${row.entry.path}`"
-        />
+        >
+          <template v-if="!row.entry.protected">
+            <template v-if="pendingDelete === row.entry.path">
+              <button
+                type="button"
+                class="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-danger"
+                :aria-label="`Confirm: ${deleteLabel(row.entry)}`"
+                :data-testid="`ws-delete-confirm-${row.entry.path}`"
+                @click="confirmDelete(row.entry.path)"
+              >Confirm</button>
+              <button
+                type="button"
+                class="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-fg-muted"
+                :aria-label="`Cancel: ${deleteLabel(row.entry)}`"
+                :data-testid="`ws-delete-cancel-${row.entry.path}`"
+                @click="pendingDelete = null"
+              >Cancel</button>
+            </template>
+            <button
+              v-else
+              type="button"
+              class="border-0 bg-transparent p-0.5 text-fg-muted hover:text-danger"
+              :aria-label="deleteLabel(row.entry)"
+              :title="deleteLabel(row.entry)"
+              :data-testid="`ws-delete-${row.entry.path}`"
+              @click="pendingDelete = row.entry.path"
+            >
+              <TrashIcon
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+        </span>
       </div>
     </div>
   </div>

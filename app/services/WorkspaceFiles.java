@@ -174,6 +174,46 @@ public final class WorkspaceFiles {
         return entries;
     }
 
+    /** What a {@link #deleteWorkspaceEntry} call did, so the caller maps each case to its own status. */
+    public enum DeleteOutcome { DELETED, MISSING, PROTECTED }
+
+    /**
+     * Delete a file, or a folder with its whole subtree, inside an agent's workspace (JCLAW-1249).
+     * The workspace root itself and the five Standing Orders files at that root are refused here
+     * rather than in the UI, so a direct API call is bound by the same rule the tree rows show.
+     * Standing Orders live only at the root, so a nested {@code AGENT.md} is an ordinary file.
+     *
+     * @param relativePath root-relative path; empty targets the root and is refused
+     * @throws SecurityException when the path escapes the workspace root
+     * @throws IOException       when the removal fails partway
+     */
+    public static DeleteOutcome deleteWorkspaceEntry(String agentName, String relativePath) throws IOException {
+        var root = acquireWorkspacePath(agentName, "");
+        var target = acquireContained(root, relativePath);
+        var relative = root.relativize(target).toString().replace('\\', '/');
+        if (relative.isEmpty() || PROTECTED_ROOT_FILES.contains(relative)) return DeleteOutcome.PROTECTED;
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) return DeleteOutcome.MISSING;
+
+        deleteRecursively(target);
+        fileCache.invalidate(agentName + "/" + relative);
+        invalidateWorkspaceSize();
+        EventLogger.info(LOG_CATEGORY, "Deleted workspace entry %s/%s".formatted(agentName, relative));
+        return DeleteOutcome.DELETED;
+    }
+
+    /** Depth-first removal. {@link Files#walk} does not follow symlinks, so a link is unlinked, not chased. */
+    private static void deleteRecursively(Path target) throws IOException {
+        if (!Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
+            Files.delete(target);
+            return;
+        }
+        List<Path> paths;
+        try (Stream<Path> walk = Files.walk(target)) {
+            paths = walk.sorted(Comparator.reverseOrder()).toList();
+        }
+        for (var path : paths) Files.delete(path);
+    }
+
     /**
      * Resolve an agent's workspace path with defense-in-depth against path
      * traversal (JCLAW-115). The controller layer already validates names
