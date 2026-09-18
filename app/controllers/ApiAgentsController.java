@@ -20,12 +20,14 @@ import play.mvc.With;
 import services.AgentService;
 import services.ConfigService;
 import services.LoadTestRunner;
+import services.WorkspaceFiles;
 import services.compression.TextCompressor;
 import tools.ShellExecTool;
 import utils.ApiResponses;
 import utils.HttpKeys;
 import utils.JsonArgs;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -685,6 +687,33 @@ public class ApiAgentsController extends Controller {
         }
         AgentService.writeWorkspaceFile(agent.name, filename, body.get(KEY_CONTENT).getAsString());
         ApiResponses.ok("filename", filename);
+    }
+
+    // --- Workspace manager endpoints ---
+
+    /**
+     * GET /api/agents/{id}/workspace-tree — the agent's workspace as a tree of attribute-only
+     * entries with aggregate folder sizes and a total (JCLAW-1247). A sub-agent lists its root
+     * agent's shared workspace.
+     */
+    @Operation(summary = "List an agent's workspace tree with sizes, protected markers and a total")
+    @ChatHidden("lists any agent's workspace, including another agent's persona files")
+    public static void listWorkspaceTree(Long id) {
+        requireOperatorForWorkspace();
+
+        var agent = requireAgent(id);
+        WorkspaceFiles.WorkspaceListing listing;
+        try {
+            listing = WorkspaceFiles.listWorkspace(agent.name);
+        } catch (SecurityException _) {
+            forbidden();
+            throw ApiResponses.unreachable();
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR,
+                    "Could not read the workspace: " + e.getMessage());
+            throw ApiResponses.unreachable();
+        }
+        renderJSON(gson.toJson(listing));
     }
 
 }

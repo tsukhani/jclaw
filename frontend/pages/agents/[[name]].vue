@@ -12,6 +12,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { Save } from '@lucide/vue'
+import AgentWorkspaceManager from '~/components/agents/AgentWorkspaceManager.vue'
 import { renderMarkdown } from '~/utils/chat-markdown'
 import type {
   Agent,
@@ -2929,6 +2930,8 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           class="px-4 pb-2.5"
         />
       </div>
+
+      <AgentWorkspaceManager :agent-id="editing?.id ?? null" />
     </div>
 
     <!-- System prompt breakdown dialog uses ARIA dialog semantics on a div because the native HTML dialog element has open and close behaviour that conflicts with v-if-driven rendering. Screen readers still announce role dialog with aria-modal true. -->

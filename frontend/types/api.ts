@@ -540,6 +540,26 @@ export interface WorkspaceFileContent {
   content: string
 }
 
+/**
+ * One node of GET /api/agents/:id/workspace-tree (JCLAW-1247). `path` is root-relative with
+ * forward slashes; `children` is an array for a dir and null for a file; `protected` marks the
+ * five Standing Orders files at the root, which are never delete targets.
+ */
+export interface WorkspaceEntry {
+  path: string
+  name: string
+  kind: 'file' | 'dir'
+  size: number
+  protected: boolean
+  children: WorkspaceEntry[] | null
+}
+
+/** Shape returned by GET /api/agents/:id/workspace-tree: `total` is the byte sum under the root. */
+export interface WorkspaceListing {
+  total: number
+  entries: WorkspaceEntry[]
+}
+
 /** Shape returned by GET /api/agents/:id/shell/effective-allowlist. */
 export interface EffectiveAllowlist {
   global: string[]

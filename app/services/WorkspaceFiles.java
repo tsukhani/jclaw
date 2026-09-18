@@ -1,5 +1,6 @@
 package services;
 
+import com.google.gson.annotations.SerializedName;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 import play.Play;
@@ -11,9 +12,14 @@ import utils.WorkspacePathGuard;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -97,6 +103,75 @@ public final class WorkspaceFiles {
         } catch (IOException | RuntimeException _) {
             return -1;
         }
+    }
+
+    /** Drops the memoized workspace size so the dashboard figure follows a delete at once. */
+    public static void invalidateWorkspaceSize() {
+        sizeCache.invalidateAll();
+    }
+
+    /** The Standing Orders files at a workspace root; listed but never delete targets. */
+    public static final Set<String> PROTECTED_ROOT_FILES =
+            Set.of("SOUL.md", "IDENTITY.md", "USER.md", "BOOTSTRAP.md", "AGENT.md");
+
+    /**
+     * One node of a workspace listing. {@code path} is root-relative with forward slashes;
+     * {@code children} is non-null for a directory only.
+     */
+    public record WorkspaceEntry(String path, String name, String kind, long size,
+                                 @SerializedName("protected") boolean isProtected,
+                                 @Nullable List<WorkspaceEntry> children) {}
+
+    /** A workspace listing: {@code total} is the byte sum of every file under the root. */
+    public record WorkspaceListing(long total, List<WorkspaceEntry> entries) {}
+
+    /**
+     * Attribute-only recursive listing of an agent's workspace (JCLAW-1247): folder sizes
+     * aggregate their contents, dotfiles are listed like any other entry, and no file is
+     * opened. Symlinks are never followed — one that resolves outside the root is dropped by
+     * the guard, one inside is listed as a file of the link's own size. A workspace that was
+     * never materialized lists as empty.
+     *
+     * @throws SecurityException when the agent's workspace resolves outside the workspace root
+     * @throws IOException       when a directory cannot be read
+     */
+    public static WorkspaceListing listWorkspace(String agentName) throws IOException {
+        var root = acquireWorkspacePath(agentName, "");
+        if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) {
+            return new WorkspaceListing(0, List.of());
+        }
+        var entries = listDirectory(root, root);
+        var total = entries.stream().mapToLong(WorkspaceEntry::size).sum();
+        return new WorkspaceListing(total, entries);
+    }
+
+    private static List<WorkspaceEntry> listDirectory(Path root, Path dir) throws IOException {
+        var entries = new ArrayList<WorkspaceEntry>();
+        try (var children = Files.newDirectoryStream(dir)) {
+            for (var child : children) {
+                var relative = root.relativize(child).toString().replace('\\', '/');
+                // Each child re-enters the guard so an in-tree symlink escaping the root is dropped.
+                if (WorkspacePathGuard.resolveContained(root, relative) == null) continue;
+                BasicFileAttributes attrs;
+                try {
+                    attrs = Files.readAttributes(child, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                } catch (IOException _) {
+                    continue; // vanished mid-walk
+                }
+                var name = child.getFileName().toString();
+                if (attrs.isDirectory()) {
+                    var nested = listDirectory(root, child);
+                    var size = nested.stream().mapToLong(WorkspaceEntry::size).sum();
+                    entries.add(new WorkspaceEntry(relative, name, "dir", size, false, nested));
+                } else {
+                    var isProtected = dir.equals(root) && PROTECTED_ROOT_FILES.contains(name);
+                    entries.add(new WorkspaceEntry(relative, name, "file", attrs.size(), isProtected, null));
+                }
+            }
+        }
+        entries.sort(Comparator.comparing((WorkspaceEntry e) -> !"dir".equals(e.kind()))
+                .thenComparing(WorkspaceEntry::name, String.CASE_INSENSITIVE_ORDER));
+        return entries;
     }
 
     /**
