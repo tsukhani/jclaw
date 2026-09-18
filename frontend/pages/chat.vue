@@ -374,7 +374,13 @@ function onModelPicked(key: string) {
 // the dropdown).
 watch(() => route.query.conversation, async (raw) => {
   const id = raw ? Number(raw) : null
-  if (!id || id === selectedConvoId.value) return
+  // The sidebar's Chats link points at a bare /chat, so leaving a conversation
+  // reaches this page as a dropped query on a component that never unmounts.
+  if (!id) {
+    if (!isEmptyChat.value) newChat()
+    return
+  }
+  if (id === selectedConvoId.value) return
   const ownedByCurrent = conversations.value?.some(c => c.id === id) ?? false
   if (ownedByCurrent) {
     clearSubagentTranscript()

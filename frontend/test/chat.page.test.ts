@@ -1610,6 +1610,28 @@ describe('Chat page — address bar', () => {
     await component.find('button[title="New conversation"]').trigger('click')
     await vi.waitFor(() => expect(router.currentRoute.value.query.conversation).toBeUndefined())
   })
+
+  it('leaves the open conversation when the address drops the query, as the sidebar Chats link does', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations/960/messages', () => [
+      { id: 2600, role: 'user', content: 'earlier prompt', createdAt: '2026-05-16T10:00:00Z' },
+    ])
+    const router = useRouter()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(960)
+    await flushPromises()
+    expect(component.html()).toContain('earlier prompt')
+    await vi.waitFor(() => expect(router.currentRoute.value.query.conversation).toBe('960'))
+
+    // /chat and /chat?conversation=960 are the same route component, so the link
+    // drops the query on a page that stays mounted — nothing else resets it.
+    await router.push({ path: '/chat', query: {} })
+    await flushPromises()
+    expect(component.html()).not.toContain('earlier prompt')
+  })
 })
 
 describe('Chat page — error-event SSE branch', () => {
