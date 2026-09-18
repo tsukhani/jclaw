@@ -111,6 +111,7 @@ GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspace
 GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspaceFile
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
 GET     /api/agents/{id}/workspace-tree         ApiAgentsController.listWorkspaceTree
+GET     /api/agents/{id}/workspace-download/{<.+>path}  ApiAgentsController.downloadWorkspaceEntry
 
 # Agent memories API (JCLAW-40) — cross-agent admin, addressed by memory id
 GET     /api/memories                           ApiMemoryController.list

@@ -16,6 +16,7 @@ import models.AgentSkillConfig;
 import org.jspecify.annotations.Nullable;
 import play.libs.MimeTypes;
 import play.mvc.Controller;
+import play.mvc.Http;
 import play.mvc.With;
 import services.AgentService;
 import services.ConfigService;
@@ -27,7 +28,11 @@ import utils.ApiResponses;
 import utils.HttpKeys;
 import utils.JsonArgs;
 
+import java.io.BufferedOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -714,6 +719,74 @@ public class ApiAgentsController extends Controller {
             throw ApiResponses.unreachable();
         }
         renderJSON(gson.toJson(listing));
+    }
+
+    /**
+     * GET /api/agents/{id}/workspace-download/{path} — one workspace entry as a download
+     * (JCLAW-1248): a file with its own name and bytes, a folder as {@code <name>.zip}.
+     */
+    @Operation(summary = "Download a workspace file as an attachment, or a workspace folder as a zip")
+    @ChatHidden("downloads any agent's workspace, including another agent's persona files")
+    public static void downloadWorkspaceEntry(Long id, String path) {
+        requireOperatorForWorkspace();
+
+        var agent = requireAgent(id);
+        var target = acquireWorkspaceTarget(agent.name, path);
+        if (Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) {
+            streamWorkspaceZip(agent.name, path, target.getFileName() + ".zip");
+            return;
+        }
+        var file = target.toFile();
+        if (!file.isFile()) notFound();
+        // The two-argument overload renders an attachment; renderBinary(file) would say inline.
+        renderBinary(file, file.getName());
+    }
+
+    /** The guarded on-disk path for a workspace-relative argument; any escape is a 403. */
+    private static Path acquireWorkspaceTarget(String agentName, String relative) {
+        try {
+            return AgentService.acquireWorkspacePath(agentName, relative);
+        }
+        catch (SecurityException _) {
+            forbidden();
+            throw ApiResponses.unreachable();
+        }
+    }
+
+    /** Big enough that a deflated file costs a few chunks rather than dozens of tiny ones. */
+    private static final int ZIP_CHUNK_BYTES = 32 * 1024;
+
+    /**
+     * Stream a workspace zip as the walk builds it: Play's chunked writer backpressures against
+     * the socket, so neither the disk nor {@code response.out} ever holds the whole archive.
+     */
+    private static void streamWorkspaceZip(String agentName, String relative, String zipName) {
+        response.contentType = "application/zip";
+        response.setHeader("Content-Disposition", "attachment; filename=\"%s\"".formatted(zipName));
+        try (var out = new BufferedOutputStream(chunkedSink(response), ZIP_CHUNK_BYTES)) {
+            WorkspaceFiles.zipDirectory(agentName, relative, out);
+        }
+        catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Could not archive the workspace: " + e.getMessage());
+        }
+    }
+
+    /** Play's chunked writer as an {@link OutputStream}. The response is a parameter because the
+     *  enhancer rewrites the controller's static {@code response} only inside the controller class,
+     *  never inside an anonymous one. */
+    private static OutputStream chunkedSink(Http.Response target) {
+        return new OutputStream() {
+            @Override
+            public void write(int b) {
+                write(new byte[] {(byte) b}, 0, 1);
+            }
+
+            @Override
+            public void write(byte[] bytes, int off, int len) {
+                // writeChunk queues the array without copying it, so a reused buffer must be copied.
+                if (len > 0) target.writeChunk(Arrays.copyOfRange(bytes, off, off + len));
+            }
+        };
     }
 
 }

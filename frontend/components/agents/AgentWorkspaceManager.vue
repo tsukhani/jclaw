@@ -6,7 +6,7 @@
  * and the Standing Orders editor beside it stays the only write path. A sub-agent shows
  * its root agent's shared workspace, because that is the directory it writes into.
  */
-import { ChevronRightIcon } from '@heroicons/vue/24/outline'
+import { ArrowDownTrayIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
 import { DocumentIcon, FolderIcon } from '@heroicons/vue/20/solid'
 import type { ApiErrorDetails, WorkspaceEntry, WorkspaceListing } from '~/types/api'
 import { formatSize } from '~/utils/format'
@@ -73,7 +73,14 @@ const rows = computed<Row[]>(() => {
   return out
 })
 
-// (3) Per-row actions: download and delete land here in later stories; nothing renders today.
+// (3) Per-row actions: download today, delete in a later story.
+
+// A link rather than a fetch, so the browser owns the save dialog and honours the filename the
+// server sends; each segment is encoded so a '#' or '?' in a name survives the round trip.
+function downloadHref(entry: WorkspaceEntry) {
+  const encoded = entry.path.split('/').map(encodeURIComponent).join('/')
+  return `/api/agents/${props.agentId}/workspace-download/${encoded}`
+}
 </script>
 
 <template>
@@ -172,7 +179,21 @@ const rows = computed<Row[]>(() => {
         <span
           class="flex items-center gap-1 shrink-0"
           :data-testid="`ws-actions-${row.entry.path}`"
-        />
+        >
+          <a
+            :href="downloadHref(row.entry)"
+            download
+            class="w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong transition-colors"
+            :title="row.entry.kind === 'dir' ? 'Download this folder as a zip' : 'Download this file'"
+            :aria-label="`Download ${row.entry.name}`"
+            :data-testid="`ws-download-${row.entry.path}`"
+          >
+            <ArrowDownTrayIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </a>
+        </span>
       </div>
     </div>
   </div>

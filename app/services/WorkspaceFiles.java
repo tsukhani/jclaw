@@ -10,7 +10,9 @@ import play.cache.Caches;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -21,6 +23,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * Workspace path-security + file I/O for agents (JCLAW-728), extracted from {@link AgentService}.
@@ -172,6 +176,52 @@ public final class WorkspaceFiles {
         entries.sort(Comparator.comparing((WorkspaceEntry e) -> !"dir".equals(e.kind()))
                 .thenComparing(WorkspaceEntry::name, String.CASE_INSENSITIVE_ORDER));
         return entries;
+    }
+
+    /**
+     * Write the directory at {@code relative} inside an agent's workspace to {@code out} as a zip
+     * whose entry names are relative to that directory (JCLAW-1248, JCLAW-1251). Nothing is staged:
+     * the caller's stream is the archive, and it is closed when the last entry is written.
+     *
+     * <p>Symlinks are never followed. One escaping the root is dropped by the guard; one inside it
+     * is skipped too, because its target is already an entry under its own real path.
+     *
+     * @throws SecurityException when the directory resolves outside the workspace root
+     * @throws IOException       when a directory cannot be read or the stream refuses a write
+     */
+    public static void zipDirectory(String agentName, String relative, OutputStream out) throws IOException {
+        var root = acquireWorkspacePath(agentName, "");
+        var base = acquireWorkspacePath(agentName, relative);
+        try (var zip = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
+            zipInto(root, base, base, zip);
+        }
+    }
+
+    private static void zipInto(Path root, Path base, Path dir, ZipOutputStream zip) throws IOException {
+        try (var children = Files.newDirectoryStream(dir)) {
+            for (var child : children) {
+                // Each child re-enters the guard so an in-tree symlink escaping the root is dropped.
+                if (WorkspacePathGuard.resolveContained(root, root.relativize(child).toString()) == null) continue;
+                BasicFileAttributes attrs;
+                try {
+                    attrs = Files.readAttributes(child, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                }
+                catch (IOException _) {
+                    continue; // vanished mid-walk
+                }
+                var name = base.relativize(child).toString().replace('\\', '/');
+                if (attrs.isDirectory()) {
+                    zip.putNextEntry(new ZipEntry(name + "/"));
+                    zip.closeEntry();
+                    zipInto(root, base, child, zip);
+                }
+                else if (attrs.isRegularFile()) {
+                    zip.putNextEntry(new ZipEntry(name));
+                    Files.copy(child, zip);
+                    zip.closeEntry();
+                }
+            }
+        }
     }
 
     /**

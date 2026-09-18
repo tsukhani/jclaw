@@ -67,15 +67,12 @@ describe('AgentWorkspaceManager', () => {
     expect(component.find('[data-testid="ws-row-downloads/report.pdf"]').exists()).toBe(false)
   })
 
-  it('offers no row action and renders no file content', async () => {
+  it('renders no file content', async () => {
     registerEndpoint('/api/agents/9/workspace-tree', () => listing)
 
     const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 9 } })
     await flushPromises()
 
-    for (const path of ['downloads', '.env', 'AGENT.md']) {
-      expect(component.find(`[data-testid="ws-actions-${path}"]`).element.children.length).toBe(0)
-    }
     expect(component.findAll('textarea, iframe, img, pre').length).toBe(0)
   })
 
