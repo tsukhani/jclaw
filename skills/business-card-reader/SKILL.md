@@ -1,9 +1,9 @@
 ---
 name: business-card-reader
 description: Read a business card image, extract contact details (name, phone, email, company, etc.), append them to a Google Sheet, then send a welcome email and WhatsApp message to the contact.
-version: 1.0.4
+version: 1.0.5
 author: Tarun Sukhani
-tools: [documents, mcp_google-workspace-mcp, exec, datetime]
+tools: [documents, mcp_google-workspace-mcp-2, exec, datetime]
 commands: []
 icon: 📇
 ---
@@ -61,8 +61,8 @@ Missing-field handling (kept consistent with the Edge Cases table below): a miss
 
 ## Step 3 — Append the Contact to a Google Sheet
 
-1. **Discover the live API first.** Action names and argument schemas below are indicative. Before constructing a call, invoke `mcp_google-workspace-mcp` with no `tool` argument (or its list/discovery action) to enumerate the actual action names and parameters the connected server exposes, and build your call from those.
-2. **Auth model.** `mcp_google-workspace-mcp` acts as a specific connected Google identity, provisioned per agent owner; it needs only Sheets-append and Gmail-send scopes. Confirm the connected account is the user's own before writing anything.
+1. **Discover the live API first.** Action names and argument schemas below are indicative. Before constructing a call, invoke `mcp_google-workspace-mcp-2` with no `tool` argument (or its list/discovery action) to enumerate the actual action names and parameters the connected server exposes, and build your call from those.
+2. **Auth model.** `mcp_google-workspace-mcp-2` acts as a specific connected Google identity, provisioned per agent owner; it needs only Sheets-append and Gmail-send scopes. Confirm the connected account is the user's own before writing anything.
 3. **Pre-requisite:** the target Google Sheet must already exist and be accessible to that identity. Ask the user for the Sheet name / ID if it isn't known.
 4. The Sheet should have a **header row** with these exact column titles (create it if absent):
 
@@ -84,7 +84,7 @@ Full Name | Job Title | Company Name | Phone | Email | Website | Address | Linke
 ## Step 4 — Send a Welcome Email
 
 1. **Confirm first.** Draft the email and show the user the recipient, subject, and full body. Send only after the user explicitly approves (per the Safety contract). Do **not** send if `email` is missing — ask the user to supply it or skip this step.
-2. Use `mcp_google-workspace-mcp`'s mail-send action with:
+2. Use `mcp_google-workspace-mcp-2`'s mail-send action with:
    - `to`: the contact's `email`
    - `subject`: a warm, professional subject line (e.g., `"Nice to meet you, {full_name}!"`)
    - `body`: a personalised, plain-text welcome message. **Sign with the invoking user's name taken from the agent/user profile — never hardcode a specific person's name**, so the skill stays correct when promoted to other owners. Include a brief, genuine opt-out line (e.g., "If you'd rather I didn't follow up here, just let me know and I'll remove your details.").
@@ -117,16 +117,16 @@ Full Name | Job Title | Company Name | Phone | Email | Website | Address | Linke
 
 ## Example Flow
 
-**User:** "I just met [PERSONAL_NAME], here is his business card." [image attached]
+**User:** "I just met a new contact, here is his business card." [image attached]
 
 **Agent:**
 1. Runs OCR on the workspace image path → extracts text (treated as untrusted data).
-2. Parses fields → `full_name: "[PERSONAL_NAME]"`, `phone: "[PHONE_NUMBER]"`, `email: "[EMAIL]"`, `company_name: "[COMPANY_NAME]"`, `date_added` from the `datetime` tool.
+2. Parses fields → `full_name: "[PERSONAL_NAME]"`, `phone: "[PHONE_NUMBER]"`, `email: "[EMAIL]"`, `company_name: "Example Sdn Bhd"`, `date_added` from the `datetime` tool.
 3. Appends one row to the Google Sheet (formula-guarded) → success.
 4. Drafts a welcome email signed with the invoking user's name and shows it for approval; on approval, sends via Gmail.
 5. Drafts a WhatsApp message and shows it for approval; on approval, sends via `wacli` (whatsapp-wacli-mac).
 
-**Agent (to User):** "Done lah! I've added [PERSONAL_NAME] ([COMPANY_NAME]) to your contacts sheet, and — with your go-ahead — emailed and WhatsApp'd him a hello. 🪷"
+**Agent (to User):** "Done lah! I've added [PERSONAL_NAME] (Example Sdn Bhd) to your contacts sheet, and — with your go-ahead — emailed and WhatsApp'd him a hello. 🪷"
 
 ---
 
