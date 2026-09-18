@@ -1,9 +1,9 @@
 ---
 name: business-card-reader
 description: Read a business card image, extract contact details (name, phone, email, company, etc.), append them to a Google Sheet, then send a welcome email and WhatsApp message to the contact.
-version: 1.0.5
+version: 1.0.6
 author: Tarun Sukhani
-tools: [documents, mcp_google-workspace-mcp-2, exec, datetime]
+tools: [documents, exec, datetime]
 commands: []
 icon: 📇
 ---
@@ -12,6 +12,8 @@ icon: 📇
 OCR a business card, parse the contact, append it to a Google Sheet, and (after explicit user approval) send a welcome email and WhatsApp message.
 
 > **Prerequisite:** WhatsApp sending uses the `wacli` binary contributed by the **whatsapp-wacli-mac** skill. This skill ships no binaries of its own (`commands: []`); it calls `wacli` through `exec`, which only works once whatsapp-wacli-mac is installed on this agent (that install adds `wacli` to the shell allowlist). If it isn't installed, skip Step 5 and tell the user.
+>
+> **Prerequisite:** Steps 3 and 4 need a connected MCP server that reaches Google Sheets and Gmail. Its name is chosen by whoever connected it, so this skill never names one — it is deliberately absent from `tools:`, where an unknown name would hide the whole skill from the agent rather than just this step. Find it at run time (Step 0).
 
 ## Safety contract (read this first)
 
@@ -21,6 +23,18 @@ This skill ingests a stranger's personal data and contacts them. Honour every ru
 - **No outreach without explicit human approval.** Before sending the email (Step 4) or WhatsApp (Step 5), show the user the exact drafted recipient, subject, and body, and wait for a clear go-ahead. There is no "auto-send"; a contact being successfully parsed is not consent to message them.
 - **Spreadsheet formula injection.** When writing any value to the Sheet, if the value begins with `=`, `+`, `-`, or `@`, prefix it with a single apostrophe (`'`) so Google Sheets stores it as literal text rather than evaluating it as a formula.
 - **Consent, minimisation, retention.** You are storing a third party's personal data and reaching out unsolicited. Confirm with the user that they have a lawful basis to do so before the first write/send, capture only the fields the user actually needs, and remind the user the data lives in *their* Sheet and is *their* responsibility to retain or delete.
+
+---
+
+## Step 0 — Find the Google Workspace Server
+
+Do this before touching the image. If there is nowhere to put the contact, there is no reason to process a stranger's personal data at all.
+
+1. Look through your own tool catalogue for MCP server handles — every one takes the form `mcp_<server>`. The server you need may be called `google-workspace`, `workspace-mcp`, `gws` or anything else; judge it by what it does, never by its name.
+2. Call each plausible candidate as `mcp_<server>` with no arguments to enumerate its actions and their input schemas.
+3. Choose the server whose actions cover **both** appending to a Google Sheet **and** sending Gmail. Use that handle for Steps 3 and 4, and build every call from the schemas you just enumerated.
+4. If two servers qualify, ask the user which Google account to use rather than choosing for them.
+5. If none qualifies, **stop here.** Tell the user the skill needs a Google Workspace MCP server connected, and name which of the two capabilities you could not find. Do not run the OCR.
 
 ---
 
@@ -61,8 +75,8 @@ Missing-field handling (kept consistent with the Edge Cases table below): a miss
 
 ## Step 3 — Append the Contact to a Google Sheet
 
-1. **Discover the live API first.** Action names and argument schemas below are indicative. Before constructing a call, invoke `mcp_google-workspace-mcp-2` with no `tool` argument (or its list/discovery action) to enumerate the actual action names and parameters the connected server exposes, and build your call from those.
-2. **Auth model.** `mcp_google-workspace-mcp-2` acts as a specific connected Google identity, provisioned per agent owner; it needs only Sheets-append and Gmail-send scopes. Confirm the connected account is the user's own before writing anything.
+1. **Use the server you found in Step 0**, and the action names and schemas you enumerated there. The ones described below are indicative only — build the call from the live enumeration, never from this page.
+2. **Auth model.** That server acts as a specific connected Google identity, provisioned per agent owner; it needs only Sheets-append and Gmail-send scopes. Confirm the connected account is the user's own before writing anything.
 3. **Pre-requisite:** the target Google Sheet must already exist and be accessible to that identity. Ask the user for the Sheet name / ID if it isn't known.
 4. The Sheet should have a **header row** with these exact column titles (create it if absent):
 
@@ -84,7 +98,7 @@ Full Name | Job Title | Company Name | Phone | Email | Website | Address | Linke
 ## Step 4 — Send a Welcome Email
 
 1. **Confirm first.** Draft the email and show the user the recipient, subject, and full body. Send only after the user explicitly approves (per the Safety contract). Do **not** send if `email` is missing — ask the user to supply it or skip this step.
-2. Use `mcp_google-workspace-mcp-2`'s mail-send action with:
+2. Use the Step 0 server's mail-send action with:
    - `to`: the contact's `email`
    - `subject`: a warm, professional subject line (e.g., `"Nice to meet you, {full_name}!"`)
    - `body`: a personalised, plain-text welcome message. **Sign with the invoking user's name taken from the agent/user profile — never hardcode a specific person's name**, so the skill stays correct when promoted to other owners. Include a brief, genuine opt-out line (e.g., "If you'd rather I didn't follow up here, just let me know and I'll remove your details.").
@@ -105,6 +119,7 @@ Full Name | Job Title | Company Name | Phone | Email | Website | Address | Linke
 
 | Situation                                          | Action                                                                                          |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| No connected MCP server covers both Sheets and Gmail | Stop before the OCR; say which capability was missing. (See Step 0.)                           |
 | OCR returns empty / garbled text                   | Ask the user to re-upload a clearer photo — do **not** guess. (See Step 1 for OCR-disabled / engine-missing cases.) |
 | Multiple phone numbers / emails found              | Pick the most likely one (mobile over landline, personal over generic) and ask the user to confirm. |
 | Missing email or phone                             | Append the row anyway with the field blank; ask the user before the matching outreach step.     |
