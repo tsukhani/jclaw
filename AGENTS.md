@@ -63,7 +63,10 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - `graphify update .` re-clusters and can dissolve curated communities; recover from the dated backup in `graphify-out/<date>/` and delete `.graphify_labels.json.sig`.
 - JCLAW acceptance criteria forward-reference helpers and tickets that were never built: verify before designing around them.
 - `memory.jpa.vector.queryPrefix` and `memory.recall.minCosine` move together. A CSP, if enabled, must allow `'unsafe-inline'` for `script-src`; Nuxt inlines `window.__NUXT__`. The scrape ladder never escalates a `POLICY_BLOCK`. A task without a pinned model follows its agent's current model.
-- Personal Edition: `findById` without owner scoping is not IDOR. `/api/providers`, `/api/mcp-servers`, the config reads and the channel list are agent-reachable on purpose — remediate there at the seam (SsrfGuard, masking, the dangerous-verb gate), never by blocking the endpoint. The exception is whatever reaches past an agent's own grants, which refuses the agent principal via `RequestPrincipal.isAgentOriginated`: config writes (JCLAW-1022), tool grants, skill shell allowlists and `acpAllowed` (JCLAW-1023), any agent's workspace files (JCLAW-1058) and standing approvals (JCLAW-1062). Give an agent a narrow tool argument rather than reopening one of those. Installer paths (Playwright Chromium, `uv run`, the JRE download) were audited and accepted 2026-08-28.
+- Personal Edition has two trust axes. **The agent principal:** `findById` without owner scoping is not IDOR. `/api/providers`, `/api/mcp-servers`, the config reads and the channel list are agent-reachable on purpose — remediate there at the seam (SsrfGuard, masking, the dangerous-verb gate), never by blocking the endpoint. The exception is whatever reaches past an agent's own grants, which refuses the agent principal via `RequestPrincipal.isAgentOriginated`: config writes (JCLAW-1022), tool grants, skill shell allowlists and `acpAllowed` (JCLAW-1023), any agent's workspace files including the binary serve route (JCLAW-1058, JCLAW-1227), standing approvals (JCLAW-1062), and the writes that decide what an agent can be granted later — WhatsApp binding CRUD, the custom ACP-harness commands a `runtime=acp` spawn executes, and the four global-skill-registry writes (JCLAW-1227). Since JCLAW-1253 that list is enforced rather than remembered: every mutating route declares a stance (see Capabilities) and `JClawApiToolTest.theCallableApiSurfaceIsExactlyTheseRoutes` pins what an agent can still invoke, so widening the surface is a visible diff in two places. Give an agent a narrow tool argument rather than reopening one of those — the printer tool is the worked example (JCLAW-1229): `host`/`port` stay open and `services.printing.PrintTargetGuard` classifies the destination instead, refusing link-local, multicast and `0.0.0.0` outright and making `PrinterTool.dangerous(args)` true for a well-formed address matching neither a discovered printer nor the saved default, which is exempt because a human chose it once in Settings. The `jclaw_api` deny layers gate `HttpUrl.encodedPath()`, never the model's string: OkHttp resolves dot-segments while parsing, so `/api/skills/x/files/../../../logs` checked raw passed both layers and left as `/api/logs`, defeating `PATH_BLOCKLIST` through any wildcard route (JCLAW-1227) — parse first, then gate, because `%2e%2e` and a backslash normalise the same way and a `#` truncates. A workspace file is served `attachment` with `Content-Security-Policy: sandbox` unless it is a raster image, audio or PDF; the app declares no global CSP, so that response carries its own. Installer paths (Playwright Chromium, `uv run`, the JRE download) were audited and accepted 2026-08-28.
+- **The channel sender** is the other axis, and the two are independent: an inbound turn is owner-initiated only when the channel proved it — `TelegramAccessPolicy` (DM owner-only) and `SlackAccessPolicy` once an `ownerUserId` is configured, nowhere else. A group member who @mentioned the bot, every WhatsApp sender and every user of an owner-less Slack binding are guests. `DangerousActionGate.withOwnerInitiated` binds that answer at the three ingress sites and `ownerInitiated()` reads it back; unbound means guest, which is the safe polarity. Three things consume it beyond the dangerous-action prompt. A standing tool-approval grant is the operator's own approval, so it is spendable only on an owner-initiated turn or one whose effective origin classifies as `OPERATOR` — the grant key is `(agentId, toolName)` with no channel in it, so before JCLAW-1226 an "Always" tap in the owner's DM also covered a group guest's turn on the same agent. `Commands.execute`'s `ownerInitiated` overload refuses `/subagent`, `/prompt` and the `/model` write forms for a guest turn — those reach every subagent run on the instance, the operator's prompt library and the conversation's model override; the read forms and every lifecycle command stay open, and web chat passes `true` explicitly because it sits behind `AuthCheck` (JCLAW-1228). And `TelegramReactionNotifier.reactorAllowed` drops a private-chat reaction whose `reactorId` is not the binding owner: under the default `own` notify policy a DM reaction is admitted unconditionally and a DM peer id resolves to the owner's own conversation, so a stranger's reaction would otherwise run a turn over the owner's history and send the reply to the stranger. Group and supergroup reactions keep the `shouldNotifyReaction` policy — their peer id is the shared chat, not the owner's DM. Reaction event text is labelled `[reaction]`, never `[system]`: the reactor chooses their own display name, and the old prefix lent attacker-supplied text the authority of a system line. Two consequences before filing a bug against them — a Slack binding with no `ownerUserId` refuses those commands for everyone, the operator included, so configure the owner; and `/subagent info|log|kill` is deliberately not scoped to the calling agent's own runs, because one operator owns every agent here.
+- `DangerousActionGate.hasStandingGrant` is an OR over a never-pruned static set and the `tool_approval_grant` table, so deleting the row alone can only fail open: every revoke path pairs `ToolApprovalGrant.revoke` with `DangerousActionGate.revokeGrant` (the endpoint) or `revokeGrantsForAgent` (the delete cascade, where the rows go by `ON DELETE CASCADE`). The row records the granting channel and peer as provenance only; the gate never reads them (JCLAW-1226).
+- A model-chosen network destination is screened with `SsrfGuard.isBlockedForProvider`, not `isUnsafe`: the strict guard blocks loopback and RFC-1918, which is where self-hosted inference and every LAN printer live. A per-attempt failure string returned to the model must not carry the transport exception — "refused" versus "timed out" is a port scan — so `PrintDispatcher` emits a fixed phrase per protocol and keeps the detail on `EventLogger.warn` (JCLAW-1229).
 
 <!-- /bmad:context -->
 
@@ -299,6 +302,8 @@ All HTTP-client provisioning lives in `app/utils/HttpFactories.java` — a singl
 
 Because call sites reach the transport through those factory methods, it is substitutable in one place: `HttpFactories.runWith(client, body)` — and its value-returning twin `callWith` — binds a `ScopedValue` that all six accessors (the three tiers plus their SSRF-guarded variants) honour for the dynamic extent of `body`, so a test installs a canned-response OkHttp interceptor instead of standing up a mock server on a port. Nothing binds it in production, and a `ScopedValue` does not follow an unrelated thread, so one test class cannot leak a transport into another that play1 is running concurrently — but for that same reason the binding does not reach Play's own request threads, and a `FunctionalTest` driving a controller still needs a per-collaborator seam such as `WhatsAppCloudApiProbe.installForTest`. The seam also stops at the accessor: nine sites derive a tuned client from `general().newBuilder()`, most of them into a static field at class-init (the rendered and impersonated fetchers, the Telegram/Slack/WhatsApp file downloaders through `StagedDownload`, the Slack uploader, the image-sidecar progress client) or at construction (the sidecar clients through `SidecarHttpClient`), and a binding made later cannot reach a reference captured that early.
 
+**Which tier a call site picks.** The plain `llmStreaming()` / `llmSingleShot()` / `general()` clients carry no DNS screen; the `*Guarded()` twins wire `SsrfGuard.PROVIDER_SAFE_DNS`, which refuses link-local (the cloud-metadata address), multicast and `0.0.0.0` while permitting loopback and RFC-1918 — where self-hosted inference lives. Any client dialling a URL an operator or an agent can change reaches for the guarded twin, including the chat path: `OkHttpLlmHttpDriver`'s three sites moved there in JCLAW-1229, because a provider `baseUrl` screened once at discovery says nothing about where the host resolves on the next turn. The guarded clients are `newBuilder()`-derived from the plain ones, so pool, dispatcher, timeouts and the `LlmCallEventListener` are identical, and `HttpFactories.runWith` rebinds all six accessors — a test installing a canned transport is unaffected by the choice. `ConfigService.setWithSideEffects` runs `SsrfGuard.assertProviderUrlSafe` on any `provider.*.baseUrl` write, so the refusal is a 403 at the save rather than an opaque DNS error mid-turn; there is no dedicated provider-write action, `POST /api/config` is the write path, which is why the assert lives at the validation seam.
+
 ### Wall clock — AppClock
 
 Every wall-clock read in `app/` goes through **`utils.AppClock`** (JCLAW-1150). `AppClock.now()`
@@ -319,6 +324,15 @@ Code under test that crosses one of those boundaries must read the clock before 
 inside the task. `WallClockDisciplineTest.theBindingDoesNotCrossAVirtualThreadExecutor` pins that
 behaviour so the boundary is a tested fact rather than a comment. The same boundary governs
 `HttpFactories.runWith` above and any future `ScopedValue` seam.
+
+`InheritableThreadLocal` has the *opposite* boundary, and that asymmetry has bitten once.
+`DangerousActionGate`'s `OWNER_INITIATED` and the task-fire origin are the only two in `app/`, and
+both are deliberately inheritable so a subagent fork inherits the turn's trust as a floor. But
+`Thread.ofVirtual()` inherits them by default, so a fork that starts work for a *different* sender
+must opt out: `QueueDrainOrchestrator.startDrainThread` builds the `agent-drain` thread with
+`inheritInheritableThreadLocals(false)`, because a guest message queued behind an owner's turn
+would otherwise be drained carrying the owner's identity (JCLAW-1226). A new fork that crosses a
+sender boundary needs the same flag.
 
 **The gate.** `test/WallClockDisciplineTest` is an ArchUnit rule banning `Instant.now()`,
 `LocalDate.now()`, `LocalDateTime.now()`, `OffsetDateTime.now()`, `ZonedDateTime.now()` and
@@ -579,7 +593,7 @@ needs a check that Error Prone accepts `@MustBeClosed` on a method implemented t
 Java 25 cannot express a capability in a signature, and JEP 486 removed the
 SecurityManager, so nothing confines one at runtime either — which class may spawn a
 process or reach the database is invisible to both javac and the JVM. `ArchUnit`
-stands in for that at test time: `test/CapabilityRulesTest.java` holds four
+stands in for that at test time: `test/CapabilityRulesTest.java` holds five
 allowlists, one per authority the codebase actually exercises, and a class that picks
 up an authority it was never granted fails `play autotest` with a `because` clause
 naming the capability.
@@ -590,6 +604,7 @@ naming the capability.
 | Resolve a model-controlled path | `tools.FsPaths` → `utils.WorkspacePathGuard`; the sites under `tools..` predating that seam are listed in `archunit_store/filesystem-tool-paths` |
 | Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..` and `services.LocalSidecarDaemon` |
 | Reach the database | Everything except the subsystems `jobs.ShutdownJob` stops — teardown that needs a connection has no useful recovery when it cannot get one (JCLAW-1143) |
+| Mutate state as the agent principal | Every POST/PUT/PATCH/DELETE route in `conf/routes` declares a stance: `@ChatHidden`, a `RequestPrincipal.isAgentOriginated` guard, or `@AgentCallable` (JCLAW-1253) |
 
 Shell and filesystem carry pre-existing holders, so they run as `FreezingArchRule`s
 and the checked-in store under `archunit_store/` *is* the allowlist: a listed site
@@ -606,6 +621,29 @@ The filesystem authority is deliberately the narrow one: it covers paths resolve
 tool arguments, since those are the only ones an operator does not control.
 Application-internal file access — config, caches, sidecar working directories — is not
 this capability and is not gated.
+
+The agent-principal capability is the one rule that reads `conf/routes`. ArchUnit imports
+bytecode and cannot see the routes file, so `everyMutatingRouteDeclaresAnAgentPrincipalStance`
+parses it the way `WebhookControllerTest.webhookRoutes` does and checks the action each mutating
+route binds to. It is not frozen — all 134 mutating routes were adjudicated in JCLAW-1253, so the
+rule lands green and a new route with no stance fails immediately. The floor is on the route count
+rather than on matched files, because a routes file that stopped parsing would otherwise
+adjudicate nothing and pass. Reads are out of scope: a GET that leaks is a masking problem at the
+seam.
+
+The three stances are not interchangeable. `@ChatHidden` removes the action from `jclaw_api`'s
+discover and call surface. A `requireOperator`-style guard refuses the agent principal
+server-side, so it also holds against a leaked internal bearer token — the two are complementary
+and the strongest routes carry both. `@AgentCallable` changes nothing at runtime: it records that
+leaving the route open was a decision, and its mandatory reason names what bounds it instead (a
+scoped tool, `DangerousActionGate`, `SsrfGuard`, `LoadtestAuthCheck`), so an empty reason is worse
+than no annotation. The rule matches a guard by the check it *reaches* —
+`RequestPrincipal.isAgentOriginated`, up to two hops through helpers on the same controller — not
+by the helper being named `requireOperator`, so renaming one is safe and a `requireOperator` that
+checks nothing does not pass. `JClawApiTool.PATH_BLOCKLIST` is deliberately not a fourth stance:
+it is a path-prefix deny-floor in the tool layer, and accepting it would have left 34 actions —
+the whole of auth, chat, bindings, the webhooks — with nothing at the action saying why they are
+closed, which is the invisibility the rule exists to remove.
 
 ### Process sandboxing
 
