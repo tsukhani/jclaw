@@ -489,4 +489,139 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
 
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/config")));
     }
+
+    // --- JCLAW-1227: the routes the hand-maintained allowlist had missed ---
+
+    @Test
+    void agentPrincipalCannotServeAnotherAgentsWorkspaceFile() {
+        // The seventh workspace route. Its siblings all carry the guard; this one served bytes
+        // from any agent's workspace, so the JCLAW-1058 boundary had a hole beside its own gate.
+        var victim = createAgent("operator-only-serve-file");
+
+        var resp = asAgent(() -> GET(agentRequest(), "/api/agents/" + victim + "/files/AGENT.md"));
+
+        assertStatus(403, resp);
+        assertTrue(getContent(resp).contains("operator_only"),
+                "expected the operator_only error code; got: " + getContent(resp));
+    }
+
+    /** CONTROL — passes with the guard reverted; the operator's file viewer must keep working,
+     *  and the response must carry the headers that stop an agent-authored file executing. */
+    @Test
+    void operatorStillServesAWorkspaceFileWithTheSandboxHeaders() {
+        login();
+        var id = createAgent("operator-only-serve-file-operator");
+        assertIsOk(PUT("/api/agents/" + id + "/workspace/AGENT.md",
+                "application/json", "{\"content\":\"<script>alert(1)</script>\"}"));
+
+        var resp = GET("/api/agents/" + id + "/files/AGENT.md");
+
+        assertIsOk(resp);
+        assertEquals("sandbox", resp.headers.get("Content-Security-Policy").value());
+        assertTrue(resp.headers.get("Content-Disposition").value().startsWith("attachment"),
+                "a workspace file outside images/audio/PDF must download, not render: "
+                        + resp.headers.get("Content-Disposition").value());
+    }
+
+    // --- WhatsApp bindings: PATH_BLOCKLIST names telegram and slack only ---
+
+    private static final String WHATSAPP_BINDINGS = "/api/channels/whatsapp/bindings";
+
+    @Test
+    void agentPrincipalCannotWriteAWhatsAppBinding() {
+        // A binding decides which agent a WhatsApp presence answers as, and carries the Cloud
+        // API credentials — the same reason the telegram and slack paths are deny-floored.
+        var id = createAgent("operator-only-whatsapp");
+
+        var create = asAgent(() -> POST(agentRequest(), WHATSAPP_BINDINGS, "application/json",
+                "{\"agentId\":" + id + ",\"transport\":\"WHATSAPP_WEB\"}"));
+        assertStatus(403, create);
+        assertTrue(getContent(create).contains("operator_only"),
+                "expected the operator_only error code; got: " + getContent(create));
+
+        assertStatus(403, asAgent(() -> PUT(agentRequest(), WHATSAPP_BINDINGS + "/999999",
+                "application/json", "{\"enabled\":true}")));
+        assertStatus(403, asAgent(() -> DELETE(agentRequest(), WHATSAPP_BINDINGS + "/999999")));
+    }
+
+    /** CONTROL — passes with the guard reverted; the operator reaches the body validation
+     *  (400 for a missing agentId) instead of being refused at the principal check. */
+    @Test
+    void operatorStillReachesTheWhatsAppBindingCreate() {
+        login();
+
+        var resp = POST(WHATSAPP_BINDINGS, "application/json", "{\"transport\":\"WHATSAPP_WEB\"}");
+
+        assertStatus(400, resp);
+    }
+
+    /** CONTROL — the binding list is a channel read, which the Personal Edition posture keeps
+     *  open to an agent; only the writes moved. */
+    @Test
+    void agentPrincipalCanStillListWhatsAppBindings() {
+        var token = AuthFixture.seedBearerToken();
+
+        assertIsOk(asAgent(() -> GET(requestWithToken(token), WHATSAPP_BINDINGS)));
+    }
+
+    // --- ACP harness commands: what a runtime=acp spawn executes ---
+
+    private static final String ACP_HARNESSES = "/api/subagents/acp-harnesses";
+
+    @Test
+    void agentPrincipalCannotAddOrRemoveAnAcpHarnessCommand() {
+        // The stored command is executed verbatim by a runtime=acp spawn, and it is written
+        // under a config key the JCLAW-1022 guard only covered on POST /api/config.
+        var add = asAgent(() -> POST(agentRequest(), ACP_HARNESSES, "application/json",
+                "{\"command\":\"/bin/sh -c\"}"));
+
+        assertStatus(403, add);
+        assertTrue(getContent(add).contains("operator_only"),
+                "expected the operator_only error code; got: " + getContent(add));
+        // No assertion on the stored list: subagent.acp.customCommands is one shared row and
+        // ApiAcpHarnessControllerTest writes it, so reading it here would race that class.
+
+        assertStatus(403, asAgent(() -> DELETE(agentRequest(), ACP_HARNESSES + "?command=x")));
+    }
+
+    /** CONTROL — passes with the guard reverted; the operator reaches the probe, which reports
+     *  the command unavailable rather than refusing the principal. */
+    @Test
+    void operatorStillReachesTheAcpHarnessProbe() {
+        login();
+
+        var resp = POST(ACP_HARNESSES, "application/json",
+                "{\"command\":\"jclaw-no-such-harness-binary\"}");
+
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"available\":false"), getContent(resp));
+    }
+
+    // --- The four global-registry skill writes ---
+
+    @Test
+    void agentPrincipalCannotChangeTheGlobalSkillRegistry() {
+        // The registry is what copyToAgent installs from, so writing it is the same
+        // shell-allowlist escalation the install guard already refuses, one hop earlier.
+        var promote = asAgent(() -> POST(agentRequest(), "/api/skills/promote", "application/json",
+                "{\"agentId\":1,\"skillName\":\"" + MISSING_SKILL + "\"}"));
+        assertStatus(403, promote);
+        assertTrue(getContent(promote).contains("operator_only"),
+                "expected the operator_only error code; got: " + getContent(promote));
+
+        assertStatus(403, asAgent(() -> POST(agentRequest(), "/api/skills/catalog/import",
+                "application/json", "{\"source\":\"owner/repo\",\"skillId\":\"" + MISSING_SKILL + "\"}")));
+        assertStatus(403, asAgent(() -> PUT(agentRequest(), "/api/skills/" + MISSING_SKILL + "/rename",
+                "application/json", "{\"newName\":\"renamed-by-agent\"}")));
+        assertStatus(403, asAgent(() -> DELETE(agentRequest(), "/api/skills/" + MISSING_SKILL)));
+    }
+
+    /** CONTROL — passes with the guard reverted; the operator reaches the registry lookup
+     *  (404 for a name no skill has) instead of being refused at the principal check. */
+    @Test
+    void operatorStillReachesTheGlobalSkillDelete() {
+        login();
+
+        assertStatus(404, DELETE("/api/skills/" + MISSING_SKILL));
+    }
 }
