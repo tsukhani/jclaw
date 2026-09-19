@@ -446,4 +446,18 @@ class PrintBackendTest extends UnitTest {
         assertFalse(boom.getMessage().contains(String.valueOf(deadPort)),
                 "nor the port it was learned from: " + boom.getMessage());
     }
+
+    @Test
+    void discoveryDoesNotWaitForJmdnsTeardown() {
+        // JmDNS close() costs ~2s regardless of the browse window — measured 2008ms for a
+        // bare create-then-close (JCLAW-1254) — so a blocking close would put this call at
+        // 2s+ however short the timeout. Detached, it tracks the window instead. The bound
+        // is deliberately loose: the gap being guarded is 50ms vs 2000ms.
+        var start = System.nanoTime();
+        PrinterDiscovery.discover(java.time.Duration.ofMillis(50));
+        var elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(elapsedMs < 1_000,
+                () -> "discover() took " + elapsedMs + "ms for a 50ms browse — close() is being "
+                        + "waited on again");
+    }
 }

@@ -2075,6 +2075,27 @@ describe('Settings page — Unmanaged config warning banner', () => {
     expect(component.find('[data-testid="unmanaged-banner-toggle"]').exists()).toBe(false)
     expect(component.text()).not.toContain('unmanaged config')
   })
+
+  // Neither key is seeded, so only an install that has used the panel holds the row.
+  it.each([
+    ['otel.enabled', 'false'],
+    ['tool.approval.offChannelPolicy', 'deny'],
+  ])('treats %s, written by its own Settings panel, as managed', async (key, value) => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
+    registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
+    registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({
+        entries: [...defaultConfigEntries(), { key, value, updatedAt: '2026-09-19T10:00:00Z' }],
+      }),
+    })
+    const component = await mountSettingsSection('timezone')
+
+    expect(component.find('[data-testid="unmanaged-banner-toggle"]').exists()).toBe(false)
+  })
 })
 
 describe('Settings page — Timezone section (app.timezone)', () => {
