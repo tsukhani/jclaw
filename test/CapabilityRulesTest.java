@@ -354,9 +354,17 @@ class CapabilityRulesTest extends UnitTest {
      * {@link ChatHidden} and the {@code requireOperator} helpers — with nothing watching for a
      * route that joined none of them. Default-allow plus silence meant a new endpoint was
      * agent-reachable the moment it was written, and the omission looked exactly like a
-     * decision (JCLAW-1253). So silence is now the failure: an action carries {@link ChatHidden},
-     * reaches a {@link controllers.RequestPrincipal#isAgentOriginated()} guard, or carries
+     * decision (JCLAW-1253). So silence is now the failure: an action reaches a
+     * {@link controllers.RequestPrincipal#isAgentOriginated()} guard, or carries
      * {@link AgentCallable} saying why it is deliberately open.
+     *
+     * <p>{@link ChatHidden} was a third accepted stance until JCLAW-1266 and no longer is. It is
+     * consulted only inside {@code JClawApiTool}, so it hides a route from that tool without
+     * refusing anyone: an agent holding the internal token and any HTTP capability reaches the
+     * route anyway. Thirty-two controllers rested on it alone, among them the database
+     * backup/restore surface whose archive carries the token's own plaintext config row. Those
+     * are recorded in {@code archunit_store/agent-principal-stance} and counted down from there;
+     * a route that joins them now fails the build instead.
      *
      * <p>The guard is matched by what it reaches rather than by being named
      * {@code requireOperator}: every one of those helpers is a one-line wrapper around the same
@@ -388,10 +396,11 @@ class CapabilityRulesTest extends UnitTest {
                 .that().resideInAPackage("controllers")
                 .should(declareAnAgentPrincipalStance(routes))
                 .because("a mutating route is reachable by the agent principal unless something "
-                        + "refuses it, so leaving the stance unstated grants the capability by "
-                        + "accident (JCLAW-1253); @ChatHidden, a RequestPrincipal.isAgentOriginated "
-                        + "guard and @AgentCallable are the three ways to state one");
-        rule.check(APP_CLASSES);
+                        + "refuses it at the request layer, so leaving the stance unstated grants "
+                        + "the capability by accident (JCLAW-1253/1266); a "
+                        + "RequestPrincipal.isAgentOriginated guard and @AgentCallable are the two "
+                        + "ways to state one, and @ChatHidden is not among them");
+        frozen(rule, "agent-principal-stance").check(APP_CLASSES);
     }
 
     /**
@@ -413,14 +422,31 @@ class CapabilityRulesTest extends UnitTest {
         assertTrue(error.getMessage().contains("declares no agent-principal stance"), error.getMessage());
 
         checkStanceOf(new RouteAction("controllers.ApiTasksController", "create"));        // @AgentCallable
-        checkStanceOf(new RouteAction("controllers.ApiMetricsController", "purgeLogs"));   // @ChatHidden
         checkStanceOf(new RouteAction("controllers.ApiAgentsController", "update"));       // guard, two hops
+        checkStanceOf("POST /api/webhooks/telegram/{bindingId}",
+                new RouteAction("controllers.WebhookTelegramController", "webhook"));      // signature-verified
+    }
+
+    /**
+     * {@link ChatHidden} alone no longer satisfies the rule (JCLAW-1266). Driven against a route
+     * that carries it and nothing else, so the day someone re-admits it as a stance this fails
+     * rather than quietly widening the boundary back to the tool layer.
+     */
+    @Test
+    void chatHiddenAloneIsNotAStance() {
+        var toolLayerOnly = new RouteAction("controllers.ApiMetricsController", "purgeLogs");
+        var error = assertThrows(AssertionError.class, () -> checkStanceOf(toolLayerOnly));
+        assertTrue(error.getMessage().contains("@ChatHidden does not count"), error.getMessage());
     }
 
     private static void checkStanceOf(RouteAction action) {
+        checkStanceOf("POST /api/probe", action);
+    }
+
+    private static void checkStanceOf(String route, RouteAction action) {
         classes()
                 .that().resideInAPackage("controllers")
-                .should(declareAnAgentPrincipalStance(Map.of("POST /api/probe", action)))
+                .should(declareAnAgentPrincipalStance(Map.of(route, action)))
                 .check(APP_CLASSES);
     }
 
@@ -462,21 +488,37 @@ class CapabilityRulesTest extends UnitTest {
                 for (var route : routes.entrySet()) {
                     if (!javaClass.getName().equals(route.getValue().controller())) continue;
                     for (JavaMethod method : javaClass.getMethods()) {
-                        if (!method.getName().equals(route.getValue().action()) || declaresStance(method)) continue;
+                        if (!method.getName().equals(route.getValue().action())
+                                || declaresStance(method, route.getKey())) continue;
                         events.add(SimpleConditionEvent.violated(method, route.getKey()
                                 + " -> " + javaClass.getSimpleName() + "." + method.getName()
-                                + " declares no agent-principal stance: add @ChatHidden, an "
-                                + "isAgentOriginated guard, or @AgentCallable with the reason"));
+                                + " declares no agent-principal stance: add an isAgentOriginated "
+                                + "guard, or @AgentCallable with the reason. @ChatHidden does not "
+                                + "count — it hides the route from the tool without refusing it"));
                     }
                 }
             }
         };
     }
 
-    private static boolean declaresStance(JavaMethod method) {
-        return method.isAnnotatedWith(ChatHidden.class)
+    /**
+     * {@link ChatHidden} is deliberately <em>not</em> accepted here (JCLAW-1266). It is read in one
+     * place — {@code JClawApiTool.discover} and {@code isCallable} — so it refuses an agent only
+     * while that tool is the agent's only route to the API, and an agent holding the internal token
+     * and any HTTP capability walks past it. It states what the tool advertises, not who may call.
+     * The two stances that survive are the request-layer refusal and an explicit opt-in.
+     */
+    private static boolean declaresStance(JavaMethod method, String route) {
+        return isUnauthenticatedWebhook(route)
                 || method.isAnnotatedWith(AgentCallable.class)
                 || reachesAgentPrincipalCheck(method);
+    }
+
+    /** The {@code /api/webhooks/} surface has no session to judge a principal against: it bypasses
+     *  AuthCheck by design and verifies its provider's signature instead. Deferred to rather than
+     *  restated, because {@code WebhookControllerTest} already pins that surface route-for-route. */
+    private static boolean isUnauthenticatedWebhook(String route) {
+        return route.contains(" /api/webhooks/");
     }
 
     /** BFS through helpers declared on the same controller — the guard is usually one hop away

@@ -112,6 +112,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
     @ChatHidden("stores a Telegram bot token")
     public static void create() {
+        requireOperator();
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -166,6 +167,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
     @ChatHidden("rewrites a binding's bot token or its target agent")
     public static void update(Long id) {
+        requireOperator();
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();
 
@@ -327,6 +329,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ChatHidden("spends a live getMe against the stored bot token")
     public static void test(Long id) {
+        requireOperator();
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();
         var result = TelegramWebhookRegistrar.probe(binding);
@@ -339,6 +342,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ChatHidden("takes the operator's Telegram channel offline")
     public static void delete(Long id) {
+        requireOperator();
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();
         String agentName = binding.agent != null ? binding.agent.name : null;
@@ -354,4 +358,14 @@ public class ApiTelegramBindingsController extends ApiBindingController {
         TelegramPollingRunner.reconcile();
         ApiResponses.ok();
     }
+
+    /** Refuse the agent principal at the request layer — a binding carries its bot token (JCLAW-1266).
+     *  {@code @ChatHidden} would only hide it from the jclaw_api tool. */
+    private static void requireOperator() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
+                    "This endpoint is operator-only; an agent principal cannot call it. A Telegram binding carries its bot token.");
+        }
+    }
+
 }

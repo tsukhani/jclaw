@@ -43,6 +43,7 @@ public class ApiDatabaseController extends Controller {
     @Operation(summary = "Database size, free space, health verdict, backups and repair remnants")
     @ChatHidden("operator maintenance plumbing -- names files on the host")
     public static void status() {
+        requireOperator();
         DatabaseService.Status status;
         try {
             status = DatabaseService.status();
@@ -57,6 +58,7 @@ public class ApiDatabaseController extends Controller {
     @Operation(summary = "Back up the database now, online, into the backups directory")
     @ChatHidden("writes a copy of the whole database to disk")
     public static void backup() {
+        requireOperator();
         DatabaseService.BackupInfo info;
         try {
             info = DatabaseService.backupNow();
@@ -75,6 +77,7 @@ public class ApiDatabaseController extends Controller {
     @Operation(summary = "Download one backup")
     @ChatHidden("streams the database to the caller")
     public static void download(String id) {
+        requireOperator();
         var path = DatabaseService.resolveBackup(id == null ? "" : id);
         if (path == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_BACKUP);
@@ -86,6 +89,7 @@ public class ApiDatabaseController extends Controller {
     @Operation(summary = "Delete one backup")
     @ChatHidden("deletes a database backup")
     public static void delete(String id) {
+        requireOperator();
         try {
             if (!DatabaseService.deleteBackup(id == null ? "" : id)) {
                 ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_BACKUP);
@@ -105,6 +109,7 @@ public class ApiDatabaseController extends Controller {
      */
     @ChatHidden("replaces the database and restarts the instance -- data loss")
     public static void restore(String id, Upload file) {
+        requireOperator();
         String backupId;
         if (file != null && file.asFile() != null && file.asFile().exists()) {
             try {
@@ -148,6 +153,7 @@ public class ApiDatabaseController extends Controller {
     /** POST /api/system/database/repair — hand off to {@code jclaw.sh repair} and ack 202. */
     @ChatHidden("rebuilds the database and restarts the instance -- rows on unreadable pages are lost")
     public static void repair() {
+        requireOperator();
         RestartService.Plan plan;
         try {
             plan = DatabaseService.requestRepair();
@@ -166,6 +172,7 @@ public class ApiDatabaseController extends Controller {
     @Operation(summary = "Delete the files the last successful repair left behind")
     @ChatHidden("deletes the damaged database file kept aside by a repair")
     public static void clean() {
+        requireOperator();
         H2Maintenance.CleanResult result;
         try {
             result = DatabaseService.clean();
@@ -179,4 +186,14 @@ public class ApiDatabaseController extends Controller {
         }
         renderJSON(GSON.toJson(result));
     }
+
+    /** Refuse the agent principal at the request layer — a backup archive carries the internal token's own plaintext config row (JCLAW-1266).
+     *  {@code @ChatHidden} would only hide it from the jclaw_api tool. */
+    private static void requireOperator() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
+                    "This endpoint is operator-only; an agent principal cannot call it. Database maintenance reaches every table, and a backup archive carries the internal API token's own plaintext config row.");
+        }
+    }
+
 }

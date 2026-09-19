@@ -253,6 +253,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Adjust a memory's importance and/or category")
     @ChatHidden("edits any agent's memory row; the scoped memory tool is the agent path")
     public static void update(Long memoryId) {
+        requireOperator();
         Memory memory = MemoryService.findById(memoryId);
         if (memory == null) {
             notFound();
@@ -308,6 +309,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Generate a memory-recall eval suite from the corpus")
     @ChatHidden("builds an eval suite out of the whole memory corpus")
     public static void evalGenerate() {
+        requireOperator();
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -385,6 +387,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Score a memory-recall eval suite against live recall")
     @ChatHidden("scores recall over every agent's memories and spends embedding calls")
     public static void evalRun() {
+        requireOperator();
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -434,6 +437,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Backfill core promotion and retrieval keys over an existing corpus")
     @ChatHidden("rewrites retrieval keys across the whole corpus")
     public static void backfillKeysStart() {
+        requireOperator();
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -565,6 +569,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Recategorise one agent's core memories past the cap")
     @ChatHidden("rewrites any agent's core memories -- the cross-agent reach /api/memories is floored for")
     public static void coreMigrationStart(Long agentId) {
+        requireOperator();
         requireAgentById(agentId);
         var refusal = CoreMemoryCapMigration.start(String.valueOf(agentId));
         if (refusal != null) {
@@ -603,6 +608,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Start re-embedding stored memories")
     @ChatHidden("re-embeds every stored memory -- bulk model spend")
     public static void reembedStart() {
+        requireOperator();
         var refusal = MemoryReembedService.start();
         if (refusal != null) {
             ApiResponses.error(409, ApiResponses.CONFLICT, refusal);
@@ -618,6 +624,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Delete a memory")
     @ChatHidden("deletes any agent's memory row; the scoped memory tool is the agent path")
     public static void delete(Long memoryId) {
+        requireOperator();
         Memory memory = MemoryService.findById(memoryId);
         if (memory == null) {
             notFound();
@@ -645,6 +652,7 @@ public class ApiMemoryController extends Controller {
     @ChatHidden("destructive bulk memory deletion")
     @Operation(summary = "Bulk-delete memories by ids or by the list filter set")
     public static void bulkDelete() {
+        requireOperator();
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -755,4 +763,14 @@ public class ApiMemoryController extends Controller {
             // ignore an unparseable importance filter
         }
     }
+
+    /** Refuse the agent principal at the request layer — cross-agent personal data; the scoped memory tool is the agent path (JCLAW-1266).
+     *  {@code @ChatHidden} would only hide it from the jclaw_api tool. */
+    private static void requireOperator() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
+                    "This endpoint is operator-only; an agent principal cannot call it. Memories are cross-agent personal data; the scoped memory tool is the agent path.");
+        }
+    }
+
 }

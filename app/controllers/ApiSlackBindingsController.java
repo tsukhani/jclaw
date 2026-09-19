@@ -117,6 +117,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
     @ChatHidden("stores a Slack bot token and signing secret")
     public static void create() {
+        requireOperator();
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -185,6 +186,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
     @ChatHidden("rewrites a binding's Slack credentials or its target agent")
     public static void update(Long id) {
+        requireOperator();
         var binding = SlackBinding.<SlackBinding>findById(id);
         if (binding == null) notFound();
 
@@ -231,6 +233,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SlackWebApi.AuthTestResult.class)))
     @ChatHidden("spends a live auth.test against the stored Slack token")
     public static void test(Long id) {
+        requireOperator();
         var binding = SlackBinding.<SlackBinding>findById(id);
         if (binding == null) notFound();
         var result = SlackWebApi.authTest(binding.botToken);
@@ -248,6 +251,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ChatHidden("takes the operator's Slack channel offline")
     public static void delete(Long id) {
+        requireOperator();
         var binding = SlackBinding.<SlackBinding>findById(id);
         if (binding == null) notFound();
         String agentName = binding.agent != null ? binding.agent.name : null;
@@ -294,6 +298,16 @@ public class ApiSlackBindingsController extends ApiBindingController {
         if (probe.ok()) {
             binding.botUserId = probe.botUserId();
             binding.teamId = probe.teamId();
+        }
+    }
+
+
+    /** Refuse the agent principal at the request layer — a binding carries its bot token and signing secret (JCLAW-1266).
+     *  {@code @ChatHidden} would only hide it from the jclaw_api tool. */
+    private static void requireOperator() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
+                    "This endpoint is operator-only; an agent principal cannot call it. A Slack binding carries its bot token and signing secret.");
         }
     }
 
