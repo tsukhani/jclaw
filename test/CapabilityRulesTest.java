@@ -405,8 +405,11 @@ class CapabilityRulesTest extends UnitTest {
      */
     @Test
     void theStanceRuleFailsAnActionThatDeclaresNothing() {
-        var error = assertThrows(AssertionError.class,
-                () -> checkStanceOf(new RouteAction("controllers.ApiController", "status")));
+        // Built outside the lambda so the only thing that can throw inside it is the
+        // check: a constructor failure would otherwise satisfy assertThrows and pass
+        // this negative case without the rule having run at all.
+        var unstanced = new RouteAction("controllers.ApiController", "status");
+        var error = assertThrows(AssertionError.class, () -> checkStanceOf(unstanced));
         assertTrue(error.getMessage().contains("declares no agent-principal stance"), error.getMessage());
 
         checkStanceOf(new RouteAction("controllers.ApiTasksController", "create"));        // @AgentCallable

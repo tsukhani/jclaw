@@ -61,6 +61,7 @@ public class PrinterTool implements ToolRegistry.Tool {
     private static final String ARG_SIDES = "sides";
     private static final String ARG_COLOR = "color";
     private static final String ARG_MEDIA = "media";
+    private static final String ARG_PROTOCOL = "protocol";
 
     /** Upper bound on a job we will read into memory and push to a printer. */
     private static final long MAX_DOCUMENT_BYTES = 64L * 1024 * 1024;
@@ -137,7 +138,7 @@ public class PrinterTool implements ToolRegistry.Tool {
                         Map.entry("port", prop(SchemaKeys.INTEGER, null,
                                 "Explicit port. Defaults to the protocol's standard port "
                                         + "(631 IPP, 9100 raw, 515 LPD).")),
-                        Map.entry("protocol", prop(SchemaKeys.STRING,
+                        Map.entry(ARG_PROTOCOL, prop(SchemaKeys.STRING,
                                 List.of("IPP", "IPPS", "RAW", "LPD"),
                                 "Force a protocol instead of auto-selecting. Rarely needed.")),
                         Map.entry(ARG_PATH, prop(SchemaKeys.STRING, null,
@@ -326,7 +327,7 @@ public class PrinterTool implements ToolRegistry.Tool {
         // A named protocol switches off the fallback ladder: falling through would
         // dial 631, 9100 and 515 for the one destination that was vetted.
         var outcome = PrintDispatcher.print(target, jobName, agent.name, documentFormat,
-                document, job, saved.options(), PrintProtocol.parse(str(args, "protocol")) != null);
+                document, job, saved.options(), PrintProtocol.parse(str(args, ARG_PROTOCOL)) != null);
         var verdict = new StringBuilder(outcome.verified()
                 ? "Printed via " + outcome.protocol() + " — " + outcome.detail()
                 // Said plainly because the model will otherwise report this as a
@@ -383,7 +384,7 @@ public class PrinterTool implements ToolRegistry.Tool {
      * why a stale address is worse than a slow lookup.
      */
     private static @Nullable DiscoveredPrinter resolveTarget(JsonObject args) {
-        var protocol = PrintProtocol.parse(str(args, "protocol"));
+        var protocol = PrintProtocol.parse(str(args, ARG_PROTOCOL));
         var host = str(args, "host");
         if (host != null) {
             return PrinterDiscovery.direct(host, intOrNull(args, "port"), protocol);
@@ -441,7 +442,7 @@ public class PrinterTool implements ToolRegistry.Tool {
             return PrintTargetGuard.Verdict.ALLOWED;
         }
         var port = PrinterDiscovery.directPort(intOrNull(args, "port"),
-                PrintProtocol.parse(str(args, "protocol")));
+                PrintProtocol.parse(str(args, ARG_PROTOCOL)));
         var saved = PrinterDefaults.load();
         var verdict = PrintTargetGuard.classify(host, port, saved, List.of());
         // The browse is what vets a printer the operator never saved, including one on a

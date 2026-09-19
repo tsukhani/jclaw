@@ -15,7 +15,7 @@ import java.util.Map;
  * as a parameter and the tool browses mDNS for it — only this level can assert what
  * a discovered printer does to the answer without a network.
  */
-public class PrintTargetGuardTest extends UnitTest {
+class PrintTargetGuardTest extends UnitTest {
 
     private static final PrinterDefaults.Defaults NO_DEFAULT = PrinterDefaults.NONE;
 
