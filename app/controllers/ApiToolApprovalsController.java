@@ -1,5 +1,6 @@
 package controllers;
 
+import agents.DangerousActionGate;
 import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.Operation;
 import models.Agent;
@@ -95,6 +96,9 @@ public class ApiToolApprovalsController extends Controller {
             return ToolApprovalGrant.revoke(id, toolName);
         });
         if (!Boolean.TRUE.equals(removed)) notFound();
+        // JCLAW-1226: the gate ORs the row against an in-process cache, so the row
+        // delete alone would leave the grant standing until the JVM restarts.
+        DangerousActionGate.revokeGrant(id, toolName);
         ok();
     }
 

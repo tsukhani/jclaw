@@ -157,7 +157,7 @@ class ApiToolApprovalsControllerTest extends FunctionalTest {
 
     private void seedGrant(Long agentId, String toolName) {
         fetchInFreshTx(() -> {
-            ToolApprovalGrant.upsert(Agent.findById(agentId), toolName);
+            ToolApprovalGrant.upsert(Agent.findById(agentId), toolName, "telegram", "555");
             return null;
         });
     }

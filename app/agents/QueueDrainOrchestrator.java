@@ -88,7 +88,7 @@ public final class QueueDrainOrchestrator {
         var drained = ConversationQueue.drain(conversationId);
         if (drained.isEmpty()) return;
 
-        Thread.ofVirtual().name("agent-drain").start(() -> {
+        startDrainThread(() -> {
             // JCLAW-273: a yield-resume's content is already a persisted announce row,
             // so it must not be re-appended. Dropping it from the combined block leaves
             // a mixed drain appending only the real inputs; when it is the whole drain
@@ -122,5 +122,20 @@ public final class QueueDrainOrchestrator {
                 }
             }
         });
+    }
+
+    /**
+     * Start the thread that re-processes a drained message.
+     *
+     * <p>JCLAW-1226: it is forked from the turn that just finished, but the message it runs
+     * may be a different sender's — so it must <em>not</em> inherit that turn's
+     * {@link DangerousActionGate} trust flags ({@code OWNER_INITIATED}, the fire origin),
+     * which are the only {@code InheritableThreadLocal}s in {@code app/}. Inheriting them let
+     * a guest message queued behind an owner's turn spend the owner's identity at the gate.
+     *
+     * <p>Public as a test seam: this is the fork whose inheritance the regression pins.
+     */
+    public static Thread startDrainThread(Runnable body) {
+        return Thread.ofVirtual().inheritInheritableThreadLocals(false).name("agent-drain").start(body);
     }
 }

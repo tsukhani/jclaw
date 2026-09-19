@@ -53,8 +53,8 @@ import java.util.function.Supplier;
  * used to leave web-initiated turns blocking on a prompt nobody saw. JCLAW-709
  * adds an opt-in {@code ask} that explicitly routes the confirmation to the
  * agent's bound Telegram DM (fail-closed if there is none). A standing grant
- * still proceeds under any policy. Non-dangerous tools never reach the
- * gate — it returns {@link Decision#PROCEED} before any I/O.
+ * still proceeds under any policy, on an operator turn. Non-dangerous tools never
+ * reach the gate — it returns {@link Decision#PROCEED} before any I/O.
  *
  * <p>JCLAW-777 / VULN-001: the permissive {@code allow} default applies only to a
  * <em>trusted operator origin</em> — the web UI ({@link utils.ChannelOriginTrust}).
@@ -85,7 +85,14 @@ import java.util.function.Supplier;
  * {@link ToolApprovalGrant} row, so the grant survives a restart. The
  * pre-prompt check consults <em>both</em> the in-process set and the
  * persisted store, so a durable always-grant keeps suppressing the prompt
- * even after the in-memory set has been emptied (a fresh JVM).
+ * even after the in-memory set has been emptied (a fresh JVM). Because it is
+ * an OR over a cache and a table, deleting the row alone can only fail open:
+ * every revoke path must also call {@link #revokeGrant} (JCLAW-1226).
+ *
+ * <p>JCLAW-1226: a grant is spendable only by the operator — an owner-initiated
+ * turn, or one whose effective origin classifies as {@code OPERATOR}. A guest on
+ * the same agent and tool still takes the origin-trust branch, so an "Always" tap
+ * given in the owner's DM cannot be borrowed by a group peer.
  *
  * <p>The binding lookup walks the agent's parent chain, so a dangerous call
  * made by a sub-agent surfaces the prompt on its root ancestor's bound chat
@@ -262,28 +269,30 @@ public final class DangerousActionGate {
      */
     private static Decision arbitrate(Agent agent, @Nullable Long conversationId,
                                       @Nullable String toolName, @Nullable String argsJson) {
-        // A standing grant (in-process session set or the JCLAW-385 persisted
-        // always-store) is an explicit operator approval for this (agent, tool)
-        // — honor it on ANY channel without prompting.
-        if (hasStandingGrant(agent, toolName)) {
-            EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
-                    "Dangerous tool '%s' pre-approved for this agent; skipping prompt".formatted(toolName));
-            return Decision.PROCEED;
-        }
-
         // JCLAW-423/350: the interactive approve/deny prompt reaches the operator only
         // when THIS turn's effective origin is a channel that has an approval surface
         // (Telegram or Slack) AND has a usable binding. Route the prompt only there;
         // every other channel (web, or no origin at all) has no surface and must NOT
         // silently route to a bound chat — it falls through to the off-channel policy.
         var channelType = effectiveOrigin(conversationId);
+        var ownerInitiated = ownerInitiated();
+
+        // JCLAW-1226: a standing grant is the operator's own approval, so only the operator
+        // may spend it. Honoring it before the origin was resolved meant an "Always" tap in
+        // the owner's DM also covered a group guest's turn on that same (agent, tool).
+        if ((ownerInitiated || ChannelOriginTrust.classify(channelType) == ChannelOriginTrust.Trust.OPERATOR)
+                && hasStandingGrant(agent, toolName)) {
+            EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
+                    "Dangerous tool '%s' pre-approved for this agent; skipping prompt".formatted(toolName));
+            return Decision.PROCEED;
+        }
 
         // JCLAW-1061: the prompt exists to ask "is this really you?". When the channel's own
         // access policy already answered that at the door, asking again is noise — so an
         // owner-initiated turn skips the prompt and resolves as the operator surface, which
         // means an operator who set the policy to ask/deny still gets that. A guest on the
         // very same binding carries false and takes the branch below.
-        if (ownerInitiated()) {
+        if (ownerInitiated) {
             return offChannelDecision(agent, toolName, argsJson, channelType,
                     ChannelOriginTrust.Trust.OPERATOR);
         }
@@ -323,8 +332,10 @@ public final class DangerousActionGate {
      * with no interactive surface AND no authenticated caller. It must never run a
      * dangerous tool ungated, so its floor is fail-closed ({@link Decision#ABORT});
      * the operator can still opt into {@code ask} to route a confirmation to the
-     * bound Telegram DM, and a standing grant has already short-circuited before this
-     * point. JCLAW-1021 puts an <em>unknown</em> origin on that same floor: no
+     * bound Telegram DM. A standing grant does <em>not</em> reach here on an untrusted
+     * origin — JCLAW-1226 makes it spendable by the operator only, so an untrusted turn
+     * on a granted pair lands on this floor. JCLAW-1021 puts an <em>unknown</em> origin
+     * on that same floor: no
      * recorded provenance is a gap, not operator authority. The permissive
      * {@code allow} default applies only to the <em>trusted operator origin</em> (the
      * web UI — see {@link ChannelOriginTrust#classify}), where it preserves the
@@ -398,7 +409,7 @@ public final class DangerousActionGate {
      * the DB, so it runs in its own transaction.
      */
     private static boolean hasStandingGrant(Agent agent, @Nullable String toolName) {
-        return GRANTS.contains(grantKey(agent, toolName))
+        return GRANTS.contains(grantKey(agent.id, toolName))
                 || Tx.run(() -> ToolApprovalGrant.exists(agent.id, toolName));
     }
 
@@ -471,7 +482,7 @@ public final class DangerousActionGate {
                 yield Decision.PROCEED;
             }
             case APPROVED_ALWAYS -> {
-                recordAlwaysGrant(agent, toolName, CHANNEL_NAME, outcome.name());
+                recordAlwaysGrant(agent, toolName, CHANNEL_NAME, chatId, outcome.name());
                 yield Decision.PROCEED;
             }
             case DENIED, TIMED_OUT, EXPIRED -> {
@@ -507,7 +518,7 @@ public final class DangerousActionGate {
                 yield Decision.PROCEED;
             }
             case APPROVED_ALWAYS -> {
-                recordAlwaysGrant(agent, toolName, SLACK_CHANNEL, outcome.name());
+                recordAlwaysGrant(agent, toolName, SLACK_CHANNEL, channelId, outcome.name());
                 yield Decision.PROCEED;
             }
             case DENIED, TIMED_OUT, EXPIRED -> {
@@ -521,7 +532,7 @@ public final class DangerousActionGate {
     /** Record an in-process session grant for {@code (agent, toolName)} and log it. */
     private static void recordSessionGrant(Agent agent, @Nullable String toolName, String channelName,
                                            String outcomeName) {
-        GRANTS.add(grantKey(agent, toolName));
+        GRANTS.add(grantKey(agent.id, toolName));
         EventLogger.info(LOG_CATEGORY, agent.name, channelName,
                 "Dangerous tool '%s' approved (%s) — future calls won't re-prompt"
                         .formatted(toolName, outcomeName));
@@ -532,12 +543,27 @@ public final class DangerousActionGate {
      * a restart. The upsert is idempotent on the unique {@code (agent, tool)} key.
      */
     private static void recordAlwaysGrant(Agent agent, @Nullable String toolName, String channelName,
-                                          String outcomeName) {
-        GRANTS.add(grantKey(agent, toolName));
-        Tx.run(() -> ToolApprovalGrant.upsert(agent, toolName));
+                                          @Nullable String grantingPeer, String outcomeName) {
+        GRANTS.add(grantKey(agent.id, toolName));
+        Tx.run(() -> ToolApprovalGrant.upsert(agent, toolName, channelName, grantingPeer));
         EventLogger.info(LOG_CATEGORY, agent.name, channelName,
                 "Dangerous tool '%s' approved (%s) — future calls won't re-prompt (persisted)"
                         .formatted(toolName, outcomeName));
+    }
+
+    /**
+     * JCLAW-1226: drop the in-process grant for {@code (agentId, toolName)}. Callers that
+     * delete the {@link ToolApprovalGrant} row must call this too: {@link #hasStandingGrant}
+     * is an OR over this never-pruned set and the live table, so a row delete on its own
+     * leaves the grant standing until the JVM restarts.
+     */
+    public static void revokeGrant(Long agentId, @Nullable String toolName) {
+        GRANTS.remove(grantKey(agentId, toolName));
+    }
+
+    /** JCLAW-1226: the {@link #revokeGrant} sweep for a whole agent, for the delete cascade. */
+    public static void revokeGrantsForAgent(Long agentId) {
+        GRANTS.removeIf(key -> key.startsWith(agentId + ":"));
     }
 
     /**
@@ -606,8 +632,9 @@ public final class DangerousActionGate {
         return null;
     }
 
-    private static String grantKey(Agent agent, @Nullable String toolName) {
-        return agent.id + ":" + toolName;
+    /** The {@link #GRANTS} key. {@link #revokeGrantsForAgent} prefix-matches on {@code agentId + ":"}. */
+    private static String grantKey(Long agentId, @Nullable String toolName) {
+        return agentId + ":" + toolName;
     }
 
     private static Duration timeout() {
