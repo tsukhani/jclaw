@@ -165,8 +165,9 @@ public final class CompressionPipeline {
             CompressionMetrics.recordInflationGuard(settings.agentId(), settings.channel(), modelId, type.name(), before, after);
             return msg;
         }
-        Logger.debug("[compress] %s/%s %d->%d tokens (-%d)",
-                type, result.algorithm(), before, after, before - after);
+        Logger.debug("[compress] %s/%s%s %d->%d tokens (-%d)",
+                type, result.algorithm(), result.degraded() ? " (degraded)" : "",
+                before, after, before - after);
         CompressionMetrics.recordCompression(settings.agentId(), settings.channel(), modelId, type.name(), result.algorithm(), before, after);
         return candidate;
     }
