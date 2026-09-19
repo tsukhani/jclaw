@@ -6,7 +6,6 @@ import utils.SsrfGuard;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Whether a print destination the <em>model</em> named may be dialled (JCLAW-1229).
@@ -41,34 +40,26 @@ public final class PrintTargetGuard {
         UNVETTED
     }
 
-    /**
-     * The ports a print backend speaks on. A destination on any other port is not a
-     * printer, whatever else it is — which is the half of the port-scan surface that
-     * no approval prompt should have to adjudicate.
-     */
-    private static final Set<Integer> PRINT_PORTS = Set.of(
-            PrintProtocol.IPP.defaultPort(),
-            PrintProtocol.RAW.defaultPort(),
-            PrintProtocol.LPD.defaultPort());
-
     private PrintTargetGuard() {}
-
-    /** Is {@code port} one a print backend speaks on? */
-    public static boolean isPrintPort(int port) {
-        return PRINT_PORTS.contains(port);
-    }
 
     /**
      * Classify {@code host:port}.
+     *
+     * <p>The port is not screened against the well-known print ports. A printer may
+     * legitimately advertise on any port, and both ALLOWED paths below already require
+     * that a human saved the destination or that it announced itself over mDNS — either
+     * of which chose the port too. Screening it again only cost an approval prompt for
+     * a printer that was in fact vetted; a port nobody chose still falls through to
+     * {@link Verdict#UNVETTED} on its own.
      *
      * @param port       the port the tool would actually dial, not the raw argument —
      *                   see {@link PrinterDiscovery#directPort}, which is how the two
      *                   are kept identical. Vetting one port and dialling another
      *                   would make this guard decorative
      * @param discovered printers from an mDNS browse, or empty to answer from the
-     *                   saved default alone. Passed in rather than browsed here so
-     *                   the caller decides when a two-second browse is worth paying
-     *                   for; an empty list can only widen the answer to UNVETTED
+     *                   saved default alone. Browsed by the caller rather than here so
+     *                   the two-second cost is paid only once the cheap pass has already
+     *                   said UNVETTED; an empty list can only widen the answer to UNVETTED
      */
     public static Verdict classify(@Nullable String host, int port,
                                    PrinterDefaults.Defaults saved,
@@ -78,9 +69,6 @@ public final class PrintTargetGuard {
         }
         if (isForbiddenDestination(host)) {
             return Verdict.REFUSED;
-        }
-        if (!isPrintPort(port)) {
-            return Verdict.UNVETTED;
         }
         if (saved.matches(host, port)) {
             return Verdict.ALLOWED;

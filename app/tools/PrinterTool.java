@@ -444,11 +444,12 @@ public class PrinterTool implements ToolRegistry.Tool {
                 PrintProtocol.parse(str(args, "protocol")));
         var saved = PrinterDefaults.load();
         var verdict = PrintTargetGuard.classify(host, port, saved, List.of());
-        // A browse can only widen the answer by finding this exact host:port, so skip
-        // its two seconds when the port already rules every printer out. A printer that
+        // The browse is what vets a printer the operator never saved, including one on a
+        // non-standard port, so it runs for every unmatched destination — there is no
+        // cheap way to know whether it would match without paying for it. A printer that
         // is asleep and misses the browse costs an approval prompt rather than a
         // refusal — the safe direction to fail in.
-        if (verdict == PrintTargetGuard.Verdict.UNVETTED && PrintTargetGuard.isPrintPort(port)) {
+        if (verdict == PrintTargetGuard.Verdict.UNVETTED) {
             return PrintTargetGuard.classify(host, port, saved, PrinterDiscovery.discover());
         }
         return verdict;
