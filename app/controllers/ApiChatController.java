@@ -293,9 +293,10 @@ public class ApiChatController extends Controller {
             // summary branch on web. Telegram got this fix in JCLAW-109 via
             // AgentRunner.processInboundForAgentStreaming; the web path
             // needs the same treatment.
+            // JCLAW-1228: web chat sits behind AuthCheck, so the sender is the operator.
             var slashResult = Commands.execute(
                     slashCmd.get(), ctx.agent(), "web", ctx.username(), current,
-                    Commands.extractArgs(ctx.message()));
+                    Commands.extractArgs(ctx.message()), true);
             var slashResp = new HashMap<String, Object>();
             slashResp.put(KEY_CONVERSATION_ID,
                     slashResult.conversation() != null ? slashResult.conversation().id : null);
@@ -464,9 +465,10 @@ public class ApiChatController extends Controller {
 
         var slashConv = resolveSlashConversation(slashCmd.get(), agent, conversationId, username);
         // JCLAW-111: args-aware execute so /model status etc. work via SSE.
+        // JCLAW-1228: web chat sits behind AuthCheck, so the sender is the operator.
         var slashResult = Commands.execute(
                 slashCmd.get(), agent, "web", username, slashConv,
-                Commands.extractArgs(messageText));
+                Commands.extractArgs(messageText), true);
         if (slashResult.conversation() != null) {
             sse.send(Map.of("type", "init", KEY_CONVERSATION_ID, slashResult.conversation().id));
         }

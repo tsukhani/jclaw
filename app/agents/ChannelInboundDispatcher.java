@@ -81,8 +81,10 @@ final class ChannelInboundDispatcher {
             Conversation current = cmd == Commands.Command.NEW
                     ? null
                     : Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
+            // JCLAW-1228: the ingress bound this around the whole turn — the dispatcher is
+            // handed a peerId and never sees the sender id it would need to re-derive it.
             var result = Commands.execute(cmd, agent, channelType, peerId, current,
-                    Commands.extractArgs(text));
+                    Commands.extractArgs(text), DangerousActionGate.ownerInitiated());
             sendResponse.accept(peerId, result.responseText());
             return;
         }
@@ -186,7 +188,7 @@ final class ChannelInboundDispatcher {
                     ? null
                     : Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId, chatType));
             var result = Commands.execute(cmd, agent, channelType, peerId, current,
-                    Commands.extractArgs(text));
+                    Commands.extractArgs(text), DangerousActionGate.ownerInitiated());
             var slashSink = sinkFactory.apply(
                     result.conversation() != null ? result.conversation().id : null);
             // JCLAW-109: an empty responseText is the handler's signal that

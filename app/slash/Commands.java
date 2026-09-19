@@ -75,6 +75,9 @@ public final class Commands {
     private static final String MISSING_RUN_ID_MSG = "Missing run id.";
     private static final String NOT_FOUND_SUFFIX = " not found.";
 
+    // Reply to an owner-only command invoked by a turn the channel could not attribute to the owner.
+    private static final String NOT_OWNER_MSG = "Only the operator can use this command.";
+
     private Commands() {}
 
     /**
@@ -281,9 +284,30 @@ public final class Commands {
      * null or empty when none. Only {@code /model} currently consumes args:
      * {@code /model NAME} writes the conversation-scoped override,
      * {@code /model reset} clears it.
+     *
+     * <p>Treats the turn as owner-initiated; a channel that can carry a guest calls the
+     * {@code ownerInitiated} overload instead.
      */
     public static Result execute(Command cmd, Agent agent, String channelType,
                                   String peerId, @Nullable Conversation current, @Nullable String args) {
+        return execute(cmd, agent, channelType, peerId, current, args, true);
+    }
+
+    /**
+     * JCLAW-1228: owner-gated execute. {@code ownerInitiated} is false whenever the channel
+     * could not attribute the turn to the binding owner — a guest in a Telegram group, any
+     * WhatsApp sender, or a user of an owner-less Slack binding. Owner-only commands are
+     * refused for such a turn; every other command runs unchanged.
+     */
+    public static Result execute(Command cmd, Agent agent, String channelType, String peerId,
+                                  @Nullable Conversation current, @Nullable String args,
+                                  boolean ownerInitiated) {
+        if (!ownerInitiated && ownerOnly(cmd, args)) {
+            EventLogger.warn(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
+                    "Refused %s from a non-owner turn on peer=%s".formatted(cmd.literal, peerId));
+            // Not persisted: a guest's refused command must not write into the owner's transcript.
+            return new Result(current, NOT_OWNER_MSG, cmd);
+        }
         return switch (cmd) {
             case NEW -> executeNew(agent, channelType, peerId);
             case RESET -> executeReset(agent, channelType, current);
@@ -295,6 +319,17 @@ public final class Commands {
             case STOP -> executeStop(agent, channelType, current);
             case SUBAGENT -> executeSubagent(agent, channelType, current, args);
             case PROMPT -> executePrompt(agent, channelType, current, args);
+        };
+    }
+
+    /** {@code /subagent} reaches every run on the instance and {@code /prompt} returns the
+     *  operator's library; of the {@code /model} forms only the writes (NAME, reset) qualify —
+     *  bare and {@code status} just read. */
+    private static boolean ownerOnly(Command cmd, @Nullable String args) {
+        return switch (cmd) {
+            case SUBAGENT, PROMPT -> true;
+            case MODEL -> args != null && !args.isBlank() && !args.equalsIgnoreCase("status");
+            case NEW, RESET, COMPACT, HELP, THINK, USAGE, STOP -> false;
         };
     }
 

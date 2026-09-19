@@ -173,6 +173,9 @@ public final class TelegramReactionNotifier {
      *   <li>{@code all} — every reaction delta, any chat type.</li>
      * </ul>
      *
+     * <p>A private-chat reaction is additionally gated on {@link #reactorAllowed}, which the
+     * notify policy above cannot express: {@code own} admits every DM reaction.
+     *
      * <p>Shared by the polling runner and {@link controllers.WebhookTelegramController}.
      * The event is delivered through {@link AgentRunner#processInboundForAgent}
      * (non-streaming — a reaction notification is a low-volume system event), and
@@ -184,6 +187,11 @@ public final class TelegramReactionNotifier {
         if (agent == null || reaction == null) return;
         final String chatId = reaction.chatId();
         if (chatId == null) return;
+        if (!reactorAllowed(ownerTelegramUserId, reaction)) {
+            EventLogger.warn(LOG_CATEGORY, agent.name, LOG_SOURCE,
+                    "Dropped private-chat reaction from non-owner %s".formatted(reaction.reactorId()));
+            return;
+        }
         String mode = reactionNotifyMode();
         // JCLAW-383: only own consults the bot-sent-id cache (a group message_reaction
         // update omits the reacted message's author) — off/all ignore it, so skip the lookup.
@@ -206,6 +214,20 @@ public final class TelegramReactionNotifier {
                         "Reaction dispatch error: %s".formatted(e.getMessage()));
             }
         });
+    }
+
+    /**
+     * JCLAW-1228: may this reactor's delta run a turn? A private chat's peer id resolves to
+     * the binding owner's own conversation, so a stranger's reaction would otherwise run a
+     * turn over the owner's history and send the reply to the stranger. A null
+     * {@code reactorId} (anonymous or channel actor) is not the owner. Group and supergroup
+     * chats are governed by {@link #shouldNotifyReaction} instead — their peer id is the
+     * shared chat, not the owner's DM. Pure + public so the gate is testable without the
+     * dispatch path.
+     */
+    public static boolean reactorAllowed(String ownerTelegramUserId, ReactionDelta reaction) {
+        if (!CHAT_TYPE_PRIVATE.equals(reaction.chatType())) return true;
+        return ownerTelegramUserId.equals(reaction.reactorId());
     }
 
     /**
@@ -239,14 +261,17 @@ public final class TelegramReactionNotifier {
     }
 
     /**
-     * Render a {@link ReactionDelta} into the system-event text the agent sees.
+     * Render a {@link ReactionDelta} into the event text the agent sees.
      * Public for default-package tests. Examples:
-     * {@code "[system] @ada reacted 👍 to message 42."} /
-     * {@code "[system] @ada removed reaction 👍 from message 42."}
+     * {@code "[reaction] @ada reacted 👍 to message 42."} /
+     * {@code "[reaction] @ada removed reaction 👍 from message 42."}
+     *
+     * <p>JCLAW-1228: the label names the origin rather than claiming system authority — the
+     * reactor's display name is chosen by the reactor, and a {@code [system]} prefix lent it one.
      */
     public static String reactionEventText(ReactionDelta r) {
         var who = r.reactor() != null ? r.reactor() : "Someone";
-        var sb = new StringBuilder("[system] ").append(who).append(' ');
+        var sb = new StringBuilder("[reaction] ").append(who).append(' ');
         if (!r.added().isEmpty()) {
             sb.append("reacted ").append(String.join(" ", r.added()))
               .append(" to message ").append(r.messageId());

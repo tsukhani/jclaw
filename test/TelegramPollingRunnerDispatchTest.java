@@ -567,7 +567,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
 
         var anonymous = new TelegramReactionNotifier.ReactionDelta("1", "private", 7, null, null,
                 java.util.List.of("👍"), java.util.List.of());
-        assertTrue(TelegramReactionNotifier.reactionEventText(anonymous).startsWith("[system] Someone "),
+        assertTrue(TelegramReactionNotifier.reactionEventText(anonymous).startsWith("[reaction] Someone "),
                 "a null reactor renders as 'Someone'");
     }
 
