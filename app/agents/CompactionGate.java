@@ -80,6 +80,21 @@ public final class CompactionGate {
             Agent agent, Long conversationId, String userMessage,
             @Nullable Set<String> disabledTools, LlmProvider primary,
             List<ChatMessage> current, List<ToolDef> tools) {
+        return maybeCompactAndRebuild(agent, conversationId, userMessage, disabledTools, primary,
+                new MessageHydrator.Hydration(current, List.of(), List.of(), List.of()), tools).messages();
+    }
+
+    /**
+     * Bearer-aware overload. A rebuild replaces the message list, so the media bearers whose
+     * {@code chatMessageIndex} addressed the pre-compaction list stop being valid; this returns the
+     * rebuild's own bearers beside its messages so the capability rewrites downstream write into
+     * the list they were actually computed against (JCLAW-1232). When no compaction fires,
+     * {@code current} is returned unchanged.
+     */
+    public static MessageHydrator.Hydration maybeCompactAndRebuild(
+            Agent agent, Long conversationId, String userMessage,
+            @Nullable Set<String> disabledTools, LlmProvider primary,
+            MessageHydrator.Hydration current, List<ToolDef> tools) {
         // Cheap snapshot: model info + effective model id + channel type.
         // resolveModelInfo reads only in-memory provider config, so this
         // Tx is bounded by one findById.
@@ -96,7 +111,7 @@ public final class CompactionGate {
         // letting providerName/modelLabel construction NPE later.
         if (primary == null || primary.config() == null) return current;
         final var providerName = primary.config().name();
-        var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current, tools);
+        var estimate = TokenUsageEstimator.estimateChatRequest(snapshot.modelId(), current.messages(), tools);
         int estimatedTokens = ContextWindowManager.adjustedPromptTokens(providerName, snapshot.modelId(), estimate);
         if (!SessionCompactor.shouldCompact(estimatedTokens, snapshot.modelInfo())) return current;
 
@@ -129,7 +144,7 @@ public final class CompactionGate {
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
-            return MessageHydrator.buildMessages(sysPrompt, conv).messages();
+            return MessageHydrator.buildMessages(sysPrompt, conv);
         });
     }
 }
