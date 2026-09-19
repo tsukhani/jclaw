@@ -13,8 +13,8 @@ import java.util.regex.Pattern;
  *   <li><b>JSON</b> — decided by {@link JsonSpan}, which parses an object/array
  *       even after a short non-JSON prefix (e.g. a {@code "HTTP 200"} status
  *       line); malformed input fast-fails.</li>
- *   <li><b>CODE</b> — declaration-style keywords anchored to line starts, so a
- *       log line that merely mentions {@code import} doesn't read as code.</li>
+ *   <li><b>CODE</b> — {@link CodeCompressor}'s own language hints, so the
+ *       detector and the compressor cannot disagree about what code is.</li>
  *   <li><b>LOG</b> — log-level tokens ({@code ERROR}, {@code WARN}, …).</li>
  *   <li><b>TEXT</b> — the catch-all when nothing else matches.</li>
  * </ol>
@@ -23,20 +23,11 @@ public final class ContentTypeDetector {
 
     private ContentTypeDetector() {}
 
-    // Declaration-style code signals, anchored to line starts (UNIX_LINES so
-    // ^ also matches after \n). Covers Java/Kotlin (package/import/public/…),
-    // Python (import / from X import / def), Go (func/package/import), Rust
-    // (fn/use), JS/TS (import/export/const/let/var), C/C++ (#include/using).
-    private static final Pattern CODE_SIGNAL = Pattern.compile(
-            "(?m)^[ \\t]*(?:package |import |from \\w[\\w.]* import |func |def |fn |use |class |interface |"
-                    + "public |private |protected |export |const |let |var |#include|using )",
-            Pattern.UNIX_LINES);
+    /** A lone declaration line in a document is a mention, not a listing (JCLAW-1230). */
+    private static final int MIN_CODE_SIGNAL_LINES = 2;
 
-    // A function / class / method signature anywhere — catches JS
-    // `function foo(`, Java methods, and the like even without a leading
-    // declaration keyword on its own line.
-    private static final Pattern CODE_SIGNATURE = Pattern.compile(
-            "(?:function\\s+\\w+\\s*\\(|class\\s+\\w+|def\\s+\\w+\\s*\\(|func\\s+\\w+\\s*\\()");
+    /** Short enough that one declaration line is most of the content, so one signal is enough. */
+    private static final int SNIPPET_LINES = 5;
 
     private static final Pattern LOG_LEVEL = Pattern.compile(
             "(?m)\\b(?:ERROR|WARN|WARNING|INFO|DEBUG|FATAL|TRACE)\\b");
@@ -52,10 +43,14 @@ public final class ContentTypeDetector {
         if (trimmed.isEmpty()) return ContentType.TEXT;
 
         if (JsonSpan.find(content).isPresent()) return ContentType.JSON;
-        if (CODE_SIGNAL.matcher(content).find() || CODE_SIGNATURE.matcher(content).find()) {
-            return ContentType.CODE;
-        }
+        if (isCode(content)) return ContentType.CODE;
         if (LOG_LEVEL.matcher(content).find()) return ContentType.LOG;
         return ContentType.TEXT;
+    }
+
+    private static boolean isCode(String content) {
+        if (CodeCompressor.detectLanguage(content) == CodeCompressor.Language.UNKNOWN) return false;
+        return CodeCompressor.signalLineCount(content) >= MIN_CODE_SIGNAL_LINES
+                || content.lines().filter(line -> !line.isBlank()).count() <= SNIPPET_LINES;
     }
 }

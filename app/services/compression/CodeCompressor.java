@@ -1,15 +1,20 @@
 package services.compression;
 
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.JavaParserAdapter;
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.ParserConfiguration.LanguageLevel;
 import com.github.javaparser.Position;
 import com.github.javaparser.Range;
-import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import org.jspecify.annotations.Nullable;
+import play.Logger;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -57,11 +62,16 @@ public final class CodeCompressor implements ContentCompressor {
         if (code == null || code.isBlank()) return CompressionResult.unchanged(code, ALGORITHM_NAME);
 
         String out = null;
+        var degraded = false;
         if (language == Language.JAVA) {
             try {
                 out = compressJava(code);
-            } catch (RuntimeException _) {
-                out = null; // unparseable / partial Java — fall through to regex
+            } catch (RuntimeException e) {
+                // A silent fall-through hid real loss: the regex path keeps far less
+                // than the AST path. The handle is the pipeline's ccr_retrieve marker.
+                Logger.warn(e, "[compress] Java parse failed for content %s — using the regex fallback",
+                        ContentHash.handle(code));
+                degraded = true;
             }
         }
         if (out == null) out = compressByRegex(code, language);
@@ -70,7 +80,9 @@ public final class CodeCompressor implements ContentCompressor {
         if (out == null || out.length() >= code.length()) {
             return CompressionResult.unchanged(code, ALGORITHM_NAME);
         }
-        return CompressionResult.compressed(out, ALGORITHM_NAME);
+        return degraded
+                ? CompressionResult.degraded(out, ALGORITHM_NAME)
+                : CompressionResult.compressed(out, ALGORITHM_NAME);
     }
 
     // ---------------------------------------------------------------- language
@@ -88,6 +100,29 @@ public final class CodeCompressor implements ContentCompressor {
     private static final Pattern JS_HINT = Pattern.compile(
             "(?m)^\\s*(?:function\\s+\\w+\\s*\\(|const\\s+\\w+\\s*=|export\\s+(?:default\\s+)?|import\\s++.*\\bfrom\\b)");
 
+    private static final List<Pattern> LANGUAGE_HINTS =
+            List.of(JAVA_HINT, PYTHON_HINT, GO_HINT, RUST_HINT, JS_HINT);
+
+    /**
+     * Non-blank lines carrying a declaration signal for any recognized language.
+     * {@link ContentTypeDetector} requires more than one before routing content
+     * here: a single stray declaration line in a prose document is not a listing.
+     */
+    public static int signalLineCount(String code) {
+        if (code == null || code.isBlank()) return 0;
+        var count = 0;
+        for (var line : code.split("\n", -1)) {
+            if (line.isBlank()) continue;
+            for (var hint : LANGUAGE_HINTS) {
+                if (hint.matcher(line).find()) {
+                    count++;
+                    break;
+                }
+            }
+        }
+        return count;
+    }
+
     public static Language detectLanguage(String code) {
         if (code == null || code.isBlank()) return Language.UNKNOWN;
         if (JAVA_HINT.matcher(code).find()) return Language.JAVA;
@@ -103,8 +138,15 @@ public final class CodeCompressor implements ContentCompressor {
     /** One method/constructor body, as absolute char offsets into the source. */
     private record BodyRange(int begin, int end, int chars) {}
 
+    // javaparser defaults to JAVA_11: records, sealed types, switch expressions and
+    // text blocks all threw, sending 56% of this repo's own files down the lossy regex
+    // path (JCLAW-1230). BLEEDING_EDGE tracks the pinned version's newest level.
+    private static final ParserConfiguration PARSER_CONFIG =
+            new ParserConfiguration().setLanguageLevel(LanguageLevel.BLEEDING_EDGE);
+
     private static @Nullable String compressJava(String code) {
-        var cu = StaticJavaParser.parse(code);
+        // A JavaParser is not safe to share across threads; the configuration is.
+        var cu = JavaParserAdapter.of(new JavaParser(PARSER_CONFIG)).parse(code);
         int[] lineStarts = lineStarts(code);
         var ranges = new ArrayList<BodyRange>();
         cu.findAll(MethodDeclaration.class).forEach(m ->
