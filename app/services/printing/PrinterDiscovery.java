@@ -190,9 +190,21 @@ public final class PrinterDiscovery {
      */
     public static DiscoveredPrinter direct(@Nullable String host, @Nullable Integer port, @Nullable PrintProtocol protocol) {
         var resolved = protocol == null ? PrintProtocol.IPP : protocol;
-        return new DiscoveredPrinter(host, host,
-                port == null || port <= 0 ? resolved.defaultPort() : port,
-                resolved, Map.of());
+        return new DiscoveredPrinter(host, host, directPort(port, resolved), resolved, Map.of());
+    }
+
+    /**
+     * The port {@link #direct} will dial for these arguments.
+     *
+     * <p>Shared rather than restated so {@link PrintTargetGuard} screens the port the
+     * job is actually sent to; a guard that vets a different port than the tool dials
+     * is decorative (JCLAW-1229).
+     */
+    public static int directPort(@Nullable Integer port, @Nullable PrintProtocol protocol) {
+        if (port != null && port > 0) {
+            return port;
+        }
+        return (protocol == null ? PrintProtocol.IPP : protocol).defaultPort();
     }
 
     /**

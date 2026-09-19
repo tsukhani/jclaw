@@ -26,8 +26,15 @@ import java.util.function.Consumer;
  * OkHttp 5.x-backed LLM transport. The only HTTP path for outbound LLM
  * traffic since JCLAW-187 deleted the JDK alternative; static utility
  * methods because the class has no per-instance state — clients are
- * sourced via {@link utils.HttpFactories#llmStreaming()} and
- * {@link utils.HttpFactories#llmSingleShot(Duration)}.
+ * sourced via {@link utils.HttpFactories#llmStreamingGuarded()} and
+ * {@link utils.HttpFactories#llmSingleShotGuarded()}.
+ *
+ * <p>The guarded tiers, not the plain ones (JCLAW-1229). A provider base URL
+ * used to be screened once at discovery and never again, so a host that
+ * resolved somewhere respectable then and to 169.254.169.254 afterwards
+ * reached the metadata endpoint on the chat path. The relaxed provider guard
+ * permits loopback and RFC-1918, so self-hosted Ollama and LM Studio are
+ * unaffected — see {@code SsrfGuard.isBlockedForProvider}.
  *
  * <p>OkHttp does not issue an {@code Upgrade: h2c} on plain HTTP, so the
  * LM-Studio Express upgrade-event hang the previous JDK driver had to
@@ -56,7 +63,7 @@ final class OkHttpLlmHttpDriver {
                 .post(RequestBody.create(jsonBody, JSON));
         if (channel != null) builder.tag(String.class, channel);
         var req = builder.build();
-        var call = OtelRuntime.traced(HttpFactories.llmSingleShot()).newCall(req);
+        var call = OtelRuntime.traced(HttpFactories.llmSingleShotGuarded()).newCall(req);
         // Per-call timeout via Call.timeout() — no per-call client allocation.
         call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
         try (var resp = call.execute()) {
@@ -130,7 +137,7 @@ final class OkHttpLlmHttpDriver {
             }
         };
 
-        var eventSource = EventSources.createFactory(OtelRuntime.traced(HttpFactories.llmStreaming()))
+        var eventSource = EventSources.createFactory(OtelRuntime.traced(HttpFactories.llmStreamingGuarded()))
                 .newEventSource(req, listener);
         publishCancel.accept(eventSource::cancel);
         try {
@@ -163,7 +170,7 @@ final class OkHttpLlmHttpDriver {
                 .header(HttpKeys.AUTHORIZATION, authHeader)
                 .post(RequestBody.create(jsonBody, JSON));
         if (channel != null) builder.tag(String.class, channel);
-        var call = OtelRuntime.traced(HttpFactories.llmStreaming()).newCall(builder.build());
+        var call = OtelRuntime.traced(HttpFactories.llmStreamingGuarded()).newCall(builder.build());
         publishCancel.accept(call::cancel);
         try (var resp = call.execute()) {
             if (resp.code() != 200) {

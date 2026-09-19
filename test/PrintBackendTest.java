@@ -3,12 +3,14 @@ import play.test.UnitTest;
 import services.printing.DiscoveredPrinter;
 import services.printing.JobAttributes;
 import services.printing.LpdClient;
+import services.printing.PrintDispatcher;
 import services.printing.PrintProtocol;
 import services.printing.PrinterDiscovery;
 import services.printing.RawSocketClient;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -405,5 +407,43 @@ class PrintBackendTest extends UnitTest {
         // CI and containers routinely have no multicast route. "No printers found"
         // is the honest answer there; a stack trace would suggest a bug.
         assertNotNull(PrinterDiscovery.discover(java.time.Duration.ofMillis(50)));
+    }
+
+    // ─── Reach, and what the failure says (JCLAW-1229) ───
+
+    @Test
+    void aPinnedProtocolIsTheOnlyBackendTried() {
+        // One destination became three dialled ports — 631, 9100 and 515. That is the
+        // fallback's value for a printer the operator chose, and pure reach for an
+        // address the model named, so a named protocol switches the ladder off.
+        var raw = PrinterDiscovery.direct("192.0.2.9", 9100, PrintProtocol.RAW);
+
+        assertEquals(List.of(PrintProtocol.RAW), PrintDispatcher.backendOrder(raw, true));
+        assertEquals(List.of(PrintProtocol.RAW, PrintProtocol.IPP, PrintProtocol.LPD),
+                PrintDispatcher.backendOrder(raw, false),
+                "the ladder must survive for a destination nobody pinned");
+    }
+
+    @Test
+    void anExhaustedJobReportsNoTransportDetail() throws Exception {
+        // The per-backend text used to echo the transport exception, which separates
+        // "connection refused" from "timed out" — the difference between a closed and
+        // a filtered port. That made an aggregated print failure a port scanner the
+        // model could read, so the phrasing is now fixed per protocol.
+        int deadPort;
+        try (var probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            deadPort = probe.getLocalPort();
+        }
+        var target = PrinterDiscovery.direct("127.0.0.1", deadPort, PrintProtocol.RAW);
+
+        var boom = assertThrows(IOException.class, () -> PrintDispatcher.print(
+                target, "job", "user", "text/plain", "x".getBytes(StandardCharsets.UTF_8),
+                JobAttributes.DEFAULTS, Map.of(), true));
+
+        assertTrue(boom.getMessage().contains("RAW: no response"), boom.getMessage());
+        assertFalse(boom.getMessage().toLowerCase().contains("refus"),
+                "the transport verdict must not reach the model: " + boom.getMessage());
+        assertFalse(boom.getMessage().contains(String.valueOf(deadPort)),
+                "nor the port it was learned from: " + boom.getMessage());
     }
 }

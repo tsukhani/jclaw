@@ -104,10 +104,27 @@ public final class PrintDispatcher {
                                 String documentFormat, byte[] document,
                                 JobAttributes job, Map<String, String> options)
             throws IOException {
+        return print(printer, jobName, user, documentFormat, document, job, options, false);
+    }
+
+    /**
+     * Send with the protocol fixed rather than auto-selected.
+     *
+     * @param protocolPinned the caller named the protocol, so try only that one.
+     *                       Carried as an argument rather than on
+     *                       {@link DiscoveredPrinter}, which is also what the
+     *                       Settings panel and the saved default are built from —
+     *                       neither of those wants the ladder switched off
+     */
+    public static Outcome print(DiscoveredPrinter printer, String jobName, String user,
+                                String documentFormat, byte[] document,
+                                JobAttributes job, Map<String, String> options,
+                                boolean protocolPinned)
+            throws IOException {
         var failures = new ArrayList<String>();
         var requested = job == null ? JobAttributes.DEFAULTS : job;
 
-        for (var protocol : backendOrder(printer)) {
+        for (var protocol : backendOrder(printer, protocolPinned)) {
             try {
                 var outcome = attempt(protocol, printer, jobName, user, documentFormat,
                         document, requested, options == null ? Map.of() : options);
@@ -124,11 +141,29 @@ public final class PrintDispatcher {
                     return outcome;
                 }
                 failures.add(protocol + ": printer rejected the job");
-            } catch (IOException e) {
+            } catch (PrinterRefusal e) {
+                // A printer answered and declined. That is the point of trying IPP
+                // first, and it is not a transport signal — reaching it takes a real
+                // IPP service at the address.
                 failures.add(protocol + ": " + e.getMessage());
+            } catch (IOException e) {
+                // Fixed phrasing: the transport text distinguished "refused" from
+                // "timed out", which turned an aggregated print failure into a port
+                // scan the model could read (JCLAW-1229). The operator still gets the
+                // detail, one layer down where an agent cannot see it.
+                EventLogger.warn(CATEGORY, "%s backend failed for %s: %s"
+                        .formatted(protocol, printer.host(), e.getMessage()));
+                failures.add(protocol + ": no response");
             }
         }
         throw new IOException("No print backend accepted the job — " + String.join("; ", failures));
+    }
+
+    /** An IPP printer answered and declined the job, as opposed to a transport failure. */
+    private static final class PrinterRefusal extends IOException {
+        PrinterRefusal(String message) {
+            super(message);
+        }
     }
 
     /**
@@ -138,8 +173,16 @@ public final class PrintDispatcher {
      * that announced itself over {@code _pdl-datastream} is telling us it wants
      * port 9100, and starting with IPP there just buys a guaranteed timeout before
      * the fallback. Everything else follows in capability order.
+     *
+     * <p>{@code protocolPinned} switches the ladder off. Falling through turned one
+     * destination into three dialled ports — 631, 9100 and 515 — which is the whole
+     * fallback's value for a printer the operator chose and pure reach for one the
+     * model named (JCLAW-1229).
      */
-    static List<PrintProtocol> backendOrder(DiscoveredPrinter printer) {
+    public static List<PrintProtocol> backendOrder(DiscoveredPrinter printer, boolean protocolPinned) {
+        if (protocolPinned) {
+            return List.of(printer.protocol());
+        }
         var order = new ArrayList<PrintProtocol>();
         order.add(printer.protocol());
         for (var p : List.of(PrintProtocol.IPP, PrintProtocol.RAW, PrintProtocol.LPD)) {
@@ -230,7 +273,7 @@ public final class PrintDispatcher {
                     // tells an operator to convert the file;
                     // "printer-stopped" tells them to go look at the device. Collapsing
                     // both to "rejected" throws away the only actionable part.
-                    throw new IOException("printer rejected the job — " + result.message()
+                    throw new PrinterRefusal("printer rejected the job — " + result.message()
                             + " (sent as " + prepared.format() + ")");
                 }
                 // effective, not job: the negotiator overrides media to whatever the

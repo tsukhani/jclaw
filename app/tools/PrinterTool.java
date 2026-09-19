@@ -11,6 +11,7 @@ import services.printing.DiscoveredPrinter;
 import services.printing.JobAttributes;
 import services.printing.PrintDispatcher;
 import services.printing.PrintProtocol;
+import services.printing.PrintTargetGuard;
 import services.printing.PrinterDefaults;
 import services.printing.PrinterDiscovery;
 import utils.HttpKeys;
@@ -178,6 +179,27 @@ public class PrinterTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION, description);
     }
 
+    /**
+     * A destination the model named, that nobody chose, goes in front of the operator
+     * (JCLAW-1229). Every backend behind this tool writes bytes to whatever answers,
+     * so an arbitrary {@code host}/{@code port} is an outbound-connection primitive —
+     * and the saved default is exempt for the reason the class comment gives: a human
+     * chose it once, in Settings.
+     */
+    @Override
+    public boolean dangerous(String argsJson) {
+        if (argsJson == null) {
+            return false;
+        }
+        JsonObject args;
+        try {
+            args = JsonParser.parseString(argsJson).getAsJsonObject();
+        } catch (RuntimeException _) {
+            return false;   // execute() rejects malformed args before any connection
+        }
+        return verdictFor(args) == PrintTargetGuard.Verdict.UNVETTED;
+    }
+
     @Override
     public String execute(String argsJson, Agent agent) {
         JsonObject args;
@@ -190,6 +212,10 @@ public class PrinterTool implements ToolRegistry.Tool {
         if (action == null) {
             return "Error: missing required 'action' argument "
                     + "(one of: discover, print, status, cancel).";
+        }
+        var forbidden = forbiddenTarget(args);
+        if (forbidden != null) {
+            return forbidden;
         }
         try {
             return switch (action.toLowerCase()) {
@@ -297,8 +323,10 @@ public class PrinterTool implements ToolRegistry.Tool {
             return "Error: " + invalid;
         }
 
+        // A named protocol switches off the fallback ladder: falling through would
+        // dial 631, 9100 and 515 for the one destination that was vetted.
         var outcome = PrintDispatcher.print(target, jobName, agent.name, documentFormat,
-                document, job, saved.options());
+                document, job, saved.options(), PrintProtocol.parse(str(args, "protocol")) != null);
         var verdict = new StringBuilder(outcome.verified()
                 ? "Printed via " + outcome.protocol() + " — " + outcome.detail()
                 // Said plainly because the model will otherwise report this as a
@@ -380,6 +408,50 @@ public class PrinterTool implements ToolRegistry.Tool {
             return PrinterDiscovery.direct(name, intOrNull(args, "port"), protocol);
         }
         return hits.getFirst();
+    }
+
+    /** The destination the caller named, or null when they left it to the saved default. */
+    private static @Nullable String namedTarget(JsonObject args) {
+        return firstNonNull(str(args, "host"), str(args, ARG_PRINTER));
+    }
+
+    /**
+     * A range that is never a printer — the cloud-metadata address and the rest of
+     * link-local, multicast, the unspecified address. Refused outright rather than
+     * gated, because no approval makes 169.254.169.254 a printer, and refused here
+     * rather than in {@code resolveTarget} so {@code status} and {@code cancel} are
+     * covered too: both dial the same address (JCLAW-1229).
+     */
+    private static @Nullable String forbiddenTarget(JsonObject args) {
+        var host = namedTarget(args);
+        if (host == null || !PrintTargetGuard.isForbiddenDestination(host)) {
+            return null;
+        }
+        return "Error: '" + host + "' is a link-local, multicast or unspecified address, "
+                + "which is never a printer. Refused before opening a connection.";
+    }
+
+    /**
+     * Classify the destination the model named, for {@link #dangerous(String)}.
+     * ALLOWED when it named none: the saved default is the operator's own choice.
+     */
+    private static PrintTargetGuard.Verdict verdictFor(JsonObject args) {
+        var host = namedTarget(args);
+        if (host == null) {
+            return PrintTargetGuard.Verdict.ALLOWED;
+        }
+        var port = PrinterDiscovery.directPort(intOrNull(args, "port"),
+                PrintProtocol.parse(str(args, "protocol")));
+        var saved = PrinterDefaults.load();
+        var verdict = PrintTargetGuard.classify(host, port, saved, List.of());
+        // A browse can only widen the answer by finding this exact host:port, so skip
+        // its two seconds when the port already rules every printer out. A printer that
+        // is asleep and misses the browse costs an approval prompt rather than a
+        // refusal — the safe direction to fail in.
+        if (verdict == PrintTargetGuard.Verdict.UNVETTED && PrintTargetGuard.isPrintPort(port)) {
+            return PrintTargetGuard.classify(host, port, saved, PrinterDiscovery.discover());
+        }
+        return verdict;
     }
 
     /**

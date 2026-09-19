@@ -520,6 +520,30 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
+    void aProviderBaseUrlInTheMetadataRangeIsRefused() {
+        // JCLAW-1229: the chat path dials this value on every turn, so a host in the
+        // metadata range is a credential-theft primitive. Refused at the write, where
+        // the message can name the range, rather than as a DNS error mid-turn.
+        var rejected = ConfigService.setWithSideEffects(
+                "provider.metadata-probe.baseUrl", "http://169.254.169.254/v1");
+
+        assertNotNull(rejected, "the cloud-metadata address must be refused");
+        assertTrue(rejected.contains("169.254.169.254"), rejected);
+    }
+
+    @Test
+    void aProviderBaseUrlOnLoopbackOrTheLanIsAccepted() {
+        // The relaxed posture, pinned: self-hosted inference is a core use case here,
+        // so blocking loopback or RFC-1918 would break more than it protects.
+        assertNull(ConfigService.setWithSideEffects(
+                "provider.local-ollama.baseUrl", "http://127.0.0.1:11434/v1"));
+        assertNull(ConfigService.setWithSideEffects(
+                "provider.lan-box.baseUrl", "http://192.168.1.50/v1"));
+        assertNull(ConfigService.setWithSideEffects("provider.lan-box.baseUrl", ""),
+                "clearing the key is always accepted");
+    }
+
+    @Test
     void setWithSideEffectsIgnoresUnrelatedProviderApiKey() {
         // Sanity guard: the linkage is specific to provider.ollama-cloud.apiKey.
         // Setting a different provider's apiKey must not touch search.ollama.*.

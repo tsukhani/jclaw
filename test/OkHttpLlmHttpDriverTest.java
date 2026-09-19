@@ -1,6 +1,9 @@
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Optional;
 
 /**
@@ -47,5 +50,25 @@ class OkHttpLlmHttpDriverTest extends UnitTest {
         var result = parseRetryAfter("999999999");
         assertTrue(result.isPresent());
         assertEquals(999999999L, result.get());
+    }
+
+    @Test
+    void theDriverSourcesOnlyTheGuardedClientTiers() throws Exception {
+        // JCLAW-1229: a provider baseUrl was screened once at discovery and never on
+        // the chat path, so a host that rebound to the metadata range afterwards was
+        // still dialled. Asserted on the source because the clients are built inside
+        // method bodies, with no seam to read the choice back from; the guarded tiers
+        // differ from the plain ones only by a DNS resolver, which nothing observable
+        // distinguishes without a rebinding fixture.
+        var driver = Files.readString(Path.of(Play.applicationPath.getAbsolutePath(),
+                "app/llm/OkHttpLlmHttpDriver.java"));
+
+        assertTrue(driver.contains("HttpFactories.llmSingleShotGuarded()"), "send must be guarded");
+        assertTrue(driver.contains("HttpFactories.llmStreamingGuarded()"),
+                "streamSse and streamNdjson must be guarded");
+        assertFalse(driver.contains("HttpFactories.llmSingleShot()"),
+                "the unguarded tier carries no DNS screen — naming it here reopens the hole");
+        assertFalse(driver.contains("HttpFactories.llmStreaming()"),
+                "the unguarded tier carries no DNS screen — naming it here reopens the hole");
     }
 }

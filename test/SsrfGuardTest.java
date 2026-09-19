@@ -1,5 +1,6 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import utils.HttpFactories;
 import utils.SsrfGuard;
 
 import java.net.InetAddress;
@@ -476,5 +477,15 @@ class SsrfGuardTest extends UnitTest {
                 () -> SsrfGuard.assertProviderUrlSafe("gopher://evil/"));
         assertThrows(SecurityException.class,
                 () -> SsrfGuard.assertProviderUrlSafe("http:///no-host"));
+    }
+
+    @Test
+    void theGuardedLlmTiersActuallyCarryTheProviderResolver() {
+        // JCLAW-1229 moved the chat path onto these two. "Guarded" has to mean the
+        // rebinding screen is wired in, or the swap bought a name and nothing else.
+        assertSame(SsrfGuard.PROVIDER_SAFE_DNS, HttpFactories.llmSingleShotGuarded().dns());
+        assertSame(SsrfGuard.PROVIDER_SAFE_DNS, HttpFactories.llmStreamingGuarded().dns());
+        assertNotSame(SsrfGuard.PROVIDER_SAFE_DNS, HttpFactories.llmSingleShot().dns());
+        assertNotSame(SsrfGuard.PROVIDER_SAFE_DNS, HttpFactories.llmStreaming().dns());
     }
 }
