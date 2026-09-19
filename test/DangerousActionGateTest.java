@@ -1,5 +1,6 @@
 import agents.DangerousActionGate;
 import agents.DangerousActionGate.Decision;
+import agents.QueueDrainOrchestrator;
 import agents.ToolRegistry;
 import channels.TelegramApprovalCallback;
 import channels.TelegramApprovalService;
@@ -128,38 +129,75 @@ class DangerousActionGateTest extends UnitTest {
         assertEquals(Decision.ABORT, verdict.get(5, TimeUnit.SECONDS));
     }
 
-    // ── JCLAW-1062: revoking a standing grant restores the prompt ───────
+    // ── JCLAW-1062/1226: revoking a standing grant restores the prompt ──
 
     @Test
     void revokingAStandingGrantMakesTheNextDispatchPromptAgain() throws Exception {
+        // JCLAW-1226: the gate ORs a never-pruned in-process set against the row, so
+        // deleting the row alone can only fail open. The grant is therefore taken the
+        // way production takes it — an APPROVE_ALWAYS tap, which writes both — and
+        // revoked exactly as the endpoint does, with no clearGrantsForTest crutch.
+        commitInFreshTx(() -> { ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "ask"); return null; });
+        ConfigService.clearCache();
         var agent = boundAgent("gate-revoke");
-        var convId = telegramConvId(agent);
+        var convId = webConvId(agent);
         var agentId = agent.id;
 
-        // Persisted always-grant with the in-process set cleared, so the row alone
-        // is what suppresses the prompt — the JCLAW-385 restart-survival path.
-        commitInFreshTx(() -> {
-            ToolApprovalGrant.upsert(Agent.findById(agentId), DANGEROUS_TOOL);
-            return null;
-        });
-        DangerousActionGate.clearGrantsForTest();
+        var first = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        TelegramApprovalService.resolve(awaitPromptAndExtractId(),
+                TelegramApprovalCallback.Decision.APPROVE_ALWAYS, TG_USER);
+        assertEquals(Decision.PROCEED, first.get(2, TimeUnit.SECONDS));
+        long promptsAfterGrant = server.countRequests("sendMessage");
 
+        assertTrue(commitInFreshTx(() -> ToolApprovalGrant.exists(agentId, DANGEROUS_TOOL)),
+                "the tap must have persisted the grant it is about to revoke");
         assertEquals(Decision.PROCEED,
                 DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}"),
                 "a standing grant must suppress the prompt");
-        assertEquals(0, server.countRequests("sendMessage"),
+        assertEquals(promptsAfterGrant, server.countRequests("sendMessage"),
                 "no approval prompt may be sent while the grant stands");
 
         commitInFreshTx(() -> ToolApprovalGrant.revoke(agentId, DANGEROUS_TOOL));
-        DangerousActionGate.clearGrantsForTest();
+        DangerousActionGate.revokeGrant(agentId, DANGEROUS_TOOL);
 
         // The barrier is back: the dispatch now prompts instead of proceeding, and
         // a denial aborts it. awaitPromptAndExtractId times out if no prompt is sent.
         var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
-        var approvalId = awaitPromptAndExtractId();
-        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.DENY, TG_USER);
+        TelegramApprovalService.resolve(awaitPromptAndExtractId(),
+                TelegramApprovalCallback.Decision.DENY, TG_USER);
         assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS),
                 "after revoke the prompt governs again");
+    }
+
+    @Test
+    void revokingEveryGrantForAnAgentClearsTheCache() throws Exception {
+        // The agent-delete sweep: a session grant lives ONLY in the in-process set, so a
+        // dispatch that proceeds after the rows are gone is proof the cache is the
+        // suppressor — and that the delete cascade has to prune it by hand.
+        commitInFreshTx(() -> { ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "ask"); return null; });
+        ConfigService.clearCache();
+        var agent = boundAgent("gate-revoke-agent");
+        var convId = webConvId(agent);
+
+        var first = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        TelegramApprovalService.resolve(awaitPromptAndExtractId(),
+                TelegramApprovalCallback.Decision.APPROVE_SESSION, TG_USER);
+        assertEquals(Decision.PROCEED, first.get(2, TimeUnit.SECONDS));
+        long promptsAfterGrant = server.countRequests("sendMessage");
+
+        assertFalse(commitInFreshTx(() -> ToolApprovalGrant.exists(agent.id, DANGEROUS_TOOL)),
+                "a session grant writes no row, so only the cache can be suppressing");
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}"));
+        assertEquals(promptsAfterGrant, server.countRequests("sendMessage"));
+
+        DangerousActionGate.revokeGrantsForAgent(agent.id);
+
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        TelegramApprovalService.resolve(awaitPromptAndExtractId(),
+                TelegramApprovalCallback.Decision.DENY, TG_USER);
+        assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS),
+                "the per-agent sweep must prune the cache too");
     }
 
     // ── Non-dangerous tool → no gate, no prompt ────────────────────────
@@ -245,7 +283,7 @@ class DangerousActionGateTest extends UnitTest {
         ConfigService.clearCache();
         var agent = boundAgent("gate-web-deny-grant");
         var convId = webConvId(agent);
-        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL); return null; });
+        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL, "telegram", TG_USER); return null; });
 
         assertEquals(Decision.PROCEED,
                 DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}"));
@@ -307,17 +345,20 @@ class DangerousActionGateTest extends UnitTest {
     }
 
     @Test
-    void whatsappUntrustedOriginHonorsStandingGrant() {
-        // The escape hatch survives: an explicit operator standing grant still proceeds
-        // on any channel (it short-circuits arbitration before the origin is resolved).
+    void whatsappUntrustedOriginDoesNotSpendAStandingGrant() {
+        // JCLAW-1226: the grant is the operator's own approval, keyed only by (agent, tool).
+        // Honouring it before the origin was resolved let an untrusted peer on a granted pair
+        // reach an unsandboxed shell without the origin-trust branch ever running. The
+        // operator's own use of the same grant is pinned by
+        // webConversationDenyPolicyHonorsStandingGrant.
         var agent = unboundAgent("gate-wa-grant");
         var convId = whatsappConvId(agent);
-        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL); return null; });
+        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL, "telegram", TG_USER); return null; });
 
-        assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}"));
+        assertEquals(Decision.ABORT,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"id > /tmp/pwned\"}"));
         assertEquals(0, server.countRequests("sendMessage"),
-                "a standing grant proceeds for an untrusted origin with no prompt");
+                "an untrusted guest turn must not spend the operator's standing grant");
     }
 
     @Test
@@ -444,9 +485,11 @@ class DangerousActionGateTest extends UnitTest {
 
         long promptsAfterFirst = server.countRequests("sendMessage");
 
-        // Second call for the same (agent, tool) must proceed without a new prompt.
-        assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
+        // JCLAW-1226: only the operator may spend the grant, so the re-dispatch that must
+        // not re-prompt is an owner-initiated one. Under deny, proceeding can only be the
+        // grant — the policy would otherwise abort it.
+        assertEquals(Decision.PROCEED, guardAsOwnerUnderDeny(agent, convId),
+                "a session-approved tool must not re-prompt on the operator's next call");
         assertEquals(promptsAfterFirst, server.countRequests("sendMessage"),
                 "a session-approved tool must not re-prompt on its next call");
     }
@@ -474,8 +517,7 @@ class DangerousActionGateTest extends UnitTest {
         DangerousActionGate.clearGrantsForTest();
 
         // Second call for the same (agent, tool) must proceed off the persisted grant, no new prompt.
-        assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
+        assertEquals(Decision.PROCEED, guardAsOwnerUnderDeny(agent, convId));
         assertEquals(promptsAfterFirst, server.countRequests("sendMessage"),
                 "a persisted always-grant must suppress the prompt after the in-process set is cleared");
     }
@@ -513,11 +555,10 @@ class DangerousActionGateTest extends UnitTest {
         var convId = telegramConvId(agent);
 
         // Seed a durable always-grant on a committed tx, as a prior JVM would have left behind.
-        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL); return null; });
+        commitInFreshTx(() -> { ToolApprovalGrant.upsert(agent, DANGEROUS_TOOL, "telegram", TG_USER); return null; });
 
         // No in-process grant exists for this fresh process; the gate must read the DB row.
-        assertEquals(Decision.PROCEED,
-                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"rm -rf build\"}"));
+        assertEquals(Decision.PROCEED, guardAsOwnerUnderDeny(agent, convId));
         assertEquals(0, server.countRequests("sendMessage"),
                 "a pre-seeded persisted grant must suppress the prompt with no Bot API call");
     }
@@ -531,6 +572,22 @@ class DangerousActionGateTest extends UnitTest {
         var future = new java.util.concurrent.CompletableFuture<Decision>();
         Thread.ofVirtual().start(() -> future.complete(DangerousActionGate.guard(agent, convId, tool, args)));
         return future;
+    }
+
+    /**
+     * Dispatch as the binding owner with the off-channel policy at {@code deny}, so a
+     * PROCEED can only come from a standing grant — owner-initiated alone resolves as the
+     * operator surface, which {@code deny} then aborts.
+     */
+    private Decision guardAsOwnerUnderDeny(Agent agent, Long convId) {
+        ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "deny");
+        try {
+            return DangerousActionGate.withOwnerInitiated(true,
+                    () -> DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls -la\"}"));
+        }
+        finally {
+            ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "allow");
+        }
     }
 
     /** Poll the mock server until the approval prompt's sendMessage lands, then
@@ -695,4 +752,25 @@ class DangerousActionGateTest extends UnitTest {
         }
     }
 
+    // ── JCLAW-1226: the drain thread must not inherit the finishing turn's trust. ──
+
+    @Test
+    void aDrainedGuestMessageIsNotTheOwner() throws Exception {
+        // The queue drain forks from the turn that just finished, but re-processes whoever
+        // else's message was waiting. Thread.Builder inherits InheritableThreadLocals by
+        // default, so OWNER_INITIATED used to cross that fork and wave the guest through.
+        var agent = boundAgent("gate-drain-guest");
+        var convId = telegramConvId(agent);
+        var verdict = new java.util.concurrent.CompletableFuture<Decision>();
+
+        DangerousActionGate.withOwnerInitiated(true, () ->
+                QueueDrainOrchestrator.startDrainThread(() -> verdict.complete(
+                        DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL,
+                                "{\"command\":\"echo queued\"}"))));
+
+        TelegramApprovalService.resolve(awaitPromptAndExtractId(),
+                TelegramApprovalCallback.Decision.DENY, TG_USER);
+        assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS),
+                "a drained message must be gated on its own sender, not the finished turn's");
+    }
 }

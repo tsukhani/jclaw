@@ -1,5 +1,6 @@
 package services;
 
+import agents.DangerousActionGate;
 import jakarta.persistence.EntityManager;
 import memory.MemoryStoreFactory;
 import models.Agent;
@@ -36,7 +37,7 @@ public final class AgentDeletionCascade {
      * channel bindings, skill/tool configs, tool-approval grants, and
      * notifications — in one statement whose delete order the database computes.
      *
-     * <p>Three resources live outside the FK graph and are still cleaned up by an
+     * <p>Four resources live outside the FK graph and are still cleaned up by an
      * explicit walk over the subtree, since {@code ON DELETE CASCADE} governs only
      * rows in FK-linked tables:
      * <ul>
@@ -44,7 +45,9 @@ public final class AgentDeletionCascade {
      *   <li>{@code agent.{name}.*} config rows (keyed by a string LIKE, not an FK);</li>
      *   <li>Lucene index docs for each agent's memories — an external store the DB
      *       cascade of the memory rows themselves cannot reach, so deletion is
-     *       routed through {@link MemoryStoreFactory}.</li>
+     *       routed through {@link MemoryStoreFactory};</li>
+     *   <li>{@link DangerousActionGate}'s in-process grant cache, which the gate ORs
+     *       against the cascaded {@code tool_approval_grant} rows.</li>
      * </ul>
      *
      * <p>Workspace directories are removed last, after DB state is clean, so a
@@ -73,6 +76,9 @@ public final class AgentDeletionCascade {
             MemoryStoreFactory.get().deleteAll(String.valueOf(node.id));
             em.createNativeQuery("DELETE FROM config WHERE config_key LIKE ?1")
                     .setParameter(1, AgentService.AGENT_CONFIG_PREFIX + node.name + ".%").executeUpdate();
+            // JCLAW-1226: the tool_approval_grant rows cascade at the DB, but the gate's
+            // in-process grant cache is not FK-linked and would outlive them.
+            DangerousActionGate.revokeGrantsForAgent(node.id);
         }
         ConfigService.clearCache();
         // JCLAW-673: evict the subtree's SUBAGENT_RUN + TASK full-text docs while

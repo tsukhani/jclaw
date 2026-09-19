@@ -40,17 +40,30 @@ public class ToolApprovalGrant extends Model {
     @Column(name = "tool_name", nullable = false)
     public String toolName;
 
+    /**
+     * JCLAW-1226: the channel the approval was tapped on, and the chat/channel it was
+     * tapped in. Provenance for the operator reviewing the list — the gate keys off
+     * {@code (agent, tool)} and decides spendability from the <em>current</em> turn's
+     * origin trust, not from these. Nullable: rows written before JCLAW-1226 have neither.
+     */
+    @Column(name = "granting_channel")
+    public String grantingChannel;
+
+    /** The chat/channel id {@link #grantingChannel} raised the prompt in. */
+    @Column(name = "granting_peer")
+    public String grantingPeer;
+
     /** True when a durable always-grant exists for {@code (agentId, toolName)}. */
     public static boolean exists(Long agentId, String toolName) {
         return count("agent.id = ?1 AND toolName = ?2", agentId, toolName) > 0;
     }
 
     /**
-     * JCLAW-1062: drop the always-grant for {@code (agentId, toolName)}. The next
-     * dangerous dispatch for that pair prompts again, because
-     * {@link agents.DangerousActionGate} consults {@link #exists} and nothing else
-     * durable outlives the row — the in-process session set is separate and
-     * deliberately ephemeral.
+     * JCLAW-1062: drop the always-grant for {@code (agentId, toolName)}.
+     *
+     * <p>Not sufficient on its own: {@link agents.DangerousActionGate} ORs this row
+     * against an in-process cache that the tap also wrote, so every caller must pair
+     * this with {@link agents.DangerousActionGate#revokeGrant} (JCLAW-1226).
      *
      * @return true if a row was removed; false when no grant existed, which lets the
      * caller answer 404 rather than report a revoke that revoked nothing
@@ -72,13 +85,18 @@ public class ToolApprovalGrant extends Model {
     /**
      * Persist an always-grant for {@code (agent, toolName)}, idempotent on the
      * unique key: a no-op if a row already exists.
+     *
+     * @param grantingChannel the channel the approval was tapped on
+     * @param grantingPeer    the chat/channel id it was tapped in, or {@code null}
      */
-    public static void upsert(Agent agent, String toolName) {
+    public static void upsert(Agent agent, String toolName, String grantingChannel, String grantingPeer) {
         if (exists(agent.id, toolName)) return;
         try {
             var grant = new ToolApprovalGrant();
             grant.agent = agent;
             grant.toolName = toolName;
+            grant.grantingChannel = grantingChannel;
+            grant.grantingPeer = grantingPeer;
             grant.save();
         } catch (PersistenceException _) {
             // A concurrent upsert inserted the same (agent, tool) first and the unique
