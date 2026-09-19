@@ -72,8 +72,9 @@ public final class PrinterDiscovery {
         // One browse per (interface, service type). JmDNS has no multi-type list(),
         // and calling list() concurrently on a shared instance is not a contract it
         // documents — so each browse gets its own short-lived instance and they run
-        // in parallel. That keeps the wall clock at roughly one timeout instead of
-        // interfaces × types × timeout.
+        // in parallel, instead of costing interfaces × types × timeout.
+        // Wall clock is one timeout, not two: close() costs a further ~2s of its own
+        // and is detached (see closeDetached), which is what keeps that true.
         var tasks = new ArrayList<Callable<List<DiscoveredPrinter>>>();
         for (var address : addresses) {
             for (var protocol : PrintProtocol.values()) {
@@ -114,7 +115,9 @@ public final class PrinterDiscovery {
     private static List<DiscoveredPrinter> browse(InetAddress address, PrintProtocol protocol,
                                                   Duration timeout) {
         var hits = new ArrayList<DiscoveredPrinter>();
-        try (var jmdns = JmDNS.create(address)) {
+        JmDNS jmdns = null;
+        try {
+            jmdns = JmDNS.create(address);
             for (var info : jmdns.list(protocol.serviceType(), timeout.toMillis())) {
                 var printer = toPrinter(info, protocol);
                 if (printer != null) {
@@ -124,8 +127,38 @@ public final class PrinterDiscovery {
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, "mDNS browse failed on %s for %s: %s"
                     .formatted(address.getHostAddress(), protocol.serviceType(), e.getMessage()));
+        } finally {
+            closeDetached(jmdns);
         }
         return hits;
+    }
+
+    /**
+     * Hand {@code close()} to a detached thread rather than blocking the browse on it.
+     *
+     * <p>JmDNS 3.6.3 spends about two seconds in {@code close()} waiting for its own cancel
+     * state machine, and that cost is unconditional: measured 2008 ms for a bare
+     * create-then-close, 2011 ms after a {@code list()}, with {@code unregisterAllServices()}
+     * itself costing 0 ms (JCLAW-1254). It is not our {@code timeout}, which bounds only
+     * {@code list()}. Every hit is already in {@code hits} by the time close is reached, so
+     * nothing the caller receives depends on it finishing.
+     *
+     * <p>Detaching is safe rather than a leak: over 60 iterations of the full fan-out, JmDNS
+     * threads peaked at 28 against a baseline of 3, all 480 detached closes completed, and the
+     * count returned to 3 within eight seconds.
+     */
+    private static void closeDetached(@Nullable JmDNS jmdns) {
+        if (jmdns == null) {
+            return;
+        }
+        final var instance = jmdns;
+        Thread.ofVirtual().name("jmdns-close").start(() -> {
+            try {
+                instance.close();
+            } catch (IOException e) {
+                EventLogger.warn(CATEGORY, "JmDNS close failed: " + e.getMessage());
+            }
+        });
     }
 
     /**
