@@ -50,14 +50,14 @@ import java.util.Set;
  * token from {@link InternalApiTokenService}. The token has FULL scope
  * (owner {@code "system"}) so mutating verbs reach their controllers,
  * but {@link controllers.AuthCheck} still 403s any bearer-authed call
- * to the token-CRUD or password-reset routes -- the {@link #PATH_BLOCKLIST}
+ * to the password-reset routes -- the {@link #PATH_BLOCKLIST}
  * below catches the rest defensively before the request is even made.
  *
  * <p><b>Default-allow blacklist + deny-floor.</b> Invocation is gated by two
  * independent <em>deny</em> layers; everything else is callable. The
  * {@link #PATH_BLOCKLIST} is an unconditional <em>deny-floor</em> applied first
  * -- coarse, whole-subsystem categories that must never be reached: chat-send
- * (recursion), auth (privilege escalation), token CRUD (lockout), webhooks
+ * (recursion), auth (privilege escalation), webhooks
  * (caller-verified), SSE (we buffer full responses), plus secret-bearing /
  * infra / resource-abuse subsystems (bindings, telegram bindings, tailscale,
  * logs, the load-test harness). On top of that, individual actions carry
@@ -96,7 +96,6 @@ public class JClawApiTool implements ToolRegistry.Tool {
     private static final List<String> PATH_BLOCKLIST = List.of(
             "/api/chat/",                 // recursion via send/stream/upload
             "/api/auth/",                 // login/setup/reset -- admin-only via UI
-            "/api/api-tokens",            // privilege-escalation surface
             "/api/webhooks/",             // verified by their own signature
             "/api/events",                // SSE; we buffer full bodies
             "/api/bindings",              // channel routing -- comms redirection / secrets

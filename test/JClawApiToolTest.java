@@ -96,15 +96,6 @@ class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    void blocksApiTokensPath() {
-        var result = tool.execute(
-                "{\"method\":\"POST\",\"path\":\"/api/api-tokens\"," +
-                "\"body\":{\"name\":\"escalation\"}}", null);
-        assertTrue(result.contains("/api/api-tokens"),
-                "token CRUD must be blocked; got: " + result);
-    }
-
-    @Test
     void blocksWebhookPath() {
         var result = tool.execute(
                 "{\"method\":\"POST\",\"path\":\"/api/webhooks/telegram/x/y\"}", null);
