@@ -177,8 +177,9 @@ public final class DangerousActionGate {
         }
     }
 
-    /** Whether this turn was proven to come from the binding owner. */
-    private static boolean ownerInitiated() {
+    /** Whether this turn was proven to come from the binding owner. Public because the slash
+     *  dispatcher gates its owner-only commands on the same answer (JCLAW-1228). */
+    public static boolean ownerInitiated() {
         return Boolean.TRUE.equals(OWNER_INITIATED.get());
     }
 

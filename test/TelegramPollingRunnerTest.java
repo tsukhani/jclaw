@@ -461,7 +461,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     void reactionEventTextRendersAddAndRemove() {
         var added = new TelegramReactionNotifier.ReactionDelta("1", "private", 7, "5", "@ada",
                 java.util.List.of("👍"), java.util.List.of());
-        assertTrue(TelegramReactionNotifier.reactionEventText(added).startsWith("[system] @ada reacted"),
+        assertTrue(TelegramReactionNotifier.reactionEventText(added).startsWith("[reaction] @ada reacted"),
                 "added-only delta must read as a 'reacted' event");
         assertTrue(TelegramReactionNotifier.reactionEventText(added).contains("message 7"));
 

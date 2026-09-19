@@ -1,6 +1,7 @@
 import models.Agent;
 import models.Message;
 import models.Prompt;
+import models.SubagentRun;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1600,5 +1601,70 @@ class SlashCommandsTest extends UnitTest {
 
         var model = Commands.handle("/model", agent, "web", "admin", convo).orElseThrow().responseText();
         assertTrue(model.contains("effort: low, conversation override"), model);
+    }
+
+    // ── JCLAW-1228: owner gate on the slash dispatcher ─────────────────
+
+    @Test
+    void nonOwnerModelSwitchIsRefusedAndWritesNoOverride() {
+        seedProvider("ollama-cloud", "kimi-k2", "{\"id\":\"kimi-k2\",\"contextWindow\":200000}");
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-guest-1");
+
+        var result = Commands.execute(Commands.Command.MODEL, agent, "telegram", "peer-guest-1",
+                convo, "ollama-cloud/kimi-k2", false);
+
+        assertEquals(Commands.Command.MODEL, result.command());
+        assertTrue(result.responseText().contains("Only the operator"), result.responseText());
+        var reloaded = ConversationService.findById(convo.id);
+        assertNull(reloaded.modelProviderOverride, "a guest must not write the model override");
+        assertNull(reloaded.modelIdOverride);
+    }
+
+    @Test
+    void nonOwnerMayStillReadTheModel() {
+        // The AC gates the write forms; the bare and `status` forms only report.
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-guest-2");
+
+        var bare = Commands.execute(Commands.Command.MODEL, agent, "telegram", "peer-guest-2",
+                convo, null, false);
+        var status = Commands.execute(Commands.Command.MODEL, agent, "telegram", "peer-guest-2",
+                convo, "status", false);
+
+        assertFalse(bare.responseText().contains("Only the operator"), bare.responseText());
+        assertFalse(status.responseText().contains("Only the operator"), status.responseText());
+    }
+
+    @Test
+    void nonOwnerSubagentKillLeavesTheRunRunning() {
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-guest-3");
+        var run = new SubagentRun();
+        run.parentAgent = agent;
+        run.childAgent = agent;
+        run.parentConversation = convo;
+        run.childConversation = convo;
+        run.startedAt = Instant.now();
+        run.status = SubagentRun.Status.RUNNING;
+        run.save();
+
+        var result = Commands.execute(Commands.Command.SUBAGENT, agent, "telegram", "peer-guest-3",
+                convo, "kill " + run.id, false);
+
+        assertTrue(result.responseText().contains("Only the operator"), result.responseText());
+        assertEquals(SubagentRun.Status.RUNNING,
+                ((SubagentRun) SubagentRun.findById(run.id)).status,
+                "a guest must not kill a running subagent");
+    }
+
+    @Test
+    void nonOwnerPromptDoesNotReturnTheOperatorsLibrary() {
+        seedPrompt("Zed secret playbook", "The operator's private prompt body.", "zedops");
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-guest-4");
+
+        var result = Commands.execute(Commands.Command.PROMPT, agent, "telegram", "peer-guest-4",
+                convo, "Zed", false);
+
+        assertTrue(result.responseText().contains("Only the operator"), result.responseText());
+        assertFalse(result.responseText().contains("The operator's private prompt body."),
+                result.responseText());
     }
 }
