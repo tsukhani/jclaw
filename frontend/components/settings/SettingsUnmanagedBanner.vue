@@ -54,6 +54,8 @@ const MANAGED_PREFIXES = [
   'logs.', // Event log retention — Settings (Logging)
   'llm.', // Primary-provider pin and circuit breaker tuning — Settings (LLM Providers)
   'router.', // Model router lists and budget thresholds — Settings (Model Router)
+  'otel.', // JCLAW-34: OpenTelemetry export, endpoint and sampling — Settings (Telemetry)
+  'tool.approval.', // JCLAW-1022: off-channel approval policy — Settings (Tool Approvals)
   'voice.', // Turn detection, live transcripts and speech pacing — Settings (Voice Mode)
   'telegram.', // Channel defaults — Channels page (Telegram); approval timeout — Settings (Tool Approvals)
   'tailscale.', // Funnel enable/port (tailscale.funnel.*) — managed on the Channels page
