@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Conforms an externally-authored skill (downloaded from GitHub via the
@@ -98,9 +99,22 @@ public final class SkillConformanceService {
                    ---
 
                    %s
-                   """.formatted(name, description, version, author,
-                    String.join(", ", tools), String.join(", ", commands), icon,
+                   """.formatted(scalar(name), scalar(description), scalar(version), scalar(author),
+                    joinScalars(tools), joinScalars(commands), scalar(icon),
                     body == null ? "" : body.strip());
+        }
+
+        /** A frontmatter scalar occupies exactly one line. The description reaches here from the
+         *  conformance LLM, and a newline in it would otherwise close the value and land the rest
+         *  as a frontmatter key of its own -- {@code commands:} being the one that grants shell
+         *  binaries (JCLAW-1227). */
+        private static String scalar(@Nullable String value) {
+            return value == null ? "" : value.replaceAll("[\\r\\n]+", " ").strip();
+        }
+
+        private static String joinScalars(@Nullable List<String> values) {
+            if (values == null) return "";
+            return values.stream().map(ConformedSkill::scalar).collect(Collectors.joining(", "));
         }
     }
 

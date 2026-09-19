@@ -620,7 +620,10 @@ public class ApiAgentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Serve a binary workspace file with its content type for inline rendering or download")
+    @ChatHidden("serves any agent's workspace, including another agent's persona files")
     public static void serveWorkspaceFile(Long id, String filePath) {
+        requireOperatorForWorkspace();
+
         var agent = requireAgent(id);
 
         // acquireWorkspacePath normalizes, compares against the workspace root, and
@@ -642,12 +645,26 @@ public class ApiAgentsController extends Controller {
 
         response.setHeader("Cache-Control", "private, max-age=300");
 
-        var inline = contentType.startsWith("image/") || contentType.startsWith("application/pdf");
+        // A workspace file is agent-writable, so it is served as an attachment unless the type
+        // renders without executing: SVG carries script and text/html is a same-origin XSS with
+        // the operator's session, and both used to match the old `image/` + PDF inline test.
+        var inline = isRasterImage(contentType)
+                || contentType.startsWith("audio/")
+                || contentType.startsWith("application/pdf");
         response.setHeader(HttpKeys.CONTENT_TYPE, contentType);
-        if (inline) {
-            response.setHeader("Content-Disposition", "inline; filename=\"%s\"".formatted(file.getName()));
-        }
+        response.setHeader("Content-Disposition",
+                (inline ? "inline" : "attachment") + "; filename=\"%s\"".formatted(file.getName()));
+        // The app declares no global CSP (http.headers.contentSecurityPolicy is empty by design),
+        // so this response carries its own: `sandbox` alone drops the unique origin's scripts,
+        // forms and plugins even if the type sniffs as something executable.
+        response.setHeader("Content-Security-Policy", "sandbox");
         renderBinary(file);
+    }
+
+    /** {@code image/*} minus the vector types a browser executes: SVG runs script inline, and
+     *  {@code image/svg+xml-compressed} is the same document gzipped. */
+    private static boolean isRasterImage(String contentType) {
+        return contentType.startsWith("image/") && !contentType.startsWith("image/svg");
     }
 
     /** Reject the agent principal on the workspace routes. {@code id} is an arbitrary path

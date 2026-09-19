@@ -95,19 +95,29 @@ public final class AcpHarnessProbe {
             var list = new ArrayList<>(customCommands());
             if (!list.contains(trimmed)) {
                 list.add(trimmed);
-                ConfigService.set(CUSTOM_COMMANDS_KEY, GsonHolder.GSON.toJson(list));
+                var rejected = persist(list);
+                if (rejected != null) {
+                    return new Detected(probe.id(), probe.displayName(), probe.command(), probe.harness(),
+                            false, rejected, true, probe.acpSupport(), probe.acpDetail());
+                }
             }
         }
         return probe;
     }
 
-    /** Remove an operator-added custom command (no-op if absent). */
-    public static void removeCustom(String command) {
+    /** Remove an operator-added custom command; {@code null} unless the write was rejected
+     *  (absent is a no-op, not a rejection). */
+    public static @Nullable String removeCustom(String command) {
         var trimmed = command == null ? "" : command.strip();
         var list = new ArrayList<>(customCommands());
-        if (list.remove(trimmed)) {
-            ConfigService.set(CUSTOM_COMMANDS_KEY, GsonHolder.GSON.toJson(list));
-        }
+        return list.remove(trimmed) ? persist(list) : null;
+    }
+
+    /** Write the list through the seam every other config write shares, so a validation rule
+     *  added for this key later applies here and not only on {@code POST /api/config}
+     *  (JCLAW-1227). Returns the rejection message, or {@code null} when it was stored. */
+    private static @Nullable String persist(List<String> commands) {
+        return ConfigService.setWithSideEffects(CUSTOM_COMMANDS_KEY, GsonHolder.GSON.toJson(commands));
     }
 
     private static Detected probeBuiltIn(Harness h) {

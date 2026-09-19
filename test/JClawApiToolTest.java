@@ -156,6 +156,66 @@ class JClawApiToolTest extends UnitTest {
                 "load-test harness (resource abuse) must be deny-floored; got: " + result);
     }
 
+    // ==================== path normalisation (JCLAW-1227) ====================
+
+    /**
+     * The traversal the audit found. {@code GET /api/skills/{name}/files/{<.+>filePath}} is a
+     * wildcard route with no {@code @ChatHidden}, so its pattern swallows the {@code ../} and
+     * both gate layers passed the raw string — while OkHttp resolved it to {@code /api/logs}
+     * while parsing, which is the path that actually left. Verified against the shipped
+     * okhttp-jvm-5.5.0: {@code HttpUrl.parse(base + that).encodedPath()} is {@code /api/logs}.
+     */
+    @Test
+    void aDotSegmentCannotWalkOutOfAWildcardRouteIntoTheDenyFloor() {
+        var result = tool.execute(
+                "{\"method\":\"GET\",\"path\":\"/api/skills/x/files/../../../logs\"}", null);
+        assertTrue(result.startsWith("Error:"), "the traversal must be refused; got: " + result);
+        assertFalse(result.startsWith("HTTP "),
+                "the traversal must not reach the HTTP call at all; got: " + result);
+    }
+
+    /**
+     * The same walk written {@code %2e%2e}, which the raw-string check cannot see: it is a
+     * dot-segment only after OkHttp decodes it. This is what pins the ordering rather than the
+     * up-front rejection — with the gate back on the raw path it resolves to {@code /api/logs}
+     * and is sent.
+     */
+    @Test
+    void aPercentEncodedDotSegmentIsGatedOnTheResolvedPath() {
+        var result = tool.execute(
+                "{\"method\":\"GET\",\"path\":\"/api/skills/x/files/%2e%2e/%2e%2e/%2e%2e/logs\"}", null);
+        assertTrue(result.contains("/api/logs"),
+                "the resolved path must be what the deny-floor sees; got: " + result);
+        assertTrue(result.contains("reserved and cannot be invoked"),
+                "expected the deny-floor refusal; got: " + result);
+    }
+
+    @Test
+    void refusesTheOtherFormsOkHttpRewrites() {
+        // Measured on okhttp-jvm-5.5.0: a backslash parses as '/', and '#' truncates the rest
+        // of the URL including the query. '//' is not collapsed, but it is a path the router
+        // and the gate can read differently, so it is refused with them.
+        assertTrue(tool.execute("{\"method\":\"GET\",\"path\":\"/api/skills\\\\x/files\"}", null)
+                        .contains("backslash"),
+                "a backslash resolves to a path separator and must be refused");
+        assertTrue(tool.execute("{\"method\":\"GET\",\"path\":\"/api/status#/../logs\"}", null)
+                        .contains("'#'"),
+                "a '#' truncates the URL and must be refused");
+        assertTrue(tool.execute("{\"method\":\"GET\",\"path\":\"/api//memories\"}", null)
+                        .contains("empty path segment"),
+                "an empty path segment must be refused");
+    }
+
+    /** A query string in {@code path} still reaches the gate — the refusals above must not
+     *  fire on a {@code //} or a dot inside a parameter value. */
+    @Test
+    void aQueryStringInThePathIsNotMistakenForATraversal() {
+        var result = tool.execute(
+                "{\"method\":\"GET\",\"path\":\"/api/config?url=https://example.com/..\"}", null);
+        assertFalse(result.contains("cannot be invoked through jclaw_api -- pass the resolved path"),
+                "the query string is not part of the path; got: " + result);
+    }
+
     // ==================== blacklist call gate ====================
 
     @Test
@@ -356,7 +416,6 @@ class JClawApiToolTest extends UnitTest {
             DELETE /api/agents/{id}/skills/{name}/delete
             DELETE /api/apps/{slug}
             DELETE /api/attachments/{uuid}
-            DELETE /api/channels/whatsapp/bindings/{id}
             DELETE /api/conversations/{id}/model-override
             DELETE /api/conversations/{id}/pin
             DELETE /api/conversations/{id}/star
@@ -369,16 +428,13 @@ class JClawApiToolTest extends UnitTest {
             DELETE /api/metrics/logs
             DELETE /api/notifications/{id}
             DELETE /api/prompts/{id}
-            DELETE /api/skills/{name}
             DELETE /api/subagent-runs
             DELETE /api/subagent-runs/{id}
-            DELETE /api/subagents/acp-harnesses
             DELETE /api/tasks/{id}
             DELETE /api/tts/reference-voice
             GET /api/agents
             GET /api/agents/{agentId}/core-migration
             GET /api/agents/{id}
-            GET /api/agents/{id}/files/{<.+>filePath}
             GET /api/agents/{id}/prompt-breakdown
             GET /api/agents/{id}/prompt-text
             GET /api/agents/{id}/shell/effective-allowlist
@@ -470,7 +526,6 @@ class JClawApiToolTest extends UnitTest {
             POST /api/agents
             POST /api/agents/{agentId}/core-migration
             POST /api/apps/{slug}/invoke
-            POST /api/channels/whatsapp/bindings
             POST /api/evals/capture
             POST /api/evals/memory-ingest
             POST /api/logging/levels
@@ -485,11 +540,8 @@ class JClawApiToolTest extends UnitTest {
             POST /api/providers/{name}/discover-models
             POST /api/providers/{name}/embedding-probe
             POST /api/providers/{name}/models
-            POST /api/skills/catalog/import
             POST /api/skills/catalog/refresh
-            POST /api/skills/promote
             POST /api/subagent-runs/{id}/kill
-            POST /api/subagents/acp-harnesses
             POST /api/task-runs/reset
             POST /api/task-runs/{runId}/cancel
             POST /api/tasks
@@ -501,7 +553,6 @@ class JClawApiToolTest extends UnitTest {
             POST /api/tasks/{id}/run
             POST /api/tts/reference-voice
             PUT /api/agents/{id}
-            PUT /api/channels/whatsapp/bindings/{id}
             PUT /api/conversations/{id}/model-override
             PUT /api/conversations/{id}/name
             PUT /api/conversations/{id}/pin
@@ -510,7 +561,6 @@ class JClawApiToolTest extends UnitTest {
             PUT /api/mcp-servers/{id}
             PUT /api/printers/default
             PUT /api/prompts/{id}
-            PUT /api/skills/{name}/rename
             WS /api/voice""".split("\n")));
 
         assertEquals(expected, callableSurface(),
