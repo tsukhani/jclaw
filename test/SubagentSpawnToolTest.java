@@ -160,6 +160,47 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void batchChildrenCarryTheTopLevelModelOverride() throws Exception {
+        // JCLAW-1231: executeBatch built each child's args by hand with null for the model
+        // override, so modelProvider/modelId were honoured on a single spawn and dropped
+        // on a batch. The child conversation's override is where the drop shows.
+        startLlmServer(simpleResponse("BATCH_MODEL_OK"));
+        configureProvider();
+
+        var parent = createAgent("p-batch-model", "spawn-provider", "test-model");
+        ConversationService.create(parent, "web", "u-batch-model");
+        commitAndReopen();
+
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
+                var spawnTool = new SubagentSpawnTool();
+                var yieldTool = new tools.SubagentYieldTool();
+                resultRef.set(agents.ToolContext.withScope(null, 8890L, () -> {
+                    spawnTool.execute("{\"tasks\":[\"do A\"],\"mode\":\"session\","
+                            + "\"modelProvider\":\"spawn-provider\",\"modelId\":\"override-model\"}", p);
+                    return yieldTool.execute("{\"all\":true}", p);
+                }));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(60_000);
+        assertFalse(thread.isAlive(), "batch spawn + yield must complete within 60s");
+        if (errorRef.get() != null) throw errorRef.get();
+
+        var childOverride = Tx.run(() -> {
+            SubagentRun run = SubagentRun.find("parentAgent.id = ?1", parent.id).first();
+            assertNotNull(run, "the batch must have created a run row");
+            return run.childConversation.modelIdOverride;
+        });
+        assertEquals("override-model", childOverride,
+                "a batch child must run on the model the call named, like a single spawn does");
+    }
+
+    @Test
     void inheritBatchFanOutSummarizesParentOnce() throws Exception {
         // JCLAW-503: a context=inherit batch fan-out of N children shares ONE parent
         // conversation, so the parent-context summary must be computed once, not per

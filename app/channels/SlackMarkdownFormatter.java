@@ -64,8 +64,10 @@ public final class SlackMarkdownFormatter {
     }
 
     /** Slack treats {@code & < >} as control characters; escape them in literal
-     *  text (Slack displays the un-escaped character). */
-    static String escape(String s) {
+     *  text (Slack displays the un-escaped character). Public for the approval
+     *  prompt in {@code agents.DangerousActionGate}, which interpolates
+     *  model-controlled text into mrkdwn. */
+    public static String escape(String s) {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 

@@ -569,22 +569,14 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     // ===== JCLAW-377: per-topic agent routing at the dispatch site =====
     //
     // dispatchMerged() runs through the SDK long-poll network path, so the
-    // turn-routing decision is exercised through its private helper
-    // resolveTopicAgent(token, chatId, threadId, defaultAgent) — the exact call
-    // dispatchMerged makes before handing off to
-    // AgentRunner.processInboundForAgentStreaming. Invoked reflectively so no
-    // production-only test seam is added.
+    // turn-routing decision is exercised through TelegramInboundTurn.resolveTopicAgent —
+    // the exact call the turn makes before handing off to
+    // AgentRunner.processInboundForAgentStreaming. JCLAW-1231 made it one
+    // implementation shared with the webhook transport, so this is the only copy.
 
     private static Agent invokeResolveTopicAgent(String token, String chatId,
                                                  Integer threadId, Agent defaultAgent) {
-        try {
-            var m = TelegramPollingRunner.class.getDeclaredMethod(
-                    "resolveTopicAgent", String.class, String.class, Integer.class, Agent.class);
-            m.setAccessible(true);
-            return (Agent) m.invoke(null, token, chatId, threadId, defaultAgent);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        return channels.TelegramInboundTurn.resolveTopicAgent(token, chatId, threadId, defaultAgent);
     }
 
     /** Seed a (chatId, threadId) override row mapping the topic to {@code overrideAgent}. */

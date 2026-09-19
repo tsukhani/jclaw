@@ -1,7 +1,5 @@
 package controllers;
 
-import agents.AgentRunner;
-import agents.DangerousActionGate;
 import channels.InboundCallback;
 import channels.InboundMessage;
 import channels.TelegramAccessPolicy;
@@ -10,15 +8,14 @@ import channels.TelegramCallbackDispatcher;
 import channels.TelegramChannel;
 import channels.TelegramForwardCoalesceBuffer;
 import channels.TelegramInboundTextBuffer;
+import channels.TelegramInboundTurn;
 import channels.TelegramMediaGroupBuffer;
 import channels.TelegramReactionNotifier;
-import channels.TelegramStreamingSink;
 import channels.TelegramWebhookRateLimiter;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import models.Agent;
 import models.TelegramBinding;
-import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import play.Play;
 import play.mvc.Controller;
@@ -348,87 +345,7 @@ public class WebhookTelegramController extends Controller {
     }
 
     private static void processMessage(BindingCtx ctx, InboundMessage message) {
-        final String sendToken = ctx.botToken();
-        final String sendChatId = message.chatId();
-        final Agent sendAgent = ctx.agent();
-        try {
-            // JCLAW-136: if the message carries attachments, gate them against
-            // the agent's model capabilities, then download each into workspace
-            // staging. Rejections (modality mismatch, size exceeded, network
-            // failures) produce a user-visible reply rather than a silent drop.
-            var inputs = TelegramChannel.prepareInboundAttachments(
-                    sendToken, sendChatId, sendAgent, message);
-            if (inputs == null) return; // prepareInboundAttachments already replied + logged
-
-            // JCLAW-94: stream the response as it's generated. The sink owns
-            // send/edit/delete of the preview message; on completion it
-            // delegates to the per-binding TelegramChannel's sendTurn (the planner
-            // path) for media-rich / oversize responses. JCLAW-95: the factory
-            // defers sink construction until AgentRunner has resolved the
-            // conversation id so the sink can persist its checkpoint.
-            // JCLAW-370: a DM keys off the binding owner (unchanged); an allowed
-            // group/supergroup keys off the chat id (one shared conversation per
-            // chat, per forum topic) so members share one transcript owned by the
-            // binding's JClaw peer. Sender attribution is prefixed onto group
-            // messages so the agent can tell members apart. The outbound sink
-            // still routes to the chat id (sendChatId).
-            final String sendChatType = message.chatType();
-            final String peerId = AgentRunner.telegramConversationPeerId(
-                    ctx.telegramUserId(), sendChatType, sendChatId, message.messageThreadId());
-            final String attributedText = AgentRunner.telegramSenderAttributed(
-                    message.text(), sendChatType, message.fromDisplayName(), message.fromId());
-            // JCLAW-377: route a forum-topic message to its per-topic override
-            // agent when one is mapped; falls back to the binding default for
-            // non-topic / unmapped messages. peerId + sink are unchanged — only
-            // which agent runs the turn changes.
-            final Agent runAgent = resolveTopicAgent(sendToken, sendChatId, message.messageThreadId(), sendAgent);
-            // JCLAW-1061: same comparison the access policy made, recomputed on the thread that
-            // actually runs the turn. All three coalescing lanes key per sender, so `message`
-            // is one person's and its fromId is the value that was checked at the door.
-            final boolean ownerInitiated = ctx.telegramUserId().equals(message.fromId());
-            // JCLAW-387 B4 follow-up: pass the Telegram chat.type so the new
-            // conversation is stamped with it (plain DM vs group history caps).
-            DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
-                AgentRunner.processInboundForAgentStreaming(
-                        runAgent, CHANNEL_TELEGRAM, peerId, attributedText,
-                        convId -> new TelegramStreamingSink(
-                                sendToken, sendChatId, sendAgent, convId, sendChatType,
-                                message.messageId(), message.messageThreadId()),
-                        inputs, sendChatType);
-                return null;
-            });
-        } catch (Exception e) {
-            EventLogger.error(CATEGORY_CHANNEL, ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
-                    "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));
-            TelegramChannel.forToken(sendToken).sendText(sendChatId,
-                    "Sorry, an error occurred processing your message.");
-        }
-    }
-
-    /**
-     * JCLAW-377: resolve which agent should run a turn for {@code (chatId,
-     * threadId)}. Reads the binding by its bot token and delegates to
-     * {@link TelegramBinding#resolveAgentForTopic} — returning the per-topic
-     * override agent when mapped, otherwise the binding's default. The read
-     * runs in a {@link services.Tx} (this runs on an off-request virtual
-     * thread with no ambient JPA transaction), and the resolved agent's name is
-     * touched eagerly to avoid detached-proxy access on the streaming path.
-     * Falls back to {@code defaultAgent} if the binding can't be found (e.g.
-     * removed between receive and dispatch).
-     */
-    private static Agent resolveTopicAgent(String botToken, String chatId, @Nullable Integer threadId,
-                                           Agent defaultAgent) {
-        return Tx.run(() -> {
-            TelegramBinding binding = TelegramBinding.findByBotToken(botToken);
-            if (binding == null) return defaultAgent;
-            Agent resolved = binding.resolveAgentForTopic(chatId, threadId);
-            if (resolved != null) {
-                var _ = resolved.name; // touch inside tx to avoid detached-proxy access later
-            }
-            // Fall back to the binding default if a topic-override's agent FK was
-            // orphaned (agent deleted): resolveAgentForTopic returns null then, and a
-            // null agent NPEs in ConversationService downstream.
-            return resolved != null ? resolved : defaultAgent;
-        });
+        TelegramInboundTurn.run(ctx.bindingId(), ctx.botToken(), ctx.telegramUserId(),
+                ctx.agent(), message);
     }
 }
