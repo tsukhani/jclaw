@@ -104,6 +104,7 @@ public class ApiTaskStatsController extends Controller {
      * history.
      */
     @Operation(summary = "Reset dashboard KPIs by deleting terminal (non-RUNNING) task runs and transcripts, scoped by payloadType")
+    @ChatHidden("deletes terminal task runs and their transcripts -- the operator's record of what ran")
     public static void resetStats(String payloadType, String excludePayloadType) {
         int deleted = TaskStatsService.resetTerminalRuns(payloadType, excludePayloadType);
 

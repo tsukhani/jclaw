@@ -251,6 +251,7 @@ public class ApiMemoryController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = MemoryUpdateRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryDto.class)))
     @Operation(summary = "Adjust a memory's importance and/or category")
+    @ChatHidden("edits any agent's memory row; the scoped memory tool is the agent path")
     public static void update(Long memoryId) {
         Memory memory = MemoryService.findById(memoryId);
         if (memory == null) {
@@ -305,6 +306,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = EvalGenerateView.class)))
     @Operation(summary = "Generate a memory-recall eval suite from the corpus")
+    @ChatHidden("builds an eval suite out of the whole memory corpus")
     public static void evalGenerate() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -381,6 +383,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryEvalScorer.Report.class)))
     @Operation(summary = "Score a memory-recall eval suite against live recall")
+    @ChatHidden("scores recall over every agent's memories and spends embedding calls")
     public static void evalRun() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -429,6 +432,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryKeyBackfillService.Status.class)))
     @Operation(summary = "Backfill core promotion and retrieval keys over an existing corpus")
+    @ChatHidden("rewrites retrieval keys across the whole corpus")
     public static void backfillKeysStart() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -492,6 +496,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RecallView.class)))
     @Operation(summary = "Inspect what memory recall returns for a query")
+    @ChatHidden("reads any agent's memories; the scoped memory tool is the agent path")
     public static void recall() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -558,6 +563,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "202")
     @Operation(summary = "Recategorise one agent's core memories past the cap")
+    @ChatHidden("rewrites any agent's core memories -- the cross-agent reach /api/memories is floored for")
     public static void coreMigrationStart(Long agentId) {
         requireAgentById(agentId);
         var refusal = CoreMemoryCapMigration.start(String.valueOf(agentId));
@@ -595,6 +601,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "202")
     @Operation(summary = "Start re-embedding stored memories")
+    @ChatHidden("re-embeds every stored memory -- bulk model spend")
     public static void reembedStart() {
         var refusal = MemoryReembedService.start();
         if (refusal != null) {
@@ -609,6 +616,7 @@ public class ApiMemoryController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Delete a memory")
+    @ChatHidden("deletes any agent's memory row; the scoped memory tool is the agent path")
     public static void delete(Long memoryId) {
         Memory memory = MemoryService.findById(memoryId);
         if (memory == null) {

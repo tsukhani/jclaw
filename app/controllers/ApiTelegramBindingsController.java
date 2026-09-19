@@ -110,6 +110,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
+    @ChatHidden("stores a Telegram bot token")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -163,6 +164,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
+    @ChatHidden("rewrites a binding's bot token or its target agent")
     public static void update(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();
@@ -323,6 +325,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TelegramWebhookRegistrar.ProbeResult.class)))
     // Sonar java:S2259: notFound() never returns (throws play.mvc.results.NotFound), so binding is non-null below.
     @SuppressWarnings("java:S2259")
+    @ChatHidden("spends a live getMe against the stored bot token")
     public static void test(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();
@@ -334,6 +337,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     }
 
     @SuppressWarnings("java:S2259")
+    @ChatHidden("takes the operator's Telegram channel offline")
     public static void delete(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();

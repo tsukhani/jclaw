@@ -124,6 +124,7 @@ public class ApiProvidersController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
     @Operation(summary = "Discover a provider's available models from its live API")
+    @AgentCallable("/api/providers is agent-reachable by design; SsrfGuard and key masking are the seams")
     public static void discoverModels(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
@@ -289,6 +290,7 @@ public class ApiProvidersController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelInfoRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AddModelResponse.class)))
     @Operation(summary = "Add a model to a provider by id")
+    @AgentCallable("extends a provider's model list; the baseUrl it dials stays behind SsrfGuard")
     public static void addModel(String name) {
         requireConfiguredProvider(name);
 
@@ -379,6 +381,7 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Check whether a model serves embeddings, and at what dimension")
+    @AgentCallable("probes a configured provider; SsrfGuard bounds the outbound dial")
     public static void embeddingProbe(String name) {
         requireConfiguredProvider(name);
         var body = JsonBodyReader.readJsonBody();
@@ -573,6 +576,7 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RefreshPricesResponse.class)))
     @Operation(summary = "Manually refresh LiteLLM model prices (synchronous)")
+    @AgentCallable("pulls the LiteLLM price table from a fixed URL")
     public static void refreshPrices() {
         var result = PricingRefreshService.refresh();
         renderJSON(gson.toJson(new RefreshPricesResponse(

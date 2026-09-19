@@ -76,6 +76,7 @@ public class WebhookTelegramController extends Controller {
     private static final long DEFAULT_MAX_BODY_BYTES = 1_048_576L;
 
     @SuppressWarnings("java:S2259")
+    @ChatHidden("inbound provider callback, authenticated by the per-binding secret token")
     public static void webhook(Long bindingId) {
         BindingCtx ctx = loadBindingCtx(bindingId);
         if (ctx == null) {

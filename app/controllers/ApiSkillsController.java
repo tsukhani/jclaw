@@ -171,6 +171,7 @@ public class ApiSkillsController extends Controller {
      * (not applicable).
      */
     @Operation(summary = "Refresh a static dump catalog from its update URL")
+    @ChatHidden("re-pulls the registry catalog the operator installs skills from")
     public static void catalogRefresh() {
         var body = JsonBodyReader.readJsonBody();
         var catalogId = body != null && body.has(KEY_CATALOG) ? body.get(KEY_CATALOG).getAsString() : null;
@@ -432,9 +433,9 @@ public class ApiSkillsController extends Controller {
     }
 
     /** Reject the agent principal on the writes that move shell-allowlist grants -- the per-agent
-     *  install and toggle, and the four registry writes (import, promote, rename, delete) that
-     *  decide what those install. Gated on how the request authenticated, not on self-reference:
-     *  agent A widening agent B's allowlist escalates just as well. */
+     *  install, toggle and delete, and the four registry writes (import, promote, rename, delete)
+     *  that decide what those install. Gated on how the request authenticated, not on
+     *  self-reference: agent A widening agent B's allowlist escalates just as well. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
@@ -594,7 +595,10 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
     @Operation(summary = "Delete a skill from an agent's workspace and revoke its shell-allowlist grants")
+    @ChatHidden("deletes any agent's workspace skill and revokes its shell-allowlist grants")
     public static void deleteAgentSkill(Long id, String name) {
+        requireOperator();
+
         Agent agent = AgentService.findById(id);
         if (agent == null) {
             notFound();

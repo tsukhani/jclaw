@@ -88,6 +88,7 @@ public class ApiNotificationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Mark a notification acknowledged (idempotent), without deleting it")
+    @AgentCallable("marks read; the row and the record it carries survive")
     public static void ack(Long id) {
         var n = NotificationService.findById(id);
         if (n == null) {
@@ -113,6 +114,7 @@ public class ApiNotificationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Hard-delete a notification by id")
+    @ChatHidden("hard-deletes an operator notification -- the record an agent's own run raised")
     public static void delete(Long id) {
         var n = NotificationService.findById(id);
         if (n == null) {

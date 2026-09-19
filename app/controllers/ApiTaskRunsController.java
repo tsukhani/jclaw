@@ -227,6 +227,7 @@ public class ApiTaskRunsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskRunView.class)))
     @Operation(summary = "Cancel an in-progress task run by runId (cooperative flag + stamp CANCELLED), 400 if not RUNNING")
+    @AgentCallable("cooperative cancel of a run; task_manager is the scoped agent path")
     public static void cancelRun(Long runId) {
         TaskRun run = TaskService.findRunById(runId);
         if (run == null) {

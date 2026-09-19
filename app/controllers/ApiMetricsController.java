@@ -136,6 +136,7 @@ public class ApiMetricsController extends Controller {
     /** DELETE /api/metrics/latency — reset histograms. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Reset latency segment histograms")
+    @ChatHidden("discards the operator's latency histograms")
     public static void resetLatency() {
         LatencyStats.reset();
         renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
@@ -201,6 +202,7 @@ public class ApiMetricsController extends Controller {
     /** DELETE /api/metrics/latency/rows — clear the persisted latency time-series (JCLAW-515). */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Clear persisted latency metric rows")
+    @ChatHidden("discards the operator's persisted latency rows")
     public static void clearLatencyRows() {
         LatencyMetric.deleteAll();
         renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
@@ -281,6 +283,7 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogFootprint.Purged.class)))
     @Operation(summary = "Delete rolled-over log archives, keeping the current log file")
+    @ChatHidden("deletes rolled-over log archives -- the record of what an agent did")
     public static void purgeLogs() {
         renderJSON(GSON.toJson(LogFootprint.purgeArchives()));
     }
@@ -288,6 +291,7 @@ public class ApiMetricsController extends Controller {
     /** DELETE /api/metrics/compression — clear all recorded compression metrics. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Reset (delete) all compression metrics")
+    @ChatHidden("discards the operator's compression metrics")
     public static void resetCompression() {
         CompressionMetrics.reset();
         renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
@@ -432,6 +436,7 @@ public class ApiMetricsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoadtestResponse.class)))
+    @ChatHidden("drives a synthetic load sweep -- resource and cost abuse")
     public static void loadtest() {
         var input = parseLoadtestInput();
         validateLoadtestInput(input);
@@ -714,6 +719,7 @@ public class ApiMetricsController extends Controller {
 
     /** DELETE /api/metrics/loadtest — stop the embedded mock provider. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @ChatHidden("stops the operator's load-test harness mid-run")
     public static void stopLoadtest() {
         LoadTestHarness.stop();
         renderJSON(GSON.toJson(new StatusResponse("stopped")));
@@ -722,6 +728,7 @@ public class ApiMetricsController extends Controller {
     /** DELETE /api/metrics/loadtest/data — delete loadtest conversations, messages, and events. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @ChatHidden("bulk-deletes the conversations a load test left behind")
     public static void cleanLoadtest() {
         LoadTestRunner.cleanupConversations();
         LoadTestRunner.forgetMockBreaker();
