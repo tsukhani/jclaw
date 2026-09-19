@@ -64,7 +64,9 @@ import java.util.Set;
  * {@link controllers.ChatHidden} as a precise per-action opt-out (see
  * {@link #isCallable}). Any {@code /api/} route that resolves to a controller
  * action and is caught by neither layer is callable -- so a newly-added endpoint
- * is reachable with no annotation. Catalog text comes from the Swagger
+ * is reachable with no annotation. Both layers run on {@link HttpUrl#encodedPath()}
+ * rather than on the model's string, so a path cannot resolve past them on its way
+ * out (JCLAW-1227). Catalog text comes from the Swagger
  * {@code @Operation} summary and {@code @RequestBody} schema, synthesized from
  * the action name and request DTO when those are absent. The security boundary
  * is the two code-enforced deny layers, not the prose.
@@ -241,8 +243,22 @@ public class JClawApiTool implements ToolRegistry.Tool {
         if (!path.startsWith(API_PREFIX)) {
             return "Error: path must start with /api/ -- got: " + path;
         }
+        var unnormalized = unnormalizedReason(path);
+        if (unnormalized != null) {
+            return "Error: path contains %s and cannot be invoked through jclaw_api -- pass the resolved path. Got: %s"
+                    .formatted(unnormalized, path);
+        }
+
+        var url = buildUrl(path, args);
+        if (url == null) {
+            return "Error: could not construct URL for path: " + path;
+        }
+        // Gate the path that will actually be sent, not the one the model typed: HttpUrl
+        // resolves dot-segments while parsing, so `/api/skills/x/files/../../../logs`
+        // checked raw passes both layers and then leaves as `/api/logs` (JCLAW-1227).
+        var gatedPath = url.encodedPath();
         for (var blocked : PATH_BLOCKLIST) {
-            if (path.startsWith(blocked)) {
+            if (gatedPath.startsWith(blocked)) {
                 return "Error: %s is reserved and cannot be invoked through jclaw_api. "
                         .formatted(blocked)
                         + "See the jclaw-api SKILL.md for the boundary.";
@@ -252,15 +268,10 @@ public class JClawApiTool implements ToolRegistry.Tool {
         // is callable unless the deny-floor (above) or a @ChatHidden marker excludes
         // it -- the same set `discover` advertises. The deny-floor runs first, so a
         // path that were ever both deny-floored and otherwise-callable stays blocked.
-        if (!isCallable(method, path)) {
+        if (!isCallable(method, gatedPath)) {
             return "Error: %s %s is not callable through jclaw_api (no such endpoint, or it is deny-listed). "
-                    .formatted(method, path)
+                    .formatted(method, gatedPath)
                     + "Use action=\"discover\" to list the callable endpoints.";
-        }
-
-        var url = buildUrl(path, args);
-        if (url == null) {
-            return "Error: could not construct URL for path: " + path;
         }
 
         var requestBuilder = new Request.Builder()
@@ -283,6 +294,26 @@ public class JClawApiTool implements ToolRegistry.Tool {
         } catch (IOException e) {
             return "Error: HTTP request failed: " + e.getMessage();
         }
+    }
+
+    /**
+     * Why {@code path} must be refused before it is parsed, or {@code null} when it is clean.
+     * Each form makes the string the model wrote disagree with the URL that leaves: a
+     * dot-segment or a backslash resolves elsewhere (measured on OkHttp 5.5.0 --
+     * {@code /api/foo\bar} parses as {@code /api/foo/bar}), a {@code #} truncates the rest
+     * including the query, and an empty segment is a path the router and the gate can read
+     * differently. Refusing is safe because none of them can be part of a real JClaw route.
+     */
+    private static @Nullable String unnormalizedReason(String path) {
+        if (path.indexOf('#') >= 0) return "a '#'";
+        int q = path.indexOf('?');
+        var pathPart = q >= 0 ? path.substring(0, q) : path;
+        if (pathPart.indexOf('\\') >= 0) return "a backslash";
+        if (pathPart.contains("//")) return "an empty path segment ('//')";
+        for (var segment : pathPart.split("/", -1)) {
+            if (".".equals(segment) || "..".equals(segment)) return "a dot-segment";
+        }
+        return null;
     }
 
     private static @Nullable HttpUrl buildUrl(String path, JsonObject args) {

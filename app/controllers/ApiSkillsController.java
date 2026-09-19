@@ -190,7 +190,10 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillImportRequest.class)))
     @Operation(summary = "Import a catalog skill from GitHub into the global registry")
+    @ChatHidden("installs a third-party skill whose shell allowlist the registry then carries")
     public static void catalogImport() {
+        requireOperator();
+
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("source") || !body.has("skillId")) {
             badRequest();
@@ -354,7 +357,10 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
     @Operation(summary = "Delete a global skill (rejects the built-in skill-creator)")
+    @ChatHidden("removes a registry skill every agent installs from")
     public static void delete(String name) {
+        requireOperator();
+
         if ("skill-creator".equals(name)) {
             ApiResponses.error(403, ApiResponses.FORBIDDEN, "The skill-creator skill is a built-in skill and cannot be deleted.");
         }
@@ -425,14 +431,15 @@ public class ApiSkillsController extends Controller {
         }).toList();
     }
 
-    /** Reject the agent principal on the two writes that move shell-allowlist grants. Gated on
-     *  how the request authenticated, not on self-reference: agent A widening agent B's allowlist
-     *  escalates just as well. */
+    /** Reject the agent principal on the writes that move shell-allowlist grants -- the per-agent
+     *  install and toggle, and the four registry writes (import, promote, rename, delete) that
+     *  decide what those install. Gated on how the request authenticated, not on self-reference:
+     *  agent A widening agent B's allowlist escalates just as well. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "Skill configuration is operator-only; an agent cannot install or enable a skill "
-                            + "for itself or for another agent.");
+                            + "for itself or for another agent, nor change the global registry.");
         }
     }
 
@@ -612,7 +619,10 @@ public class ApiSkillsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillPromoteRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillPromoteResponse.class)))
     @Operation(summary = "Promote an agent workspace skill to the global registry (sanitizes asynchronously)")
+    @ChatHidden("lifts an agent-authored skill into the registry every other agent installs from")
     public static void promote() {
+        requireOperator();
+
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("agentId") || !body.has(KEY_SKILL_NAME)) {
             badRequest();
@@ -663,7 +673,10 @@ public class ApiSkillsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillRenameRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillRenameResponse.class)))
     @Operation(summary = "Rename a global skill folder")
+    @ChatHidden("renaming a registry skill re-points every agent that installs it by name")
     public static void rename(String name) {
+        requireOperator();
+
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_NEW_NAME)) {
             badRequest();
