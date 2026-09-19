@@ -244,28 +244,31 @@ public final class WorkspaceFiles {
     }
 
     private static void zipInto(Path root, Path base, Path dir, ZipOutputStream zip) throws IOException {
-        try (var children = Files.newDirectoryStream(dir)) {
-            for (var child : children) {
-                // Each child re-enters the guard so an in-tree symlink escaping the root is dropped.
-                if (WorkspacePathGuard.resolveContained(root, root.relativize(child).toString()) == null) continue;
-                BasicFileAttributes attrs;
-                try {
-                    attrs = Files.readAttributes(child, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-                }
-                catch (IOException _) {
-                    continue; // vanished mid-walk
-                }
-                var name = base.relativize(child).toString().replace('\\', '/');
-                if (attrs.isDirectory()) {
-                    zip.putNextEntry(new ZipEntry(name + "/"));
-                    zip.closeEntry();
-                    zipInto(root, base, child, zip);
-                }
-                else if (attrs.isRegularFile()) {
-                    zip.putNextEntry(new ZipEntry(name));
-                    Files.copy(child, zip);
-                    zip.closeEntry();
-                }
+        List<Path> children;
+        // Directory order is the filesystem's (hashed on ext4), so sort for the same archive everywhere.
+        try (Stream<Path> listing = Files.list(dir)) {
+            children = listing.sorted().toList();
+        }
+        for (var child : children) {
+            // Each child re-enters the guard so an in-tree symlink escaping the root is dropped.
+            if (WorkspacePathGuard.resolveContained(root, root.relativize(child).toString()) == null) continue;
+            BasicFileAttributes attrs;
+            try {
+                attrs = Files.readAttributes(child, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            }
+            catch (IOException _) {
+                continue; // vanished mid-walk
+            }
+            var name = base.relativize(child).toString().replace('\\', '/');
+            if (attrs.isDirectory()) {
+                zip.putNextEntry(new ZipEntry(name + "/"));
+                zip.closeEntry();
+                zipInto(root, base, child, zip);
+            }
+            else if (attrs.isRegularFile()) {
+                zip.putNextEntry(new ZipEntry(name));
+                Files.copy(child, zip);
+                zip.closeEntry();
             }
         }
     }
