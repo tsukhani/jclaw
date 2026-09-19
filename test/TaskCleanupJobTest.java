@@ -137,9 +137,10 @@ class TaskCleanupJobTest extends UnitTest {
         assertEquals(TaskCleanupJob.RETENTION_DISABLED,
                 TaskCleanupJob.resolveRetentionDays());
 
-        // Negative falls back to default (with a warn the test doesn't assert).
+        // JCLAW-1231: negative disables, like 0 — the shared resolver never turns a
+        // non-positive value into a deletion window.
         ConfigService.set(CONFIG_KEY, "-5");
-        assertEquals(TaskCleanupJob.DEFAULT_RETENTION_DAYS,
+        assertEquals(TaskCleanupJob.RETENTION_DISABLED,
                 TaskCleanupJob.resolveRetentionDays());
 
         // Above the 3650-day cap falls back to default.

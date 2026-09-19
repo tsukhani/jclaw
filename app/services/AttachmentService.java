@@ -20,7 +20,9 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -425,5 +427,29 @@ public final class AttachmentService {
     public static boolean anyAudio(List<Input> inputs) {
         if (inputs == null) return false;
         return inputs.stream().anyMatch(i -> MessageAttachment.KIND_AUDIO.equalsIgnoreCase(i.kind()));
+    }
+
+    /**
+     * JCLAW-1231: the per-attachment JSON the chat UI reads, built in one place. The
+     * conversation-reload response and the live SSE {@code tool_call} frame each had
+     * their own copy and the copies had drifted apart on {@code deleted}.
+     */
+    public static Map<String, Object> toView(MessageAttachment a) {
+        var view = new LinkedHashMap<String, Object>();
+        view.put("uuid", a.uuid);
+        view.put("originalFilename", a.originalFilename);
+        view.put("mimeType", a.mimeType);
+        view.put("sizeBytes", a.sizeBytes);
+        view.put("kind", a.kind);
+        view.put("generated", a.generated); // JCLAW-227: chat UI badges tool-generated images
+        view.put("deleted", a.deleted); // JCLAW-209: chip shows a "deleted from workspace" marker
+        if (a.generationMetadata != null) view.put("generationMetadata", a.generationMetadata);
+        if (a.generationJobId != null) view.put("generationJobId", a.generationJobId); // JCLAW-234: chat polls this job
+        return view;
+    }
+
+    /** {@link #toView(MessageAttachment)} over a list, in order. */
+    public static List<Map<String, Object>> toViews(List<MessageAttachment> attachments) {
+        return attachments.stream().map(AttachmentService::toView).toList();
     }
 }

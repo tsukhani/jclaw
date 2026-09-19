@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
  * JCLAW-827: the {@code @Schema} records documenting the {@code /conversations}
  * and {@code /messages} responses are hand-maintained beside HashMap-based
  * emitters ({@code conversationToMap}, {@code messageToMap},
- * {@code attachmentsToList}), so a new map key can silently drift out of the
+ * {@code AttachmentService.toViews}), so a new map key can silently drift out of the
  * OpenAPI contract. These tests populate every optional field, run the real
  * emitters via reflection, and assert the emitted keys are a subset of the
  * corresponding record's component names — failing the moment a map key lacks a
@@ -88,8 +88,9 @@ class ApiConversationsControllerSchemaDriftTest extends UnitTest {
         att.generationMetadata = "{}";
         att.generationJobId = 5L;
 
-        List<Map<String, Object>> emitted = invoke("attachmentsToList",
-                new Class<?>[]{List.class}, List.of(att));
+        // JCLAW-1231: the attachment view moved to AttachmentService, where the live SSE
+        // frame reads it too — the @Schema record documents both surfaces now.
+        List<Map<String, Object>> emitted = services.AttachmentService.toViews(List.of(att));
 
         var allowed = componentNames(MessageAttachmentView.class);
         for (var el : emitted) {

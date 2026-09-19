@@ -4,7 +4,6 @@ import models.LatencyMetric;
 import play.jobs.Every;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
-import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
 import utils.AppClock;
@@ -21,7 +20,7 @@ import java.time.temporal.ChronoUnit;
  * <p>Configuration: {@code latency.metrics.retentionDays} (integer; default
  * {@link #DEFAULT_RETENTION_DAYS}). Set to {@link #RETENTION_DISABLED} — or unset
  * to the default — to govern behavior; out-of-range / non-numeric values fall back
- * to the default with a one-shot warn. Mirrors {@code TaskCleanupJob}'s parsing.
+ * to the default with a one-shot warn.
  */
 // JCLAW-1067: @Every alone first fires a full interval after boot, so a 24h period
 // never elapses on an instance restarted more often than daily.
@@ -37,7 +36,7 @@ public class LatencyMetricCleanupJob extends Job<Void> {
     public static final int DEFAULT_RETENTION_DAYS = 14;
 
     /** Sentinel value (0) meaning "retention disabled, never auto-delete". */
-    public static final int RETENTION_DISABLED = 0;
+    public static final int RETENTION_DISABLED = RetentionDays.DISABLED;
 
     private static final int MAX_RETENTION_DAYS = 3650;
 
@@ -55,27 +54,10 @@ public class LatencyMetricCleanupJob extends Job<Void> {
         }
     }
 
-    /** Read {@code latency.metrics.retentionDays}: missing → default, 0 → disabled,
-     *  out-of-range / non-numeric → default plus a warn. Public for direct test access. */
+    /** Read {@code latency.metrics.retentionDays} through the resolver the three cleanup
+     *  jobs share. Public for direct test access. */
     public static int resolveRetentionDays() {
-        var raw = ConfigService.get(CONFIG_KEY);
-        if (raw == null || raw.isBlank()) return DEFAULT_RETENTION_DAYS;
-        try {
-            var parsed = Integer.parseInt(raw.trim());
-            if (parsed == 0) return RETENTION_DISABLED;
-            if (parsed < 0 || parsed > MAX_RETENTION_DAYS) {
-                EventLogger.warn(EVENT_CATEGORY,
-                        ("latency.metrics.retentionDays out of range (%d); using default %d. "
-                                + "Allowed: 0 (disabled) or 1..%d.")
-                                .formatted(parsed, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS));
-                return DEFAULT_RETENTION_DAYS;
-            }
-            return parsed;
-        } catch (NumberFormatException _) {
-            EventLogger.warn(EVENT_CATEGORY,
-                    "latency.metrics.retentionDays is not numeric ('%s'); using default %d"
-                            .formatted(raw, DEFAULT_RETENTION_DAYS));
-            return DEFAULT_RETENTION_DAYS;
-        }
+        return RetentionDays.fromConfig(CONFIG_KEY, DEFAULT_RETENTION_DAYS,
+                MAX_RETENTION_DAYS, EVENT_CATEGORY);
     }
 }

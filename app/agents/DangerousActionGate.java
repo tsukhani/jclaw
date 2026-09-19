@@ -1,6 +1,7 @@
 package agents;
 
 import channels.SlackApprovalService;
+import channels.SlackMarkdownFormatter;
 import channels.TelegramApprovalService;
 import channels.TelegramMarkdownFormatter;
 import com.google.gson.JsonParser;
@@ -599,8 +600,9 @@ public final class DangerousActionGate {
 
     /**
      * Slack mrkdwn prompt body (rendered inside a Block Kit section). The args go in
-     * a fenced code block so backticks/asterisks in them don't format, and are
-     * length-capped like {@link #buildPrompt}.
+     * a fenced code block and are length-capped like {@link #buildPrompt}; both are
+     * escaped for their own grammar — {@code escapeHtml} would be wrong here, Slack
+     * is not HTML.
      */
     private static String buildSlackPrompt(@Nullable String toolName, @Nullable String argsJson) {
         var args = argsJson == null ? "" : argsJson;
@@ -608,8 +610,18 @@ public final class DangerousActionGate {
             args = args.substring(0, 600) + "… (truncated)";
         }
         var why = extractWhy(argsJson);
-        var whyLine = why == null ? "" : "*Why:* " + why + "\n";
-        return "The agent wants to run the *" + toolName + "* action:\n" + whyLine + "```" + args + "```";
+        var whyLine = why == null ? "" : "*Why:* " + slackSafe(why) + "\n";
+        return "The agent wants to run the *" + slackSafe(toolName) + "* action:\n"
+                + whyLine + "```" + slackSafe(args) + "```";
+    }
+
+    /**
+     * Slack's control characters, plus a backtick run: model-controlled args inside the
+     * fence would otherwise close it and render the rest of the payload as mrkdwn in an
+     * approval prompt. A zero-width space between backticks cannot open or close a fence.
+     */
+    private static String slackSafe(@Nullable String s) {
+        return s == null ? "" : SlackMarkdownFormatter.escape(s).replace("`", "`\u200b");
     }
 
     /**

@@ -33,14 +33,14 @@ public final class DiarizeSidecarManager {
 
     /**
      * Ensure the sidecar is up and return its base URL. Idempotent and
-     * single-flight: concurrent callers serialize on the daemon lock so only
-     * one daemon is ever spawned. Throws {@link TranscriptionException} when
+     * single-flight (JCLAW-830): the spawn + health-await run under the daemon's
+     * {@code startLock}, so only one daemon is ever spawned. Throws {@link TranscriptionException} when
      * uv is absent, the script is missing, or the daemon doesn't become
      * healthy in time (the gated pyannote weights need a Hugging Face token).
      */
     public static String ensureRunning() {
         if (DAEMON.isHealthy(IDENTITY)) return DAEMON.baseUrl();
-        synchronized (DAEMON.lock()) {
+        return DAEMON.singleFlight(() -> {
             if (DAEMON.isHealthy(IDENTITY)) return DAEMON.baseUrl();
             if (!UvProbe.isAvailable()) {
                 throw new TranscriptionException(
@@ -50,7 +50,7 @@ public final class DiarizeSidecarManager {
             DAEMON.spawn(IDENTITY, resolveHfToken());
             DAEMON.awaitHealthy();
             return DAEMON.baseUrl();
-        }
+        });
     }
 
     /** JCLAW-565/614: the diarization-specific token wins; blank falls back to
