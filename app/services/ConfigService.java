@@ -36,6 +36,7 @@ import tools.SubagentSpawnTool;
 import tools.scrape.WebScrapeSettings;
 import utils.ErrorRendering;
 import utils.HttpFactories;
+import utils.SsrfGuard;
 import utils.StartupErrorTemplates;
 import utils.TokenCoalescer;
 
@@ -55,6 +56,9 @@ public class ConfigService {
 
     /** Namespace every per-provider config key lives under: {@code provider.<name>.<field>}. */
     private static final String PROVIDER_KEY_PREFIX = "provider.";
+
+    /** The per-provider key whose value is an outbound destination. */
+    private static final String BASE_URL_SUFFIX = ".baseUrl";
 
     // Possessive: a repeated group that can backtrack recurses per character and can overflow the stack.
     private static final Pattern TESSERACT_LANGUAGES = Pattern.compile("\\w++(?:\\+\\w++)*+");
@@ -356,6 +360,18 @@ public class ConfigService {
         // Every model picker lists the router under this name, so no real provider may take it.
         if (key.startsWith(PROVIDER_KEY_PREFIX + ModelRouter.PROVIDER + ".")) {
             return "The provider name '" + ModelRouter.PROVIDER + "' is reserved for the model router.";
+        }
+
+        // JCLAW-1229: the chat path now dials through the provider-guarded client, so a base URL
+        // in the metadata range fails at connect as an opaque DNS error on the operator's next
+        // turn. Refused at the write, where the message can say which range and why.
+        if (key.startsWith(PROVIDER_KEY_PREFIX) && key.endsWith(BASE_URL_SUFFIX)
+                && value != null && !value.isBlank()) {
+            try {
+                SsrfGuard.assertProviderUrlSafe(value.trim());
+            } catch (SecurityException e) {
+                return e.getMessage();
+            }
         }
 
         // Each of these readers falls back to its default on a bad value, so without a check

@@ -458,12 +458,14 @@ public final class SsrfGuard {
 
     // ─── Provider / MCP relaxed guard (JCLAW-778) ────────────────────────
     //
-    // Operator- and agent-settable LLM provider base URLs and MCP endpoint
-    // URLs are a different trust boundary from the LLM-emitted web_fetch URLs
-    // the strict {@link #isUnsafe} guard above screens: a prompt-injected agent
-    // can set them via the jclaw_api tool, so they need SSRF screening — but
-    // they legitimately point at loopback (Ollama 127.0.0.1:11434, LM Studio)
-    // and LAN hosts, which the strict guard blocks outright. This relaxed
+    // Operator-settable LLM provider base URLs and MCP endpoint URLs are a
+    // different trust boundary from the LLM-emitted web_fetch URLs the strict
+    // {@link #isUnsafe} guard above screens. JCLAW-1022 closed the agent's own
+    // write path — POST /api/config refuses the agent principal — so these are
+    // the operator's to set; they still need screening, because the value
+    // outlives the write and a host can rebind after it (JCLAW-1229). But they
+    // legitimately point at loopback (Ollama 127.0.0.1:11434, LM Studio) and
+    // LAN hosts, which the strict guard blocks outright. This relaxed
     // variant blocks only the ranges that are never a legitimate provider/MCP
     // target yet are the real escalation surface: link-local (169.254.0.0/16 —
     // the cloud-metadata endpoint 169.254.169.254 — plus fe80::/10), multicast,

@@ -215,6 +215,60 @@ class PrinterToolTest extends UnitTest {
         assertFalse(out.contains("not answering"), out);
     }
 
+    // ─── Model-chosen destinations (JCLAW-1229) ───
+
+    @Test
+    void aMetadataRangeTargetIsRefusedBeforeAnyConnection() {
+        // Every backend behind this tool writes bytes to whatever answers, so an
+        // arbitrary host is an outbound-connection primitive. 169.254.169.254 is the
+        // cloud-metadata endpoint: refused outright rather than gated, because no
+        // approval makes it a printer.
+        var byHost = run("{\"action\":\"print\",\"host\":\"169.254.169.254\",\"text\":\"hi\"}");
+        assertTrue(byHost.startsWith("Error:"), byHost);
+        assertTrue(byHost.contains("never a printer"), byHost);
+
+        // The unmatched-name fallback reaches the same constructor with the same string.
+        var byName = run("{\"action\":\"print\",\"printer\":\"169.254.169.254\",\"text\":\"hi\"}");
+        assertTrue(byName.contains("never a printer"), byName);
+
+        // status and cancel dial the address too — the refusal is not print-only.
+        var byStatus = run("{\"action\":\"status\",\"host\":\"169.254.169.254\"}");
+        assertTrue(byStatus.contains("never a printer"), byStatus);
+    }
+
+    @Test
+    void aHostNobodyChoseGoesThroughTheApprovalGate() {
+        // TEST-NET-1: well-formed and routable-looking, so it is not refused — but
+        // nobody chose it, and the aggregated backend failures used to answer whether
+        // a port was open there. That decision belongs to the operator.
+        assertTrue(new PrinterTool().dangerous(
+                "{\"action\":\"print\",\"host\":\"192.0.2.10\",\"text\":\"hi\"}"));
+    }
+
+    @Test
+    void aTargetAHumanChoseIsNotGated() {
+        PrinterDefaults.save(new PrinterDefaults.Defaults(
+                "Office laser", "192.0.2.10", 631, "IPP", Map.of()));
+        var tool = new PrinterTool();
+
+        assertFalse(tool.dangerous("{\"action\":\"print\",\"host\":\"192.0.2.10\",\"text\":\"hi\"}"),
+                "the saved default named explicitly is still the operator's own choice");
+        assertFalse(tool.dangerous("{\"action\":\"print\",\"text\":\"hi\"}"),
+                "naming no target at all uses that same choice");
+        // The host was chosen; this port was not. 6379 is Redis, which is the shape
+        // the finding named: a loopback service reachable as a blind byte sink.
+        assertTrue(tool.dangerous(
+                "{\"action\":\"print\",\"host\":\"192.0.2.10\",\"port\":6379,\"text\":\"hi\"}"));
+    }
+
+    @Test
+    void argumentsThatReachNoDestinationAreNotGated() {
+        var tool = new PrinterTool();
+        // execute() refuses these before opening anything, so a prompt would be noise.
+        assertFalse(tool.dangerous("not json"));
+        assertFalse(tool.dangerous("{\"action\":\"discover\"}"));
+    }
+
     @Test
     void documentFormatIsInferredFromTheExtension() {
         assertEquals("application/pdf", PrinterTool.formatFor("report.PDF"));
