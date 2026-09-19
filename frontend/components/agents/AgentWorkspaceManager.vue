@@ -325,117 +325,123 @@ watch(() => props.agentId, () => {
       v-else
       class="pb-2"
     >
+      <!-- A bounded viewport: the page keeps its shape however large the workspace grows. -->
       <div
-        v-for="row in rows"
-        :key="row.entry.path"
-        class="flex items-center gap-2 pr-3 py-1 hover:bg-muted/50 transition-colors"
-        :style="{ paddingLeft: `${12 + row.depth * 16}px` }"
-        :data-testid="`ws-row-${row.entry.path}`"
+        class="max-h-[32rem] overflow-y-auto border-t border-border"
+        data-testid="workspace-scroll"
       >
-        <button
-          v-if="row.entry.kind === 'dir'"
-          type="button"
-          class="flex items-center gap-1.5 min-w-0 flex-1 text-left text-fg-primary bg-transparent border-0"
-          :aria-expanded="isShownOpen(row.entry.path)"
-          @click="toggle(row.entry.path)"
+        <div
+          v-for="row in rows"
+          :key="row.entry.path"
+          class="flex items-center gap-2 pr-3 py-1 hover:bg-muted/50 transition-colors"
+          :style="{ paddingLeft: `${12 + row.depth * 16}px` }"
+          :data-testid="`ws-row-${row.entry.path}`"
         >
-          <ChevronRightIcon
-            class="w-3 h-3 shrink-0 text-fg-muted transition-transform"
-            :class="isShownOpen(row.entry.path) ? 'rotate-90' : ''"
-            aria-hidden="true"
-          />
-          <FolderIcon
-            class="w-4 h-4 shrink-0"
-            :class="STYLE_CLASS.dir"
-            aria-hidden="true"
-          />
-          <span
-            class="truncate text-sm font-mono"
-            :class="STYLE_CLASS.dir"
-            data-kind="dir"
-          >{{ row.entry.name }}</span>
-        </button>
-        <span
-          v-else
-          class="flex items-center gap-1.5 min-w-0 flex-1 text-fg-primary"
-        >
-          <span
-            class="w-3 shrink-0"
-            aria-hidden="true"
-          />
-          <component
-            :is="styleOf(row.entry) === 'text' ? DocumentTextIcon : DocumentIcon"
-            class="w-4 h-4 shrink-0"
-            :class="STYLE_CLASS[styleOf(row.entry)]"
-            aria-hidden="true"
-          />
-          <span
-            class="truncate text-sm font-mono"
-            :class="STYLE_CLASS[styleOf(row.entry)]"
-            :data-kind="styleOf(row.entry)"
-          >{{ row.entry.name }}</span>
-        </span>
-
-        <span
-          v-if="row.entry.protected"
-          class="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-muted text-fg-muted"
-          title="A Standing Orders file: listed, never deleted"
-          :data-testid="`ws-protected-${row.entry.path}`"
-        >protected</span>
-
-        <span class="shrink-0 text-xs font-mono tabular-nums text-fg-muted">{{ formatSize(row.entry.size) }}</span>
-
-        <!-- (3) Per-row actions area: download, then delete. -->
-        <span
-          class="flex items-center gap-1 shrink-0"
-          :data-testid="`ws-actions-${row.entry.path}`"
-        >
-          <a
-            :href="downloadHref(row.entry)"
-            download
-            class="w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong transition-colors"
-            :title="row.entry.kind === 'dir' ? 'Download this folder as a zip' : 'Download this file'"
-            :aria-label="`Download ${row.entry.name}`"
-            :data-testid="`ws-download-${row.entry.path}`"
+          <button
+            v-if="row.entry.kind === 'dir'"
+            type="button"
+            class="flex items-center gap-1.5 min-w-0 flex-1 text-left text-fg-primary bg-transparent border-0"
+            :aria-expanded="isShownOpen(row.entry.path)"
+            @click="toggle(row.entry.path)"
           >
-            <ArrowDownTrayIcon
-              class="w-4 h-4"
+            <ChevronRightIcon
+              class="w-3 h-3 shrink-0 text-fg-muted transition-transform"
+              :class="isShownOpen(row.entry.path) ? 'rotate-90' : ''"
               aria-hidden="true"
             />
-          </a>
-          <template v-if="!row.entry.protected">
-            <template v-if="pendingDelete === row.entry.path">
-              <button
-                type="button"
-                class="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-danger"
-                :aria-label="`Confirm: ${deleteLabel(row.entry)}`"
-                :data-testid="`ws-delete-confirm-${row.entry.path}`"
-                @click="confirmDelete(row.entry.path)"
-              >Confirm</button>
-              <button
-                type="button"
-                class="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-fg-muted"
-                :aria-label="`Cancel: ${deleteLabel(row.entry)}`"
-                :data-testid="`ws-delete-cancel-${row.entry.path}`"
-                @click="pendingDelete = null"
-              >Cancel</button>
-            </template>
-            <button
-              v-else
-              type="button"
-              class="border-0 bg-transparent p-0.5 text-fg-muted hover:text-danger"
-              :aria-label="deleteLabel(row.entry)"
-              :title="deleteLabel(row.entry)"
-              :data-testid="`ws-delete-${row.entry.path}`"
-              @click="pendingDelete = row.entry.path"
+            <FolderIcon
+              class="w-4 h-4 shrink-0"
+              :class="STYLE_CLASS.dir"
+              aria-hidden="true"
+            />
+            <span
+              class="truncate text-sm font-mono"
+              :class="STYLE_CLASS.dir"
+              data-kind="dir"
+            >{{ row.entry.name }}</span>
+          </button>
+          <span
+            v-else
+            class="flex items-center gap-1.5 min-w-0 flex-1 text-fg-primary"
+          >
+            <span
+              class="w-3 shrink-0"
+              aria-hidden="true"
+            />
+            <component
+              :is="styleOf(row.entry) === 'text' ? DocumentTextIcon : DocumentIcon"
+              class="w-4 h-4 shrink-0"
+              :class="STYLE_CLASS[styleOf(row.entry)]"
+              aria-hidden="true"
+            />
+            <span
+              class="truncate text-sm font-mono"
+              :class="STYLE_CLASS[styleOf(row.entry)]"
+              :data-kind="styleOf(row.entry)"
+            >{{ row.entry.name }}</span>
+          </span>
+
+          <span
+            v-if="row.entry.protected"
+            class="shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-muted text-fg-muted"
+            title="A Standing Orders file: listed, never deleted"
+            :data-testid="`ws-protected-${row.entry.path}`"
+          >protected</span>
+
+          <span class="shrink-0 text-xs font-mono tabular-nums text-fg-muted">{{ formatSize(row.entry.size) }}</span>
+
+          <!-- (3) Per-row actions area: download, then delete. -->
+          <span
+            class="flex items-center gap-1 shrink-0"
+            :data-testid="`ws-actions-${row.entry.path}`"
+          >
+            <a
+              :href="downloadHref(row.entry)"
+              download
+              class="w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-fg-strong transition-colors"
+              :title="row.entry.kind === 'dir' ? 'Download this folder as a zip' : 'Download this file'"
+              :aria-label="`Download ${row.entry.name}`"
+              :data-testid="`ws-download-${row.entry.path}`"
             >
-              <TrashIcon
+              <ArrowDownTrayIcon
                 class="w-4 h-4"
                 aria-hidden="true"
               />
-            </button>
-          </template>
-        </span>
+            </a>
+            <template v-if="!row.entry.protected">
+              <template v-if="pendingDelete === row.entry.path">
+                <button
+                  type="button"
+                  class="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-danger"
+                  :aria-label="`Confirm: ${deleteLabel(row.entry)}`"
+                  :data-testid="`ws-delete-confirm-${row.entry.path}`"
+                  @click="confirmDelete(row.entry.path)"
+                >Confirm</button>
+                <button
+                  type="button"
+                  class="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-fg-muted"
+                  :aria-label="`Cancel: ${deleteLabel(row.entry)}`"
+                  :data-testid="`ws-delete-cancel-${row.entry.path}`"
+                  @click="pendingDelete = null"
+                >Cancel</button>
+              </template>
+              <button
+                v-else
+                type="button"
+                class="border-0 bg-transparent p-0.5 text-fg-muted hover:text-danger"
+                :aria-label="deleteLabel(row.entry)"
+                :title="deleteLabel(row.entry)"
+                :data-testid="`ws-delete-${row.entry.path}`"
+                @click="pendingDelete = row.entry.path"
+              >
+                <TrashIcon
+                  class="w-4 h-4"
+                  aria-hidden="true"
+                />
+              </button>
+            </template>
+          </span>
+        </div>
       </div>
       <p
         v-if="hiddenRows > 0"

@@ -133,6 +133,11 @@ describe('AgentWorkspaceManager filter and colours', () => {
     await settle()
     expect(rowPaths(component)).toHaveLength(1000)
     expect(component.find('[data-testid="workspace-row-cap"]').text()).toContain('first 1,000 of 1,500 rows')
+    // The rows scroll inside a bounded viewport; the cap notice sits below it, always visible.
+    const scroll = component.find('[data-testid="workspace-scroll"]')
+    expect(scroll.classes()).toContain('overflow-y-auto')
+    expect(scroll.findAll('[data-testid^="ws-row-"]')).toHaveLength(1000)
+    expect(scroll.find('[data-testid="workspace-row-cap"]').exists()).toBe(false)
 
     await typeFilter(component, 'bulk-09')
     expect(rowPaths(component)).toHaveLength(100)
