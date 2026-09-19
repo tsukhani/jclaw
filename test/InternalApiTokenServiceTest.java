@@ -11,16 +11,17 @@ import utils.TokenHasher;
  * Verify the auto-bootstrap and self-healing behavior of
  * {@link InternalApiTokenService} (JCLAW-282).
  *
- * <p>Three invariants this layer must guarantee:
+ * <p>Since JCLAW-1266 the plaintext is held in the process and never persisted, so the
+ * invariants are:
  * <ol>
- *   <li>First call mints a token and persists both halves (config row
- *       carrying the plaintext, ApiToken row carrying the hash).</li>
- *   <li>Subsequent calls reuse the existing token instead of minting a
- *       new one on every boot (which would leave dead rows behind).</li>
- *   <li>If the ApiToken row is wiped but the config row survives (or
- *       vice-versa), the next call re-mints both — the system can't be
- *       left in a "stored plaintext but no row to validate against"
- *       state where {@code jclaw_api} starts hitting 401.</li>
+ *   <li>A mint writes the hash and <em>only</em> the hash — no config row carries the
+ *       credential, because a database copy is recoverable by a shell query or a backup.</li>
+ *   <li>Subsequent calls reuse the held token rather than minting per boot.</li>
+ *   <li>A wiped {@link ApiToken} row still self-heals, so the tool cannot be left
+ *       authenticating against nothing (JCLAW-852).</li>
+ *   <li>A revocation outlives the process: the plaintext no longer does, so without a
+ *       row-level check a restart would mint a replacement and undo it (JCLAW-1034).</li>
+ *   <li>An upgrade deletes the legacy plaintext row <em>and</em> the credential it named.</li>
  * </ol>
  */
 class InternalApiTokenServiceTest extends UnitTest {
@@ -28,6 +29,7 @@ class InternalApiTokenServiceTest extends UnitTest {
     private void resetState() {
         ApiToken.deleteAll();
         ConfigService.delete(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
+        InternalApiTokenService.resetForTest();
     }
 
     @BeforeEach
@@ -43,9 +45,10 @@ class InternalApiTokenServiceTest extends UnitTest {
         assertTrue(token.startsWith(TokenHasher.TOKEN_PREFIX),
                 "minted token should carry the jcl_ prefix so it's recognizable in logs; got: " + token);
 
-        // Config row carries the plaintext for the tool's HTTP call.
-        var stored = ConfigService.get(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
-        assertEquals(token, stored);
+        // The credential must exist nowhere in the database (JCLAW-1266).
+        assertNull(ConfigService.get(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY),
+                "the plaintext must not be persisted — a config row is recoverable by a shell "
+                        + "query, the database file, or a backup archive");
 
         // ApiToken row carries the hash for AuthCheck to validate against.
         var row = ApiToken.findActiveByPlaintext(token);
@@ -58,7 +61,7 @@ class InternalApiTokenServiceTest extends UnitTest {
         var first = InternalApiTokenService.token();
         var second = InternalApiTokenService.token();
         assertEquals(first, second,
-                "second call should read the cached config row, not mint fresh");
+                "second call should reuse the token held in the process, not mint fresh");
         // And only ONE ApiToken row exists.
         long rows = ApiToken.count();
         assertEquals(1L, rows,
@@ -88,18 +91,42 @@ class InternalApiTokenServiceTest extends UnitTest {
     }
 
     @Test
-    void mintsFreshWhenConfigRowMissing() {
-        InternalApiTokenService.token();
-        // Inverse scenario: config row wiped (e.g. via an admin's
-        // /api/config DELETE before we filtered the prefix). Cache
-        // invalidation forces a re-read; since the config row is gone
-        // we mint a fresh one.
-        ConfigService.delete(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
+    void anUpgradeDeletesTheLegacyPlaintextRowAndTheCredentialItNamed() {
+        // The pre-JCLAW-1266 shape: plaintext in config, hash in the row. Deleting the config
+        // row alone would leave that credential working for anyone who copied it while it was
+        // readable, so the ApiToken row must go with it.
+        var legacy = TokenHasher.mint();
+        ConfigService.set(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY, legacy);
+        var legacyRow = new ApiToken();
+        legacyRow.ownerUsername = InternalApiTokenService.SYSTEM_OWNER;
+        legacyRow.secretHash = TokenHasher.hash(legacy);
+        legacyRow.save();
 
         var fresh = InternalApiTokenService.token();
-        var stored = ConfigService.get(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
-        assertEquals(fresh, stored,
-                "missing config row should be repopulated by the bootstrap path");
+
+        assertNotEquals(legacy, fresh, "the legacy credential must not be handed back");
+        assertNull(ConfigService.get(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY),
+                "the legacy config row must be gone");
+        assertNull(ApiToken.findAnyByPlaintext(legacy),
+                "the legacy credential must stop authenticating, not merely stop being stored");
+        assertNotNull(ApiToken.findActiveByPlaintext(fresh));
+    }
+
+    @Test
+    void aRevocationSurvivesTheProcessThatHeldTheToken() {
+        var token = InternalApiTokenService.token();
+        var row = ApiToken.findActiveByPlaintext(token);
+        assertNotNull(row);
+        row.revokedAt = utils.AppClock.now();
+        row.save();
+
+        // The plaintext no longer survives a restart, so without a row-level check the mint
+        // below would hand out a working replacement and quietly undo the revocation.
+        InternalApiTokenService.resetForTest();
+
+        assertEquals("", InternalApiTokenService.token(),
+                "a revoked system token must not be replaced by a restart; an empty bearer "
+                        + "keeps the tool 401ing, which is what revocation means");
     }
 
     @Test

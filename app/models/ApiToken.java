@@ -122,6 +122,16 @@ public class ApiToken extends Model {
         return ApiToken.find("secretHash = ?1", TokenHasher.hash(plaintext)).first();
     }
 
+    /** Has {@code owner} revoked a token that no caller can still present?
+     *
+     *  <p>Asked by the internal-token service before minting. Since JCLAW-1266 that token's
+     *  plaintext lives only in the process, so after a restart there is nothing left to match
+     *  against {@link #findAnyByPlaintext} — and without this the mint would hand out a working
+     *  replacement, letting a restart undo an operator's revocation. */
+    public static boolean hasRevokedTokenFor(String owner) {
+        return ApiToken.count("ownerUsername = ?1 AND revokedAt IS NOT NULL", owner) > 0;
+    }
+
     /** Resolve a plaintext bearer token to its row. Returns null if no
      *  row matches. The 64-char {@code secret_hash} unique index makes
      *  this an O(1) hit even with many tokens (we only ever expect one

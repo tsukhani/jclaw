@@ -1,41 +1,36 @@
 package services;
 
 import models.ApiToken;
+import org.jspecify.annotations.Nullable;
 import utils.TokenHasher;
 
 /**
  * Bootstrap and resolve the bearer token the in-process {@code jclaw_api}
  * tool uses to call its own {@code /api/**} endpoints (JCLAW-282).
  *
- * <p>JClaw's bearer-auth path needs an {@link ApiToken} row to validate
- * the {@code Authorization: Bearer <plaintext>} header against. For the
- * tool-to-localhost call, plaintext has to live somewhere the tool can
- * read at request time — it can't recompute the secret from the row's
- * hash. So at first boot we mint the token, save the row (FULL scope,
- * owner {@code "system"}), and stash the plaintext under the
- * {@link #INTERNAL_TOKEN_CONFIG_KEY} config row. Subsequent boots reuse
- * the existing value; if the config row was wiped but the ApiToken row
- * survives, we mint fresh and replace both so the system stays self-
- * healing.
+ * <p>JClaw's bearer-auth path needs an {@link ApiToken} row to validate the
+ * {@code Authorization: Bearer <plaintext>} header against, and the tool cannot
+ * recompute the secret from that row's hash — so the plaintext has to live
+ * somewhere readable at request time. Since JCLAW-1266 that somewhere is this
+ * process and nowhere else: the row keeps the hash, the field below keeps the
+ * plaintext, and the database holds no copy of the credential.
  *
- * <p><b>Why a config row and not an environment variable?</b> The token
- * must be readable from any thread, persisted across restarts, and live
- * in the same backing store as the rest of JClaw's secrets. Env vars
- * also require operator action on every fresh install; the auto-bootstrap
- * approach matches {@code DefaultConfigJob}'s broader posture of "make
- * it work without operator setup".
+ * <p><b>Why not a config row, as it was until JCLAW-1266?</b> A row is recoverable
+ * by anything that reads the Config table without going through the API — a shell
+ * query, the database file, or a backup archive — and the backup route was itself
+ * only hidden from the agent tool rather than gated. The masking on
+ * {@code /api/config} never covered those paths. A process-lifetime secret costs a
+ * fresh token per restart, which nothing depends on, and removes the copy entirely.
  *
- * <p>The config key is filtered from {@code /api/config} listings (see
- * {@code ApiConfigController.RESERVED_KEY_PREFIX}-style guard) and the
- * row's owner of {@code "system"} keeps it out of the Settings UI
- * token listing (which filters to the admin username). The plaintext
- * never leaks through any HTTP-visible surface.
+ * <p>Revocation still outlives the process. It lives on the {@link ApiToken} row,
+ * which is why {@link #ensureToken} refuses to mint while a revoked system row
+ * exists — without that check a restart would silently undo an operator's
+ * revocation (JCLAW-1034 established the semantics; JCLAW-1266 kept them).
  */
 public final class InternalApiTokenService {
 
-    /** Plaintext bearer token used by {@code jclaw_api}. Filtered out
-     *  of all {@code /api/config**} surfaces by the
-     *  {@link #INTERNAL_KEY_PREFIX} guard in {@code ApiConfigController}. */
+    /** The pre-JCLAW-1266 home of the plaintext token. Retained only so
+     *  {@link #dropLegacyPlaintextRow} can find and delete it on upgrade; nothing writes it. */
     public static final String INTERNAL_TOKEN_CONFIG_KEY = "auth.internal.apiToken";
 
     /** Every key starting with this prefix is reserved for JClaw-internal
@@ -50,7 +45,17 @@ public final class InternalApiTokenService {
      *  internal requests. */
     public static final String SYSTEM_OWNER = "system";
 
+    /** The live credential, for this process only. Never persisted: see the class Javadoc. */
+    private static volatile @Nullable String plaintext;
+
     private InternalApiTokenService() {}
+
+    /** Visible for testing: forget the process-held plaintext, as a restart would. Safe to leak
+     *  across concurrently-running test classes — an unset field only causes the next caller to
+     *  mint, which every path already handles. */
+    public static void resetForTest() {
+        plaintext = null;
+    }
 
     /** Return the plaintext bearer token, bootstrapping it on first call and
      *  re-minting if its backing row has gone.
@@ -80,42 +85,75 @@ public final class InternalApiTokenService {
     }
 
     private static String ensureToken() {
-        var stored = ConfigService.get(INTERNAL_TOKEN_CONFIG_KEY);
-        if (stored != null && !stored.isBlank()) {
-            if (ApiToken.findActiveByPlaintext(stored) != null) return stored;
+        dropLegacyPlaintextRow();
 
-            // JCLAW-1034: "missing" and "revoked" used to be one branch, and re-minting on
-            // both made revoking this token impossible — withdraw it and the next call
-            // minted a replacement. Only an absent row is self-healing now. A revoked one
-            // is handed back as-is so every call 401s, which is what revocation means; an
-            // expired one is a rotation signal and does re-mint.
-            var row = ApiToken.findAnyByPlaintext(stored);
+        var current = plaintext;
+        if (current != null && !current.isBlank()) {
+            // JCLAW-852: verify the row on every call rather than trusting the field. A cache
+            // that skipped this left the service handing out a credential authenticating
+            // against nothing for the life of the JVM, and made the self-healing branch below
+            // unreachable. Holding the plaintext in memory does not re-open that: only the
+            // lookup decides whether it is still good.
+            if (ApiToken.findActiveByPlaintext(current) != null) return current;
+
+            // JCLAW-1034: an absent row is self-healing, a revoked one is not — it is handed
+            // back so every call 401s, which is what revocation means. An expired one re-mints.
+            var row = ApiToken.findAnyByPlaintext(current);
             if (row != null && row.revokedAt != null) {
                 EventLogger.warn("auth",
                         "Internal jclaw_api token is revoked — not re-minting; the tool stays "
                                 + "unauthenticated until an operator clears the revocation");
-                return stored;
+                return current;
             }
             EventLogger.info("auth",
                     "Internal jclaw_api token row missing or expired — re-minting");
         }
+
+        // The plaintext no longer survives a restart, so a revocation made before one would be
+        // undone by the mint below unless the row is consulted first.
+        if (ApiToken.hasRevokedTokenFor(SYSTEM_OWNER)) {
+            EventLogger.warn("auth",
+                    "A revoked internal jclaw_api token row exists — not minting a replacement; "
+                            + "clear the revocation to restore the tool");
+            return "";
+        }
         return mintAndStore();
     }
 
-    /** Mint a fresh token, persist both halves (config row carrying the
-     *  plaintext, ApiToken row carrying the hash), commit on a fresh tx
-     *  so startup code that runs outside a request thread is safe. */
+    /**
+     * Remove the pre-JCLAW-1266 config row and the credential it named.
+     *
+     * <p>Deleting the row alone would leave a working token behind: its plaintext was readable
+     * from the database for as long as it existed, so any copy taken is still valid. The
+     * {@link ApiToken} row goes with it. Deleted rather than revoked on purpose — a revocation
+     * here would trip the guard above and refuse to mint the replacement.
+     *
+     * <p>Pre-v1 migration: delete this method and its call once every install has booted past it.
+     */
+    private static void dropLegacyPlaintextRow() {
+        var legacy = ConfigService.get(INTERNAL_TOKEN_CONFIG_KEY);
+        if (legacy == null || legacy.isBlank()) return;
+        var row = ApiToken.findAnyByPlaintext(legacy);
+        if (row != null) row.delete();
+        ConfigService.delete(INTERNAL_TOKEN_CONFIG_KEY);
+        EventLogger.warn("auth",
+                "Removed the legacy plaintext jclaw_api token config row and the credential it "
+                        + "named (JCLAW-1266); a fresh token is minted below");
+    }
+
+    /** Mint a fresh token, persist only its hash, and keep the plaintext in memory. Commits on
+     *  a fresh tx so startup code running outside a request thread is safe. */
     private static String mintAndStore() {
-        var plaintext = TokenHasher.mint();
+        var minted = TokenHasher.mint();
         Tx.run(() -> {
-            ConfigService.set(INTERNAL_TOKEN_CONFIG_KEY, plaintext);
             var row = new ApiToken();
             row.ownerUsername = SYSTEM_OWNER;
-            row.secretHash = TokenHasher.hash(plaintext);
+            row.secretHash = TokenHasher.hash(minted);
             row.save();
         });
+        plaintext = minted;
         EventLogger.info("auth",
                 "Bootstrapped internal jclaw_api token (owner=%s)".formatted(SYSTEM_OWNER));
-        return plaintext;
+        return minted;
     }
 }
