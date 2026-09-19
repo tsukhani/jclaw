@@ -69,7 +69,29 @@ public final class MessageHydrator {
             List<ChatMessage> messages,
             List<VisionAudioAssembler.AudioBearer> audioBearers,
             List<VisionAudioAssembler.ImageBearer> imageBearers,
-            List<VisionAudioAssembler.VideoBearer> videoBearers) {}
+            List<VisionAudioAssembler.VideoBearer> videoBearers) {
+
+        /**
+         * Re-point this hydration at {@code trimmed}, the same list with {@code droppedOldest}
+         * messages removed from the head (position 0, the system prompt, always survives).
+         * Bearer positions shift down by that many; a bearer whose own message was dropped is
+         * discarded, since its media has no slot left to rewrite (JCLAW-1232).
+         */
+        public Hydration afterDroppingOldest(List<ChatMessage> trimmed, int droppedOldest) {
+            if (droppedOldest <= 0) {
+                return trimmed == messages
+                        ? this
+                        : new Hydration(trimmed, audioBearers, imageBearers, videoBearers);
+            }
+            return new Hydration(trimmed,
+                    audioBearers.stream().filter(b -> b.chatMessageIndex() > droppedOldest)
+                            .map(b -> b.shiftedBy(-droppedOldest)).toList(),
+                    imageBearers.stream().filter(b -> b.chatMessageIndex() > droppedOldest)
+                            .map(b -> b.shiftedBy(-droppedOldest)).toList(),
+                    videoBearers.stream().filter(b -> b.chatMessageIndex() > droppedOldest)
+                            .map(b -> b.shiftedBy(-droppedOldest)).toList());
+        }
+    }
 
     /**
      * Build the LLM message list and capture the audio-, image-, and

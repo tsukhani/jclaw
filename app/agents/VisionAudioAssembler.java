@@ -94,6 +94,9 @@ public final class VisionAudioAssembler {
      *                           on this user turn
      */
     public record AudioBearer(int chatMessageIndex, Long msgId, List<Long> audioAttachmentIds) {
+        AudioBearer shiftedBy(int delta) {
+            return new AudioBearer(chatMessageIndex + delta, msgId, audioAttachmentIds);
+        }
     }
 
     /**
@@ -109,6 +112,9 @@ public final class VisionAudioAssembler {
      * @param imageAttachmentIds the persisted image attachment ids on this turn
      */
     public record ImageBearer(int chatMessageIndex, Long msgId, List<Long> imageAttachmentIds) {
+        ImageBearer shiftedBy(int delta) {
+            return new ImageBearer(chatMessageIndex + delta, msgId, imageAttachmentIds);
+        }
     }
 
     /**
@@ -124,6 +130,9 @@ public final class VisionAudioAssembler {
      * @param videoAttachmentIds the persisted video attachment ids on this turn
      */
     public record VideoBearer(int chatMessageIndex, Long msgId, List<Long> videoAttachmentIds) {
+        VideoBearer shiftedBy(int delta) {
+            return new VideoBearer(chatMessageIndex + delta, msgId, videoAttachmentIds);
+        }
     }
 
     /**
@@ -407,12 +416,23 @@ public final class VisionAudioAssembler {
         return Tx.run(() -> {
             var rewritten = new ArrayList<>(messages);
             for (var b : audioBearers) {
+                if (!holdsUserTurn(rewritten, b.chatMessageIndex())) continue;
                 var msg = (Message) Message.findById(b.msgId());
                 if (msg == null) continue;
                 rewritten.set(b.chatMessageIndex(), userMessageFor(msg, false));
             }
             return rewritten;
         });
+    }
+
+    /**
+     * JCLAW-1232: a bearer's slot is only writable while it still holds a USER turn. Compaction and
+     * the context-window trim rebuild the list after hydration computed the index, so an unrebased
+     * bearer would otherwise throw or overwrite an assistant/tool row.
+     */
+    private static boolean holdsUserTurn(List<ChatMessage> messages, int slot) {
+        return slot >= 0 && slot < messages.size()
+                && MessageRole.USER.value.equals(messages.get(slot).role());
     }
 
     /**
@@ -457,6 +477,7 @@ public final class VisionAudioAssembler {
         return Tx.run(() -> {
             var rewritten = new ArrayList<>(messages);
             for (var b : imageBearers) {
+                if (!holdsUserTurn(rewritten, b.chatMessageIndex())) continue;
                 var msg = (Message) Message.findById(b.msgId());
                 if (msg == null) continue;
                 rewritten.set(b.chatMessageIndex(), userMessageFor(msg, supportsAudio, false));
@@ -489,17 +510,17 @@ public final class VisionAudioAssembler {
         if (videoBearers == null || videoBearers.isEmpty()) return messages;
 
         // Phase 1 (no Tx during sampling/captioning): dispatch each video attachment to its strategy.
-        var partsByIndex = dispatchVideoParts(videoBearers, agent);
+        var partsByMessage = dispatchVideoParts(videoBearers, agent);
 
         // Phase 2 (fresh Tx): rebuild each affected user message and append the video parts.
         return Tx.run(() -> {
             var rewritten = new ArrayList<>(messages);
             for (var b : videoBearers) {
+                if (!holdsUserTurn(rewritten, b.chatMessageIndex())) continue;
                 var msg = (Message) Message.findById(b.msgId());
                 if (msg == null) continue;
                 var base = userMessageFor(msg, supportsAudio, supportsVision);
-                rewritten.set(b.chatMessageIndex(),
-                        spliceVideoParts(base, partsByIndex.get(b.chatMessageIndex())));
+                rewritten.set(b.chatMessageIndex(), spliceVideoParts(base, partsByMessage.get(b.msgId())));
             }
             return rewritten;
         });
@@ -507,12 +528,14 @@ public final class VisionAudioAssembler {
 
     /**
      * Phase 1 (no Tx held): dispatch every bearer's video attachments to their interpretation
-     * strategy, accumulating the content parts keyed by the user turn's slot index. A per-attachment
-     * dispatch failure degrades to a short text note rather than failing the turn.
+     * strategy, accumulating the content parts keyed by the bearer's message id. Keyed by id rather
+     * than slot index so dispatch and splice stay paired when the list was rebuilt under the bearers
+     * (JCLAW-1232). A per-attachment dispatch failure degrades to a short text note rather than
+     * failing the turn.
      */
-    private static Map<Integer, List<Map<String, Object>>> dispatchVideoParts(
+    private static Map<Long, List<Map<String, Object>>> dispatchVideoParts(
             List<VideoBearer> videoBearers, Agent agent) {
-        var partsByIndex = new HashMap<Integer, List<Map<String, Object>>>();
+        var partsByMessage = new HashMap<Long, List<Map<String, Object>>>();
         for (var b : videoBearers) {
             var acc = new ArrayList<Map<String, Object>>();
             for (var attId : b.videoAttachmentIds()) {
@@ -529,9 +552,9 @@ public final class VisionAudioAssembler {
                                     + "Settings → Video Interpretation, or enable Image Captioning.]"));
                 }
             }
-            partsByIndex.put(b.chatMessageIndex(), acc);
+            partsByMessage.put(b.msgId(), acc);
         }
-        return partsByIndex;
+        return partsByMessage;
     }
 
     /**

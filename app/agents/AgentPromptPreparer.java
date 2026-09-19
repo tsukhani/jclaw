@@ -167,33 +167,40 @@ final class AgentPromptPreparer {
         // rebuilds from originals; trimToContextWindow below stays the net.
         var compressedMessages = CompressionPipeline.compress(
                 ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
-        var compactedMessages = CompactionGate.maybeCompactAndRebuild(
-                agent, conversationId, userMessage, null,
-                prepared.primary(), compressedMessages, prepared.tools());
-        var finalMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
+        // JCLAW-1232: the bearers travel WITH the list. Compaction rebuilds it and the trim drops
+        // its head, so the hydration-time positions the media rewrites below address are only
+        // valid if each step hands back the bearers that match the list it produced.
+        var compacted = CompactionGate.maybeCompactAndRebuild(
+                agent, conversationId, userMessage, null, prepared.primary(),
+                new MessageHydrator.Hydration(compressedMessages, prepared.audioBearers(),
+                        prepared.imageBearers(), prepared.videoBearers()),
+                prepared.tools());
+        var hydration = ContextWindowManager.trimToContextWindow(compacted, agent, conversation,
                 prepared.primary(), prepared.tools());
+        var finalMessages = hydration.messages();
         // JCLAW-165: when the active model lacks supportsAudio, await
         // any in-flight transcription futures and rewrite the user
         // messages as text-with-transcript before the LLM call. The
         // audio-capable happy path is a no-op and pays zero added latency.
         var modelInfoForAudio = ModelResolver.resolveModelInfo(agent, conversation, prepared.primary()).orElse(null);
         var supportsAudioForCall = modelInfoForAudio != null && modelInfoForAudio.supportsAudio();
-        finalMessages = VisionAudioAssembler.applyTranscriptsForCapability(finalMessages, prepared.audioBearers(), supportsAudioForCall);
+        finalMessages = VisionAudioAssembler.applyTranscriptsForCapability(finalMessages, hydration.audioBearers(), supportsAudioForCall);
         // JCLAW-215: when the active model lacks supportsVision, caption any
         // image attachments (outside Tx) and rewrite the user messages as
         // text-with-caption. supportsAudioForCall is threaded so a turn with
         // both an image and a downgraded voice note rebuilds correctly.
         var supportsVisionForCall = modelInfoForAudio != null && modelInfoForAudio.supportsVision();
-        finalMessages = VisionAudioAssembler.applyCaptionsForCapability(finalMessages, prepared.imageBearers(), supportsVisionForCall, supportsAudioForCall);
+        finalMessages = VisionAudioAssembler.applyCaptionsForCapability(finalMessages, hydration.imageBearers(), supportsVisionForCall, supportsAudioForCall);
         // JCLAW-224: route any video attachments through the dispatcher (native-video /
         // multi-image / text-summary) and splice the content parts in. supportsVision/Audio
         // are threaded so a co-attached downgraded image / voice note survives the rebuild.
-        finalMessages = VisionAudioAssembler.applyVideoForCapability(finalMessages, prepared.videoBearers(), agent, supportsAudioForCall, supportsVisionForCall);
+        finalMessages = VisionAudioAssembler.applyVideoForCapability(finalMessages, hydration.videoBearers(), agent, supportsAudioForCall, supportsVisionForCall);
         // Clock rides the last user message rather than the system prompt (see
         // CurrentTimeInjector). Must mirror applyMediaRewrite's placement: last,
         // after compaction/trim/media, since each of those rebuilds the list.
         finalMessages = CurrentTimeInjector.inject(finalMessages);
-        return new PreparedData(finalMessages, prepared.primary(), prepared.fallback(), prepared.tools(), prepared.audioBearers(), prepared.imageBearers(), prepared.videoBearers());
+        return new PreparedData(finalMessages, prepared.primary(), prepared.fallback(), prepared.tools(),
+                hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
     }
 
     /**
@@ -241,12 +248,16 @@ final class AgentPromptPreparer {
      * Streaming capability rewrite. Compaction + context-window trim + audio-capability rewrite.
      * JCLAW-165: when the active model lacks {@code supportsAudio}, rewrite audio messages to
      * text-with-transcript before the LLM call (no-op on audio-capable models).
+     *
+     * <p>Returns the prologue carrying the rewritten list and the bearers re-based onto it, so the
+     * round-1 audio-format retry downstream addresses the list it is actually re-sending
+     * (JCLAW-1232). Every other field is threaded through unchanged.
      */
-    static List<ChatMessage> applyMediaRewrite(Agent agent, Conversation conversation,
-                                               String userMessage, LlmProvider primary,
-                                               PreparedPrologue prepared,
-                                               boolean supportsAudioForStream,
-                                               boolean supportsVisionForStream) {
+    static PreparedPrologue applyMediaRewrite(Agent agent, Conversation conversation,
+                                              String userMessage, LlmProvider primary,
+                                              PreparedPrologue prepared,
+                                              boolean supportsAudioForStream,
+                                              boolean supportsVisionForStream) {
         // JCLAW-38: if the just-built context exceeds the compaction budget,
         // summarize older turns (LLM call, outside Tx) and rebuild.
         // trimToContextWindow below stays as a drop-oldest fallback for
@@ -254,24 +265,30 @@ final class AgentPromptPreparer {
         // JCLAW-465: same content-aware compression hook on the streaming path.
         var compressedMessages = CompressionPipeline.compress(
                 ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
-        var compactedMessages = CompactionGate.maybeCompactAndRebuild(
-                agent, conversation.id, userMessage, prepared.disabledTools(),
-                primary, compressedMessages, prepared.tools());
-        var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation,
+        // JCLAW-1232: bearers travel with the list through the rebuild and the trim — see the
+        // sibling comment in rewriteSyncMedia.
+        var compacted = CompactionGate.maybeCompactAndRebuild(
+                agent, conversation.id, userMessage, prepared.disabledTools(), primary,
+                new MessageHydrator.Hydration(compressedMessages, prepared.audioBearers(),
+                        prepared.imageBearers(), prepared.videoBearers()),
+                prepared.tools());
+        var hydration = ContextWindowManager.trimToContextWindow(compacted, agent, conversation,
                 primary, prepared.tools());
-        var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(),
-                supportsAudioForStream);
+        var rewritten = VisionAudioAssembler.applyTranscriptsForCapability(hydration.messages(),
+                hydration.audioBearers(), supportsAudioForStream);
         // JCLAW-215: caption image attachments for non-vision models, mirroring
         // the audio downgrade above.
-        var captioned = VisionAudioAssembler.applyCaptionsForCapability(rewritten, prepared.imageBearers(),
+        var captioned = VisionAudioAssembler.applyCaptionsForCapability(rewritten, hydration.imageBearers(),
                 supportsVisionForStream, supportsAudioForStream);
         // JCLAW-224: route video attachments through the dispatcher on the streaming path too.
-        var finalMessages = VisionAudioAssembler.applyVideoForCapability(captioned, prepared.videoBearers(), agent,
+        var finalMessages = VisionAudioAssembler.applyVideoForCapability(captioned, hydration.videoBearers(), agent,
                 supportsAudioForStream, supportsVisionForStream);
         // The clock rides the last user message instead of the system prompt so
         // the cacheable prefix — and the whole history sitting behind it — stays
         // byte-stable across turns. Injected last, after compaction/trim/media
         // rewrites, so nothing downstream rebuilds the list and drops it.
-        return CurrentTimeInjector.inject(finalMessages);
+        return new PreparedPrologue(prepared.assembled(), CurrentTimeInjector.inject(finalMessages),
+                prepared.tools(), prepared.disabledTools(),
+                hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
     }
 }
