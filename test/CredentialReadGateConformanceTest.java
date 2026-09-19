@@ -65,11 +65,55 @@ class CredentialReadGateConformanceTest extends UnitTest {
             Pattern.compile("implementation\\s*=\\s*([\\w.]+)\\.class");
 
     /**
-     * GET routes that do not declare a response type, and so cannot be checked. Ratcheted rather
-     * than swept: each one closed is a line off this number, and a new undeclared route fails
-     * below. Lowering it is the point; raising it needs a reason in the commit.
+     * The GET routes the gate cannot see, named one by one (JCLAW-1268).
+     *
+     * <p>A list rather than a count, and the difference is the whole point: a count stays flat
+     * when someone declares one route and adds another undeclared one, so the gap would look
+     * closed while a fresh blind spot opened. Naming them makes every change to the set a diff.
+     *
+     * <p>Shrinking this is the goal — delete a line once its route declares
+     * {@code @ApiResponse(implementation = ...)}. Thirty-two of these render a typed value and
+     * could be declared today; they are left because the credential-bearing surfaces (bindings,
+     * providers, config, MCP) all declare already and are checked, so annotating the rest is
+     * mostly OpenAPI hygiene and a mis-typed annotation would point the gate at the wrong class.
+     * The two that cannot be declared at all render an anonymous {@code Map.of}.
      */
-    private static final int UNDECLARED_GET_ROUTES = 34;
+    private static final Set<String> UNCHECKABLE_GET_ROUTES = Set.of(
+            "GET /api/agents/{agentId}/core-migration",
+            "GET /api/agents/{id}/files/{<.+>filePath}",
+            "GET /api/agents/{id}/prompt-text",
+            "GET /api/agents/{id}/shell/effective-allowlist",
+            "GET /api/agents/{id}/tool-approvals",
+            "GET /api/agents/{id}/workspace-backup",
+            "GET /api/agents/{id}/workspace-download/{<.+>path}",
+            "GET /api/agents/{id}/workspace-tree",
+            "GET /api/agents/{id}/workspace/{filename}",
+            "GET /api/apps/{slug}/files/{uuid}",
+            "GET /api/attachments/{uuid}",
+            "GET /api/channels/whatsapp/bindings/{id}/qr",
+            "GET /api/conversations/channels",
+            "GET /api/events",
+            "GET /api/imagegen/capability",
+            "GET /api/imagegen/models",
+            "GET /api/imagegen/progress",
+            "GET /api/memories/reembed",
+            "GET /api/metrics/latency",
+            "GET /api/metrics/latency/rows",
+            "GET /api/notifications",
+            "GET /api/prompts/export",
+            "GET /api/skills/catalogs",
+            "GET /api/system/database/backups/{id}/download",
+            "GET /api/tailscale",
+            "GET /api/tasks/{id}/delivery-advisory",
+            "GET /api/timezones",
+            "GET /api/tool-approvals/summary",
+            "GET /api/videogen/capability",
+            "GET /api/videogen/jobs",
+            "GET /api/videogen/jobs/recent",
+            "GET /api/videogen/models",
+            "GET /api/videogen/state",
+            "GET /api/webhooks/whatsapp"
+    );
 
     private static Path repo(String relative) {
         return Path.of(Play.applicationPath.getAbsolutePath()).resolve(relative);
@@ -99,16 +143,63 @@ class CredentialReadGateConformanceTest extends UnitTest {
      * invisible and a new undeclared route would simply not be looked at.
      */
     @Test
-    void theUncheckableGetSurfaceDoesNotGrow() throws IOException {
+    void theUncheckableGetSurfaceIsExactlyTheseRoutes() throws IOException {
         var undeclared = new TreeSet<String>();
-        for (var route : getRoutes().entrySet()) {
-            if (declaredResponseTypes().containsKey(route.getKey())) continue;
-            undeclared.add(route.getKey());
+        for (var route : getRoutes().keySet()) {
+            if (!declaredResponseTypes().containsKey(route)) undeclared.add(route);
         }
-        assertTrue(undeclared.size() <= UNDECLARED_GET_ROUTES,
-                "a GET route with no @ApiResponse(implementation = ...) cannot be checked by the gate "
-                        + "above, and the number of them grew from " + UNDECLARED_GET_ROUTES + " to "
-                        + undeclared.size() + ". Declare the new route's response type: " + undeclared);
+
+        var appeared = new TreeSet<>(undeclared);
+        appeared.removeAll(UNCHECKABLE_GET_ROUTES);
+        var closed = new TreeSet<>(UNCHECKABLE_GET_ROUTES);
+        closed.removeAll(undeclared);
+
+        assertTrue(appeared.isEmpty(),
+                "these GET routes declare no @ApiResponse(implementation = ...), so the gate above "
+                        + "cannot see what they return. Declare the response type: " + appeared);
+        assertTrue(closed.isEmpty(),
+                "these routes now declare a response type, so the gate checks them — delete them "
+                        + "from UNCHECKABLE_GET_ROUTES: " + closed);
+    }
+
+    /**
+     * {@code ApiProvidersController.discoverModels} carries an {@link controllers.AgentCallable} whose
+     * reason names SsrfGuard as one of the two seams keeping that route safely open. Nothing
+     * verified it, so the annotation asserted a property the build did not check — and an
+     * annotation trusted for a guarantee it does not carry is worse than no annotation
+     * (JCLAW-1268).
+     *
+     * <p>Checked as a reachability claim across two files rather than by running the route: the
+     * assertion is that the seam is still on the path, which is what the reason says. Whether
+     * SsrfGuard itself refuses the right ranges is {@code SsrfGuardTest}'s job.
+     *
+     * <p>Read through {@code withoutComments} because the first version of this check did not, and
+     * commenting the seam out left it green — the call survived as text inside the comment that
+     * disabled it.
+     */
+    @Test
+    void theProvidersAnnotationsSsrfClaimIsTrue() throws IOException {
+        var controller = ResourceLeakGateConformanceTest.withoutComments(
+                Files.readString(repo("app/controllers/ApiProvidersController.java")));
+        var at = controller.indexOf("public static void discoverModels(");
+        assertTrue(at > 0, "ApiProvidersController.discoverModels not found — this check is stale");
+        assertTrue(controller.substring(Math.max(0, at - 700), at).contains("SsrfGuard"),
+                "the @AgentCallable reason on discoverModels no longer names SsrfGuard; either it stopped "
+                        + "claiming the seam, or this check is pinned to the wrong action");
+
+        var body = controller.substring(at, Math.min(controller.length(), at + 1200));
+        assertTrue(body.contains("ModelDiscoveryService.discover"),
+                "discoverModels no longer routes through ModelDiscoveryService, so the claimed seam is "
+                        + "no longer on its path: " + body.lines().limit(12).toList());
+
+        var service = ResourceLeakGateConformanceTest.withoutComments(
+                Files.readString(repo("app/services/ModelDiscoveryService.java")));
+        assertTrue(service.contains("SsrfGuard.assertProviderUrlSafe"),
+                "ModelDiscoveryService no longer screens the provider URL, so the annotation on "
+                        + "ApiProvidersController.discoverModels is now claiming a seam that is gone");
+        assertTrue(service.contains("llmSingleShotGuarded"),
+                "ModelDiscoveryService no longer uses the SSRF-guarded transport, which is the half "
+                        + "of the seam that closes the DNS-rebinding window");
     }
 
     /** Guards the two assertions above against a parser that quietly stopped matching. */
@@ -117,6 +208,7 @@ class CredentialReadGateConformanceTest extends UnitTest {
         assertTrue(getRoutes().size() >= 100,
                 "expected 100+ GET /api routes, found " + getRoutes().size()
                         + " — the routes parser stopped matching and both checks above would pass vacuously");
+        assertFalse(UNCHECKABLE_GET_ROUTES.isEmpty(), "the uncheckable list is empty");
         assertTrue(declaredResponseTypes().size() >= 70,
                 "expected 70+ declared response types, found " + declaredResponseTypes().size()
                         + " — the annotation parser stopped matching");
