@@ -75,6 +75,7 @@ public class ApiEvalsController extends Controller {
      * against the operator's working agent by omission, which is exactly the accident
      * worth designing out.
      */
+    @ChatHidden("eval harness only -- loopback plus X-Loadtest-Auth, which an agent cannot present")
     public static void capture() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -151,6 +152,7 @@ public class ApiEvalsController extends Controller {
      * finder on a {@code @NoTransaction} path throws "No active EntityManager".
      */
     @NoTransaction
+    @ChatHidden("eval harness only -- loopback plus X-Loadtest-Auth, which an agent cannot present")
     public static void memoryIngest() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {

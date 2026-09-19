@@ -42,6 +42,7 @@ public class ApiScrapeTestController extends Controller {
      * <p>One rung per call, never the escalation ladder: the ladder returns a single
      * outcome, and per-rung attribution is the only reason this harness exists.
      */
+    @ChatHidden("one call issues up to 150 outbound fetches")
     public static void harness() {
         var body = JsonBodyReader.readJsonBody();
         var rungId = body != null && body.has("rung") ? body.get("rung").getAsString() : "1";

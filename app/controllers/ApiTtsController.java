@@ -274,6 +274,7 @@ public class ApiTtsController extends Controller {
      * and can pick another.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReferenceVoiceResponse.class)))
+    @ChatHidden("replaces the clip a cloning model copies the operator's speaker from")
     public static void uploadReferenceVoice(Upload file) {
         if (file == null || file.asFile() == null || !file.asFile().exists()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "No reference clip supplied");
@@ -302,6 +303,7 @@ public class ApiTtsController extends Controller {
     /** DELETE /api/tts/reference-voice — drop the clip and return to the model's
      *  default speaker. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReferenceVoiceResponse.class)))
+    @ChatHidden("drops the operator's cloned-voice clip")
     public static void clearReferenceVoice() {
         try {
             TtsReferenceVoice.clear(TtsEngine.SIDECAR);

@@ -97,6 +97,7 @@ public class ApiPrintersController extends Controller {
      * than having none.
      */
     @SuppressWarnings("java:S2259")
+    @ChatHidden("repoints the host PrinterTool then sends the operator's print jobs to")
     public static void saveDefault() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {

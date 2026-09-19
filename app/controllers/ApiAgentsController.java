@@ -329,6 +329,7 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
     @Operation(summary = "Create an agent")
+    @AgentCallable("creates a model-config-only agent; tool grants and acpAllowed stay on operator-only routes")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -601,6 +602,7 @@ public class ApiAgentsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Delete an agent by id (the built-in 'main' agent cannot be deleted)")
+    @ChatHidden("deletes any agent together with its workspace (JCLAW-1058)")
     public static void delete(Long id) {
         var agent = requireAgent(id);
         if (agent.isMain()) {

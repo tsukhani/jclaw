@@ -32,6 +32,7 @@ public class WebhookSlackController extends Controller {
     /** JCLAW-783: config prefix for this channel's ingress-gate limits (mirrors telegram.webhook.*). */
     private static final String CFG_PREFIX = "slack.webhook";
 
+    @ChatHidden("inbound provider callback, authenticated by Slack's HMAC rather than by a caller")
     public static void webhook(Long bindingId) {
         var verified = resolveAndVerify(bindingId);
         var binding = verified.binding();
@@ -57,6 +58,7 @@ public class WebhookSlackController extends Controller {
      * extract and decode the {@code payload} field. Resolution runs off-thread so the
      * 200 ack lands inside Slack's 3 s window.
      */
+    @ChatHidden("inbound provider callback, authenticated by Slack's HMAC rather than by a caller")
     public static void interactive(Long bindingId) {
         var verified = resolveAndVerify(bindingId);
         var rawBody = verified.rawBody();

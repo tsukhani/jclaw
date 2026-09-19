@@ -650,6 +650,7 @@ public class ApiConversationsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelOverrideRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ModelOverrideResponse.class)))
     @Operation(summary = "Set a conversation-scoped model provider/model override, validated against the provider registry")
+    @AgentCallable("conversation-scoped model choice, validated against the provider registry")
     public static void setModelOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -693,6 +694,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Clear a conversation's model override, reverting to the agent default (idempotent)")
+    @AgentCallable("reverts one conversation to the agent default")
     public static void clearModelOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -712,6 +714,7 @@ public class ApiConversationsController extends Controller {
      * default is untouched; DELETE clears it.
      */
     @SuppressWarnings("java:S2259")
+    @AgentCallable("conversation-scoped thinking level, validated against the effective model")
     public static void setThinkingOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -741,6 +744,7 @@ public class ApiConversationsController extends Controller {
     }
 
     /** DELETE /api/conversations/{id}/thinking-override — back to the agent's default. */
+    @AgentCallable("reverts one conversation to the agent default")
     public static void clearThinkingOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -762,6 +766,7 @@ public class ApiConversationsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = RenameRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = NameResponse.class)))
     @Operation(summary = "Rename a conversation; the name is non-blank and at most 100 characters")
+    @AgentCallable("conversation metadata; the destructive siblings in this controller are hidden")
     public static void renameConversation(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -793,6 +798,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Star a conversation (idempotent)")
+    @AgentCallable("operator-visible flag, reversible in one call")
     public static void starConversation(Long id) {
         ConversationService.setStarred(requireConversation(id), true);
         renderJSON(gson.toJson(new StatusResponse(STARRED)));
@@ -802,6 +808,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Unstar a conversation (idempotent)")
+    @AgentCallable("operator-visible flag, reversible in one call")
     public static void unstarConversation(Long id) {
         ConversationService.setStarred(requireConversation(id), false);
         renderJSON(gson.toJson(new StatusResponse("unstarred")));
@@ -817,6 +824,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @ApiResponse(responseCode = "409", description = "The pinned-conversation cap is already reached")
     @Operation(summary = "Pin a conversation, up to a cap of 10 (idempotent below the cap)")
+    @AgentCallable("pinning is capped at ten and reversible")
     public static void pinConversation(Long id) {
         if (!ConversationService.pin(requireConversation(id))) {
             ApiResponses.error(409, ApiResponses.CONFLICT,
@@ -831,6 +839,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Unpin a conversation (idempotent)")
+    @AgentCallable("reversible in one call")
     public static void unpinConversation(Long id) {
         ConversationService.unpin(requireConversation(id));
         renderJSON(gson.toJson(new StatusResponse("unpinned")));

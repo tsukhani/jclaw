@@ -67,6 +67,7 @@ public class WebhookWhatsAppController extends Controller {
      * absent), parses, records the 24h window, dispatches, and fast-acks.
      */
     @SuppressWarnings("java:S2259")
+    @ChatHidden("inbound provider callback, authenticated by Meta's X-Hub-Signature-256")
     public static void webhook() {
         // JCLAW-783: pre-auth ingress gate, keyed on the source IP (the routing id
         // is only in the parsed body, so it can't key the limiter pre-parse).

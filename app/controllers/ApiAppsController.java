@@ -85,6 +85,7 @@ public class ApiAppsController extends Controller {
      *  guard against path traversal. */
     @Operation(summary = "Delete an operator-hosted mini-app (removes its public/apps/<slug>/ directory)")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeleteResponse.class)))
+    @ChatHidden("removes an operator-hosted app directory, outside every agent workspace")
     public static void delete(String slug) {
         if (slug == null || !SLUG.matcher(slug).matches()) {
             badRequest("Invalid app slug");

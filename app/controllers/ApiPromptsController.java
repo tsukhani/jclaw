@@ -77,6 +77,7 @@ public class ApiPromptsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptGenerationService.Generated.class)))
     @Operation(summary = "Generate a prompt (title, category, content, tags) from a description; does not save")
+    @AgentCallable("returns a draft without saving; the spend is the calling turn's own")
     public static void generate() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -96,6 +97,7 @@ public class ApiPromptsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = PromptView.class)))
     @Operation(summary = "Create a prompt")
+    @AgentCallable("the prompt library is agent-editable content, not a security control")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -116,6 +118,7 @@ public class ApiPromptsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = PromptView.class)))
     @Operation(summary = "Update a prompt by id (partial: only supplied fields change)")
+    @AgentCallable("partial edit of one prompt row")
     public static void update(Long id) {
         var row = requirePrompt(id);
         var body = JsonBodyReader.readJsonBody();
@@ -134,6 +137,7 @@ public class ApiPromptsController extends Controller {
     }
 
     @Operation(summary = "Delete a prompt by id")
+    @AgentCallable("removes one prompt row")
     public static void delete(Long id) {
         var row = requirePrompt(id);
         row.delete();
@@ -147,6 +151,7 @@ public class ApiPromptsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Import prompts from a JSON document (mode: merge | replace)")
+    @ChatHidden("mode=replace discards the operator's whole prompt library in one call")
     public static void importPrompts() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {

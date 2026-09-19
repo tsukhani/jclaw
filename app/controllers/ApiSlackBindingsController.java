@@ -115,6 +115,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
+    @ChatHidden("stores a Slack bot token and signing secret")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -182,6 +183,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
+    @ChatHidden("rewrites a binding's Slack credentials or its target agent")
     public static void update(Long id) {
         var binding = SlackBinding.<SlackBinding>findById(id);
         if (binding == null) notFound();
@@ -227,6 +229,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SlackWebApi.AuthTestResult.class)))
+    @ChatHidden("spends a live auth.test against the stored Slack token")
     public static void test(Long id) {
         var binding = SlackBinding.<SlackBinding>findById(id);
         if (binding == null) notFound();
@@ -243,6 +246,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     }
 
     @SuppressWarnings("java:S2259")
+    @ChatHidden("takes the operator's Slack channel offline")
     public static void delete(Long id) {
         var binding = SlackBinding.<SlackBinding>findById(id);
         if (binding == null) notFound();

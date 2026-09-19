@@ -243,10 +243,12 @@ class JClawApiToolTest extends UnitTest {
     void isCallableAllowsUnannotatedRoutes() {
         assertTrue(JClawApiTool.isCallable("GET", "/api/status"),
                 "unannotated GET /api/status is callable under the blacklist");
-        assertTrue(JClawApiTool.isCallable("DELETE", "/api/agents/5"),
-                "DELETE agent is callable (real route, not hidden/floored)");
+        // JCLAW-1253 annotated every mutating route, so the ones that stay callable now say so
+        // with @AgentCallable rather than by carrying nothing.
+        assertTrue(JClawApiTool.isCallable("DELETE", "/api/tasks/5"),
+                "@AgentCallable DELETE task is callable -- task_manager is the scoped agent path");
         assertTrue(JClawApiTool.isCallable("POST", "/api/providers/refresh-prices"),
-                "refresh-prices is callable (real route, not hidden/floored)");
+                "@AgentCallable refresh-prices is callable -- /api/providers is open by design");
         assertTrue(JClawApiTool.isCallable("GET", "/api/providers/openrouter/models"),
                 "concrete path resolves against the route pattern");
         // JCLAW-1020: the read-only halves of the two hidden system actions share their
@@ -412,26 +414,14 @@ class JClawApiToolTest extends UnitTest {
     @Test
     void theCallableApiSurfaceIsExactlyTheseRoutes() {
         var expected = new TreeSet<>(List.of("""
-            DELETE /api/agents/{id}
-            DELETE /api/agents/{id}/skills/{name}/delete
-            DELETE /api/apps/{slug}
-            DELETE /api/attachments/{uuid}
             DELETE /api/conversations/{id}/model-override
             DELETE /api/conversations/{id}/pin
             DELETE /api/conversations/{id}/star
             DELETE /api/conversations/{id}/thinking-override
             DELETE /api/logging/levels/{logger}
             DELETE /api/mcp-servers/{id}
-            DELETE /api/metrics/compression
-            DELETE /api/metrics/latency
-            DELETE /api/metrics/latency/rows
-            DELETE /api/metrics/logs
-            DELETE /api/notifications/{id}
             DELETE /api/prompts/{id}
-            DELETE /api/subagent-runs
-            DELETE /api/subagent-runs/{id}
             DELETE /api/tasks/{id}
-            DELETE /api/tts/reference-voice
             GET /api/agents
             GET /api/agents/{agentId}/core-migration
             GET /api/agents/{id}
@@ -524,10 +514,6 @@ class JClawApiToolTest extends UnitTest {
             GET /api/workspace/stats
             PATCH /api/tasks/{id}
             POST /api/agents
-            POST /api/agents/{agentId}/core-migration
-            POST /api/apps/{slug}/invoke
-            POST /api/evals/capture
-            POST /api/evals/memory-ingest
             POST /api/logging/levels
             POST /api/mcp-servers
             POST /api/mcp-servers/{id}/test
@@ -535,14 +521,10 @@ class JClawApiToolTest extends UnitTest {
             POST /api/onboarding/tour-progress
             POST /api/prompts
             POST /api/prompts/generate
-            POST /api/prompts/import
             POST /api/providers/refresh-prices
             POST /api/providers/{name}/discover-models
             POST /api/providers/{name}/embedding-probe
             POST /api/providers/{name}/models
-            POST /api/skills/catalog/refresh
-            POST /api/subagent-runs/{id}/kill
-            POST /api/task-runs/reset
             POST /api/task-runs/{runId}/cancel
             POST /api/tasks
             POST /api/tasks/{id}/cancel
@@ -551,7 +533,6 @@ class JClawApiToolTest extends UnitTest {
             POST /api/tasks/{id}/resume
             POST /api/tasks/{id}/retry
             POST /api/tasks/{id}/run
-            POST /api/tts/reference-voice
             PUT /api/agents/{id}
             PUT /api/conversations/{id}/model-override
             PUT /api/conversations/{id}/name
@@ -559,7 +540,6 @@ class JClawApiToolTest extends UnitTest {
             PUT /api/conversations/{id}/star
             PUT /api/conversations/{id}/thinking-override
             PUT /api/mcp-servers/{id}
-            PUT /api/printers/default
             PUT /api/prompts/{id}
             WS /api/voice""".split("\n")));
 
@@ -567,7 +547,9 @@ class JClawApiToolTest extends UnitTest {
                 "The jclaw_api callable surface changed. Anything listed here can be invoked by "
                         + "an agent through the tool. If the new route writes privilege — config, "
                         + "grants, workspace files, instance lifecycle — it belongs behind "
-                        + "@ChatHidden instead of on this list.");
+                        + "@ChatHidden instead of on this list. A mutating route reaches this list "
+                        + "only by carrying @AgentCallable, which CapabilityRulesTest requires and "
+                        + "whose reason says what bounds it (JCLAW-1253).");
     }
 
     /** What {@code discover} actually advertises, which is what an agent can act on. */

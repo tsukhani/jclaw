@@ -80,6 +80,7 @@ public class ApiAttachmentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Delete an attachment's bytes from the workspace, retaining its record")
+    @ChatHidden("deletes attachment bytes out of any agent's workspace (JCLAW-1058)")
     public static void deleteAttachment(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
         if (att == null) notFound();

@@ -46,6 +46,7 @@ public class ApiTailscaleController extends Controller {
     /** POST /api/tailscale — body {@code {"enabled":bool,"port":int?}}. Persists
      *  the toggle and (re)establishes or tears down the funnel accordingly. */
     @SuppressWarnings("java:S2259")
+    @ChatHidden("opens or closes the public funnel in front of this instance")
     public static void toggle() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(FIELD_ENABLED)) {

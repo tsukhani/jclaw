@@ -4,12 +4,20 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.Source;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.freeze.FreezingArchRule;
 import com.tngtech.archunit.library.freeze.TextFileBasedViolationStore;
+import controllers.AgentCallable;
+import controllers.ChatHidden;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -18,15 +26,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.Predicate;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
- * The four authorities {@code app/} actually holds, each pinned to the classes allowed to
+ * The five authorities {@code app/} actually holds, each pinned to the classes allowed to
  * exercise it: spawn an OS process, resolve a model-controlled filesystem path, open an
- * outbound connection, reach the database.
+ * outbound connection, reach the database, and mutate state on behalf of the agent
+ * principal.
  *
  * <p>Java 25 cannot express a capability in a signature, and JEP 486 removed the SecurityManager
  * so nothing confines one at runtime either — which class holds which authority is invisible to
@@ -49,7 +60,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * pass forever.
  *
  * <p>Network and database hold clean, so those stay strict rules. They live here rather than in
- * {@link ArchitectureTest} so the four capabilities read as one section.
+ * {@link ArchitectureTest} so the capabilities read as one section.
  */
 class CapabilityRulesTest extends UnitTest {
 
@@ -82,7 +93,7 @@ class CapabilityRulesTest extends UnitTest {
     @Test
     void onlyFrozenHoldersSpawnOsProcesses() {
         assertFloor(sourceFilesAccessing(PROCESS_SPAWN, javaClass -> true),
-                FROZEN_PROCESS_SPAWNER_FILES, "process-spawning");
+                FROZEN_PROCESS_SPAWNER_FILES, "process-spawning source files");
 
         ArchRule rule = noClasses()
                 .should().accessTargetWhere(PROCESS_SPAWN)
@@ -123,7 +134,7 @@ class CapabilityRulesTest extends UnitTest {
     @Test
     void toolPathsResolveThroughTheWorkspaceGuard() {
         assertFloor(sourceFilesAccessing(DIRECT_PATH_CONSTRUCTION, CapabilityRulesTest::isToolsClass),
-                FROZEN_DIRECT_PATH_FILES, "tools/ direct-path-building");
+                FROZEN_DIRECT_PATH_FILES, "tools/ direct-path-building source files");
 
         ArchRule rule = noClasses()
                 .that().resideInAPackage("tools..")
@@ -327,6 +338,168 @@ class CapabilityRulesTest extends UnitTest {
         return String.join(" -> ", chain);
     }
 
+    // ===== Capability: mutate state as the agent principal =====
+
+    /** Mutating {@code conf/routes} entries when the stance sweep landed (JCLAW-1253). */
+    private static final int ADJUDICATED_MUTATING_ROUTES = 134;
+
+    private static final Set<String> MUTATING_VERBS = Set.of("POST", "PUT", "PATCH", "DELETE");
+    private static final String PRINCIPAL_CLASS = "controllers.RequestPrincipal";
+    private static final String PRINCIPAL_CHECK = "isAgentOriginated";
+
+    /**
+     * Every mutating route says out loud whether an agent may drive it.
+     *
+     * <p>The boundary was three hand-maintained lists — {@code JClawApiTool.PATH_BLOCKLIST},
+     * {@link ChatHidden} and the {@code requireOperator} helpers — with nothing watching for a
+     * route that joined none of them. Default-allow plus silence meant a new endpoint was
+     * agent-reachable the moment it was written, and the omission looked exactly like a
+     * decision (JCLAW-1253). So silence is now the failure: an action carries {@link ChatHidden},
+     * reaches a {@link controllers.RequestPrincipal#isAgentOriginated()} guard, or carries
+     * {@link AgentCallable} saying why it is deliberately open.
+     *
+     * <p>The guard is matched by what it reaches rather than by being named
+     * {@code requireOperator}: every one of those helpers is a one-line wrapper around the same
+     * check, and a name-matched rule would pass a method called {@code requireOperator} that
+     * checks nothing while failing a correct guard someone renamed.
+     *
+     * <p>Reads are out of scope. A GET that leaks is a masking problem at the seam, which is
+     * where Personal Edition puts it; this capability is about state an agent can change.
+     */
+    @Test
+    void everyMutatingRouteDeclaresAnAgentPrincipalStance() {
+        var routes = mutatingRouteActions();
+        assertFloor(routes.keySet(), ADJUDICATED_MUTATING_ROUTES, "mutating conf/routes entries");
+
+        var unresolved = new TreeSet<String>();
+        for (var route : routes.entrySet()) {
+            var owner = route.getValue().controller();
+            if (!APP_CLASSES.contain(owner)
+                    || APP_CLASSES.get(owner).getMethods().stream()
+                            .noneMatch(m -> m.getName().equals(route.getValue().action()))) {
+                unresolved.add(route.getKey());
+            }
+        }
+        assertTrue(unresolved.isEmpty(),
+                "these mutating routes resolve to no imported controller action, so the rule below "
+                        + "cannot see them and would pass over a genuinely ungated endpoint: " + unresolved);
+
+        ArchRule rule = classes()
+                .that().resideInAPackage("controllers")
+                .should(declareAnAgentPrincipalStance(routes))
+                .because("a mutating route is reachable by the agent principal unless something "
+                        + "refuses it, so leaving the stance unstated grants the capability by "
+                        + "accident (JCLAW-1253); @ChatHidden, a RequestPrincipal.isAgentOriginated "
+                        + "guard and @AgentCallable are the three ways to state one");
+        rule.check(APP_CLASSES);
+    }
+
+    /**
+     * The rule above passes because every route is adjudicated, which is exactly the state in
+     * which a broken condition also passes. This drives it against a stanceless action to show
+     * it still fails, and against one of each stance to show it is not simply failing everything.
+     *
+     * <p>The negative case borrows {@code ApiController.status}, a GET read: no mutating route
+     * is left without a stance to point at, and inventing one in {@code conf/routes} would mean
+     * shipping an ungated endpoint to test the gate.
+     */
+    @Test
+    void theStanceRuleFailsAnActionThatDeclaresNothing() {
+        var error = assertThrows(AssertionError.class,
+                () -> checkStanceOf(new RouteAction("controllers.ApiController", "status")));
+        assertTrue(error.getMessage().contains("declares no agent-principal stance"), error.getMessage());
+
+        checkStanceOf(new RouteAction("controllers.ApiTasksController", "create"));        // @AgentCallable
+        checkStanceOf(new RouteAction("controllers.ApiMetricsController", "purgeLogs"));   // @ChatHidden
+        checkStanceOf(new RouteAction("controllers.ApiAgentsController", "update"));       // guard, two hops
+    }
+
+    private static void checkStanceOf(RouteAction action) {
+        classes()
+                .that().resideInAPackage("controllers")
+                .should(declareAnAgentPrincipalStance(Map.of("POST /api/probe", action)))
+                .check(APP_CLASSES);
+    }
+
+    /** A {@code conf/routes} action target, split the way Play resolves it. */
+    private record RouteAction(String controller, String action) {}
+
+    /**
+     * The mutating routes as declared in {@code conf/routes}, keyed {@code "METHOD path"}.
+     * ArchUnit imports bytecode and cannot see the routes file, so the binding is read from
+     * disk — the same approach {@code WebhookControllerTest.webhookRoutes} takes.
+     */
+    private static Map<String, RouteAction> mutatingRouteActions() {
+        try {
+            var found = new TreeMap<String, RouteAction>();
+            for (var line : Files.readAllLines(Play.getFile("conf/routes").toPath())) {
+                var trimmed = line.strip();
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+                var cols = trimmed.split("\\s+");
+                // A three-column entry whose target has no ':' is a controller action; the
+                // rest are staticDir/staticFile/module bindings with no method behind them.
+                if (cols.length < 3 || !MUTATING_VERBS.contains(cols[0]) || cols[2].contains(":")) continue;
+                int split = cols[2].lastIndexOf('.');
+                if (split < 0) continue;
+                found.put(cols[0] + " " + cols[1],
+                        new RouteAction("controllers." + cols[2].substring(0, split), cols[2].substring(split + 1)));
+            }
+            return found;
+        } catch (IOException e) {
+            throw new AssertionError("cannot read conf/routes", e);
+        }
+    }
+
+    /** Violation text deliberately carries no line number: the frozen rules in this class share
+     *  a store keyed by message, and an unrelated edit above an action must not red the build. */
+    private static ArchCondition<JavaClass> declareAnAgentPrincipalStance(Map<String, RouteAction> routes) {
+        return new ArchCondition<>("declare an agent-principal stance on every mutating route") {
+            @Override
+            public void check(JavaClass javaClass, ConditionEvents events) {
+                for (var route : routes.entrySet()) {
+                    if (!javaClass.getName().equals(route.getValue().controller())) continue;
+                    for (JavaMethod method : javaClass.getMethods()) {
+                        if (!method.getName().equals(route.getValue().action()) || declaresStance(method)) continue;
+                        events.add(SimpleConditionEvent.violated(method, route.getKey()
+                                + " -> " + javaClass.getSimpleName() + "." + method.getName()
+                                + " declares no agent-principal stance: add @ChatHidden, an "
+                                + "isAgentOriginated guard, or @AgentCallable with the reason"));
+                    }
+                }
+            }
+        };
+    }
+
+    private static boolean declaresStance(JavaMethod method) {
+        return method.isAnnotatedWith(ChatHidden.class)
+                || method.isAnnotatedWith(AgentCallable.class)
+                || reachesAgentPrincipalCheck(method);
+    }
+
+    /** BFS through helpers declared on the same controller — the guard is usually one hop away
+     *  ({@code requireOperator}), occasionally two ({@code requireOperatorForAcpChange}). */
+    private static boolean reachesAgentPrincipalCheck(JavaMethod method) {
+        var seen = new HashSet<String>();
+        var queue = new ArrayDeque<JavaMethod>();
+        queue.add(method);
+        seen.add(method.getFullName());
+
+        while (!queue.isEmpty()) {
+            for (var call : queue.poll().getCallsFromSelf()) {
+                if (PRINCIPAL_CLASS.equals(call.getTargetOwner().getName())
+                        && PRINCIPAL_CHECK.equals(call.getTarget().getName())) {
+                    return true;
+                }
+                if (!call.getTargetOwner().equals(method.getOwner())) continue;
+                var member = call.getTarget().resolveMember();
+                if (member.isPresent() && member.get() instanceof JavaMethod next && seen.add(next.getFullName())) {
+                    queue.add(next);
+                }
+            }
+        }
+        return false;
+    }
+
     // ===== Shared machinery =====
 
     /**
@@ -347,7 +520,7 @@ class CapabilityRulesTest extends UnitTest {
      */
     private static void assertFloor(Set<String> matched, int floor, String what) {
         assertTrue(matched.size() >= floor,
-                "expected at least " + floor + " " + what + " source files, found " + matched.size()
+                "expected at least " + floor + " " + what + ", found " + matched.size()
                         + " " + matched + " — the predicate stopped matching, and the frozen rule would "
                         + "prune its baseline to empty and pass. Lower the constant only once a holder "
                         + "was genuinely removed");

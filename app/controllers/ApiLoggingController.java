@@ -55,6 +55,7 @@ public class ApiLoggingController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SaveRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SaveResponse.class)))
     @Operation(summary = "Add or update a per-logger level override (applies live)")
+    @AgentCallable("per-logger level only; the log contents stay behind the /api/logs deny-floor")
     public static void save() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("logger") || !body.has("level")) {
@@ -75,6 +76,7 @@ public class ApiLoggingController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeleteResponse.class)))
     @Operation(summary = "Remove a per-logger level override (reverts to inherited level)")
+    @AgentCallable("reverts a per-logger override to the inherited level")
     public static void delete(String logger) {
         if (logger == null || logger.isBlank()) {
             badRequest();
