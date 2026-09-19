@@ -56,6 +56,8 @@ and the eval suites.
 | UAT-17 Circuit breakers | `breakers.uat.spec.ts` | Registry rows mirrored on the dashboard, grouped by subsystem; read-only |
 | UAT-18 Subagent chips | `subagent-chips.uat.spec.ts` | Stubbed runs and transcripts: status, expand, live poll, close, View all |
 | UAT-19 Subagents page | `subagents.uat.spec.ts` | Stubbed runs: conversation column, grouping, filter; one read-only contract check |
+| UAT-20 Workspace manager | `workspace.uat.spec.ts` | Throwaway agent; tree, filter, colours, download, backup zip, protected refusal, delete; folder and symlink cases seed on disk and skip on a remote instance |
+| UAT-21 Error page | `error-page.uat.spec.ts` | Branded 404 with a way home |
 | Page smoke | `pages.smoke.spec.ts` | Pre-existing; ten top-level pages |
 | Prompt caching | `prompt-caching.uat.spec.ts` | Pre-existing; cached-token badge |
 
