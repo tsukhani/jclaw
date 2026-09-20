@@ -409,9 +409,10 @@ class JClawApiToolTest extends UnitTest {
             DELETE /api/conversations/{id}/pin
             DELETE /api/conversations/{id}/star
             DELETE /api/conversations/{id}/thinking-override
-            DELETE /api/logging/levels/{logger}
             DELETE /api/mcp-servers/{id}
             DELETE /api/prompts/{id}
+            DELETE /api/subagent-runs
+            DELETE /api/subagent-runs/{id}
             DELETE /api/tasks/{id}
             GET /api/agents
             GET /api/agents/{agentId}/core-migration
@@ -505,7 +506,6 @@ class JClawApiToolTest extends UnitTest {
             GET /api/workspace/stats
             PATCH /api/tasks/{id}
             POST /api/agents
-            POST /api/logging/levels
             POST /api/mcp-servers
             POST /api/mcp-servers/{id}/test
             POST /api/notifications/{id}/ack
@@ -516,6 +516,7 @@ class JClawApiToolTest extends UnitTest {
             POST /api/providers/{name}/discover-models
             POST /api/providers/{name}/embedding-probe
             POST /api/providers/{name}/models
+            POST /api/subagent-runs/{id}/kill
             POST /api/task-runs/{runId}/cancel
             POST /api/tasks
             POST /api/tasks/{id}/cancel
@@ -537,10 +538,10 @@ class JClawApiToolTest extends UnitTest {
         assertEquals(expected, callableSurface(),
                 "The jclaw_api callable surface changed. Anything listed here can be invoked by "
                         + "an agent through the tool. If the new route writes privilege — config, "
-                        + "grants, workspace files, instance lifecycle — it belongs behind "
-                        + "@ChatHidden instead of on this list. A mutating route reaches this list "
-                        + "only by carrying @AgentCallable, which CapabilityRulesTest requires and "
-                        + "whose reason says what bounds it (JCLAW-1253).");
+                        + "grants, workspace files, instance lifecycle — it declares @AgentAccess "
+                        + "OPERATOR_ONLY and does not belong on this list. A route reaches this "
+                        + "list only as OPEN or OWN_ONLY, and CapabilityRulesTest requires a "
+                        + "mutating one to say what bounds it (JCLAW-1270).");
     }
 
     /** What {@code discover} actually advertises, which is what an agent can act on. */

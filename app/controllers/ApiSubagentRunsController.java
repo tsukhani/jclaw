@@ -36,7 +36,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static controllers.AgentAccess.Level.OPEN;
-import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -271,8 +271,8 @@ public class ApiSubagentRunsController extends Controller {
      */
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Delete a terminal subagent run and its child agent")
-    @AgentAccess(value = OPERATOR_ONLY,
-            reason = "erases a subagent-run record, including runs another agent started")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "an agent may erase runs it started; main reaches every agent's (JCLAW-1270)")
     public static void delete(Long id) {
         if (id == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
@@ -283,6 +283,7 @@ public class ApiSubagentRunsController extends Controller {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "Run " + id + " not found.");
             return;
         }
+        requireOwnRun(run);
         // Reject mid-flight rows — the stream owner still holds a reference
         // and would NPE on the next persist. Kill-then-delete is the
         // two-step path for live runs.
@@ -322,7 +323,8 @@ public class ApiSubagentRunsController extends Controller {
     @RequestBody(content = @Content(schema = @Schema(implementation = DeleteBulkRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
     @Operation(summary = "Bulk delete terminal subagent runs by ids or filter (RUNNING rows are skipped)")
-    @AgentAccess(value = OPERATOR_ONLY, reason = "erases subagent-run records in bulk by filter")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "the filter is narrowed to the caller's own runs before it is applied (JCLAW-1270)")
     public static void deleteBulk() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -332,7 +334,9 @@ public class ApiSubagentRunsController extends Controller {
 
         int deleted;
         if (body.has("ids")) {
-            deleted = deleteTerminalRuns(targetsFromIds(body));
+            deleted = deleteTerminalRuns(targetsFromIds(body).stream()
+                    .filter(r -> RequestPrincipal.mayReachAgentScopedRow(r.parentAgent))
+                    .toList());
         } else if (body.has("filter")) {
             var f = body.getAsJsonObject("filter");
             String statusRaw = stringField(f, STATUS);
@@ -342,7 +346,7 @@ public class ApiSubagentRunsController extends Controller {
             Instant sinceInstant = parseSinceFilter(sinceRaw);
             if (sinceInstant == null && sinceRaw != null && !sinceRaw.isBlank()) return;
             var matchingIds = findMatchingRunIds(
-                    longField(f, "parentAgentId"),
+                    scopedParentAgentId(longField(f, "parentAgentId")),
                     longField(f, "parentConversationId"),
                     statusEnum, sinceInstant, stringField(f, "q"));
             deleted = deleteRunsByIdChunked(matchingIds);
@@ -358,6 +362,30 @@ public class ApiSubagentRunsController extends Controller {
      * Resolve the explicit-ids delete set. An empty {@code ids} array yields an
      * empty list, so {@link #deleteBulk()} reports 0 deleted without special-casing.
      */
+    /** Refuse a run the caller's agent does not own. {@code main} owns every agent's. */
+    private static void requireOwnRun(SubagentRun run) {
+        if (!RequestPrincipal.mayReachAgentScopedRow(run.parentAgent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Run " + run.id + " was started by another agent.");
+        }
+    }
+
+    /**
+     * Narrow a bulk filter to the caller before it runs, rather than refusing a filter that
+     * names someone else: a delete-by-filter that quietly matched another agent's runs is the
+     * failure mode, and pinning the column is what makes the query incapable of it. The operator
+     * and {@code main} keep whatever they asked for, including no filter at all.
+     */
+    private static @Nullable Long scopedParentAgentId(@Nullable Long requested) {
+        var caller = RequestPrincipal.callingAgent();
+        if (!RequestPrincipal.isAgentOriginated()) return requested;
+        if (caller == null) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "This request is agent-originated but names no agent, so its runs cannot be scoped.");
+        }
+        return caller != null && caller.isMain() ? requested : (caller == null ? null : caller.id);
+    }
+
     private static List<SubagentRun> targetsFromIds(JsonObject body) {
         var ids = new ArrayList<Long>();
         for (var elem : body.getAsJsonArray("ids")) ids.add(elem.getAsLong());
@@ -500,13 +528,18 @@ public class ApiSubagentRunsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = KillRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = KillResponse.class)))
     @Operation(summary = "Kill a running subagent")
-    @AgentAccess(value = OPERATOR_ONLY,
-            reason = "stops a run the calling agent need not have started; subagent_yield is the agent path")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "an agent may kill runs it started; main reaches every agent's (JCLAW-1270)")
     public static void kill(Long id) {
         if (id == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
             return;
         }
+        // Loaded before the kill rather than after: SubagentRegistry.kill reports a missing row
+        // the same way it reports a killed one, so ownership has to be judged on the row itself.
+        // A miss here falls through to the registry, which owns the 404 wording.
+        var target = SubagentRegistry.findRunById(id);
+        if (target != null) requireOwnRun(target);
         String reason = "Killed by operator via admin page";
         var supplied = JsonArgs.optNonBlankString(JsonBodyReader.readJsonBody(), KEY_REASON);
         if (supplied != null) reason = supplied;

@@ -55,6 +55,45 @@ class ApiConversationsControllerTest extends FunctionalTest {
         return matcher.find() ? matcher.group(1) : null;
     }
 
+    /**
+     * One conversation the test's own HTTP request can read back. Committed off-thread because
+     * the test body is already inside a transaction that {@code Tx.run} would join, leaving the
+     * row invisible to the request (AGENTS.md, FunctionalTest seeding).
+     */
+    private static Long seededConversationId() {
+        var ref = new java.util.concurrent.atomic.AtomicReference<Long>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(services.Tx.run(() -> {
+                    var agent = new Agent();
+                    agent.name = "queue-status-agent";
+                    agent.modelProvider = "openrouter";
+                    agent.modelId = "gpt-4.1";
+                    agent.enabled = true;
+                    agent.save();
+
+                    var convo = new Conversation();
+                    convo.agent = agent;
+                    convo.channelType = "web";
+                    convo.peerId = "queue-status";
+                    convo.save();
+                    return convo.id;
+                }));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        if (err.get() != null) throw new IllegalStateException(err.get());
+        return ref.get();
+    }
+
     /** Seed one attachment row on {@code m} (all NOT NULL columns populated). */
     private static void seedAttachment(Message m, String uuid, String filename,
                                        String mime, String kind) {
@@ -650,9 +689,19 @@ class ApiConversationsControllerTest extends FunctionalTest {
     @Test
     void getQueueStatusForNonExistentConversation() {
         login();
-        // Queue status doesn't require the conversation to exist in DB —
-        // it checks the in-memory queue. Should return a valid JSON response.
+        // Answered 200 off the in-memory queue until JCLAW-1270, because it never loaded the
+        // conversation. That is also what let an agent size another agent's backlog, so the
+        // route now loads the row to judge ownership and a missing one is a 404 like every
+        // other /api/conversations/{id} route.
         var response = GET("/api/conversations/999999/queue");
+        assertStatus(404, response);
+    }
+
+    @Test
+    void getQueueStatusForAnExistingConversation() {
+        login();
+        // The positive half of the case above: the shape callers actually consume is unchanged.
+        var response = GET("/api/conversations/" + seededConversationId() + "/queue");
         assertIsOk(response);
         var content = getContent(response);
         assertTrue(content.contains("\"busy\""));

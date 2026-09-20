@@ -342,7 +342,13 @@ class CapabilityRulesTest extends UnitTest {
     /** Mutating {@code conf/routes} entries when the stance sweep landed (JCLAW-1253). */
     private static final int ADJUDICATED_MUTATING_ROUTES = 134;
     private static final int ADJUDICATED_API_ROUTES = 249;
-    private static final String OWNERSHIP_CHECK = "mayReachAgentScopedRow";
+    /**
+     * The two ways an {@code OWN_ONLY} action can honour its level. A row route refuses one it
+     * does not own; a list route has no row to refuse, so it pins the query to the caller
+     * instead — a list that 403s on someone else's rows would have had to read them first.
+     */
+    private static final Set<String> OWNERSHIP_CHECKS =
+            Set.of("mayReachAgentScopedRow", "callingAgent");
 
     private static final Set<String> MUTATING_VERBS = Set.of("POST", "PUT", "PATCH", "DELETE");
     private static final String PRINCIPAL_CLASS = "controllers.RequestPrincipal";
@@ -526,8 +532,8 @@ class CapabilityRulesTest extends UnitTest {
                     + "adjudicated when it was only unannotated");
         }
         if (level == AgentAccess.Level.OWN_ONLY && !reachesOwnershipCheck) {
-            violations.add(route + " -> " + where + " is OWN_ONLY but never reaches "
-                    + "RequestPrincipal." + OWNERSHIP_CHECK + ". Only the action knows which row "
+            violations.add(route + " -> " + where + " is OWN_ONLY but reaches none of "
+                    + "RequestPrincipal." + OWNERSHIP_CHECKS + ". Only the action knows which row "
                     + "it is about, so the level declares the intent and the action enforces it");
         }
     }
@@ -544,7 +550,7 @@ class CapabilityRulesTest extends UnitTest {
         while (!queue.isEmpty()) {
             for (var call : queue.poll().getCallsFromSelf()) {
                 if (PRINCIPAL_CLASS.equals(call.getTargetOwner().getName())
-                        && OWNERSHIP_CHECK.equals(call.getTarget().getName())) {
+                        && OWNERSHIP_CHECKS.contains(call.getTarget().getName())) {
                     return true;
                 }
                 if (!call.getTargetOwner().equals(method.getOwner())) continue;

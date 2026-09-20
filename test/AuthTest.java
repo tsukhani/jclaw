@@ -208,9 +208,11 @@ class AuthTest extends FunctionalTest {
         // call to the SSE routes returned 500 — on ApiChatController,
         // ApiAppInvokeController and ApiEventsController alike.
         //
-        // A nonexistent agent id is the probe: reaching the controller at all
-        // means authentication passed, so 404 is success here. A 500 is the
-        // regression coming back.
+        // Getting past the bearer lookup at all is the probe. JCLAW-1270 made the chat routes
+        // OPERATOR_ONLY, and AgentAccessGate runs inside AuthCheck *after* authenticateByBearer,
+        // so a 403 proves the transaction-less lookup succeeded exactly as the old 404 did — the
+        // gate can only know this is the agent principal because the token resolved. A 500 is
+        // still the regression coming back.
         var token = AuthFixture.seedBearerToken();
         var request = newRequest();
         request.headers.put("authorization", new Http.Header("authorization", "Bearer " + token));
@@ -218,7 +220,7 @@ class AuthTest extends FunctionalTest {
         var response = POST(request, "/api/chat/stream", "application/json",
                 "{\"agentId\": 99999999, \"message\": \"hi\"}");
 
-        assertStatus(404, response);
+        assertStatus(403, response);
     }
 
     @Test

@@ -38,8 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+import static controllers.AgentAccess.Level.OWN_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -170,7 +170,8 @@ public class ApiConversationsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConversationView.class))))
     @Operation(summary = "List conversations with optional channel, agent, name, peer, starred, pinned, and full-text (q) filters, paginated")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY,
+            reason = "the agent filter is pinned to the caller before the query runs (JCLAW-1270)")
     public static void listConversations(String channel, Long agentId, String name, String peer,
                                           String q, Boolean starred, Boolean pinned,
                                           String sort, String dir, Integer limit, Integer offset) {
@@ -183,7 +184,7 @@ public class ApiConversationsController extends Controller {
         // for the section above it, so no row can appear in both.
         var filter = new JpqlFilter()
                 .eq(CHANNEL_TYPE, channel)
-                .eq("agent.id", agentId)
+                .eq("agent.id", scopedAgentId(agentId))
                 .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
                 .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null)
                 .eq(STARRED, starred)
@@ -331,13 +332,10 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConversationView.class)))
     @Operation(summary = "Get a single conversation by id, in the same shape as one list row")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY,
+            reason = "one conversation the calling agent owns; main reaches every agent's (JCLAW-1270)")
     public static void getConversation(Long id) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
         renderJSON(gson.toJson(conversationToMap(conversation,
                 SessionCompaction.count("conversation = ?1", conversation))));
     }
@@ -348,13 +346,10 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageView.class))))
     @Operation(summary = "List a conversation's messages in ascending order, paginated")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY,
+            reason = "one conversation the calling agent owns; main reaches every agent's (JCLAW-1270)")
     public static void getMessages(Long id, Integer limit, Integer offset) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
@@ -483,8 +478,13 @@ public class ApiConversationsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = QueueStatusResponse.class)))
     @Operation(summary = "Get the busy flag and queued-message count for a conversation")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY,
+            reason = "one conversation the calling agent owns; main reaches every agent's (JCLAW-1270)")
     public static void getQueueStatus(Long id) {
+        // Loaded rather than read straight off the id: the queue is keyed by conversation id
+        // alone, so without this an agent could size another agent's backlog (JCLAW-1270). The
+        // 404 for an unknown id is new and follows from the load.
+        requireConversation(id);
         var busy = ConversationQueue.isBusy(id);
         var queueSize = ConversationQueue.getQueueSize(id);
         renderJSON(gson.toJson(new QueueStatusResponse(busy, queueSize)));
@@ -501,11 +501,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @AgentAccess(value = OPERATOR_ONLY, reason = "destructive history deletion")
     public static void deleteMessage(Long id, Long mid) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
         Message message = ConversationService.findMessageById(mid);
         if (message == null) {
             notFound();
@@ -525,11 +521,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @AgentAccess(value = OPERATOR_ONLY, reason = "destructive history deletion")
     public static void deleteConversation(Long id) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
         ConversationService.deleteByIds(List.of(id));
         renderJSON(gson.toJson(new StatusResponse("deleted")));
     }
@@ -631,12 +623,16 @@ public class ApiConversationsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(type = "string"))))
     @Operation(summary = "List the distinct channel types currently in use across conversations")
-    @AgentAccess(OPEN)
+    @AgentAccess(value = OWN_ONLY,
+            reason = "the distinct set is taken over the caller's own conversations (JCLAW-1270)")
     public static void listConversationChannels() {
-        List<String> channels = JPA.em()
-                .createQuery("SELECT DISTINCT c.channelType FROM Conversation c ORDER BY c.channelType", String.class)
-                .getResultList();
-        renderJSON(gson.toJson(channels));
+        var scoped = scopedAgentId(null);
+        var jpql = "SELECT DISTINCT c.channelType FROM Conversation c"
+                + (scoped == null ? "" : " WHERE c.agent.id = :agentId")
+                + " ORDER BY c.channelType";
+        var query = JPA.em().createQuery(jpql, String.class);
+        if (scoped != null) query.setParameter("agentId", scoped);
+        renderJSON(gson.toJson(query.getResultList()));
     }
 
     /**
@@ -657,14 +653,10 @@ public class ApiConversationsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelOverrideRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ModelOverrideResponse.class)))
     @Operation(summary = "Set a conversation-scoped model provider/model override, validated against the provider registry")
-    @AgentAccess(value = OPEN,
+    @AgentAccess(value = OWN_ONLY,
             reason = "conversation-scoped model choice, validated against the provider registry")
     public static void setModelOverride(Long id) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("modelProvider") || !body.has("modelId")) {
@@ -702,13 +694,10 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Clear a conversation's model override, reverting to the agent default (idempotent)")
-    @AgentAccess(value = OPEN, reason = "reverts one conversation to the agent default")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "reverts one conversation to the agent default")
     public static void clearModelOverride(Long id) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
         ConversationService.clearModelOverride(conversation);
         renderJSON(gson.toJson(new StatusResponse("cleared")));
     }
@@ -722,14 +711,10 @@ public class ApiConversationsController extends Controller {
      * default is untouched; DELETE clears it.
      */
     @SuppressWarnings("java:S2259")
-    @AgentAccess(value = OPEN,
+    @AgentAccess(value = OWN_ONLY,
             reason = "conversation-scoped thinking level, validated against the effective model")
     public static void setThinkingOverride(Long id) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(THINKING_MODE) || body.get(THINKING_MODE).isJsonNull()) {
             badRequest();
@@ -753,13 +738,10 @@ public class ApiConversationsController extends Controller {
     }
 
     /** DELETE /api/conversations/{id}/thinking-override — back to the agent's default. */
-    @AgentAccess(value = OPEN, reason = "reverts one conversation to the agent default")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "reverts one conversation to the agent default")
     public static void clearThinkingOverride(Long id) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
         ConversationService.setThinkingOverride(conversation, null);
         renderJSON(gson.toJson(new StatusResponse("cleared")));
     }
@@ -775,14 +757,10 @@ public class ApiConversationsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = RenameRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = NameResponse.class)))
     @Operation(summary = "Rename a conversation; the name is non-blank and at most 100 characters")
-    @AgentAccess(value = OPEN,
+    @AgentAccess(value = OWN_ONLY,
             reason = "conversation metadata; the destructive siblings in this controller are hidden")
     public static void renameConversation(Long id) {
-        Conversation conversation = ConversationService.findById(id);
-        if (conversation == null) {
-            notFound();
-            throw ApiResponses.unreachable();
-        }
+        Conversation conversation = requireConversation(id);
 
         var body = JsonBodyReader.readJsonBody();
         var name = body == null ? null : stringField(body, "name");
@@ -808,7 +786,8 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Star a conversation (idempotent)")
-    @AgentAccess(value = OPEN, reason = "operator-visible flag, reversible in one call")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "operator-visible flag, reversible in one call")
     public static void starConversation(Long id) {
         ConversationService.setStarred(requireConversation(id), true);
         renderJSON(gson.toJson(new StatusResponse(STARRED)));
@@ -818,7 +797,8 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Unstar a conversation (idempotent)")
-    @AgentAccess(value = OPEN, reason = "operator-visible flag, reversible in one call")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "operator-visible flag, reversible in one call")
     public static void unstarConversation(Long id) {
         ConversationService.setStarred(requireConversation(id), false);
         renderJSON(gson.toJson(new StatusResponse("unstarred")));
@@ -834,7 +814,8 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @ApiResponse(responseCode = "409", description = "The pinned-conversation cap is already reached")
     @Operation(summary = "Pin a conversation, up to a cap of 10 (idempotent below the cap)")
-    @AgentAccess(value = OPEN, reason = "pinning is capped at ten and reversible")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "pinning is capped at ten and reversible")
     public static void pinConversation(Long id) {
         if (!ConversationService.pin(requireConversation(id))) {
             ApiResponses.error(409, ApiResponses.CONFLICT,
@@ -849,7 +830,8 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Unpin a conversation (idempotent)")
-    @AgentAccess(value = OPEN, reason = "reversible in one call")
+    @AgentAccess(value = OWN_ONLY,
+            reason = "reversible in one call")
     public static void unpinConversation(Long id) {
         ConversationService.unpin(requireConversation(id));
         renderJSON(gson.toJson(new StatusResponse("unpinned")));
@@ -857,12 +839,41 @@ public class ApiConversationsController extends Controller {
 
     // --- Helpers ---
 
-    /** Load the addressed conversation or end the request with a 404. */
+    /**
+     * Pin a list query to the caller's own conversations, rather than refusing one that names
+     * someone else: a list is not a row, so there is nothing to 403 — the fix is a query that
+     * cannot return another agent's rows in the first place. Returns the requested value
+     * unchanged for the operator and for {@code main}, both of which see everything.
+     */
+    private static @Nullable Long scopedAgentId(@Nullable Long requested) {
+        if (!RequestPrincipal.isAgentOriginated()) return requested;
+        var caller = RequestPrincipal.callingAgent();
+        if (caller == null) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "This request is agent-originated but names no agent, so it cannot be scoped.");
+            throw ApiResponses.unreachable();
+        }
+        return caller.isMain() ? requested : caller.id;
+    }
+
+    /**
+     * Load the addressed conversation or end the request — 404 when it does not exist, 403 when
+     * it belongs to another agent (JCLAW-1270).
+     *
+     * <p>Every {@code /api/conversations/{id}} action routes through here, which is the point:
+     * the ownership check is one statement in one place rather than a line each action has to
+     * remember, and {@code Conversation.agent} is non-null so there is no unowned row to fall
+     * through it. {@code main} reaches every agent's conversations; nothing reaches up or across.
+     */
     private static Conversation requireConversation(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
             notFound();
             throw ApiResponses.unreachable();
+        }
+        if (!RequestPrincipal.mayReachAgentScopedRow(conversation.agent)) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "Conversation " + id + " belongs to another agent.");
         }
         return conversation;
     }

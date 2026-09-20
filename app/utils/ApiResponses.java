@@ -77,6 +77,9 @@ public final class ApiResponses {
     public static final String OPERATOR_ONLY = "operator_only";
     /** 403 — a hosted app reaching outside the agent it was installed for. */
     public static final String APP_SCOPE = "app_scope";
+    /** 403 — an agent reaching a row that belongs to another agent (JCLAW-1270). Distinct from
+     *  {@link #OPERATOR_ONLY}: the route is one agents may use, just not for this row. */
+    public static final String AGENT_SCOPE = "agent_scope";
 
     // Agents and apps.
     public static final String NO_AGENT = "no_agent";
