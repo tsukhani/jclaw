@@ -2,7 +2,7 @@
   "name": "JClaw-frontend",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.4.1",
+  "packageManager": "pnpm@12.4.2",
   "scripts": {
     "postinstall": "nuxt prepare",
     "dev": "nuxt dev",
