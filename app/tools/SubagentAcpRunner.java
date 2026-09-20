@@ -169,8 +169,8 @@ final class SubagentAcpRunner {
                 null), 0);
         if (!approved) {
             throw new IllegalStateException(
-                    "coding harness run denied: origin channel '%s' requires operator "
-                            + "approval and it was not granted".formatted(originChannel));
+                    ("coding harness run denied: origin channel '%s' requires operator "
+                            + "approval and it was not granted").formatted(originChannel));
         }
     }
 

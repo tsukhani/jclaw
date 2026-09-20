@@ -70,8 +70,8 @@ public class ApiTokenLegacyColumnsJob extends Job<Void> {
         }
         if (altered > 0) {
             EventLogger.info("system",
-                    "Relaxed NOT NULL on %d abandoned api_token column(s) so the internal token can "
-                            + "be minted (JCLAW-1266)".formatted(altered));
+                    ("Relaxed NOT NULL on %d abandoned api_token column(s) so the internal token can "
+                            + "be minted (JCLAW-1266)").formatted(altered));
         }
         return altered;
     }
