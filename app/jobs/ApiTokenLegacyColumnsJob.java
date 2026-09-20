@@ -29,8 +29,14 @@ import java.sql.SQLException;
  * <p>Relaxed rather than dropped. Dropping is the tidier end state and it is not this job's call
  * to make on an operator's data during a boot it is already failing; a nullable dead column costs
  * nothing and leaves the decision reversible.
+ *
+ * <p><b>Priority is load-bearing.</b> {@link DefaultConfigJob} runs at {@code -100} and calls
+ * {@code InternalApiTokenService.token()}, which is the mint that fails. At the default priority
+ * this job would run after it and never get the chance — the boot would already be over. It
+ * therefore runs ahead of everything, and {@code BootJobOrderConformanceTest} fails the build if
+ * anything else claims a priority at or below this one.
  */
-@OnApplicationStart
+@OnApplicationStart(priority = -200)
 @NoTransaction
 public class ApiTokenLegacyColumnsJob extends Job<Void> {
 
