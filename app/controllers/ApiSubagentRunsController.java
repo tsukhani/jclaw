@@ -358,10 +358,6 @@ public class ApiSubagentRunsController extends Controller {
         renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
     }
 
-    /**
-     * Resolve the explicit-ids delete set. An empty {@code ids} array yields an
-     * empty list, so {@link #deleteBulk()} reports 0 deleted without special-casing.
-     */
     /** Refuse a run the caller's agent does not own. {@code main} owns every agent's. */
     private static void requireOwnRun(SubagentRun run) {
         if (!RequestPrincipal.mayReachAgentScopedRow(run.parentAgent)) {
@@ -382,10 +378,15 @@ public class ApiSubagentRunsController extends Controller {
         if (caller == null) {
             ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
                     "This request is agent-originated but names no agent, so its runs cannot be scoped.");
+            throw ApiResponses.unreachable();
         }
-        return caller != null && caller.isMain() ? requested : (caller == null ? null : caller.id);
+        return caller.isMain() ? requested : caller.id;
     }
 
+    /**
+     * Resolve the explicit-ids delete set. An empty {@code ids} array yields an
+     * empty list, so {@link #deleteBulk()} reports 0 deleted without special-casing.
+     */
     private static List<SubagentRun> targetsFromIds(JsonObject body) {
         var ids = new ArrayList<Long>();
         for (var elem : body.getAsJsonArray("ids")) ids.add(elem.getAsLong());

@@ -58,6 +58,7 @@ public class ApiConversationsController extends Controller {
     private static final String STARRED = "starred";
     private static final String PINNED = "pinned";
     private static final String CHANNEL_TYPE = "channelType";
+    private static final String AGENT_ID = "agentId";
     private static final String CREATED_AT = "createdAt";
     private static final String THINKING_MODE = "thinkingMode";
     // Conversation.preview is @Column(length = 100), so a longer name cannot be stored.
@@ -501,7 +502,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @AgentAccess(value = OPERATOR_ONLY, reason = "destructive history deletion")
     public static void deleteMessage(Long id, Long mid) {
-        Conversation conversation = requireConversation(id);
+        requireConversation(id);
         Message message = ConversationService.findMessageById(mid);
         if (message == null) {
             notFound();
@@ -521,7 +522,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @AgentAccess(value = OPERATOR_ONLY, reason = "destructive history deletion")
     public static void deleteConversation(Long id) {
-        Conversation conversation = requireConversation(id);
+        requireConversation(id);
         ConversationService.deleteByIds(List.of(id));
         renderJSON(gson.toJson(new StatusResponse("deleted")));
     }
@@ -573,7 +574,7 @@ public class ApiConversationsController extends Controller {
         if (body.has("filter")) {
             var f = body.getAsJsonObject("filter");
             String channel = stringField(f, "channel");
-            Long agentId = longField(f, "agentId");
+            Long agentId = longField(f, AGENT_ID);
             String name = stringField(f, "name");
             String peer = stringField(f, "peer");
             Boolean starred = booleanField(f, STARRED);
@@ -631,7 +632,7 @@ public class ApiConversationsController extends Controller {
                 + (scoped == null ? "" : " WHERE c.agent.id = :agentId")
                 + " ORDER BY c.channelType";
         var query = JPA.em().createQuery(jpql, String.class);
-        if (scoped != null) query.setParameter("agentId", scoped);
+        if (scoped != null) query.setParameter(AGENT_ID, scoped);
         renderJSON(gson.toJson(query.getResultList()));
     }
 
@@ -917,7 +918,7 @@ public class ApiConversationsController extends Controller {
     private static Map<String, Object> conversationToMap(Conversation c, long compactionCount) {
         var map = new HashMap<String, Object>();
         map.put("id", c.id);
-        map.put("agentId", c.agent.id);
+        map.put(AGENT_ID, c.agent.id);
         map.put("agentName", c.agent.name);
         map.put(CHANNEL_TYPE, c.channelType);
         map.put("peerId", c.peerId);

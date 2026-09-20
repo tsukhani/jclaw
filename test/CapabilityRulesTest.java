@@ -339,8 +339,6 @@ class CapabilityRulesTest extends UnitTest {
 
     // ===== Capability: mutate state as the agent principal =====
 
-    /** Mutating {@code conf/routes} entries when the stance sweep landed (JCLAW-1253). */
-    private static final int ADJUDICATED_MUTATING_ROUTES = 134;
     private static final int ADJUDICATED_API_ROUTES = 249;
     /**
      * The two ways an {@code OWN_ONLY} action can honour its level. A row route refuses one it
