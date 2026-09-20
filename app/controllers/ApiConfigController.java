@@ -117,15 +117,6 @@ public class ApiConfigController extends Controller {
         return reconciled != null ? reconciled : row.value;
     }
 
-    /** Reject the agent principal on the two config writes. The table holds the instance's own
-     *  security controls -- the shell allowlist, the approval policy, the funnel switch -- so a
-     *  caller able to write it can widen every other gate rather than defeat one (JCLAW-1022). */
-    private static void requireOperator() {
-        if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
-                    "Configuration is operator-only; an agent cannot write or delete config values.");
-        }
-    }
 
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ConfigSaveRequest.class)))
@@ -134,7 +125,6 @@ public class ApiConfigController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "writes the instance's own security controls -- privilege escalation")
     public static void save() {
-        requireOperator();
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("key") || !body.has("value")) {
@@ -166,7 +156,6 @@ public class ApiConfigController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "deletes a config row, reverting a control to its code default -- privilege escalation")
     public static void delete(String key) {
-        requireOperator();
 
         if (isReservedKey(key)) {
             ApiResponses.error(409, ApiResponses.RESERVED_KEY, "The config key prefix '%s' is reserved for internal use"

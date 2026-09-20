@@ -81,7 +81,8 @@ public class ApiMcpServersController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
     @Operation(summary = "Add an MCP server (STDIO or HTTP)")
     @AgentAccess(value = OPEN,
-            reason = "MCP server CRUD is agent-reachable by design; DangerousActionGate is the mutating-verb seam")
+            reason = "HTTP transports are agent-reachable and DangerousActionGate bounds the verb; "
+                    + "a STDIO command is main-only (JCLAW-1270)")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -94,6 +95,7 @@ public class ApiMcpServersController extends Controller {
             ApiResponses.error(409, ApiResponses.CONFLICT, "An MCP server named '%s' already exists".formatted(name));
         }
         var transport = readTransport(body);
+        requireMainForStdio(transport);
         var row = new McpServer();
         row.name = name;
         // Default true when the key is absent or explicitly null; otherwise
@@ -122,7 +124,8 @@ public class ApiMcpServersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
     @Operation(summary = "Update an MCP server by id; it reconnects automatically")
-    @AgentAccess(value = OPEN, reason = "same seam as create; DangerousActionGate bounds the mutating verb")
+    @AgentAccess(value = OPEN,
+            reason = "same seam as create; a STDIO command is main-only (JCLAW-1270)")
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
@@ -150,6 +153,10 @@ public class ApiMcpServersController extends Controller {
         // configJson rebuild: any of (transport, command, args, env, url, headers)
         // appearing in the body triggers a fresh compose. Cheaper than diffing.
         if (touchesTransportConfig(body)) {
+            // Guarded on the row's transport rather than the body's: a body that omits
+            // `transport` but carries a new `command` rewrites what an existing STDIO server
+            // executes, which is the same authority as creating one.
+            requireMainForStdio(row.transport);
             row.configJson = McpServerService.composeConfigJson(row.transport, body);
         }
         try {
@@ -214,6 +221,20 @@ public class ApiMcpServersController extends Controller {
         if (row != null) return row;
         notFound();
         throw new AssertionError("notFound() did not throw");
+    }
+
+    /**
+     * A STDIO server is a command this JVM spawns, unconfined — {@code McpStdioTransport} builds
+     * a bare {@code ProcessBuilder}, outside {@code HarnessSandbox} and outside the shell
+     * allowlist. That is the operator's authority to delegate, and {@code main} holds it;
+     * a custom agent gets HTTP transports only (JCLAW-1270).
+     */
+    private static void requireMainForStdio(McpServer.Transport transport) {
+        if (transport == McpServer.Transport.STDIO && !RequestPrincipal.isOperatorOrMainAgent()) {
+            ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
+                    "A STDIO MCP server runs a local command; only the operator or the main agent "
+                            + "may configure one. Use an HTTP transport, or ask the operator.");
+        }
     }
 
     @SuppressWarnings("java:S2259")

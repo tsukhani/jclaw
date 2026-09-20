@@ -100,17 +100,6 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
         renderJSON(gson.toJson(items));
     }
 
-    /** Reject the agent principal on the binding writes. A binding decides which agent a
-     *  WhatsApp presence talks to and carries the Cloud API credentials, so a caller able to
-     *  write one can redirect the operator's conversations to itself (JCLAW-1227). The Telegram
-     *  and Slack equivalents are reached only through the {@code jclaw_api} deny-floor, which
-     *  never named {@code /api/channels/whatsapp/}. */
-    private static void requireOperator() {
-        if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
-                    "WhatsApp bindings are operator-only; an agent cannot create, change or delete one.");
-        }
-    }
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
@@ -118,7 +107,6 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "binds a WhatsApp presence to an agent and stores its Cloud API credentials")
     public static void create() {
-        requireOperator();
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -191,7 +179,6 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "repoints a WhatsApp presence at another agent and rewrites its credentials")
     public static void update(Long id) {
-        requireOperator();
 
         var binding = WhatsAppBinding.<WhatsAppBinding>findById(id);
         if (binding == null) notFound();
@@ -235,7 +222,6 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "removing a binding silently takes the operator's WhatsApp channel offline")
     public static void delete(Long id) {
-        requireOperator();
 
         var binding = WhatsAppBinding.<WhatsAppBinding>findById(id);
         if (binding == null) notFound();

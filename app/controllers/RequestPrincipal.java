@@ -77,20 +77,48 @@ public final class RequestPrincipal {
     }
 
     /**
-     * Whether this caller may reach a row owned by {@code owner}: the operator may reach anything,
-     * the {@code main} agent may reach any agent's rows, and every other agent only its own
-     * (JCLAW-1270).
+     * The operator, or the {@code main} agent — everyone who is trusted with more than their own
+     * rows (JCLAW-1270).
      *
      * <p>{@code main} is the operator's own assistant and the one agent that spawns and supervises
      * the others, so the asymmetry is deliberate: it sees down the tree, nothing sees up or across.
+     * A custom agent, and an agent-originated request that names no agent, are both false.
+     */
+    public static boolean isOperatorOrMainAgent() {
+        return isOperatorOrMain(isAgentOriginated(), callingAgent());
+    }
+
+    /**
+     * The policy behind {@link #isOperatorOrMainAgent}, with the request read out of it.
      *
-     * @param owner the agent the row belongs to; a null owner is reachable only by the operator
+     * <p>Separated so the matrix — operator, main, a custom agent, an agent-originated request
+     * that names nobody — is covered by a table rather than by four HTTP round trips against a
+     * {@code main} row that is provisioned at boot and that a sibling's
+     * {@code Fixtures.deleteDatabase} can remove mid-suite.
+     */
+    // Public because Play's tests live in the default package.
+    public static boolean isOperatorOrMain(boolean agentOriginated, @Nullable Agent caller) {
+        if (!agentOriginated) return true;
+        return caller != null && caller.isMain();
+    }
+
+    /** {@link #mayReachAgentScopedRow} with the request read out of it; see {@link
+     *  #isOperatorOrMain}. */
+    // Public because Play's tests live in the default package.
+    public static boolean mayReachRow(boolean agentOriginated, @Nullable Agent caller,
+                                      @Nullable Agent owner) {
+        if (isOperatorOrMain(agentOriginated, caller)) return true;
+        return caller != null && owner != null && owner.id != null && owner.id.equals(caller.id);
+    }
+
+    /**
+     * Whether this caller may reach a row owned by {@code owner}: the operator and {@code main}
+     * reach anything, every other agent only its own (JCLAW-1270).
+     *
+     * @param owner the agent the row belongs to; a null owner is reachable only by
+     *              {@link #isOperatorOrMainAgent}
      */
     public static boolean mayReachAgentScopedRow(@Nullable Agent owner) {
-        if (!isAgentOriginated()) return true;
-        var caller = callingAgent();
-        if (caller == null) return false;
-        if (caller.isMain()) return true;
-        return owner != null && owner.id != null && owner.id.equals(caller.id);
+        return mayReachRow(isAgentOriginated(), callingAgent(), owner);
     }
 }

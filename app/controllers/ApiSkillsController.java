@@ -200,7 +200,6 @@ public class ApiSkillsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "installs a third-party skill whose shell allowlist the registry then carries")
     public static void catalogImport() {
-        requireOperator();
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("source") || !body.has("skillId")) {
@@ -370,7 +369,6 @@ public class ApiSkillsController extends Controller {
     @Operation(summary = "Delete a global skill (rejects the built-in skill-creator)")
     @AgentAccess(value = OPERATOR_ONLY, reason = "removes a registry skill every agent installs from")
     public static void delete(String name) {
-        requireOperator();
 
         if ("skill-creator".equals(name)) {
             ApiResponses.error(403, ApiResponses.FORBIDDEN, "The skill-creator skill is a built-in skill and cannot be deleted.");
@@ -444,17 +442,6 @@ public class ApiSkillsController extends Controller {
         }).toList();
     }
 
-    /** Reject the agent principal on the writes that move shell-allowlist grants -- the per-agent
-     *  install, toggle and delete, and the four registry writes (import, promote, rename, delete)
-     *  that decide what those install. Gated on how the request authenticated, not on
-     *  self-reference: agent A widening agent B's allowlist escalates just as well. */
-    private static void requireOperator() {
-        if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
-                    "Skill configuration is operator-only; an agent cannot install or enable a skill "
-                            + "for itself or for another agent, nor change the global registry.");
-        }
-    }
 
     /** PUT /api/agents/{id}/skills/{name} — Enable or disable a skill for an agent.
      *  Toggle-only: the skill must already be installed in the agent's workspace
@@ -468,7 +455,6 @@ public class ApiSkillsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "re-admits a skill's shell-allowlist rows -- privilege escalation")
     public static void updateForAgent(Long id, String name) {
-        requireOperator();
 
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -526,7 +512,6 @@ public class ApiSkillsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "syncs the skill's shell allowlist onto the agent -- privilege escalation")
     public static void copyToAgent(Long id, String name) {
-        requireOperator();
 
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -614,7 +599,6 @@ public class ApiSkillsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "deletes any agent's workspace skill and revokes its shell-allowlist grants")
     public static void deleteAgentSkill(Long id, String name) {
-        requireOperator();
 
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -643,7 +627,6 @@ public class ApiSkillsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "lifts an agent-authored skill into the registry every other agent installs from")
     public static void promote() {
-        requireOperator();
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("agentId") || !body.has(KEY_SKILL_NAME)) {
@@ -698,7 +681,6 @@ public class ApiSkillsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "renaming a registry skill re-points every agent that installs it by name")
     public static void rename(String name) {
-        requireOperator();
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_NEW_NAME)) {

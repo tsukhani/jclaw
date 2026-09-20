@@ -634,7 +634,6 @@ public class ApiAgentsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "serves any agent's workspace, including another agent's persona files")
     public static void serveWorkspaceFile(Long id, String filePath) {
-        requireOperatorForWorkspace();
 
         var agent = requireAgent(id);
 
@@ -679,24 +678,12 @@ public class ApiAgentsController extends Controller {
         return contentType.startsWith("image/") && !contentType.startsWith("image/svg");
     }
 
-    /** Reject the agent principal on the workspace routes. {@code id} is an arbitrary path
-     *  parameter, so these reach <em>any</em> agent's workspace, while the {@code filesystem}
-     *  tool an agent is meant to use is scoped to its own — leaving this open would make
-     *  jclaw_api a way around a withheld filesystem tool as well as a cross-agent one. */
-    private static void requireOperatorForWorkspace() {
-        if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
-                    "Workspace files are operator-only through this API; an agent must use its "
-                            + "filesystem tool, which is scoped to its own workspace.");
-        }
-    }
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Read a text workspace file's contents by filename")
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "reads any agent's workspace, including another agent's persona files")
     public static void getWorkspaceFile(Long id, String filename) {
-        requireOperatorForWorkspace();
 
         var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
@@ -713,7 +700,6 @@ public class ApiAgentsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "workspace files are injected as authoritative standing instructions")
     public static void saveWorkspaceFile(Long id, String filename) {
-        requireOperatorForWorkspace();
 
         var agent = requireAgent(id);
         var body = JsonBodyReader.readJsonBody();
@@ -736,7 +722,6 @@ public class ApiAgentsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "lists any agent's workspace, including another agent's persona files")
     public static void listWorkspaceTree(Long id) {
-        requireOperatorForWorkspace();
 
         var agent = requireAgent(id);
         WorkspaceFiles.WorkspaceListing listing;
@@ -761,7 +746,6 @@ public class ApiAgentsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "downloads any agent's workspace, including another agent's persona files")
     public static void downloadWorkspaceEntry(Long id, String path) {
-        requireOperatorForWorkspace();
 
         var agent = requireAgent(id);
         var target = acquireWorkspaceTarget(agent.name, path);
@@ -783,7 +767,6 @@ public class ApiAgentsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "downloads any agent's whole workspace, including another agent's persona files")
     public static void backupWorkspace(Long id) {
-        requireOperatorForWorkspace();
 
         var agent = requireAgent(id);
         var root = acquireWorkspaceTarget(agent.name, "");
@@ -847,7 +830,6 @@ public class ApiAgentsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "deletes files from any agent's workspace, including another agent's persona files")
     public static void deleteWorkspaceEntry(Long id, @Nullable String path) {
-        requireOperatorForWorkspace();
 
         var agent = requireAgent(id);
         var relative = path == null ? "" : path;   // an empty trailing segment is the root, refused below

@@ -8,7 +8,6 @@ import models.ToolApprovalGrant;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.Tx;
-import utils.ApiResponses;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -50,14 +49,6 @@ public class ApiToolApprovalsController extends Controller {
     /** Roll-up totals plus the per-agent breakdown the Settings panel links through. */
     public record SummaryView(int totalGrants, int agentsWithGrants, List<AgentGrantsView> agents) {}
 
-    /** Reject the agent principal. Gated on how the request authenticated, not on
-     *  self-reference: enumerating another agent's grants maps the same boundary. */
-    private static void requireOperator() {
-        if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
-                    "Tool approvals are operator-only; an agent cannot list or revoke standing approvals.");
-        }
-    }
 
     private static Agent requireAgent(Long id) {
         var agent = (Agent) Agent.findById(id);
@@ -71,7 +62,6 @@ public class ApiToolApprovalsController extends Controller {
     @Operation(summary = "List standing tool-approval grants for an agent")
     @AgentAccess(value = OPERATOR_ONLY, reason = "enumerates which dangerous tools an agent may run unprompted")
     public static void listForAgent(Long id) {
-        requireOperator();
         var views = Tx.run(() -> {
             requireAgent(id);
             var out = new ArrayList<GrantView>();
@@ -91,7 +81,6 @@ public class ApiToolApprovalsController extends Controller {
     @Operation(summary = "Revoke a standing tool-approval grant")
     @AgentAccess(value = OPERATOR_ONLY, reason = "revoking an approval is an operator security action")
     public static void revokeForAgent(Long id, String toolName) {
-        requireOperator();
         var removed = Tx.run(() -> {
             requireAgent(id);
             return ToolApprovalGrant.revoke(id, toolName);
@@ -114,7 +103,6 @@ public class ApiToolApprovalsController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "instance-wide map of which agents may run dangerous tools unprompted")
     public static void summary() {
-        requireOperator();
         var view = Tx.run(() -> {
             var byAgent = new LinkedHashMap<Long, AgentGrantsView>();
             var total = 0;

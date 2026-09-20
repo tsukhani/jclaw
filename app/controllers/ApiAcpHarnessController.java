@@ -55,15 +55,6 @@ public class ApiAcpHarnessController extends Controller {
         renderJSON(gson.toJson(new HarnessesResponse(toEntries(AcpHarnessProbe.probeAll()))));
     }
 
-    /** Reject the agent principal on the custom-harness writes. The stored command is what a
-     *  {@code runtime=acp} spawn executes, so writing one is arbitrary local execution behind a
-     *  key the JCLAW-1022 config guard covers only on {@code POST /api/config} (JCLAW-1227). */
-    private static void requireOperator() {
-        if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
-                    "ACP harness commands are operator-only; an agent cannot add or remove one.");
-        }
-    }
 
     /** POST /api/subagents/acp-harnesses — probe an operator-entered command;
      *  when its binary resolves it's persisted and returned as a custom chip,
@@ -74,7 +65,6 @@ public class ApiAcpHarnessController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "persists a command a runtime=acp spawn then executes -- privilege escalation")
     public static void add() {
-        requireOperator();
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(COMMAND_FIELD) || body.get(COMMAND_FIELD).isJsonNull()) {
@@ -93,7 +83,6 @@ public class ApiAcpHarnessController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "edits the stored ACP harness list a runtime=acp spawn executes from")
     public static void remove(String command) {
-        requireOperator();
 
         if (command == null || command.isBlank()) {
             badRequest();

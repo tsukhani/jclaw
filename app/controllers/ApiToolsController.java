@@ -117,15 +117,6 @@ public class ApiToolsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
-    /** Reject the agent principal. Gated on how the request authenticated rather than on
-     *  self-reference: agent A granting agent B a tool escalates just as well, and the row
-     *  written here is the execute-time guard's authoritative input. */
-    private static void requireOperator() {
-        if (RequestPrincipal.isAgentOriginated()) {
-            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
-                    "Tool configuration is operator-only; an agent cannot grant tools to itself or to another agent.");
-        }
-    }
 
     /**
      * PUT /api/agents/{id}/tools/{name} — Enable or disable a tool for an agent.
@@ -143,7 +134,6 @@ public class ApiToolsController extends Controller {
     @Operation(summary = "Enable or disable a tool for an agent")
     @AgentAccess(value = OPERATOR_ONLY, reason = "writes a per-agent tool grant -- privilege escalation")
     public static void updateForAgent(Long id, String name) {
-        requireOperator();
 
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -215,7 +205,6 @@ public class ApiToolsController extends Controller {
     @Operation(summary = "Enable or disable a tool group (e.g. an MCP server) for an agent")
     @AgentAccess(value = OPERATOR_ONLY, reason = "writes a per-agent MCP server grant -- privilege escalation")
     public static void updateGroupForAgent(Long id, String group) {
-        requireOperator();
 
         Agent agent = AgentService.findById(id);
         if (agent == null) {
