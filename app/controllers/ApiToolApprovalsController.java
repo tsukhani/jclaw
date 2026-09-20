@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -23,7 +24,7 @@ import static utils.GsonHolder.GSON;
  * {@code (agent, tool)} pair forever, survives restarts, and until now had no removal
  * path short of deleting the agent. These endpoints are the management surface.
  *
- * <p><b>Operator-only and {@link ChatHidden}, without exception.</b> Per JCLAW-1023/1058
+ * <p><b>Operator-only without exception ({@link AgentAccess} {@code OPERATOR_ONLY}).</b> Per JCLAW-1023/1058
  * an agent must not enumerate or edit its own approvals: the list answers "which tools can
  * I run without being challenged", which is reconnaissance for exactly the boundary the
  * prompt exists to hold. Revoke is gated for the mirror-image reason — an agent that could
@@ -67,8 +68,8 @@ public class ApiToolApprovalsController extends Controller {
     /**
      * GET /api/agents/{id}/tool-approvals — standing approvals for one agent.
      */
-    @ChatHidden("enumerates which dangerous tools an agent may run unprompted")
     @Operation(summary = "List standing tool-approval grants for an agent")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "enumerates which dangerous tools an agent may run unprompted")
     public static void listForAgent(Long id) {
         requireOperator();
         var views = Tx.run(() -> {
@@ -87,8 +88,8 @@ public class ApiToolApprovalsController extends Controller {
      * nothing to remove" — the difference matters when the operator is clearing a list
      * they believe is stale.
      */
-    @ChatHidden("revoking an approval is an operator security action")
     @Operation(summary = "Revoke a standing tool-approval grant")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "revoking an approval is an operator security action")
     public static void revokeForAgent(Long id, String toolName) {
         requireOperator();
         var removed = Tx.run(() -> {
@@ -109,8 +110,9 @@ public class ApiToolApprovalsController extends Controller {
      * without opening every agent in turn. That sweep is the case JCLAW-1062 is really
      * about: grants made before JCLAW-1061 are still in force and mostly unnecessary.
      */
-    @ChatHidden("instance-wide map of which agents may run dangerous tools unprompted")
     @Operation(summary = "Roll-up of standing tool-approval grants across all agents")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "instance-wide map of which agents may run dangerous tools unprompted")
     public static void summary() {
         requireOperator();
         var view = Tx.run(() -> {

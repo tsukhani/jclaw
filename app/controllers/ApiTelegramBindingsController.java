@@ -22,6 +22,7 @@ import utils.Strings;
 import java.security.SecureRandom;
 import java.util.Base64;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static controllers.BindingKeys.EVENT_CATEGORY_CHANNEL;
 import static controllers.BindingKeys.KEY_AGENT_ID;
 import static controllers.BindingKeys.KEY_ENABLED;
@@ -100,6 +101,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
+    @AgentAccess(OPERATOR_ONLY)
     public static void list() {
         var items = TelegramBinding.<TelegramBinding>findAll().stream()
                 .map(BindingView::of)
@@ -110,7 +112,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
-    @ChatHidden("stores a Telegram bot token")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "stores a Telegram bot token")
     public static void create() {
         requireOperator();
         var body = JsonBodyReader.readJsonBody();
@@ -165,7 +167,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
-    @ChatHidden("rewrites a binding's bot token or its target agent")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "rewrites a binding's bot token or its target agent")
     public static void update(Long id) {
         requireOperator();
         var binding = TelegramBinding.<TelegramBinding>findById(id);
@@ -327,7 +329,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TelegramWebhookRegistrar.ProbeResult.class)))
     // Sonar java:S2259: notFound() never returns (throws play.mvc.results.NotFound), so binding is non-null below.
     @SuppressWarnings("java:S2259")
-    @ChatHidden("spends a live getMe against the stored bot token")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "spends a live getMe against the stored bot token")
     public static void test(Long id) {
         requireOperator();
         var binding = TelegramBinding.<TelegramBinding>findById(id);
@@ -340,7 +342,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     }
 
     @SuppressWarnings("java:S2259")
-    @ChatHidden("takes the operator's Telegram channel offline")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "takes the operator's Telegram channel offline")
     public static void delete(Long id) {
         requireOperator();
         var binding = TelegramBinding.<TelegramBinding>findById(id);
@@ -360,7 +362,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
     }
 
     /** Refuse the agent principal at the request layer — a binding carries its bot token (JCLAW-1266).
-     *  {@code @ChatHidden} would only hide it from the jclaw_api tool. */
+     *  Kept beside {@code @AgentAccess(OPERATOR_ONLY)} as defence in depth: the gate refuses before the action runs, this refuses if it ever does not. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,

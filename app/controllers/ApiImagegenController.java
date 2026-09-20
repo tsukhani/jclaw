@@ -18,6 +18,8 @@ import services.imagegen.ReplicateImageModelCatalog;
 
 import java.util.LinkedHashMap;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -55,6 +57,7 @@ public class ApiImagegenController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ImagegenLocalStateResponse.class)))
     @Operation(summary = "Snapshot local image-gen config, uv availability, and the local image model download status")
+    @AgentAccess(OPEN)
     public static void state() {
         var uv = UvProbe.lastResult();
         // Force one probe if the cache is still on the UNRUN sentinel — DefaultConfigJob
@@ -82,7 +85,8 @@ public class ApiImagegenController extends Controller {
      *  configured local model. Returns 202-style {@code {"status":"downloading"}}
      *  immediately; progress is observed via {@link #state}. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
-    @ChatHidden("triggers a local image model download -- disk/network/GPU resource action")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "triggers a local image model download -- disk/network/GPU resource action")
     public static void pull() {
         var model = ImageModelManager.configuredModel();
         // ensureAvailable is single-flight; concurrent calls from the polling UI
@@ -97,6 +101,7 @@ public class ApiImagegenController extends Controller {
      *  {@code imageToImage} flag so the UI can group them. Empty when no Replicate API key is set or
      *  discovery fails; the UI degrades to "no models". */
     @Operation(summary = "List selectable Replicate image models (text-to-image + Kontext image-to-image)")
+    @AgentAccess(OPEN)
     public static void models() {
         renderJSON(gson.toJson(ReplicateImageModelCatalog.availableModels()));
     }
@@ -105,6 +110,7 @@ public class ApiImagegenController extends Controller {
      *  the chat to drive a determinate bar. {@code percent} is null when the local sidecar is down or
      *  idle, or when the active provider is cloud (no per-step progress — like the video cloud path). */
     @Operation(summary = "Live step-progress of an in-flight local image generation (chat bar)")
+    @AgentAccess(OPEN)
     public static void progress() {
         var m = new LinkedHashMap<String, Object>();
         m.put("percent", LocalImageSidecarManager.currentProgressPercent());
@@ -115,6 +121,7 @@ public class ApiImagegenController extends Controller {
      *  (GPU + free VRAM + whether local Flux can run). The page polls this while PROBING, then disables
      *  the Self-Hosted radio when the host can't run it. */
     @Operation(summary = "Local image-gen host capability (GPU, free VRAM, whether Flux can run)")
+    @AgentAccess(OPEN)
     public static void capability() {
         renderJSON(gson.toJson(ImageCapabilityProbe.snapshot()));
     }
@@ -122,7 +129,7 @@ public class ApiImagegenController extends Controller {
     /** POST /api/imagegen/capability/probe — kick off a background GPU/VRAM probe (one-shot
      *  {@code uv run serve.py --probe}). Returns immediately; progress is observed via {@link #capability}. */
     @Operation(summary = "Start a background local image-gen capability probe")
-    @ChatHidden("runs a GPU capability subprocess -- resource action")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "runs a GPU capability subprocess -- resource action")
     public static void probeCapability() {
         ImageCapabilityProbe.probe();
         var m = new LinkedHashMap<String, Object>();

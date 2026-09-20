@@ -19,6 +19,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /** The model router's live state for Settings > Model Router (JCLAW-1222). */
@@ -43,6 +44,7 @@ public class ApiRouterController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RouterStatusResponse.class)))
     @Operation(summary = "Model router availability, budget thresholds and per-provider quota usage")
+    @AgentAccess(OPEN)
     public static void status() {
         var policy = RouterPolicy.load();
         var names = new LinkedHashSet<String>();

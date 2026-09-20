@@ -16,6 +16,7 @@ import utils.ApiResponses;
 import java.io.IOException;
 import java.sql.SQLException;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -41,7 +42,7 @@ public class ApiDatabaseController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DatabaseService.Status.class)))
     @Operation(summary = "Database size, free space, health verdict, backups and repair remnants")
-    @ChatHidden("operator maintenance plumbing -- names files on the host")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "operator maintenance plumbing -- names files on the host")
     public static void status() {
         requireOperator();
         DatabaseService.Status status;
@@ -56,7 +57,7 @@ public class ApiDatabaseController extends Controller {
 
     @ApiResponse(responseCode = "201", content = @Content(schema = @Schema(implementation = DatabaseService.BackupInfo.class)))
     @Operation(summary = "Back up the database now, online, into the backups directory")
-    @ChatHidden("writes a copy of the whole database to disk")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "writes a copy of the whole database to disk")
     public static void backup() {
         requireOperator();
         DatabaseService.BackupInfo info;
@@ -75,7 +76,7 @@ public class ApiDatabaseController extends Controller {
     }
 
     @Operation(summary = "Download one backup")
-    @ChatHidden("streams the database to the caller")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "streams the database to the caller")
     public static void download(String id) {
         requireOperator();
         var path = DatabaseService.resolveBackup(id == null ? "" : id);
@@ -87,7 +88,7 @@ public class ApiDatabaseController extends Controller {
     }
 
     @Operation(summary = "Delete one backup")
-    @ChatHidden("deletes a database backup")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "deletes a database backup")
     public static void delete(String id) {
         requireOperator();
         try {
@@ -107,7 +108,7 @@ public class ApiDatabaseController extends Controller {
      * ({@code file}, multipart). Validates first so a file that is not an H2 backup is refused
      * with the instance still up and nothing on disk changed; then hands off and acks 202.
      */
-    @ChatHidden("replaces the database and restarts the instance -- data loss")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "replaces the database and restarts the instance -- data loss")
     public static void restore(String id, Upload file) {
         requireOperator();
         String backupId;
@@ -151,7 +152,8 @@ public class ApiDatabaseController extends Controller {
     }
 
     /** POST /api/system/database/repair — hand off to {@code jclaw.sh repair} and ack 202. */
-    @ChatHidden("rebuilds the database and restarts the instance -- rows on unreadable pages are lost")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "rebuilds the database and restarts the instance -- rows on unreadable pages are lost")
     public static void repair() {
         requireOperator();
         RestartService.Plan plan;
@@ -170,7 +172,7 @@ public class ApiDatabaseController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = H2Maintenance.CleanResult.class)))
     @Operation(summary = "Delete the files the last successful repair left behind")
-    @ChatHidden("deletes the damaged database file kept aside by a repair")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "deletes the damaged database file kept aside by a repair")
     public static void clean() {
         requireOperator();
         H2Maintenance.CleanResult result;
@@ -188,7 +190,7 @@ public class ApiDatabaseController extends Controller {
     }
 
     /** Refuse the agent principal at the request layer — a backup archive carries the internal token's own plaintext config row (JCLAW-1266).
-     *  {@code @ChatHidden} would only hide it from the jclaw_api tool. */
+     *  Kept beside {@code @AgentAccess(OPERATOR_ONLY)} as defence in depth: the gate refuses before the action runs, this refuses if it ever does not. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,

@@ -12,6 +12,9 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+
 /**
  * Download endpoint for persisted chat-message attachments (JCLAW-279).
  * Resolves the storage path via the same workspace-bounded resolver used
@@ -31,6 +34,7 @@ public class ApiAttachmentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Stream the raw bytes of a persisted chat-message attachment (inline for media, attachment otherwise)")
+    @AgentAccess(OPEN)
     public static void download(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
         // JCLAW-209: a deleted attachment's bytes are gone from the workspace; the
@@ -80,7 +84,8 @@ public class ApiAttachmentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Delete an attachment's bytes from the workspace, retaining its record")
-    @ChatHidden("deletes attachment bytes out of any agent's workspace (JCLAW-1058)")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "deletes attachment bytes out of any agent's workspace (JCLAW-1058)")
     public static void deleteAttachment(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
         if (att == null) notFound();

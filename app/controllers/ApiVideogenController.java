@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -63,6 +65,7 @@ public class ApiVideogenController extends Controller {
      * {@code videogen.local.model} directly sees a blank where a real model will be used.
      */
     @Operation(summary = "Selected video-generation provider and its effective model")
+    @AgentAccess(OPEN)
     public static void state() {
         var provider = ConfigService.get("videogen.provider");
         renderJSON(gson.toJson(new VideogenStateResponse(
@@ -78,6 +81,7 @@ public class ApiVideogenController extends Controller {
      *  every job. This mirrors {@code ApiConversationsController} / {@code ApiAttachmentsController},
      *  which likewise serve rows by id/uuid to the one authenticated operator. */
     @Operation(summary = "Status of video-generation jobs by id (chat progress polling)")
+    @AgentAccess(OPEN)
     public static void jobs(String ids) {
         var out = new ArrayList<LinkedHashMap<String, Object>>();
         if (ids != null && !ids.isBlank()) {
@@ -111,6 +115,7 @@ public class ApiVideogenController extends Controller {
 
     /** GET /api/videogen/models — Replicate text-to-video models for the Settings model dropdown. */
     @Operation(summary = "Discover Replicate text-to-video models (Settings model dropdown)")
+    @AgentAccess(OPEN)
     public static void models() {
         renderJSON(gson.toJson(ReplicateVideoModelCatalog.textToVideoModels()));
     }
@@ -119,6 +124,7 @@ public class ApiVideogenController extends Controller {
      *  (SV-2 / JCLAW-232/233). The page polls this while the probe is PROBING, then renders the per-host
      *  tiered engine list (and grays out what won't run). */
     @Operation(summary = "Local video-gen host capability (GPU, free VRAM, per-engine runnable tiers)")
+    @AgentAccess(OPEN)
     public static void capability() {
         renderJSON(gson.toJson(VideoCapabilityProbe.snapshot()));
     }
@@ -126,7 +132,7 @@ public class ApiVideogenController extends Controller {
     /** POST /api/videogen/capability/probe — kick off a background GPU/VRAM probe (one-shot
      *  {@code uv run serve.py --probe}). Returns immediately; progress is observed via {@link #capability}. */
     @Operation(summary = "Start a background local video-gen capability probe")
-    @ChatHidden("runs a GPU capability subprocess -- resource action")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "runs a GPU capability subprocess -- resource action")
     public static void probeCapability() {
         VideoCapabilityProbe.probe();
         ApiResponses.ok(FIELD_STATE, "probing");
@@ -134,6 +140,7 @@ public class ApiVideogenController extends Controller {
 
     /** GET /api/videogen/jobs/recent — most-recent jobs for the dashboard Recent Activity (video view). */
     @Operation(summary = "Most-recent video-generation jobs (dashboard Recent Activity — video view)")
+    @AgentAccess(OPEN)
     public static void recent() {
         List<VideoGenerationJob> jobs = VideoGenerationJob.find("order by createdAt desc").fetch(20);
         var out = new ArrayList<LinkedHashMap<String, Object>>();

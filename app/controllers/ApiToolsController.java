@@ -22,6 +22,8 @@ import utils.ApiResponses;
 
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -52,6 +54,7 @@ public class ApiToolsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolListEntry.class))))
     @Operation(summary = "List all globally-registered tools (name, category, description)")
+    @AgentAccess(OPEN)
     public static void list() {
         var result = ToolRegistry.listTools().stream()
                 .map(t -> new ToolListEntry(t.name(), t.description()))
@@ -71,6 +74,7 @@ public class ApiToolsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolMetaEntry.class))))
     @Operation(summary = "List tool metadata (category, icon, actions) for the admin UI")
+    @AgentAccess(OPEN)
     public static void meta() {
         var result = ToolRegistry.listTools().stream()
                 .map(t -> new ToolMetaEntry(
@@ -91,6 +95,7 @@ public class ApiToolsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentToolEntry.class))))
     @Operation(summary = "List an agent's tools and their enabled state")
+    @AgentAccess(OPEN)
     public static void listForAgent(Long id) {
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -136,7 +141,7 @@ public class ApiToolsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ToolToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolToggleResponse.class)))
     @Operation(summary = "Enable or disable a tool for an agent")
-    @ChatHidden("writes a per-agent tool grant -- privilege escalation")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "writes a per-agent tool grant -- privilege escalation")
     public static void updateForAgent(Long id, String name) {
         requireOperator();
 
@@ -208,7 +213,7 @@ public class ApiToolsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ToolToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolGroupToggleResponse.class)))
     @Operation(summary = "Enable or disable a tool group (e.g. an MCP server) for an agent")
-    @ChatHidden("writes a per-agent MCP server grant -- privilege escalation")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "writes a per-agent MCP server grant -- privilege escalation")
     public static void updateGroupForAgent(Long id, String group) {
         requireOperator();
 

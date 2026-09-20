@@ -16,6 +16,7 @@ import utils.JpqlFilter;
 import java.time.Instant;
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -34,6 +35,7 @@ public class ApiLogsController extends Controller {
     // generation) to flatten on the wire anyway.
     @SuppressWarnings("java:S107")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogListResponse.class)))
+    @AgentAccess(OPERATOR_ONLY)
     public static void list(String category, String level, String agentId, String channel,
                             String since, String until, String search,
                             Integer limit, Integer offset) {
@@ -71,6 +73,7 @@ public class ApiLogsController extends Controller {
 
     /** The distinct categories present in the event log, in code-point order. */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = String.class))))
+    @AgentAccess(OPERATOR_ONLY)
     public static void categories() {
         var categories = JPA.em()
                 .createQuery("SELECT DISTINCT e.category FROM EventLog e", String.class)

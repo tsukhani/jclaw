@@ -20,6 +20,8 @@ import utils.ApiResponses;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -48,6 +50,7 @@ public class ApiPrintersController extends Controller {
 
     /** GET /api/printers — live mDNS browse, with the saved default flagged. */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = PrinterEntry.class))))
+    @AgentAccess(OPEN)
     public static void discover() {
         var saved = PrinterDefaults.load();
         var entries = PrinterDiscovery.discover().stream()
@@ -59,6 +62,7 @@ public class ApiPrintersController extends Controller {
     }
 
     /** GET /api/printers/default — the saved default printer and job options. */
+    @AgentAccess(OPEN)
     public static void getDefault() {
         renderJSON(GSON.toJson(PrinterDefaults.load()));
     }
@@ -75,6 +79,7 @@ public class ApiPrintersController extends Controller {
     /** GET /api/printers/default/status — is the saved default still answering? */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DefaultStatus.class)))
     @Operation(summary = "Probe whether the saved default printer answers at its address")
+    @AgentAccess(OPEN)
     public static void defaultStatus() {
         var saved = PrinterDefaults.load();
         if (saved.isUnset()) {
@@ -97,7 +102,8 @@ public class ApiPrintersController extends Controller {
      * than having none.
      */
     @SuppressWarnings("java:S2259")
-    @ChatHidden("repoints the host PrinterTool then sends the operator's print jobs to")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "repoints the host PrinterTool then sends the operator's print jobs to")
     public static void saveDefault() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -168,6 +174,7 @@ public class ApiPrintersController extends Controller {
      * rather than as an empty form.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JobOptionsResponse.class)))
+    @AgentAccess(OPEN)
     public static void options(String host, Integer port, String protocol) {
         var protocols = List.of("IPP", "IPPS", "RAW", "LPD");
         if (host == null || host.isBlank()) {

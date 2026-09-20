@@ -4,6 +4,8 @@ import play.mvc.Controller;
 import utils.ApiErrorTemplates;
 import utils.ApiResponses;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+
 /**
  * Clean 404 for unmatched {@code /api/*} paths (JCLAW-336).
  *
@@ -19,7 +21,8 @@ import utils.ApiResponses;
  */
 public class ApiNotFoundController extends Controller {
 
-    @ChatHidden("404 catch-all -- matches every unknown /api path; must never grant")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "404 catch-all -- matches every unknown /api path; must never grant")
     public static void handle() {
         ApiResponses.errorWithTemplate(404, ApiResponses.NOT_FOUND, "Not found",
                 ApiErrorTemplates.apiPathNotFound());

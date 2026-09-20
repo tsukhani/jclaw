@@ -19,6 +19,7 @@ import utils.ApiResponses;
 import java.nio.file.Path;
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -75,7 +76,8 @@ public class ApiEvalsController extends Controller {
      * against the operator's working agent by omission, which is exactly the accident
      * worth designing out.
      */
-    @ChatHidden("eval harness only -- loopback plus X-Loadtest-Auth, which an agent cannot present")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "eval harness only -- loopback plus X-Loadtest-Auth, which an agent cannot present")
     public static void capture() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -152,7 +154,8 @@ public class ApiEvalsController extends Controller {
      * finder on a {@code @NoTransaction} path throws "No active EntityManager".
      */
     @NoTransaction
-    @ChatHidden("eval harness only -- loopback plus X-Loadtest-Auth, which an agent cannot present")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "eval harness only -- loopback plus X-Loadtest-Auth, which an agent cannot present")
     public static void memoryIngest() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {

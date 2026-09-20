@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -70,6 +72,7 @@ public class ApiTranscriptionController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TranscriptionStateResponse.class)))
     @Operation(summary = "Snapshot transcription config, ffmpeg availability, and per-Whisper-model download status")
+    @AgentAccess(OPEN)
     public static void state() {
         var ffmpeg = FfmpegProbe.lastResult();
         // Force one probe if the cache is still on the UNRUN sentinel —
@@ -116,7 +119,8 @@ public class ApiTranscriptionController extends Controller {
     // S3655: error(400) halts via a Result Sonar can't see, so it thinks model.get() is reachable when empty — same Play-1.x gap as S2259.
     @SuppressWarnings({"java:S2259", "java:S3655"})
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
-    @ChatHidden("triggers a Whisper model download -- disk/network resource action")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "triggers a Whisper model download -- disk/network resource action")
     public static void download(String id) {
         var model = AsrModel.byId(id);
         if (model.isEmpty()) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown whisper model id: " + id);
@@ -133,6 +137,7 @@ public class ApiTranscriptionController extends Controller {
      *  on-device diarization weights (the pyannote diarizer + the configured
      *  SER emotion model). Polled by the Settings page like the ASR models. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiarizationModelsResponse.class)))
+    @AgentAccess(OPEN)
     public static void diarizationModels() {
         var serRepo = DiarizeModelStore.serRepo();
         var statuses = DiarizeModelStore.statusAll(serRepo);
@@ -155,7 +160,8 @@ public class ApiTranscriptionController extends Controller {
      *  Returns immediately; progress is observed through diarizationModels. */
     @SuppressWarnings("java:S2259")  // ApiResponses.error(400) halts; repo is non-null past the guard
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
-    @ChatHidden("triggers an on-device diarization weight download -- disk/network resource action")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "triggers an on-device diarization weight download -- disk/network resource action")
     public static void diarizationDownload(String repo) {
         if (repo == null
                 || (!repo.equals(DiarizeModelStore.PYANNOTE_REPO) && !DiarizeModelStore.isAllowedSer(repo))) {

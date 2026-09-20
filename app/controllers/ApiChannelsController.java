@@ -22,6 +22,8 @@ import utils.ApiResponses;
 import java.util.List;
 import java.util.Set;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -63,6 +65,7 @@ public class ApiChannelsController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ChannelView.class))))
     @Operation(summary = "List all stored channel configurations")
+    @AgentAccess(OPEN)
     public static void list() {
         List<ChannelConfig> configs = ChannelConfig.findAll();
         var result = configs.stream().map(ChannelView::of).toList();
@@ -83,6 +86,7 @@ public class ApiChannelsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ActiveChannelsResponse.class)))
     @Operation(summary = "Get the count and set of channel types currently doing work, aggregated across web, telegram, and ChannelConfig")
+    @AgentAccess(OPEN)
     public static void active() {
         var types = ChannelStatusService.activeChannelTypes();
         renderJSON(gson.toJson(new ActiveChannelsResponse(types.size(), types)));
@@ -90,7 +94,7 @@ public class ApiChannelsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
-    @ChatHidden("channel config detail may include secrets")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "channel config detail may include secrets")
     public static void get(String channelType) {
         var config = ChannelConfig.findByType(channelType);
         if (config == null) notFound();
@@ -100,7 +104,7 @@ public class ApiChannelsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ChannelConfig.class)))
-    @ChatHidden("writes channel config -- secrets / comms routing")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "writes channel config -- secrets / comms routing")
     public static void save(String channelType) {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {

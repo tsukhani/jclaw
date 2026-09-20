@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -168,6 +170,7 @@ public class ApiConversationsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConversationView.class))))
     @Operation(summary = "List conversations with optional channel, agent, name, peer, starred, pinned, and full-text (q) filters, paginated")
+    @AgentAccess(OPEN)
     public static void listConversations(String channel, Long agentId, String name, String peer,
                                           String q, Boolean starred, Boolean pinned,
                                           String sort, String dir, Integer limit, Integer offset) {
@@ -328,6 +331,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConversationView.class)))
     @Operation(summary = "Get a single conversation by id, in the same shape as one list row")
+    @AgentAccess(OPEN)
     public static void getConversation(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -344,6 +348,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageView.class))))
     @Operation(summary = "List a conversation's messages in ascending order, paginated")
+    @AgentAccess(OPEN)
     public static void getMessages(Long id, Integer limit, Integer offset) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -478,6 +483,7 @@ public class ApiConversationsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = QueueStatusResponse.class)))
     @Operation(summary = "Get the busy flag and queued-message count for a conversation")
+    @AgentAccess(OPEN)
     public static void getQueueStatus(Long id) {
         var busy = ConversationQueue.isBusy(id);
         var queueSize = ConversationQueue.getQueueSize(id);
@@ -493,7 +499,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
-    @ChatHidden("destructive history deletion")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "destructive history deletion")
     public static void deleteMessage(Long id, Long mid) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -517,7 +523,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
-    @ChatHidden("destructive history deletion")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "destructive history deletion")
     public static void deleteConversation(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -551,7 +557,7 @@ public class ApiConversationsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
-    @ChatHidden("destructive bulk history deletion -- wipes conversations")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "destructive bulk history deletion -- wipes conversations")
     public static void deleteConversations() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -625,6 +631,7 @@ public class ApiConversationsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(type = "string"))))
     @Operation(summary = "List the distinct channel types currently in use across conversations")
+    @AgentAccess(OPEN)
     public static void listConversationChannels() {
         List<String> channels = JPA.em()
                 .createQuery("SELECT DISTINCT c.channelType FROM Conversation c ORDER BY c.channelType", String.class)
@@ -650,7 +657,8 @@ public class ApiConversationsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelOverrideRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ModelOverrideResponse.class)))
     @Operation(summary = "Set a conversation-scoped model provider/model override, validated against the provider registry")
-    @AgentCallable("conversation-scoped model choice, validated against the provider registry")
+    @AgentAccess(value = OPEN,
+            reason = "conversation-scoped model choice, validated against the provider registry")
     public static void setModelOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -694,7 +702,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Clear a conversation's model override, reverting to the agent default (idempotent)")
-    @AgentCallable("reverts one conversation to the agent default")
+    @AgentAccess(value = OPEN, reason = "reverts one conversation to the agent default")
     public static void clearModelOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -714,7 +722,8 @@ public class ApiConversationsController extends Controller {
      * default is untouched; DELETE clears it.
      */
     @SuppressWarnings("java:S2259")
-    @AgentCallable("conversation-scoped thinking level, validated against the effective model")
+    @AgentAccess(value = OPEN,
+            reason = "conversation-scoped thinking level, validated against the effective model")
     public static void setThinkingOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -744,7 +753,7 @@ public class ApiConversationsController extends Controller {
     }
 
     /** DELETE /api/conversations/{id}/thinking-override — back to the agent's default. */
-    @AgentCallable("reverts one conversation to the agent default")
+    @AgentAccess(value = OPEN, reason = "reverts one conversation to the agent default")
     public static void clearThinkingOverride(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -766,7 +775,8 @@ public class ApiConversationsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = RenameRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = NameResponse.class)))
     @Operation(summary = "Rename a conversation; the name is non-blank and at most 100 characters")
-    @AgentCallable("conversation metadata; the destructive siblings in this controller are hidden")
+    @AgentAccess(value = OPEN,
+            reason = "conversation metadata; the destructive siblings in this controller are hidden")
     public static void renameConversation(Long id) {
         Conversation conversation = ConversationService.findById(id);
         if (conversation == null) {
@@ -798,7 +808,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Star a conversation (idempotent)")
-    @AgentCallable("operator-visible flag, reversible in one call")
+    @AgentAccess(value = OPEN, reason = "operator-visible flag, reversible in one call")
     public static void starConversation(Long id) {
         ConversationService.setStarred(requireConversation(id), true);
         renderJSON(gson.toJson(new StatusResponse(STARRED)));
@@ -808,7 +818,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Unstar a conversation (idempotent)")
-    @AgentCallable("operator-visible flag, reversible in one call")
+    @AgentAccess(value = OPEN, reason = "operator-visible flag, reversible in one call")
     public static void unstarConversation(Long id) {
         ConversationService.setStarred(requireConversation(id), false);
         renderJSON(gson.toJson(new StatusResponse("unstarred")));
@@ -824,7 +834,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @ApiResponse(responseCode = "409", description = "The pinned-conversation cap is already reached")
     @Operation(summary = "Pin a conversation, up to a cap of 10 (idempotent below the cap)")
-    @AgentCallable("pinning is capped at ten and reversible")
+    @AgentAccess(value = OPEN, reason = "pinning is capped at ten and reversible")
     public static void pinConversation(Long id) {
         if (!ConversationService.pin(requireConversation(id))) {
             ApiResponses.error(409, ApiResponses.CONFLICT,
@@ -839,7 +849,7 @@ public class ApiConversationsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Unpin a conversation (idempotent)")
-    @AgentCallable("reversible in one call")
+    @AgentAccess(value = OPEN, reason = "reversible in one call")
     public static void unpinConversation(Long id) {
         ConversationService.unpin(requireConversation(id));
         renderJSON(gson.toJson(new StatusResponse("unpinned")));

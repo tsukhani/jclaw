@@ -59,6 +59,12 @@ public class LoadtestAuthCheck extends Controller {
         if (!permits(Http.Request.current())) {
             denied();
         }
+        // The routes behind this check never see AuthCheck, so without this call they would be
+        // the hole in "every /api action passes an access gate". Play reads the session cookie on
+        // every request regardless of interceptor, and AuthCheck's bearer branch answers with one
+        // carrying the agent principal, so a caller that keeps cookies can arrive here stamped
+        // (JCLAW-1270).
+        AgentAccessGate.enforce();
     }
 
     /**

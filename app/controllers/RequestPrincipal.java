@@ -1,11 +1,14 @@
 package controllers;
 
+import models.Agent;
+import org.jspecify.annotations.Nullable;
+import play.mvc.Http;
 import play.mvc.Scope;
 import services.InternalApiTokenService;
 
 /**
  * Who is making this request — the operator at a browser, or an agent driving the API through
- * the {@code jclaw_api} tool (JCLAW-1023).
+ * the {@code jclaw_api} tool (JCLAW-1023), and since JCLAW-1270 <em>which</em> agent.
  *
  * <p>Both arrive at a controller looking identical: {@link AuthCheck}'s bearer branch stashes
  * {@code authenticated}/{@code username} into the session exactly as a cookie login does, so
@@ -25,6 +28,16 @@ public final class RequestPrincipal {
     /** Value of {@link #PRINCIPAL_KEY} for a bearer-authenticated (agent) request. */
     static final String AGENT = "agent";
 
+    /**
+     * Header {@code JClawApiTool} stamps with the calling agent's id.
+     *
+     * <p>One token serves every agent, so the credential cannot say which one is calling. The
+     * tool builds the request from the {@link Agent} it is handed; the model supplies only method
+     * and path and never sees this header, so it cannot forge one. Honoured only on an
+     * agent-originated request — an operator session that sent it is ignored.
+     */
+    public static final String AGENT_ID_HEADER = "x-jclaw-agent-id";
+
     private RequestPrincipal() {}
 
     /**
@@ -39,5 +52,45 @@ public final class RequestPrincipal {
         if (session == null) return false;
         return AGENT.equals(session.get(PRINCIPAL_KEY))
                 || InternalApiTokenService.SYSTEM_OWNER.equals(session.get("username"));
+    }
+
+    /**
+     * The agent behind this request, or null when the operator is calling or the caller could not
+     * be identified.
+     *
+     * <p>Null on an agent-originated request means the header was absent, unparseable or named a
+     * row that no longer exists — a bearer used outside the tool, in other words. Callers treat
+     * that as "not this agent" and refuse, so the unidentified case is the closed one.
+     */
+    public static @Nullable Agent callingAgent() {
+        if (!isAgentOriginated()) return null;
+        var request = Http.Request.current();
+        if (request == null) return null;
+        var header = request.headers.get(AGENT_ID_HEADER);
+        var raw = header == null ? null : header.value();
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return Agent.findById(Long.valueOf(raw.trim()));
+        } catch (NumberFormatException _) {
+            return null;
+        }
+    }
+
+    /**
+     * Whether this caller may reach a row owned by {@code owner}: the operator may reach anything,
+     * the {@code main} agent may reach any agent's rows, and every other agent only its own
+     * (JCLAW-1270).
+     *
+     * <p>{@code main} is the operator's own assistant and the one agent that spawns and supervises
+     * the others, so the asymmetry is deliberate: it sees down the tree, nothing sees up or across.
+     *
+     * @param owner the agent the row belongs to; a null owner is reachable only by the operator
+     */
+    public static boolean mayReachAgentScopedRow(@Nullable Agent owner) {
+        if (!isAgentOriginated()) return true;
+        var caller = callingAgent();
+        if (caller == null) return false;
+        if (caller.isMain()) return true;
+        return owner != null && owner.id != null && owner.id.equals(caller.id);
     }
 }

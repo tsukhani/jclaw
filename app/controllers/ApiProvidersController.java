@@ -40,6 +40,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -96,6 +97,7 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ProviderInfo.class))))
     @Operation(summary = "List configured LLM providers")
+    @AgentAccess(OPEN)
     public static void list() {
         var infos = ProviderRegistry.listAll().stream()
                 .filter(p -> !isInternalProvider(p.config().name()))
@@ -124,7 +126,8 @@ public class ApiProvidersController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
     @Operation(summary = "Discover a provider's available models from its live API")
-    @AgentCallable("/api/providers is agent-reachable by design; SsrfGuard and key masking are the seams")
+    @AgentAccess(value = OPEN,
+            reason = "/api/providers is agent-reachable by design; SsrfGuard and key masking are the seams")
     public static void discoverModels(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
@@ -159,6 +162,7 @@ public class ApiProvidersController extends Controller {
     @SuppressWarnings("java:S2259") // null guard halts via Play's renderJSON() throwing — baseUrl is non-null at the probe call (same as discoverModels)
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReachableResponse.class)))
     @Operation(summary = "Check whether a provider's endpoint is reachable right now")
+    @AgentAccess(OPEN)
     public static void reachable(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
@@ -185,6 +189,7 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's video-capable models from its live API")
+    @AgentAccess(OPEN)
     public static void videoModels(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
@@ -261,6 +266,7 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's configured models (id + display name)")
+    @AgentAccess(OPEN)
     public static void models(String name) {
         requireConfiguredProvider(name);
         var arr = parseModelsArray(ConfigService.get(modelsKey(name)));
@@ -290,7 +296,8 @@ public class ApiProvidersController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelInfoRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AddModelResponse.class)))
     @Operation(summary = "Add a model to a provider by id")
-    @AgentCallable("extends a provider's model list; the baseUrl it dials stays behind SsrfGuard")
+    @AgentAccess(value = OPEN,
+            reason = "extends a provider's model list; the baseUrl it dials stays behind SsrfGuard")
     public static void addModel(String name) {
         requireConfiguredProvider(name);
 
@@ -354,6 +361,7 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's models unfiltered, for the embedding picker")
+    @AgentAccess(OPEN)
     public static void embeddingModels(String name) {
         requireConfiguredProvider(name);
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
@@ -381,7 +389,7 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Check whether a model serves embeddings, and at what dimension")
-    @AgentCallable("probes a configured provider; SsrfGuard bounds the outbound dial")
+    @AgentAccess(value = OPEN, reason = "probes a configured provider; SsrfGuard bounds the outbound dial")
     public static void embeddingProbe(String name) {
         requireConfiguredProvider(name);
         var body = JsonBodyReader.readJsonBody();
@@ -576,7 +584,7 @@ public class ApiProvidersController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RefreshPricesResponse.class)))
     @Operation(summary = "Manually refresh LiteLLM model prices (synchronous)")
-    @AgentCallable("pulls the LiteLLM price table from a fixed URL")
+    @AgentAccess(value = OPEN, reason = "pulls the LiteLLM price table from a fixed URL")
     public static void refreshPrices() {
         var result = PricingRefreshService.refresh();
         renderJSON(gson.toJson(new RefreshPricesResponse(

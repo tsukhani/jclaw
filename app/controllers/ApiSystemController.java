@@ -13,6 +13,8 @@ import services.SubagentRegistry;
 import services.UpgradeService;
 import utils.ApiResponses;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -54,6 +56,7 @@ public class ApiSystemController extends Controller {
      * interrupt. Drives the confirmation dialog; performs nothing.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RestartPreflight.class)))
+    @AgentAccess(OPEN)
     public static void restartPreflight() {
         var plan = RestartService.plan();
         var unavailable = RestartService.unavailableReason();
@@ -72,7 +75,7 @@ public class ApiSystemController extends Controller {
      * This JVM keeps serving for a couple more seconds so this very response
      * can reach the browser, then the helper stops it.
      */
-    @ChatHidden("stops and relaunches the instance -- availability")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "stops and relaunches the instance -- availability")
     public static void restart() {
         // The success render stays OUT of the try. Play signals results by
         // throwing, and RenderJson is a RuntimeException — inside the try below
@@ -127,6 +130,7 @@ public class ApiSystemController extends Controller {
      * @param refresh bypass the cached release check (the "check again" control)
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UpgradePreflight.class)))
+    @AgentAccess(OPEN)
     public static void upgradePreflight(Boolean refresh) {
         var unavailable = UpgradeService.unavailableReason();
         var current = UpgradeService.currentVersion();
@@ -155,7 +159,8 @@ public class ApiSystemController extends Controller {
      * @param version optional release to install (defaults to the newest);
      *                also the way to re-install or step back to an earlier one
      */
-    @ChatHidden("replaces the install and restarts; stepping back reopens fixed holes")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "replaces the install and restarts; stepping back reopens fixed holes")
     public static void upgrade(String version) {
         // Success render stays OUT of the try — RenderJson is a RuntimeException,
         // so a catch-all around it would swallow its own 202 and answer 500.
@@ -188,6 +193,7 @@ public class ApiSystemController extends Controller {
      * 204 when no upgrade has ever run on this install.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UpgradeService.Status.class)))
+    @AgentAccess(OPEN)
     public static void upgradeStatus() {
         var status = UpgradeService.status();
         if (status == null) {

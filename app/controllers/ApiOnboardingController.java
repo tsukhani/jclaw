@@ -12,6 +12,7 @@ import services.ConfigService;
 import services.EventLogger;
 import utils.ApiResponses;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -49,6 +50,7 @@ public class ApiOnboardingController extends Controller {
      *  on the intro dialog (or advance any step), the flag flips forever. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TourStatusResponse.class)))
     @Operation(summary = "Return the guided-tour max step reached, total steps, and whether the intro dialog should auto-show")
+    @AgentAccess(OPEN)
     public static void status() {
         var maxStep = ConfigService.getInt(CONFIG_KEY, 0);
         renderJSON(gson.toJson(new TourStatusResponse(maxStep, TOTAL_STEPS, maxStep == 0)));
@@ -61,7 +63,7 @@ public class ApiOnboardingController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TourProgressRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TourProgressResponse.class)))
     @Operation(summary = "Record guided-tour progress, upserting the max step reached (clamped to [1, totalSteps])")
-    @AgentCallable("guided-tour step counter -- operator UI state with no reach")
+    @AgentAccess(value = OPEN, reason = "guided-tour step counter -- operator UI state with no reach")
     public static void recordProgress() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("step")) {

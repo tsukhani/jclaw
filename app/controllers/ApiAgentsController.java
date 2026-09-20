@@ -43,6 +43,8 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -195,6 +197,7 @@ public class ApiAgentsController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentView.class))))
     @Operation(summary = "List agents (id, name, modelProvider, modelId, enabled, isMain)")
+    @AgentAccess(OPEN)
     public static void list() {
         var configuredKeys = AgentService.configuredModelKeys();
         var result = listedAgents().stream()
@@ -221,6 +224,7 @@ public class ApiAgentsController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @Operation(summary = "Get one agent's full details by id")
+    @AgentAccess(OPEN)
     public static void get(Long id) {
         var agent = requireAgent(id);
         renderJSON(gson.toJson(AgentView.of(agent)));
@@ -235,6 +239,7 @@ public class ApiAgentsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptBreakdown.class)))
     @Operation(summary = "Per-section breakdown of the system prompt this agent would receive next turn")
+    @AgentAccess(OPEN)
     public static void promptBreakdown(Long id) {
         var agent = requireAgent(id);
         var breakdown = SystemPromptAssembler.breakdown(agent, null, requireBreakdownChannel());
@@ -254,6 +259,7 @@ public class ApiAgentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Full assembled system prompt text this agent would receive next turn")
+    @AgentAccess(OPEN)
     public static void promptText(Long id) {
         var agent = requireAgent(id);
         var assembled = SystemPromptAssembler.assemble(agent, null, null, requireBreakdownChannel());
@@ -292,6 +298,7 @@ public class ApiAgentsController extends Controller {
      * disabling or removing the skill.
      */
     @Operation(summary = "Effective shell allowlist for an agent: global config unioned with enabled-skill commands")
+    @AgentAccess(OPEN)
     public static void effectiveShellAllowlist(Long id) {
         var agent = requireAgent(id);
 
@@ -329,7 +336,8 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
     @Operation(summary = "Create an agent")
-    @AgentCallable("creates a model-config-only agent; tool grants and acpAllowed stay on operator-only routes")
+    @AgentAccess(value = OPEN,
+            reason = "creates a model-config-only agent; tool grants and acpAllowed stay on operator-only routes")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -452,6 +460,7 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
     @Operation(summary = "Update an agent by id")
+    @AgentAccess(value = OPEN, reason = "model config only; acpAllowed is refused per-field for the agent principal (JCLAW-1023) and tool grants live on operator-only routes")
     public static void update(Long id) {
         var agent = requireAgent(id);
 
@@ -602,7 +611,7 @@ public class ApiAgentsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Delete an agent by id (the built-in 'main' agent cannot be deleted)")
-    @ChatHidden("deletes any agent together with its workspace (JCLAW-1058)")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "deletes any agent together with its workspace (JCLAW-1058)")
     public static void delete(Long id) {
         var agent = requireAgent(id);
         if (agent.isMain()) {
@@ -622,7 +631,8 @@ public class ApiAgentsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Serve a binary workspace file with its content type for inline rendering or download")
-    @ChatHidden("serves any agent's workspace, including another agent's persona files")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "serves any agent's workspace, including another agent's persona files")
     public static void serveWorkspaceFile(Long id, String filePath) {
         requireOperatorForWorkspace();
 
@@ -683,7 +693,8 @@ public class ApiAgentsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Read a text workspace file's contents by filename")
-    @ChatHidden("reads any agent's workspace, including another agent's persona files")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "reads any agent's workspace, including another agent's persona files")
     public static void getWorkspaceFile(Long id, String filename) {
         requireOperatorForWorkspace();
 
@@ -699,7 +710,8 @@ public class ApiAgentsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkspaceFileRequest.class)))
     @Operation(summary = "Write a text workspace file's contents by filename")
-    @ChatHidden("workspace files are injected as authoritative standing instructions")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "workspace files are injected as authoritative standing instructions")
     public static void saveWorkspaceFile(Long id, String filename) {
         requireOperatorForWorkspace();
 
@@ -721,7 +733,8 @@ public class ApiAgentsController extends Controller {
      * agent's shared workspace.
      */
     @Operation(summary = "List an agent's workspace tree with sizes, protected markers and a total")
-    @ChatHidden("lists any agent's workspace, including another agent's persona files")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "lists any agent's workspace, including another agent's persona files")
     public static void listWorkspaceTree(Long id) {
         requireOperatorForWorkspace();
 
@@ -745,7 +758,8 @@ public class ApiAgentsController extends Controller {
      * (JCLAW-1248): a file with its own name and bytes, a folder as {@code <name>.zip}.
      */
     @Operation(summary = "Download a workspace file as an attachment, or a workspace folder as a zip")
-    @ChatHidden("downloads any agent's workspace, including another agent's persona files")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "downloads any agent's workspace, including another agent's persona files")
     public static void downloadWorkspaceEntry(Long id, String path) {
         requireOperatorForWorkspace();
 
@@ -766,7 +780,8 @@ public class ApiAgentsController extends Controller {
      * {@code <agent>-workspace.zip}, Standing Orders files included (JCLAW-1251).
      */
     @Operation(summary = "Download an agent's entire workspace as a zip backup")
-    @ChatHidden("downloads any agent's whole workspace, including another agent's persona files")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "downloads any agent's whole workspace, including another agent's persona files")
     public static void backupWorkspace(Long id) {
         requireOperatorForWorkspace();
 
@@ -829,7 +844,8 @@ public class ApiAgentsController extends Controller {
      * Standing Orders files are refused here, not in the UI: hiding the control is a courtesy.
      */
     @Operation(summary = "Delete a workspace file or folder subtree; the root and Standing Orders files are refused")
-    @ChatHidden("deletes files from any agent's workspace, including another agent's persona files")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "deletes files from any agent's workspace, including another agent's persona files")
     public static void deleteWorkspaceEntry(Long id, @Nullable String path) {
         requireOperatorForWorkspace();
 

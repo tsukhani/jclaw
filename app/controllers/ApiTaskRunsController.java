@@ -24,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -102,6 +103,7 @@ public class ApiTaskRunsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunView.class))))
     @Operation(summary = "Paginated TaskRun history for one task (startedAt DESC), 404 if task missing")
+    @AgentAccess(OPEN)
     public static void runs(Long id, Integer limit, Integer offset) {
         Task task = TaskService.findById(id);
         if (task == null) {
@@ -127,6 +129,7 @@ public class ApiTaskRunsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunMessageView.class))))
     @Operation(summary = "Turn-by-turn message trace for one TaskRun (turnIndex order), 404 if run missing")
+    @AgentAccess(OPEN)
     public static void runMessages(Long id) {
         TaskRun run = TaskService.findRunById(id);
         if (run == null) {
@@ -179,6 +182,7 @@ public class ApiTaskRunsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = RecentRunView.class))))
     @Operation(summary = "Recent TaskRuns across all tasks for the calendar/timeline (range via from/to or rolling last hours)")
+    @AgentAccess(OPEN)
     public static void recentRuns(Integer hours, Integer limit, String from, String to) {
         int lim = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         var window = resolveRunWindow(hours, from, to);
@@ -227,7 +231,7 @@ public class ApiTaskRunsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskRunView.class)))
     @Operation(summary = "Cancel an in-progress task run by runId (cooperative flag + stamp CANCELLED), 400 if not RUNNING")
-    @AgentCallable("cooperative cancel of a run; task_manager is the scoped agent path")
+    @AgentAccess(value = OPEN, reason = "cooperative cancel of a run; task_manager is the scoped agent path")
     public static void cancelRun(Long runId) {
         TaskRun run = TaskService.findRunById(runId);
         if (run == null) {

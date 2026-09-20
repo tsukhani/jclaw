@@ -80,10 +80,10 @@ class JClawApiToolTest extends UnitTest {
         var result = tool.execute(
                 "{\"method\":\"POST\",\"path\":\"/api/chat/send\"," +
                 "\"body\":{\"agentId\":1,\"message\":\"hi\"}}", null);
-        assertTrue(result.contains("reserved and cannot be invoked"),
-                "expected deny-floor refusal; got: " + result);
+        assertTrue(result.contains("is not callable through jclaw_api"),
+                "expected the default-deny refusal; got: " + result);
         assertTrue(result.contains("/api/chat/"),
-                "error should name the blocked prefix; got: " + result);
+                "the refusal should name the path it refused; got: " + result);
     }
 
     @Test
@@ -122,8 +122,8 @@ class JClawApiToolTest extends UnitTest {
     void blocksTelegramBindingsPath() {
         var result = tool.execute(
                 "{\"method\":\"GET\",\"path\":\"/api/channels/telegram/bindings\"}", null);
-        assertTrue(result.contains("reserved and cannot be invoked"),
-                "telegram bindings (bot tokens) must be deny-floored; got: " + result);
+        assertTrue(result.contains("is not callable through jclaw_api"),
+                "telegram bindings (bot tokens) must stay refused; got: " + result);
     }
 
     @Test
@@ -176,9 +176,9 @@ class JClawApiToolTest extends UnitTest {
         var result = tool.execute(
                 "{\"method\":\"GET\",\"path\":\"/api/skills/x/files/%2e%2e/%2e%2e/%2e%2e/logs\"}", null);
         assertTrue(result.contains("/api/logs"),
-                "the resolved path must be what the deny-floor sees; got: " + result);
-        assertTrue(result.contains("reserved and cannot be invoked"),
-                "expected the deny-floor refusal; got: " + result);
+                "the resolved path must be what the gate sees; got: " + result);
+        assertTrue(result.contains("is not callable through jclaw_api"),
+                "expected the default-deny refusal; got: " + result);
     }
 
     @Test

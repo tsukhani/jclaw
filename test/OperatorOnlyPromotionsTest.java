@@ -7,7 +7,7 @@ import play.test.FunctionalTest;
 import java.util.function.Supplier;
 
 /**
- * The routes JCLAW-1266 promoted from {@code @ChatHidden} to a request-layer guard actually
+ * The routes JCLAW-1266 promoted to a request-layer guard actually
  * refuse the agent principal — driven end to end, not proved structurally.
  *
  * <p>{@code CapabilityRulesTest} shows each of these actions <em>reaches</em> an
@@ -109,20 +109,21 @@ class OperatorOnlyPromotionsTest extends FunctionalTest {
     void agentPrincipalCannotToggleTheTailscaleFunnel() {
         // The widest-blast-radius switch on the instance: Funnel publishes a whole port, so
         // flipping it on exposes every route this app serves to the public internet. It was
-        // deny-floored and @ChatHidden, which only ever stopped the jclaw_api tool.
+        // hidden from the tool only, which stopped the jclaw_api tool and nobody else.
         var resp = asAgent(() -> POST(agentRequest(), "/api/tailscale",
                 "application/json", "{\"enabled\":true}"));
         assertRefusedAsOperatorOnly(resp);
     }
 
     @Test
-    void theFunnelStatusReadStaysOpenToAnAgent() {
-        // Deliberate, not an oversight: status reports a funnel URL that is public by definition,
-        // and Personal Edition puts a leaky read at the masking seam rather than behind a refusal.
-        // Pinned so that closing it later is a decision someone makes on purpose.
+    void theFunnelStatusReadIsRefusedToo() {
+        // Was pinned open until JCLAW-1270, on the reasoning that a funnel URL is public by
+        // definition. What closed it is the mechanism rather than a re-reading of the risk:
+        // @AgentAccess has no level meaning "hidden from the tool but not refused", which is the
+        // state that let JCLAW-1266's routes look protected while refusing nobody. Collapsing it
+        // costs an agent a read nothing needed.
         var resp = asAgent(() -> GET(agentRequest(), "/api/tailscale"));
-        assertFalse(getContent(resp).contains(OPERATOR_ONLY),
-                "the funnel status read is intentionally reachable by an agent; got: " + getContent(resp));
+        assertRefusedAsOperatorOnly(resp);
     }
 
     // --- channel bindings: which agent receives a channel's messages -------------------------
@@ -151,12 +152,11 @@ class OperatorOnlyPromotionsTest extends FunctionalTest {
     }
 
     @Test
-    void theBindingListReadStaysOpenToAnAgent() {
-        // Deliberate: BindingView carries ids, names, channel type and priority — nothing secret.
-        // Pinned so that closing it later is a decision rather than drift.
+    void theBindingListReadIsRefusedToo() {
+        // Same collapse as the funnel status above: BindingView carries nothing secret, but the
+        // level that used to express "visible, just not advertised" no longer exists (JCLAW-1270).
         var resp = asAgent(() -> GET(agentRequest(), "/api/bindings"));
-        assertFalse(getContent(resp).contains(OPERATOR_ONLY),
-                "the binding list read is intentionally reachable by an agent; got: " + getContent(resp));
+        assertRefusedAsOperatorOnly(resp);
     }
 
     // --- positive control ----------------------------------------------------------------------

@@ -14,6 +14,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -40,6 +41,7 @@ public class ApiSchedulingMetaController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "List IANA timezone ids plus the effective task-scheduling and app default zones")
+    @AgentAccess(OPEN)
     public static void timezones() {
         var ids = new ArrayList<>(ZoneId.getAvailableZoneIds());
         ids.sort(String::compareTo);
@@ -63,6 +65,7 @@ public class ApiSchedulingMetaController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Preflight Slack delivery reachability advisory for one task (null when reachable / N/A)")
+    @AgentAccess(OPEN)
     public static void deliveryAdvisory(Long id) {
         Task task = TaskService.findById(id);
         if (task == null) {

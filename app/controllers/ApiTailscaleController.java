@@ -9,6 +9,7 @@ import services.EventLogger;
 import services.TailscaleFunnel;
 import utils.ApiResponses;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -37,6 +38,7 @@ public class ApiTailscaleController extends Controller {
                                  @Nullable String error) {}
 
     /** GET /api/tailscale — funnel toggle state + live availability / public URL. */
+    @AgentAccess(OPERATOR_ONLY)
     public static void status() {
         var st = TailscaleFunnel.status();
         renderJSON(gson.toJson(new StatusResponse(
@@ -46,7 +48,7 @@ public class ApiTailscaleController extends Controller {
     /** POST /api/tailscale — body {@code {"enabled":bool,"port":int?}}. Persists
      *  the toggle and (re)establishes or tears down the funnel accordingly. */
     @SuppressWarnings("java:S2259")
-    @ChatHidden("opens or closes the public funnel in front of this instance")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "opens or closes the public funnel in front of this instance")
     public static void toggle() {
         requireOperator();
         var body = JsonBodyReader.readJsonBody();
@@ -73,7 +75,7 @@ public class ApiTailscaleController extends Controller {
 
     /** Refuse the agent principal at the request layer — this switch decides whether the instance
      *  is reachable from the public internet (JCLAW-1266).
-     *  {@code @ChatHidden} would only hide it from the jclaw_api tool.
+     *  Kept beside {@code @AgentAccess(OPERATOR_ONLY)} as defence in depth: the gate refuses before the action runs, this refuses if it ever does not.
      *
      *  <p>{@link #status} is deliberately left open: it reports a funnel URL that is public by
      *  definition, and Personal Edition puts a leaky read at the masking seam rather than behind

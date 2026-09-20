@@ -18,6 +18,8 @@ import utils.AppClock;
 
 import java.time.LocalDate;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -51,6 +53,7 @@ public class ApiTaskStatsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskStatsView.class)))
     @Operation(summary = "Task dashboard KPIs (runs today, success rate, avg duration, pending/running/paused/active/failed counts, retention days)")
+    @AgentAccess(OPEN)
     public static void stats(String payloadType, String excludePayloadType) {
         var zone = TimezoneResolver.currentDefault();
         var since = LocalDate.ofInstant(AppClock.now(), zone).atStartOfDay(zone).toInstant();
@@ -104,7 +107,8 @@ public class ApiTaskStatsController extends Controller {
      * history.
      */
     @Operation(summary = "Reset dashboard KPIs by deleting terminal (non-RUNNING) task runs and transcripts, scoped by payloadType")
-    @ChatHidden("deletes terminal task runs and their transcripts -- the operator's record of what ran")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "deletes terminal task runs and their transcripts -- the operator's record of what ran")
     public static void resetStats(String payloadType, String excludePayloadType) {
         int deleted = TaskStatsService.resetTerminalRuns(payloadType, excludePayloadType);
 

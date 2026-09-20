@@ -29,6 +29,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+
 /**
  * JCLAW-764 / AD-2: the single-purpose App → Agent invoke endpoint. A hosted app
  * POSTs to {@code POST /api/apps/<slug>/invoke} and its one operator-designated
@@ -75,7 +78,8 @@ public class ApiAppInvokeController extends Controller {
      * none runs outside one.
      */
     @NoTransaction
-    @ChatHidden("drives a full agent turn -- the recursion the /api/chat/ deny-floor exists to prevent")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "drives a full agent turn -- the recursion the /api/chat/ deny-floor exists to prevent")
     public static void invoke(String slug, Upload[] files) {
         var agent = resolveDesignatedAgent(slug); // AD-3 — fail-closed 4xx on any miss (own Tx.run inside)
         // AD-2: input is the multipart "message" field plus optional file uploads of
@@ -120,6 +124,7 @@ public class ApiAppInvokeController extends Controller {
      * attachment by guessing a uuid. Only finalized, {@code generated}, non-deleted rows
      * are served.
      */
+    @AgentAccess(OPEN)
     public static void file(String slug, String uuid) {
         if (slug == null || !SLUG.matcher(slug).matches()) {
             notFound();

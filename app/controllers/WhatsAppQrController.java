@@ -8,6 +8,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.BindingService;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -35,6 +36,7 @@ public class WhatsAppQrController extends Controller {
      * a {@code paired:false, qr:null} response for a Cloud-API binding (which never
      * pairs via QR) so the UI can distinguish "wrong transport" cheaply.
      */
+    @AgentAccess(OPEN)
     public static void status(Long id) {
         WhatsAppBinding binding = BindingService.findWhatsAppBindingById(id);
         notFoundIfNull(binding);

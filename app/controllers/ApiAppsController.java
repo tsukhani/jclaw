@@ -20,6 +20,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -61,6 +63,7 @@ public class ApiAppsController extends Controller {
      *  skipped, never a 500. */
     @Operation(summary = "List operator-hosted mini-apps discovered under public/apps/")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AppsResponse.class)))
+    @AgentAccess(OPEN)
     public static void list() {
         var appsDir = Play.getFile("public/apps").toPath();
         var apps = new ArrayList<AppEntry>();
@@ -85,7 +88,8 @@ public class ApiAppsController extends Controller {
      *  guard against path traversal. */
     @Operation(summary = "Delete an operator-hosted mini-app (removes its public/apps/<slug>/ directory)")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeleteResponse.class)))
-    @ChatHidden("removes an operator-hosted app directory, outside every agent workspace")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "removes an operator-hosted app directory, outside every agent workspace")
     public static void delete(String slug) {
         if (slug == null || !SLUG.matcher(slug).matches()) {
             badRequest("Invalid app slug");

@@ -12,6 +12,7 @@ import slash.Commands;
 
 import java.util.Arrays;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -42,6 +43,7 @@ public class ApiSlashCommandsController extends Controller {
     @ApiResponse(responseCode = "200",
             content = @Content(array = @ArraySchema(schema = @Schema(implementation = SlashCommandView.class))))
     @Operation(summary = "List the built-in slash commands (literal, name, description)")
+    @AgentAccess(OPEN)
     public static void list() {
         renderJSON(gson.toJson(
                 Arrays.stream(Commands.Command.values()).map(SlashCommandView::of).toList()));

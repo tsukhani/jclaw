@@ -18,6 +18,8 @@ import utils.ApiResponses;
 
 import java.util.Arrays;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -64,12 +66,14 @@ public class ApiPromptsController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = PromptView.class))))
     @Operation(summary = "List all saved prompts, newest-edited first")
+    @AgentAccess(OPEN)
     public static void list() {
         renderJSON(gson.toJson(Prompt.findAllOrdered().stream().map(PromptView::of).toList()));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = CategoryView.class))))
     @Operation(summary = "List the fixed prompt categories (value, label)")
+    @AgentAccess(OPEN)
     public static void categories() {
         renderJSON(gson.toJson(Arrays.stream(Prompt.Category.values()).map(CategoryView::of).toList()));
     }
@@ -77,7 +81,7 @@ public class ApiPromptsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptGenerationService.Generated.class)))
     @Operation(summary = "Generate a prompt (title, category, content, tags) from a description; does not save")
-    @AgentCallable("returns a draft without saving; the spend is the calling turn's own")
+    @AgentAccess(value = OPEN, reason = "returns a draft without saving; the spend is the calling turn's own")
     public static void generate() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -97,7 +101,7 @@ public class ApiPromptsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = PromptView.class)))
     @Operation(summary = "Create a prompt")
-    @AgentCallable("the prompt library is agent-editable content, not a security control")
+    @AgentAccess(value = OPEN, reason = "the prompt library is agent-editable content, not a security control")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -118,7 +122,7 @@ public class ApiPromptsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = PromptView.class)))
     @Operation(summary = "Update a prompt by id (partial: only supplied fields change)")
-    @AgentCallable("partial edit of one prompt row")
+    @AgentAccess(value = OPEN, reason = "partial edit of one prompt row")
     public static void update(Long id) {
         var row = requirePrompt(id);
         var body = JsonBodyReader.readJsonBody();
@@ -137,7 +141,7 @@ public class ApiPromptsController extends Controller {
     }
 
     @Operation(summary = "Delete a prompt by id")
-    @AgentCallable("removes one prompt row")
+    @AgentAccess(value = OPEN, reason = "removes one prompt row")
     public static void delete(Long id) {
         var row = requirePrompt(id);
         row.delete();
@@ -145,13 +149,15 @@ public class ApiPromptsController extends Controller {
     }
 
     @Operation(summary = "Export all prompts as a portable JSON document")
+    @AgentAccess(OPEN)
     public static void export() {
         renderJSON(gson.toJson(PromptImportExportService.exportAll()));
     }
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Import prompts from a JSON document (mode: merge | replace)")
-    @ChatHidden("mode=replace discards the operator's whole prompt library in one call")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "mode=replace discards the operator's whole prompt library in one call")
     public static void importPrompts() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {

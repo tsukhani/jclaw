@@ -17,6 +17,7 @@ import play.mvc.With;
 import services.EventLogger;
 import utils.ApiResponses;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static controllers.BindingKeys.EVENT_CATEGORY_CHANNEL;
 import static controllers.BindingKeys.KEY_AGENT_ID;
 import static controllers.BindingKeys.KEY_ENABLED;
@@ -105,6 +106,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
+    @AgentAccess(OPERATOR_ONLY)
     public static void list() {
         var items = SlackBinding.<SlackBinding>findAll().stream()
                 .map(BindingView::of)
@@ -115,7 +117,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
-    @ChatHidden("stores a Slack bot token and signing secret")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "stores a Slack bot token and signing secret")
     public static void create() {
         requireOperator();
         var body = JsonBodyReader.readJsonBody();
@@ -184,7 +186,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SlackBinding.class)))
-    @ChatHidden("rewrites a binding's Slack credentials or its target agent")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "rewrites a binding's Slack credentials or its target agent")
     public static void update(Long id) {
         requireOperator();
         var binding = SlackBinding.<SlackBinding>findById(id);
@@ -231,7 +233,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SlackWebApi.AuthTestResult.class)))
-    @ChatHidden("spends a live auth.test against the stored Slack token")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "spends a live auth.test against the stored Slack token")
     public static void test(Long id) {
         requireOperator();
         var binding = SlackBinding.<SlackBinding>findById(id);
@@ -249,7 +251,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
     }
 
     @SuppressWarnings("java:S2259")
-    @ChatHidden("takes the operator's Slack channel offline")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "takes the operator's Slack channel offline")
     public static void delete(Long id) {
         requireOperator();
         var binding = SlackBinding.<SlackBinding>findById(id);
@@ -303,7 +305,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
 
 
     /** Refuse the agent principal at the request layer — a binding carries its bot token and signing secret (JCLAW-1266).
-     *  {@code @ChatHidden} would only hide it from the jclaw_api tool. */
+     *  Kept beside {@code @AgentAccess(OPERATOR_ONLY)} as defence in depth: the gate refuses before the action runs, this refuses if it ever does not. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,

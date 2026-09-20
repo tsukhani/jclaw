@@ -45,6 +45,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -267,7 +268,8 @@ public class ApiChatController extends Controller {
      * POST /api/chat/send — Send a message and get a synchronous response.
      */
     @SuppressWarnings("java:S2259")
-    @ChatHidden("an agent calling chat drives another turn -- unbounded recursion")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "an agent calling chat drives another turn -- unbounded recursion")
     public static void send() {
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
 
@@ -339,7 +341,8 @@ public class ApiChatController extends Controller {
      * insertion) happens in {@link AgentRunner} when the send lands.
      */
     @SuppressWarnings("java:S2259")
-    @ChatHidden("stages arbitrary bytes into an agent workspace as a chat attachment")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "stages arbitrary bytes into an agent workspace as a chat attachment")
     public static void uploadChatFiles(Long agentId, Upload[] files) {
         if (agentId == null) {
             badRequest();
@@ -391,7 +394,7 @@ public class ApiChatController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @NoTransaction
-    @ChatHidden("the same recursion as send, over SSE")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "the same recursion as send, over SSE")
     public static void streamChat() {
         // Grab the Netty-set queue-accept stamp on the invocation thread so we can
         // forward it across the virtual-thread hop inside AgentRunner. The trace

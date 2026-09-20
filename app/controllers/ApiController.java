@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -60,6 +61,7 @@ public class ApiController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Report service health, app name/version, run mode, and Play framework version vs. expected")
+    @AgentAccess(OPEN)
     public static void status() {
         var resp = new StatusResponse(
                 "ok",
@@ -129,6 +131,7 @@ public class ApiController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = WorkspaceStatsResponse.class)))
     @Operation(summary = "Total on-disk size of the agent workspace root, for the dashboard's runaway-growth line")
+    @AgentAccess(OPEN)
     public static void workspaceStats() {
         renderJSON(GSON.toJson(new WorkspaceStatsResponse(WorkspaceFiles.workspaceSizeBytes())));
     }

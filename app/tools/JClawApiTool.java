@@ -5,7 +5,9 @@ import agents.ToolRegistry;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import controllers.ChatHidden;
+import controllers.AgentAccess;
+import controllers.AgentAccessGate;
+import controllers.RequestPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import models.Agent;
 import okhttp3.HttpUrl;
@@ -47,29 +49,24 @@ import java.util.Set;
  * is the same JVM's HTTP listener.
  *
  * <p><b>Bearer auth.</b> Every request carries the auto-managed internal
- * token from {@link InternalApiTokenService}. The token has FULL scope
- * (owner {@code "system"}) so mutating verbs reach their controllers,
- * but {@link controllers.AuthCheck} still 403s any bearer-authed call
- * to the password-reset routes -- the {@link #PATH_BLOCKLIST}
- * below catches the rest defensively before the request is even made.
+ * token from {@link InternalApiTokenService}, whose owner is {@code "system"}, plus
+ * {@link RequestPrincipal#AGENT_ID_HEADER} naming the calling agent -- one token serves every
+ * agent, so the credential alone cannot say which one is calling (JCLAW-1270).
  *
- * <p><b>Default-allow blacklist + deny-floor.</b> Invocation is gated by two
- * independent <em>deny</em> layers; everything else is callable. The
- * {@link #PATH_BLOCKLIST} is an unconditional <em>deny-floor</em> applied first
- * -- coarse, whole-subsystem categories that must never be reached: chat-send
- * (recursion), auth (privilege escalation), webhooks
- * (caller-verified), SSE (we buffer full responses), plus secret-bearing /
- * infra / resource-abuse subsystems (bindings, telegram bindings, tailscale,
- * logs, the load-test harness). On top of that, individual actions carry
- * {@link controllers.ChatHidden} as a precise per-action opt-out (see
- * {@link #isCallable}). Any {@code /api/} route that resolves to a controller
- * action and is caught by neither layer is callable -- so a newly-added endpoint
- * is reachable with no annotation. Both layers run on {@link HttpUrl#encodedPath()}
- * rather than on the model's string, so a path cannot resolve past them on its way
- * out (JCLAW-1227). Catalog text comes from the Swagger
- * {@code @Operation} summary and {@code @RequestBody} schema, synthesized from
- * the action name and request DTO when those are absent. The security boundary
- * is the two code-enforced deny layers, not the prose.
+ * <p><b>Default-deny.</b> A route is callable only where its action declares
+ * {@link controllers.AgentAccess} {@code OPEN} or {@code OWN_ONLY}; an action that declares
+ * nothing is refused, so a newly-added endpoint is unreachable until someone opts it in. This
+ * check is not the security boundary -- {@link controllers.AgentAccessGate} enforces the same
+ * annotation at the request layer, so an agent that reached the route by some other means is
+ * refused there too. Until JCLAW-1270 the two were separate mechanisms and only this one
+ * existed for most routes, which meant they hid rather than refused.
+ *
+ * <p>The gate runs on {@link HttpUrl#encodedPath()} rather than on the model's string, so a
+ * path cannot resolve past it on its way out -- {@code /api/skills/x/files/../../../logs} left
+ * as {@code /api/logs} when checked raw, and normalising also keeps a path from escaping
+ * {@code /api/} into the routes file's {@code {controller}/{action}} catch-all (JCLAW-1227).
+ * Catalog text comes from the Swagger {@code @Operation} summary and {@code @RequestBody}
+ * schema, synthesized from the action name and request DTO when those are absent.
  */
 public class JClawApiTool implements ToolRegistry.Tool {
 
@@ -87,26 +84,6 @@ public class JClawApiTool implements ToolRegistry.Tool {
 
     /** Every callable path must start with this prefix (the three gate checks share it). */
     private static final String API_PREFIX = "/api/";
-
-    /** Path prefixes refused at the tool layer (the deny-floor). Each one is a
-     *  whole-subsystem category the in-process tool must never invoke regardless
-     *  of the model's intent or the SKILL.md's contents. Order doesn't matter;
-     *  the loop short-circuits on the first match. Per-action exclusions inside
-     *  an otherwise-callable controller use {@link controllers.ChatHidden}. */
-    private static final List<String> PATH_BLOCKLIST = List.of(
-            "/api/chat/",                 // recursion via send/stream/upload
-            "/api/auth/",                 // login/setup/reset -- admin-only via UI
-            "/api/webhooks/",             // verified by their own signature
-            "/api/events",                // SSE; we buffer full bodies
-            "/api/bindings",              // channel routing -- comms redirection / secrets
-            "/api/channels/telegram/",    // telegram bindings carry bot tokens
-            "/api/channels/slack/",       // slack bindings carry bot tokens + signing secrets
-            "/api/tailscale",             // network-funnel infra config
-            "/api/logs",                  // raw app logs can leak secrets/PII
-            "/api/metrics/loadtest",      // load-test harness -- resource/cost abuse
-            "/api/scrape/harness",        // scrape harness -- 150 outbound fetches per call
-            "/api/memories"               // cross-agent personal data; the scoped `memory` tool is the agent path
-    );
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -256,17 +233,10 @@ public class JClawApiTool implements ToolRegistry.Tool {
         // resolves dot-segments while parsing, so `/api/skills/x/files/../../../logs`
         // checked raw passes both layers and then leaves as `/api/logs` (JCLAW-1227).
         var gatedPath = url.encodedPath();
-        for (var blocked : PATH_BLOCKLIST) {
-            if (gatedPath.startsWith(blocked)) {
-                return "Error: %s is reserved and cannot be invoked through jclaw_api. "
-                        .formatted(blocked)
-                        + "See the jclaw-api SKILL.md for the boundary.";
-            }
-        }
-        // Default-allow gate: any /api/ route that resolves to a controller action
-        // is callable unless the deny-floor (above) or a @ChatHidden marker excludes
-        // it -- the same set `discover` advertises. The deny-floor runs first, so a
-        // path that were ever both deny-floored and otherwise-callable stays blocked.
+        // Default-deny gate: a route is callable only where its action declares @AgentAccess
+        // OPEN or OWN_ONLY -- the same set `discover` advertises. The request layer enforces
+        // the same annotation, so an agent that reached the route another way is refused
+        // there too; before JCLAW-1270 this check was the only one and hid rather than refused.
         if (!isCallable(method, gatedPath)) {
             return "Error: %s %s is not callable through jclaw_api (no such endpoint, or it is deny-listed). "
                     .formatted(method, gatedPath)
@@ -277,6 +247,15 @@ public class JClawApiTool implements ToolRegistry.Tool {
                 .url(url)
                 .header("Authorization", "Bearer " + InternalApiTokenService.token())
                 .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON);
+
+        // One token serves every agent, so the credential cannot say which one is calling; this
+        // header is how an agent-scoped route learns that (JCLAW-1270). Built here from the Agent
+        // the registry hands us, never from the model's arguments. A null agent is the tool driven
+        // straight from a test, and an unstamped request reads as an unidentified agent, which
+        // agent-scoped routes refuse.
+        if (agent != null && agent.id != null) {
+            requestBuilder.header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agent.id));
+        }
 
         RequestBody body = requestBodyFor(method, args);
         requestBuilder.method(method, body);
@@ -357,11 +336,10 @@ public class JClawApiTool implements ToolRegistry.Tool {
 
     /**
      * List the callable JClaw API endpoints. Scans the live route table and keeps
-     * every {@code /api/} route that resolves to a controller action, minus the
-     * {@link #PATH_BLOCKLIST} deny-floor and minus any action annotated
-     * {@link controllers.ChatHidden}. The route table is the source of truth for
-     * verb + path, so a newly-added endpoint shows up here at runtime with no
-     * annotation and no skill edit. Catalog text comes from the Swagger
+     * every {@code /api/} route whose action declares {@link controllers.AgentAccess}
+     * {@code OPEN} or {@code OWN_ONLY}. The route table is the source of truth for
+     * verb + path, so a newly-added endpoint shows up here at runtime as soon as it
+     * declares a level -- and stays hidden until it does. Catalog text comes from the Swagger
      * {@code @Operation} summary and {@code @RequestBody} schema, synthesized from
      * the action name and request DTO when those are absent.
      */
@@ -374,8 +352,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             if (m == null) continue;                       // not a controller action
             var path = route.path;
             if (path == null || !path.startsWith(API_PREFIX)) continue;
-            if (isDenyFloored(path)) continue;             // unconditional deny-floor
-            if (m.isAnnotationPresent(ChatHidden.class)) continue;   // per-action opt-out
+            if (!agentMayCall(m)) continue;                // declared OPERATOR_ONLY, or undeclared
             var verb = (route.method == null || route.method.isBlank() || "*".equals(route.method))
                     ? "ANY" : route.method.toUpperCase(Locale.ROOT);
             if (!seen.add(verb + " " + path)) continue;
@@ -405,13 +382,11 @@ public class JClawApiTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Default-allow gate for {@code action="call"}: a concrete {@code (method, path)}
-     * is callable unless the {@link #PATH_BLOCKLIST} deny-floor or a
-     * {@link ChatHidden} marker excludes it -- mirroring exactly what {@link #discover}
-     * advertises. An endpoint that exists but carries no annotation IS callable
-     * (the blacklist inversion). The 404 catch-all and other never-callable actions
-     * carry {@link ChatHidden} so they never grant, which keeps nonexistent paths
-     * (matched only by the catch-all) correctly refused.
+     * Default-deny gate for {@code action="call"}: a concrete {@code (method, path)} is callable
+     * only where its action declares {@link controllers.AgentAccess} {@code OPEN} or
+     * {@code OWN_ONLY} -- mirroring exactly what {@link #discover} advertises. An endpoint that
+     * exists but declares nothing is refused, which is also what keeps a nonexistent path
+     * (matched only by the 404 catch-all) from granting.
      *
      * <p>{@code discover} compares route <em>patterns</em>; {@code call} receives a
      * <em>concrete</em> path, so the pattern match is delegated to the router's own
@@ -422,11 +397,10 @@ public class JClawApiTool implements ToolRegistry.Tool {
         int q = matchPath.indexOf('?');
         if (q >= 0) matchPath = matchPath.substring(0, q);
         if (!matchPath.startsWith(API_PREFIX)) return false;
-        if (isDenyFloored(matchPath)) return false;
         for (var route : Router.routes) {
             Method m = resolveMethod(route.action);
             if (m == null) continue;                       // not a controller action
-            if (m.isAnnotationPresent(ChatHidden.class)) continue;   // hidden never grants
+            if (!agentMayCall(m)) continue;                // declared OPERATOR_ONLY, or undeclared
             try {
                 if (route.matches(method, matchPath) != null) return true;
             } catch (RuntimeException _) {
@@ -437,11 +411,10 @@ public class JClawApiTool implements ToolRegistry.Tool {
         return false;
     }
 
-    private static boolean isDenyFloored(String path) {
-        for (var b : PATH_BLOCKLIST) {
-            if (path.startsWith(b)) return true;
-        }
-        return false;
+    /** An action the agent principal may invoke: anything the request layer would not refuse
+     *  outright. {@code OWN_ONLY} counts — the row check happens inside the action. */
+    private static boolean agentMayCall(Method m) {
+        return AgentAccessGate.levelFor(m) != AgentAccess.Level.OPERATOR_ONLY;
     }
 
     /** Catalog summary for a discovered action: the Swagger {@code @Operation}

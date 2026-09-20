@@ -36,6 +36,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.TreeSet;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -129,6 +131,7 @@ public class ApiMetricsController extends Controller {
      *  schema since the shape is dictated at runtime by the segments that
      *  have observed traffic. */
     @Operation(summary = "Snapshot latency segment histograms as JSON")
+    @AgentAccess(OPEN)
     public static void latency() {
         renderJSON(LatencyStats.snapshot().toString());
     }
@@ -136,7 +139,7 @@ public class ApiMetricsController extends Controller {
     /** DELETE /api/metrics/latency — reset histograms. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Reset latency segment histograms")
-    @ChatHidden("discards the operator's latency histograms")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "discards the operator's latency histograms")
     public static void resetLatency() {
         LatencyStats.reset();
         renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
@@ -157,6 +160,7 @@ public class ApiMetricsController extends Controller {
      * when omitted, with percentiles recomputed from raw samples (not merged).
      */
     @Operation(summary = "Windowed latency percentiles by segment, filterable by agent and channel")
+    @AgentAccess(OPEN)
     public static void latencyRows() {
         Instant since = parseSinceParam(params.get(KEY_SINCE));
         var agentIdParam = params.get("agentId");
@@ -202,7 +206,7 @@ public class ApiMetricsController extends Controller {
     /** DELETE /api/metrics/latency/rows — clear the persisted latency time-series (JCLAW-515). */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Clear persisted latency metric rows")
-    @ChatHidden("discards the operator's persisted latency rows")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "discards the operator's persisted latency rows")
     public static void clearLatencyRows() {
         LatencyMetric.deleteAll();
         renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
@@ -216,6 +220,7 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CompressionResponse.class)))
     @Operation(summary = "List raw compression-metric rows since a timestamp for client-side aggregation")
+    @AgentAccess(OPEN)
     public static void compression() {
         Instant since = parseSinceParam(params.get(KEY_SINCE));
         List<CompressionMetric> events = CompressionMetric.<CompressionMetric>find(
@@ -237,6 +242,7 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DbPoolStats.class)))
     @Operation(summary = "Current HikariCP connection-pool occupancy (active, idle, total, awaiting, max)")
+    @AgentAccess(OPEN)
     public static void dbPool() {
         var stats = DbPoolStats.snapshot();
         if (stats.isEmpty()) {
@@ -257,6 +263,7 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JvmStats.class)))
     @Operation(summary = "JVM runtime state (heap, non-heap, RSS, GC, threads, uptime, CPU)")
+    @AgentAccess(OPEN)
     public static void jvm() {
         renderJSON(GSON.toJson(JvmStats.snapshot()));
     }
@@ -269,6 +276,7 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogFootprint.class)))
     @Operation(summary = "Disk used by the log directory (live file, archives, total)")
+    @AgentAccess(OPEN)
     public static void logs() {
         renderJSON(GSON.toJson(LogFootprint.snapshot()));
     }
@@ -283,7 +291,8 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogFootprint.Purged.class)))
     @Operation(summary = "Delete rolled-over log archives, keeping the current log file")
-    @ChatHidden("deletes rolled-over log archives -- the record of what an agent did")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "deletes rolled-over log archives -- the record of what an agent did")
     public static void purgeLogs() {
         renderJSON(GSON.toJson(LogFootprint.purgeArchives()));
     }
@@ -291,7 +300,7 @@ public class ApiMetricsController extends Controller {
     /** DELETE /api/metrics/compression — clear all recorded compression metrics. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Reset (delete) all compression metrics")
-    @ChatHidden("discards the operator's compression metrics")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "discards the operator's compression metrics")
     public static void resetCompression() {
         CompressionMetrics.reset();
         renderJSON(GSON.toJson(new StatusResponse(STATUS_RESET)));
@@ -330,6 +339,7 @@ public class ApiMetricsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CostResponse.class)))
     @Operation(summary = "List per-turn cost rows since a timestamp for client-side aggregation")
+    @AgentAccess(OPEN)
     public static void cost() {
         Instant since = parseSinceParam(params.get(KEY_SINCE));
         Long agentId = parseAgentIdParam(params.get("agentId"));
@@ -436,7 +446,7 @@ public class ApiMetricsController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoadtestResponse.class)))
-    @ChatHidden("drives a synthetic load sweep -- resource and cost abuse")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "drives a synthetic load sweep -- resource and cost abuse")
     public static void loadtest() {
         var input = parseLoadtestInput();
         validateLoadtestInput(input);
@@ -719,7 +729,7 @@ public class ApiMetricsController extends Controller {
 
     /** DELETE /api/metrics/loadtest — stop the embedded mock provider. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
-    @ChatHidden("stops the operator's load-test harness mid-run")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "stops the operator's load-test harness mid-run")
     public static void stopLoadtest() {
         LoadTestHarness.stop();
         renderJSON(GSON.toJson(new StatusResponse("stopped")));
@@ -728,7 +738,7 @@ public class ApiMetricsController extends Controller {
     /** DELETE /api/metrics/loadtest/data — delete loadtest conversations, messages, and events. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
-    @ChatHidden("bulk-deletes the conversations a load test left behind")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "bulk-deletes the conversations a load test left behind")
     public static void cleanLoadtest() {
         LoadTestRunner.cleanupConversations();
         LoadTestRunner.forgetMockBreaker();

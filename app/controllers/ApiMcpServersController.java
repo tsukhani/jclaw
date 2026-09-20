@@ -20,6 +20,7 @@ import utils.JsonArgs;
 import java.util.List;
 import java.util.Map;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -62,12 +63,14 @@ public class ApiMcpServersController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
     @Operation(summary = "List MCP servers with status and tool count")
+    @AgentAccess(OPEN)
     public static void list() {
         renderJSON(gson.toJson(McpServerService.listAll()));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @Operation(summary = "Get a single MCP server by id")
+    @AgentAccess(OPEN)
     public static void get(Long id) {
         var row = requireServer(id);
         renderJSON(gson.toJson(McpServerService.View.of(row)));
@@ -77,7 +80,8 @@ public class ApiMcpServersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
     @Operation(summary = "Add an MCP server (STDIO or HTTP)")
-    @AgentCallable("MCP server CRUD is agent-reachable by design; DangerousActionGate is the mutating-verb seam")
+    @AgentAccess(value = OPEN,
+            reason = "MCP server CRUD is agent-reachable by design; DangerousActionGate is the mutating-verb seam")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -118,7 +122,7 @@ public class ApiMcpServersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
     @Operation(summary = "Update an MCP server by id; it reconnects automatically")
-    @AgentCallable("same seam as create; DangerousActionGate bounds the mutating verb")
+    @AgentAccess(value = OPEN, reason = "same seam as create; DangerousActionGate bounds the mutating verb")
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
@@ -176,7 +180,8 @@ public class ApiMcpServersController extends Controller {
     }
 
     @Operation(summary = "Disconnect and delete an MCP server by id")
-    @AgentCallable("removes a server an agent can equally add; DangerousActionGate bounds it")
+    @AgentAccess(value = OPEN,
+            reason = "removes a server an agent can equally add; DangerousActionGate bounds it")
     public static void delete(Long id) {
         var row = requireServer(id);
         // stop() handles every teardown concern: closes the McpClient,
@@ -194,7 +199,7 @@ public class ApiMcpServersController extends Controller {
 
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Test an MCP server connection by id (probe); returns success, toolCount, toolNames")
-    @AgentCallable("probes an already-configured server and adds no reach")
+    @AgentAccess(value = OPEN, reason = "probes an already-configured server and adds no reach")
     public static void test(Long id) {
         var row = requireServer(id);
         var result = McpServerService.testConnection(row);

@@ -20,6 +20,8 @@ import utils.ApiResponses;
 
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -77,6 +79,7 @@ public class ApiConfigController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigListResponse.class)))
     @Operation(summary = "List all config rows (sensitive values masked)")
+    @AgentAccess(OPEN)
     public static void list() {
         var configs = ConfigService.listAll();
         var entries = configs.stream()
@@ -92,6 +95,7 @@ public class ApiConfigController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigEntry.class)))
     @Operation(summary = "Read a config value by key")
+    @AgentAccess(OPEN)
     public static void get(String key) {
         if (isReservedKey(key)) notFound();
         var config = Config.findByKey(key);
@@ -127,7 +131,8 @@ public class ApiConfigController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ConfigSaveRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigSaveResponse.class)))
     @Operation(summary = "Write a config value")
-    @ChatHidden("writes the instance's own security controls -- privilege escalation")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "writes the instance's own security controls -- privilege escalation")
     public static void save() {
         requireOperator();
 
@@ -158,7 +163,8 @@ public class ApiConfigController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigDeleteResponse.class)))
     @Operation(summary = "Delete a config value by key")
-    @ChatHidden("deletes a config row, reverting a control to its code default -- privilege escalation")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "deletes a config row, reverting a control to its code default -- privilege escalation")
     public static void delete(String key) {
         requireOperator();
 

@@ -14,6 +14,7 @@ import services.OcrInstallHint;
 
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -41,6 +42,7 @@ public class ApiOcrController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = OcrStatusResponse.class)))
     @Operation(summary = "Report OCR provider availability and operator-enabled state for the Settings page")
+    @AgentAccess(OPEN)
     public static void status() {
         // Probe now rather than serving the boot snapshot: an operator who just
         // installed tesseract, or an agent asking through jclaw_api whether OCR

@@ -14,6 +14,8 @@ import utils.ApiResponses;
 
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -48,6 +50,7 @@ public class ApiAcpHarnessController extends Controller {
     /** GET /api/subagents/acp-harnesses — probe every known + custom harness. */
     @Operation(summary = "Detect installed ACP coding harnesses (claude/pi/codex/gemini/opencode + custom) on PATH")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = HarnessesResponse.class)))
+    @AgentAccess(OPEN)
     public static void list() {
         renderJSON(gson.toJson(new HarnessesResponse(toEntries(AcpHarnessProbe.probeAll()))));
     }
@@ -68,7 +71,8 @@ public class ApiAcpHarnessController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = CustomHarnessRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = HarnessEntry.class)))
     @Operation(summary = "Add + probe a custom ACP harness command")
-    @ChatHidden("persists a command a runtime=acp spawn then executes -- privilege escalation")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "persists a command a runtime=acp spawn then executes -- privilege escalation")
     public static void add() {
         requireOperator();
 
@@ -86,7 +90,8 @@ public class ApiAcpHarnessController extends Controller {
      *  return the refreshed list. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = HarnessesResponse.class)))
     @Operation(summary = "Remove a custom ACP harness command")
-    @ChatHidden("edits the stored ACP harness list a runtime=acp spawn executes from")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "edits the stored ACP harness list a runtime=acp spawn executes from")
     public static void remove(String command) {
         requireOperator();
 
@@ -105,6 +110,7 @@ public class ApiAcpHarnessController extends Controller {
      *  model override's flags without storing them in the command. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AcpCommandPreview.class)))
     @Operation(summary = "Preview the effective ACP harness launch command")
+    @AgentAccess(OPEN)
     public static void commandPreview() {
         renderJSON(gson.toJson(AcpCommandPreview.current()));
     }

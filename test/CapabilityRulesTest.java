@@ -10,8 +10,7 @@ import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.library.freeze.FreezingArchRule;
 import com.tngtech.archunit.library.freeze.TextFileBasedViolationStore;
-import controllers.AgentCallable;
-import controllers.ChatHidden;
+import controllers.AgentAccess;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
@@ -342,42 +341,36 @@ class CapabilityRulesTest extends UnitTest {
 
     /** Mutating {@code conf/routes} entries when the stance sweep landed (JCLAW-1253). */
     private static final int ADJUDICATED_MUTATING_ROUTES = 134;
+    private static final int ADJUDICATED_API_ROUTES = 249;
+    private static final String OWNERSHIP_CHECK = "mayReachAgentScopedRow";
 
     private static final Set<String> MUTATING_VERBS = Set.of("POST", "PUT", "PATCH", "DELETE");
     private static final String PRINCIPAL_CLASS = "controllers.RequestPrincipal";
-    private static final String PRINCIPAL_CHECK = "isAgentOriginated";
 
     /**
-     * Every mutating route says out loud whether an agent may drive it.
+     * Every routed {@code /api} action says out loud what the agent principal may do with it.
      *
-     * <p>The boundary was three hand-maintained lists — {@code JClawApiTool.PATH_BLOCKLIST},
-     * {@link ChatHidden} and the {@code requireOperator} helpers — with nothing watching for a
-     * route that joined none of them. Default-allow plus silence meant a new endpoint was
-     * agent-reachable the moment it was written, and the omission looked exactly like a
-     * decision (JCLAW-1253). So silence is now the failure: an action reaches a
-     * {@link controllers.RequestPrincipal#isAgentOriginated()} guard, or carries
-     * {@link AgentCallable} saying why it is deliberately open.
+     * <p>The boundary used to be four mechanisms — {@code JClawApiTool.PATH_BLOCKLIST},
+     * {@code @ChatHidden}, {@code @AgentCallable} and the {@code requireOperator} helpers — of
+     * which only the last refused anyone; the first two merely hid a route from one tool, so an
+     * agent holding the internal token walked past them. Worse, the gate was default-allow, so a
+     * new endpoint was reachable the moment it was written and the omission looked exactly like a
+     * decision (JCLAW-1253/1266). {@link AgentAccess} collapses all four into one declaration that
+     * both the tool and {@code AgentAccessGate} read, and its absence means
+     * {@code OPERATOR_ONLY} — silence now closes a route instead of opening it (JCLAW-1270).
      *
-     * <p>{@link ChatHidden} was a third accepted stance until JCLAW-1266 and no longer is. It is
-     * consulted only inside {@code JClawApiTool}, so it hides a route from that tool without
-     * refusing anyone: an agent holding the internal token and any HTTP capability reaches the
-     * route anyway. Thirty-two controllers rested on it alone, among them the database
-     * backup/restore surface whose archive carries the token's own plaintext config row. Those
-     * are recorded in {@code archunit_store/agent-principal-stance} and counted down from there;
-     * a route that joins them now fails the build instead.
+     * <p>Reads are in scope now, which they were not before. The old rule skipped them on the
+     * grounds that a leaky GET is a masking problem; that left 91 reads answering to no rule at
+     * all, including the conversation history of every other agent.
      *
-     * <p>The guard is matched by what it reaches rather than by being named
-     * {@code requireOperator}: every one of those helpers is a one-line wrapper around the same
-     * check, and a name-matched rule would pass a method called {@code requireOperator} that
-     * checks nothing while failing a correct guard someone renamed.
-     *
-     * <p>Reads are out of scope. A GET that leaks is a masking problem at the seam, which is
-     * where Personal Edition puts it; this capability is about state an agent can change.
+     * <p>Not frozen: all 249 routes are adjudicated, so the rule lands green and a new route with
+     * no level fails immediately. The floor is on the route count rather than on matched files,
+     * because a routes file that stopped parsing would otherwise adjudicate nothing and pass.
      */
     @Test
-    void everyMutatingRouteDeclaresAnAgentPrincipalStance() {
-        var routes = mutatingRouteActions();
-        assertFloor(routes.keySet(), ADJUDICATED_MUTATING_ROUTES, "mutating conf/routes entries");
+    void everyRoutedApiActionDeclaresAnAgentAccessLevel() {
+        var routes = apiRouteActions();
+        assertFloor(routes.keySet(), ADJUDICATED_API_ROUTES, "/api conf/routes entries");
 
         var unresolved = new TreeSet<String>();
         for (var route : routes.entrySet()) {
@@ -389,18 +382,16 @@ class CapabilityRulesTest extends UnitTest {
             }
         }
         assertTrue(unresolved.isEmpty(),
-                "these mutating routes resolve to no imported controller action, so the rule below "
-                        + "cannot see them and would pass over a genuinely ungated endpoint: " + unresolved);
+                "these routes resolve to no imported controller action, so the rule below cannot "
+                        + "see them and would pass over a genuinely undeclared endpoint: " + unresolved);
 
-        ArchRule rule = classes()
+        classes()
                 .that().resideInAPackage("controllers")
-                .should(declareAnAgentPrincipalStance(routes))
-                .because("a mutating route is reachable by the agent principal unless something "
-                        + "refuses it at the request layer, so leaving the stance unstated grants "
-                        + "the capability by accident (JCLAW-1253/1266); a "
-                        + "RequestPrincipal.isAgentOriginated guard and @AgentCallable are the two "
-                        + "ways to state one, and @ChatHidden is not among them");
-        frozen(rule, "agent-principal-stance").check(APP_CLASSES);
+                .should(declareAnAgentAccessLevel(routes))
+                .because("an undeclared route is refused rather than reachable, but a route nobody "
+                        + "adjudicated is a decision nobody made — the annotation is what turns the "
+                        + "default from a backstop into a statement (JCLAW-1270)")
+                .check(APP_CLASSES);
     }
 
     /**
@@ -417,36 +408,47 @@ class CapabilityRulesTest extends UnitTest {
         // Built outside the lambda so the only thing that can throw inside it is the
         // check: a constructor failure would otherwise satisfy assertThrows and pass
         // this negative case without the rule having run at all.
-        var unstanced = new RouteAction("controllers.ApiController", "status");
-        var error = assertThrows(AssertionError.class, () -> checkStanceOf(unstanced));
-        assertTrue(error.getMessage().contains("declares no agent-principal stance"), error.getMessage());
+        var undeclared = new RouteAction("controllers.AgentAccessGate", "levelFor");
+        var error = assertThrows(AssertionError.class, () -> checkLevelOf(undeclared));
+        assertTrue(error.getMessage().contains("declares no @AgentAccess"), error.getMessage());
 
-        checkStanceOf(new RouteAction("controllers.ApiTasksController", "create"));        // @AgentCallable
-        checkStanceOf(new RouteAction("controllers.ApiAgentsController", "update"));       // guard, two hops
-        checkStanceOf("POST /api/webhooks/telegram/{bindingId}",
-                new RouteAction("controllers.WebhookTelegramController", "webhook"));      // signature-verified
+        checkLevelOf(new RouteAction("controllers.ApiTasksController", "create"));       // OPEN + reason
+        checkLevelOf(new RouteAction("controllers.ApiAgentsController", "update"));      // OPEN + reason
+        checkLevelOf("GET /api/probe",
+                new RouteAction("controllers.ApiTailscaleController", "status"));        // OPERATOR_ONLY
     }
 
     /**
-     * {@link ChatHidden} alone no longer satisfies the rule (JCLAW-1266). Driven against a route
-     * that carries it and nothing else, so the day someone re-admits it as a stance this fails
-     * rather than quietly widening the boundary back to the tool layer.
+     * An {@code OPEN} or {@code OWN_ONLY} mutating route with an empty reason records a decision
+     * without its grounds, which is worse than no annotation — it reads as adjudicated. Driven
+     * against a synthetic level rather than a real route, so the day someone ships one this fails
+     * instead of the rule having no case to prove itself on.
      */
     @Test
-    void chatHiddenAloneIsNotAStance() {
-        var toolLayerOnly = new RouteAction("controllers.ApiMetricsController", "purgeLogs");
-        var error = assertThrows(AssertionError.class, () -> checkStanceOf(toolLayerOnly));
-        assertTrue(error.getMessage().contains("@ChatHidden does not count"), error.getMessage());
+    void anOpenMutatingRouteMustSayWhatBoundsIt() {
+        var error = assertThrows(AssertionError.class,
+                () -> checkReason("POST /api/probe", AgentAccess.Level.OPEN, ""));
+        assertTrue(error.getMessage().contains("names nothing that bounds it"), error.getMessage());
+
+        checkReason("POST /api/probe", AgentAccess.Level.OPEN, "DangerousActionGate bounds it");
+        checkReason("GET /api/probe", AgentAccess.Level.OPEN, "");   // reads need no reason
+        checkReason("POST /api/probe", AgentAccess.Level.OPERATOR_ONLY, "");
     }
 
-    private static void checkStanceOf(RouteAction action) {
-        checkStanceOf("POST /api/probe", action);
+    private static void checkReason(String route, AgentAccess.Level level, String reason) {
+        var violations = new TreeSet<String>();
+        auditLevel(route, "Probe.action", level, reason, false, violations);
+        assertTrue(violations.isEmpty(), String.join("; ", violations));
     }
 
-    private static void checkStanceOf(String route, RouteAction action) {
+    private static void checkLevelOf(RouteAction action) {
+        checkLevelOf("POST /api/probe", action);
+    }
+
+    private static void checkLevelOf(String route, RouteAction action) {
         classes()
                 .that().resideInAPackage("controllers")
-                .should(declareAnAgentPrincipalStance(Map.of(route, action)))
+                .should(declareAnAgentAccessLevel(Map.of(route, action)))
                 .check(APP_CLASSES);
     }
 
@@ -454,11 +456,11 @@ class CapabilityRulesTest extends UnitTest {
     private record RouteAction(String controller, String action) {}
 
     /**
-     * The mutating routes as declared in {@code conf/routes}, keyed {@code "METHOD path"}.
+     * Every {@code /api} route as declared in {@code conf/routes}, keyed {@code "METHOD path"}.
      * ArchUnit imports bytecode and cannot see the routes file, so the binding is read from
      * disk — the same approach {@code WebhookControllerTest.webhookRoutes} takes.
      */
-    private static Map<String, RouteAction> mutatingRouteActions() {
+    private static Map<String, RouteAction> apiRouteActions() {
         try {
             var found = new TreeMap<String, RouteAction>();
             for (var line : Files.readAllLines(Play.getFile("conf/routes").toPath())) {
@@ -467,7 +469,7 @@ class CapabilityRulesTest extends UnitTest {
                 var cols = trimmed.split("\\s+");
                 // A three-column entry whose target has no ':' is a controller action; the
                 // rest are staticDir/staticFile/module bindings with no method behind them.
-                if (cols.length < 3 || !MUTATING_VERBS.contains(cols[0]) || cols[2].contains(":")) continue;
+                if (cols.length < 3 || !cols[1].startsWith("/api") || cols[2].contains(":")) continue;
                 int split = cols[2].lastIndexOf('.');
                 if (split < 0) continue;
                 found.put(cols[0] + " " + cols[1],
@@ -479,22 +481,27 @@ class CapabilityRulesTest extends UnitTest {
         }
     }
 
-    /** Violation text deliberately carries no line number: the frozen rules in this class share
-     *  a store keyed by message, and an unrelated edit above an action must not red the build. */
-    private static ArchCondition<JavaClass> declareAnAgentPrincipalStance(Map<String, RouteAction> routes) {
-        return new ArchCondition<>("declare an agent-principal stance on every mutating route") {
+    private static ArchCondition<JavaClass> declareAnAgentAccessLevel(Map<String, RouteAction> routes) {
+        return new ArchCondition<>("declare an @AgentAccess level on every routed /api action") {
             @Override
             public void check(JavaClass javaClass, ConditionEvents events) {
                 for (var route : routes.entrySet()) {
                     if (!javaClass.getName().equals(route.getValue().controller())) continue;
                     for (JavaMethod method : javaClass.getMethods()) {
-                        if (!method.getName().equals(route.getValue().action())
-                                || declaresStance(method, route.getKey())) continue;
-                        events.add(SimpleConditionEvent.violated(method, route.getKey()
-                                + " -> " + javaClass.getSimpleName() + "." + method.getName()
-                                + " declares no agent-principal stance: add an isAgentOriginated "
-                                + "guard, or @AgentCallable with the reason. @ChatHidden does not "
-                                + "count — it hides the route from the tool without refusing it"));
+                        if (!method.getName().equals(route.getValue().action())) continue;
+                        var where = javaClass.getSimpleName() + "." + method.getName();
+                        if (!method.isAnnotatedWith(AgentAccess.class)) {
+                            events.add(SimpleConditionEvent.violated(method, route.getKey() + " -> "
+                                    + where + " declares no @AgentAccess level. An undeclared route "
+                                    + "is refused, so this is not a hole — but it is an unmade "
+                                    + "decision. State OPEN, OWN_ONLY or OPERATOR_ONLY"));
+                            continue;
+                        }
+                        var declared = method.getAnnotationOfType(AgentAccess.class);
+                        var violations = new TreeSet<String>();
+                        auditLevel(route.getKey(), where, declared.value(), declared.reason(),
+                                reachesOwnershipCheck(method), violations);
+                        violations.forEach(v -> events.add(SimpleConditionEvent.violated(method, v)));
                     }
                 }
             }
@@ -502,28 +509,33 @@ class CapabilityRulesTest extends UnitTest {
     }
 
     /**
-     * {@link ChatHidden} is deliberately <em>not</em> accepted here (JCLAW-1266). It is read in one
-     * place — {@code JClawApiTool.discover} and {@code isCallable} — so it refuses an agent only
-     * while that tool is the agent's only route to the API, and an agent holding the internal token
-     * and any HTTP capability walks past it. It states what the tool advertises, not who may call.
-     * The two stances that survive are the request-layer refusal and an explicit opt-in.
+     * The two obligations a level carries beyond existing, collected rather than thrown so the
+     * rule reports every offending route in one run.
+     *
+     * <p>Split out from the ArchUnit condition so the negative cases can drive it on a synthetic
+     * route: a rule whose failure path is only reachable by shipping the defect it forbids is a
+     * rule nobody has seen fail.
      */
-    private static boolean declaresStance(JavaMethod method, String route) {
-        return isUnauthenticatedWebhook(route)
-                || method.isAnnotatedWith(AgentCallable.class)
-                || reachesAgentPrincipalCheck(method);
+    private static void auditLevel(String route, String where, AgentAccess.Level level,
+                                   String reason, boolean reachesOwnershipCheck,
+                                   Set<String> violations) {
+        boolean mutating = MUTATING_VERBS.contains(route.split(" ", 2)[0]);
+        if (mutating && level != AgentAccess.Level.OPERATOR_ONLY && reason.isBlank()) {
+            violations.add(route + " -> " + where + " is " + level + " but names nothing that "
+                    + "bounds it. A mutating route left open without its grounds reads as "
+                    + "adjudicated when it was only unannotated");
+        }
+        if (level == AgentAccess.Level.OWN_ONLY && !reachesOwnershipCheck) {
+            violations.add(route + " -> " + where + " is OWN_ONLY but never reaches "
+                    + "RequestPrincipal." + OWNERSHIP_CHECK + ". Only the action knows which row "
+                    + "it is about, so the level declares the intent and the action enforces it");
+        }
     }
 
-    /** The {@code /api/webhooks/} surface has no session to judge a principal against: it bypasses
-     *  AuthCheck by design and verifies its provider's signature instead. Deferred to rather than
-     *  restated, because {@code WebhookControllerTest} already pins that surface route-for-route. */
-    private static boolean isUnauthenticatedWebhook(String route) {
-        return route.contains(" /api/webhooks/");
-    }
-
-    /** BFS through helpers declared on the same controller — the guard is usually one hop away
-     *  ({@code requireOperator}), occasionally two ({@code requireOperatorForAcpChange}). */
-    private static boolean reachesAgentPrincipalCheck(JavaMethod method) {
+    /** BFS through helpers declared on the same controller — the check is usually one hop away,
+     *  occasionally two. Matched by what it reaches rather than by the helper's name, so renaming
+     *  one is safe and a helper called {@code requireOwner} that checks nothing does not pass. */
+    private static boolean reachesOwnershipCheck(JavaMethod method) {
         var seen = new HashSet<String>();
         var queue = new ArrayDeque<JavaMethod>();
         queue.add(method);
@@ -532,7 +544,7 @@ class CapabilityRulesTest extends UnitTest {
         while (!queue.isEmpty()) {
             for (var call : queue.poll().getCallsFromSelf()) {
                 if (PRINCIPAL_CLASS.equals(call.getTargetOwner().getName())
-                        && PRINCIPAL_CHECK.equals(call.getTarget().getName())) {
+                        && OWNERSHIP_CHECK.equals(call.getTarget().getName())) {
                     return true;
                 }
                 if (!call.getTargetOwner().equals(method.getOwner())) continue;

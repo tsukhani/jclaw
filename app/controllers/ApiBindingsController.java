@@ -18,6 +18,7 @@ import utils.JsonArgs;
 
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -40,6 +41,7 @@ public class ApiBindingsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
+    @AgentAccess(OPERATOR_ONLY)
     public static void list() {
         List<AgentBinding> bindings = JPA.em()
                 .createQuery("SELECT b FROM AgentBinding b JOIN FETCH b.agent", AgentBinding.class)
@@ -53,7 +55,7 @@ public class ApiBindingsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
-    @ChatHidden("binds a channel to an agent -- comms redirection")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "binds a channel to an agent -- comms redirection")
     public static void create() {
         requireOperator();
         var body = JsonBodyReader.readJsonBody();
@@ -82,7 +84,7 @@ public class ApiBindingsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
-    @ChatHidden("repoints a channel binding at another agent")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "repoints a channel binding at another agent")
     public static void update(Long id) {
         requireOperator();
         var binding = BindingService.findAgentBindingById(id);
@@ -114,7 +116,7 @@ public class ApiBindingsController extends Controller {
     }
 
     @SuppressWarnings("java:S2259")
-    @ChatHidden("takes a channel offline without the operator noticing")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "takes a channel offline without the operator noticing")
     public static void delete(Long id) {
         requireOperator();
         var binding = BindingService.findAgentBindingById(id);
@@ -155,7 +157,7 @@ public class ApiBindingsController extends Controller {
     /** Refuse the agent principal at the request layer — a binding decides which agent receives a
      *  channel's messages, so writing one redirects someone else's conversations and deleting one
      *  takes a channel offline quietly (JCLAW-1266).
-     *  {@code @ChatHidden} would only hide these from the jclaw_api tool.
+     *  Kept beside {@code @AgentAccess(OPERATOR_ONLY)} as defence in depth: the gate refuses before the action runs, these refuse if it ever does not.
      *
      *  <p>{@link #list} stays open: {@code BindingView} carries ids, names, channel type and
      *  priority — nothing secret — and Personal Edition puts a leaky read at the masking seam

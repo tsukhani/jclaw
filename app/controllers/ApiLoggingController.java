@@ -14,6 +14,7 @@ import utils.ApiResponses;
 
 import java.util.List;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -43,6 +44,7 @@ public class ApiLoggingController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LevelsResponse.class)))
     @Operation(summary = "List per-logger level overrides plus the valid level names")
+    @AgentAccess(OPEN)
     public static void list() {
         var entries = LoggerLevelService.list().stream()
                 .map(l -> new LevelEntry(l.logger(), l.level()))
@@ -55,7 +57,8 @@ public class ApiLoggingController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SaveRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SaveResponse.class)))
     @Operation(summary = "Add or update a per-logger level override (applies live)")
-    @AgentCallable("per-logger level only; the log contents stay behind the /api/logs deny-floor")
+    @AgentAccess(value = OPEN,
+            reason = "per-logger level only; the log contents stay behind the /api/logs deny-floor")
     public static void save() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("logger") || !body.has("level")) {
@@ -76,7 +79,7 @@ public class ApiLoggingController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeleteResponse.class)))
     @Operation(summary = "Remove a per-logger level override (reverts to inherited level)")
-    @AgentCallable("reverts a per-logger override to the inherited level")
+    @AgentAccess(value = OPEN, reason = "reverts a per-logger override to the inherited level")
     public static void delete(String logger) {
         if (logger == null || logger.isBlank()) {
             badRequest();

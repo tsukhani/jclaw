@@ -19,6 +19,8 @@ import utils.ApiResponses;
 
 import java.util.Objects;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static controllers.BindingKeys.EVENT_CATEGORY_CHANNEL;
 import static controllers.BindingKeys.KEY_AGENT_ID;
 import static controllers.BindingKeys.KEY_ENABLED;
@@ -90,6 +92,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
+    @AgentAccess(OPEN)
     public static void list() {
         var items = WhatsAppBinding.<WhatsAppBinding>findAll().stream()
                 .map(BindingView::of)
@@ -112,7 +115,8 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WhatsAppBinding.class)))
-    @ChatHidden("binds a WhatsApp presence to an agent and stores its Cloud API credentials")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "binds a WhatsApp presence to an agent and stores its Cloud API credentials")
     public static void create() {
         requireOperator();
 
@@ -184,7 +188,8 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WhatsAppBinding.class)))
-    @ChatHidden("repoints a WhatsApp presence at another agent and rewrites its credentials")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "repoints a WhatsApp presence at another agent and rewrites its credentials")
     public static void update(Long id) {
         requireOperator();
 
@@ -227,7 +232,8 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     }
 
     @SuppressWarnings("java:S2259")
-    @ChatHidden("removing a binding silently takes the operator's WhatsApp channel offline")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "removing a binding silently takes the operator's WhatsApp channel offline")
     public static void delete(Long id) {
         requireOperator();
 

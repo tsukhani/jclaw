@@ -8,6 +8,8 @@ import services.NotificationBus;
 
 import java.time.Duration;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+
 /**
  * GET /api/events — Server-Sent Events endpoint for real-time notifications.
  * The frontend connects once on app load and receives events from the
@@ -28,6 +30,7 @@ public class ApiEventsController extends Controller {
      * Play tx was pure overhead.
      */
     @NoTransaction
+    @AgentAccess(OPERATOR_ONLY)
     public static void stream() {
         SseStream sse = openSSE().heartbeat(Duration.ofSeconds(30)).timeout(Duration.ofHours(24));
         // The fork sends the response headers with the first chunk, so without this the browser's open event waits for a heartbeat.

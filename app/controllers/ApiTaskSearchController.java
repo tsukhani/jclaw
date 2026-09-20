@@ -14,6 +14,7 @@ import play.mvc.With;
 import services.search.MessageSearch;
 import utils.ApiResponses;
 
+import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -71,6 +72,7 @@ public class ApiTaskSearchController extends Controller {
     @SuppressWarnings({"java:S2259", "java:S1181"})
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TranscriptSearchHit.class))))
     @Operation(summary = "Full-text search task-run transcripts (q, limit) returning matching messages with task/run context")
+    @AgentAccess(OPEN)
     public static void searchTranscripts(String q, Integer limit) {
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         if (q == null || q.isBlank()) {

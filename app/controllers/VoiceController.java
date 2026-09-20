@@ -49,6 +49,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static controllers.AgentAccess.Level.OPEN;
+
 /**
  * Real-time voice mode WebSocket (JCLAW-791; server-side endpointing JCLAW-799).
  * The browser streams the mic as continuous PCM16 {@code BinaryFrame}s; the
@@ -146,6 +148,7 @@ public class VoiceController extends WebSocketController {
      * {@link #modelHearsAudioAtInit}, and {@link #discardSessionConversation}.
      */
     @NoTransaction
+    @AgentAccess(OPEN)
     public static void socket() {
         // CSWSH defense — a WebSocket handshake is NOT bound by the Same-Origin
         // Policy, so the browser attaches the session cookie even on a cross-site

@@ -36,6 +36,8 @@ import utils.WebhookUtil;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+
 /**
  * Webhook receiver for per-user Telegram bindings (JCLAW-89). The route carries
  * the {@code bindingId} so the controller can look up the matching
@@ -76,7 +78,8 @@ public class WebhookTelegramController extends Controller {
     private static final long DEFAULT_MAX_BODY_BYTES = 1_048_576L;
 
     @SuppressWarnings("java:S2259")
-    @ChatHidden("inbound provider callback, authenticated by the per-binding secret token")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "inbound provider callback, authenticated by the per-binding secret token")
     public static void webhook(Long bindingId) {
         BindingCtx ctx = loadBindingCtx(bindingId);
         if (ctx == null) {

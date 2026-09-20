@@ -35,6 +35,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -90,6 +92,7 @@ public class ApiTtsController extends Controller {
     /** GET /api/tts/state — snapshot for the Settings &gt; Speech panel. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TtsStateResponse.class)))
     @Operation(summary = "Snapshot both TTS engines, the selected one, and per-model readiness")
+    @AgentAccess(OPEN)
     public static void state() {
         var engines = new ArrayList<TtsEngineEntry>();
         engines.add(sidecarEntry());
@@ -149,7 +152,7 @@ public class ApiTtsController extends Controller {
     /** POST /api/tts/synthesize {text} — read-aloud: WAV bytes from the selected engine. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = byte[].class)))
     @Operation(summary = "Synthesize text to speech (WAV) with the operator-selected engine")
-    @ChatHidden("synthesizes speech audio -- compute/disk resource action")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "synthesizes speech audio -- compute/disk resource action")
     public static void synthesize() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -192,7 +195,8 @@ public class ApiTtsController extends Controller {
      *  of after the whole message. Frames: {type:"audio",index,audio:&lt;base64
      *  wav&gt;} per chunk, then {type:"complete",count} — or {type:"error",message}.
      *  Uses the operator-selected engine. */
-    @ChatHidden("streams synthesized speech audio -- compute/disk resource action")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "streams synthesized speech audio -- compute/disk resource action")
     public static void stream() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -244,7 +248,8 @@ public class ApiTtsController extends Controller {
     // can't see across the framework boundary, so model.get() past the guard is safe.
     @SuppressWarnings({"java:S2259", "java:S3655"})
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
-    @ChatHidden("triggers a TTS model download -- disk/network resource action")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "triggers a TTS model download -- disk/network resource action")
     public static void download(String id) {
         var model = TtsModel.byId(id);
         if (model.isEmpty()) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown TTS model id: " + id);
@@ -274,7 +279,8 @@ public class ApiTtsController extends Controller {
      * and can pick another.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReferenceVoiceResponse.class)))
-    @ChatHidden("replaces the clip a cloning model copies the operator's speaker from")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "replaces the clip a cloning model copies the operator's speaker from")
     public static void uploadReferenceVoice(Upload file) {
         if (file == null || file.asFile() == null || !file.asFile().exists()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "No reference clip supplied");
@@ -303,7 +309,7 @@ public class ApiTtsController extends Controller {
     /** DELETE /api/tts/reference-voice — drop the clip and return to the model's
      *  default speaker. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReferenceVoiceResponse.class)))
-    @ChatHidden("drops the operator's cloned-voice clip")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "drops the operator's cloned-voice clip")
     public static void clearReferenceVoice() {
         try {
             TtsReferenceVoice.clear(TtsEngine.SIDECAR);

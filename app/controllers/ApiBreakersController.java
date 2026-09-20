@@ -14,6 +14,8 @@ import utils.CircuitBreakers;
 
 import java.util.ArrayList;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -50,6 +52,7 @@ public class ApiBreakersController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BreakerView.class)))
     @Operation(summary = "Every registered circuit breaker with its state, window counters and last reason")
+    @AgentAccess(OPEN)
     public static void list() {
         var out = new ArrayList<BreakerView>();
         CircuitBreakers.snapshot().forEach((name, stats) -> out.add(view(name, stats)));
@@ -59,8 +62,7 @@ public class ApiBreakersController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = BreakerRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BreakerView.class)))
     @Operation(summary = "Force a breaker open, turning its subsystem's calls away for one cooldown")
-    @ChatHidden("isolating a provider is operator maintenance; an agent tripping the breaker it is "
-            + "talking through would cut its own turn off mid-sentence")
+    @AgentAccess(OPERATOR_ONLY)
     public static void trip() {
         move(true);
     }
@@ -68,8 +70,7 @@ public class ApiBreakersController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = BreakerRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BreakerView.class)))
     @Operation(summary = "Force a breaker closed and clear its outcome window")
-    @ChatHidden("the other half of the operator's handle -- restoring a subsystem the operator "
-            + "isolated is the operator's call, not the agent's")
+    @AgentAccess(OPERATOR_ONLY)
     public static void reset() {
         move(false);
     }

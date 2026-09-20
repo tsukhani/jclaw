@@ -44,6 +44,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -86,6 +88,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MemoryDto.class))))
     @Operation(summary = "List memories across agents with a filter query (q / agent / category / importance / status), paginated with X-Total-Count")
+    @AgentAccess(OPERATOR_ONLY)
     public static void list(String q, String agent, String category, String importance,
                             String status, String sort, String dir, Integer limit, Integer offset) {
         int effLimit = (limit != null && limit > 0) ? Math.min(limit, PagedJpqlQuery.MAX_LIMIT) : 200;
@@ -251,7 +254,8 @@ public class ApiMemoryController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = MemoryUpdateRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryDto.class)))
     @Operation(summary = "Adjust a memory's importance and/or category")
-    @ChatHidden("edits any agent's memory row; the scoped memory tool is the agent path")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "edits any agent's memory row; the scoped memory tool is the agent path")
     public static void update(Long memoryId) {
         requireOperator();
         Memory memory = MemoryService.findById(memoryId);
@@ -307,7 +311,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = EvalGenerateView.class)))
     @Operation(summary = "Generate a memory-recall eval suite from the corpus")
-    @ChatHidden("builds an eval suite out of the whole memory corpus")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "builds an eval suite out of the whole memory corpus")
     public static void evalGenerate() {
         requireOperator();
         var body = JsonBodyReader.readJsonBody();
@@ -385,7 +389,8 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryEvalScorer.Report.class)))
     @Operation(summary = "Score a memory-recall eval suite against live recall")
-    @ChatHidden("scores recall over every agent's memories and spends embedding calls")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "scores recall over every agent's memories and spends embedding calls")
     public static void evalRun() {
         requireOperator();
         var body = JsonBodyReader.readJsonBody();
@@ -435,7 +440,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryKeyBackfillService.Status.class)))
     @Operation(summary = "Backfill core promotion and retrieval keys over an existing corpus")
-    @ChatHidden("rewrites retrieval keys across the whole corpus")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "rewrites retrieval keys across the whole corpus")
     public static void backfillKeysStart() {
         requireOperator();
         var body = JsonBodyReader.readJsonBody();
@@ -453,6 +458,7 @@ public class ApiMemoryController extends Controller {
     /** GET /api/memories/backfill-keys — progress of the run started above. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryKeyBackfillService.Status.class)))
     @Operation(summary = "Status of the retrieval-key backfill")
+    @AgentAccess(OPERATOR_ONLY)
     public static void backfillKeysStatus() {
         renderJSON(gson.toJson(MemoryKeyBackfillService.status()));
     }
@@ -500,7 +506,8 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RecallView.class)))
     @Operation(summary = "Inspect what memory recall returns for a query")
-    @ChatHidden("reads any agent's memories; the scoped memory tool is the agent path")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "reads any agent's memories; the scoped memory tool is the agent path")
     public static void recall() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -548,6 +555,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200")
     @Operation(summary = "One agent's core-memory usage against the cap")
+    @AgentAccess(OPEN)
     public static void coreMigrationStatus(Long agentId) {
         requireAgentById(agentId);
         renderJSON(gson.toJson(CoreMemoryCapMigration.status(String.valueOf(agentId))));
@@ -567,7 +575,8 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "202")
     @Operation(summary = "Recategorise one agent's core memories past the cap")
-    @ChatHidden("rewrites any agent's core memories -- the cross-agent reach /api/memories is floored for")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "rewrites any agent's core memories -- the cross-agent reach /api/memories is floored for")
     public static void coreMigrationStart(Long agentId) {
         requireOperator();
         requireAgentById(agentId);
@@ -591,6 +600,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Re-embed progress")
+    @AgentAccess(OPERATOR_ONLY)
     public static void reembedStatus() {
         renderJSON(gson.toJson(MemoryReembedService.status()));
     }
@@ -606,7 +616,7 @@ public class ApiMemoryController extends Controller {
      */
     @ApiResponse(responseCode = "202")
     @Operation(summary = "Start re-embedding stored memories")
-    @ChatHidden("re-embeds every stored memory -- bulk model spend")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "re-embeds every stored memory -- bulk model spend")
     public static void reembedStart() {
         requireOperator();
         var refusal = MemoryReembedService.start();
@@ -622,7 +632,8 @@ public class ApiMemoryController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Delete a memory")
-    @ChatHidden("deletes any agent's memory row; the scoped memory tool is the agent path")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "deletes any agent's memory row; the scoped memory tool is the agent path")
     public static void delete(Long memoryId) {
         requireOperator();
         Memory memory = MemoryService.findById(memoryId);
@@ -649,8 +660,8 @@ public class ApiMemoryController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true)
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
-    @ChatHidden("destructive bulk memory deletion")
     @Operation(summary = "Bulk-delete memories by ids or by the list filter set")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "destructive bulk memory deletion")
     public static void bulkDelete() {
         requireOperator();
         var body = JsonBodyReader.readJsonBody();
@@ -765,7 +776,7 @@ public class ApiMemoryController extends Controller {
     }
 
     /** Refuse the agent principal at the request layer — cross-agent personal data; the scoped memory tool is the agent path (JCLAW-1266).
-     *  {@code @ChatHidden} would only hide it from the jclaw_api tool. */
+     *  Kept beside {@code @AgentAccess(OPERATOR_ONLY)} as defence in depth: the gate refuses before the action runs, this refuses if it ever does not. */
     private static void requireOperator() {
         if (RequestPrincipal.isAgentOriginated()) {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,

@@ -30,6 +30,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -229,6 +230,7 @@ public class ApiAuthController extends Controller {
     /** GET /api/auth/status — unauthenticated. Returns whether a password
      *  has been set, so the login/setup routing decision lives client-side. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AuthStatusResponse.class)))
+    @AgentAccess(OPERATOR_ONLY)
     public static void status() {
         var hash = ConfigService.get(PASSWORD_HASH_KEY);
         var passwordSet = hash != null && !hash.isBlank();
@@ -242,7 +244,8 @@ public class ApiAuthController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SetupRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SetupOkResponse.class)))
-    @ChatHidden("creates the admin password before one exists -- account takeover")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "creates the admin password before one exists -- account takeover")
     public static void setup() {
         // JCLAW-764 / AD-1 (defense-in-depth, VulnHunter follow-up): setup() is
         // unauthenticated and not behind @With(AuthCheck.class), so the provenance gate
@@ -314,7 +317,7 @@ public class ApiAuthController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = LoginRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoginResponse.class)))
-    @ChatHidden("mints an operator session")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "mints an operator session")
     public static void login() {
         // JCLAW-741: throttle brute-force / PBKDF2 CPU-exhaustion before any
         // work. Keyed on the socket peer; a source with too many recent
@@ -395,7 +398,7 @@ public class ApiAuthController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogoutResponse.class)))
-    @ChatHidden("clears the operator's own session")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "clears the operator's own session")
     public static void logout() {
         // JCLAW-764 / AD-1: same rationale as resetPassword — an app-originated
         // caller must not be able to log the operator out via the ambient cookie.
@@ -423,7 +426,7 @@ public class ApiAuthController extends Controller {
      * on reset and the no-auth gate on setup from getting tangled.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ResetPasswordResponse.class)))
-    @ChatHidden("wipes the stored admin hash and signs the operator out")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "wipes the stored admin hash and signs the operator out")
     public static void resetPassword() {
         // JCLAW-764 / AD-1: this endpoint is session-sensitive but not behind
         // @With(AuthCheck.class) (setup/login must stay unauthenticated), so the

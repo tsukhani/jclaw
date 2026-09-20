@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 @With(AuthCheck.class)
@@ -118,6 +120,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/skills — List all global skills. */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SkillView.class))))
     @Operation(summary = "List all skills in the global registry")
+    @AgentAccess(OPEN)
     public static void list() {
         var skills = new ArrayList<SkillLoader.SkillInfo>();
         var globalDir = SkillLoader.globalSkillsPath();
@@ -140,6 +143,7 @@ public class ApiSkillsController extends Controller {
 
     /** GET /api/skills/catalogs — List the configured catalogs for the selector. */
     @Operation(summary = "List the configured skill catalogs (static dumps + dynamic registries)")
+    @AgentAccess(OPEN)
     public static void catalogs() {
         var list = CatalogRegistry.all().stream()
                 .map(c -> Map.of("id", c.id(), "displayName", c.displayName(),
@@ -156,6 +160,7 @@ public class ApiSkillsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CatalogPage.class)))
     @Operation(summary = "Browse or search a skill catalog")
+    @AgentAccess(OPEN)
     public static void catalogSearch(String catalog, String q, String category,
                                      Integer page, Integer pageSize, String cursor, String sort) {
         var c = CatalogRegistry.byId(catalog);
@@ -171,7 +176,8 @@ public class ApiSkillsController extends Controller {
      * (not applicable).
      */
     @Operation(summary = "Refresh a static dump catalog from its update URL")
-    @ChatHidden("re-pulls the registry catalog the operator installs skills from")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "re-pulls the registry catalog the operator installs skills from")
     public static void catalogRefresh() {
         var body = JsonBodyReader.readJsonBody();
         var catalogId = body != null && body.has(KEY_CATALOG) ? body.get(KEY_CATALOG).getAsString() : null;
@@ -191,7 +197,8 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillImportRequest.class)))
     @Operation(summary = "Import a catalog skill from GitHub into the global registry")
-    @ChatHidden("installs a third-party skill whose shell allowlist the registry then carries")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "installs a third-party skill whose shell allowlist the registry then carries")
     public static void catalogImport() {
         requireOperator();
 
@@ -219,6 +226,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillDetailView.class)))
     @Operation(summary = "Get a global skill with its full SKILL.md content")
+    @AgentAccess(OPEN)
     public static void get(String name) {
         var path = resolveSkillName(SkillLoader.globalSkillsPath(), name).resolve(SKILL_MD);
         if (!Files.exists(path)) notFound();
@@ -252,6 +260,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
     @Operation(summary = "List files in a global skill folder with metadata and detected tool dependencies")
+    @AgentAccess(OPEN)
     public static void listFiles(String name) {
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
@@ -261,6 +270,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/skills/{name}/files/{&lt;path&gt;filePath} — Read a text file from a skill folder. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFileContentResponse.class)))
     @Operation(summary = "Read a text file from a global skill folder")
+    @AgentAccess(OPEN)
     public static void readFile(String name, String filePath) {
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         readSkillFileFrom(dir, filePath);
@@ -358,7 +368,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
     @Operation(summary = "Delete a global skill (rejects the built-in skill-creator)")
-    @ChatHidden("removes a registry skill every agent installs from")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "removes a registry skill every agent installs from")
     public static void delete(String name) {
         requireOperator();
 
@@ -374,6 +384,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
     @Operation(summary = "List an agent's installed skills and their enabled state")
+    @AgentAccess(OPEN)
     public static void listForAgent(Long id) {
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -392,6 +403,7 @@ public class ApiSkillsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentSkillView.class)))
     @Operation(summary = "List every agent's installed skills and enabled state, keyed by agent id")
+    @AgentAccess(OPEN)
     public static void listByAgent() {
         var byAgent = new LinkedHashMap<String, Object>();
         for (var agent : ApiAgentsController.listedAgents()) {
@@ -453,7 +465,8 @@ public class ApiSkillsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillToggleResponse.class)))
     @Operation(summary = "Enable or disable an already-installed skill on an agent")
-    @ChatHidden("re-admits a skill's shell-allowlist rows -- privilege escalation")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "re-admits a skill's shell-allowlist rows -- privilege escalation")
     public static void updateForAgent(Long id, String name) {
         requireOperator();
 
@@ -510,7 +523,8 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCopyResponse.class)))
     @Operation(summary = "Install (copy) a global skill into an agent's workspace and enable it (use this to add a skill an agent lacks)")
-    @ChatHidden("syncs the skill's shell allowlist onto the agent -- privilege escalation")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "syncs the skill's shell allowlist onto the agent -- privilege escalation")
     public static void copyToAgent(Long id, String name) {
         requireOperator();
 
@@ -566,6 +580,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFilesResponse.class)))
     @Operation(summary = "List files in an agent workspace skill folder with metadata and detected tool dependencies")
+    @AgentAccess(OPEN)
     public static void listAgentSkillFiles(Long id, String name) {
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -581,6 +596,7 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillFileContentResponse.class)))
     @Operation(summary = "Read a text file from an agent workspace skill")
+    @AgentAccess(OPEN)
     public static void readAgentSkillFile(Long id, String name, String filePath) {
         Agent agent = AgentService.findById(id);
         if (agent == null) {
@@ -595,7 +611,8 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillStatusResponse.class)))
     @Operation(summary = "Delete a skill from an agent's workspace and revoke its shell-allowlist grants")
-    @ChatHidden("deletes any agent's workspace skill and revokes its shell-allowlist grants")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "deletes any agent's workspace skill and revokes its shell-allowlist grants")
     public static void deleteAgentSkill(Long id, String name) {
         requireOperator();
 
@@ -623,7 +640,8 @@ public class ApiSkillsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillPromoteRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillPromoteResponse.class)))
     @Operation(summary = "Promote an agent workspace skill to the global registry (sanitizes asynchronously)")
-    @ChatHidden("lifts an agent-authored skill into the registry every other agent installs from")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "lifts an agent-authored skill into the registry every other agent installs from")
     public static void promote() {
         requireOperator();
 
@@ -677,7 +695,8 @@ public class ApiSkillsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillRenameRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillRenameResponse.class)))
     @Operation(summary = "Rename a global skill folder")
-    @ChatHidden("renaming a registry skill re-points every agent that installs it by name")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "renaming a registry skill re-points every agent that installs it by name")
     public static void rename(String name) {
         requireOperator();
 

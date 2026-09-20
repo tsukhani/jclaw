@@ -35,6 +35,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -95,6 +97,7 @@ public class ApiSubagentRunsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubagentRunView.class))))
     @Operation(summary = "List subagent runs with optional filters and pagination")
+    @AgentAccess(OPEN)
     public static void list(Long parentAgentId, Long parentConversationId,
                             String status, String since, String q,
                             String sort, String dir,
@@ -268,7 +271,8 @@ public class ApiSubagentRunsController extends Controller {
      */
     @ApiResponse(responseCode = "200")
     @Operation(summary = "Delete a terminal subagent run and its child agent")
-    @ChatHidden("erases a subagent-run record, including runs another agent started")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "erases a subagent-run record, including runs another agent started")
     public static void delete(Long id) {
         if (id == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
@@ -318,7 +322,7 @@ public class ApiSubagentRunsController extends Controller {
     @RequestBody(content = @Content(schema = @Schema(implementation = DeleteBulkRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
     @Operation(summary = "Bulk delete terminal subagent runs by ids or filter (RUNNING rows are skipped)")
-    @ChatHidden("erases subagent-run records in bulk by filter")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "erases subagent-run records in bulk by filter")
     public static void deleteBulk() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -496,7 +500,8 @@ public class ApiSubagentRunsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = KillRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = KillResponse.class)))
     @Operation(summary = "Kill a running subagent")
-    @ChatHidden("stops a run the calling agent need not have started; subagent_yield is the agent path")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "stops a run the calling agent need not have started; subagent_yield is the agent path")
     public static void kill(Long id) {
         if (id == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);
@@ -529,6 +534,7 @@ public class ApiSubagentRunsController extends Controller {
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = StepView.class))))
     @Operation(summary = "Ordered persisted step transcript for a subagent coding run")
+    @AgentAccess(OPEN)
     public static void steps(Long id) {
         if (id == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, MISSING_RUN_ID);

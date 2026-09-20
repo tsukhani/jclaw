@@ -14,6 +14,8 @@ import services.EventLogger;
 import utils.AppClock;
 import utils.WebhookUtil;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
+
 
 /**
  * Cloud-API inbound webhook for WhatsApp (JCLAW-446). Per-binding routed: a single
@@ -43,6 +45,7 @@ public class WebhookWhatsAppController extends Controller {
      * {@code hub.challenge}; 403 when no enabled binding owns the token (or the
      * mode isn't {@code subscribe}).
      */
+    @AgentAccess(OPERATOR_ONLY)
     public static void verify(String hubMode, String hubVerifyToken, String hubChallenge) {
         // Play maps hub.mode → hubMode etc. via query params; fall back to the
         // dotted names that Play can't bind to a Java identifier.
@@ -67,7 +70,8 @@ public class WebhookWhatsAppController extends Controller {
      * absent), parses, records the 24h window, dispatches, and fast-acks.
      */
     @SuppressWarnings("java:S2259")
-    @ChatHidden("inbound provider callback, authenticated by Meta's X-Hub-Signature-256")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "inbound provider callback, authenticated by Meta's X-Hub-Signature-256")
     public static void webhook() {
         // JCLAW-783: pre-auth ingress gate, keyed on the source IP (the routing id
         // is only in the parsed body, so it can't key the limiter pre-parse).

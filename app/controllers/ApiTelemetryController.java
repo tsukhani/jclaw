@@ -8,6 +8,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.telemetry.OtelRuntime;
 
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -20,14 +21,16 @@ public class ApiTelemetryController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = OtelRuntime.Status.class)))
     @Operation(summary = "OpenTelemetry export status: enabled, endpoint, protocol, last export error")
-    @ChatHidden("operator observability plumbing -- names the collector, nothing an agent needs")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "operator observability plumbing -- names the collector, nothing an agent needs")
     public static void status() {
         renderJSON(GSON.toJson(OtelRuntime.status()));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = OtelRuntime.TestResult.class)))
     @Operation(summary = "Emit one test span and report whether the collector confirmed it")
-    @ChatHidden("emits a span to the operator's collector -- an outward side effect")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "emits a span to the operator's collector -- an outward side effect")
     public static void test() {
         renderJSON(GSON.toJson(OtelRuntime.sendTestSpan()));
     }

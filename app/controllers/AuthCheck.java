@@ -68,26 +68,30 @@ public class AuthCheck extends Controller {
         var bearer = readBearerToken();
         if (bearer != null) {
             authenticateByBearer(bearer);
-            return;
+        } else {
+            // JCLAW-1034: a cookie minted under an older credential is no longer honored, so
+            // changing or resetting the password logs every other session out. Checked only on
+            // the cookie path — a bearer carries no generation and is revoked through its own row.
+            switch (ApiAuthController.sessionRejection()) {
+                case null -> { /* live operator session */ }
+                case CREDENTIALS_CHANGED -> {
+                    session.clear();
+                    ApiResponses.error(401, ApiResponses.CREDENTIALS_CHANGED, AUTH_REQUIRED);
+                }
+                case REVOKED -> {
+                    session.clear();
+                    ApiResponses.error(401, ApiResponses.SESSION_REVOKED, AUTH_REQUIRED);
+                }
+                case NOT_AUTHENTICATED ->
+                        ApiResponses.error(401, ApiResponses.AUTHENTICATION_REQUIRED, AUTH_REQUIRED);
+            }
         }
 
-        // JCLAW-1034: a cookie minted under an older credential is no longer honored, so
-        // changing or resetting the password logs every other session out. Checked only on
-        // the cookie path — a bearer carries no generation and is revoked through its own row.
-        switch (ApiAuthController.sessionRejection()) {
-            case null -> { /* live operator session */ }
-            case CREDENTIALS_CHANGED -> {
-                session.clear();
-                ApiResponses.error(401, ApiResponses.CREDENTIALS_CHANGED, AUTH_REQUIRED);
-            }
-            case REVOKED -> {
-                session.clear();
-                ApiResponses.error(401, ApiResponses.SESSION_REVOKED, AUTH_REQUIRED);
-            }
-            case NOT_AUTHENTICATED ->
-                    ApiResponses.error(401, ApiResponses.AUTHENTICATION_REQUIRED, AUTH_REQUIRED);
-        }
-
+        // JCLAW-1270: the bearer branch used to return here, which would have left the widest
+        // principal the one the access gate never saw — the same shape as the JCLAW-1034 bug
+        // above it. Both paths now fall through, because a session carrying the system owner's
+        // name reads as the agent principal too.
+        AgentAccessGate.enforce();
     }
 
     /**
