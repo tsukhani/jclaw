@@ -55,6 +55,7 @@ public class ApiBindingsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
     @ChatHidden("binds a channel to an agent -- comms redirection")
     public static void create() {
+        requireOperator();
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
@@ -83,6 +84,7 @@ public class ApiBindingsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentBinding.class)))
     @ChatHidden("repoints a channel binding at another agent")
     public static void update(Long id) {
+        requireOperator();
         var binding = BindingService.findAgentBindingById(id);
         if (binding == null) {
             notFound();
@@ -114,6 +116,7 @@ public class ApiBindingsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ChatHidden("takes a channel offline without the operator noticing")
     public static void delete(Long id) {
+        requireOperator();
         var binding = BindingService.findAgentBindingById(id);
         if (binding == null) {
             notFound();
@@ -145,6 +148,23 @@ public class ApiBindingsController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Field '%s' must be a number".formatted(key));
             throw ApiResponses.unreachable();
+        }
+    }
+
+
+    /** Refuse the agent principal at the request layer — a binding decides which agent receives a
+     *  channel's messages, so writing one redirects someone else's conversations and deleting one
+     *  takes a channel offline quietly (JCLAW-1266).
+     *  {@code @ChatHidden} would only hide these from the jclaw_api tool.
+     *
+     *  <p>{@link #list} stays open: {@code BindingView} carries ids, names, channel type and
+     *  priority — nothing secret — and Personal Edition puts a leaky read at the masking seam
+     *  rather than behind a refusal. */
+    private static void requireOperator() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
+                    "This endpoint is operator-only; an agent principal cannot call it. Channel "
+                            + "bindings decide which agent receives a channel's messages.");
         }
     }
 

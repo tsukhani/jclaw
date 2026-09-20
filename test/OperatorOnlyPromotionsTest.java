@@ -125,6 +125,40 @@ class OperatorOnlyPromotionsTest extends FunctionalTest {
                 "the funnel status read is intentionally reachable by an agent; got: " + getContent(resp));
     }
 
+    // --- channel bindings: which agent receives a channel's messages -------------------------
+
+    @Test
+    void agentPrincipalCannotCreateAChannelBinding() {
+        // Writing a binding redirects a channel's traffic to an agent of the caller's choosing,
+        // which is how an agent grants itself an inbound surface it was never bound to.
+        var resp = asAgent(() -> POST(agentRequest(), "/api/bindings",
+                "application/json", "{}"));
+        assertRefusedAsOperatorOnly(resp);
+    }
+
+    @Test
+    void agentPrincipalCannotRepointAChannelBinding() {
+        var resp = asAgent(() -> PUT(agentRequest(), "/api/bindings/" + NO_SUCH_ROW,
+                "application/json", "{}"));
+        assertRefusedAsOperatorOnly(resp);
+    }
+
+    @Test
+    void agentPrincipalCannotDeleteAChannelBinding() {
+        // Deleting one takes a channel offline without the operator noticing.
+        var resp = asAgent(() -> DELETE(agentRequest(), "/api/bindings/" + NO_SUCH_ROW));
+        assertRefusedAsOperatorOnly(resp);
+    }
+
+    @Test
+    void theBindingListReadStaysOpenToAnAgent() {
+        // Deliberate: BindingView carries ids, names, channel type and priority — nothing secret.
+        // Pinned so that closing it later is a decision rather than drift.
+        var resp = asAgent(() -> GET(agentRequest(), "/api/bindings"));
+        assertFalse(getContent(resp).contains(OPERATOR_ONLY),
+                "the binding list read is intentionally reachable by an agent; got: " + getContent(resp));
+    }
+
     // --- positive control ----------------------------------------------------------------------
 
     @Test
