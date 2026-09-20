@@ -48,6 +48,7 @@ public class ApiTailscaleController extends Controller {
     @SuppressWarnings("java:S2259")
     @ChatHidden("opens or closes the public funnel in front of this instance")
     public static void toggle() {
+        requireOperator();
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(FIELD_ENABLED)) {
             badRequest();
@@ -68,5 +69,20 @@ public class ApiTailscaleController extends Controller {
 
         var st = TailscaleFunnel.status();
         renderJSON(gson.toJson(new StatusResponse(enabled, st.available(), st.publicUrl(), st.error())));
+    }
+
+    /** Refuse the agent principal at the request layer — this switch decides whether the instance
+     *  is reachable from the public internet (JCLAW-1266).
+     *  {@code @ChatHidden} would only hide it from the jclaw_api tool.
+     *
+     *  <p>{@link #status} is deliberately left open: it reports a funnel URL that is public by
+     *  definition, and Personal Edition puts a leaky read at the masking seam rather than behind
+     *  a refusal. This capability is the state an agent can change. */
+    private static void requireOperator() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
+                    "This endpoint is operator-only; an agent principal cannot call it. The Funnel "
+                            + "toggle exposes this instance's HTTP port to the public internet.");
+        }
     }
 }

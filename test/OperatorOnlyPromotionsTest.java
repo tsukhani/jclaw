@@ -103,6 +103,28 @@ class OperatorOnlyPromotionsTest extends FunctionalTest {
         assertRefusedAsOperatorOnly(resp);
     }
 
+    // --- the funnel: whether this instance is reachable from the internet ---------------------
+
+    @Test
+    void agentPrincipalCannotToggleTheTailscaleFunnel() {
+        // The widest-blast-radius switch on the instance: Funnel publishes a whole port, so
+        // flipping it on exposes every route this app serves to the public internet. It was
+        // deny-floored and @ChatHidden, which only ever stopped the jclaw_api tool.
+        var resp = asAgent(() -> POST(agentRequest(), "/api/tailscale",
+                "application/json", "{\"enabled\":true}"));
+        assertRefusedAsOperatorOnly(resp);
+    }
+
+    @Test
+    void theFunnelStatusReadStaysOpenToAnAgent() {
+        // Deliberate, not an oversight: status reports a funnel URL that is public by definition,
+        // and Personal Edition puts a leaky read at the masking seam rather than behind a refusal.
+        // Pinned so that closing it later is a decision someone makes on purpose.
+        var resp = asAgent(() -> GET(agentRequest(), "/api/tailscale"));
+        assertFalse(getContent(resp).contains(OPERATOR_ONLY),
+                "the funnel status read is intentionally reachable by an agent; got: " + getContent(resp));
+    }
+
     // --- positive control ----------------------------------------------------------------------
 
     @Test
