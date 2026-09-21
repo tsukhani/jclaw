@@ -18,6 +18,9 @@ record SubagentSpawnArgs(
         @Nullable String modelProvider, @Nullable String modelId,
         @Nullable String mode, @Nullable String context, int timeoutSeconds, boolean asyncRequested) {
 
+    private static final String FIELD_MODEL_PROVIDER = "modelProvider";
+    private static final String FIELD_MODEL_ID = "modelId";
+
     static SubagentSpawnArgs fail(String msg) {
         return new SubagentSpawnArgs(msg, null, null, null, null, null, null, null, 0, false);
     }
@@ -43,8 +46,8 @@ record SubagentSpawnArgs(
         }
         var label = optString(args, SubagentSpawnTool.FIELD_LABEL);
         var requestedAgentId = optLong(args, SubagentSpawnTool.ARG_AGENT_ID);
-        var modelProviderOverride = optString(args, "modelProvider");
-        var modelIdOverride = optString(args, "modelId");
+        var modelProviderOverride = optString(args, FIELD_MODEL_PROVIDER);
+        var modelIdOverride = optString(args, FIELD_MODEL_ID);
         var runDefault = SubagentSpawnTool.defaultRunTimeoutSeconds();
         var timeoutSeconds = optInt(args, SubagentSpawnTool.ARG_RUN_TIMEOUT_SECONDS, runDefault);
         if (timeoutSeconds <= 0) timeoutSeconds = runDefault;
@@ -95,6 +98,23 @@ record SubagentSpawnArgs(
         return new SubagentSpawnArgs(null, task, label, requestedAgentId,
                 modelProviderOverride, modelIdOverride,
                 mode, context, timeoutSeconds, asyncRequested);
+    }
+
+    /**
+     * One child of a batch fan-out: its own task/label/agentId over the batch-wide mode,
+     * context and timeout {@link SubagentSpawnTool#executeBatch} has already validated.
+     *
+     * <p>The model override is read from the top-level call here rather than at the call
+     * site, which built this record by hand and passed null for it — so a
+     * {@code modelProvider} honoured for a single spawn was dropped for a batch
+     * (JCLAW-1231).
+     */
+    static SubagentSpawnArgs batchChild(JsonObject args, String task, @Nullable String label,
+                                        @Nullable Long agentId, String mode, String context,
+                                        int timeoutSeconds) {
+        return new SubagentSpawnArgs(null, task, label, agentId,
+                optString(args, FIELD_MODEL_PROVIDER), optString(args, FIELD_MODEL_ID),
+                mode, context, timeoutSeconds, true);
     }
 
     // Thin forwarders to the shared {@link JsonArgs} accessors (JCLAW-729). Kept

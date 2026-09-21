@@ -61,11 +61,6 @@ import java.util.stream.Collectors;
  * idle-respawn, shutdown, or engine-switch stop never waits on an in-flight
  * spawn. A stop that races a spawn is made orphan-free by the {@code stopGeneration}
  * hand-off (see {@code spawnNow} and {@link #stop()}).
- *
- * <p>{@link #lock()} is retained only for the diarization facade
- * ({@code services.transcription.DiarizeSidecarManager}), which still serializes
- * its own {@code ensureRunning} on that monitor; it is orthogonal to {@code startLock}
- * and is not the lock {@code stop()} uses.
  */
 public final class LocalSidecarDaemon {
 
@@ -87,10 +82,8 @@ public final class LocalSidecarDaemon {
             BiFunction<String, Throwable, RuntimeException> fail) {}
 
     private final Config cfg;
-    private final Object lock = new Object();
 
-    /** Guards the {@link #authToken} derivation only. Deliberately not {@link #lock()},
-     *  which the diarization facade holds across a multi-minute spawn. */
+    /** Guards the {@link #authToken} derivation only — never held across a spawn. */
     private final Object tokenLock = new Object();
 
     /** JCLAW-830 single-flight lock, held across spawn + {@link #awaitHealthy()}; see
@@ -128,16 +121,6 @@ public final class LocalSidecarDaemon {
 
     public LocalSidecarDaemon(Config cfg) {
         this.cfg = cfg;
-    }
-
-    /** Retained for the diarization facade
-     *  ({@code services.transcription.DiarizeSidecarManager}), which still
-     *  serializes its own {@code ensureRunning} on this monitor. The other
-     *  facades use {@link #singleFlight(Supplier)} instead (JCLAW-830). This
-     *  monitor is orthogonal to {@code startLock} and is not the lock
-     *  {@link #stop()} uses. */
-    public Object lock() {
-        return lock;
     }
 
     /**
@@ -229,8 +212,7 @@ public final class LocalSidecarDaemon {
      * non-blank) to the child as {@code HF_TOKEN}. The token parameter exists
      * so a facade can pass an explicit value (or null to force no token —
      * the ASR sidecar's weights are ungated and need none). Invoke inside
-     * {@link #singleFlight(Supplier)} (or, for the diarization facade, while
-     * holding {@link #lock()}) so only one spawn runs on the fixed port at a time.
+     * {@link #singleFlight(Supplier)} so only one spawn runs on the fixed port at a time.
      */
     public void spawn(@Nullable String model, @Nullable String hfToken) {
         if (System.currentTimeMillis() < spawnFailedUntil) {
@@ -332,8 +314,7 @@ public final class LocalSidecarDaemon {
 
     /** Block until {@code /health} responds or the startup deadline elapses. Runs
      *  without holding any monitor {@link #stop()} needs; invoke from inside the
-     *  single-flight section that launched the process ({@link #singleFlight(Supplier)},
-     *  or {@link #lock()} for the diarization facade). */
+     *  single-flight section that launched the process ({@link #singleFlight(Supplier)}). */
     public void awaitHealthy() {
         int timeoutS = ConfigService.getInt(cfg.configPrefix() + ".startupTimeoutSeconds", cfg.defaultStartupTimeoutS());
         // JCLAW-830: if stop() intervenes while we poll, abort promptly instead of

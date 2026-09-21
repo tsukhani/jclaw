@@ -1,10 +1,7 @@
 package channels;
 
-import agents.AgentRunner;
-import agents.DangerousActionGate;
 import models.Agent;
 import models.TelegramBinding;
-import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.longpolling.BotSession;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
@@ -551,99 +548,27 @@ public final class TelegramPollingRunner {
         // path. Everything else stays on the media-group buffer unchanged.
         if (isForward) {
             TelegramForwardCoalesceBuffer.add(msg, merged -> dispatchMerged(
-                    sendToken, sendAgent, ownerKey, merged));
+                    bindingId, sendToken, sendAgent, ownerKey, merged));
         } else if (TelegramInboundTextBuffer.isEligible(msg)) {
             TelegramInboundTextBuffer.add(msg, merged -> dispatchMerged(
-                    sendToken, sendAgent, ownerKey, merged));
+                    bindingId, sendToken, sendAgent, ownerKey, merged));
         } else {
             TelegramMediaGroupBuffer.add(msg, merged -> dispatchMerged(
-                    sendToken, sendAgent, ownerKey, merged));
+                    bindingId, sendToken, sendAgent, ownerKey, merged));
         }
     }
 
     /**
-     * Invoked by {@link TelegramMediaGroupBuffer} either immediately (for
-     * non-group messages) or after the idle window (for reassembled
-     * albums). Applies attachment gates, downloads pending files, then
-     * hands off to {@link AgentRunner#processInboundForAgentStreaming}.
-     * Runs on a virtual thread so a long download doesn't block the
-     * single-threaded scheduler used by the reassembly buffer.
+     * Invoked by the coalescing lanes either immediately (for a non-group message) or
+     * after the idle window (for a reassembled album / burst). Runs the turn on a
+     * virtual thread so a long attachment download doesn't block the single-threaded
+     * scheduler the buffers use; the turn itself is
+     * {@link TelegramInboundTurn#run}, shared with the webhook path.
      */
-    private static void dispatchMerged(String sendToken, Agent sendAgent, String ownerKey,
-                                        InboundMessage merged) {
-        Thread.ofVirtual().name("telegram-dispatch").start(() -> {
-            try {
-                final String sendChatId = merged.chatId();
-                var inputs = TelegramChannel.prepareInboundAttachments(
-                        sendToken, sendChatId, sendAgent, merged);
-                if (inputs == null) return; // helper already replied + logged
-
-                // JCLAW-94: stream via the same sink as the webhook path. Sink
-                // owns the placeholder/edit/delete lifecycle; the planner takes
-                // over on seal for media-rich or oversize responses. JCLAW-95:
-                // factory defers construction until the conversation id is known.
-                final String sendChatType = merged.chatType();
-                // JCLAW-370: shared chat/topic-scoped conversation key for
-                // groups (owner key for DMs), with sender attribution prefixed
-                // onto group messages so the agent can tell members apart. The
-                // outbound sink still routes to the chat id (sendChatId).
-                final String peerId = AgentRunner.telegramConversationPeerId(
-                        ownerKey, sendChatType, sendChatId, merged.messageThreadId());
-                final String attributedText = AgentRunner.telegramSenderAttributed(
-                        merged.text(), sendChatType, merged.fromDisplayName(), merged.fromId());
-                // JCLAW-377: route a forum-topic message to its per-topic override
-                // agent when one is mapped; falls back to the binding default for
-                // non-topic / unmapped messages. peerId + sink are unchanged — only
-                // which agent runs the turn changes.
-                final Agent runAgent = resolveTopicAgent(sendToken, sendChatId, merged.messageThreadId(), sendAgent);
-                // JCLAW-1061: bound HERE, not at the access check — the turn runs on this
-                // virtual thread, which the check's thread had already left. Recomputed rather
-                // than carried: every coalescing lane keys its bucket per sender, so `merged`
-                // is one person's messages and its fromId is the same value the check compared.
-                final boolean ownerInitiated = ownerKey.equals(merged.fromId());
-                // JCLAW-387 B4 follow-up: pass the Telegram chat.type so the new
-                // conversation is stamped with it (plain DM vs group history caps).
-                DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
-                    AgentRunner.processInboundForAgentStreaming(
-                            runAgent, LOG_SOURCE, peerId, attributedText,
-                            convId -> new TelegramStreamingSink(
-                                    sendToken, sendChatId, sendAgent, convId, sendChatType,
-                                    merged.messageId(), merged.messageThreadId()),
-                            inputs, sendChatType);
-                    return null;
-                });
-            } catch (Exception e) {
-                EventLogger.error(LOG_CATEGORY, Agent.nameOf(sendAgent),
-                        LOG_SOURCE, "Polling dispatch error: %s".formatted(e.getMessage()));
-            }
-        });
-    }
-
-    /**
-     * JCLAW-377: resolve which agent should run a turn for {@code (chatId,
-     * threadId)}. Reads the binding by its bot token and delegates to
-     * {@link TelegramBinding#resolveAgentForTopic} — returning the per-topic
-     * override agent when mapped, otherwise the binding's default. The read
-     * runs in a {@link services.Tx} (the dispatch virtual thread has no ambient
-     * JPA transaction), and the resolved agent's name is touched eagerly to
-     * avoid detached-proxy access on the streaming path. Falls back to
-     * {@code defaultAgent} if the binding can't be found (e.g. removed between
-     * receive and dispatch).
-     */
-    private static Agent resolveTopicAgent(String botToken, String chatId, @Nullable Integer threadId,
-                                           Agent defaultAgent) {
-        return Tx.run(() -> {
-            TelegramBinding binding = TelegramBinding.findByBotToken(botToken);
-            if (binding == null) return defaultAgent;
-            Agent resolved = binding.resolveAgentForTopic(chatId, threadId);
-            if (resolved != null) {
-                var _ = resolved.name; // touch inside tx to avoid detached-proxy access later
-            }
-            // Fall back to the binding default if a topic-override's agent FK was
-            // orphaned (agent deleted): resolveAgentForTopic returns null then, and a
-            // null agent NPEs in ConversationService downstream.
-            return resolved != null ? resolved : defaultAgent;
-        });
+    private static void dispatchMerged(Long bindingId, String sendToken, Agent sendAgent,
+                                       String ownerKey, InboundMessage merged) {
+        Thread.ofVirtual().name("telegram-dispatch").start(() ->
+                TelegramInboundTurn.run(bindingId, sendToken, ownerKey, sendAgent, merged));
     }
 
     /**

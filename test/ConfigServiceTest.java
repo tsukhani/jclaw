@@ -9,6 +9,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import tools.scrape.WebScrapeSettings;
+import utils.HttpFactories;
 
 class ConfigServiceTest extends UnitTest {
 
@@ -589,6 +590,27 @@ class ConfigServiceTest extends UnitTest {
         var error = ConfigService.setWithSideEffects(
                 "dispatcher.llm.maxRequests", "200");
         assertNull(error);
+    }
+
+    @Test
+    void deleteWithSideEffectsRevertsTheDispatcherCapToItsDefault() {
+        // JCLAW-1231: deleteWithSideEffects had no dispatcher arm, so clearing the key
+        // left the live OkHttp dispatcher on the deleted cap until the next restart.
+        var key = "dispatcher.llm.maxRequestsPerHost";
+        var previous = ConfigService.get(key);
+        try {
+            assertNull(ConfigService.setWithSideEffects(key, "9"));
+            assertEquals(9, HttpFactories.llmDispatcherMaxRequestsPerHost());
+
+            ConfigService.deleteWithSideEffects(key);
+
+            assertEquals(64, HttpFactories.llmDispatcherMaxRequestsPerHost(),
+                    "a deleted cap must revert the live dispatcher to the compiled default");
+        } finally {
+            if (previous == null) ConfigService.delete(key);
+            else ConfigService.set(key, previous);
+            HttpFactories.applyDispatcherConfig();
+        }
     }
 
     // --- JCLAW-832: set() caches eagerly for read-your-writes; if it joined an

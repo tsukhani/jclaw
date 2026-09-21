@@ -22,6 +22,7 @@ import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AttachmentService;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
@@ -452,26 +453,9 @@ public class ApiConversationsController extends Controller {
         // page-level bulk fetch (see attachmentsForMessages) rather than the
         // lazy m.attachments bag, so this stays N+1-free.
         if (!attachments.isEmpty()) {
-            map.put("attachments", attachmentsToList(attachments));
+            map.put("attachments", AttachmentService.toViews(attachments));
         }
         return map;
-    }
-
-    private static List<HashMap<String, Object>> attachmentsToList(
-            List<MessageAttachment> attachments) {
-        return attachments.stream().map(a -> {
-            var av = new HashMap<String, Object>();
-            av.put("uuid", a.uuid);
-            av.put("originalFilename", a.originalFilename);
-            av.put("mimeType", a.mimeType);
-            av.put("sizeBytes", a.sizeBytes);
-            av.put("kind", a.kind);
-            av.put("generated", a.generated); // JCLAW-227: chat UI badges tool-generated images
-            av.put("deleted", a.deleted); // JCLAW-209: chip shows a "deleted from workspace" marker
-            if (a.generationMetadata != null) av.put("generationMetadata", a.generationMetadata);
-            if (a.generationJobId != null) av.put("generationJobId", a.generationJobId); // JCLAW-234: chat polls this job's status
-            return av;
-        }).toList();
     }
 
     /**

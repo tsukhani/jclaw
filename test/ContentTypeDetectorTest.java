@@ -96,4 +96,26 @@ class ContentTypeDetectorTest extends UnitTest {
         assertEquals(ContentType.TEXT, ContentTypeDetector.detect("   \n  "));
         assertEquals(ContentType.TEXT, ContentTypeDetector.detect(null));
     }
+
+    @Test
+    void proseNamingAFlagIsNotCode() {
+        // JCLAW-1230: the detector's own "use " signal classified this as CODE
+        // and the code compressor reduced it to a stub.
+        assertEquals(ContentType.TEXT, ContentTypeDetector.detect("use the --force flag"));
+    }
+
+    @Test
+    void oneDeclarationLineInAProseDocumentIsNotCode() {
+        var prose = """
+                Release checklist for the quarterly data refresh.
+
+                Confirm the upstream feed landed before midnight and that the row
+                counts match what the finance team published on Monday.
+                export the results to CSV before archiving the working copy, then
+                Notify the on-call rota once the archive has been verified, and
+                record the run in the shared ledger so the next person can find it.
+                """;
+        assertEquals(ContentType.TEXT, ContentTypeDetector.detect(prose));
+    }
+
 }

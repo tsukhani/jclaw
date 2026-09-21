@@ -560,4 +560,28 @@ class ParallelToolExecutionTest extends UnitTest {
         assertEquals(1, sinkRef.get().ems.size(),
                 "the whole round must commit in ONE transaction; saw " + sinkRef.get().ems.size());
     }
+
+    @Test
+    void generatedAttachmentFramesCarryTheSameShapeAsAConversationReload() throws Exception {
+        // JCLAW-1231: the live tool_call frame and the reload response each built the
+        // per-attachment JSON themselves, and the frame's copy had lost `deleted`.
+        var att = new models.MessageAttachment();
+        att.uuid = "att-uuid";
+        att.originalFilename = "render.png";
+        att.mimeType = "image/png";
+        att.sizeBytes = 1234L;
+        att.kind = models.MessageAttachment.KIND_IMAGE;
+        att.generated = true;
+
+        var m = agents.ParallelToolExecutor.class.getDeclaredMethod(
+                "generatedAttachmentsJson", List.class);
+        m.setAccessible(true);
+        var frame = com.google.gson.JsonParser.parseString((String) m.invoke(null, List.of(att)))
+                .getAsJsonArray().get(0).getAsJsonObject();
+
+        assertEquals(services.AttachmentService.toView(att).keySet(), frame.keySet(),
+                "the streamed frame must carry the same keys the reload response does");
+        assertFalse(frame.get("deleted").getAsBoolean(),
+                "a freshly generated attachment is present, so the chip shows no deleted marker");
+    }
 }

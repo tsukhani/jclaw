@@ -496,8 +496,7 @@ public class ConfigService {
         // requiring a restart. HttpFactories.applyDispatcherConfig reads
         // both keys and pushes them into the live OkHttp dispatcher, so
         // the next outbound LLM call uses the new cap.
-        if (key.equals("dispatcher.llm.maxRequestsPerHost")
-                || key.equals("dispatcher.llm.maxRequests")) {
+        if (isDispatcherCapKey(key)) {
             HttpFactories.applyDispatcherConfig();
         }
 
@@ -624,6 +623,17 @@ public class ConfigService {
         if (key.startsWith(OtelConfig.KEY_PREFIX)) {
             OtelRuntime.applyConfig();
         }
+        // JCLAW-1231: clearing a cap reverts it to the compiled default, which the live
+        // dispatcher only picks up here — without this the deleted cap stayed in force
+        // until the next restart.
+        if (isDispatcherCapKey(key)) {
+            HttpFactories.applyDispatcherConfig();
+        }
+    }
+
+    /** The two keys {@link HttpFactories#applyDispatcherConfig} reads. */
+    private static boolean isDispatcherCapKey(String key) {
+        return key.equals("dispatcher.llm.maxRequestsPerHost") || key.equals("dispatcher.llm.maxRequests");
     }
 
     public static List<Config> listAll() {

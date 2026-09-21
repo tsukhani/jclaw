@@ -597,8 +597,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var runIds = new ArrayList<String>();
         var failures = new LinkedHashMap<String, String>();
         for (var spec : specs) {
-            var perArgs = new SubagentSpawnArgs(null, spec.task(), spec.label(), spec.agentId(),
-                    null, null, fMode, fContext, fTimeout, true);
+            var perArgs = SubagentSpawnArgs.batchChild(args, spec.task(), spec.label(), spec.agentId(),
+                    fMode, fContext, fTimeout);
             var bootstrap = SubagentChildBootstrap.bootstrapChildInTx(parentAgent, parentConv, perArgs, summary);
             if (bootstrap.error() != null) {
                 // JCLAW-823: don't silently drop a child whose bootstrap failed.

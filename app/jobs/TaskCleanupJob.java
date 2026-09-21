@@ -5,7 +5,6 @@ import play.db.jpa.JPA;
 import play.jobs.Every;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
-import services.ConfigService;
 import services.EventLogger;
 import services.TaskSchedulingService;
 import services.Tx;
@@ -61,7 +60,7 @@ public class TaskCleanupJob extends Job<Void> {
     public static final int DEFAULT_RETENTION_DAYS = 30;
 
     /** Sentinel value (0) meaning "retention disabled, never auto-delete". */
-    public static final int RETENTION_DISABLED = 0;
+    public static final int RETENTION_DISABLED = RetentionDays.DISABLED;
 
     /** Upper bound on the configured value — defense-in-depth against a
      *  typo like 365000 that would make the query effectively no-op but
@@ -93,33 +92,16 @@ public class TaskCleanupJob extends Job<Void> {
     }
 
     /**
-     * Read {@code tasks.retentionDays} from {@link ConfigService}, with
-     * defensive handling: missing → {@link #DEFAULT_RETENTION_DAYS}, 0 →
-     * disabled, negative or above ceiling → default plus a warn.
+     * Read {@code tasks.retentionDays}: missing → {@link #DEFAULT_RETENTION_DAYS}, 0 or
+     * less → disabled, above the ceiling or non-numeric → default plus a warn.
+     * {@link RetentionDays#resolve} is the rule the three cleanup jobs share.
      *
      * <p>Public because Play 1.x test classes live in the default package, so
      * {@code TaskCleanupJobTest} could not reach a package-private method.
      */
     public static int resolveRetentionDays() {
-        var raw = ConfigService.get(CONFIG_KEY);
-        if (raw == null || raw.isBlank()) return DEFAULT_RETENTION_DAYS;
-        try {
-            var parsed = Integer.parseInt(raw.trim());
-            if (parsed == 0) return RETENTION_DISABLED;
-            if (parsed < 0 || parsed > MAX_RETENTION_DAYS) {
-                EventLogger.warn(EVENT_CATEGORY,
-                        ("tasks.retentionDays out of range (%d); using default %d. "
-                                + "Allowed: 0 (disabled) or 1..%d.")
-                                .formatted(parsed, DEFAULT_RETENTION_DAYS, MAX_RETENTION_DAYS));
-                return DEFAULT_RETENTION_DAYS;
-            }
-            return parsed;
-        } catch (NumberFormatException _) {
-            EventLogger.warn(EVENT_CATEGORY,
-                    "tasks.retentionDays is not numeric ('%s'); using default %d"
-                            .formatted(raw, DEFAULT_RETENTION_DAYS));
-            return DEFAULT_RETENTION_DAYS;
-        }
+        return RetentionDays.fromConfig(CONFIG_KEY, DEFAULT_RETENTION_DAYS,
+                MAX_RETENTION_DAYS, EVENT_CATEGORY);
     }
 
     /**

@@ -773,4 +773,23 @@ class DangerousActionGateTest extends UnitTest {
         assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS),
                 "a drained message must be gated on its own sender, not the finished turn's");
     }
+
+    @Test
+    void slackApprovalPromptEscapesModelControlledText() throws Exception {
+        // JCLAW-1231: the Telegram prompt escaped the tool name, the why line and the args;
+        // the Slack one escaped nothing. Its grammar is mrkdwn, not HTML — and args inside
+        // the fence must not be able to close it and render as formatting.
+        var buildSlackPrompt = DangerousActionGate.class.getDeclaredMethod(
+                "buildSlackPrompt", String.class, String.class);
+        buildSlackPrompt.setAccessible(true);
+        var args = "{\"why\":\"<b>trust me</b>\",\"cmd\":\"echo ```*approved*\"}";
+
+        var prompt = (String) buildSlackPrompt.invoke(null, "exec<&>", args);
+
+        assertFalse(prompt.contains("<b>"), "Slack control characters must be escaped: " + prompt);
+        assertTrue(prompt.contains("&lt;b&gt;"), "the why line must be escaped too: " + prompt);
+        assertTrue(prompt.contains("exec&lt;&amp;&gt;"), "the tool name must be escaped: " + prompt);
+        assertEquals(2, prompt.split(Pattern.quote("```"), -1).length - 1,
+                "only the opening and closing fence may survive, or the args escape the block: " + prompt);
+    }
 }

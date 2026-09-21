@@ -198,4 +198,54 @@ class CodeCompressorTest extends UnitTest {
         var result = compressor.compress("   ", Language.UNKNOWN);
         assertFalse(result.changed());
     }
+
+    @Test
+    void modernJavaTakesTheAstPathNotTheRegexFallback() {
+        // JCLAW-1230: at javaparser's default JAVA_11 level a record or a switch
+        // expression threw and the lossy regex path silently took over.
+        var java = """
+                package com.example.shape;
+
+                import java.util.List;
+
+                public record Point(int x, int y) {
+
+                    public String quadrant() {
+                        return switch (Integer.signum(x) * 2 + Integer.signum(y)) {
+                            case 3 -> "north-east";
+                            case 1 -> "north-west";
+                            default -> "somewhere else entirely";
+                        };
+                    }
+
+                    public static Point origin(List<Integer> unused) {
+                        return new Point(0, 0);
+                    }
+                }
+                """;
+
+        var result = compressor.compress(java, Language.JAVA);
+        assertTrue(result.changed(), "body-heavy modern Java should compress");
+        var out = result.content();
+        // The two paths leave distinguishable markers, so the marker names the path taken.
+        assertTrue(out.contains("[body:"), "AST path marker missing: " + out);
+        assertFalse(out.contains("// [...]"), "regex fallback was taken: " + out);
+        assertTrue(out.contains("public String quadrant()"), out);
+        assertFalse(out.contains("north-east"), "switch body should be gone: " + out);
+        assertFalse(result.degraded(), "the AST path succeeded, so nothing was degraded");
+    }
+
+    @Test
+    void unparseableJavaReportsADegradedResult() {
+        var broken = new StringBuilder("package x;\npublic class X {\n    void broken( {{{ not valid ;;;\n");
+        for (int i = 0; i < 20; i++) {
+            broken.append("        some garbage line ").append(i).append(" with filler text\n");
+        }
+        broken.append("}\n");
+
+        var result = compressor.compress(broken.toString(), Language.JAVA);
+        assertTrue(result.changed(), "the regex fallback still shrinks a body-heavy listing");
+        assertTrue(result.degraded(), "a swallowed parse failure must reach the caller");
+    }
+
 }

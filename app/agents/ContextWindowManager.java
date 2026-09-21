@@ -274,8 +274,29 @@ public final class ContextWindowManager {
 
     static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv,
                                                  LlmProvider provider, @Nullable List<ToolDef> tools) {
+        return trim(messages, agent, conv, provider, tools).messages();
+    }
+
+    /**
+     * Bearer-aware overload: drop-oldest shifts every surviving position down, so the media
+     * bearers that address the list have to move with it or they rewrite the wrong slot
+     * (JCLAW-1232). Delegates to the same trim and re-bases the bearers by what it dropped.
+     */
+    static MessageHydrator.Hydration trimToContextWindow(MessageHydrator.Hydration hydration, Agent agent,
+                                                         Conversation conv, LlmProvider provider,
+                                                         @Nullable List<ToolDef> tools) {
+        var trimmed = trim(hydration.messages(), agent, conv, provider, tools);
+        return hydration.afterDroppingOldest(trimmed.messages(), trimmed.droppedOldest());
+    }
+
+    /** The trimmed list plus how many oldest messages went, which is what a position re-base needs. */
+    private record Trimmed(List<ChatMessage> messages, int droppedOldest) {
+    }
+
+    private static Trimmed trim(List<ChatMessage> messages, Agent agent, Conversation conv,
+                                LlmProvider provider, @Nullable List<ToolDef> tools) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
-        if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
+        if (modelInfo == null || modelInfo.contextWindow() <= 0) return new Trimmed(messages, 0);
 
         int contextWindow = modelInfo.contextWindow();
         var modelId = modelIdFor(agent, conv, provider);
@@ -291,7 +312,7 @@ public final class ContextWindowManager {
         int reservation = Math.min(RESERVED_OUTPUT_TOKENS, contextWindow / 2);
         int trimTarget = contextWindow - reservation;
 
-        if (estimatedTokens <= trimTarget) return messages;
+        if (estimatedTokens <= trimTarget) return new Trimmed(messages, 0);
 
         // Stage 1 (ported from OpenClaw's preemptive-compaction route
         // "truncate_tool_results_only"): when a single oversized tool result is
@@ -303,7 +324,7 @@ public final class ContextWindowManager {
         if (truncationResult != null) {
             if (truncationResult.adjustedEstimate() <= trimTarget) {
                 // Truncating tool results alone got us under the budget.
-                return truncationResult.messages();
+                return new Trimmed(truncationResult.messages(), 0);
             }
             // Truncation reduced the deficit but didn't close it — proceed to
             // drop-oldest with the already-truncated list as the new baseline.
@@ -331,9 +352,9 @@ public final class ContextWindowManager {
             var trimmed = new ArrayList<ChatMessage>(messages.size() - dropCount);
             trimmed.add(messages.getFirst());
             trimmed.addAll(messages.subList(1 + dropCount, messages.size()));
-            return trimmed;
+            return new Trimmed(trimmed, dropCount);
         }
-        return messages;
+        return new Trimmed(messages, 0);
     }
 
     // ─── Tool-result truncation ─────────────────────────────────────────────

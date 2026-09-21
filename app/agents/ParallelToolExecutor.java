@@ -7,6 +7,7 @@ import llm.LlmTypes.ToolCall;
 import models.Agent;
 import models.MessageAttachment;
 import org.jspecify.annotations.Nullable;
+import services.AttachmentService;
 import services.EventLogger;
 import services.Tx;
 import utils.LatencyTrace;
@@ -14,7 +15,6 @@ import utils.LatencyTrace;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -435,27 +435,14 @@ public final class ParallelToolExecutor {
     }
 
     /**
-     * JCLAW-228/562: serialize the tool-produced attachments for the live SSE {@code tool_call} frame
-     * as a JSON array, in the same per-item shape {@code ApiConversationsController.attachmentsToList}
-     * uses, so the chat UI can render generated images / voice clips inline without waiting for a
+     * JCLAW-228/562: serialize the tool-produced attachments for the live SSE {@code tool_call}
+     * frame as a JSON array, in the per-item shape {@link AttachmentService#toView} defines, so
+     * the chat UI can render generated images / voice clips inline without waiting for a
      * reload. {@code null} when the call produced nothing.
      */
     private static @Nullable String generatedAttachmentsJson(@Nullable List<MessageAttachment> atts) {
         if (atts == null || atts.isEmpty()) return null;
-        var list = new ArrayList<Map<String, Object>>(atts.size());
-        for (var att : atts) {
-            var m = new LinkedHashMap<String, Object>();
-            m.put("uuid", att.uuid);
-            m.put("originalFilename", att.originalFilename);
-            m.put("mimeType", att.mimeType);
-            m.put("sizeBytes", att.sizeBytes);
-            m.put("kind", att.kind);
-            m.put("generated", att.generated);
-            if (att.generationMetadata != null) m.put("generationMetadata", att.generationMetadata);
-            if (att.generationJobId != null) m.put("generationJobId", att.generationJobId); // JCLAW-234: chat polls this job
-            list.add(m);
-        }
-        return gson.toJson(list);
+        return gson.toJson(AttachmentService.toViews(atts));
     }
 
 }
