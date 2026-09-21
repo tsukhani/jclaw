@@ -41,6 +41,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * Owns the OpenTelemetry SDK for the process (JCLAW-34).
@@ -64,6 +65,7 @@ public final class OtelRuntime {
     private static final Duration EXPORT_TIMEOUT = Duration.ofSeconds(5);
     // Bounded so a config write cannot hang a request thread on a dead collector.
     private static final Duration SWAP_FLUSH_TIMEOUT = Duration.ofSeconds(2);
+    private static final Duration FLUSH_RETRY_PAUSE = Duration.ofMillis(5);
     // Bounded so a refused collector answers the Settings delivery check within its wait,
     // rather than the exporter's default five attempts of growing backoff.
     private static final RetryPolicy RETRY = RetryPolicy.builder()
@@ -353,10 +355,23 @@ public final class OtelRuntime {
         }
         try {
             body.run();
-            s.getSdkMeterProvider().forceFlush().join(EXPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            flushMetrics(s.getSdkMeterProvider());
             return memory.getFinishedMetricItems();
         } finally {
             applyConfig();
+        }
+    }
+
+    /**
+     * Flushes {@code provider}, waiting out an export already in flight: the periodic reader
+     * refuses a concurrent flush outright (SDK 1.66 fails it with "Export is already in
+     * progress") rather than queueing behind it. Public for TelemetryMetricsTest.
+     */
+    public static void flushMetrics(SdkMeterProvider provider) {
+        var deadline = System.nanoTime() + EXPORT_TIMEOUT.toNanos();
+        while (!provider.forceFlush().join(EXPORT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS).isSuccess()
+                && System.nanoTime() < deadline) {
+            LockSupport.parkNanos(FLUSH_RETRY_PAUSE.toNanos());
         }
     }
 

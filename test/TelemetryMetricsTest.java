@@ -1,5 +1,8 @@
+import io.opentelemetry.sdk.metrics.SdkMeterProvider;
 import io.opentelemetry.sdk.metrics.data.HistogramPointData;
 import io.opentelemetry.sdk.metrics.data.MetricData;
+import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
+import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -9,9 +12,13 @@ import services.telemetry.OtelRuntime;
 import services.telemetry.TurnMetrics;
 import utils.LatencyStats;
 
+import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 
 /** JVM metrics and the turn-segment histogram reach the metric exporter (JCLAW-34). */
@@ -38,6 +45,42 @@ class TelemetryMetricsTest extends UnitTest {
                 .flatMap(m -> m.getHistogramData().getPoints().stream())
                 .filter(p -> segment.equals(p.getAttributes().get(TurnMetrics.JCLAW_SEGMENT)))
                 .findFirst();
+    }
+
+    @Test
+    void aFlushThatMeetsAnExportInProgressStillDeliversWhatWasRecorded() throws InterruptedException {
+        // The reader refuses a flush outright while another export holds it, so a flush that lands
+        // during the periodic export returned before anything reached the exporter.
+        var exporter = InMemoryMetricExporter.create();
+        var collecting = new CountDownLatch(1);
+        var holdOnce = new AtomicBoolean(true);
+        try (var provider = SdkMeterProvider.builder()
+                .registerMetricReader(PeriodicMetricReader.builder(exporter).setInterval(Duration.ofHours(1)).build())
+                .build()) {
+            var meter = provider.get("flush-retry");
+            try (var _ = meter.gaugeBuilder("slow.collection").ofLongs().buildWithCallback(m -> {
+                if (holdOnce.compareAndSet(true, false)) {
+                    collecting.countDown();
+                    try {
+                        Thread.sleep(300);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                m.record(1);
+            })) {
+                var inFlight = Thread.ofPlatform().start(() -> provider.forceFlush().join(5, TimeUnit.SECONDS));
+                assertTrue(collecting.await(5, TimeUnit.SECONDS), "the in-flight export never started collecting");
+                meter.counterBuilder("recorded.meanwhile").build().add(1);
+
+                OtelRuntime.flushMetrics(provider);
+
+                assertTrue(exporter.getFinishedMetricItems().stream()
+                                .anyMatch(m -> m.getName().equals("recorded.meanwhile")),
+                        () -> "exported: " + names(exporter.getFinishedMetricItems()));
+                inFlight.join();
+            }
+        }
     }
 
     @Test
