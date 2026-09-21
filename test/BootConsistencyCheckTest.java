@@ -466,6 +466,8 @@ class BootConsistencyCheckTest extends UnitTest {
             ScheduleCall(TaskInstance<?> i, Instant w) { instance = i; when = w; }
         }
         final List<ScheduleCall> schedules = new ArrayList<>();
+        /** What scheduleIfNotExists reports: true models an absent row, false a surviving one. */
+        boolean scheduleIfNotExistsReturns = true;
         final List<String> scheduledIds = new ArrayList<>();
 
         SchedulerClient proxy() {
@@ -483,6 +485,14 @@ class BootConsistencyCheckTest extends UnitTest {
                     && args[1] instanceof Instant when) {
                 schedules.add(new ScheduleCall(inst, when));
                 return null;
+            }
+            // Production schedules through scheduleIfNotExists, which leaves an existing row alone
+            // and reports whether it created one; schedules records only the ones it created.
+            if ("scheduleIfNotExists".equals(name) && args != null && args.length == 2
+                    && args[0] instanceof TaskInstance<?> inst
+                    && args[1] instanceof Instant when) {
+                if (scheduleIfNotExistsReturns) schedules.add(new ScheduleCall(inst, when));
+                return scheduleIfNotExistsReturns;
             }
             // BootConsistencyCheck calls
             // getScheduledExecutionsForTask(name), the no-data-class

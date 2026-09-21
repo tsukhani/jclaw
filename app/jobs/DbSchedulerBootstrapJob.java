@@ -165,7 +165,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                 // "the transaction is externally managed" and silently
                 // SKIPS the commit. The INSERT into scheduled_tasks runs
                 // but is then rolled back when Hikari recycles the
-                // connection, so client.schedule() appears to succeed but
+                // connection, so client.scheduleIfNotExists() appears to succeed but
                 // no row lands. .commitWhenAutocommitDisabled(true) tells
                 // db-scheduler to always commit/rollback explicitly even
                 // when autoCommit is off — which is what we need since

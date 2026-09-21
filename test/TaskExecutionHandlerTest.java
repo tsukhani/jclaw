@@ -902,11 +902,15 @@ class TaskExecutionHandlerTest extends UnitTest {
         stub.scheduleIfNotExistsReturns = false; // the row is still there
         TaskSchedulingService.pause(task.id);
         stub.schedules.clear();
+        stub.scheduleIfNotExists.clear();
         TaskSchedulingService.resume(task.id);
         commitAndReopen();
 
+        // Paired: an empty schedules list alone is also what a resume that never ran would leave.
+        assertEquals(1, stub.scheduleIfNotExists.size(),
+                "resume must attempt the re-arm through scheduleIfNotExists");
         assertTrue(stub.schedules.isEmpty(),
-                "resume must not call schedule() — that throws on an existing row");
+                "a surviving one-shot row keeps its time: resume must create no schedule");
     }
 
     /**
@@ -1023,6 +1027,8 @@ class TaskExecutionHandlerTest extends UnitTest {
                     && args[0] instanceof TaskInstance<?> inst
                     && args[1] instanceof Instant when) {
                 scheduleIfNotExists.add(new ScheduleCall(inst, when));
+                // schedules means "created": production schedules through this method now.
+                if (scheduleIfNotExistsReturns) schedules.add(new ScheduleCall(inst, when));
                 return scheduleIfNotExistsReturns;
             }
             if ("cancel".equals(name) && args != null && args.length == 1

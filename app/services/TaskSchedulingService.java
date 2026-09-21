@@ -367,13 +367,22 @@ public final class TaskSchedulingService {
         SchedulerClient client = client();
         if (client == null) return;
         try {
-            client.schedule(
+            boolean scheduled = client.scheduleIfNotExists(
                     new TaskInstance<>(TaskExecutionHandler.TASK_NAME, task.id.toString()),
                     when);
-            EventLogger.info("task",
-                    task.agent != null ? task.agent.name : null, null,
-                    "Scheduled Task '%s' (type=%s) for %s"
-                            .formatted(task.name, task.type, when));
+            // A Task holds at most one scheduled_tasks row and an existing one is left in place,
+            // so "Scheduled" is only true when this call created it.
+            if (scheduled) {
+                EventLogger.info("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "Scheduled Task '%s' (type=%s) for %s"
+                                .formatted(task.name, task.type, when));
+            } else {
+                EventLogger.info("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "Task '%s' already has a pending fire; left it in place, not rescheduled for %s"
+                                .formatted(task.name, when));
+            }
         } catch (RuntimeException e) {
             EventLogger.error("task",
                     task.agent != null ? task.agent.name : null, null,

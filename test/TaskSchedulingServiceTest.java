@@ -4,12 +4,14 @@ import com.github.kagkarlsson.scheduler.exceptions.TaskInstanceNotFoundException
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Agent;
+import models.EventLog;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.EventLogger;
 import services.TaskExecutionHandler;
 import services.TaskSchedulingService;
 import utils.AppClock;
@@ -194,6 +196,39 @@ class TaskSchedulingServiceTest extends UnitTest {
         return a;
     }
 
+    // --- the "Scheduled" log reports what scheduleIfNotExists actually did -------------------
+
+    @Test
+    void registerDoesNotLogScheduledWhenARowAlreadyHoldsTheTask() {
+        var task = persistTask(Task.Type.SCHEDULED, Instant.now().plus(Duration.ofHours(1)), null);
+        stub.scheduleIfNotExistsReturns = false; // a row already holds this task
+
+        TaskSchedulingService.register(task);
+
+        assertTrue(stub.schedules.isEmpty(), "nothing was created, so nothing is recorded");
+        // Paired: this message proves the log is being read, so the zero below is a real zero.
+        assertEquals(1L, loggedLike("Task '" + task.name + "' already has a pending fire%"),
+                "the not-scheduled branch must say what happened");
+        assertEquals(0L, loggedLike("Scheduled Task '" + task.name + "'%"),
+                "register must not log Scheduled when scheduleIfNotExists created nothing");
+    }
+
+    @Test
+    void registerLogsScheduledWhenItCreatedTheRow() {
+        var task = persistTask(Task.Type.SCHEDULED, Instant.now().plus(Duration.ofHours(1)), null);
+
+        TaskSchedulingService.register(task);
+
+        assertEquals(1L, loggedLike("Scheduled Task '" + task.name + "'%"));
+        assertEquals(0L, loggedLike("Task '" + task.name + "' already has a pending fire%"));
+    }
+
+    /** EventLogger batches writes on a 30s window; flush first. Task names are unique per test. */
+    private static long loggedLike(String pattern) {
+        EventLogger.flush();
+        return EventLog.count("category = ?1 AND message LIKE ?2", "task", pattern);
+    }
+
     private Task persistTask(Task.Type type, Instant scheduledAt, String cronExpression) {
         var t = new Task();
         t.agent = agent;
@@ -238,6 +273,8 @@ class TaskSchedulingServiceTest extends UnitTest {
         }
 
         final List<ScheduleCall> schedules = new ArrayList<>();
+        /** What scheduleIfNotExists reports: true models an absent row, false a surviving one. */
+        boolean scheduleIfNotExistsReturns = true;
         final List<TaskInstanceId> cancels = new ArrayList<>();
         final List<RescheduleCall> reschedules = new ArrayList<>();
         boolean throwNotFoundOnCancel = false;
@@ -258,6 +295,14 @@ class TaskSchedulingServiceTest extends UnitTest {
                     && args[1] instanceof Instant when) {
                 schedules.add(new ScheduleCall(inst, when));
                 return null;
+            }
+            // Production schedules through scheduleIfNotExists, which leaves an existing row alone
+            // and reports whether it created one; schedules records only the ones it created.
+            if ("scheduleIfNotExists".equals(name) && args != null && args.length == 2
+                    && args[0] instanceof TaskInstance<?> inst
+                    && args[1] instanceof Instant when) {
+                if (scheduleIfNotExistsReturns) schedules.add(new ScheduleCall(inst, when));
+                return scheduleIfNotExistsReturns;
             }
             if ("cancel".equals(name) && args != null && args.length == 1
                     && args[0] instanceof TaskInstanceId id) {

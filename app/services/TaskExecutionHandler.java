@@ -374,11 +374,19 @@ public final class TaskExecutionHandler {
                 return;
             }
             String instanceId = task.id.toString();
-            client.schedule(new TaskInstance<>(TASK_NAME, instanceId), next);
-            EventLogger.info("task",
-                    task.agent != null ? task.agent.name : null, null,
-                    "Rescheduled Task '%s' next %s fire for %s%s"
-                            .formatted(task.name, kind, next, detailSuffix));
+            boolean scheduled = client.scheduleIfNotExists(new TaskInstance<>(TASK_NAME, instanceId), next);
+            if (scheduled) {
+                EventLogger.info("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "Rescheduled Task '%s' next %s fire for %s%s"
+                                .formatted(task.name, kind, next, detailSuffix));
+            } else {
+                // stopCurrentRow runs first, so a surviving row means it did not clear this fire's.
+                EventLogger.warn("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "Task '%s' next %s fire was not re-armed: a scheduled row for it still exists"
+                                .formatted(task.name, kind));
+            }
         } catch (Exception e) {
             EventLogger.error("task",
                     task.agent != null ? task.agent.name : null, null,

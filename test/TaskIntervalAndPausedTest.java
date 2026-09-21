@@ -193,6 +193,8 @@ class TaskIntervalAndPausedTest extends UnitTest {
             RescheduleCall(TaskInstanceId id, Instant w) { instanceId = id; when = w; }
         }
         final List<ScheduleCall> schedules = new ArrayList<>();
+        /** What scheduleIfNotExists reports: true models an absent row, false a surviving one. */
+        boolean scheduleIfNotExistsReturns = true;
         final List<TaskInstanceId> cancels = new ArrayList<>();
         final List<RescheduleCall> reschedules = new ArrayList<>();
 
@@ -209,6 +211,14 @@ class TaskIntervalAndPausedTest extends UnitTest {
                     && args[1] instanceof Instant when) {
                 schedules.add(new ScheduleCall(inst, when));
                 return null;
+            }
+            // Production schedules through scheduleIfNotExists, which leaves an existing row alone
+            // and reports whether it created one; schedules records only the ones it created.
+            if ("scheduleIfNotExists".equals(name) && args != null && args.length == 2
+                    && args[0] instanceof TaskInstance<?> inst
+                    && args[1] instanceof Instant when) {
+                if (scheduleIfNotExistsReturns) schedules.add(new ScheduleCall(inst, when));
+                return scheduleIfNotExistsReturns;
             }
             if ("cancel".equals(name) && args != null && args.length == 1
                     && args[0] instanceof TaskInstanceId id) {
