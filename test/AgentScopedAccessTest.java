@@ -10,6 +10,8 @@ import play.test.FunctionalTest;
 import services.Tx;
 import utils.AppClock;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -41,6 +43,7 @@ class AgentScopedAccessTest extends FunctionalTest {
     private Long alienConversationId;
     private Long ownConversationId;
     private Long callerAgentId;
+    private Long alienAgentId;
     private Long ownRunId;
     private Long alienRunId;
 
@@ -55,15 +58,16 @@ class AgentScopedAccessTest extends FunctionalTest {
             var ownConversation = conversationFor(caller);
             var alienConversation = conversationFor(alien);
             return new Long[]{
-                    caller.id, ownConversation.id, alienConversation.id,
+                    caller.id, alien.id, ownConversation.id, alienConversation.id,
                     settledRunFor(caller, ownConversation).id,
                     settledRunFor(alien, alienConversation).id};
         });
         callerAgentId = seeded[0];
-        ownConversationId = seeded[1];
-        alienConversationId = seeded[2];
-        ownRunId = seeded[3];
-        alienRunId = seeded[4];
+        alienAgentId = seeded[1];
+        ownConversationId = seeded[2];
+        alienConversationId = seeded[3];
+        ownRunId = seeded[4];
+        alienRunId = seeded[5];
     }
 
     @AfterEach
@@ -159,6 +163,31 @@ class AgentScopedAccessTest extends FunctionalTest {
         assertStatus(403, resp);
     }
 
+    // --- subagent runs: bulk delete narrows, it does not refuse -------------------------------
+
+    @Test
+    void aBulkDeleteByIdsNarrowsToTheCallersOwnRuns() {
+        var resp = asAgent(() -> deleteWithBody(agentRequest(callerAgentId), "/api/subagent-runs",
+                "{\"ids\":[" + ownRunId + "," + alienRunId + "]}"));
+        assertStatus(200, resp);
+        assertTrue(getContent(resp).contains("\"deleted\":1"), getContent(resp));
+        assertFalse(runExists(ownRunId), "the caller named its own run and it should have gone");
+        assertTrue(runExists(alienRunId), "the caller named another agent's run and it must survive");
+    }
+
+    @Test
+    void aBulkDeleteByFilterCannotBeAimedAtAnotherAgent() {
+        // The sharp case for narrowing: the filter names the other agent outright, and
+        // scopedParentAgentId rewrites it to the caller — so the query is incapable of matching
+        // that row rather than refusing it after reading it.
+        var resp = asAgent(() -> deleteWithBody(agentRequest(callerAgentId), "/api/subagent-runs",
+                "{\"filter\":{\"parentAgentId\":" + alienAgentId + "}}"));
+        assertStatus(200, resp);
+        assertTrue(runExists(alienRunId), "a filter aimed at another agent must not reach its runs");
+        // The permission half: the filter was rewritten, not ignored or rejected.
+        assertFalse(runExists(ownRunId), "the rewritten filter still sweeps the caller's own runs");
+    }
+
     // --- seam ---------------------------------------------------------------------------------
 
     private static Agent agentNamed(String name) {
@@ -203,6 +232,28 @@ class AgentScopedAccessTest extends FunctionalTest {
         run.endedAt = AppClock.now();
         run.save();
         return run;
+    }
+
+    /**
+     * {@code DELETE} carrying a body. Play 1.x {@code FunctionalTest} ships only
+     * {@code DELETE(String)} and {@code DELETE(Request, Object)}, and {@code deleteBulk} answers
+     * 400 without a body — the same harness gap {@code ApiTasksControllerCoverageTest} works
+     * around for PATCH. The bearer header is already on {@code request}; no cookie jar is folded
+     * in, because this class drives the agent principal and clears cookies after every call.
+     */
+    private static Http.Response deleteWithBody(Http.Request request, String url, String body) {
+        request.method = "DELETE";
+        request.contentType = "application/json";
+        request.url = url;
+        request.path = url;
+        request.querystring = "";
+        request.body = new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));
+        return makeRequest(request);
+    }
+
+    /** Committed read: the test body's own transaction cannot see what the request committed. */
+    private static boolean runExists(Long id) {
+        return commit(() -> SubagentRun.findById(id) != null);
     }
 
     /** Unique-named, unlike {@link #agentNamed}: a reused child would accumulate runs across
