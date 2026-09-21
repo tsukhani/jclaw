@@ -181,7 +181,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void aNestedTurnBillsItselfAndRestoresTheParent() {
-        var suffix = System.nanoTime();
+        var suffix = uniqueSuffix();
         var parentChannel = "llm-calls-parent-" + suffix;
         var childChannel = "llm-calls-child-" + suffix;
         var parent = startedTrace(parentChannel);
