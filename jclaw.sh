@@ -4149,22 +4149,6 @@ do_test() {
     _now() { date +%s.%N; }
     _elapsed() { awk -v a="$1" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }'; }
 
-    # `play autotest` truncates logs/system.out and redirects the TEST server's
-    # output into it (the play1 plugin does writeText("") then redirectOutput), so
-    # a live instance loses its own log to every suite run. Measured 2026-09-21:
-    # the suite does NOT kill a live instance — PLAY_TEST_PORT keeps the two
-    # servers on separate ports — but the truncation erases the evidence when one
-    # exits for any other reason, which is what left an earlier exit unattributable.
-    local live_pid=""
-    if [[ -f "$SCRIPT_DIR/server.pid" ]]; then
-        live_pid=$(cat "$SCRIPT_DIR/server.pid" 2>/dev/null || true)
-    fi
-    if [[ -n "$live_pid" ]] && kill -0 "$live_pid" 2>/dev/null; then
-        if cp "$SCRIPT_DIR/logs/system.out" "$SCRIPT_DIR/logs/system.out.pre-test" 2>/dev/null; then
-            echo "[jclaw test] Instance live (pid $live_pid) — preserved logs/system.out as logs/system.out.pre-test"
-        fi
-    fi
-
     echo "==> Running backend tests (play autotest)..."
     t0=$(_now)
     # JCLAW-684: clear this run's per-class result sentinels first so the
