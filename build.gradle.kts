@@ -335,7 +335,7 @@ dependencies {
     implementation("io.opentelemetry.instrumentation:opentelemetry-okhttp-3.0")
     implementation("io.opentelemetry.instrumentation:opentelemetry-jdbc")
     implementation("io.opentelemetry.instrumentation:opentelemetry-runtime-telemetry")
-    implementation("io.opentelemetry.semconv:opentelemetry-semconv-incubating:1.43.0-alpha")
+    implementation("io.opentelemetry.semconv:opentelemetry-semconv")
 
     // ArchUnit — architecture rules as unit tests (test/ArchitectureTest). Guards
     // the canonical seams the audit waves keep having to re-consolidate: outbound
