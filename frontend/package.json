@@ -51,7 +51,7 @@
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/qrcode": "^1.5.6",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^5.0.1",
     "@vue/test-utils": "^2.4.11",
     "axe-core": "^4.12.1",
     "eslint": "^10.7.0",
@@ -64,7 +64,7 @@
     "stylelint-config-standard-vue": "^2.0.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10",
+    "vitest": "^5.0.1",
     "vitest-sonar-reporter": "^3.0.0",
     "vue-axe": "^3.1.2",
     "vue-tsc": "^3.3.7"
