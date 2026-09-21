@@ -1,6 +1,8 @@
 package tools;
 
+import agents.DangerousActionGate;
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -12,9 +14,12 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.scrape.BlockClassifier;
+import services.scrape.ScrapeJobService;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
+import tools.scrape.CrawlListener;
+import tools.scrape.ScrapeJobRequest;
 import tools.scrape.ScrapeLadder;
 import tools.scrape.ScrapeOutput;
 import tools.scrape.ScrapeProxy;
@@ -102,12 +107,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private static final String ARG_LANGUAGE = "language";
     private static final String ARG_SAVE = "save";
+    private static final String ARG_BACKGROUND = "background";
     private static final String EVENT_CATEGORY = "scrape";
-
-    /** Preferred language for pages that declare translations. English by default; the
-     *  per-call {@code language} argument overrides it, following the respectRobots
-     *  precedent from JCLAW-1095 rather than being config-only. */
-    private static final String DEFAULT_LANGUAGE = "en";
 
     /** Escalated pages allowed per crawl. Deliberately well below max-pages: a rung-3
      *  render costs seconds where a plain fetch costs milliseconds, so a crawl that
@@ -117,13 +118,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final int DEFAULT_MAX_ESCALATIONS = 5;
 
     private static final String INTERRUPTED = "interrupted";
+    private static final String CANCELLED = "stopped on request";
     private static final String ROBOTS_REFUSAL = "disallowed by robots.txt";
 
     /** Ceilings an operator can lower but the model cannot raise. This is a tool call
      *  inside a conversation, not a background crawler: the caller is waiting, and the
      *  result has to fit a context window. */
     private static final int DEFAULT_MAX_PAGES = 25;
-    private static final int DEFAULT_MAX_DEPTH = 2;
     private static final int DEFAULT_TIMEOUT_SECONDS = 60;
 
     /** Outbound fan-out. Deliberately operator config and never a tool argument:
@@ -168,7 +169,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 Markdown document with each page's source URL as a heading. \
                 Use this for a documentation site, a multi-page article, or any question that \
                 needs more than one page. Use extract to collect specific values from every page, \
-                and save to write a large crawl to a workspace file. \
+                and save to write a large crawl to a workspace file. For a crawl of many pages set \
+                background: it runs as a job after this turn ends and reports back when it finishes. \
                 For a single page use web_fetch instead — it is faster and cheaper.""";
     }
 
@@ -182,14 +184,15 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                         ARG_MAX_PAGES, Map.of(SchemaKeys.TYPE, "integer",
                                 SchemaKeys.DESCRIPTION,
                                 "Maximum pages to read. Defaults to the operator's limit (%d unless "
-                                + "changed in Settings); a larger value is capped to that limit"
-                                        .formatted(DEFAULT_MAX_PAGES)),
+                                + "changed in Settings, %d with background); a larger value is capped "
+                                + "to that limit"
+                                        .formatted(DEFAULT_MAX_PAGES, WebScrapeSettings.DEFAULT_JOB_MAX_PAGES)),
                         ARG_MAX_DEPTH, Map.of(SchemaKeys.TYPE, "integer",
                                 SchemaKeys.DESCRIPTION,
                                 "How many links deep to follow; 0 reads only the starting URL. "
                                 + "Defaults to the operator's limit (%d unless changed in Settings); "
                                 + "a larger value is capped to that limit"
-                                        .formatted(DEFAULT_MAX_DEPTH)),
+                                        .formatted(WebScrapeSettings.DEFAULT_MAX_DEPTH)),
                         ARG_SAME_HOST, Map.of(SchemaKeys.TYPE, "boolean",
                                 SchemaKeys.DESCRIPTION,
                                 "Stay on the starting URL's host (default true)"),
@@ -202,13 +205,25 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION,
                                 "Write the result to a workspace file (Markdown, text, or JSON Lines "
                                 + "with one page per line) and return only a summary and the file name"),
+                        ARG_BACKGROUND, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                                SchemaKeys.DESCRIPTION,
+                                "Run the crawl as a background job instead of inside this turn. Returns "
+                                + "a job id at once; pages are written to a workspace folder as they "
+                                + "are read, and a message here says when the job ends. Use it for a "
+                                + "crawl of more pages than one turn can read"),
+                        ScrapeJobRequest.ARG_MAX_MINUTES, Map.of(SchemaKeys.TYPE, "integer",
+                                SchemaKeys.DESCRIPTION,
+                                "With background, how many minutes the job may run. Defaults to the "
+                                + "operator's limit (%d unless changed in Settings); a larger value "
+                                + "is capped to that limit"
+                                        .formatted(WebScrapeSettings.DEFAULT_JOB_MAX_MINUTES)),
                         ARG_LANGUAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
                                 "Preferred language for sites that publish translations, as an "
                                 + "hreflang code such as 'en', 'ja' or 'pt-BR' (default '%s'). "
                                 + "Other translations of a page are skipped so the page budget "
                                 + "is spent on distinct content."
-                                        .formatted(DEFAULT_LANGUAGE))
+                                        .formatted(WebScrapeSettings.DEFAULT_LANGUAGE))
                 )),
                 SchemaKeys.REQUIRED, List.of(ARG_URL)
         );
@@ -254,15 +269,15 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 args.has(ARG_MAX_PAGES) ? args.get(ARG_MAX_PAGES).getAsInt() : configMaxPages(),
                 1, configMaxPages());
         int maxDepth = Math.clamp(
-                args.has(ARG_MAX_DEPTH) ? args.get(ARG_MAX_DEPTH).getAsInt() : configMaxDepth(),
-                0, configMaxDepth());
+                args.has(ARG_MAX_DEPTH) ? args.get(ARG_MAX_DEPTH).getAsInt() : WebScrapeSettings.maxDepth(),
+                0, WebScrapeSettings.maxDepth());
         boolean sameHostOnly = !args.has(ARG_SAME_HOST) || args.get(ARG_SAME_HOST).getAsBoolean();
         // Config supplies the default; the argument overrides it per call. An operator
         // who wants robots ignored everywhere sets the config once, and one who leaves
         // it on can still say "ignore robots for this" in a single request.
         boolean respectRobots = args.has(ARG_RESPECT_ROBOTS)
                 ? args.get(ARG_RESPECT_ROBOTS).getAsBoolean()
-                : respectRobotsDefault();
+                : WebScrapeSettings.respectRobots();
 
         try {
             SsrfGuard.assertSafeScheme(seed);
@@ -272,17 +287,78 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
         var language = args.has(ARG_LANGUAGE) && !args.get(ARG_LANGUAGE).isJsonNull()
                 ? args.get(ARG_LANGUAGE).getAsString().strip()
-                : languageDefault();
+                : WebScrapeSettings.language();
         ScrapeOutput.Request output;
         try {
             output = ScrapeOutput.parse(args, false, ScrapeOutput.Format.MARKDOWN);
         } catch (IllegalArgumentException e) {
             return ToolRegistry.ToolResult.error(ToolErrorTemplates.webBadArgument(String.valueOf(e.getMessage())));
         }
+        if (args.has(ARG_BACKGROUND) && !args.get(ARG_BACKGROUND).isJsonNull()
+                && args.get(ARG_BACKGROUND).getAsBoolean()) {
+            return startJob(args, agent);
+        }
         boolean save = args.has(ARG_SAVE) && !args.get(ARG_SAVE).isJsonNull() && args.get(ARG_SAVE).getAsBoolean();
         var state = new CrawlState(output, save);
         crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots, language, state);
         return ToolRegistry.ToolResult.text(result(seed, state, maxDepth, sameHostOnly, agent));
+    }
+
+    /** Queue the crawl as a background job (JCLAW-1272) and answer within the turn. */
+    private static ToolRegistry.ToolResult startJob(JsonObject args, @Nullable Agent agent) {
+        ScrapeJobRequest request;
+        try {
+            request = ScrapeJobRequest.forAgent(args);
+        } catch (IllegalArgumentException e) {
+            return ToolRegistry.ToolResult.error(ToolErrorTemplates.webBadArgument(String.valueOf(e.getMessage())));
+        }
+        if (agent == null) {
+            return ToolRegistry.ToolResult.error(ToolErrorTemplates.webBadArgument(
+                    "background needs an agent workspace to write the pages to"));
+        }
+        var conversationId = ToolContext.conversationId();
+        var job = ScrapeJobService.submit(agent, conversationId, request, DangerousActionGate.ownerInitiated());
+        var folder = ScrapeJobService.folder(job.id);
+        var text = new StringBuilder("Started background scrape job %d for %s (up to %d pages, depth %d, %d minutes). "
+                .formatted(job.id, request.url(), request.maxPages(), request.maxDepth(), request.maxMinutes()));
+        text.append("It keeps running after this turn. Each page is written to the workspace folder '%s' as it is read, "
+                .formatted(folder));
+        text.append("and every page is combined in '%s' when the job ends. "
+                .formatted(ScrapeJobService.combinedFile(job.id, request.output().format())));
+        text.append(conversationId != null
+                ? "A message in this conversation will say when it finishes, so do not start it again or check on it."
+                : "No conversation will be told when it finishes; read the folder later.");
+        var structured = new JsonObject();
+        var ref = new JsonObject();
+        ref.addProperty("id", job.id);
+        ref.addProperty("url", request.url().toString());
+        ref.addProperty("folder", folder);
+        structured.add("scrapeJob", ref);
+        return new ToolRegistry.ToolResult(text.toString(), GsonHolder.GSON.toJson(structured));
+    }
+
+    /**
+     * What a background job's crawl reports when it ends (JCLAW-1272).
+     *
+     * @param firstRefusal why the first URL the crawl declined was declined — the seed's reason when
+     *                     no page was read at all
+     */
+    public record JobCrawl(String summary, @Nullable String stoppedBecause, @Nullable String firstRefusal) {}
+
+    /**
+     * Run a background job's crawl: each page goes to {@code listener} as it lands, and the crawl
+     * stops before its next fetch once the listener asks. Blocks until the crawl ends.
+     *
+     * <p>Not bounded by the content budget a turn's result needs — the pages are on disk, not in a
+     * context window — so its page count and time limit are what bound it.
+     */
+    public JobCrawl crawlForJob(ScrapeJobRequest request, CrawlListener listener) {
+        var state = new CrawlState(request.output(), true, Integer.MAX_VALUE,
+                Duration.ofMinutes(request.maxMinutes()), request.seedFromSitemap(), listener);
+        crawl(request.url(), request.maxPages(), request.maxDepth(), request.sameHostOnly(),
+                request.respectRobots(), request.language(), state);
+        return new JobCrawl(summary(request.url(), state, request.maxDepth(), request.sameHostOnly()),
+                state.stoppedBecause, state.refused.isEmpty() ? null : state.refused.getFirst().why());
     }
 
     /**
@@ -303,7 +379,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         } catch (RuntimeException e) {
             return ScrapeObservation.failed(url, "rejected: " + e.getMessage());
         }
-        boolean respect = respectRobotsDefault();
+        boolean respect = WebScrapeSettings.respectRobots();
         if (respect && !RobotsCache.isAllowed(uri, client(), IDENTITY)) {
             return ScrapeObservation.failed(url, ROBOTS_REFUSAL);
         }
@@ -316,7 +392,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             return ScrapeObservation.failed(url, INTERRUPTED);
         }
         try {
-            var fetched = WebExtraction.fetch(url, client(), headersFor(languageDefault(), false));
+            var fetched = WebExtraction.fetch(url, client(), headersFor(WebScrapeSettings.language(), false));
             return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
         } catch (Exception e) {
             return ScrapeObservation.failed(url, reason(e));
@@ -329,6 +405,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         final ScrapeOutput.Request output;
         final boolean save;
         final int contentBudget;
+        final Duration timeBudget;
+        final boolean seedFromSitemap;
+        /** Set for a background job (JCLAW-1272); null for a crawl inside a turn. */
+        final @Nullable CrawlListener listener;
         final List<Page> pages = new ArrayList<>();
         final List<Refusal> refused = new ArrayList<>();
         final LinkedHashSet<String> seen = new LinkedHashSet<>();
@@ -339,6 +419,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
          *  locale roots, e.g. "/ar/". Learned, never guessed — see suppressLocaleVariants. */
         final LinkedHashSet<String> suppressedLocalePrefixes = new LinkedHashSet<>();
         int unvisited;
+        /** URLs queued so far, for a job's progress. */
+        int discovered;
         @Nullable String stoppedBecause;
         /** {@code System.nanoTime()} at which the crawl's declared timeout expires. */
         long deadline;
@@ -368,19 +450,38 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
 
         CrawlState(ScrapeOutput.Request output, boolean save) {
+            this(output, save, save ? MAX_SAVED_CHARS : MAX_TOTAL_CHARS,
+                    Duration.ofSeconds(configTimeoutSeconds()), WebScrapeSettings.seedFromSitemap(), null);
+        }
+
+        CrawlState(ScrapeOutput.Request output, boolean save, int contentBudget, Duration timeBudget,
+                   boolean seedFromSitemap, @Nullable CrawlListener listener) {
             this.output = output;
             this.save = save;
-            this.contentBudget = save ? MAX_SAVED_CHARS : MAX_TOTAL_CHARS;
+            this.contentBudget = contentBudget;
+            this.timeBudget = timeBudget;
+            this.seedFromSitemap = seedFromSitemap;
+            this.listener = listener;
+        }
+
+        /** True once no further fetch should start: the job was stopped, or the time is up. */
+        boolean stopRequested() {
+            return (listener != null && listener.stopRequested()) || System.nanoTime() > deadline;
+        }
+
+        /** Why {@link #stopRequested} became true. */
+        String stopReason() {
+            return listener != null && listener.stopRequested() ? CANCELLED : timeBudgetReached(timeBudget);
         }
     }
 
     private void crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
                        boolean respectRobots, String language, CrawlState state) {
-        state.deadline = System.nanoTime()
-                + Duration.ofSeconds(configTimeoutSeconds()).toNanos();
+        state.deadline = System.nanoTime() + state.timeBudget.toNanos();
         state.seen.add(canonical(seed));
         var level = List.of(seed);
         int depth = 0;
+        noteDiscovered(state, level.size());
 
         try (var pool = Executors.newFixedThreadPool(configConcurrency())) {
             while (!level.isEmpty()) {
@@ -388,7 +489,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 if (admitted.isEmpty()) {
                     break;
                 }
-                var fetched = fetchLevel(pool, admitted, respectRobots, language, state);
+                var fetched = fetchLevel(pool, admitted, respectRobots, language, depth, state);
                 if (state.stoppedBecause != null || exhausted(state)
                         || depth >= maxDepth) {
                     break;
@@ -402,6 +503,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 if (depth == 0) {
                     level = withSitemapSeeds(level, seed, sameHostOnly, respectRobots, state);
                 }
+                noteDiscovered(state, level.size());
                 depth++;
             }
         }
@@ -464,7 +566,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      */
     private List<WebExtraction.FetchResult> fetchLevel(ExecutorService pool, List<URI> admitted,
                                                        boolean respectRobots, String language,
-                                                       CrawlState state) {
+                                                       int depth, CrawlState state) {
         var futures = admitted.stream()
                 .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots, language, state)))
                 .toList();
@@ -472,7 +574,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         for (int i = 0; i < futures.size(); i++) {
             var uri = admitted.get(i);
             try {
-                recordOutcome(futures.get(i).get(), uri, state, fetched);
+                var outcome = futures.get(i).get();
+                if (outcome == null) {
+                    // Never started: the time ran out or the job was stopped while it queued.
+                    state.unvisited++;
+                    if (state.stoppedBecause == null) state.stoppedBecause = state.stopReason();
+                    continue;
+                }
+                recordOutcome(outcome, uri, depth, state, fetched);
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 state.stoppedBecause = INTERRUPTED;
@@ -482,6 +591,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                         "[Not retrieved \u2014 %s]".formatted(reason(e)), ScrapeRung.PLAIN,
                         state.output.json() ? ScrapeOutput.failedRecord(uri.toString(), ScrapeRung.PLAIN, reason(e))
                                 : null));
+                notifyPage(state, uri.toString(), depth, ScrapeRung.PLAIN, ScrapeReason.ERROR, null);
             }
         }
         return fetched;
@@ -490,7 +600,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     /** Name the reason and the rung that would address it rather than reporting a bare
      *  failure. An agent reading "TURNSTILE" knows not to retry; "[Could not fetch]"
      *  invites a retry loop. */
-    private static void recordOutcome(Outcome outcome, URI uri, CrawlState state,
+    private static void recordOutcome(Outcome outcome, URI uri, int depth, CrawlState state,
                                       List<WebExtraction.FetchResult> fetched) {
         if (!outcome.usable()) {
             var why = "%s%s%s".formatted(outcome.reason(),
@@ -500,6 +610,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     outcome.servedBy(),
                     state.output.json() ? ScrapeOutput.failedRecord(uri.toString(), outcome.servedBy(), why)
                             : null));
+            notifyPage(state, uri.toString(), depth, outcome.servedBy(), outcome.reason(), null);
             return;
         }
         var page = outcome.resolvedFetched();
@@ -508,22 +619,44 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             // Built now, while the page's HTML is in hand, so a crawl never holds every body at once.
             var record = ScrapeOutput.pageRecord(state.output, uri.toString(), page, text,
                     outcome.servedBy(), false);
-            state.pages.add(new Page(page.finalUrl(), null, outcome.servedBy(), record));
+            var json = GsonHolder.GSON.toJson(record);
+            // A job's pages go to disk as they land, so it keeps none of them in memory.
+            state.pages.add(new Page(page.finalUrl(), null, outcome.servedBy(),
+                    state.listener == null ? record : null));
             // With extract this counts the fields rather than the page, which is what lets an
             // extraction crawl cover far more pages than a content crawl.
-            state.totalChars += GsonHolder.GSON.toJson(record).length();
+            state.totalChars += json.length();
+            notifyPage(state, page.finalUrl(), depth, outcome.servedBy(), ScrapeReason.OK, json);
         } else {
             var shown = state.output.format() == ScrapeOutput.Format.TEXT ? WebExtraction.toPlain(page, text) : text;
-            state.pages.add(new Page(page.finalUrl(), shown, outcome.servedBy(), null));
+            state.pages.add(new Page(page.finalUrl(), state.listener == null ? shown : null,
+                    outcome.servedBy(), null));
             state.totalChars += shown.length();
+            notifyPage(state, page.finalUrl(), depth, outcome.servedBy(), ScrapeReason.OK, shown);
         }
         fetched.add(page);
     }
 
+    private static void notifyPage(CrawlState state, String url, int depth, ScrapeRung servedBy,
+                                   ScrapeReason reason, @Nullable String content) {
+        if (state.listener != null) {
+            state.listener.page(new CrawlListener.Page(url, depth, servedBy, reason, content));
+        }
+    }
+
+    private static void noteDiscovered(CrawlState state, int queued) {
+        state.discovered += queued;
+        if (state.listener != null) state.listener.discovered(state.discovered);
+    }
+
     /** True when the time or content budget is spent; records which one. */
     private boolean exhausted(CrawlState state) {
+        if (state.listener != null && state.listener.stopRequested()) {
+            state.stoppedBecause = CANCELLED;
+            return true;
+        }
         if (System.nanoTime() > state.deadline) {
-            state.stoppedBecause = "time budget (%ds) reached".formatted(configTimeoutSeconds());
+            state.stoppedBecause = timeBudgetReached(state.timeBudget);
             return true;
         }
         if (state.totalChars >= state.contentBudget) {
@@ -677,7 +810,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      */
     private List<URI> withSitemapSeeds(List<URI> harvested, URI seed, boolean sameHostOnly,
                                        boolean respectRobots, CrawlState state) {
-        if (!respectRobots || !seedFromSitemapDefault()) return harvested;
+        if (!respectRobots || !state.seedFromSitemap) return harvested;
         var seeds = SitemapSeeder.seedsFor(seed, client(), IDENTITY,
                 uri -> (!sameHostOnly || sameHost(uri, seed))
                         && !underSuppressedLocale(uri, state)
@@ -718,7 +851,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
     }
 
-    private Outcome fetchOne(URI uri, boolean respectRobots, String language, CrawlState state) {
+    /** Null when the page was never fetched because the crawl had to stop first. */
+    private @Nullable Outcome fetchOne(URI uri, boolean respectRobots, String language, CrawlState state) {
+        if (state.stopRequested()) return null;
         try {
             RobotsCache.awaitSlot(uri, respectRobots
                     ? RobotsCache.delayMillis(uri, client(), IDENTITY)
@@ -727,6 +862,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             Thread.currentThread().interrupt();
             return classified(uri, null, ScrapeObservation.failed(uri.toString(), INTERRUPTED));
         }
+        // A crawl-delay can hold a page for seconds, so ask again once its slot comes up.
+        if (state.stopRequested()) return null;
         Outcome plain;
         try {
             var fetched = WebExtraction.fetch(uri.toString(), client(),
@@ -766,6 +903,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             state.noteOutOfTime();
             return plain;
         }
+        if (state.listener != null && state.listener.stopRequested()) return plain;
         if (!state.claimEscalation()) return plain;
         // An escalation is another request to a host that just refused us, so it waits
         // its turn like any other. Without this a blocked page fired rung 1, rung 2 and
@@ -924,8 +1062,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                         .formatted(state.escalationsSuppressed, maxEscalations()));
             }
             if (state.escalationsOutOfTime > 0) {
-                sb.append("; %d more were skipped because the time budget (%ds) was spent"
-                        .formatted(state.escalationsOutOfTime, configTimeoutSeconds()));
+                sb.append("; %d more were skipped because the time budget (%s) was spent"
+                        .formatted(state.escalationsOutOfTime, describe(state.timeBudget)));
             }
             sb.append(".\n");
         }
@@ -937,21 +1075,19 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return sb.toString();
     }
 
+    /** How a page's section opens in a crawl written as one document, here and in a background job's combined file. */
+    public static String sectionHeading(ScrapeOutput.Format format, String url, ScrapeRung servedBy) {
+        boolean via = servedBy != ScrapeRung.PLAIN;
+        return format == ScrapeOutput.Format.TEXT
+                ? "\n\n=== " + url + (via ? " (via " + servedBy + ")" : "") + " ==="
+                : "\n\n---\n\n## " + url + (via ? " _(via " + servedBy + ")_" : "");
+    }
+
     private static String pagesDocument(String summary, CrawlState state, int limit) {
         var sb = new StringBuilder(summary);
-        boolean plain = state.output.format() == ScrapeOutput.Format.TEXT;
         for (var p : state.pages) {
-            if (plain) {
-                sb.append("\n\n=== ").append(p.url());
-                if (p.servedBy() != ScrapeRung.PLAIN) sb.append(" (via ").append(p.servedBy()).append(")");
-                sb.append(" ===");
-            } else {
-                sb.append("\n\n---\n\n## ").append(p.url());
-                if (p.servedBy() != ScrapeRung.PLAIN) {
-                    sb.append(" _(via ").append(p.servedBy()).append(")_");
-                }
-            }
-            sb.append("\n\n").append(Objects.requireNonNullElse(p.text(), ""));
+            sb.append(sectionHeading(state.output.format(), p.url(), p.servedBy()))
+                    .append("\n\n").append(Objects.requireNonNullElse(p.text(), ""));
         }
         if (sb.length() > limit) {
             return sb.substring(0, limit)
@@ -1004,10 +1140,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return ConfigService.getInt(WebScrapeSettings.MAX_PAGES, DEFAULT_MAX_PAGES);
     }
 
-    private static int configMaxDepth() {
-        return ConfigService.getInt(WebScrapeSettings.MAX_DEPTH, DEFAULT_MAX_DEPTH);
-    }
-
     /** Runtime config, matching web_scrape.concurrency and .respect-robots. JCLAW-1099
      *  described this as operator-tunable but read it from application.conf, which needs
      *  a restart to change — not tunable in the sense the ticket meant. */
@@ -1015,33 +1147,16 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return ConfigService.getInt(WebScrapeSettings.MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
     }
 
+    private static String timeBudgetReached(Duration budget) {
+        return "time budget (%s) reached".formatted(describe(budget));
+    }
+
+    private static String describe(Duration budget) {
+        long seconds = budget.toSeconds();
+        return seconds >= 120 && seconds % 60 == 0 ? "%d minutes".formatted(seconds / 60) : "%ds".formatted(seconds);
+    }
+
     private static int configTimeoutSeconds() {
         return ConfigService.getInt(WebScrapeSettings.TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
-    }
-
-    private static String languageDefault() {
-        var configured = ConfigService.get(WebScrapeSettings.LANGUAGE, DEFAULT_LANGUAGE).strip();
-        return configured.isEmpty() ? DEFAULT_LANGUAGE : configured;
-    }
-
-    private static boolean seedFromSitemapDefault() {
-        return !"false".equalsIgnoreCase(
-                ConfigService.get(WebScrapeSettings.SEED_FROM_SITEMAP, "true").strip());
-    }
-
-    /**
-     * Default for the {@code respectRobots} argument when a call omits it.
-     *
-     * <p>Default-on. Ignoring a site's robots.txt is a deliberate choice about someone
-     * else's server, so it is opt-out per call rather than something that happens by
-     * omission — and an operator who wants it off everywhere sets this key once.
-     *
-     * <p>Note what the override does <em>not</em> change: per-host pacing stays on
-     * either way. "Ignore this site's directives" and "hammer this site" are different
-     * requests, and only the first is available.
-     */
-    private static boolean respectRobotsDefault() {
-        return !"false".equalsIgnoreCase(
-                ConfigService.get(WebScrapeSettings.RESPECT_ROBOTS, "true").strip());
     }
 }

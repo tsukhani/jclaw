@@ -99,6 +99,33 @@ const GROUPS: { label: string, fields: SettingField[] }[] = [
     ],
   },
   {
+    label: 'Background jobs',
+    fields: [
+      {
+        key: 'web_scrape.job.max-pages',
+        kind: 'number',
+        fallback: '500',
+        min: 1,
+        tip: 'Most pages an agent\'s background scrape may read; a larger request is capped here, and it is the default when the agent names none. A scrape you start yourself is not capped. Minimum 1.',
+      },
+      {
+        key: 'web_scrape.job.max-minutes',
+        kind: 'number',
+        fallback: '60',
+        min: 1,
+        tip: 'Longest an agent\'s background scrape may run, in minutes; a longer request is capped here. When it runs out the job stops and keeps the pages it has read. Minimum 1.',
+      },
+      {
+        key: 'web_scrape.job.max-concurrent',
+        kind: 'number',
+        fallback: '2',
+        min: 1,
+        max: 8,
+        tip: 'Background scrapes running at once; the rest wait their turn. Each one fetches with its own set of workers, so this multiplies the concurrency above. 1 to 8.',
+      },
+    ],
+  },
+  {
     label: 'Proxy',
     fields: [
       {

@@ -1,6 +1,7 @@
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.ScrapeJob;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.Tx;
 import tools.WebScrapeTool;
 import tools.scrape.WebScrapeSettings;
 
@@ -27,6 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -355,6 +359,86 @@ class WebScrapeToolTest extends UnitTest {
             AgentService.delete(agent);
             deleteTree(AgentService.workspacePath(name));
         }
+    }
+
+    // Background jobs (JCLAW-1272)
+
+    @Test
+    void backgroundAnswersWithinTheCallAndTheCrawlRunsAfterIt() throws Exception {
+        routes.put("https://site.test/", page("Home", "/a"));
+        routes.put("https://site.test/a", page("A"));
+        var name = "scrapebg" + (System.nanoTime() % 1_000_000);
+        var agent = onFreshThread(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
+        try {
+            // Off the test's own transaction, as a tool call runs: the job starts once its row commits.
+            var result = onFreshThread(() -> new WebScrapeTool().executeRich(
+                    "{\"url\": \"https://site.test/\", \"maxDepth\": 1, \"background\": true}", agent));
+
+            assertTrue(result.text().startsWith("Started background scrape job"), result.text());
+            var id = JsonParser.parseString(Objects.requireNonNull(result.structuredJson())).getAsJsonObject()
+                    .getAsJsonObject("scrapeJob").get("id").getAsLong();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+            ScrapeJob.State state;
+            do {
+                Thread.sleep(25);
+                state = onFreshThread(() -> ((ScrapeJob) ScrapeJob.findById(id)).state);
+            } while (!state.terminal() && System.nanoTime() < deadline);
+
+            assertEquals(ScrapeJob.State.SUCCEEDED, state);
+            assertEquals(2, (int) onFreshThread(() -> ((ScrapeJob) ScrapeJob.findById(id)).pagesFetched));
+            var folder = AgentService.workspacePath(name).resolve("scrapes/" + id);
+            assertTrue(Files.readString(folder.resolve("0002.md")).contains("# A"));
+            assertTrue(Files.readString(folder.resolve("combined.md")).contains("## https://site.test/a"));
+        } finally {
+            onFreshThread(() -> {
+                AgentService.delete(Agent.findById(agent.id));
+                return null;
+            });
+            deleteTree(AgentService.workspacePath(name));
+        }
+    }
+
+    @Test
+    void backgroundRefusesABadArgumentAsAnInlineCallDoesAndStartsNothing() {
+        var name = "scrapebgbad" + (System.nanoTime() % 1_000_000);
+        var agent = onFreshThread(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
+        try {
+            var badSelector = onFreshThread(() -> new WebScrapeTool().executeRich(
+                    "{\"url\": \"https://site.test/\", \"background\": true, \"extract\": {\"x\": \"div[[\"}}", agent));
+            var badMinutes = onFreshThread(() -> new WebScrapeTool().executeRich(
+                    "{\"url\": \"https://site.test/\", \"background\": true, \"maxMinutes\": \"soon\"}", agent));
+
+            assertEquals("web_bad_argument", errorCode(badSelector));
+            assertEquals("web_bad_argument", errorCode(badMinutes));
+            assertTrue(badMinutes.text().contains("maxMinutes"), badMinutes.text());
+            assertEquals(0L, (long) onFreshThread(() -> ScrapeJob.count("agent.id = ?1", agent.id)));
+            assertTrue(routes.pageHits().isEmpty(), "nothing may be fetched for a refused call");
+        } finally {
+            onFreshThread(() -> {
+                AgentService.delete(Agent.findById(agent.id));
+                return null;
+            });
+        }
+    }
+
+    private static <T> T onFreshThread(Supplier<T> block) {
+        var ref = new AtomicReference<T>();
+        var err = new AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        if (err.get() != null) throw new IllegalStateException(err.get());
+        return ref.get();
     }
 
     private static void deleteTree(Path dir) throws IOException {

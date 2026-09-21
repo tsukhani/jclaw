@@ -411,6 +411,7 @@ class JClawApiToolTest extends UnitTest {
             DELETE /api/conversations/{id}/thinking-override
             DELETE /api/mcp-servers/{id}
             DELETE /api/prompts/{id}
+            DELETE /api/scrape-jobs/{id}
             DELETE /api/subagent-runs
             DELETE /api/subagent-runs/{id}
             DELETE /api/tasks/{id}
@@ -469,6 +470,11 @@ class JClawApiToolTest extends UnitTest {
             GET /api/providers/{name}/reachable
             GET /api/providers/{name}/video-models
             GET /api/router/status
+            GET /api/scrape-jobs
+            GET /api/scrape-jobs/{id}
+            GET /api/scrape-jobs/{id}/download
+            GET /api/scrape-jobs/{id}/pages
+            GET /api/scrape-jobs/{id}/pages/{pageId}/content
             GET /api/skills
             GET /api/skills/by-agent
             GET /api/skills/catalog/search
@@ -516,6 +522,7 @@ class JClawApiToolTest extends UnitTest {
             POST /api/providers/{name}/discover-models
             POST /api/providers/{name}/embedding-probe
             POST /api/providers/{name}/models
+            POST /api/scrape-jobs/{id}/cancel
             POST /api/subagent-runs/{id}/kill
             POST /api/task-runs/{runId}/cancel
             POST /api/tasks

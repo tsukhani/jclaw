@@ -363,6 +363,21 @@ public class AgentRunner {
         return runAfterAcquire(agent, conversation, "", null, true);
     }
 
+    /**
+     * {@link #runYieldResume}, then send the reply out on the conversation's channel (JCLAW-1272).
+     * Web chat reads the persisted reply instead; a conversation busy with another turn queues this
+     * one, and the queue's drain sends the reply when it runs.
+     */
+    public static void resumeAndDeliver(Agent agent, Conversation conversation) {
+        deliverResumed(agent, conversation, runYieldResume(agent, conversation));
+    }
+
+    /** The delivery half of {@link #resumeAndDeliver}, apart so a test can hand it a reply without a model call. */
+    static void deliverResumed(Agent agent, Conversation conversation, RunResult result) {
+        if (QUEUED_MESSAGE_RESPONSE.equals(result.response())) return;
+        dispatchToChannel(agent, conversation.channelType, conversation.peerId, result.response());
+    }
+
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
                                              @Nullable List<AttachmentService.Input> attachments) {
         return runAfterAcquire(agent, conversation, userMessage, attachments, false);

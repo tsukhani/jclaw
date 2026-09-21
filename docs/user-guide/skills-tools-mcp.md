@@ -114,6 +114,8 @@ If `discover` returns nothing, that is often the network rather than the printer
 
 Asking for `extract` or `metadata` always makes the result JSON. To route this traffic through a proxy, see [Settings → Web Scraping](/guide#settings-web-scraping).
 
+**Background scrapes.** A crawl inside a chat turn stops after 25 pages or 60 seconds by default. For more than that, an agent passes `background: true` to `web_scrape`, and the crawl becomes a job that keeps running after the turn ends. The agent gets the job's number straight away. Each page is written to its workspace as it is read, under `scrapes/JOB/`, numbered in the order the crawl read them. When the job ends, a file named `combined` in the same folder holds every page, as Markdown, text or JSON Lines. The chat that started the job then gets a message saying how it went, and the agent replies to it, so a finished job costs one more model call. `maxMinutes` sets how long the job may run. An agent's job is capped at 500 pages and 60 minutes unless you change the limits in [Settings → Web Scraping](/guide#settings-web-scraping). At most two jobs run at once, and the rest wait their turn. A job that was running when JClaw stopped is marked interrupted and keeps the pages it had read.
+
 ## MCP Servers
 
 The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps like JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. An MCP server's tools are managed on the [MCP Servers](/mcp-servers) page — not the Tools page, which lists only JClaw's first-party tools.

@@ -541,7 +541,7 @@ describe('Settings page — Web Scraping section', () => {
     const component = await mountSettingsSection('web-scraping')
 
     expect(component.html()).toMatch(/<h2[^>]*>\s*Web Scraping\s*</)
-    expect(component.findAll('[data-testid^="web-scrape-row-"]')).toHaveLength(14)
+    expect(component.findAll('[data-testid^="web-scrape-row-"]')).toHaveLength(17)
     expect(component.find('[data-testid="web-scrape-row-max-pages"]').text()).toContain('40')
     expect(component.find('[data-testid="web-scrape-row-max-depth"]').text()).toContain('2')
     expect(component.find('[data-testid="web-scrape-row-timeout-seconds"]').text()).toContain('60')

@@ -66,6 +66,16 @@ GET     /api/videogen/models                     ApiVideogenController.models
 GET     /api/videogen/capability                 ApiVideogenController.capability
 POST    /api/videogen/capability/probe           ApiVideogenController.probeCapability
 
+# Background scrape jobs (JCLAW-1272)
+GET     /api/scrape-jobs                         ApiScrapeJobsController.list
+POST    /api/scrape-jobs                         ApiScrapeJobsController.start
+GET     /api/scrape-jobs/{id}                    ApiScrapeJobsController.show
+GET     /api/scrape-jobs/{id}/pages              ApiScrapeJobsController.pages
+GET     /api/scrape-jobs/{id}/pages/{pageId}/content  ApiScrapeJobsController.pageContent
+GET     /api/scrape-jobs/{id}/download           ApiScrapeJobsController.download
+POST    /api/scrape-jobs/{id}/cancel             ApiScrapeJobsController.cancel
+DELETE  /api/scrape-jobs/{id}                    ApiScrapeJobsController.delete
+
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
 GET     /api/tasks/stats                        ApiTaskStatsController.stats

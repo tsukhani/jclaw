@@ -519,7 +519,7 @@ The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](
 
 ## Web Scraping
 
-Every setting the `web_scrape` tool reads, in two groups. Changes apply live; no restart needed.
+Every setting the `web_scrape` tool reads, in four groups. Changes apply live; no restart needed.
 
 **Crawl**
 
@@ -542,6 +542,16 @@ Every setting the `web_scrape` tool reads, in two groups. Changes apply live; no
 | `web_scrape.seed-from-sitemap`     | on      | Add URLs from the sitemaps a site's `robots.txt` declares. Only applies while `robots.txt` is respected. |
 | `web_scrape.max-sitemap-urls`      | 50      | Most URLs one crawl takes from sitemaps. `0` seeds nothing.                           |
 | `web_scrape.max-sitemap-documents` | 3       | Most sitemap files one crawl fetches, counting nested sitemap indexes. `0` fetches none. |
+
+**Background jobs**
+
+| Key                              | Default | Meaning                                                                            |
+|----------------------------------|---------|------------------------------------------------------------------------------------|
+| `web_scrape.job.max-pages`       | 500     | Most pages an agent's background scrape may read. Minimum 1.                        |
+| `web_scrape.job.max-minutes`     | 60      | Longest an agent's background scrape may run, in minutes. When it runs out, the job stops and keeps the pages it has read. Minimum 1. |
+| `web_scrape.job.max-concurrent`  | 2       | Background scrapes running at once, 1–8. The rest wait their turn and start in the order they were queued. |
+
+A background scrape keeps running after the chat turn that started it. Like `max-pages` above, the two limits are the default when an agent leaves the value out and the ceiling when it asks for more; `max-depth` applies to background scrapes too. They bound what an agent may ask for, not a scrape you start yourself. `timeout-seconds` does not apply to background scrapes, which are bounded in minutes instead. Each running job fetches with its own set of workers, so `max-concurrent` multiplies `concurrency`.
 
 **Proxy**
 

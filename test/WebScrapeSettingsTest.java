@@ -45,6 +45,20 @@ class WebScrapeSettingsTest extends UnitTest {
     }
 
     @Test
+    void theBackgroundJobLimitsAreWholeNumbersOfAtLeastOne() {
+        for (var key : List.of(WebScrapeSettings.JOB_MAX_PAGES, WebScrapeSettings.JOB_MAX_MINUTES)) {
+            assertNotNull(reject(key, "0"), key);
+            assertNotNull(reject(key, "an hour"), key);
+            assertNull(reject(key, "1"), key);
+            assertNull(reject(key, "5000"), key);
+        }
+        assertNotNull(reject(WebScrapeSettings.JOB_MAX_CONCURRENT, "0"));
+        assertNull(reject(WebScrapeSettings.JOB_MAX_CONCURRENT, "1"));
+        assertNull(reject(WebScrapeSettings.JOB_MAX_CONCURRENT, "8"));
+        assertNotNull(reject(WebScrapeSettings.JOB_MAX_CONCURRENT, "9"), "each running job has its own worker pool");
+    }
+
+    @Test
     void togglesTakeOnlyTrueOrFalse() {
         for (var key : List.of(WebScrapeSettings.RESPECT_ROBOTS, WebScrapeSettings.SEED_FROM_SITEMAP)) {
             assertNull(reject(key, "true"), key);

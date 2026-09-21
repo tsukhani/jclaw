@@ -41,6 +41,11 @@ public final class PageData {
             }
             return new Field(spec.strip(), null);
         }
+
+        /** The spec {@link #parse} reads back to this field. */
+        public String spec() {
+            return attribute == null ? selector : selector + "@" + attribute;
+        }
     }
 
     /** What an extraction produced, and whether a bound cut it short. */
