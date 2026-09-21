@@ -63,7 +63,8 @@ With `$ARGUMENTS` = `caps`, stop here. Otherwise continue to Phase 1; a stale ca
 **Phase 2 — Pre-flight**
 
 5. Confirm the primary tree is on `main` with a **clean working tree** (`/usr/bin/git status -sb`). If dirty, stop and tell the user — don't merge onto uncommitted work.
-6. `play autotest` needs a clean `:9000`. If jclaw is live there (`lsof -nP -iTCP:9000 -sTCP:LISTEN`), **confirm with the user before stopping it** (the backend may be serving other work) — then `./jclaw.sh stop`, and offer to restart at the end. Never stop it autonomously.
+6. **A live instance does not need stopping — do not ask to.** `play autotest` resolves its port from `certs/.env`'s `PLAY_TEST_PORT` and binds that, not `:9000`. Measured 2026-09-21: an instance live on `:9000` survived a full suite run untouched while the test server held `:9300` for the duration. The earlier wording here claimed the suite needs a clean `:9000`; it does not, and acting on that claim costs a stop, a restart and a decision for nothing.
+   What the suite *does* do is truncate `logs/system.out` and redirect the test server's output into it, so a live instance loses its own log every run — and with it the evidence if it exits for an unrelated reason. `./jclaw.sh test` snapshots it to `logs/system.out.pre-test` first; bare `play autotest` does not. If you need to stop the instance for some *other* reason, confirm with the user first — never stop it autonomously (AGENTS.md).
 
 **Phase 3 — Merge & validate (backend first, then frontend)**
 
