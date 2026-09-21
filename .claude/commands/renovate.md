@@ -1,9 +1,9 @@
 ---
 name: renovate
-description: Discover origin/renovate/* branches, merge each into local main one at a time, and validate by ecosystem — play autotest for backend bumps, pnpm test/lint/typecheck/stylelint for frontend bumps (with a full lockfile regen). Stops at the local merges; hand off to /deploy to push.
+description: Audit renovate.json5's version caps for lift conditions that have expired, then discover origin/renovate/* branches, merge each into local main one at a time, and validate by ecosystem — play autotest for backend bumps, pnpm test/lint/typecheck/stylelint for frontend bumps (with a full lockfile regen). Stops at the local merges; hand off to /deploy to push.
 category: Maintenance
 tags: [renovate, dependencies, merge, git, frontend, backend, tests]
-argument-hint: "[empty | frontend | backend | <branch-substring>]"
+argument-hint: "[empty | caps | frontend | backend | <branch-substring>]"
 ---
 
 **Renovate Merge Workflow**
@@ -16,9 +16,36 @@ This works on `main` directly — the user wants the bumps *merged with main*, s
 - *(empty)* → every `renovate/*` branch on origin that isn't already merged.
 - `frontend` → only branches that touch `frontend/**`.
 - `backend` → only branches that touch gradle/Java build files.
+- `caps` → run **Phase 0 only**: audit the blockers in `renovate.json5` and stop. No branches are merged.
 - a substring (e.g. `okhttp`, `nuxt`) → only `renovate/*` branches whose name matches.
 
 Reject anything else with a clear message; do not guess. If no matching renovate branches exist, say so and stop — there's nothing to do.
+
+---
+
+**Phase 0 — Audit the blockers (always, unless `$ARGUMENTS` names a substring)**
+
+A version cap suppresses the PR *entirely*, so a cap whose cause has expired is invisible: there is no branch to notice, and the config keeps describing a world that has moved on. Renovate will never tell you. This phase is the only thing that will.
+
+0a. **Enumerate every blocker in `renovate.json5`**, and sort them into the two kinds — they are not the same thing and only the first is in scope here:
+   - **Blocking:** `allowedVersions` with an upper bound (`<7`), and any `enabled: false` rule. These stop the PR being opened at all.
+   - **Not blocking:** `allowedVersions` with a *lower* bound (`>4.4.5` is a floor — it blocks nothing going forward), `automerge: false`, `minimumReleaseAge`, and group rules. These only shape *how* an update lands. List them for completeness and move on.
+
+0b. **For each blocking cap, test its lift condition against the installed tree — not against the comment.** The comment records why the cap was added, which is not the same as whether it still applies. Two rules, both learned the hard way:
+   - **Check the property, never a proxy for it.** A condition written as a version number ("lift once vue-tsc > 3.3.7") or as an expected release shape ("lift when @nuxt/test-utils ships a major") *will* drift: the first green-lights a release that still carries the breaking call, and the second never fires when the fix arrives in a patch. Restate the condition as something greppable — *is the `typescript/lib/tsc` shim still in `vue-tsc/index.js`?*, *does `peerDependencies.vitest` admit 5?* — and answer that.
+   - **Validate the check before believing a negative.** `grep -r` does **not** follow symlinks, and pnpm links every package into `node_modules/.pnpm/`, so a recursive grep over `node_modules/<scope>/` silently returns zero. Use `find <pkg> -name "*.d.ts" -exec grep -l …`, and run it once against a token you know is present. A sweeping "absent" that would imply the library deleted its own API is a broken check, not a finding. The same applies to a registry fetch: a 404 can return valid JSON, so read the status or the raw body before parsing.
+
+0c. **Report the verdict per cap, and say what lifting would cost** — this is the difference between a decision and a guess:
+   - **STILL VALID** — name the evidence (`vue-tsc 3.3.11 index.js:73 still has the shim`). No action.
+   - **STALE, and lifting is a bump** — the dependency moves and nothing else does. Cheap.
+   - **STALE, and lifting is a migration** — calling code has to change too. Name the blast radius (which files, how many call sites) before offering it.
+   Then **ask the user which stale caps to act on, and let them decline.** Never lift a cap autonomously: the cap is a decision someone made, and re-taking it is theirs. If the user says yes, remove the cap and do the upgrade **in the same commit** — a lifted cap with no bump behind it is just a hole.
+
+0d. **When a cap is lifted, delete its comment with it, along with any sibling rule that existed only to announce the unblock** (e.g. a `prBodyNotes` rule watching for the release that was supposed to be the signal). Leaving either behind is a changelog in the config; the reasoning goes in the commit message (AGENTS.md §8).
+
+0e. **If a cap's *stated reason* turns out to be wrong** — not merely expired, but never accurate — say so plainly in the report and the commit message. Both caps lifted on 2026-09-21 had mis-specified lift conditions, and that is worth more to the next reader than the bump itself.
+
+With `$ARGUMENTS` = `caps`, stop here. Otherwise continue to Phase 1; a stale cap and a pending branch are independent, and the run handles both.
 
 ---
 
@@ -84,3 +111,5 @@ Process **BACKEND** branches first, then **FRONTEND** — each ecosystem is batc
 - Validate by ecosystem: backend → `play autotest`; frontend → `pnpm test` + `lint` + `typecheck` + `stylelint` (+ `pnpm install --frozen-lockfile`). A BOTH branch runs both.
 - Confirm before stopping jclaw for the backend suite; restart it afterward only if it was running.
 - A failing backend bump is undone (`reset --hard HEAD~1`) and skipped, not forced through; a failing frontend batch is reported for the user to triage.
+- **Never lift a version cap without the user choosing it.** Report the verdict and the cost; the decision is theirs. A lift and the upgrade behind it land in one commit, never separately.
+- Never trust a negative from an unvalidated check — a sweeping "absent" across a dependency's whole API is a broken grep (symlinks, `.pnpm/`) far more often than it is a real finding.
