@@ -11,6 +11,9 @@
 // Hence two tracking modes: read the status file while we can still reach it,
 // then fall back to the down-then-up watcher once the swap actually begins.
 
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
 interface UpgradePreflight {
   available: boolean
   unavailableReason: string | null
@@ -22,6 +25,8 @@ interface UpgradePreflight {
   activeSubagentRuns: number
   /** Null on a packaged install, which ships without a repository to report. */
   commit: string | null
+  /** Markdown notes of latestVersion. */
+  releaseNotes: string | null
 }
 
 interface UpgradeStatus {
@@ -232,6 +237,17 @@ const previousOutcome = computed(() => {
   return null
 })
 
+/** Notes of the newest release, shown when it is the one installed or the one on offer. */
+const releaseNotesHtml = computed(() => {
+  const p = preflight.value
+  if (!p?.releaseNotes || !p.latestVersion) return ''
+  // A checkout running ahead of the newest published release would otherwise
+  // be shown an older release's notes under its own version.
+  if (!p.upgradeAvailable && p.latestVersion !== p.currentVersion) return ''
+  // Release notes hard-wrap their prose, so GFM line breaks would split every sentence.
+  return DOMPurify.sanitize(marked.parse(p.releaseNotes, { gfm: true, breaks: false, async: false }))
+})
+
 const summaryLine = computed(() => {
   const p = preflight.value
   if (!p) return 'Checking for updates…'
@@ -317,6 +333,33 @@ const summaryLine = computed(() => {
           :class="previousOutcome.ok ? 'text-fg-muted' : 'text-red-600 dark:text-red-400'"
         >{{ previousOutcome.text }}</span>
       </div>
+
+      <details
+        v-if="releaseNotesHtml"
+        class="border-t border-border"
+        data-testid="release-notes"
+      >
+        <summary class="px-4 py-2.5 text-xs font-medium text-fg-strong cursor-pointer">
+          What's new in {{ preflight?.latestVersion }}
+        </summary>
+        <!-- eslint-disable vue/no-v-html -- releaseNotesHtml runs through DOMPurify.sanitize (see computed above). -->
+        <div
+          class="release-notes px-4 pb-4 text-xs text-fg-primary"
+          v-html="releaseNotesHtml"
+        />
+        <!-- eslint-enable vue/no-v-html -->
+      </details>
     </div>
   </div>
 </template>
+
+<style scoped>
+.release-notes { line-height: 1.6; overflow-wrap: anywhere; }
+.release-notes :deep(h3) { margin: 1em 0 0.4em; font-weight: 600; color: var(--color-fg-strong); }
+.release-notes :deep(h3:first-child) { margin-top: 0; }
+.release-notes :deep(p) { margin: 0.5em 0; }
+.release-notes :deep(ul) { padding-left: 1.5em; margin: 0.4em 0; list-style-type: disc; }
+.release-notes :deep(li) { margin: 0.3em 0; }
+.release-notes :deep(strong) { font-weight: 600; color: var(--color-fg-strong); }
+.release-notes :deep(code) { background: var(--color-muted); padding: 0.1em 0.3em; border-radius: 0.25rem; }
+</style>

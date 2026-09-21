@@ -116,12 +116,14 @@ public class ApiSystemController extends Controller {
      * @param activeSubagentRuns subagent runs live in THIS JVM, likewise
      * @param commit             short commit id of the checkout, {@code -dirty} when
      *                           the tree is modified, or null on a packaged install
+     * @param releaseNotes       Markdown notes of {@code latestVersion}, or null
+     *                           when it has none or GitHub could not be reached
      */
     public record UpgradePreflight(boolean available, @Nullable String unavailableReason,
                                    String currentVersion, @Nullable String latestVersion,
                                    boolean upgradeAvailable, String installKind,
                                    long runningTasks, int activeSubagentRuns,
-                                   @Nullable String commit) {}
+                                   @Nullable String commit, @Nullable String releaseNotes) {}
 
     /**
      * GET /api/system/upgrade — what an upgrade would install and what it would
@@ -137,14 +139,16 @@ public class ApiSystemController extends Controller {
         // Resolved even when this install cannot upgrade itself: without it the panel
         // can only recite a git-pull/docker instruction, including on a checkout that
         // is already current. The hour-long cache bounds this to one GitHub call/hour.
-        var latest = UpgradeService.latestVersion(Boolean.TRUE.equals(refresh));
+        var release = UpgradeService.latestRelease(Boolean.TRUE.equals(refresh));
+        var latest = release == null ? null : release.version();
 
         renderJSON(GSON.toJson(new UpgradePreflight(
                 unavailable == null, unavailable, current, latest,
                 UpgradeService.isNewer(latest, current), UpgradeService.installKind(),
                 TaskRun.count("status = ?1", TaskRun.Status.RUNNING),
                 SubagentRegistry.activeRunIds().size(),
-                GitCheckout.describe())));
+                GitCheckout.describe(),
+                release == null ? null : release.notes())));
     }
 
     /**

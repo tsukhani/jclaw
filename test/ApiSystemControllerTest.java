@@ -33,6 +33,7 @@ class ApiSystemControllerTest extends FunctionalTest {
         RestartService.spawnerForTest = null;
         UpgradeService.spawnerForTest = null;
         UpgradeService.latestVersionForTest = null;
+        UpgradeService.latestNotesForTest = null;
     }
 
     private void login() {
@@ -124,6 +125,16 @@ class ApiSystemControllerTest extends FunctionalTest {
         var body = getContent(GET("/api/system/upgrade"));
         assertTrue(body.contains("\"latestVersion\":\"99.0.0\""), body);
         assertTrue(body.contains("\"upgradeAvailable\":true"), body);
+    }
+
+    @Test
+    void upgradePreflightCarriesTheNewestReleasesNotes() {
+        login();
+        UpgradeService.latestVersionForTest = "99.0.0";
+        UpgradeService.latestNotesForTest = "### Fixes\n\n- **A fix.**";
+
+        var body = getContent(GET("/api/system/upgrade"));
+        assertTrue(body.contains("\"releaseNotes\":\"### Fixes\\n\\n- **A fix.**\""), body);
     }
 
     @Test

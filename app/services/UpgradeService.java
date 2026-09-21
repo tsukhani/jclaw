@@ -52,6 +52,7 @@ public final class UpgradeService {
     private static final String REPO_PROPERTY = "jclaw.upgrade.repo";
     private static final String API_URL_PROPERTY = "jclaw.upgrade.api.url";
     private static final String KEY_TAG_NAME = "tag_name";
+    private static final String KEY_BODY = "body";
     private static final int TIMEOUT_SECONDS = 20;
 
     /**
@@ -74,12 +75,23 @@ public final class UpgradeService {
     /** Test seam: when non-null, {@link #requestUpgrade(String)} hands the plan here instead of spawning it. */
     public static @Nullable Consumer<Plan> spawnerForTest;
 
-    /** Test seam: when non-null, {@link #latestVersion(boolean)} returns this instead of calling GitHub. */
+    /** Test seam: when non-null, {@link #latestRelease(boolean)} reports this version instead of calling GitHub. */
     public static @Nullable String latestVersionForTest;
 
-    private record CachedTag(String tag, Instant at) {}
+    /** Test seam: the notes reported alongside {@link #latestVersionForTest}. */
+    public static @Nullable String latestNotesForTest;
 
-    private static volatile @Nullable CachedTag cachedTag;
+    /**
+     * The newest published release.
+     *
+     * @param version the release tag without its leading {@code v}
+     * @param notes   the release's Markdown notes, or null when it has none
+     */
+    public record LatestRelease(String version, @Nullable String notes) {}
+
+    private record CachedRelease(LatestRelease release, Instant at) {}
+
+    private static volatile @Nullable CachedRelease cachedRelease;
 
     /**
      * @param command        argv handed to {@link ProcessBuilder}
@@ -182,25 +194,36 @@ public final class UpgradeService {
      * @param refresh bypass the cache for an operator-initiated re-check
      */
     public static @Nullable String latestVersion(boolean refresh) {
-        if (latestVersionForTest != null) return latestVersionForTest;
+        var release = latestRelease(refresh);
+        return release == null ? null : release.version();
+    }
 
-        var cached = cachedTag;
+    /**
+     * Newest published release with its notes, or null when GitHub could not be
+     * reached. Cached for {@link #CHECK_TTL}.
+     *
+     * @param refresh bypass the cache for an operator-initiated re-check
+     */
+    public static @Nullable LatestRelease latestRelease(boolean refresh) {
+        if (latestVersionForTest != null) return new LatestRelease(latestVersionForTest, latestNotesForTest);
+
+        var cached = cachedRelease;
         if (!refresh && cached != null && Duration.between(cached.at(), AppClock.now()).compareTo(CHECK_TTL) < 0) {
-            return cached.tag();
+            return cached.release();
         }
         try {
-            var tag = fetchLatestTag();
-            cachedTag = new CachedTag(tag, AppClock.now());
-            return tag;
+            var release = fetchLatestRelease();
+            cachedRelease = new CachedRelease(release, AppClock.now());
+            return release;
         } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY, "Could not check for a newer release: " + e.getMessage());
             // Serve a stale answer rather than none — an hour-old version number
             // is still more useful to the operator than an empty panel.
-            return cached != null ? cached.tag() : null;
+            return cached != null ? cached.release() : null;
         }
     }
 
-    private static String fetchLatestTag() throws IOException {
+    private static LatestRelease fetchLatestRelease() throws IOException {
         var url = base(API_URL_PROPERTY, DEFAULT_API) + "/repos/" + repo() + "/releases/latest";
         var call = HttpFactories.general().newCall(new Request.Builder().url(url).get().build());
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -208,12 +231,23 @@ public final class UpgradeService {
             if (!resp.isSuccessful()) {
                 throw new IOException("HTTP " + resp.code() + " for " + url);
             }
-            var json = JsonParser.parseString(resp.body().string()).getAsJsonObject();
-            if (!json.has(KEY_TAG_NAME) || json.get(KEY_TAG_NAME).isJsonNull()) {
-                throw new IOException("release payload has no " + KEY_TAG_NAME);
-            }
-            return stripV(json.get(KEY_TAG_NAME).getAsString());
+            return parseRelease(resp.body().string());
         }
+    }
+
+    /**
+     * Reads a GitHub release payload.
+     *
+     * @throws IOException if the payload names no tag
+     */
+    public static LatestRelease parseRelease(String payload) throws IOException {
+        var json = JsonParser.parseString(payload).getAsJsonObject();
+        if (!json.has(KEY_TAG_NAME) || json.get(KEY_TAG_NAME).isJsonNull()) {
+            throw new IOException("release payload has no " + KEY_TAG_NAME);
+        }
+        var notes = str(json, KEY_BODY);
+        return new LatestRelease(stripV(json.get(KEY_TAG_NAME).getAsString()),
+                notes == null || notes.isBlank() ? null : notes.strip());
     }
 
     /** True when {@code candidate} is a strictly newer release than {@code current}. */

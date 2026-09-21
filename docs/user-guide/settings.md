@@ -175,6 +175,8 @@ Installs the newest JClaw release over this one, without a shell. The button han
 
 The panel shows the version you're running and the newest published release. **Check again** forces a fresh lookup; otherwise the answer is cached for an hour, because GitHub allows only 60 unauthenticated API calls an hour per address and this panel is polled on every visit.
 
+**What's new in** opens the newest release's notes: those of the release on offer, or, once it is installed, of the version you're running. A checkout running ahead of the newest published release shows none, because those notes describe an older version.
+
 When JClaw is served from a git checkout, the panel also names the commit it's running, marked when the working tree has uncommitted changes. A checkout keeps the same version number across many commits, so the version alone can't tell you which build is live. A packaged install has no repository and shows nothing here.
 
 **The download happens while JClaw keeps serving.** The release (~400 MB for a bundle install) is fetched, checksum-verified and unpacked before anything is stopped, so a network failure, a bad download or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.

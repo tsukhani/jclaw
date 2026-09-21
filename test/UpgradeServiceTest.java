@@ -3,6 +3,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.UpgradeService;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -126,5 +127,35 @@ class UpgradeServiceTest extends UnitTest {
         var version = UpgradeService.currentVersion();
         assertNotNull(version);
         assertTrue(version.matches("\\d+\\.\\d+\\.\\d+"), "unexpected version shape: " + version);
+    }
+
+    @Test
+    void aReleasePayloadYieldsItsVersionAndNotes() throws IOException {
+        var release = UpgradeService.parseRelease("""
+                {"tag_name": "v0.18.83", "body": "### Fixes\\n\\n- **A fix.**\\n\\n"}
+                """);
+        assertEquals("0.18.83", release.version());
+        assertEquals("### Fixes\n\n- **A fix.**", release.notes());
+    }
+
+    @Test
+    void aReleaseWithoutNotesReportsNone() throws IOException {
+        // GitHub sends "body": null for a release published with no description.
+        assertNull(UpgradeService.parseRelease("""
+                {"tag_name": "v0.18.83", "body": null}
+                """).notes());
+        assertNull(UpgradeService.parseRelease("""
+                {"tag_name": "v0.18.83", "body": "  \\n "}
+                """).notes());
+        assertNull(UpgradeService.parseRelease("""
+                {"tag_name": "v0.18.83"}
+                """).notes());
+    }
+
+    @Test
+    void aReleasePayloadWithoutATagIsRefused() {
+        assertThrows(IOException.class, () -> UpgradeService.parseRelease("""
+                {"tag_name": null, "body": "notes"}
+                """));
     }
 }
