@@ -76,7 +76,7 @@ class ApiConversationsControllerSchemaDriftTest extends UnitTest {
     }
 
     @Test
-    void attachmentMapKeysAreSubsetOfMessageAttachmentView() throws Exception {
+    void attachmentMapKeysAreSubsetOfMessageAttachmentView() {
         var att = new MessageAttachment();
         att.uuid = "u";
         att.originalFilename = "f.png";

@@ -516,7 +516,7 @@ public final class IppClient {
     }
 
     /** Encode a packet to bytes. Exposed for tests, which assert the wire form without a printer. */
-    static byte[] encode(IppPacket packet) throws IOException {
+    static byte[] encode(IppPacket packet) {
         var out = new ByteArrayOutputStream();
         new IppOutputStream(out).write(packet);
         return out.toByteArray();
