@@ -6,7 +6,8 @@ package services.telemetry;
  * <p>The metric-side sibling of {@link GenAiAttributes}, owned by jclaw for the same reason:
  * opentelemetry-semconv-incubating deprecated these when the GenAI conventions moved to a
  * repository with no Java artifact. Names and units are the contract — a collector aggregates
- * by both — and must stay identical to the semconv values they replace.
+ * by both — and track {@code model/gen-ai/metrics.yaml} at the same upstream commit as
+ * {@link GenAiAttributes}, checked the same way.
  */
 public final class GenAiMetrics {
 

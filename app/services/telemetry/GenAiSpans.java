@@ -240,7 +240,7 @@ public final class GenAiSpans {
                     span.setAttribute(GenAiAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, (long) u.cachedTokens());
                 }
                 if (u.cacheCreationTokens() > 0) {
-                    span.setAttribute(GenAiAttributes.GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, (long) u.cacheCreationTokens());
+                    span.setAttribute(GenAiAttributes.GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS, (long) u.cacheCreationTokens());
                 }
                 if (u.reasoningTokens() > 0) {
                     span.setAttribute(GenAiAttributes.GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, (long) u.reasoningTokens());

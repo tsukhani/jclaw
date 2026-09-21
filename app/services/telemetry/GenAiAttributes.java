@@ -15,8 +15,11 @@ import static io.opentelemetry.api.common.AttributeKey.stringKey;
  *
  * <p>opentelemetry-semconv-incubating deprecated its copies when the GenAI conventions moved to
  * their own repository, which publishes no Java artifact, so jclaw owns them. The wire names are
- * the contract — collectors, dashboards and queries key on them — and must stay identical to the
- * semconv ones they replace. Constant names match semconv's so call sites read unchanged.
+ * the contract — collectors, dashboards and queries key on them — and track
+ * open-telemetry/semantic-conventions-genai {@code model/gen-ai/registry.yaml} as of commit
+ * c88d504ab3d9. That repository cuts no releases and marks these {@code stability: development},
+ * so they can change: {@code /renovate} checks them against upstream, and GenAiWireNamesTest pins
+ * them here. Constant names follow the upstream keys.
  */
 public final class GenAiAttributes {
 
@@ -35,8 +38,8 @@ public final class GenAiAttributes {
     public static final AttributeKey<Double> GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK =
             doubleKey("gen_ai.response.time_to_first_chunk");
     public static final AttributeKey<String> GEN_AI_TOKEN_TYPE = stringKey("gen_ai.token.type");
-    public static final AttributeKey<Long> GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS =
-            longKey("gen_ai.usage.cache_creation.input_tokens");
+    public static final AttributeKey<Long> GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS =
+            longKey("gen_ai.usage.cache_write.input_tokens");
     public static final AttributeKey<Long> GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS =
             longKey("gen_ai.usage.cache_read.input_tokens");
     public static final AttributeKey<Long> GEN_AI_USAGE_INPUT_TOKENS = longKey("gen_ai.usage.input_tokens");
