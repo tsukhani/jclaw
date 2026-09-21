@@ -518,7 +518,6 @@ public class ApiConversationsController extends Controller {
     /**
      * DELETE /api/conversations/{id}
      */
-    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @AgentAccess(value = OPERATOR_ONLY, reason = "destructive history deletion")
     public static void deleteConversation(Long id) {
