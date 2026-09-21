@@ -63,7 +63,7 @@ class TelemetryMetricsTest extends UnitTest {
                     collecting.countDown();
                     try {
                         Thread.sleep(300);
-                    } catch (InterruptedException e) {
+                    } catch (InterruptedException _) {
                         Thread.currentThread().interrupt();
                     }
                 }
