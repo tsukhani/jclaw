@@ -22,6 +22,10 @@ public final class WebScrapeSettings {
     public static final String SEED_FROM_SITEMAP = "web_scrape.seed-from-sitemap";
     public static final String MAX_SITEMAP_URLS = "web_scrape.max-sitemap-urls";
     public static final String MAX_SITEMAP_DOCUMENTS = "web_scrape.max-sitemap-documents";
+    public static final String PROXY_URL = "web_scrape.proxy.url";
+    public static final String PROXY_USERNAME = "web_scrape.proxy.username";
+    public static final String PROXY_PASSWORD = "web_scrape.proxy.password";
+    public static final String PROXY_ENABLED = "web_scrape.proxy.enabled";
 
     /** Worker-pool ceiling, applied on read as well, so a value written around the API is still bounded. */
     public static final int MAX_CONCURRENCY = 16;
@@ -42,11 +46,13 @@ public final class WebScrapeSettings {
             case MAX_DEPTH, MAX_ESCALATIONS, MAX_SITEMAP_URLS, MAX_SITEMAP_DOCUMENTS ->
                     wholeNumber(key, v, 0, Integer.MAX_VALUE);
             case CONCURRENCY -> wholeNumber(key, v, 1, MAX_CONCURRENCY);
-            case RESPECT_ROBOTS, SEED_FROM_SITEMAP ->
+            case RESPECT_ROBOTS, SEED_FROM_SITEMAP, PROXY_ENABLED ->
                     "true".equalsIgnoreCase(v) || "false".equalsIgnoreCase(v) ? null
                             : key + " must be true or false.";
             case LANGUAGE -> LANGUAGE_CODE.matcher(v).matches() ? null
                     : key + " must be a language code such as en, ja or pt-BR.";
+            case PROXY_URL -> ScrapeProxy.urlRejection(v);
+            case PROXY_USERNAME, PROXY_PASSWORD -> ScrapeProxy.credentialRejection(v);
             default -> null;
         };
     }

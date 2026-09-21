@@ -4,6 +4,7 @@ import com.vladsch.flexmark.ast.Link;
 import com.vladsch.flexmark.html2md.converter.FlexmarkHtmlConverter;
 import com.vladsch.flexmark.parser.Parser;
 import com.vladsch.flexmark.util.ast.Node;
+import com.vladsch.flexmark.util.ast.TextCollectingVisitor;
 import com.vladsch.flexmark.util.data.MutableDataSet;
 import net.dankito.readability4j.Readability4J;
 import okhttp3.MediaType;
@@ -363,6 +364,20 @@ public final class WebExtraction {
     }
 
     /**
+     * {@link #toText}'s result without Markdown markup, for a caller that asked for plain text
+     * (JCLAW-1271). Only HTML and markdown sources are converted: {@code toText} returns every
+     * other format as it came, and reading a PDF's text as Markdown would eat its asterisks and
+     * leading hashes.
+     */
+    public static String toPlain(FetchResult fetched, String text) {
+        if (!isHtml(fetched.contentType(), fetched.body()) && !isMarkdown(fetched.contentType())) {
+            return text;
+        }
+        var plain = new TextCollectingVisitor().collectAndGetText(MARKDOWN_PARSER.parse(text));
+        return plain.replaceAll("\n{3,}", "\n\n").strip();
+    }
+
+    /**
      * Absolute http(s) links from an HTML response, in document order, deduplicated.
      *
      * <p>Resolved against the response's <em>final</em> URL rather than the requested
@@ -470,7 +485,7 @@ public final class WebExtraction {
     /** True when the response is HTML: an explicit html content type, or — when
      *  the content type is absent — a body whose first non-whitespace char opens
      *  a tag that isn't an XML declaration. */
-    private static boolean isHtml(String contentType, byte[] body) {
+    static boolean isHtml(String contentType, byte[] body) {
         if (contentType.toLowerCase().contains("html")) {
             return true;
         }

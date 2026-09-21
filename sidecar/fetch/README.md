@@ -65,7 +65,7 @@ code enforces.
 | `POST /shutdown` | answers, lets in-flight fetches finish — up to 45 s (`DRAIN_TIMEOUT_S`, the same budget the idle exit uses) — then exits, so a restarted JVM can evict an orphan |
 | `--probe` (CLI) | the capability JSON on stdout, no server, no port |
 
-`POST /fetch` takes `{url, pins?, headers?, profile?, timeoutMs?, maxBytes?}` (`timeoutMs`
+`POST /fetch` takes `{url, pins?, headers?, profile?, timeoutMs?, maxBytes?, proxy?}` (`timeoutMs`
 defaults to `30000`, `DEFAULT_TIMEOUT_MS`) and answers `200` when the exchange completed — **not** when the origin was happy. The
 origin's own result rides in headers, so a 403 from the origin stays
 distinguishable from a 403 raised by the sidecar itself:
@@ -79,6 +79,12 @@ distinguishable from a 403 raised by the sidecar itself:
 `400` means a malformed request — a body that is not a JSON object, a missing `url`, a
 `pins` that is not one, a `timeoutMs`/`maxBytes` that will not parse as a number, or a
 negative `maxBytes`. `502` is a transport failure reaching the origin.
+
+`proxy` is the operator's scrape proxy (`{url, username?, password?}`, with an `http://` or
+`socks5://` URL), passed to curl as its proxy. It is checked like a pin, since it also decides
+where curl connects, but on the provider rule: a proxy may sit on loopback or the LAN, so only
+link-local, multicast, unspecified and unresolvable hosts are refused (`400`). With `socks5://`
+curl still resolves the target itself, so the `pins` entry keeps holding.
 
 `maxBytes` caps what this process buffers, under a hard 25 MB ceiling. `0` means zero
 bytes, not "no cap"; omit the field to get the ceiling.

@@ -1,8 +1,11 @@
+import agents.ToolRegistry;
+import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
+import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.junit.jupiter.api.AfterEach;
@@ -17,7 +20,9 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 
@@ -110,12 +115,14 @@ class WebFetchToolTest extends UnitTest {
      *  enqueueing IOExceptions so the catch-all branches are exercisable. */
     static final class QueueInterceptor implements Interceptor {
         private final Deque<Object> entries = new ArrayDeque<>();
+        final List<Request> requests = new ArrayList<>();
 
         void enqueue(Response.Builder b) { entries.add(b); }
         void enqueueThrow(IOException e) { entries.add(e); }
 
         @Override
         public Response intercept(Chain chain) throws IOException {
+            requests.add(chain.request());
             var entry = entries.poll();
             if (entry == null) {
                 throw new IOException("no response enqueued for " + chain.request().url());
@@ -630,5 +637,98 @@ class WebFetchToolTest extends UnitTest {
             doc.save(baos);
             return baos.toByteArray();
         }
+    }
+
+    // 9. Output formats and extraction (JCLAW-1271)
+
+    /** Article-shaped, so Readability keeps it and nothing escalates. */
+    private static String product() {
+        return "<html><head><title>Blue Kettle</title>"
+                + "<meta property=\"og:title\" content=\"Blue Kettle (OG)\"></head><body><article>"
+                + "<p>" + "A kettle described at some length so the page reads as an article. ".repeat(8) + "</p>"
+                + "<p>Price: <span class=\"price\">\u00a329.99</span>. See the <a href=\"https://example.com/x\">"
+                + "example link</a> for details.</p>"
+                + "<ul><li>Alpha bullet item</li><li>Beta bullet item</li></ul>"
+                + "<p>" + "Closing prose that keeps the article substantial. ".repeat(8) + "</p>"
+                + "</article></body></html>";
+    }
+
+    private static String errorCode(ToolRegistry.ToolResult result) {
+        return JsonParser.parseString(java.util.Objects.requireNonNull(result.structuredJson()))
+                .getAsJsonObject().getAsJsonObject("error").get("code").getAsString();
+    }
+
+    @Test
+    void jsonFormatIsARecordWithTheContentAndTheLinks() {
+        queue.enqueue(okHtml(product()));
+        var result = new WebFetchTool().execute("{\"url\":\"http://example.test/k\",\"format\":\"json\"}", null);
+
+        var record = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("http://example.test/k", record.get("url").getAsString());
+        assertEquals("plain", record.get("fetchedBy").getAsString());
+        assertTrue(record.get("content").getAsString().contains("Alpha bullet item"), result);
+        assertTrue(record.getAsJsonArray("links").toString().contains("https://example.com/x"), result);
+    }
+
+    @Test
+    void textFormatKeepsTheWordsAndDropsTheMarkup() {
+        queue.enqueue(okHtml(product()));
+        var result = new WebFetchTool().execute("{\"url\":\"http://example.test/k\",\"format\":\"text\"}", null);
+
+        assertTrue(result.contains("example link"), result);
+        assertFalse(result.contains("](https://example.com/x)"), "no Markdown link syntax: " + result);
+        assertFalse(result.startsWith("# "), "no Markdown heading: " + result);
+    }
+
+    @Test
+    void extractReturnsOnlyTheFieldsAndAsksForTheHtml() {
+        queue.enqueue(okHtml(product()));
+        var result = new WebFetchTool().execute("""
+                {"url": "http://example.test/k", "extract": {"price": ".price", "more": "article a@href"}}
+                """, null);
+
+        var record = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("[\"\u00a329.99\"]", record.getAsJsonObject("fields").get("price").toString());
+        assertEquals("[\"https://example.com/x\"]", record.getAsJsonObject("fields").get("more").toString());
+        assertFalse(record.has("content"), "extract replaces the page content: " + result);
+        // A site offering markdown would leave the selectors nothing to match.
+        assertEquals("text/html,application/xhtml+xml", queue.requests.get(0).header("Accept"));
+    }
+
+    @Test
+    void metadataAddsWhatThePageStatesAboutItself() {
+        queue.enqueue(okHtml(product()));
+        var result = new WebFetchTool().execute("{\"url\":\"http://example.test/k\",\"metadata\":true}", null);
+
+        var record = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("Blue Kettle (OG)",
+                record.getAsJsonObject("metadata").getAsJsonObject("openGraph").get("og:title").getAsString());
+        assertTrue(record.has("content"), "metadata alone keeps the content: " + result);
+    }
+
+    @Test
+    void aBadSelectorIsRefusedBeforeAnythingIsFetched() {
+        var result = new WebFetchTool().executeRich(
+                "{\"url\":\"http://example.test/k\",\"extract\":{\"x\":\"div[[\"}}", null);
+
+        assertEquals("web_bad_argument", errorCode(result));
+        assertTrue(result.text().contains("'x'"), result.text());
+        assertEquals(0, queue.requests.size());
+    }
+
+    @Test
+    void anUnknownFormatIsRefusedBeforeAnythingIsFetched() {
+        var result = new WebFetchTool().executeRich("{\"url\":\"http://example.test/k\",\"format\":\"yaml\"}", null);
+
+        assertEquals("web_bad_argument", errorCode(result));
+        assertEquals(0, queue.requests.size());
+    }
+
+    @Test
+    void theOlderModeArgumentStillReturnsRawHtml() {
+        queue.enqueue(okHtml(product()));
+        var result = new WebFetchTool().execute("{\"url\":\"http://example.test/k\",\"mode\":\"html\"}", null);
+
+        assertTrue(result.startsWith("<html>"), result);
     }
 }

@@ -6,6 +6,7 @@ import tools.WebScrapeTool;
 import tools.scrape.ImpersonatedFetcher;
 import tools.scrape.RenderedFetcher;
 import tools.scrape.ScrapeLadder;
+import tools.scrape.ScrapeProxy;
 import utils.SsrfGuard;
 import utils.WebExtraction;
 
@@ -68,7 +69,7 @@ public final class ScrapeHarness {
     public static Rung rung1() {
         return url -> {
             try {
-                var fetched = WebExtraction.fetch(url, CLIENT, HEADERS);
+                var fetched = WebExtraction.fetch(url, ScrapeProxy.client(CLIENT), HEADERS);
                 return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
             } catch (Exception e) {
                 var m = e.getMessage();

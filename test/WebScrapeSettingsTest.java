@@ -65,10 +65,22 @@ class WebScrapeSettingsTest extends UnitTest {
     }
 
     @Test
+    void theProxyKeysAreCheckedWhenWritten() {
+        assertNull(WebScrapeSettings.rejectionFor(WebScrapeSettings.PROXY_URL, ""), "empty turns the proxy off");
+        assertNull(WebScrapeSettings.rejectionFor(WebScrapeSettings.PROXY_URL, "http://proxy.example:8080"));
+        assertNotNull(WebScrapeSettings.rejectionFor(WebScrapeSettings.PROXY_URL, "ftp://proxy.example:21"));
+        assertNotNull(WebScrapeSettings.rejectionFor(WebScrapeSettings.PROXY_URL, "http://u:p@proxy.example:8080"),
+                "credentials in the URL would be returned unmasked on every config read");
+        assertNotNull(WebScrapeSettings.rejectionFor(WebScrapeSettings.PROXY_ENABLED, "maybe"));
+        assertNotNull(WebScrapeSettings.rejectionFor(WebScrapeSettings.PROXY_PASSWORD, "pass\nword"));
+    }
+
+    @Test
     void everyWebScrapeKeyInTheCodeHasASettingsRow() throws IOException {
         var root = Path.of(Play.applicationPath.getAbsolutePath());
         var panel = Files.readString(root.resolve("frontend/components/settings/SettingsWebScrapePanel.vue"));
-        var literal = Pattern.compile("\"(web_scrape\\.[a-z0-9-]+)\"");
+        // Dotted segments included: web_scrape.proxy.url matched nothing under [a-z0-9-]+ alone.
+        var literal = Pattern.compile("\"(web_scrape\\.[a-z0-9-]+(?:\\.[a-z0-9-]+)*)\"");
         var keys = new TreeSet<String>();
         try (var files = Files.walk(root.resolve("app"))) {
             for (var file : files.filter(p -> p.toString().endsWith(".java")).toList()) {

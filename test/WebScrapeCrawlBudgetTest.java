@@ -1,6 +1,8 @@
+import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import tools.WebScrapeTool;
+import tools.scrape.ScrapeOutput;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -27,12 +29,12 @@ class WebScrapeCrawlBudgetTest extends UnitTest {
     static {
         try {
             CRAWL_STATE = Class.forName("tools.WebScrapeTool$CrawlState");
-            NEW_STATE = CRAWL_STATE.getDeclaredConstructor();
+            NEW_STATE = CRAWL_STATE.getDeclaredConstructor(ScrapeOutput.Request.class, boolean.class);
             NEW_STATE.setAccessible(true);
             EXHAUSTED = WebScrapeTool.class.getDeclaredMethod("exhausted", CRAWL_STATE);
             EXHAUSTED.setAccessible(true);
             RENDER = WebScrapeTool.class.getDeclaredMethod(
-                    "render", URI.class, CRAWL_STATE, int.class, boolean.class);
+                    "result", URI.class, CRAWL_STATE, int.class, boolean.class, Agent.class);
             RENDER.setAccessible(true);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
@@ -40,7 +42,7 @@ class WebScrapeCrawlBudgetTest extends UnitTest {
     }
 
     private static Object state() throws ReflectiveOperationException {
-        return NEW_STATE.newInstance();
+        return NEW_STATE.newInstance(ScrapeOutput.Request.MARKDOWN, false);
     }
 
     private static void set(Object state, String field, Object value)
@@ -61,7 +63,7 @@ class WebScrapeCrawlBudgetTest extends UnitTest {
     }
 
     private static String render(Object state) throws ReflectiveOperationException {
-        return (String) RENDER.invoke(null, URI.create("https://site.test/"), state, 2, true);
+        return (String) RENDER.invoke(null, URI.create("https://site.test/"), state, 2, true, null);
     }
 
     @Test

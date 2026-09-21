@@ -2,10 +2,13 @@ package tools;
 
 import agents.ToolAction;
 import agents.ToolRegistry;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
 import org.jspecify.annotations.Nullable;
+import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.scrape.BlockClassifier;
@@ -13,8 +16,12 @@ import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.scrape.ScrapeLadder;
+import tools.scrape.ScrapeOutput;
+import tools.scrape.ScrapeProxy;
 import tools.scrape.SitemapSeeder;
 import tools.scrape.WebScrapeSettings;
+import utils.AppClock;
+import utils.GsonHolder;
 import utils.RobotsCache;
 import utils.SsrfGuard;
 import utils.ToolErrorTemplates;
@@ -22,11 +29,15 @@ import utils.WebExtraction;
 
 import java.net.URI;
 import java.time.Duration;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -71,9 +82,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * language preference must never cost us the page — same reasoning as keeping
      * {@code text/html} acceptable while preferring markdown.
      */
-    private static Map<String, String> headersFor(String language) {
-        return Map.of("User-Agent", USER_AGENT,
-                "Accept-Language", language + ", *;q=0.5");
+    private static Map<String, String> headersFor(String language, boolean html) {
+        return html
+                ? Map.of("User-Agent", USER_AGENT, "Accept", "text/html,application/xhtml+xml",
+                        "Accept-Language", language + ", *;q=0.5")
+                : Map.of("User-Agent", USER_AGENT, "Accept-Language", language + ", *;q=0.5");
     }
 
     /** {@code jclaw} is the token a site would write in a {@code User-agent:} line;
@@ -88,6 +101,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String ARG_RESPECT_ROBOTS = "respectRobots";
 
     private static final String ARG_LANGUAGE = "language";
+    private static final String ARG_SAVE = "save";
     private static final String EVENT_CATEGORY = "scrape";
 
     /** Preferred language for pages that declare translations. English by default; the
@@ -125,6 +139,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     /** Total budget across every page, matching what one web_fetch may return. */
     private static final int MAX_TOTAL_CHARS = WebExtraction.MAX_TEXT_LENGTH;
 
+    /** Budget for a crawl written to the workspace (JCLAW-1271): the file, not the context
+     *  window, holds it, so the page and time budgets are what bound it. */
+    private static final int MAX_SAVED_CHARS = 2_000_000;
+
+    private static final DateTimeFormatter SAVE_STAMP =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
+
     @Override public String name() { return "web_scrape"; }
     @Override public String category() { return "Web"; }
     @Override public String icon() { return "globe"; }
@@ -146,7 +167,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 Read a starting URL and the pages it links to, returning all of them as one \
                 Markdown document with each page's source URL as a heading. \
                 Use this for a documentation site, a multi-page article, or any question that \
-                needs more than one page. \
+                needs more than one page. Use extract to collect specific values from every page, \
+                and save to write a large crawl to a workspace file. \
                 For a single page use web_fetch instead — it is faster and cheaper.""";
     }
 
@@ -154,7 +176,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     public Map<String, Object> parameters() {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
-                SchemaKeys.PROPERTIES, Map.of(
+                SchemaKeys.PROPERTIES, withOutputArguments(Map.of(
                         ARG_URL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "The URL to start from"),
                         ARG_MAX_PAGES, Map.of(SchemaKeys.TYPE, "integer",
@@ -176,6 +198,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 "Honour the site's robots.txt (default true). Set false ONLY when "
                                 + "the user explicitly asks to ignore robots.txt for this request; "
                                 + "never choose it yourself to work around a refusal."),
+                        ARG_SAVE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                                SchemaKeys.DESCRIPTION,
+                                "Write the result to a workspace file (Markdown, text, or JSON Lines "
+                                + "with one page per line) and return only a summary and the file name"),
                         ARG_LANGUAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
                                 "Preferred language for sites that publish translations, as an "
@@ -183,17 +209,25 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 + "Other translations of a page are skipped so the page budget "
                                 + "is spent on distinct content."
                                         .formatted(DEFAULT_LANGUAGE))
-                ),
+                )),
                 SchemaKeys.REQUIRED, List.of(ARG_URL)
         );
     }
 
-    /** Holds no handles between calls and writes nothing to disk. */
+    /** Past Map.of's ten pairs, so the shared output arguments are merged in. */
+    private static Map<String, Object> withOutputArguments(Map<String, Object> own) {
+        var props = new LinkedHashMap<String, Object>(own);
+        props.putAll(ScrapeOutput.schema(false));
+        return props;
+    }
+
+    /** Holds no handles between calls. It writes to disk only when {@code save} is set, to a
+     *  file named for the host and the second, so parallel crawls do not share one. */
     @Override public boolean parallelSafe() { return true; }
 
     /** {@code servedBy} is the rung that produced this text. PLAIN for the ordinary
      *  case; anything higher means the ladder was climbed for this page. */
-    private record Page(String url, @Nullable String text, ScrapeRung servedBy) {}
+    private record Page(String url, @Nullable String text, ScrapeRung servedBy, @Nullable JsonObject record) {}
 
     /** A frontier URL the guard declined, kept apart from {@link Page} so a refusal
      *  never spends a slot in the page budget. */
@@ -239,8 +273,16 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         var language = args.has(ARG_LANGUAGE) && !args.get(ARG_LANGUAGE).isJsonNull()
                 ? args.get(ARG_LANGUAGE).getAsString().strip()
                 : languageDefault();
-        return ToolRegistry.ToolResult.text(
-                crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots, language));
+        ScrapeOutput.Request output;
+        try {
+            output = ScrapeOutput.parse(args, false, ScrapeOutput.Format.MARKDOWN);
+        } catch (IllegalArgumentException e) {
+            return ToolRegistry.ToolResult.error(ToolErrorTemplates.webBadArgument(String.valueOf(e.getMessage())));
+        }
+        boolean save = args.has(ARG_SAVE) && !args.get(ARG_SAVE).isJsonNull() && args.get(ARG_SAVE).getAsBoolean();
+        var state = new CrawlState(output, save);
+        crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots, language, state);
+        return ToolRegistry.ToolResult.text(result(seed, state, maxDepth, sameHostOnly, agent));
     }
 
     /**
@@ -262,19 +304,19 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             return ScrapeObservation.failed(url, "rejected: " + e.getMessage());
         }
         boolean respect = respectRobotsDefault();
-        if (respect && !RobotsCache.isAllowed(uri, CLIENT, IDENTITY)) {
+        if (respect && !RobotsCache.isAllowed(uri, client(), IDENTITY)) {
             return ScrapeObservation.failed(url, ROBOTS_REFUSAL);
         }
         try {
             RobotsCache.awaitSlot(uri, respect
-                    ? RobotsCache.delayMillis(uri, CLIENT, IDENTITY)
+                    ? RobotsCache.delayMillis(uri, client(), IDENTITY)
                     : RobotsCache.DEFAULT_DELAY_MS);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return ScrapeObservation.failed(url, INTERRUPTED);
         }
         try {
-            var fetched = WebExtraction.fetch(url, CLIENT, headersFor(languageDefault()));
+            var fetched = WebExtraction.fetch(url, client(), headersFor(languageDefault(), false));
             return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
         } catch (Exception e) {
             return ScrapeObservation.failed(url, reason(e));
@@ -284,6 +326,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     /** Accumulators for one crawl. A small mutable carrier so the passes below can be
      *  separate methods without threading six out-parameters through each of them. */
     private static final class CrawlState {
+        final ScrapeOutput.Request output;
+        final boolean save;
+        final int contentBudget;
         final List<Page> pages = new ArrayList<>();
         final List<Refusal> refused = new ArrayList<>();
         final LinkedHashSet<String> seen = new LinkedHashSet<>();
@@ -321,11 +366,16 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         synchronized void noteOutOfTime() {
             escalationsOutOfTime++;
         }
+
+        CrawlState(ScrapeOutput.Request output, boolean save) {
+            this.output = output;
+            this.save = save;
+            this.contentBudget = save ? MAX_SAVED_CHARS : MAX_TOTAL_CHARS;
+        }
     }
 
-    private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
-                         boolean respectRobots, String language) {
-        var state = new CrawlState();
+    private void crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
+                       boolean respectRobots, String language, CrawlState state) {
         state.deadline = System.nanoTime()
                 + Duration.ofSeconds(configTimeoutSeconds()).toNanos();
         state.seen.add(canonical(seed));
@@ -355,7 +405,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 depth++;
             }
         }
-        return render(seed, state, maxDepth, sameHostOnly);
     }
 
     /**
@@ -374,7 +423,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 state.refused.add(new Refusal(uri.toString(), e.getMessage()));
                 continue;
             }
-            if (respectRobots && !RobotsCache.isAllowed(uri, CLIENT, IDENTITY)) {
+            if (respectRobots && !RobotsCache.isAllowed(uri, client(), IDENTITY)) {
                 state.refused.add(new Refusal(uri.toString(), ROBOTS_REFUSAL));
                 continue;
             }
@@ -430,7 +479,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 return fetched;
             } catch (ExecutionException e) {
                 state.pages.add(new Page(uri.toString(),
-                        "[Not retrieved \u2014 %s]".formatted(reason(e)), ScrapeRung.PLAIN));
+                        "[Not retrieved \u2014 %s]".formatted(reason(e)), ScrapeRung.PLAIN,
+                        state.output.json() ? ScrapeOutput.failedRecord(uri.toString(), ScrapeRung.PLAIN, reason(e))
+                                : null));
             }
         }
         return fetched;
@@ -442,17 +493,30 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static void recordOutcome(Outcome outcome, URI uri, CrawlState state,
                                       List<WebExtraction.FetchResult> fetched) {
         if (!outcome.usable()) {
-            state.pages.add(new Page(uri.toString(), "[Not retrieved \u2014 %s%s%s]"
-                    .formatted(outcome.reason(),
-                            outcome.detail() == null ? "" : ": " + outcome.detail(),
-                            outcome.nextRung() == ScrapeRung.NONE ? ""
-                                    : "; needs " + outcome.nextRung()), outcome.servedBy()));
+            var why = "%s%s%s".formatted(outcome.reason(),
+                    outcome.detail() == null ? "" : ": " + outcome.detail(),
+                    outcome.nextRung() == ScrapeRung.NONE ? "" : "; needs " + outcome.nextRung());
+            state.pages.add(new Page(uri.toString(), "[Not retrieved \u2014 %s]".formatted(why),
+                    outcome.servedBy(),
+                    state.output.json() ? ScrapeOutput.failedRecord(uri.toString(), outcome.servedBy(), why)
+                            : null));
             return;
         }
         var page = outcome.resolvedFetched();
         var text = outcome.resolvedText();
-        state.pages.add(new Page(page.finalUrl(), text, outcome.servedBy()));
-        state.totalChars += text.length();
+        if (state.output.json()) {
+            // Built now, while the page's HTML is in hand, so a crawl never holds every body at once.
+            var record = ScrapeOutput.pageRecord(state.output, uri.toString(), page, text,
+                    outcome.servedBy(), false);
+            state.pages.add(new Page(page.finalUrl(), null, outcome.servedBy(), record));
+            // With extract this counts the fields rather than the page, which is what lets an
+            // extraction crawl cover far more pages than a content crawl.
+            state.totalChars += GsonHolder.GSON.toJson(record).length();
+        } else {
+            var shown = state.output.format() == ScrapeOutput.Format.TEXT ? WebExtraction.toPlain(page, text) : text;
+            state.pages.add(new Page(page.finalUrl(), shown, outcome.servedBy(), null));
+            state.totalChars += shown.length();
+        }
         fetched.add(page);
     }
 
@@ -462,9 +526,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             state.stoppedBecause = "time budget (%ds) reached".formatted(configTimeoutSeconds());
             return true;
         }
-        if (state.totalChars >= MAX_TOTAL_CHARS) {
+        if (state.totalChars >= state.contentBudget) {
             state.stoppedBecause =
-                    "content budget (%d characters) reached".formatted(MAX_TOTAL_CHARS);
+                    "content budget (%d characters) reached".formatted(state.contentBudget);
             return true;
         }
         return false;
@@ -581,7 +645,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         if (fetched.stream().noneMatch(f -> WebExtraction.isMarkdown(f.contentType()))) return;
 
         try {
-            var html = WebExtraction.fetch(seed.toString(), CLIENT,
+            var html = WebExtraction.fetch(seed.toString(), client(),
                     Map.of("User-Agent", IDENTITY.userAgentHeader(),
                             "Accept", "text/html",
                             "Accept-Language", language + ", *;q=0.5"));
@@ -614,7 +678,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private List<URI> withSitemapSeeds(List<URI> harvested, URI seed, boolean sameHostOnly,
                                        boolean respectRobots, CrawlState state) {
         if (!respectRobots || !seedFromSitemapDefault()) return harvested;
-        var seeds = SitemapSeeder.seedsFor(seed, CLIENT, IDENTITY,
+        var seeds = SitemapSeeder.seedsFor(seed, client(), IDENTITY,
                 uri -> (!sameHostOnly || sameHost(uri, seed))
                         && !underSuppressedLocale(uri, state)
                         && !state.seen.contains(canonical(uri)));
@@ -657,7 +721,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private Outcome fetchOne(URI uri, boolean respectRobots, String language, CrawlState state) {
         try {
             RobotsCache.awaitSlot(uri, respectRobots
-                    ? RobotsCache.delayMillis(uri, CLIENT, IDENTITY)
+                    ? RobotsCache.delayMillis(uri, client(), IDENTITY)
                     : RobotsCache.DEFAULT_DELAY_MS);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
@@ -665,7 +729,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
         Outcome plain;
         try {
-            var fetched = WebExtraction.fetch(uri.toString(), CLIENT, headersFor(language));
+            var fetched = WebExtraction.fetch(uri.toString(), client(),
+                    headersFor(language, state.output.needsHtml()));
             var text = WebExtraction.toText(fetched);
             plain = classified(uri, fetched, ScrapeObservation.of(fetched, text));
         } catch (WebExtraction.HostNotAllowedException e) {
@@ -807,8 +872,26 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return m == null || m.isBlank() ? e.getClass().getSimpleName() : m;
     }
 
-    private static String render(URI seed, CrawlState state, int maxDepth,
-                                 boolean sameHostOnly) {
+    /** The crawl's result: inline, or written to the workspace with only the summary returned. */
+    private static String result(URI seed, CrawlState state, int maxDepth, boolean sameHostOnly,
+                                 @Nullable Agent agent) {
+        var summary = summary(seed, state, maxDepth, sameHostOnly);
+        if (state.save && agent != null) {
+            var json = state.output.json();
+            var extension = json ? ".jsonl" : state.output.format() == ScrapeOutput.Format.TEXT ? ".txt" : ".md";
+            var content = json ? jsonLines(state) : pagesDocument(summary, state, MAX_SAVED_CHARS);
+            var host = seed.getHost() == null ? "site" : seed.getHost().replaceAll("[^a-zA-Z0-9.-]", "_");
+            var filename = "scrape-%s-%s%s".formatted(host, SAVE_STAMP.format(AppClock.now()), extension);
+            AgentService.writeWorkspaceFile(agent.name, filename, content);
+            return summary + "Saved %d page%s (%d characters) to workspace file '%s'.\n".formatted(
+                    state.pages.size(), state.pages.size() == 1 ? "" : "s", content.length(), filename);
+        }
+        if (state.save) summary += "Not saved: this call has no agent workspace.\n";
+        return state.output.json() ? jsonDocument(summary, state) : pagesDocument(summary, state, MAX_TOTAL_CHARS);
+    }
+
+    /** What was read, refused and left behind — the lines every form of the result starts with. */
+    private static String summary(URI seed, CrawlState state, int maxDepth, boolean sameHostOnly) {
         var pages = state.pages;
         var refused = state.refused;
         var stoppedBecause = state.stoppedBecause;
@@ -851,19 +934,70 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             sb.append("Stopped: %s \u2014 %d discovered page%s not read.\n"
                     .formatted(stoppedBecause, unvisited, unvisited == 1 ? "" : "s"));
         }
-        for (var p : pages) {
-            sb.append("\n\n---\n\n## ").append(p.url());
-            if (p.servedBy() != ScrapeRung.PLAIN) {
-                sb.append(" _(via ").append(p.servedBy()).append(")_");
+        return sb.toString();
+    }
+
+    private static String pagesDocument(String summary, CrawlState state, int limit) {
+        var sb = new StringBuilder(summary);
+        boolean plain = state.output.format() == ScrapeOutput.Format.TEXT;
+        for (var p : state.pages) {
+            if (plain) {
+                sb.append("\n\n=== ").append(p.url());
+                if (p.servedBy() != ScrapeRung.PLAIN) sb.append(" (via ").append(p.servedBy()).append(")");
+                sb.append(" ===");
+            } else {
+                sb.append("\n\n---\n\n## ").append(p.url());
+                if (p.servedBy() != ScrapeRung.PLAIN) {
+                    sb.append(" _(via ").append(p.servedBy()).append(")_");
+                }
             }
-            sb.append("\n\n").append(p.text());
+            sb.append("\n\n").append(Objects.requireNonNullElse(p.text(), ""));
         }
-        if (sb.length() > MAX_TOTAL_CHARS) {
-            return sb.substring(0, MAX_TOTAL_CHARS)
-                    + "\n\n[Truncated: scraped content exceeds %d characters]"
-                            .formatted(MAX_TOTAL_CHARS);
+        if (sb.length() > limit) {
+            return sb.substring(0, limit)
+                    + "\n\n[Truncated: scraped content exceeds %d characters]".formatted(limit);
         }
         return sb.toString();
+    }
+
+    /**
+     * The crawl as one JSON object. Trimmed by dropping whole trailing pages rather than cutting
+     * text, so what comes back always parses; the first page is kept whatever its size.
+     */
+    private static String jsonDocument(String summary, CrawlState state) {
+        var root = new JsonObject();
+        root.addProperty("summary", summary.strip());
+        var pages = new JsonArray();
+        int size = summary.length();
+        int omitted = 0;
+        for (var p : state.pages) {
+            var record = Objects.requireNonNull(p.record(), "a JSON crawl records every page");
+            int length = GsonHolder.GSON.toJson(record).length();
+            if (omitted > 0 || (!pages.isEmpty() && size + length > MAX_TOTAL_CHARS)) {
+                omitted++;
+                continue;
+            }
+            size += length;
+            pages.add(record);
+        }
+        root.add("pages", pages);
+        if (omitted > 0) root.addProperty("pagesOmitted", omitted);
+        return GsonHolder.GSON.toJson(root);
+    }
+
+    /** One page record per line, the shape a saved JSON crawl takes. */
+    private static String jsonLines(CrawlState state) {
+        var sb = new StringBuilder();
+        for (var p : state.pages) {
+            sb.append(GsonHolder.GSON.toJson(Objects.requireNonNull(p.record(), "a JSON crawl records every page")))
+                    .append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** The rung-1 client for this call, routed through the operator's proxy when one is set. */
+    private static OkHttpClient client() {
+        return ScrapeProxy.client(CLIENT);
     }
 
     private static int configMaxPages() {

@@ -18,7 +18,7 @@ Protocol (--host defaults to 127.0.0.1; the server binds whatever it is given):
                     isHealthy(expectedModel) respawns when an operator repins it.
   GET  /capability-> 200 {kind, runnable, profile, profileKnown, profileCount, reason}
   (CLI) --probe  -> the same capability JSON on stdout, one-shot, no server
-  POST /fetch {url, pins?, headers?, profile?, timeoutMs?, maxBytes?}
+  POST /fetch {url, pins?, headers?, profile?, timeoutMs?, maxBytes?, proxy?}
         -> 200  upstream body verbatim; upstream status and Location ride in
                 X-Upstream-* headers (see below)
         -> 400  {error}  malformed request
@@ -66,7 +66,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from ssrf import is_public_ip
+from ssrf import is_allowed_proxy_host, is_public_ip
+from urllib.parse import urlsplit
 
 DEFAULT_PROFILE = "chrome"
 # Ceiling on what this process will hold for one response. The JVM applies its
@@ -102,6 +103,24 @@ def _default_port(url):
     if parts.port:
         return parts.port
     return 80 if parts.scheme.lower() == "http" else 443
+
+
+def _curl_proxy(proxy):
+    """curl's (proxy, proxy_auth) for the operator's scrape proxy (JCLAW-1271), or (None, None).
+
+    Checked like a pin, because it also decides where curl connects -- but on the provider rule,
+    since a proxy may legitimately sit on loopback or the LAN. Raises ValueError naming the fault.
+    """
+    if not proxy:
+        return None, None
+    parts = urlsplit(proxy.get("url") or "")
+    if parts.scheme not in ("http", "socks5") or not parts.hostname or not parts.port:
+        raise ValueError("proxy url must be http:// or socks5:// with a host and port")
+    if not is_allowed_proxy_host(parts.hostname):
+        raise ValueError("proxy host is link-local, multicast or unresolvable")
+    host = "[%s]" % parts.hostname if ":" in parts.hostname else parts.hostname
+    auth = (proxy["username"], proxy.get("password") or "") if proxy.get("username") else None
+    return "%s://%s:%d" % (parts.scheme, host, parts.port), auth
 
 
 def _header_safe(value):
@@ -287,6 +306,9 @@ class Handler(BaseHTTPRequestHandler):
             pins = req.get("pins") or {}
             if not isinstance(pins, dict):
                 raise TypeError("pins must be a JSON object")
+            proxy = req.get("proxy")
+            if proxy is not None and not isinstance(proxy, dict):
+                raise TypeError("proxy must be a JSON object")
             timeout_s = max(1.0, float(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS) / 1000.0)
             # `or HARD_MAX_BYTES` here would read an explicit 0 as "no cap".
             requested_bytes = req.get("maxBytes")
@@ -315,6 +337,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
         try:
+            proxy_url, proxy_auth = _curl_proxy(proxy)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+
+        try:
             curl_handle = Curl()
             if pins:
                 # CURLOPT_RESOLVE pre-seeds curl's DNS cache, so the name is never
@@ -337,6 +365,8 @@ class Handler(BaseHTTPRequestHandler):
                 # the JVM so SsrfGuard re-validates it.
                 allow_redirects=False,
                 stream=True,
+                proxy=proxy_url,
+                proxy_auth=proxy_auth,
             )
         except Exception as exc:
             self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})

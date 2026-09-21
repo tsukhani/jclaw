@@ -2,6 +2,7 @@ package tools;
 
 import agents.ToolAction;
 import agents.ToolRegistry;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
@@ -13,7 +14,10 @@ import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeRung;
 import tools.scrape.ScrapeLadder;
+import tools.scrape.ScrapeOutput;
+import tools.scrape.ScrapeProxy;
 import utils.ErrorTemplate;
+import utils.GsonHolder;
 import utils.SsrfGuard;
 import utils.ToolErrorTemplates;
 import utils.WebExtraction;
@@ -27,20 +31,17 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Fetch the content of a URL. Supports two modes:
- * <ul>
- *   <li>"text" (default): Extract readable content and return it as Markdown.
- *       HTML is run through a Readability main-content pass (falling back to a
- *       Jsoup boilerplate strip) and converted to Markdown; PDF / Office / other
- *       non-HTML documents are extracted to text with Apache Tika; JSON, XML and
- *       plain text pass through unchanged. Best for reading/summarizing.</li>
- *   <li>"html": Return raw HTML. Best for saving the actual page to a file.</li>
- * </ul>
+ * Fetch the content of a URL. By default HTML is run through a Readability main-content pass
+ * (falling back to a Jsoup boilerplate strip) and converted to Markdown; PDF / Office / other
+ * non-HTML documents are extracted to text with Apache Tika; JSON, XML and plain text pass
+ * through unchanged. {@code format} and {@code extract} ask for something else instead — plain
+ * text, a JSON record, raw HTML, or named values — as {@link ScrapeOutput} describes.
  *
  * <p>The fetch and extraction chain lives in {@link WebExtraction}, shared with
  * {@code web_scrape} (JCLAW-1082). What stays here is what is specific to this
@@ -71,11 +72,11 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private static final Map<String, String> HEADERS =
             Map.of("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)");
 
-    /** Mode {@code html} promises the page's own source, so it asks for it: the shared
+    /** Raw HTML and selectors both need the page's own source, so they ask for it: the shared
      *  default prefers markdown, and a site that honors that had its markdown written
      *  to the workspace as {@code <host>.html}. */
-    private static Map<String, String> headersFor(String mode) {
-        if (!"html".equals(mode)) return HEADERS;
+    private static Map<String, String> headersFor(ScrapeOutput.Request output) {
+        if (!output.needsHtml()) return HEADERS;
         var withAccept = new HashMap<>(HEADERS);
         withAccept.put("Accept", "text/html,application/xhtml+xml");
         return Map.copyOf(withAccept);
@@ -159,7 +160,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
     @Override
     public List<ToolAction> actions() {
         return List.of(
-                new ToolAction("fetch (text)", "Retrieve a URL and extract clean, readable content as Markdown"),
+                new ToolAction("fetch", "Retrieve a URL as readable Markdown, plain text or a JSON record"),
+                new ToolAction("extract", "Pull named values from a page by CSS selector, or its own structured data"),
                 new ToolAction("fetch (html)", "Retrieve a URL and return the raw HTML source")
         );
     }
@@ -167,23 +169,32 @@ public class WebFetchTool implements ToolRegistry.Tool {
     @Override
     public String description() {
         return """
-                Fetch the content of a URL. \
-                Use mode "text" (default) to extract readable content as Markdown — best for reading, summarizing, saving content, or answering questions about a page. Handles HTML articles, PDFs and Office documents. \
-                Use mode "html" ONLY when the user explicitly asks for the raw HTML source code of a page.""";
+                Fetch the content of a URL as readable Markdown — best for reading, summarizing, saving \
+                content, or answering questions about a page. Handles HTML articles, PDFs and Office \
+                documents. Use extract to pull specific values instead of the whole page.""";
     }
 
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
-                SchemaKeys.PROPERTIES, Map.of(
-                        "url", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "The URL to fetch"),
-                        "mode", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of("text", "html"),
-                                SchemaKeys.DESCRIPTION, "Extraction mode: 'text' extracts readable content as Markdown (default), 'html' returns raw HTML")
-                ),
+                SchemaKeys.PROPERTIES, properties(),
                 SchemaKeys.REQUIRED, List.of("url")
         );
+    }
+
+    private static Map<String, Object> properties() {
+        var props = new LinkedHashMap<String, Object>();
+        props.put("url", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "The URL to fetch"));
+        props.putAll(ScrapeOutput.schema(true));
+        return props;
+    }
+
+    /** The format a call gets when it names none. {@code mode} predates {@code format} (JCLAW-1271)
+     *  and is still honoured, so a prompt or skill written against it keeps working. */
+    private static ScrapeOutput.Format legacyFormat(JsonObject args) {
+        return args.has("mode") && "html".equals(args.get("mode").getAsString())
+                ? ScrapeOutput.Format.HTML : ScrapeOutput.Format.MARKDOWN;
     }
 
     /** Stateless HTTP GET — holds no handles between calls, writes nothing
@@ -200,16 +211,20 @@ public class WebFetchTool implements ToolRegistry.Tool {
     public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         var url = args.get("url").getAsString();
-        var mode = args.has("mode") ? args.get("mode").getAsString() : "text";
+        ScrapeOutput.Request output;
+        try {
+            output = ScrapeOutput.parse(args, true, legacyFormat(args));
+        } catch (IllegalArgumentException e) {
+            return ToolRegistry.ToolResult.error(ToolErrorTemplates.webBadArgument(String.valueOf(e.getMessage())));
+        }
 
         try {
-            var fetched = WebExtraction.fetch(url, CLIENT, headersFor(mode));
+            var fetched = WebExtraction.fetch(url, ScrapeProxy.client(CLIENT), headersFor(output));
             var text = WebExtraction.toText(fetched);
             var best = climb(url, fetched, text, null, agent);
             var body = best.fetched() == null ? fetched : best.fetched();
             var extracted = best.text() == null ? text : best.text();
-            return ToolRegistry.ToolResult.text(
-                    "html".equals(mode) ? rawHtml(body, url, agent) : extracted);
+            return ToolRegistry.ToolResult.text(render(output, url, body, extracted, best.servedBy(), agent));
         } catch (WebExtraction.HostNotAllowedException e) {
             // Already a three-part refusal, authored where the allowlist lives.
             return ToolRegistry.ToolResult.text(e.getMessage());
@@ -225,12 +240,26 @@ public class WebFetchTool implements ToolRegistry.Tool {
             return ToolRegistry.ToolResult.error(
                     ToolErrorTemplates.webTlsFailed(url, String.valueOf(e.getMessage())));
         } catch (Exception e) {
-            return escalateOrReport(url, mode, agent, e);
+            return escalateOrReport(url, output, agent, e);
         }
     }
 
+    /** The page in the form the call asked for. */
+    private String render(ScrapeOutput.Request output, String url, WebExtraction.FetchResult body,
+                          String text, ScrapeRung servedBy, Agent agent) {
+        if (output.json()) {
+            return GsonHolder.GSON.toJson(ScrapeOutput.pageRecord(output, url, body, text, servedBy, true));
+        }
+        return switch (output.format()) {
+            case HTML -> rawHtml(body, url, agent);
+            case TEXT -> WebExtraction.toPlain(body, text);
+            case MARKDOWN, JSON -> text;
+        };
+    }
+
     /** The failures {@link #executeRich} has no specific catch for: a wrapped TLS failure, or one to escalate. */
-    private ToolRegistry.ToolResult escalateOrReport(String url, String mode, Agent agent, Exception e) {
+    private ToolRegistry.ToolResult escalateOrReport(String url, ScrapeOutput.Request output, Agent agent,
+                                                     Exception e) {
         if (e.getCause() instanceof SSLException sslEx) {
             return ToolRegistry.ToolResult.error(
                     ToolErrorTemplates.webTlsFailed(url, String.valueOf(sslEx.getMessage())));
@@ -243,8 +272,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
         var escalated = climb(url, null, null, e.getMessage(), agent);
         if (escalated.usable()) {
             var escalatedBody = escalated.fetched();
-            return ToolRegistry.ToolResult.text("html".equals(mode) && escalatedBody != null
-                    ? rawHtml(escalatedBody, url, agent) : escalated.resolvedText());
+            return ToolRegistry.ToolResult.text(escalatedBody == null ? escalated.resolvedText()
+                    : render(output, url, escalatedBody, escalated.resolvedText(), escalated.servedBy(), agent));
         }
         return ToolRegistry.ToolResult.error(classifyFetchFailure(url, e));
     }

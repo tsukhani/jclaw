@@ -94,7 +94,10 @@ everything from reading as a pass.)
 `channel` is the browser the most recent render actually launched, not the one asked
 for — see [Looking like a real browser](#looking-like-a-real-browser).
 
-`POST /render` takes `{url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?}`.
+`POST /render` takes `{url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?, proxy?}`. `proxy` is the operator's
+scrape proxy (`{url, username?, password?}`), given to the browser at launch; it is checked on
+the provider rule (loopback and LAN allowed; link-local, multicast, unspecified and unresolvable
+refused with `400`). The route gate still range-checks every host the page reaches either way.
 Defaults: `timeoutMs` `35000`, `settleMs` `4000`, `language` `en` (sent as `Accept-Language`
 and set as the context locale, so `navigator.language` agrees), `waitUntil` `domcontentloaded`.
 

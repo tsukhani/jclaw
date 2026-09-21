@@ -17,7 +17,7 @@ Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health   -> 200 {status, model, patchright, channel, browser_ready}
   GET  /capability -> 200 {kind, runnable, channel, reason}
   (CLI) --probe  -> the same capability JSON on stdout, one-shot, no browser
-  POST /render {url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?}
+  POST /render {url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?, proxy?}
         -> 200  rendered HTML; X-Upstream-Status / X-Settled-Status / X-Upstream-Url /
                 X-Blocked-Hosts / X-Blocked-Hosts-Count / X-Upstream-Truncated carry
                 the outcome
@@ -101,7 +101,7 @@ DEFAULT_MAX_CONCURRENT = 4
 # browser-managed client hints after interception. Verified by sending an x-probe header
 # through the same call — the probe arrives, the brand list does not change. It goes
 # through Emulation.setUserAgentOverride instead, below.
-from ssrf import is_public_host, is_public_ip
+from ssrf import is_allowed_proxy_host, is_public_host, is_public_ip
 
 try:
     from patchright.sync_api import sync_playwright
@@ -237,7 +237,28 @@ def _active_channel():
         return _LAST_CHANNEL
 
 
-def _launch(p, args):
+def _launch_proxy(proxy):
+    """Playwright launch settings for the operator's scrape proxy (JCLAW-1271), or None.
+
+    Checked on the provider rule, since a proxy may sit on loopback or the LAN; the route gate
+    still range-checks every host the page reaches either way. Raises ValueError naming the fault.
+    """
+    if not proxy:
+        return None
+    parts = urlsplit(proxy.get("url") or "")
+    if parts.scheme not in ("http", "socks5") or not parts.hostname or not parts.port:
+        raise ValueError("proxy url must be http:// or socks5:// with a host and port")
+    if not is_allowed_proxy_host(parts.hostname):
+        raise ValueError("proxy host is link-local, multicast or unresolvable")
+    host = "[%s]" % parts.hostname if ":" in parts.hostname else parts.hostname
+    settings = {"server": "%s://%s:%d" % (parts.scheme, host, parts.port)}
+    if proxy.get("username"):
+        settings["username"] = proxy["username"]
+        settings["password"] = proxy.get("password") or ""
+    return settings
+
+
+def _launch(p, args, proxy=None):
     """Launch the full Chromium, falling back to the headless shell for THIS render only.
 
     The fallback is per-render because a launch failure is not proof the full build is
@@ -248,13 +269,13 @@ def _launch(p, args):
     global _LAST_CHANNEL
     channel = _CHANNEL
     try:
-        browser = p.chromium.launch(headless=True, channel=channel, args=args)
+        browser = p.chromium.launch(headless=True, channel=channel, args=args, proxy=proxy)
     except Exception as exc:
         sys.stderr.write("[stealth-sidecar] full Chromium launch failed (%s: %s) — this "
                          "render uses the headless shell; if the build is missing, run "
                          "'patchright install chromium'\n" % (type(exc).__name__, exc))
         channel = _FALLBACK_CHANNEL
-        browser = p.chromium.launch(headless=True, channel=channel, args=args)
+        browser = p.chromium.launch(headless=True, channel=channel, args=args, proxy=proxy)
     with _CHANNEL_LOCK:
         _LAST_CHANNEL = channel
     return browser
@@ -422,6 +443,9 @@ class Handler(BaseHTTPRequestHandler):
             pins = req.get("pins") or {}
             if not isinstance(pins, dict):
                 raise TypeError("pins must be a JSON object")
+            proxy = req.get("proxy")
+            if proxy is not None and not isinstance(proxy, dict):
+                raise TypeError("proxy must be a JSON object")
             timeout_ms = max(1_000, min(int(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS),
                                         MAX_TIMEOUT_MS))
             settle_ms = max(0, min(int(req.get("settleMs") or DEFAULT_SETTLE_MS),
@@ -457,10 +481,16 @@ class Handler(BaseHTTPRequestHandler):
                     "error": "pin for %s is not a public address" % pinned_host})
                 return
 
+        try:
+            launch_proxy = _launch_proxy(proxy)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+
         with self.state.render_slots:
             try:
                 html, status, settled_status, final_url, blocked = self._render(
-                    url, pins, timeout_ms, settle_ms, wait_until, language)
+                    url, pins, timeout_ms, settle_ms, wait_until, language, launch_proxy)
             except Exception as exc:
                 self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
                 return
@@ -522,7 +552,7 @@ class Handler(BaseHTTPRequestHandler):
                 _UA_RETRY_AT = time.monotonic() + _UA_RETRY_S
             return _UA_OVERRIDE
 
-    def _render(self, url, pins, timeout_ms, settle_ms, wait_until, language):
+    def _render(self, url, pins, timeout_ms, settle_ms, wait_until, language, proxy=None):
         args = []
         if pins:
             clauses = ["MAP %s %s" % (h, ip) for h, ip in pins.items()]
@@ -570,7 +600,7 @@ class Handler(BaseHTTPRequestHandler):
             ws.connect_to_server()
 
         with sync_playwright() as p:
-            browser = _launch(p, args)
+            browser = _launch(p, args, proxy)
             try:
                 # Routed on the CONTEXT, not the page: a popup the page opens is a
                 # separate Page with no page-level handler, and service workers issue

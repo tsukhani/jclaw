@@ -54,6 +54,7 @@ public final class ToolErrorTemplates {
     public static final String WEB_BLOCKED = "web_blocked";
     public static final String WEB_FETCH_FAILED = "web_fetch_failed";
     public static final String WEB_BAD_URL = "web_bad_url";
+    public static final String WEB_BAD_ARGUMENT = "web_bad_argument";
 
     public static final String MCP_BAD_ARGUMENTS = "mcp_bad_arguments";
     public static final String MCP_NOT_ALLOWED = "mcp_not_allowed";
@@ -280,6 +281,13 @@ public final class ToolErrorTemplates {
                 "could not parse url: %s".formatted(detail),
                 "The 'url' argument is not a URL — a bare hostname or a search phrase looks like this.",
                 "Re-send with an absolute URL including its scheme, e.g. https://example.com/page.");
+    }
+
+    public static ErrorTemplate webBadArgument(String detail) {
+        return new ErrorTemplate(WEB_BAD_ARGUMENT,
+                "invalid argument: %s".formatted(detail),
+                "An output argument could not be used as given, so nothing was fetched.",
+                "Correct the named argument and re-send; the URL itself was not the problem.");
     }
 
     /**

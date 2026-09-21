@@ -103,6 +103,17 @@ If `discover` returns nothing, that is often the network rather than the printer
 
 ---
 
+### Web fetching and scraping
+
+`web_fetch` reads one page and `web_scrape` reads a page and the pages it links to. Both return readable Markdown by default, and an agent can ask for something else:
+
+- **`format`**: `text` for the content without Markdown markup, or `json` for a record per page (address, which fetcher succeeded, content, and for a single page its links). `web_fetch` also offers `html` for the raw page source.
+- **`extract`**: named values instead of the whole page. Each field is a CSS selector, with `@attr` to read an attribute, for example `{"price": ".price", "next": "a.next@href"}`. Every page comes back as those fields only, which keeps a crawl small.
+- **`metadata`**: the page's own structured data, including its title, description, canonical address, OpenGraph and Twitter card properties, and JSON-LD blocks. Many product, article, recipe and event pages publish their facts this way.
+- **`save`** (`web_scrape` only): write the result to the agent's workspace as Markdown, text, or JSON Lines with one page per line, and return only a summary and the file name. A saved crawl is not limited by the size of a chat reply.
+
+Asking for `extract` or `metadata` always makes the result JSON. To route this traffic through a proxy, see [Settings → Web Scraping](/guide#settings-web-scraping).
+
 ## MCP Servers
 
 The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps like JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. An MCP server's tools are managed on the [MCP Servers](/mcp-servers) page — not the Tools page, which lists only JClaw's first-party tools.

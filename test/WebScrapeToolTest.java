@@ -1,3 +1,5 @@
+import agents.ToolRegistry;
+import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
@@ -9,17 +11,23 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.AgentService;
 import services.ConfigService;
 import tools.WebScrapeTool;
 import tools.scrape.WebScrapeSettings;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -269,6 +277,90 @@ class WebScrapeToolTest extends UnitTest {
                     .addHeader("Content-Type", type)
                     .body(ResponseBody.create(body, MediaType.parse(type)))
                     .build();
+        }
+    }
+
+    // Output formats, extraction and saving (JCLAW-1271)
+
+    private static String errorCode(ToolRegistry.ToolResult result) {
+        return JsonParser.parseString(Objects.requireNonNull(result.structuredJson()))
+                .getAsJsonObject().getAsJsonObject("error").get("code").getAsString();
+    }
+
+    @Test
+    void jsonFormatIsOneObjectWithARecordPerPage() {
+        routes.put("https://site.test/", page("Home", "/a"));
+        routes.put("https://site.test/a", page("A"));
+        var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1,\"format\":\"json\"}");
+
+        var root = JsonParser.parseString(out).getAsJsonObject();
+        assertTrue(root.get("summary").getAsString().startsWith("Scraped 2 pages"), out);
+        var pages = root.getAsJsonArray("pages");
+        assertEquals(2, pages.size());
+        assertEquals("https://site.test/", pages.get(0).getAsJsonObject().get("url").getAsString());
+        assertTrue(pages.get(1).getAsJsonObject().get("content").getAsString().contains("# A"), out);
+    }
+
+    @Test
+    void extractCollectsTheFieldsFromEveryPageWithoutTheirContent() {
+        routes.put("https://site.test/", page("Home", "/a"));
+        routes.put("https://site.test/a", page("A"));
+        var out = scrape("""
+                {"url": "https://site.test/", "maxDepth": 1, "extract": {"title": "title"}}""");
+
+        var pages = JsonParser.parseString(out).getAsJsonObject().getAsJsonArray("pages");
+        assertEquals("[\"Home\"]", pages.get(0).getAsJsonObject().getAsJsonObject("fields").get("title").toString());
+        assertEquals("[\"A\"]", pages.get(1).getAsJsonObject().getAsJsonObject("fields").get("title").toString());
+        assertFalse(out.contains("widgets and how they combine"), "extract replaces the page content: " + out);
+    }
+
+    @Test
+    void textFormatReadsWithoutMarkup() {
+        routes.put("https://site.test/", page("Home"));
+        var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":0,\"format\":\"text\"}");
+
+        assertTrue(out.contains("=== https://site.test/ ==="), out);
+        assertFalse(out.contains("# Home"), "no Markdown heading: " + out);
+        assertTrue(out.contains("widgets and how they combine"), out);
+    }
+
+    @Test
+    void aBadArgumentIsRefusedBeforeTheCrawlStarts() {
+        routes.put("https://site.test/", page("Home"));
+        var result = new WebScrapeTool().executeRich(
+                "{\"url\":\"https://site.test/\",\"format\":\"html\"}", (Agent) null);
+
+        assertEquals("web_bad_argument", errorCode(result));
+        assertTrue(routes.pageHits().isEmpty(), "nothing may be fetched for a refused call");
+    }
+
+    @Test
+    void saveWritesTheCrawlToTheWorkspaceAndReturnsOnlyTheSummary() throws Exception {
+        routes.put("https://site.test/", page("Home", "/a"));
+        routes.put("https://site.test/a", page("A"));
+        var name = "scrapesave" + (System.nanoTime() % 1_000_000);
+        var agent = AgentService.create(name, "openrouter", "gpt-4.1");
+        try {
+            var out = new WebScrapeTool().execute("""
+                    {"url": "https://site.test/", "maxDepth": 1, "format": "json", "save": true}""", agent);
+
+            var saved = Pattern.compile("workspace file '([^']+\\.jsonl)'").matcher(out);
+            assertTrue(saved.find(), out);
+            assertFalse(out.contains("widgets and how they combine"), "the content goes to the file: " + out);
+            var lines = Files.readAllLines(AgentService.workspacePath(name).resolve(saved.group(1)));
+            assertEquals(2, lines.size(), "one JSON record per page");
+            assertEquals("https://site.test/a",
+                    JsonParser.parseString(lines.get(1)).getAsJsonObject().get("url").getAsString());
+        } finally {
+            AgentService.delete(agent);
+            deleteTree(AgentService.workspacePath(name));
+        }
+    }
+
+    private static void deleteTree(Path dir) throws IOException {
+        if (!Files.exists(dir)) return;
+        try (var walk = Files.walk(dir)) {
+            for (var path : walk.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(path);
         }
     }
 }

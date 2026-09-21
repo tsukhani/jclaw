@@ -98,6 +98,7 @@ public final class RenderedFetcher {
         });
         payload.add("pins", pins);
         payload.addProperty("maxBytes", WebExtraction.maxBodyBytes());
+        ScrapeProxy.current().ifPresent(proxy -> payload.add("proxy", proxy.toJson()));
 
         var request = new Request.Builder()
                 .url(baseUrl + "/render")

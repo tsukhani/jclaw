@@ -86,6 +86,7 @@ public final class ImpersonatedFetcher {
             payload.add("pins", pins);
             payload.addProperty("timeoutMs", CALL_TIMEOUT.toMillis() / 2);
             payload.addProperty("maxBytes", WebExtraction.maxBodyBytes());
+            ScrapeProxy.current().ifPresent(proxy -> payload.add("proxy", proxy.toJson()));
             var hdrs = new JsonObject();
             headers.forEach(hdrs::addProperty);
             payload.add("headers", hdrs);

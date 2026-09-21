@@ -184,4 +184,139 @@ class ScrapeSidecarContractTest extends UnitTest {
         assertEquals(25L * 1024 * 1024, out.get("bytes").getAsLong(),
                 "the render body ceiling is the one the README publishes");
     }
+
+    @Test
+    void theFetchSidecarHandsTheOperatorsProxyToCurlAndRefusesALinkLocalOne() throws Exception {
+        // JCLAW-1271. The real handler on a spare port, with curl stubbed: what reaches curl is
+        // what the stub records, and a refused proxy never reaches it at all.
+        var out = probe("sidecar/fetch", """
+                import sys, json, threading, urllib.request, urllib.error
+                sys.path.insert(0, sys.argv[1])
+                import serve
+                from http.server import ThreadingHTTPServer
+
+                calls = []
+
+                class FakeResponse:
+                    status_code = 200
+                    headers = {"Content-Type": "text/html"}
+                    url = "http://93.184.215.14/"
+                    def iter_content(self):
+                        yield b"<html>ok</html>"
+                    def close(self):
+                        pass
+
+                class FakeSession:
+                    def __init__(self, curl=None):
+                        pass
+                    def get(self, url, **kw):
+                        auth = kw.get("proxy_auth")
+                        calls.append({"proxy": kw.get("proxy"), "proxy_auth": list(auth) if auth else None})
+                        return FakeResponse()
+
+                class FakeRequests:
+                    Session = FakeSession
+
+                class FakeCurl:
+                    def setopt(self, *args):
+                        pass
+
+                serve.curl_requests = FakeRequests
+                serve.Curl = FakeCurl
+                serve.Handler.token = None
+                serve.Handler.state = serve.SidecarState("chrome", 0)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+
+                def post(body):
+                    req = urllib.request.Request("http://127.0.0.1:%d/fetch" % server.server_address[1],
+                                                 data=json.dumps(body).encode(), method="POST",
+                                                 headers={"Content-Type": "application/json"})
+                    try:
+                        with urllib.request.urlopen(req) as r:
+                            return r.status
+                    except urllib.error.HTTPError as e:
+                        return e.code
+
+                target = "http://93.184.215.14/"
+                out = {
+                    "direct": post({"url": target}),
+                    "http": post({"url": target, "proxy": {"url": "http://127.0.0.1:3128", "username": "u", "password": "p"}}),
+                    "socks": post({"url": target, "proxy": {"url": "socks5://127.0.0.1:1080"}}),
+                    "linkLocal": post({"url": target, "proxy": {"url": "http://169.254.169.254:80"}}),
+                    "badScheme": post({"url": target, "proxy": {"url": "ftp://127.0.0.1:21"}}),
+                }
+                out["calls"] = calls
+                server.shutdown()
+                print("PROBE:" + json.dumps(out))
+                """);
+        assertEquals(200, out.get("direct").getAsInt());
+        assertEquals(200, out.get("http").getAsInt());
+        assertEquals(200, out.get("socks").getAsInt());
+        assertEquals(400, out.get("linkLocal").getAsInt(), "a link-local proxy is never a proxy");
+        assertEquals(400, out.get("badScheme").getAsInt());
+        var calls = out.getAsJsonArray("calls");
+        assertEquals(3, calls.size(), "only the accepted requests reach curl: " + calls);
+        assertTrue(calls.get(0).getAsJsonObject().get("proxy").isJsonNull(), "no proxy, no proxy: " + calls);
+        assertEquals("http://127.0.0.1:3128", calls.get(1).getAsJsonObject().get("proxy").getAsString());
+        assertEquals("[\"u\",\"p\"]", calls.get(1).getAsJsonObject().get("proxy_auth").toString());
+        assertEquals("socks5://127.0.0.1:1080", calls.get(2).getAsJsonObject().get("proxy").getAsString());
+    }
+
+    @Test
+    void theRenderSidecarLaunchesEveryBrowserThroughTheOperatorsProxy() throws Exception {
+        // Including the headless-shell fallback: a relaunch that dropped the proxy would render
+        // that one page direct, from this host's address, without anyone noticing.
+        var out = probe("sidecar/stealth", """
+                import sys, json
+                sys.path.insert(0, sys.argv[1])
+                import serve
+
+                def refused(proxy):
+                    try:
+                        serve._launch_proxy(proxy)
+                        return False
+                    except ValueError:
+                        return True
+
+                launches = []
+
+                class FakeChromium:
+                    def __init__(self, fail_first):
+                        self.fail_first = fail_first
+                    def launch(self, **kw):
+                        launches.append(kw.get("proxy"))
+                        if self.fail_first:
+                            self.fail_first = False
+                            raise RuntimeError("full build missing")
+                        return "browser"
+
+                class FakePlaywright:
+                    def __init__(self, fail_first):
+                        self.chromium = FakeChromium(fail_first)
+
+                settings = serve._launch_proxy({"url": "http://127.0.0.1:3128", "username": "u", "password": "p"})
+                serve._launch(FakePlaywright(False), [], settings)
+                serve._launch(FakePlaywright(True), [], settings)
+                print("PROBE:" + json.dumps({
+                    "none": serve._launch_proxy(None),
+                    "http": settings,
+                    "socks": serve._launch_proxy({"url": "socks5://127.0.0.1:1080"}),
+                    "linkLocalRefused": refused({"url": "http://169.254.169.254:80"}),
+                    "schemeRefused": refused({"url": "https://127.0.0.1:443"}),
+                    "launches": launches,
+                }))
+                """);
+        assertTrue(out.get("none").isJsonNull());
+        assertEquals("{\"server\":\"http://127.0.0.1:3128\",\"username\":\"u\",\"password\":\"p\"}",
+                out.get("http").toString());
+        assertEquals("{\"server\":\"socks5://127.0.0.1:1080\"}", out.get("socks").toString());
+        assertTrue(out.get("linkLocalRefused").getAsBoolean());
+        assertTrue(out.get("schemeRefused").getAsBoolean());
+        var launches = out.getAsJsonArray("launches");
+        assertEquals(3, launches.size(), "one launch, then a failed launch and its fallback: " + launches);
+        for (var launch : launches) {
+            assertEquals(out.get("http"), launch, "every launch carries the proxy: " + launches);
+        }
+    }
 }

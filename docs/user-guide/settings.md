@@ -543,6 +543,19 @@ Every setting the `web_scrape` tool reads, in two groups. Changes apply live; no
 | `web_scrape.max-sitemap-urls`      | 50      | Most URLs one crawl takes from sitemaps. `0` seeds nothing.                           |
 | `web_scrape.max-sitemap-documents` | 3       | Most sitemap files one crawl fetches, counting nested sitemap indexes. `0` fetches none. |
 
+**Proxy**
+
+| Key                          | Default   | Meaning                                                                                  |
+|------------------------------|-----------|------------------------------------------------------------------------------------------|
+| `web_scrape.proxy.url`       | *(unset)* | Send `web_fetch` and `web_scrape` through this proxy, as `http://host:port` or `socks5://host:port`. Unset, they connect directly. Nothing outside scraping uses it. |
+| `web_scrape.proxy.username`  | *(unset)* | Username for an `http://` proxy that asks for one.                                       |
+| `web_scrape.proxy.password`  | *(unset)* | Password for an `http://` proxy. Masked like every other secret, and never shown back.   |
+| `web_scrape.proxy.enabled`   | on        | Turn the proxy off without clearing its address.                                         |
+
+The proxy covers every way a page is fetched: the plain fetch, the browser-impersonating fetch and the full browser render, as well as `robots.txt` and sitemap requests. Credentials belong in the username and password settings, never in the URL, which is shown unmasked; a `socks5://` proxy is used without credentials. A proxy on this machine or your local network is fine; link-local, multicast and unspecified addresses are refused.
+
+Behind a proxy, JClaw still checks every address before a request leaves, and refuses anything private or unresolvable. The proxy then looks the name up itself, so a DNS record that changes between the two lookups can reach whatever the proxy's own network can reach. That trade-off is accepted because the proxy is an exit you chose. With `socks5://`, the browser-impersonating fetch resolves names locally, which narrows it further.
+
 ## Tasks
 
 Three knobs for the [Tasks](/guide#tasks) subsystem:

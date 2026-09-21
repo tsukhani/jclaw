@@ -66,6 +66,45 @@ class StealthBrowserTest extends UnitTest {
         }
     }
 
+    @Test
+    void theSidecarsProxyCheckIsNoMorePermissiveThanTheProviderGuard() throws Exception {
+        // JCLAW-1271: the operator's proxy is judged on the provider rule, not the public one,
+        // so loopback and the LAN pass and only link-local, multicast and unspecified do not.
+        var table = new java.util.ArrayList<>(ADDRESSES);
+        // IPv4 written as IPv6: Java unwraps these to v4, so the Python side must block them too.
+        table.addAll(List.of("::ffff:169.254.169.254", "::ffff:224.0.0.1", "::ffff:0.0.0.0", "::ffff:10.0.0.1"));
+        for (var relative : List.of("sidecar/stealth/ssrf.py", "sidecar/fetch/ssrf.py")) {
+            var script = new File(Play.applicationPath, relative);
+            var cmd = new java.util.ArrayList<>(List.of("python3", "-c", """
+                    import sys, json
+                    sys.path.insert(0, sys.argv[1])
+                    from ssrf import is_allowed_proxy_ip
+                    print(json.dumps({a: is_allowed_proxy_ip(a) for a in sys.argv[2:]}))
+                    """, script.getParent()));
+            cmd.addAll(table);
+            var proc = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            assertTrue(proc.waitFor(60, TimeUnit.SECONDS), "python3 proxy probe timed out");
+            var stdout = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            assertEquals(0, proc.exitValue(), "python3 proxy probe failed: " + stdout);
+            var python = JsonParser.parseString(stdout).getAsJsonObject();
+
+            // Positive controls: a check that refused everything would pass every line below.
+            for (var allowed : List.of("127.0.0.1", "10.0.0.1", "8.8.8.8")) {
+                assertTrue(python.get(allowed).getAsBoolean(), relative + " refuses proxy address " + allowed);
+            }
+            for (var address : table) {
+                if (python.get(address).getAsBoolean()) {
+                    assertFalse(SsrfGuard.isBlockedForProvider(InetAddress.getByName(address)),
+                            relative + " admits " + address + " as a proxy, which the JVM blocks");
+                }
+            }
+            for (var mustBlock : List.of("169.254.169.254", "fe80::1", "224.0.0.1", "0.0.0.0", "::",
+                                         "::ffff:169.254.169.254")) {
+                assertFalse(python.get(mustBlock).getAsBoolean(), relative + " admits proxy " + mustBlock);
+            }
+        }
+    }
+
     private static void assertGuardIsNoMorePermissiveThanJava(File script) throws Exception {
         assertTrue(script.isFile(), script + " missing — a sidecar's guard has moved or gone");
 

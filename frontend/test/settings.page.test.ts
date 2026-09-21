@@ -541,7 +541,7 @@ describe('Settings page — Web Scraping section', () => {
     const component = await mountSettingsSection('web-scraping')
 
     expect(component.html()).toMatch(/<h2[^>]*>\s*Web Scraping\s*</)
-    expect(component.findAll('[data-testid^="web-scrape-row-"]')).toHaveLength(10)
+    expect(component.findAll('[data-testid^="web-scrape-row-"]')).toHaveLength(14)
     expect(component.find('[data-testid="web-scrape-row-max-pages"]').text()).toContain('40')
     expect(component.find('[data-testid="web-scrape-row-max-depth"]').text()).toContain('2')
     expect(component.find('[data-testid="web-scrape-row-timeout-seconds"]').text()).toContain('60')
@@ -605,6 +605,50 @@ describe('Settings page — Web Scraping section', () => {
 
     expect(component.find('[role="alert"]').text())
       .toContain('web_scrape.max-pages must be a whole number of at least 1.')
+  })
+
+  it('never shows a stored proxy password, and edits it from empty (JCLAW-1271)', async () => {
+    let postedBody: { key?: string, value?: string } | null = null
+    stubOtherEndpoints()
+    // The API masks a secret on every read, so this is what the panel receives.
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: [{ key: 'web_scrape.proxy.password', value: 'abcd****', updatedAt: '2026-09-22T10:00:00Z' }] }),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        postedBody = await readBody(event) as { key?: string, value?: string }
+        return { ok: true }
+      },
+    })
+    const component = await mountSettingsSection('web-scraping')
+
+    const row = component.find('[data-testid="web-scrape-row-proxy.password"]')
+    expect(row.text()).toContain('set')
+    expect(row.text()).not.toContain('abcd')
+    await row.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    const input = row.find('input')
+    expect(input.attributes('type')).toBe('password')
+    // Prefilling the mask would save the mask over the real password.
+    expect((input.element as HTMLInputElement).value).toBe('')
+    await input.setValue('n3w-secret')
+    await row.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    expect(postedBody).toEqual({ key: 'web_scrape.proxy.password', value: 'n3w-secret' })
+  })
+
+  it('reads an unset proxy as not set', async () => {
+    stubOtherEndpoints()
+    registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries: [] }) })
+    const component = await mountSettingsSection('web-scraping')
+
+    expect(component.find('[data-testid="web-scrape-row-proxy.url"]').text()).toContain('not set')
+    expect(component.find('[data-testid="web-scrape-row-proxy.password"]').text()).toContain('not set')
+    expect(component.find('[data-testid="web-scrape-row-proxy.enabled"] button[aria-pressed]').attributes('aria-pressed'))
+      .toBe('true')
   })
 
   it('names the request when a proxy answers with a page instead of the error envelope (JCLAW-1221)', async () => {

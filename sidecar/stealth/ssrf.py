@@ -55,3 +55,25 @@ def is_public_host(host):
         # leaving the request neither continued nor aborted until the render timed out.
         return False
     return bool(infos) and all(is_public_ip(i[4][0]) for i in infos)
+
+
+def is_allowed_proxy_ip(addr):
+    """True unless `addr` is link-local, multicast or unspecified -- SsrfGuard.isBlockedForProvider.
+
+    The operator's scrape proxy (JCLAW-1271) may sit on loopback or the LAN, so the rule is the
+    provider one rather than is_public_ip: only the ranges that are never a proxy are refused.
+    """
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    return not (ip.is_link_local or ip.is_multicast or ip.is_unspecified)
+
+
+def is_allowed_proxy_host(host):
+    """True when every address `host` resolves to passes is_allowed_proxy_ip."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return bool(infos) and all(is_allowed_proxy_ip(i[4][0]) for i in infos)

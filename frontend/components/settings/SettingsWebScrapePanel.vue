@@ -11,7 +11,7 @@ const { configData, saving, refresh } = useSettingsConfig()
 
 interface SettingField {
   key: string
-  kind: 'number' | 'text' | 'boolean'
+  kind: 'number' | 'text' | 'boolean' | 'secret'
   /** Shown while the key is unset — mirrors the default in WebScrapeTool / SitemapSeeder. */
   fallback: string
   min?: number
@@ -98,6 +98,35 @@ const GROUPS: { label: string, fields: SettingField[] }[] = [
       },
     ],
   },
+  {
+    label: 'Proxy',
+    fields: [
+      {
+        key: 'web_scrape.proxy.url',
+        kind: 'text',
+        fallback: '',
+        tip: 'Route web_fetch and web_scrape through this proxy, as http://host:port or socks5://host:port. Nothing else uses it. Leave empty to connect directly. Credentials go in username and password, not in the URL.',
+      },
+      {
+        key: 'web_scrape.proxy.username',
+        kind: 'text',
+        fallback: '',
+        tip: 'Username for an http:// proxy that asks for one. SOCKS5 proxies are used without credentials.',
+      },
+      {
+        key: 'web_scrape.proxy.password',
+        kind: 'secret',
+        fallback: '',
+        tip: 'Password for an http:// proxy. Stored like the other secrets here and never shown back.',
+      },
+      {
+        key: 'web_scrape.proxy.enabled',
+        kind: 'boolean',
+        fallback: 'true',
+        tip: 'Turn the proxy off without clearing its address.',
+      },
+    ],
+  },
 ]
 
 function labelOf(field: SettingField): string {
@@ -118,10 +147,17 @@ const editingKey = ref<string | null>(null)
 const draft = ref<string | number>('')
 const { saveError, attempt } = useSaveAttempt()
 
+// A secret reads back masked; prefilling the editor with the mask would save the mask over the real value.
 function startEdit(field: SettingField) {
   editingKey.value = field.key
-  draft.value = valueOf(field)
+  draft.value = field.kind === 'secret' ? '' : valueOf(field)
   saveError.value = null
+}
+
+function shown(field: SettingField): string {
+  const value = valueOf(field)
+  if (field.kind === 'secret') return value ? 'set' : 'not set'
+  return value || 'not set'
 }
 
 async function save(key: string, value: string) {
@@ -195,11 +231,13 @@ async function save(key: string, value: string) {
             <template v-else-if="editingKey === field.key">
               <input
                 v-model="draft"
-                :type="field.kind === 'number' ? 'number' : 'text'"
+                :type="field.kind === 'number' ? 'number' : field.kind === 'secret' ? 'password' : 'text'"
                 :min="field.min"
                 :max="field.max"
                 :aria-label="labelOf(field)"
-                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+                :autocomplete="field.kind === 'secret' ? 'new-password' : undefined"
+                :class="field.kind === 'number' ? 'w-24' : 'flex-1 min-w-0'"
+                class="px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
@@ -224,7 +262,7 @@ async function save(key: string, value: string) {
               </button>
             </template>
             <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono">{{ valueOf(field) }}</span>
+              <span class="flex-1 text-sm text-fg-primary font-mono break-all">{{ shown(field) }}</span>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Edit"
