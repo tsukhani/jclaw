@@ -326,7 +326,7 @@ dependencies {
     // and attaches through PF-92's javaagent.path instead. Both BOMs so every artifact
     // moves together. The OTLP sender's OkHttp is okhttp-jvm 5.x, the same artifact
     // family pinned below — no exclusion needed, unlike the telegrambots graph.
-    implementation(platform("io.opentelemetry:opentelemetry-bom:1.65.0"))
+    implementation(platform("io.opentelemetry:opentelemetry-bom:1.66.0"))
     implementation(platform("io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha:2.31.1-alpha"))
     implementation("io.opentelemetry:opentelemetry-api")
     implementation("io.opentelemetry:opentelemetry-sdk")
