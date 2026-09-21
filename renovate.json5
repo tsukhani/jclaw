@@ -123,21 +123,6 @@
       matchPackageNames: ["typescript"],
       allowedVersions: "<7",
     },
-    // Block @tanstack/vue-table 9.x. v9 is an API rewrite: getCoreRowModel is
-    // gone (the core row model is implicit), useVueTable became useTable, and
-    // row models compose through tableFeatures() — so the v9 branch fails 32
-    // tests across 6 files on a single `getCoreRowModel is not a function` at
-    // DataTable.vue:57. Unlike the typescript hold above, this one is a code
-    // change we could simply make; it's held because components/ui/table/** is
-    // shadcn-vue-derived and shadcn has not migrated (shadcn-ui/ui#11389
-    // recommends pinning to ^8.21.3), so porting now forks DataTable.vue from
-    // upstream while future table pulls stay v8-shaped. Tracking: JCLAW-1063.
-    // Lift once shadcn-vue ships a v9-based table registry, migrating
-    // DataTable.vue in the same change.
-    {
-      matchPackageNames: ["@tanstack/vue-table"],
-      allowedVersions: "<9",
-    },
     {
       groupName: "eslint",
       matchManagers: ["npm"],

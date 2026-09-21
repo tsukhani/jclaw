@@ -1,13 +1,12 @@
-<script setup lang="ts" generic="TData">
+<script setup lang="ts" generic="TData extends RowData">
 import {
   FlexRender,
-  useVueTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  type ColumnDef,
+  useTable,
+  type RowData,
   type SortingState,
   type RowSelectionState,
 } from '@tanstack/vue-table'
+import { dataTableFeatures, type DataTableColumn } from '~/utils/data-table'
 import {
   Table,
   TableBody,
@@ -18,7 +17,7 @@ import {
 } from '~/components/ui/table'
 
 const props = withDefaults(defineProps<{
-  columns: ColumnDef<TData, unknown>[]
+  columns: DataTableColumn<TData>[]
   data: TData[]
   loading?: boolean
   emptyMessage?: string
@@ -51,13 +50,12 @@ const sorting = ref<SortingState>([])
 const rowSelection = ref<RowSelectionState>({})
 const focusedRowIndex = ref(-1)
 
-const table = useVueTable({
+const table = useTable({
+  features: dataTableFeatures,
   get data() { return props.data },
   get columns() { return props.columns },
-  getCoreRowModel: getCoreRowModel(),
-  getSortedRowModel: getSortedRowModel(),
   // manualSorting=true tells the table the rows arrive pre-sorted (from the
-  // server), so getSortedRowModel becomes a passthrough — the sort state is
+  // server), so the sorted row model becomes a passthrough — the sort state is
   // still tracked for the header arrow, and the change is emitted upward.
   get manualSorting() { return props.manualSorting },
   state: {

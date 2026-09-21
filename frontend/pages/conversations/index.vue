@@ -2,7 +2,8 @@
 import type { Agent, Conversation, Message } from '~/types/api'
 import type { Filter } from '~/components/FilterBar.vue'
 import { h } from 'vue'
-import type { ColumnDef, SortingState } from '@tanstack/vue-table'
+import type { SortingState } from '@tanstack/vue-table'
+import type { DataTableColumn } from '~/utils/data-table'
 import { ChatBubbleLeftRightIcon, PencilSquareIcon, StarIcon as StarOutlineIcon } from '@heroicons/vue/24/outline'
 import { StarIcon as StarSolidIcon } from '@heroicons/vue/24/solid'
 
@@ -393,7 +394,7 @@ function closePeek() {
 }
 
 // ── DataTable column definitions ────────────────────────────────────────────
-const columns: ColumnDef<Conversation, unknown>[] = [
+const columns: DataTableColumn<Conversation>[] = [
   {
     id: 'select',
     header: () => h('input', {
