@@ -3104,7 +3104,8 @@ do_start_prod() {
 
     echo ""
     echo "JClaw is running (production):"
-    echo "  App: http://localhost:$BACKEND_PORT  (pid: $(cat "$SCRIPT_DIR/server.pid"))"
+    echo "  App:  http://localhost:$BACKEND_PORT  (pid: $(cat "$SCRIPT_DIR/server.pid"))"
+    echo "  Logs: logs/application.log"
     echo ""
     echo "Tail logs with: $0 logs"
     echo "Stop with:      $0 stop"
