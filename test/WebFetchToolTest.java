@@ -691,8 +691,28 @@ class WebFetchToolTest extends UnitTest {
         assertEquals("[\"\u00a329.99\"]", record.getAsJsonObject("fields").get("price").toString());
         assertEquals("[\"https://example.com/x\"]", record.getAsJsonObject("fields").get("more").toString());
         assertFalse(record.has("content"), "extract replaces the page content: " + result);
+        assertFalse(record.has("links"), "a link list would undo what extract saves: " + result);
         // A site offering markdown would leave the selectors nothing to match.
         assertEquals("text/html,application/xhtml+xml", queue.requests.get(0).header("Accept"));
+    }
+
+    @Test
+    void textFormatReadsCleanlyWhereTheMarkdownCarriesFootnotes() {
+        // Shaped on a live Wikipedia fetch: a footnote superscript became ^[\\[1\\]](#n)^ in the
+        // Markdown, which a plain parse left in and which unbalanced the links after it.
+        queue.enqueue(okHtml("<html><head><title>Web scraping</title></head><body><article><p>"
+                + "<b>Web scraping</b>, <b>web harvesting</b>, or data extraction"
+                + "<sup id=\"c1\"><a href=\"#cite_note-1\">[1]</a></sup> is described in "
+                + "<a href=\"https://example.com/js\">JumpStation</a>, which was launched.</p><p>"
+                + "Further explanatory prose that keeps the article substantial enough. ".repeat(8)
+                + "</p></article></body></html>"));
+        var result = new WebFetchTool().execute("{\"url\":\"http://example.test/w\",\"format\":\"text\"}", null);
+
+        assertTrue(result.contains("Web scraping, web harvesting, or data extraction[1] is described in "
+                + "JumpStation, which was launched."), result);
+        assertFalse(result.contains("^"), "no superscript markup: " + result);
+        assertFalse(result.contains("]("), "no link syntax: " + result);
+        assertFalse(result.contains(" ,"), "no space before a comma: " + result);
     }
 
     @Test

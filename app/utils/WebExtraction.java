@@ -16,6 +16,11 @@ import org.apache.tika.metadata.HttpHeaders;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.TextNode;
+import org.jsoup.select.NodeTraversor;
+import org.jsoup.select.NodeVisitor;
+import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
 
@@ -32,6 +37,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * SSRF-guarded fetch plus readable-content extraction, shared by {@code web_fetch}
@@ -370,11 +376,50 @@ public final class WebExtraction {
      * leading hashes.
      */
     public static String toPlain(FetchResult fetched, String text) {
-        if (!isHtml(fetched.contentType(), fetched.body()) && !isMarkdown(fetched.contentType())) {
-            return text;
+        if (isHtml(fetched.contentType(), fetched.body())) {
+            // From the HTML, not the Markdown: html2md writes a footnote as ^[\[1\]](#n)^, which a
+            // plain parse leaves in, and which unbalances every link after it (measured on Wikipedia).
+            var readable = readable(new String(fetched.body(), charsetFor(fetched.contentType())),
+                    fetched.finalUrl());
+            var plain = blockText(Jsoup.parseBodyFragment(readable.contentHtml()).body());
+            var title = readable.title();
+            return truncate(title == null || title.isBlank() ? plain : title.strip() + "\n\n" + plain,
+                    "extracted text");
         }
+        if (!isMarkdown(fetched.contentType())) return text;
         var plain = new TextCollectingVisitor().collectAndGetText(MARKDOWN_PARSER.parse(text));
         return plain.replaceAll("\n{3,}", "\n\n").strip();
+    }
+
+    /** Elements that end a line of text; a table cell only ends a word. */
+    private static final Set<String> BLOCKS = Set.of("p", "div", "br", "li", "ul", "ol", "dl", "dt", "dd",
+            "h1", "h2", "h3", "h4", "h5", "h6", "tr", "table", "blockquote", "pre", "section", "article",
+            "header", "footer", "main", "aside", "nav", "figure", "figcaption", "hr");
+
+    /** The text of {@code root}, with a line break wherever a block element starts or ends. */
+    private static String blockText(Element root) {
+        var sb = new StringBuilder();
+        NodeTraversor.traverse(new NodeVisitor() {
+            @Override
+            public void head(org.jsoup.nodes.Node node, int depth) {
+                if (node instanceof TextNode text) {
+                    sb.append(text.text());
+                } else if (node instanceof Element el) {
+                    if (BLOCKS.contains(el.normalName())) sb.append('\n');
+                    else if (el.normalName().equals("td") || el.normalName().equals("th")) sb.append(' ');
+                }
+            }
+
+            @Override
+            public void tail(org.jsoup.nodes.Node node, int depth) {
+                if (node instanceof Element el && BLOCKS.contains(el.normalName())) sb.append('\n');
+            }
+        }, root);
+        return sb.toString()
+                .replaceAll("[ \t]+\n", "\n")
+                .replaceAll("\n[ \t]+", "\n")
+                .replaceAll("\n{3,}", "\n\n")
+                .strip();
     }
 
     /**
@@ -426,6 +471,27 @@ public final class WebExtraction {
      * with the page title as an H1 when present.
      */
     public static String extractText(String html, String url) {
+        var readable = readable(html, url);
+        var markdown = HTML_TO_MARKDOWN.convert(readable.contentHtml()).strip();
+
+        var result = new StringBuilder();
+        var title = readable.title();
+        if (title != null && !title.isBlank()) {
+            result.append("# ").append(title.strip()).append("\n\n");
+        }
+        result.append(markdown);
+
+        if (result.length() > MAX_TEXT_LENGTH) {
+            return result.substring(0, MAX_TEXT_LENGTH)
+                    + "\n\n[Truncated: extracted text exceeds %d characters]".formatted(MAX_TEXT_LENGTH);
+        }
+        return result.toString();
+    }
+
+    /** A page's main content as HTML, and its title — shared so Markdown and plain text read the same content. */
+    private record Readable(String contentHtml, @Nullable String title) {}
+
+    private static Readable readable(String html, String url) {
         String contentHtml = null;
         String title = null;
 
@@ -450,20 +516,7 @@ public final class WebExtraction {
             // jsoup always yields a <body> (creating an empty one if absent), so no null guard is needed.
             contentHtml = doc.body().html();
         }
-
-        var markdown = HTML_TO_MARKDOWN.convert(contentHtml).strip();
-
-        var result = new StringBuilder();
-        if (title != null && !title.isBlank()) {
-            result.append("# ").append(title.strip()).append("\n\n");
-        }
-        result.append(markdown);
-
-        if (result.length() > MAX_TEXT_LENGTH) {
-            return result.substring(0, MAX_TEXT_LENGTH)
-                    + "\n\n[Truncated: extracted text exceeds %d characters]".formatted(MAX_TEXT_LENGTH);
-        }
-        return result.toString();
+        return new Readable(contentHtml, title);
     }
 
     /** Extract text from a non-HTML document (PDF, Office, EPUB, …) with Tika. */

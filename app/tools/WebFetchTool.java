@@ -248,7 +248,10 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private String render(ScrapeOutput.Request output, String url, WebExtraction.FetchResult body,
                           String text, ScrapeRung servedBy, Agent agent) {
         if (output.json()) {
-            return GsonHolder.GSON.toJson(ScrapeOutput.pageRecord(output, url, body, text, servedBy, true));
+            // Links only when JSON was asked for outright: beside extract or metadata, up to two hundred
+            // URLs would undo the saving those arguments exist for.
+            boolean withLinks = output.format() == ScrapeOutput.Format.JSON && !output.contentOmitted();
+            return GsonHolder.GSON.toJson(ScrapeOutput.pageRecord(output, url, body, text, servedBy, withLinks));
         }
         return switch (output.format()) {
             case HTML -> rawHtml(body, url, agent);
