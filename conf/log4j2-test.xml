@@ -40,7 +40,8 @@
         <!-- OtelRuntimeTest enables export against http://127.0.0.1:1 on purpose, to prove the
              exporter leaves swap without a restart. The SDK then logs SEVERE "Failed to export"
              on every attempt — expected, and noise. It was invisible until JUL was bridged into
-             log4j2 (jvm.memory); routing it here is what makes it suppressible at all. Test mode
+             log4j2 (the framework does this since 1.13.73, PF-175); that routing is what makes
+             it suppressible at all. Test mode
              only: log4j2.xml and log4j2-prod.xml leave these at Root level, where a real export
              failure is worth seeing. -->
         <Logger name="io.opentelemetry" level="OFF"/>

@@ -328,22 +328,6 @@ dependencies {
     // family pinned below — no exclusion needed, unlike the telegrambots graph.
     implementation(platform("io.opentelemetry:opentelemetry-bom:1.66.0"))
     implementation(platform("io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha:2.31.1-alpha"))
-    // JUL -> log4j2 bridge, activated by -Djava.util.logging.manager in conf/application.conf's
-    // jvm.memory. The OTel SDK below and Lucene both log through java.util.logging; without this
-    // their output bypasses log4j2 entirely and lands only on stdout, which play start truncates
-    // on every boot. The version is derived, not restated: log4j-jul must match the log4j-core
-    // the fork ships, a hand-copied pin drifts silently on the next fork bump, and log4j rejects
-    // a mismatched pair at runtime rather than at build time. Belongs in the fork itself — it
-    // owns the log4j pin and builds the JVM argv — but lives here until PF-175 lands.
-    val forkLog4jVersion = run {
-        val deps = file("/opt/play1/framework/dependencies.yml")
-        require(deps.isFile) {
-            "play1 dependencies.yml not found at $deps — cannot derive the log4j-jul version."
-        }
-        Regex("""log4j-core\s+(\S+)""").find(deps.readText())?.groupValues?.get(1)
-            ?: error("No log4j-core pin found in $deps — cannot derive the log4j-jul version.")
-    }
-    implementation("org.apache.logging.log4j:log4j-jul:$forkLog4jVersion")
     implementation("io.opentelemetry:opentelemetry-api")
     implementation("io.opentelemetry:opentelemetry-sdk")
     implementation("io.opentelemetry:opentelemetry-exporter-otlp")
