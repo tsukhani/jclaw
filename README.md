@@ -66,6 +66,9 @@ prompt. Re-running the one-line installer
 does the same thing — it hands off to `jclaw upgrade` when an install already
 exists. Docker deployments upgrade the image instead
 (`docker compose pull && docker compose up -d`), and a git clone uses `git pull`.
+Release notes for every published version are on the
+[Releases page](https://github.com/tsukhani/jclaw/releases); the upgrade panel
+shows the newest release's notes too.
 
 **Requirements:** a Java 25+ runtime ([Zulu](https://www.azul.com/downloads/?version=java-25)
 or Temurin), or let the installer download one. Nothing else — the bundle bakes in
