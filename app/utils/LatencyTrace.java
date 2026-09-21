@@ -5,10 +5,10 @@ import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.context.Scope;
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
+import services.telemetry.GenAiAttributes;
 import services.telemetry.OtelRuntime;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -110,7 +110,7 @@ public final class LatencyTrace {
     public void conversationId(@Nullable Long id) {
         if (id == null) return;
         this.conversationId = Long.toString(id);
-        span.setAttribute(GenAiIncubatingAttributes.GEN_AI_CONVERSATION_ID, this.conversationId);
+        span.setAttribute(GenAiAttributes.GEN_AI_CONVERSATION_ID, this.conversationId);
     }
 
     /**

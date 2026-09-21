@@ -2,13 +2,13 @@ import com.google.gson.JsonParser;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.semconv.HttpAttributes;
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.mvc.Http;
 import play.test.FunctionalTest;
+import services.telemetry.GenAiAttributes;
 import services.telemetry.OtelRuntime;
 import utils.LatencyTrace;
 
@@ -79,7 +79,7 @@ class StreamingTurnSpanTest extends FunctionalTest {
         assertEquals(2, chats.size(), () -> "chat spans in " + describe(spans) + "\nloadtest report: " + report[0]);
         for (var chat : chats) {
             assertEquals(SpanKind.CLIENT, chat.getKind());
-            assertNotNull(chat.getAttributes().get(GenAiIncubatingAttributes.GEN_AI_CONVERSATION_ID),
+            assertNotNull(chat.getAttributes().get(GenAiAttributes.GEN_AI_CONVERSATION_ID),
                     "the streaming runner tags the turn with its conversation, and the model call inherits it");
 
             var turn = parentOf.apply(chat);

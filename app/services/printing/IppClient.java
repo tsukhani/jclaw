@@ -6,6 +6,7 @@ import com.hp.jipp.encoding.EnumType;
 import com.hp.jipp.encoding.IntRangeType;
 import com.hp.jipp.encoding.IntType;
 import com.hp.jipp.encoding.IppInputStream;
+import com.hp.jipp.encoding.IppOutputStream;
 import com.hp.jipp.encoding.IppPacket;
 import com.hp.jipp.encoding.KeywordType;
 import com.hp.jipp.encoding.Tag;
@@ -495,7 +496,8 @@ public final class IppClient {
                 // Stream straight into the sink rather than buffering the whole
                 // job: a print document is arbitrarily large and this path is the
                 // one that would OOM on a 200 MB PDF.
-                packet.write(sink.outputStream());
+                // Not closed: that would close the sink before the document below is written.
+                new IppOutputStream(sink.outputStream()).write(packet);
                 if (document != null) {
                     sink.write(document);
                 }
@@ -516,7 +518,7 @@ public final class IppClient {
     /** Encode a packet to bytes. Exposed for tests, which assert the wire form without a printer. */
     static byte[] encode(IppPacket packet) throws IOException {
         var out = new ByteArrayOutputStream();
-        packet.write(out);
+        new IppOutputStream(out).write(packet);
         return out.toByteArray();
     }
 }

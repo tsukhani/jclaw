@@ -6,8 +6,6 @@ import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.semconv.ErrorAttributes;
 import io.opentelemetry.semconv.HttpAttributes;
 import io.opentelemetry.semconv.ServerAttributes;
-import io.opentelemetry.semconv.incubating.GenAiIncubatingAttributes;
-import io.opentelemetry.semconv.incubating.GenAiIncubatingMetrics;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ProviderConfig;
 import llm.OpenAiProvider;
@@ -23,6 +21,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.telemetry.GenAiAttributes;
+import services.telemetry.GenAiMetrics;
 import services.telemetry.GenAiSpans;
 import services.telemetry.OtelRuntime;
 import utils.HttpFactories;
@@ -118,18 +118,18 @@ class GenAiSpansTest extends UnitTest {
         assertEquals(turn.getSpanContext().getSpanId(), chat.getParentSpanContext().getSpanId(),
                 "the model call nests under the turn");
         var a = chat.getAttributes();
-        assertEquals("chat", a.get(GenAiIncubatingAttributes.GEN_AI_OPERATION_NAME));
-        assertEquals("openai", a.get(GenAiIncubatingAttributes.GEN_AI_PROVIDER_NAME));
-        assertEquals("gpt-x", a.get(GenAiIncubatingAttributes.GEN_AI_REQUEST_MODEL));
-        assertEquals("gpt-x-2024", a.get(GenAiIncubatingAttributes.GEN_AI_RESPONSE_MODEL));
-        assertEquals("chatcmpl-1", a.get(GenAiIncubatingAttributes.GEN_AI_RESPONSE_ID));
-        assertEquals(128L, a.get(GenAiIncubatingAttributes.GEN_AI_REQUEST_MAX_TOKENS));
-        assertEquals(10L, a.get(GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS));
-        assertEquals(5L, a.get(GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS));
-        assertEquals(4L, a.get(GenAiIncubatingAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS));
+        assertEquals("chat", a.get(GenAiAttributes.GEN_AI_OPERATION_NAME));
+        assertEquals("openai", a.get(GenAiAttributes.GEN_AI_PROVIDER_NAME));
+        assertEquals("gpt-x", a.get(GenAiAttributes.GEN_AI_REQUEST_MODEL));
+        assertEquals("gpt-x-2024", a.get(GenAiAttributes.GEN_AI_RESPONSE_MODEL));
+        assertEquals("chatcmpl-1", a.get(GenAiAttributes.GEN_AI_RESPONSE_ID));
+        assertEquals(128L, a.get(GenAiAttributes.GEN_AI_REQUEST_MAX_TOKENS));
+        assertEquals(10L, a.get(GenAiAttributes.GEN_AI_USAGE_INPUT_TOKENS));
+        assertEquals(5L, a.get(GenAiAttributes.GEN_AI_USAGE_OUTPUT_TOKENS));
+        assertEquals(4L, a.get(GenAiAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS));
         assertEquals(Boolean.TRUE, a.get(GenAiSpans.JCLAW_CACHE_HIT));
-        assertEquals(List.of("stop"), a.get(GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
-        assertEquals("42", a.get(GenAiIncubatingAttributes.GEN_AI_CONVERSATION_ID));
+        assertEquals(List.of("stop"), a.get(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
+        assertEquals("42", a.get(GenAiAttributes.GEN_AI_CONVERSATION_ID));
         assertEquals("main", a.get(GenAiSpans.JCLAW_AGENT));
         assertEquals("web", a.get(GenAiSpans.JCLAW_CHANNEL));
         assertEquals("api.example.test", a.get(ServerAttributes.SERVER_ADDRESS));
@@ -146,9 +146,9 @@ class GenAiSpansTest extends UnitTest {
                 "the HTTP client span nests under the model call");
 
         var metrics = OtelRuntime.captureMetricsForTest(() -> { });
-        var duration = histogramPoint(metrics, GenAiIncubatingMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME);
+        var duration = histogramPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME);
         assertTrue(duration.getBoundaries().contains(0.01), () -> "semconv buckets on the duration: " + duration.getBoundaries());
-        var tokens = histogramPoint(metrics, GenAiIncubatingMetrics.GEN_AI_CLIENT_TOKEN_USAGE_NAME);
+        var tokens = histogramPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_TOKEN_USAGE_NAME);
         assertTrue(tokens.getBoundaries().contains(4.0), () -> "semconv buckets on token usage: " + tokens.getBoundaries());
     }
 
@@ -189,15 +189,15 @@ class GenAiSpansTest extends UnitTest {
             var turn = one(spans, "turn");
             var chat = one(spans, "chat gpt-x");
             var a = chat.getAttributes();
-            assertEquals(Boolean.TRUE, a.get(GenAiIncubatingAttributes.GEN_AI_REQUEST_STREAM));
-            var ttfc = a.get(GenAiIncubatingAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK);
+            assertEquals(Boolean.TRUE, a.get(GenAiAttributes.GEN_AI_REQUEST_STREAM));
+            var ttfc = a.get(GenAiAttributes.GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK);
             assertNotNull(ttfc, "time to first chunk is stamped on a streamed call");
             assertTrue(ttfc >= 0.0);
-            assertEquals(10L, a.get(GenAiIncubatingAttributes.GEN_AI_USAGE_INPUT_TOKENS));
-            assertEquals(5L, a.get(GenAiIncubatingAttributes.GEN_AI_USAGE_OUTPUT_TOKENS));
-            assertEquals(4L, a.get(GenAiIncubatingAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS),
+            assertEquals(10L, a.get(GenAiAttributes.GEN_AI_USAGE_INPUT_TOKENS));
+            assertEquals(5L, a.get(GenAiAttributes.GEN_AI_USAGE_OUTPUT_TOKENS));
+            assertEquals(4L, a.get(GenAiAttributes.GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS),
                     "the re-scanned cache reads reach the span");
-            assertEquals(List.of("stop"), a.get(GenAiIncubatingAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
+            assertEquals(List.of("stop"), a.get(GenAiAttributes.GEN_AI_RESPONSE_FINISH_REASONS));
             assertEquals(turn.getSpanContext().getSpanId(), chat.getParentSpanContext().getSpanId(),
                     "the span opened on the dispatching thread parents under the turn");
             var http = httpClientSpan(spans);
