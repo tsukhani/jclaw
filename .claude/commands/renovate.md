@@ -1,6 +1,6 @@
 ---
 name: renovate
-description: Audit renovate.json5's version caps for lift conditions that have expired, then discover origin/renovate/* branches, merge each into local main one at a time, and validate by ecosystem — play autotest for backend bumps, pnpm test/lint/typecheck/stylelint for frontend bumps (with a full lockfile regen). Stops at the local merges; hand off to /deploy to push.
+description: Audit what Renovate cannot see — version caps whose lift conditions have expired, and vendored specs with no artifact to bump — then discover origin/renovate/* branches, merge each into local main one at a time, and validate by ecosystem — play autotest for backend bumps, pnpm test/lint/typecheck/stylelint for frontend bumps (with a full lockfile regen). Stops at the local merges; hand off to /deploy to push.
 category: Maintenance
 tags: [renovate, dependencies, merge, git, frontend, backend, tests]
 argument-hint: "[empty | caps | frontend | backend | <branch-substring>]"
@@ -16,14 +16,16 @@ This works on `main` directly — the user wants the bumps *merged with main*, s
 - *(empty)* → every `renovate/*` branch on origin that isn't already merged.
 - `frontend` → only branches that touch `frontend/**`.
 - `backend` → only branches that touch gradle/Java build files.
-- `caps` → run **Phase 0 only**: audit the blockers in `renovate.json5` and stop. No branches are merged.
+- `caps` → run **Phase 0 only**: audit the version caps and the vendored specs, and stop. No branches are merged.
 - a substring (e.g. `okhttp`, `nuxt`) → only `renovate/*` branches whose name matches.
 
 Reject anything else with a clear message; do not guess. If no matching renovate branches exist, say so and stop — there's nothing to do.
 
 ---
 
-**Phase 0 — Audit the blockers (always, unless `$ARGUMENTS` names a substring)**
+**Phase 0 — Audit what Renovate cannot see (always, unless `$ARGUMENTS` names a substring)**
+
+Two kinds of dependency are invisible to Renovate: a version cap, which suppresses the update it would otherwise propose (0a–0e), and a specification jclaw has vendored because there is no artifact to depend on (0f–0g). Both drift silently.
 
 A version cap suppresses the PR *entirely*, so a cap whose cause has expired is invisible: there is no branch to notice, and the config keeps describing a world that has moved on. Renovate will never tell you. This phase is the only thing that will.
 
@@ -44,6 +46,14 @@ A version cap suppresses the PR *entirely*, so a cap whose cause has expired is 
 0d. **When a cap is lifted, delete its comment with it, along with any sibling rule that existed only to announce the unblock** (e.g. a `prBodyNotes` rule watching for the release that was supposed to be the signal). Leaving either behind is a changelog in the config; the reasoning goes in the commit message (AGENTS.md §8).
 
 0e. **If a cap's *stated reason* turns out to be wrong** — not merely expired, but never accurate — say so plainly in the report and the commit message. Both caps lifted on 2026-09-21 had mis-specified lift conditions, and that is worth more to the next reader than the bump itself.
+
+0f. **Check the vendored GenAI semantic conventions against upstream.** jclaw owns `services.telemetry.GenAiAttributes` and `GenAiMetrics` because the GenAI conventions moved to a repository that publishes no Java artifact, so there is nothing for Renovate to bump — a key renamed upstream leaves jclaw emitting the old one, silently. This has already happened once: `gen_ai.usage.cache_creation.input_tokens` became `gen_ai.usage.cache_write.input_tokens`.
+   - **Source:** `open-telemetry/semantic-conventions-genai`, `model/gen-ai/registry.yaml` for attributes and `model/gen-ai/metrics.yaml` for metrics, on `main` — the repository cuts no releases. Name the path exactly: other directories (`model/aws-bedrock/`) carry their own `registry.yaml`, and taking the first match reads the wrong file.
+   - **Schema:** the Weaver format keys attributes by `key:` and metrics by `name:` — not `id:` or `metric_name:`. An enum attribute's `type:` nests a `members:` list; it is a string on the wire, not a type mismatch.
+   - **Validate before believing a "missing".** Confirm a key you know is present (`gen_ai.request.model`) resolves first. A broken parser reports every key missing, which reads exactly like wholesale drift — and each of the three mistakes above produced a confident false drift report on 2026-09-21.
+   - **Compare** every `GenAiAttributes` key by name and type, and every `GenAiMetrics` constant by name and unit (a collector aggregates by both).
+
+0g. **Report drift; don't apply it.** For each difference, say whether it is a rename (same meaning under a new key — read the upstream `brief` to confirm), a removal, or a type or unit change. A wire-name change breaks any dashboard or query keyed on the old name, so the user decides. When they choose to align, change `GenAiAttributes`/`GenAiMetrics` and `GenAiWireNamesTest` together — the pin test fails until both move — and update the pinned commit in `GenAiAttributes`' Javadoc to the one you checked. Rename only the emitted OTel key, never by blind search-and-replace: a provider's response field can share the old spelling. Anthropic's `cache_creation_input_tokens`, which `LlmProvider` reads, is not the OTel attribute and must not change.
 
 With `$ARGUMENTS` = `caps`, stop here. Otherwise continue to Phase 1; a stale cap and a pending branch are independent, and the run handles both.
 
@@ -113,4 +123,5 @@ Process **BACKEND** branches first, then **FRONTEND** — each ecosystem is batc
 - Confirm before stopping jclaw for the backend suite; restart it afterward only if it was running.
 - A failing backend bump is undone (`reset --hard HEAD~1`) and skipped, not forced through; a failing frontend batch is reported for the user to triage.
 - **Never lift a version cap without the user choosing it.** Report the verdict and the cost; the decision is theirs. A lift and the upgrade behind it land in one commit, never separately.
+- Never apply vendored-spec drift unasked: a renamed wire key breaks whatever keys on the old one. Report it (0g) and let the user choose.
 - Never trust a negative from an unvalidated check — a sweeping "absent" across a dependency's whole API is a broken grep (symlinks, `.pnpm/`) far more often than it is a real finding.
