@@ -1,13 +1,16 @@
 import controllers.RequestPrincipal;
 import models.Agent;
 import models.Conversation;
+import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.mvc.Http;
 import play.test.FunctionalTest;
 import services.Tx;
+import utils.AppClock;
 
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -38,6 +41,8 @@ class AgentScopedAccessTest extends FunctionalTest {
     private Long alienConversationId;
     private Long ownConversationId;
     private Long callerAgentId;
+    private Long ownRunId;
+    private Long alienRunId;
 
     // No Fixtures.deleteDatabase(): play1 runs test classes concurrently and these rows are
     // scoped to this class by name. Wiping the shared H2 would only break the siblings.
@@ -47,12 +52,18 @@ class AgentScopedAccessTest extends FunctionalTest {
         var seeded = commit(() -> {
             var caller = agentNamed("scope-test-caller");
             var alien = agentNamed("scope-test-alien");
+            var ownConversation = conversationFor(caller);
+            var alienConversation = conversationFor(alien);
             return new Long[]{
-                    caller.id, conversationFor(caller).id, conversationFor(alien).id};
+                    caller.id, ownConversation.id, alienConversation.id,
+                    settledRunFor(caller, ownConversation).id,
+                    settledRunFor(alien, alienConversation).id};
         });
         callerAgentId = seeded[0];
         ownConversationId = seeded[1];
         alienConversationId = seeded[2];
+        ownRunId = seeded[3];
+        alienRunId = seeded[4];
     }
 
     @AfterEach
@@ -113,6 +124,41 @@ class AgentScopedAccessTest extends FunctionalTest {
                 "an HTTP transport must not hit the STDIO guard; got: " + getContent(resp));
     }
 
+    // --- subagent runs: an agent owns what it spawned ----------------------------------------
+
+    @Test
+    void anAgentKillsItsOwnRunAndNotAnotherAgents() {
+        var own = asAgent(() -> POST(agentRequest(callerAgentId),
+                "/api/subagent-runs/" + ownRunId + "/kill", "application/json", "{}"));
+        assertStatus(200, own);
+
+        var alien = asAgent(() -> POST(agentRequest(callerAgentId),
+                "/api/subagent-runs/" + alienRunId + "/kill", "application/json", "{}"));
+        assertStatus(403, alien);
+        assertTrue(getContent(alien).contains(AGENT_SCOPE), getContent(alien));
+    }
+
+    @Test
+    void anAgentDeletesItsOwnRunAndNotAnotherAgents() {
+        var own = asAgent(() -> DELETE(agentRequest(callerAgentId),
+                "/api/subagent-runs/" + ownRunId));
+        assertStatus(200, own);
+
+        var alien = asAgent(() -> DELETE(agentRequest(callerAgentId),
+                "/api/subagent-runs/" + alienRunId));
+        assertStatus(403, alien);
+        assertTrue(getContent(alien).contains(AGENT_SCOPE), getContent(alien));
+    }
+
+    @Test
+    void anUnstampedBearerCannotKillARun() {
+        // The destructive half of the unstamped case above: an unidentified agent gets less
+        // reach than an identified one, never more.
+        var resp = asAgent(() -> POST(bareBearerRequest(),
+                "/api/subagent-runs/" + ownRunId + "/kill", "application/json", "{}"));
+        assertStatus(403, resp);
+    }
+
     // --- seam ---------------------------------------------------------------------------------
 
     private static Agent agentNamed(String name) {
@@ -134,6 +180,35 @@ class AgentScopedAccessTest extends FunctionalTest {
         convo.peerId = "scope-test";
         convo.save();
         return convo;
+    }
+
+    /**
+     * A settled run owned by {@code parent}. Terminal rather than RUNNING because delete refuses a
+     * live row with 409 and kill answers an already-terminal one with 200 — both after the
+     * ownership check, which is what these cases are about.
+     *
+     * <p>Each run gets its own child agent: delete cascades through
+     * {@link services.AgentService#delete} on the child, so a shared one would take the other
+     * run's row with it and the refusal would pass for the wrong reason.
+     */
+    private static SubagentRun settledRunFor(Agent parent, Conversation parentConversation) {
+        var child = freshAgentNamed("scope-test-child");
+        var run = new SubagentRun();
+        run.parentAgent = parent;
+        run.childAgent = child;
+        run.parentConversation = parentConversation;
+        run.childConversation = conversationFor(child);
+        run.status = SubagentRun.Status.COMPLETED;
+        run.startedAt = AppClock.now();
+        run.endedAt = AppClock.now();
+        run.save();
+        return run;
+    }
+
+    /** Unique-named, unlike {@link #agentNamed}: a reused child would accumulate runs across
+     *  cases, and one delete would then cascade over another case's row. */
+    private static Agent freshAgentNamed(String prefix) {
+        return agentNamed(prefix + "-" + UUID.randomUUID().toString().substring(0, 8));
     }
 
     /** Commit off-thread: the test body is already in a transaction this request would not see. */
