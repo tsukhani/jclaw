@@ -19,6 +19,7 @@ import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.scrape.CrawlListener;
+import tools.scrape.PageHarvest;
 import tools.scrape.ScrapeJobRequest;
 import tools.scrape.ScrapeLadder;
 import tools.scrape.ScrapeOutput;
@@ -37,6 +38,7 @@ import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -44,9 +46,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.function.Predicate;
 
 /**
  * Read a page and the pages it links to, as one block of Markdown.
@@ -351,10 +356,15 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *
      * <p>Not bounded by the content budget a turn's result needs — the pages are on disk, not in a
      * context window — so its page count and time limit are what bound it.
+     *
+     * <p>A resumed crawl walks the same frontier from the seed, replaying the pages in
+     * {@code resume} rather than fetching them, so it arrives where the earlier run stopped with
+     * the same queue it had.
      */
-    public JobCrawl crawlForJob(ScrapeJobRequest request, CrawlListener listener) {
+    public JobCrawl crawlForJob(ScrapeJobRequest request, CrawlListener listener, CrawlListener.Resume resume) {
         var state = new CrawlState(request.output(), true, Integer.MAX_VALUE,
-                Duration.ofMinutes(request.maxMinutes()), request.seedFromSitemap(), listener);
+                Duration.ofMinutes(request.maxMinutes()), resume.timeLeft(), request.seedFromSitemap(),
+                listener, resume.recorded());
         crawl(request.url(), request.maxPages(), request.maxDepth(), request.sameHostOnly(),
                 request.respectRobots(), request.language(), state);
         return new JobCrawl(summary(request.url(), state, request.maxDepth(), request.sameHostOnly()),
@@ -406,9 +416,15 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         final boolean save;
         final int contentBudget;
         final Duration timeBudget;
+        /** Less than {@link #timeBudget} for a resumed job, which has spent some of it already. */
+        final Duration timeLeft;
         final boolean seedFromSitemap;
         /** Set for a background job (JCLAW-1272); null for a crawl inside a turn. */
         final @Nullable CrawlListener listener;
+        /** Pages an earlier run read, by requested URL, each taken out as it is replayed. */
+        final Map<String, CrawlListener.Recorded> recorded;
+        /** Which harvested links the crawl may follow; set once the seed is known. */
+        Predicate<URI> inScope = uri -> true;
         final List<Page> pages = new ArrayList<>();
         final List<Refusal> refused = new ArrayList<>();
         final LinkedHashSet<String> seen = new LinkedHashSet<>();
@@ -450,18 +466,30 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
 
         CrawlState(ScrapeOutput.Request output, boolean save) {
-            this(output, save, save ? MAX_SAVED_CHARS : MAX_TOTAL_CHARS,
-                    Duration.ofSeconds(configTimeoutSeconds()), WebScrapeSettings.seedFromSitemap(), null);
+            this(output, save, save ? MAX_SAVED_CHARS : MAX_TOTAL_CHARS, Duration.ofSeconds(configTimeoutSeconds()),
+                    Duration.ofSeconds(configTimeoutSeconds()), WebScrapeSettings.seedFromSitemap(), null, Map.of());
         }
 
         CrawlState(ScrapeOutput.Request output, boolean save, int contentBudget, Duration timeBudget,
-                   boolean seedFromSitemap, @Nullable CrawlListener listener) {
+                   Duration timeLeft, boolean seedFromSitemap, @Nullable CrawlListener listener,
+                   Map<String, CrawlListener.Recorded> recorded) {
             this.output = output;
             this.save = save;
             this.contentBudget = contentBudget;
             this.timeBudget = timeBudget;
+            this.timeLeft = timeLeft;
             this.seedFromSitemap = seedFromSitemap;
             this.listener = listener;
+            this.recorded = new HashMap<>(recorded);
+        }
+
+        /** An earlier run's page counts against the budgets as it did then. */
+        synchronized void replay(CrawlListener.Recorded page, String url) {
+            pages.add(new Page(url, null, page.servedBy(), null));
+            if (page.servedBy() != ScrapeRung.PLAIN) {
+                escalationsLeft--;
+                escalationsUsed++;
+            }
         }
 
         /** True once no further fetch should start: the job was stopped, or the time is up. */
@@ -477,7 +505,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private void crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
                        boolean respectRobots, String language, CrawlState state) {
-        state.deadline = System.nanoTime() + state.timeBudget.toNanos();
+        state.deadline = System.nanoTime() + state.timeLeft.toNanos();
+        state.inScope = link -> !sameHostOnly || sameHost(link, seed);
         state.seen.add(canonical(seed));
         var level = List.of(seed);
         int depth = 0;
@@ -564,15 +593,26 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * JCLAW-1091 harness compares runs, and a result whose page order varies per run is
      * not comparable.
      */
-    private List<WebExtraction.FetchResult> fetchLevel(ExecutorService pool, List<URI> admitted,
-                                                       boolean respectRobots, String language,
-                                                       int depth, CrawlState state) {
-        var futures = admitted.stream()
-                .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots, language, state)))
-                .toList();
-        var fetched = new ArrayList<WebExtraction.FetchResult>();
+    private List<PageHarvest> fetchLevel(ExecutorService pool, List<URI> admitted,
+                                         boolean respectRobots, String language,
+                                         int depth, CrawlState state) {
+        var replays = new ArrayList<CrawlListener.@Nullable Recorded>(admitted.size());
+        var futures = new ArrayList<Future<@Nullable Outcome>>(admitted.size());
+        for (var uri : admitted) {
+            var recorded = state.recorded.remove(uri.toString());
+            replays.add(recorded);
+            futures.add(recorded != null ? CompletableFuture.completedFuture(null)
+                    : pool.submit(() -> fetchOne(uri, respectRobots, language, state)));
+        }
+        var fetched = new ArrayList<PageHarvest>();
         for (int i = 0; i < futures.size(); i++) {
             var uri = admitted.get(i);
+            var replay = replays.get(i);
+            if (replay != null) {
+                state.replay(replay, uri.toString());
+                if (replay.harvest() != null) fetched.add(replay.harvest());
+                continue;
+            }
             try {
                 var outcome = futures.get(i).get();
                 if (outcome == null) {
@@ -591,7 +631,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                         "[Not retrieved \u2014 %s]".formatted(reason(e)), ScrapeRung.PLAIN,
                         state.output.json() ? ScrapeOutput.failedRecord(uri.toString(), ScrapeRung.PLAIN, reason(e))
                                 : null));
-                notifyPage(state, uri.toString(), depth, ScrapeRung.PLAIN, ScrapeReason.ERROR, null);
+                notifyPage(state, uri, uri.toString(), depth, ScrapeRung.PLAIN, ScrapeReason.ERROR, null, null);
             }
         }
         return fetched;
@@ -601,7 +641,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *  failure. An agent reading "TURNSTILE" knows not to retry; "[Could not fetch]"
      *  invites a retry loop. */
     private static void recordOutcome(Outcome outcome, URI uri, int depth, CrawlState state,
-                                      List<WebExtraction.FetchResult> fetched) {
+                                      List<PageHarvest> fetched) {
         if (!outcome.usable()) {
             var why = "%s%s%s".formatted(outcome.reason(),
                     outcome.detail() == null ? "" : ": " + outcome.detail(),
@@ -610,11 +650,12 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     outcome.servedBy(),
                     state.output.json() ? ScrapeOutput.failedRecord(uri.toString(), outcome.servedBy(), why)
                             : null));
-            notifyPage(state, uri.toString(), depth, outcome.servedBy(), outcome.reason(), null);
+            notifyPage(state, uri, uri.toString(), depth, outcome.servedBy(), outcome.reason(), null, null);
             return;
         }
         var page = outcome.resolvedFetched();
         var text = outcome.resolvedText();
+        var harvest = PageHarvest.of(page, state.inScope);
         if (state.output.json()) {
             // Built now, while the page's HTML is in hand, so a crawl never holds every body at once.
             var record = ScrapeOutput.pageRecord(state.output, uri.toString(), page, text,
@@ -626,21 +667,22 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             // With extract this counts the fields rather than the page, which is what lets an
             // extraction crawl cover far more pages than a content crawl.
             state.totalChars += json.length();
-            notifyPage(state, page.finalUrl(), depth, outcome.servedBy(), ScrapeReason.OK, json);
+            notifyPage(state, uri, page.finalUrl(), depth, outcome.servedBy(), ScrapeReason.OK, json, harvest);
         } else {
             var shown = state.output.format() == ScrapeOutput.Format.TEXT ? WebExtraction.toPlain(page, text) : text;
             state.pages.add(new Page(page.finalUrl(), state.listener == null ? shown : null,
                     outcome.servedBy(), null));
             state.totalChars += shown.length();
-            notifyPage(state, page.finalUrl(), depth, outcome.servedBy(), ScrapeReason.OK, shown);
+            notifyPage(state, uri, page.finalUrl(), depth, outcome.servedBy(), ScrapeReason.OK, shown, harvest);
         }
-        fetched.add(page);
+        fetched.add(harvest);
     }
 
-    private static void notifyPage(CrawlState state, String url, int depth, ScrapeRung servedBy,
-                                   ScrapeReason reason, @Nullable String content) {
+    private static void notifyPage(CrawlState state, URI requested, String url, int depth, ScrapeRung servedBy,
+                                   ScrapeReason reason, @Nullable String content, @Nullable PageHarvest harvest) {
         if (state.listener != null) {
-            state.listener.page(new CrawlListener.Page(url, depth, servedBy, reason, content));
+            state.listener.page(new CrawlListener.Page(requested.toString(), url, depth, servedBy, reason,
+                    content, harvest));
         }
     }
 
@@ -667,7 +709,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return false;
     }
 
-    private static List<URI> nextLevel(List<WebExtraction.FetchResult> fetched, URI seed,
+    private static List<URI> nextLevel(List<PageHarvest> fetched, URI seed,
                                        boolean sameHostOnly, String language, CrawlState state) {
         var next = new ArrayList<URI>();
         for (var f : fetched) {
@@ -691,9 +733,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * language keeps one — its own URL, or failing that the first declared — because a
      * language filter that empties the frontier is worse than no filter at all.
      */
-    private static void suppressLocaleVariants(WebExtraction.FetchResult fetched,
+    private static void suppressLocaleVariants(PageHarvest fetched,
                                                String language, CrawlState state) {
-        var alternates = WebExtraction.alternates(fetched);
+        var alternates = fetched.alternates();
         if (alternates.size() < 2) return;
 
         var keeper = pickVariant(alternates, language, fetched.finalUrl());
@@ -765,7 +807,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * the locale map for the whole crawl.
      */
     private static void learnLocalesFromHtml(URI seed, String language, CrawlState state,
-                                             List<WebExtraction.FetchResult> fetched) {
+                                             List<PageHarvest> fetched) {
         if (!state.suppressedLocalePrefixes.isEmpty()) return;
 
         // An HTML seed already carries its own alternates — read them and spend nothing.
@@ -775,14 +817,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         if (!state.suppressedLocalePrefixes.isEmpty()) return;
         // Only a markdown seed is worth a second request; anything else has either told
         // us its translations or has none to tell.
-        if (fetched.stream().noneMatch(f -> WebExtraction.isMarkdown(f.contentType()))) return;
+        if (fetched.stream().noneMatch(PageHarvest::markdown)) return;
 
         try {
             var html = WebExtraction.fetch(seed.toString(), client(),
                     Map.of("User-Agent", IDENTITY.userAgentHeader(),
                             "Accept", "text/html",
                             "Accept-Language", language + ", *;q=0.5"));
-            suppressLocaleVariants(html, language, state);
+            suppressLocaleVariants(PageHarvest.of(html, state.inScope), language, state);
         } catch (Exception _) {
             // Best effort. A site that will not serve HTML simply keeps its translations
             // in the frontier, which is where they were before this existed.
@@ -944,11 +986,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     /** Runs after a level completes, single-threaded, so {@code seen} needs no
      *  synchronization and the next level's order is deterministic. */
-    private static void collectLinks(WebExtraction.FetchResult fetched, URI seed,
+    private static void collectLinks(PageHarvest fetched, URI seed,
                                      boolean sameHostOnly, CrawlState state,
                                      List<URI> next) {
         var seen = state.seen;
-        for (var link : WebExtraction.links(fetched)) {
+        for (var link : fetched.links()) {
             if (sameHostOnly && !sameHost(link, seed)) {
                 continue;
             }

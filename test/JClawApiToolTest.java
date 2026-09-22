@@ -523,6 +523,8 @@ class JClawApiToolTest extends UnitTest {
             POST /api/providers/{name}/embedding-probe
             POST /api/providers/{name}/models
             POST /api/scrape-jobs/{id}/cancel
+            POST /api/scrape-jobs/{id}/pause
+            POST /api/scrape-jobs/{id}/resume
             POST /api/subagent-runs/{id}/kill
             POST /api/task-runs/{runId}/cancel
             POST /api/tasks

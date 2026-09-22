@@ -171,9 +171,11 @@ class ApiScrapeJobsControllerTest extends FunctionalTest {
             assertStatus(403, alien);
             assertTrue(getContent(alien).contains(AGENT_SCOPE), path + ": " + getContent(alien));
         }
-        var cancel = asAgent(() -> POST(agentRequest(callerId), "/api/scrape-jobs/" + alienJobId + "/cancel",
-                "application/json", "{}"));
-        assertStatus(403, cancel);
+        for (var action : List.of("/cancel", "/pause", "/resume")) {
+            var refused = asAgent(() -> POST(agentRequest(callerId), "/api/scrape-jobs/" + alienJobId + action,
+                    "application/json", "{}"));
+            assertStatus(403, refused);
+        }
         var delete = asAgent(() -> DELETE(agentRequest(callerId), "/api/scrape-jobs/" + alienJobId));
         assertStatus(403, delete);
         assertNotNull(commit(() -> ScrapeJob.findById(alienJobId)), "a refused delete deletes nothing");
@@ -219,10 +221,12 @@ class ApiScrapeJobsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aFinishedJobCannotBeStoppedButCanBeDeleted() {
-        var cancel = asAgent(() -> POST(agentRequest(callerId), "/api/scrape-jobs/" + ownJobId + "/cancel",
-                "application/json", "{}"));
-        assertStatus(409, cancel);
+    void aFinishedJobCannotBeStoppedPausedOrResumedButCanBeDeleted() {
+        for (var action : List.of("/cancel", "/pause", "/resume")) {
+            var refused = asAgent(() -> POST(agentRequest(callerId), "/api/scrape-jobs/" + ownJobId + action,
+                    "application/json", "{}"));
+            assertStatus(409, refused);
+        }
 
         var delete = asAgent(() -> DELETE(agentRequest(callerId), "/api/scrape-jobs/" + ownJobId));
         assertIsOk(delete);

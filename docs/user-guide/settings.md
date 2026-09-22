@@ -548,7 +548,7 @@ Every setting the `web_scrape` tool reads, in four groups. Changes apply live; n
 | Key                              | Default | Meaning                                                                            |
 |----------------------------------|---------|------------------------------------------------------------------------------------|
 | `web_scrape.job.max-pages`       | 500     | Most pages an agent's background scrape may read. Minimum 1.                        |
-| `web_scrape.job.max-minutes`     | 60      | Longest an agent's background scrape may run, in minutes. When it runs out, the job stops and keeps the pages it has read. Minimum 1. |
+| `web_scrape.job.max-minutes`     | 60      | Longest an agent's background scrape may run, in minutes, counting only time spent running, not time paused. When it runs out, the job stops and keeps the pages it has read. Minimum 1. |
 | `web_scrape.job.max-concurrent`  | 2       | Background scrapes running at once, 1–8. The rest wait their turn and start in the order they were queued. |
 
 A background scrape keeps running after the chat turn that started it. Like `max-pages` above, the two limits are the default when an agent leaves the value out and the ceiling when it asks for more; `max-depth` applies to background scrapes too. They bound what an agent may ask for, not a scrape you start yourself. `timeout-seconds` does not apply to background scrapes, which are bounded in minutes instead. Each running job fetches with its own set of workers, so `max-concurrent` multiplies `concurrency`.

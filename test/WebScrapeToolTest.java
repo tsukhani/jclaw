@@ -15,6 +15,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.Tx;
+import services.scrape.ScrapeJobService;
 import tools.WebScrapeTool;
 import tools.scrape.WebScrapeSettings;
 
@@ -22,12 +23,14 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -242,7 +245,18 @@ class WebScrapeToolTest extends UnitTest {
         private final Map<String, String> bodies = new HashMap<>();
         private final Map<String, String> types = new HashMap<>();
         private final Map<String, IOException> failures = new HashMap<>();
-        final List<String> hits = new ArrayList<>();
+        // Written from the crawl's fetch workers, several at once.
+        final List<String> hits = new CopyOnWriteArrayList<>();
+        private final Map<String, Hold> holds = new ConcurrentHashMap<>();
+
+        /** A request held on arrival until the test releases it. */
+        record Hold(CountDownLatch arrived, CountDownLatch release) {}
+
+        Hold hold(String url) {
+            var hold = new Hold(new CountDownLatch(1), new CountDownLatch(1));
+            holds.put(url, hold);
+            return hold;
+        }
 
         /** Hits with robots.txt filtered out. RobotsCache is a process-global cache, so
          *  whether a given test observes that fetch depends on which test ran first —
@@ -264,6 +278,15 @@ class WebScrapeToolTest extends UnitTest {
         public Response intercept(Chain chain) throws IOException {
             var url = chain.request().url().toString();
             hits.add(url);
+            var hold = holds.remove(url);
+            if (hold != null) {
+                hold.arrived().countDown();
+                try {
+                    hold.release().await(4, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             var failure = failures.get(url);
             if (failure != null) {
                 throw failure;
@@ -418,6 +441,109 @@ class WebScrapeToolTest extends UnitTest {
                 AgentService.delete(Agent.findById(agent.id));
                 return null;
             });
+        }
+    }
+
+    @Test
+    void aPausedBackgroundCrawlResumesWithoutReadingAPageTwice() throws Exception {
+        var held = twoLevelSite();
+        var name = "scrapebgpause" + (System.nanoTime() % 1_000_000);
+        var agent = onFreshThread(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
+        try {
+            var id = startBackground(agent);
+            assertTrue(held.arrived().await(10, TimeUnit.SECONDS), "the crawl reaches the held page");
+            assertEquals(ScrapeJobService.PauseResult.PAUSING, onFreshThread(() -> ScrapeJobService.pause(id)));
+            held.release().countDown();
+
+            assertEquals(ScrapeJob.State.PAUSED, awaitJob(id, ScrapeJob.State.PAUSED));
+            int beforeResume = onFreshThread(() -> ((ScrapeJob) ScrapeJob.findById(id)).pagesRead);
+            assertTrue(beforeResume < 13, "the pause stopped it partway, after " + beforeResume + " pages");
+
+            assertEquals(ScrapeJobService.ResumeResult.RESUMED, onFreshThread(() -> ScrapeJobService.resume(id)));
+            assertEquals(ScrapeJob.State.SUCCEEDED, awaitJob(id, ScrapeJob.State.SUCCEEDED));
+            assertEveryPageReadOnce(id);
+        } finally {
+            onFreshThread(() -> {
+                AgentService.delete(Agent.findById(agent.id));
+                return null;
+            });
+            deleteTree(AgentService.workspacePath(name));
+        }
+    }
+
+    @Test
+    void aBackgroundCrawlLeftRunningByAStoppedAppContinuesWithoutReadingAPageTwice() throws Exception {
+        var held = twoLevelSite();
+        var name = "scrapebgrestart" + (System.nanoTime() % 1_000_000);
+        var agent = onFreshThread(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
+        try {
+            var id = startBackground(agent);
+            assertTrue(held.arrived().await(10, TimeUnit.SECONDS), "the crawl reaches the held page");
+            onFreshThread(() -> ScrapeJobService.pause(id));
+            held.release().countDown();
+            awaitJob(id, ScrapeJob.State.PAUSED);
+            // What a stopped app leaves behind: the row says RUNNING and no thread is running it.
+            onFreshThread(() -> {
+                ScrapeJob job = ScrapeJob.findById(id);
+                job.state = ScrapeJob.State.RUNNING;
+                job.save();
+                return null;
+            });
+
+            onFreshThread(() -> {
+                ScrapeJobService.tickOnce();
+                return null;
+            });
+            assertEquals(ScrapeJob.State.SUCCEEDED, awaitJob(id, ScrapeJob.State.SUCCEEDED));
+            assertEveryPageReadOnce(id);
+        } finally {
+            onFreshThread(() -> {
+                AgentService.delete(Agent.findById(agent.id));
+                return null;
+            });
+            deleteTree(AgentService.workspacePath(name));
+        }
+    }
+
+    /** A seed linking six pages, each linking one more: thirteen pages over two levels, one of them held. */
+    private RouteInterceptor.Hold twoLevelSite() {
+        var hrefs = new String[6];
+        for (int i = 1; i <= 6; i++) {
+            hrefs[i - 1] = "/p" + i;
+            routes.put("https://site.test/p" + i, page("P" + i, "/q" + i));
+            routes.put("https://site.test/q" + i, page("Q" + i));
+        }
+        routes.put("https://site.test/", page("Home", hrefs));
+        return routes.hold("https://site.test/p3");
+    }
+
+    private static Long startBackground(Agent agent) {
+        var result = onFreshThread(() -> new WebScrapeTool().executeRich(
+                "{\"url\": \"https://site.test/\", \"maxDepth\": 2, \"background\": true}", agent));
+        return JsonParser.parseString(Objects.requireNonNull(result.structuredJson(), result.text())).getAsJsonObject()
+                .getAsJsonObject("scrapeJob").get("id").getAsLong();
+    }
+
+    private static ScrapeJob.State awaitJob(Long id, ScrapeJob.State wanted) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+        ScrapeJob.State state;
+        do {
+            Thread.sleep(25);
+            state = onFreshThread(() -> ((ScrapeJob) ScrapeJob.findById(id)).state);
+        } while (state != wanted && !state.terminal() && System.nanoTime() < deadline);
+        return state;
+    }
+
+    /** Every page of the site recorded once and requested once, across both runs. */
+    private void assertEveryPageReadOnce(Long id) {
+        List<String> requested = onFreshThread(() -> {
+            List<models.ScrapeJobPage> rows = models.ScrapeJobPage.find("job.id = ?1", id).fetch();
+            return rows.stream().map(p -> p.requestedUrl).toList();
+        });
+        assertEquals(13, requested.size(), requested.toString());
+        assertEquals(13, requested.stream().distinct().count(), "no page is recorded twice: " + requested);
+        for (var url : requested) {
+            assertEquals(1, routes.pageHits().stream().filter(url::equals).count(), url + " was fetched once");
         }
     }
 

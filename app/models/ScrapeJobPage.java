@@ -47,8 +47,17 @@ public class ScrapeJobPage extends Model {
     @Column(name = "page_index", nullable = false)
     public int pageIndex;
 
+    /** Where the page ended up after redirects. */
     @Column(nullable = false, length = 2048)
     public String url;
+
+    /** The URL the crawl queued, which is how a resumed crawl recognises the page. */
+    @Column(name = "requested_url", length = 2048)
+    public String requestedUrl;
+
+    /** The page's {@code PageHarvest} as JSON, kept while the job can still resume and cleared when it ends. */
+    @Column(columnDefinition = "TEXT")
+    public String harvest;
 
     @Column(name = "crawl_depth", nullable = false)
     public int crawlDepth;

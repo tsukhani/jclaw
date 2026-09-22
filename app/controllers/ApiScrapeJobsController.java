@@ -48,13 +48,16 @@ public class ApiScrapeJobsController extends Controller {
     private static final String STATE = "state";
 
     /**
-     * @param options      the request the job runs with, as {@code web_scrape} arguments
-     * @param combinedFile the workspace path of the file combining every page, once it exists
+     * @param options        the request the job runs with, as {@code web_scrape} arguments
+     * @param combinedFile   the workspace path of the file combining every page, once it exists
+     * @param runtimeSeconds time spent running, across every run; what its time limit counts
+     * @param interruptions  times a stopped app left it running since it was last resumed
      */
     public record ScrapeJobView(Long id, Long agentId, String agentName, @Nullable Long conversationId,
                                 String url, String state, int pagesRead, int pagesFetched, int pagesDiscovered,
                                 @Nullable String stopReason, @Nullable String errorMessage, @Nullable String summary,
                                 String folder, @Nullable String combinedFile, JsonObject options,
+                                long runtimeSeconds, int interruptions,
                                 String createdAt, @Nullable String startedAt, @Nullable String completedAt) {
 
         static ScrapeJobView of(ScrapeJob job) {
@@ -66,6 +69,7 @@ public class ApiScrapeJobsController extends Controller {
                     job.url, job.state.name(), job.pagesRead, job.pagesFetched, job.pagesDiscovered,
                     job.stopReason, job.errorMessage, job.summary, ScrapeJobFiles.folder(job.id),
                     ScrapeJobFiles.existing(job.agent.name, combined) == null ? null : combined, options,
+                    job.runtimeMillis / 1000, job.interruptions,
                     job.createdAt.toString(), iso(job.startedAt), iso(job.completedAt));
         }
     }
@@ -222,8 +226,42 @@ public class ApiScrapeJobsController extends Controller {
         }
     }
 
+    /** POST /api/scrape-jobs/{id}/pause */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ScrapeJobView.class)))
+    @Operation(summary = "Pause a waiting or running scrape job; one running finishes the fetches in flight and keeps its place")
+    @AgentAccess(value = OWN_ONLY, reason = "one job the calling agent owns; main reaches every agent's (JCLAW-1272)")
+    public static void pause(Long id) {
+        var job = requireJob(id);
+        switch (ScrapeJobService.pause(job.id)) {
+            case NOT_FOUND -> {
+                notFound();
+                throw ApiResponses.unreachable();
+            }
+            case NOT_ACTIVE -> ApiResponses.error(409, ApiResponses.CONFLICT,
+                    "Scrape job %d is not waiting or running (%s).".formatted(id, job.state));
+            case PAUSING, PAUSED -> renderJSON(GSON.toJson(ScrapeJobView.of(job)));
+        }
+    }
+
+    /** POST /api/scrape-jobs/{id}/resume */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ScrapeJobView.class)))
+    @Operation(summary = "Resume a paused or interrupted scrape job from the pages it has already read")
+    @AgentAccess(value = OWN_ONLY, reason = "one job the calling agent owns; main reaches every agent's (JCLAW-1272)")
+    public static void resume(Long id) {
+        var job = requireJob(id);
+        switch (ScrapeJobService.resume(job.id)) {
+            case NOT_FOUND -> {
+                notFound();
+                throw ApiResponses.unreachable();
+            }
+            case NOT_PAUSED -> ApiResponses.error(409, ApiResponses.CONFLICT,
+                    "Scrape job %d is not paused or interrupted (%s).".formatted(id, job.state));
+            case RESUMED -> renderJSON(GSON.toJson(ScrapeJobView.of(job)));
+        }
+    }
+
     /** DELETE /api/scrape-jobs/{id} */
-    @Operation(summary = "Delete a finished scrape job, its page records and its workspace folder")
+    @Operation(summary = "Delete a scrape job that is not waiting or running, its page records and its workspace folder")
     @AgentAccess(value = OWN_ONLY, reason = "one job the calling agent owns; main reaches every agent's (JCLAW-1272)")
     public static void delete(Long id) {
         var job = requireJob(id);
@@ -233,7 +271,7 @@ public class ApiScrapeJobsController extends Controller {
                 throw ApiResponses.unreachable();
             }
             case NOT_FINISHED -> ApiResponses.error(409, ApiResponses.CONFLICT,
-                    "Scrape job %d is still %s; stop it before deleting it.".formatted(id,
+                    "Scrape job %d is still %s; pause or stop it before deleting it.".formatted(id,
                             job.state.name().toLowerCase(Locale.ROOT)));
             case DELETED -> ApiResponses.ok();
         }

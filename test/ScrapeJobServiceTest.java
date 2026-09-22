@@ -14,25 +14,24 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConversationService;
 import services.Tx;
-import services.scrape.ScrapeJobFiles;
 import services.scrape.ScrapeJobService;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.WebScrapeTool;
 import tools.scrape.CrawlListener;
+import tools.scrape.PageHarvest;
 import tools.scrape.ScrapeJobRequest;
-import tools.scrape.ScrapeOutput;
 import tools.scrape.WebScrapeSettings;
-import utils.AppClock;
-import utils.GsonHolder;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -126,7 +125,7 @@ class ScrapeJobServiceTest extends UnitTest {
     void aJobThatRetrievesNoPageFailsWithTheSeedsReason() {
         var agent = agent("sj-fail");
         var blockedSeed = submit(agent, null, crawler(null, blocked("https://jobs.test/")), NO_TURN);
-        var refusedSeed = submit(agent, null, (request, listener) ->
+        var refusedSeed = submit(agent, null, (request, listener, resume) ->
                 new WebScrapeTool.JobCrawl("Scraped 0 pages\n", null, "disallowed by robots.txt"), NO_TURN);
 
         var blockedEnd = awaitEnd(blockedSeed);
@@ -141,7 +140,7 @@ class ScrapeJobServiceTest extends UnitTest {
     @Test
     void aCrawlThatThrowsFailsTheJobRatherThanLeavingItRunning() {
         var agent = agent("sj-crash");
-        var id = submit(agent, null, (request, listener) -> {
+        var id = submit(agent, null, (request, listener, resume) -> {
             throw new IllegalStateException("boom");
         }, NO_TURN);
 
@@ -218,7 +217,7 @@ class ScrapeJobServiceTest extends UnitTest {
             assertTrue(blocker.started.await(WAIT.toSeconds(), TimeUnit.SECONDS));
         }
         var ran = new AtomicBoolean();
-        var waiting = submit(agent, null, (request, listener) -> {
+        var waiting = submit(agent, null, (request, listener, resume) -> {
             ran.set(true);
             return new WebScrapeTool.JobCrawl("", null, null);
         }, NO_TURN);
@@ -237,49 +236,157 @@ class ScrapeJobServiceTest extends UnitTest {
         assertEquals(ScrapeJobService.CancelResult.ALREADY_FINISHED, fresh(() -> ScrapeJobService.cancel(waiting)));
     }
 
+    // ==================== pause and resume ====================
+
+    @Test
+    void aPausedJobKeepsItsPlaceAndResumingContinuesFromIt() throws Exception {
+        var agent = agent("sj-pause");
+        var runs = new CopyOnWriteArrayList<CrawlListener.Resume>();
+        var turned = new AtomicBoolean();
+        var conversationId = conversation(agent, "web", "u-sj-pause");
+        var id = fresh(() -> ScrapeJobService.submitForTest(agent, conversationId, request("https://jobs.test/"),
+                false, resumable(runs), (a, c, owner) -> turned.set(true)).id);
+        await(() -> runs.size() == 1 && pagesOf(id) == 1, "the first run reads its first page");
+
+        assertEquals(ScrapeJobService.PauseResult.PAUSING, fresh(() -> ScrapeJobService.pause(id)));
+        var paused = awaitState(id, ScrapeJob.State.PAUSED);
+        assertEquals(1, paused.pagesRead());
+        assertEquals("paused", paused.stopReason());
+        assertTrue(read(agent, "scrapes/%d/combined.md".formatted(id)).contains("# One"),
+                "a paused job's pages so far are combined too");
+        assertNotNull(fresh(() -> ((ScrapeJobPage) ScrapeJobPage.find("job.id = ?1", id).first()).harvest),
+                "what a resume replays is kept while the job can resume");
+        Thread.sleep(200);
+        assertFalse(turned.get(), "a pause is not an ending: nothing is posted");
+
+        assertEquals(ScrapeJobService.ResumeResult.RESUMED, fresh(() -> ScrapeJobService.resume(id)));
+        var end = awaitEnd(id);
+        assertEquals(ScrapeJob.State.SUCCEEDED, end.state());
+        assertEquals(2, end.pagesRead(), "the page read before the pause is not read again");
+        assertEquals(List.of(1, 2), pages(id).stream().map(PageRow::index).toList());
+        assertTrue(runs.get(1).recorded().containsKey("https://jobs.test/one"), "the resumed run is handed the page it had");
+        assertTrue(runs.get(1).timeLeft().compareTo(runs.get(0).timeLeft()) < 0,
+                "the time limit counts the time the first run spent");
+        await(turned::get, "the ending is posted");
+        assertNull(fresh(() -> ((ScrapeJobPage) ScrapeJobPage.find("job.id = ?1", id).first()).harvest),
+                "an ended job no longer keeps what a resume would replay");
+    }
+
+    @Test
+    void pausingAWaitingJobKeepsItOutOfTheQueueUntilItIsResumed() throws Exception {
+        var agent = agent("sj-pause-waiting");
+        int limit = fresh(WebScrapeSettings::jobMaxConcurrent);
+        var blockers = new ArrayList<Blocker>();
+        var blockerIds = new ArrayList<Long>();
+        for (int i = 0; i < limit; i++) {
+            var blocker = new Blocker();
+            blockers.add(blocker);
+            blockerIds.add(submit(agent, null, blocker, NO_TURN));
+        }
+        for (var blocker : blockers) {
+            assertTrue(blocker.started.await(WAIT.toSeconds(), TimeUnit.SECONDS));
+        }
+        var ran = new AtomicBoolean();
+        var waiting = submit(agent, null, (request, listener, resume) -> {
+            ran.set(true);
+            listener.page(fetched("https://jobs.test/w", "# W"));
+            return new WebScrapeTool.JobCrawl("", null, null);
+        }, NO_TURN);
+
+        assertEquals(ScrapeJobService.PauseResult.PAUSED, fresh(() -> ScrapeJobService.pause(waiting)));
+        blockers.forEach(b -> b.release.countDown());
+        blockerIds.forEach(ScrapeJobServiceTest::awaitEnd);
+        fresh(() -> {
+            ScrapeJobService.dispatch();
+            return null;
+        });
+        assertEquals(ScrapeJob.State.PAUSED, state(waiting).state());
+        assertFalse(ran.get(), "a paused job does not start when a slot frees");
+
+        assertEquals(ScrapeJobService.ResumeResult.RESUMED, fresh(() -> ScrapeJobService.resume(waiting)));
+        assertEquals(ScrapeJob.State.SUCCEEDED, awaitEnd(waiting).state());
+    }
+
+    @Test
+    void aPausedJobCanBeCancelledOrDeletedAndAnEndedOneNeitherPausesNorResumes() throws Exception {
+        var agent = agent("sj-pause-end");
+        var first = new Blocker();
+        var cancelled = submit(agent, null, first, NO_TURN);
+        assertTrue(first.started.await(WAIT.toSeconds(), TimeUnit.SECONDS));
+        fresh(() -> ScrapeJobService.pause(cancelled));
+        awaitState(cancelled, ScrapeJob.State.PAUSED);
+        assertEquals(ScrapeJobService.CancelResult.CANCELLED, fresh(() -> ScrapeJobService.cancel(cancelled)));
+        assertEquals(ScrapeJob.State.CANCELLED, state(cancelled).state());
+        assertNull(fresh(() -> ((ScrapeJobPage) ScrapeJobPage.find("job.id = ?1", cancelled).first()).harvest));
+
+        var second = new Blocker();
+        var deleted = submit(agent, null, second, NO_TURN);
+        assertTrue(second.started.await(WAIT.toSeconds(), TimeUnit.SECONDS));
+        fresh(() -> ScrapeJobService.pause(deleted));
+        awaitState(deleted, ScrapeJob.State.PAUSED);
+        assertEquals(ScrapeJobService.DeleteResult.DELETED, fresh(() -> ScrapeJobService.delete(deleted)));
+
+        assertEquals(ScrapeJobService.PauseResult.NOT_ACTIVE, fresh(() -> ScrapeJobService.pause(cancelled)));
+        assertEquals(ScrapeJobService.ResumeResult.NOT_PAUSED, fresh(() -> ScrapeJobService.resume(cancelled)));
+    }
+
     // ==================== restart ====================
 
     @Test
-    void aJobLeftRunningByAnEarlierProcessIsInterruptedWithItsPagesKept() throws Exception {
-        var agent = agent("sj-orphan");
+    void aJobLeftRunningByAStoppedAppContinuesFromItsPages() throws Exception {
+        var agent = agent("sj-restart");
+        var runs = new CopyOnWriteArrayList<CrawlListener.Resume>();
+        var id = submit(agent, null, resumable(runs), NO_TURN);
+        await(() -> runs.size() == 1 && pagesOf(id) == 1, "the first run reads its first page");
+        fresh(() -> ScrapeJobService.pause(id));
+        awaitState(id, ScrapeJob.State.PAUSED);
+        // What a stopped app leaves: the row still says RUNNING, and nothing here is running it.
+        leftRunning(id, 0);
         var live = new Blocker();
         var liveId = submit(agent, null, live, NO_TURN);
         assertTrue(live.started.await(WAIT.toSeconds(), TimeUnit.SECONDS));
 
-        // What an earlier process leaves: a RUNNING row, a page it read, and nothing here running it.
-        var orphanId = fresh(() -> {
-            var job = new ScrapeJob();
-            job.agent = Agent.findById(agent.id);
-            job.url = "https://jobs.test/orphan/";
-            job.options = GsonHolder.GSON.toJson(request(job.url).toJson());
-            job.state = ScrapeJob.State.RUNNING;
-            job.startedAt = AppClock.now();
-            job.pagesRead = 1;
-            job.pagesFetched = 1;
-            job.save();
-            var file = ScrapeJobFiles.pageFile(job.id, 1, ScrapeOutput.Format.MARKDOWN);
-            AgentService.writeWorkspaceFile(agent.name, file, "# Before the restart");
-            var page = new ScrapeJobPage();
-            page.job = job;
-            page.pageIndex = 1;
-            page.url = job.url;
-            page.servedBy = ScrapeRung.PLAIN;
-            page.outcome = ScrapeJobPage.Outcome.FETCHED;
-            page.chars = 20;
-            page.file = file;
-            page.fetchedAt = AppClock.now();
-            page.save();
-            return job.id;
+        // Another class's reconcile may reach the row first; either way it ends up the same.
+        fresh(ScrapeJobService::reconcile);
+        fresh(() -> {
+            ScrapeJobService.dispatch();
+            return null;
         });
 
-        assertTrue(fresh(ScrapeJobService::reconcile) >= 1);
-
-        var orphan = state(orphanId);
-        assertEquals(ScrapeJob.State.INTERRUPTED, orphan.state());
-        assertEquals("the app stopped while it ran", orphan.stopReason());
-        assertEquals(1, pages(orphanId).size(), "the page it read is kept");
-        assertTrue(read(agent, "scrapes/%d/combined.md".formatted(orphanId)).contains("# Before the restart"));
         assertEquals(ScrapeJob.State.RUNNING, state(liveId).state(), "a job this process is running is left alone");
+        var end = awaitEnd(id);
+        assertEquals(ScrapeJob.State.SUCCEEDED, end.state());
+        assertEquals(2, end.pagesRead(), "it continued rather than starting again");
+        assertTrue(runs.get(1).recorded().containsKey("https://jobs.test/one"));
+        assertEquals(1, (int) fresh(() -> ((ScrapeJob) ScrapeJob.findById(id)).interruptions));
+    }
+
+    @Test
+    void aJobInterruptedTooOftenWaitsToBeResumed() throws Exception {
+        var agent = agent("sj-restart-limit");
+        var runs = new CopyOnWriteArrayList<CrawlListener.Resume>();
+        var id = submit(agent, null, resumable(runs), NO_TURN);
+        await(() -> runs.size() == 1 && pagesOf(id) == 1, "the first run reads its first page");
+        fresh(() -> ScrapeJobService.pause(id));
+        awaitState(id, ScrapeJob.State.PAUSED);
+        leftRunning(id, ScrapeJobService.MAX_INTERRUPTIONS - 1);
+
+        // Another class's reconcile may reach the row first; either way it ends up the same.
+        fresh(ScrapeJobService::reconcile);
+
+        var interrupted = state(id);
+        assertEquals(ScrapeJob.State.INTERRUPTED, interrupted.state());
+        assertTrue(interrupted.stopReason().startsWith("interrupted 3 times"), interrupted.stopReason());
+        assertTrue(read(agent, "scrapes/%d/combined.md".formatted(id)).contains("# One"));
+        Thread.sleep(200);
+        assertEquals(1, runs.size(), "it is not started on its own");
+
+        assertEquals(ScrapeJobService.ResumeResult.RESUMED, fresh(() -> ScrapeJobService.resume(id)));
+        var end = awaitEnd(id);
+        assertEquals(ScrapeJob.State.SUCCEEDED, end.state());
+        assertEquals(2, end.pagesRead());
+        assertEquals(0, (int) fresh(() -> ((ScrapeJob) ScrapeJob.findById(id)).interruptions),
+                "a resume starts the count again");
     }
 
     // ==================== deletion ====================
@@ -432,9 +539,12 @@ class ScrapeJobServiceTest extends UnitTest {
         }
 
         @Override
-        public WebScrapeTool.JobCrawl crawl(ScrapeJobRequest request, CrawlListener listener) {
+        public WebScrapeTool.JobCrawl crawl(ScrapeJobRequest request, CrawlListener listener,
+                                            CrawlListener.Resume resume) {
             listener.discovered(2);
-            listener.page(fetched(request.url() + "one", "# One"));
+            if (!resume.recorded().containsKey(request.url() + "one")) {
+                listener.page(fetched(request.url() + "one", "# One"));
+            }
             started.countDown();
             try {
                 while (!listener.stopRequested() && !release.await(20, TimeUnit.MILLISECONDS)) {
@@ -450,8 +560,58 @@ class ScrapeJobServiceTest extends UnitTest {
         }
     }
 
+    /**
+     * Reads {@code one}, then holds until it is stopped; handed {@code one} back on a resume, reads
+     * {@code two} and finishes. Records what each run was handed.
+     */
+    private static ScrapeJobService.Crawler resumable(List<CrawlListener.Resume> runs) {
+        return (request, listener, resume) -> {
+            runs.add(resume);
+            listener.discovered(2);
+            if (!resume.recorded().containsKey("https://jobs.test/one")) {
+                listener.page(fetched("https://jobs.test/one", "# One"));
+                long deadline = System.nanoTime() + WAIT.toNanos();
+                while (!listener.stopRequested() && System.nanoTime() < deadline) {
+                    try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+                if (listener.stopRequested()) return new WebScrapeTool.JobCrawl("Scraped 1 page\n", "stopped on request", null);
+            }
+            listener.page(fetched("https://jobs.test/two", "# Two"));
+            return new WebScrapeTool.JobCrawl("Scraped 2 pages\n", null, null);
+        };
+    }
+
+    /** Put a job's row back to RUNNING, as a stopped app leaves it, having been left so {@code before} times already. */
+    private static void leftRunning(Long id, int before) {
+        fresh(() -> {
+            ScrapeJob job = ScrapeJob.findById(id);
+            job.state = ScrapeJob.State.RUNNING;
+            job.interruptions = before;
+            job.save();
+            return null;
+        });
+    }
+
+    private static long pagesOf(Long id) {
+        return fresh(() -> ScrapeJobPage.count("job.id = ?1", id));
+    }
+
+    private static JobState awaitState(Long id, ScrapeJob.State wanted) {
+        var now = new AtomicReference<JobState>();
+        await(() -> {
+            now.set(state(id));
+            return now.get() != null && now.get().state() == wanted;
+        }, "job " + id + " is " + wanted);
+        return now.get();
+    }
+
     private static ScrapeJobService.Crawler crawler(String stoppedBecause, CrawlListener.Page... pages) {
-        return (request, listener) -> {
+        return (request, listener, resume) -> {
             listener.discovered(pages.length);
             for (var page : pages) listener.page(page);
             return new WebScrapeTool.JobCrawl("Scraped %d pages from %s\n".formatted(pages.length, request.url()),
@@ -460,11 +620,12 @@ class ScrapeJobServiceTest extends UnitTest {
     }
 
     private static CrawlListener.Page fetched(String url, String content) {
-        return new CrawlListener.Page(url, 0, ScrapeRung.PLAIN, ScrapeReason.OK, content);
+        return new CrawlListener.Page(url, url, 0, ScrapeRung.PLAIN, ScrapeReason.OK, content,
+                new PageHarvest(url, List.of(URI.create(url + "next")), Map.of(), false));
     }
 
     private static CrawlListener.Page blocked(String url) {
-        return new CrawlListener.Page(url, 1, ScrapeRung.PLAIN, ScrapeReason.TURNSTILE, null);
+        return new CrawlListener.Page(url, url, 1, ScrapeRung.PLAIN, ScrapeReason.TURNSTILE, null, null);
     }
 
     private static ScrapeJobRequest request(String url) {

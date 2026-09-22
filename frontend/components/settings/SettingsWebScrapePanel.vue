@@ -113,7 +113,7 @@ const GROUPS: { label: string, fields: SettingField[] }[] = [
         kind: 'number',
         fallback: '60',
         min: 1,
-        tip: 'Longest an agent\'s background scrape may run, in minutes; a longer request is capped here. When it runs out the job stops and keeps the pages it has read. Minimum 1.',
+        tip: 'Longest an agent\'s background scrape may run, in minutes, counting only time spent running; a longer request is capped here. When it runs out the job stops and keeps the pages it has read. Minimum 1.',
       },
       {
         key: 'web_scrape.job.max-concurrent',

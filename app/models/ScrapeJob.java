@@ -10,6 +10,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
@@ -29,12 +30,21 @@ import java.time.Instant;
 public class ScrapeJob extends Model {
 
     public enum State {
-        PENDING, RUNNING, SUCCEEDED, FAILED, CANCELLED,
-        /** Was running when the app stopped; the pages it had read are kept. */
-        INTERRUPTED;
+        PENDING, RUNNING,
+        /** Stopped on request, keeping its place; resuming continues from the pages it has. */
+        PAUSED,
+        /** Left running by a stopped app too many times to be continued on its own; waits to be resumed. */
+        INTERRUPTED,
+        SUCCEEDED, FAILED, CANCELLED;
 
+        /** Ended for good: nothing resumes it. */
         public boolean terminal() {
-            return this != PENDING && this != RUNNING;
+            return this == SUCCEEDED || this == FAILED || this == CANCELLED;
+        }
+
+        /** Queued or running, so a scheduler owns it. */
+        public boolean active() {
+            return this == PENDING || this == RUNNING;
         }
     }
 
@@ -75,6 +85,16 @@ public class ScrapeJob extends Model {
     /** Whether the turn that started it was proven to come from the binding owner; the completion turn keeps that answer. */
     @Column(name = "owner_initiated", nullable = false)
     public boolean ownerInitiated;
+
+    /** Time spent running, across every run of it; its time limit counts this, not time paused or down. */
+    @Column(name = "runtime_millis", nullable = false)
+    @ColumnDefault("0")
+    public long runtimeMillis;
+
+    /** Times a stopped app left it running; see {@code ScrapeJobService.MAX_INTERRUPTIONS}. */
+    @Column(nullable = false)
+    @ColumnDefault("0")
+    public int interruptions;
 
     @Column(name = "stop_reason", length = 255)
     public String stopReason;
