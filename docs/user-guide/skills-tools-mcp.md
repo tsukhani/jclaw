@@ -118,6 +118,33 @@ Asking for `extract` or `metadata` always makes the result JSON. To route this t
 
 A job can be paused and resumed. Pausing lets the pages being fetched finish and keeps the job's place, and resuming continues from the pages it already has, without reading any of them again. A job that was running when JClaw stopped continues the same way on its own once JClaw is back. After a job has been interrupted three times, it waits for you to resume it, so a job that brings JClaw down cannot keep doing so. The time limit counts only time spent running, not time paused or while JClaw was down.
 
+### Jev mode
+
+The `browser` tool drives a headless Chromium for pages that need JavaScript, and by default the agent's own model steers it one selector at a time. When [Settings → Browser](/guide#settings-browser) selects Jev and has a key, the tool changes shape. It offers only two actions:
+
+- **`run`** with a `url` and a `goal`, both required. JClaw opens the URL through the same checks as `navigate`, then Jev works through the goal: clicking, typing, choosing from dropdowns, scrolling and waiting, one decision at a time. Jev can act only on what it saw on the page. Nothing it answers becomes a selector or a script, and every action is checked against the current page just before it happens.
+- **`close`**, as before.
+
+The other actions (`navigate`, `click`, `fill`, `getText`, `screenshot`, `evaluate`) are hidden while Jev is selected, and calling one returns an error listing `run` and `close`.
+
+Jev follows explicit instructions best, so the tool asks the agent for a step-by-step goal that names the controls: fill the fields, submit the search, set the filters, then open the result. "Use the destination search: type Lisbon, submit it, set the category to Design, tick Free cancellation, then open Casa Flora" works where "Find Design stays in Lisbon" can leave the search unsubmitted. Text is written by the calling agent's own model from the goal, so the goal should carry every value to enter.
+
+A run ends as **done** or **blocked**. The result gives the final page's title and address, each action taken in order, and the text visible at the end. Done means Jev judged the goal met, not that anything verified it, and the result says so, so the agent compares the final page with the goal before reporting success. If the final page had more than 250 controls, the result says how many Jev was not shown.
+
+A click or text entry whose target changed or became covered just before it ran is refused without sending any input. The refusal goes into the run's history, so Jev sees it among its recent actions and looks again.
+
+A run stops as blocked, with the reason, after:
+
+- 60 actions or 120 decisions;
+- three steps in a row that were refused or changed nothing on the page, naming the control that was refused (waits do not count toward this);
+- five decisions in a row made on a page that moved before they could run, such as a page whose content keeps changing;
+- five minutes;
+- **Stop** pressed in the chat, or the task or subagent run being cancelled. The run ends at its next step, and the result lists the actions already taken.
+
+Each call into the browser has 30 seconds. A page that stops responding for longer, for example because a script is stuck in a loop, ends the run with an error, and JClaw closes that agent's browser session so the next call starts fresh. If Jev cannot be reached, or answers with something invalid, the run stops without taking that step and says why. A Jev request that times out, fails to connect or is rate-limited is retried twice first.
+
+Jev never sees or fills password fields, so logins do not work in Jev mode: switch to Playwright for a site that needs one. Shadow DOM, frames, file uploads and pop-up windows are not supported either.
+
 ## MCP Servers
 
 The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps like JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. An MCP server's tools are managed on the [MCP Servers](/mcp-servers) page — not the Tools page, which lists only JClaw's first-party tools.

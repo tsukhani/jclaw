@@ -1,6 +1,7 @@
 import agents.AgentExecutionSink;
 import agents.AgentRunner;
 import agents.ConversationSink;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import jakarta.persistence.EntityManager;
 import llm.LlmTypes.ChatMessage;
@@ -15,6 +16,7 @@ import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConversationService;
+import services.SubagentRegistry;
 import services.Tx;
 
 import java.util.ArrayList;
@@ -23,6 +25,8 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -583,5 +587,75 @@ class ParallelToolExecutionTest extends UnitTest {
                 "the streamed frame must carry the same keys the reload response does");
         assertFalse(frame.get("deleted").getAsBoolean(),
                 "a freshly generated attachment is present, so the chip shows no deleted marker");
+    }
+
+    // --- the turn's stop signal reaches the tool (JCLAW-1274) ---------------------------------
+
+    /** Records what {@link ToolContext#cancelled()} reads before and after {@code stop} runs mid-call. */
+    private static ToolRegistry.Tool stopWatcher(Runnable stop, List<String> seen) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return "stop_watch"; }
+            @Override public String description() { return "Watches the stop signal for the test."; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public String execute(String argsJson, Agent agent) {
+                var before = ToolContext.cancelled();
+                stop.run();
+                seen.add(before + "->" + ToolContext.cancelled());
+                return "ok";
+            }
+        };
+    }
+
+    private static final ToolCall WATCH = new ToolCall("watch", "function", new FunctionCall("stop_watch", "{}"));
+    private static final ToolCall ALONGSIDE = new ToolCall("x1", "function", new FunctionCall("safe_x", "{}"));
+
+    @Test
+    void theStopFlagReachesASingleCall() throws Exception {
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var cancelled = new AtomicBoolean();
+        var seen = Collections.synchronizedList(new ArrayList<String>());
+        ToolRegistry.publish(List.of(stopWatcher(() -> cancelled.set(true), seen)));
+
+        invokeParallel(List.of(WATCH), agent, ids[1], new ArrayList<>(), cancelled);
+
+        assertEquals(List.of("false->true"), seen);
+    }
+
+    @Test
+    void theStopFlagReachesACallInAMultiCallBatch() throws Exception {
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var cancelled = new AtomicBoolean();
+        var seen = Collections.synchronizedList(new ArrayList<String>());
+        ToolRegistry.publish(List.of(stopWatcher(() -> cancelled.set(true), seen), sleepTool("safe_x", true)));
+
+        invokeParallel(List.of(WATCH, ALONGSIDE), agent, ids[1], new ArrayList<>(), cancelled);
+
+        assertEquals(List.of("false->true"), seen);
+    }
+
+    @Test
+    void aSubagentStopReachesACallOnAWorkUnitThread() throws Exception {
+        // The run's scope is bound to the child's own thread; a multi-call batch runs each call on another.
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var runId = -ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
+        var seen = Collections.synchronizedList(new ArrayList<String>());
+        ToolRegistry.publish(List.of(stopWatcher(() -> SubagentRegistry.requestStop(runId), seen),
+                sleepTool("safe_x", true)));
+        SubagentRegistry.register(runId, new CompletableFuture<Void>());
+        try {
+            SubagentRegistry.callAsRun(runId, () -> {
+                invokeParallel(List.of(WATCH, ALONGSIDE), agent, ids[1], new ArrayList<>(), null);
+                return null;
+            });
+        } finally {
+            SubagentRegistry.unregister(runId);
+        }
+
+        assertEquals(List.of("false->true"), seen);
     }
 }

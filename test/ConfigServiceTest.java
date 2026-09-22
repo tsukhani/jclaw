@@ -8,6 +8,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
 import utils.HttpFactories;
 
@@ -17,6 +18,37 @@ class ConfigServiceTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
+    }
+
+    @Test
+    void theBrowserEngineIsPlaywrightOrJev() {
+        // JCLAW-1274: an engine the tool does not know would read as Playwright without a word.
+        var rejected = ConfigService.setWithSideEffects(JevSettings.ENGINE, "foo");
+        assertNotNull(rejected, "an unknown engine must be refused at the write");
+        assertTrue(rejected.contains("playwright") && rejected.contains("jev"), rejected);
+        assertNotEquals("foo", ConfigService.get(JevSettings.ENGINE), "a refused value is not saved");
+
+        var unknownKey = ConfigService.setWithSideEffects("browser.jev.model", "jev-latest");
+        assertNotNull(unknownKey, "no browser.* key other than the engine and the Jev key exists");
+        assertNull(ConfigService.get("browser.jev.model"));
+
+        assertNull(JevSettings.rejectionFor(JevSettings.ENGINE, "playwright"));
+        assertNull(JevSettings.rejectionFor(JevSettings.ENGINE, "jev"));
+        // The panel's radios compare the stored value exactly, so a padded engine is refused, not trimmed.
+        assertNotNull(JevSettings.rejectionFor(JevSettings.ENGINE, " jev"));
+        assertNotNull(JevSettings.rejectionFor(JevSettings.ENGINE, "JEV"));
+        assertTrue(ConfigService.isSensitive(JevSettings.API_KEY), "the Jev key is masked on every read");
+    }
+
+    @Test
+    void theJevKeyMustSurviveAnAuthorizationHeader() {
+        assertNull(JevSettings.rejectionFor(JevSettings.API_KEY, "ts-anything_1.2/3+4="));
+        assertNull(JevSettings.rejectionFor(JevSettings.API_KEY, ""), "a blank key clears it");
+        for (var bad : new String[] {"ts key", " ts-key", "ts-key\n", "ts\tkey", "ts-kéy", "ts-key\u0000"}) {
+            var rejected = JevSettings.rejectionFor(JevSettings.API_KEY, bad);
+            assertNotNull(rejected, "refused: " + bad.replace("\n", "\\n"));
+            assertFalse(rejected.contains(bad), "the refusal does not echo the key");
+        }
     }
 
     @Test

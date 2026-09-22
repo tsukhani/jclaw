@@ -44,11 +44,13 @@ import {
   ShieldCheckIcon,
   SpeakerWaveIcon,
   UserGroupIcon,
+  WindowIcon,
   WrenchScrewdriverIcon,
   ChartBarSquareIcon,
 } from '@heroicons/vue/24/outline'
 
 import SettingsApprovalsPanel from './SettingsApprovalsPanel.vue'
+import SettingsBrowserPanel from './SettingsBrowserPanel.vue'
 import SettingsChatPanel from './SettingsChatPanel.vue'
 import SettingsCodingPanel from './SettingsCodingPanel.vue'
 import SettingsDatabasePanel from './SettingsDatabasePanel.vue'
@@ -159,6 +161,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'subagents', title: 'Subagents', icon: UserGroupIcon, component: SettingsSubagentsPanel },
       { id: 'coding', title: 'Coding', icon: CodeBracketIcon, component: SettingsCodingPanel },
       { id: 'web-scraping', title: 'Web Scraping', icon: GlobeAltIcon, component: SettingsWebScrapePanel },
+      { id: 'browser', title: 'Browser', icon: WindowIcon, component: SettingsBrowserPanel },
       { id: 'tasks', title: 'Tasks', icon: ClipboardDocumentCheckIcon, component: SettingsTasksPanel },
       { id: 'skills', title: 'Skills Promotion', icon: PuzzlePieceIcon, component: SettingsSkillsPanel },
     ],

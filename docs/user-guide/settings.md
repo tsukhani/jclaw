@@ -566,6 +566,21 @@ The proxy covers every way a page is fetched: the plain fetch, the browser-imper
 
 Behind a proxy, JClaw still checks every address before a request leaves, and refuses anything private or unresolvable. The proxy then looks the name up itself, so a DNS record that changes between the two lookups can reach whatever the proxy's own network can reach. That trade-off is accepted because the proxy is an exit you chose. With `socks5://`, the browser-impersonating fetch resolves names locally, which narrows it further.
 
+## Browser
+
+Chooses what drives the `browser` tool, for every agent at once.
+
+| Key                  | Default      | Meaning                                                                                   |
+|----------------------|--------------|-------------------------------------------------------------------------------------------|
+| `browser.engine`     | `playwright` | `playwright` or `jev`. Any other value is refused when you save it.                       |
+| `browser.jev.apiKey` | *(unset)*    | Your TypeSafe AI key, for Jev. Masked like every other secret.                            |
+
+**Playwright**, the default, works as it always has: the agent's own model reads the page and writes CSS selectors and JavaScript, one tool call per step.
+
+**Jev** hands the steps to TypeSafe AI's Jev model. The agent calls `run` with a URL and a goal, and Jev chooses each click, text entry, dropdown choice and scroll until it judges the goal done or blocked. Each step is one request to Jev rather than a round of the agent's own model. The agent's own model still writes any text that is typed. Selecting Jev shows the key field. Until a key is set, agents keep the Playwright actions. See [Jev mode](/guide#skills-tools-mcp-jev-mode) for what the agent sees.
+
+With Jev, every step sends TypeSafe AI the goal, the page's address and title, what is visible on it (its text, element labels and form values, but not hidden password fields) and the text typed earlier in the run, and TypeSafe may record or retain them. Keep Playwright for pages whose content must not leave this instance. Switching back to Playwright keeps the key, so you can switch again without re-entering it. The key is refused if it contains spaces or characters outside printable ASCII, and saving the key editor without typing anything leaves the stored key as it was.
+
 ## Tasks
 
 Three knobs for the [Tasks](/guide#tasks) subsystem:

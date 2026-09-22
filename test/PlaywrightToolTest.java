@@ -1,3 +1,4 @@
+import agents.ToolAction;
 import models.Agent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -8,10 +9,15 @@ import org.junit.jupiter.params.provider.CsvSource;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
+import services.ConfigService;
 import tools.PlaywrightBrowserTool;
+import tools.jev.JevSettings;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 class PlaywrightToolTest extends UnitTest {
 
@@ -451,6 +457,61 @@ class PlaywrightToolTest extends UnitTest {
             assertFalse(action.description().isBlank(),
                     "description blank for " + action.name());
         }
+    }
+
+    /**
+     * JCLAW-1274: the engine is read on every call. Jev without a key changes nothing; with one
+     * the tool offers only run and close and refuses the selector actions before any browser
+     * starts; switching back restores the default actions and keeps the stored key.
+     */
+    @Test
+    void theActionSetFollowsTheBrowserEngine() {
+        var tool = new PlaywrightBrowserTool();
+        try {
+            ConfigService.delete(JevSettings.ENGINE);
+            ConfigService.delete(JevSettings.API_KEY);
+            assertEquals(ACTIONS, actionEnum(tool), "an absent engine is Playwright, exactly as before");
+            assertEquals(ACTIONS, tool.actions().stream().map(ToolAction::name).toList());
+
+            ConfigService.set(JevSettings.ENGINE, JevSettings.JEV);
+            assertEquals(ACTIONS, actionEnum(tool), "Jev without a key is the default engine");
+            assertTrue(tool.execute("{\"action\":\"run\",\"url\":\"https://example.com\",\"goal\":\"x\"}", agent)
+                    .startsWith("Error: Unknown action 'run'."));
+
+            ConfigService.set(JevSettings.API_KEY, "ts-test-key");
+            assertEquals(List.of("run", "close"), actionEnum(tool));
+            assertEquals(List.of("run", "close"), tool.actions().stream().map(ToolAction::name).toList());
+            assertTrue(tool.description().contains("step"), tool.description());
+            assertTrue(tool.description().contains("tell the operator"), "an agent cannot switch the engine itself");
+            assertFalse(tool.shortDescription().contains("login"), tool.shortDescription());
+            @SuppressWarnings("unchecked")
+            var props = (Map<String, Object>) tool.parameters().get("properties");
+            assertEquals(Set.of("action", "url", "goal"), props.keySet());
+            assertEquals("Error: Action 'click' is not available while Jev drives the browser. Valid actions: run, close",
+                    tool.execute("{\"action\":\"click\",\"selector\":\"a\"}", agent));
+            assertEquals("Error: run needs both a url and a goal.",
+                    tool.execute("{\"action\":\"run\",\"url\":\"https://example.com\"}", agent));
+            assertTrue(tool.execute("{\"action\":\"run\",\"url\":\"http://169.254.169.254/\",\"goal\":\"x\"}", agent)
+                    .startsWith("Error: SSRF"), "run takes navigate's SSRF check before any browser starts");
+
+            ConfigService.set(JevSettings.ENGINE, JevSettings.PLAYWRIGHT);
+            assertEquals(ACTIONS, actionEnum(tool));
+            assertTrue(tool.description().contains("navigate"));
+            assertTrue(tool.shortDescription().contains("login flows"), tool.shortDescription());
+            assertEquals("ts-test-key", ConfigService.get(JevSettings.API_KEY), "switching back keeps the key");
+        } finally {
+            ConfigService.delete(JevSettings.ENGINE);
+            ConfigService.delete(JevSettings.API_KEY);
+        }
+    }
+
+    private static final List<String> ACTIONS =
+            List.of("navigate", "click", "fill", "getText", "screenshot", "evaluate", "close");
+
+    @SuppressWarnings("unchecked")
+    private static List<String> actionEnum(PlaywrightBrowserTool tool) {
+        var props = (Map<String, Object>) tool.parameters().get("properties");
+        return (List<String>) ((Map<String, Object>) props.get("action")).get("enum");
     }
 
     // ─── chromiumPreinstalledAt: directory-listing branch ─────────────────

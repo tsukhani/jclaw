@@ -1,0 +1,191 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
+import { readBody, setResponseStatus } from 'h3'
+import { clearNuxtData } from '#app'
+import Settings from '~/pages/settings.vue'
+import { sectionGroups } from '~/components/settings/sections'
+
+/**
+ * The Browser settings panel (JCLAW-1274): the engine radios, the TypeSafe warning and key
+ * field that only Jev shows, and that every write is an ordinary /api/config row — switching
+ * back to Playwright keeps the stored key rather than deleting it.
+ */
+
+let stored: Map<string, string>
+let posted: Array<{ key: string, value: string }>
+let deleted: string[]
+let reads: number
+
+function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } = {}) {
+  registerEndpoint('/api/agents', () => [])
+  registerEndpoint('/api/channels', () => [])
+  registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
+  registerEndpoint('/api/providers', () => [])
+  registerEndpoint('/api/config', () => {
+    reads++
+    return {
+      entries: [...stored].map(([key, value]) => ({ key, value, updatedAt: '2026-09-22T00:00:00Z' })),
+    }
+  })
+  registerEndpoint('/api/config', {
+    method: 'POST',
+    handler: async (event) => {
+      const body = await readBody(event) as { key: string, value: string }
+      posted.push(body)
+      if (opts.holdSaves) await opts.holdSaves
+      if (opts.failSaves) {
+        setResponseStatus(event, 502)
+        return '<html><body>Bad Gateway</body></html>'
+      }
+      // The API masks a key on read, as ConfigService.maskValue does.
+      stored.set(body.key, body.key.endsWith('apiKey') ? `${body.value.slice(0, 4)}****` : body.value)
+      return { status: 'ok' }
+    },
+  })
+  registerEndpoint('/api/config/browser.jev.apiKey', {
+    method: 'DELETE',
+    handler: () => {
+      deleted.push('browser.jev.apiKey')
+      return { status: 'ok' }
+    },
+  })
+}
+
+async function mountBrowser() {
+  const component = await mountSuspended(Settings)
+  ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = 'browser'
+  await flushPromises()
+  await flushPromises()
+  return component
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+function checked(component: any, id: string): boolean {
+  return (component.find(id).element as HTMLInputElement).checked
+}
+
+describe('Settings page — Browser', () => {
+  beforeEach(() => {
+    clearNuxtData()
+    stored = new Map()
+    posted = []
+    deleted = []
+    reads = 0
+  })
+
+  it('sits after Web Scraping under Agents & Automation', () => {
+    const ids = sectionGroups.find(g => g.label === 'Agents & Automation')!.sections.map(s => s.id)
+    expect(ids.indexOf('browser')).toBe(ids.indexOf('web-scraping') + 1)
+  })
+
+  it('defaults to Playwright, with no warning and no key field', async () => {
+    baseEndpoints()
+    const component = await mountBrowser()
+
+    expect(component.html()).toMatch(/<h2[^>]*>\s*Browser\s*</)
+    expect(checked(component, '#browser-engine-playwright')).toBe(true)
+    expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
+    expect(component.find('[data-testid="browser-jev-key"]').exists()).toBe(false)
+  })
+
+  it('selecting Jev saves the engine and reveals the warning and an unset key', async () => {
+    baseEndpoints()
+    const component = await mountBrowser()
+
+    await component.find('#browser-engine-jev').setValue(true)
+    await flushPromises()
+
+    expect(posted).toEqual([{ key: 'browser.engine', value: 'jev' }])
+    const warning = component.find('[data-testid="browser-jev-warning"]')
+    expect(warning.exists()).toBe(true)
+    expect(warning.text()).toContain('TypeSafe AI')
+    expect(warning.text()).toContain('address and title')
+    expect(warning.text()).toContain('not hidden password fields')
+    expect(warning.text()).toContain('text typed earlier in the run')
+    expect(warning.text()).toContain('record or retain')
+    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('(not set)')
+  })
+
+  it('sets the key through the masked editor, which starts blank', async () => {
+    baseEndpoints()
+    stored.set('browser.engine', 'jev')
+    const component = await mountBrowser()
+
+    await component.find('button[aria-label="Edit TypeSafe API key"]').trigger('click')
+    const input = component.find('input[aria-label="TypeSafe API key"]')
+    expect((input.element as HTMLInputElement).value).toBe('')
+    expect(input.attributes('autocomplete')).toBe('new-password')
+    await input.setValue('ts-secret-123')
+    await component.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(posted).toEqual([{ key: 'browser.jev.apiKey', value: 'ts-secret-123' }])
+    // updateEntry refreshes the config without awaiting it.
+    await vi.waitFor(() => expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••'))
+  })
+
+  it('switching back to Playwright hides the warning and key but keeps the stored key', async () => {
+    baseEndpoints()
+    stored.set('browser.engine', 'jev')
+    stored.set('browser.jev.apiKey', 'ts-s****')
+    const component = await mountBrowser()
+    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••')
+
+    await component.find('#browser-engine-playwright').setValue(true)
+    await flushPromises()
+
+    expect(posted).toEqual([{ key: 'browser.engine', value: 'playwright' }])
+    expect(deleted).toEqual([])
+    expect(stored.get('browser.jev.apiKey')).toBe('ts-s****')
+    expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
+    expect(component.find('[data-testid="browser-jev-key"]').exists()).toBe(false)
+  })
+
+  it('a failed save puts the saved engine back, names the request and re-reads the settings', async () => {
+    baseEndpoints({ failSaves: true })
+    const component = await mountBrowser()
+    const readsBefore = reads
+
+    await component.find('#browser-engine-jev').setValue(true)
+    await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
+
+    expect(component.find('[data-testid="api-error"]').text()).toContain('/api/config')
+    expect(checked(component, '#browser-engine-playwright')).toBe(true)
+    expect(checked(component, '#browser-engine-jev')).toBe(false)
+    expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
+    await vi.waitFor(() => expect(reads).toBeGreaterThan(readsBefore))
+  })
+
+  it('saving the key editor untouched cancels rather than storing a blank key', async () => {
+    baseEndpoints()
+    stored.set('browser.engine', 'jev')
+    stored.set('browser.jev.apiKey', 'ts-s****')
+    const component = await mountBrowser()
+
+    await component.find('button[aria-label="Edit TypeSafe API key"]').trigger('click')
+    await component.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    expect(posted).toEqual([])
+    expect(component.find('input[aria-label="TypeSafe API key"]').exists()).toBe(false)
+    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••')
+  })
+
+  it('the key cannot be saved while the engine save is in flight', async () => {
+    let release!: () => void
+    baseEndpoints({ holdSaves: new Promise<void>((resolve) => {
+      release = resolve
+    }) })
+    const component = await mountBrowser()
+
+    await component.find('#browser-engine-jev').setValue(true)
+    await component.find('button[aria-label="Edit TypeSafe API key"]').trigger('click')
+    await component.find('input[aria-label="TypeSafe API key"]').setValue('ts-secret-123')
+
+    expect(component.find('button[title="Save"]').attributes('disabled')).toBeDefined()
+    release()
+    await vi.waitFor(() => expect(component.find('button[title="Save"]').attributes('disabled')).toBeUndefined())
+  })
+})

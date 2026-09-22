@@ -33,6 +33,7 @@ import services.tts.TtsSidecarManager;
 import services.voice.VoiceSettings;
 import tools.DocumentsTool;
 import tools.SubagentSpawnTool;
+import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
 import utils.ErrorRendering;
 import utils.HttpFactories;
@@ -444,6 +445,14 @@ public class ConfigService {
         // here, where the write happens, rather than logged at the next export.
         if (key.startsWith(OtelConfig.KEY_PREFIX)) {
             var rejected = OtelConfig.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
+        }
+
+        // JCLAW-1274: an engine the browser tool does not know would read as Playwright without a word.
+        if (key.startsWith(JevSettings.KEY_PREFIX)) {
+            var rejected = JevSettings.rejectionFor(key, value);
             if (rejected != null) {
                 return rejected;
             }

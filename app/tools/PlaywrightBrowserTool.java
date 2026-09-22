@@ -2,17 +2,23 @@ package tools;
 
 import agents.ToolAction;
 import agents.ToolRegistry;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.PlaywrightException;
+import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.LoadState;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
+import tools.jev.JevPage;
+import tools.jev.JevRun;
+import tools.jev.JevSettings;
 import utils.AppClock;
 import utils.SsrfGuard;
 
@@ -25,6 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 /**
  * Headless Chromium browser automation for JS-heavy pages.
@@ -54,6 +61,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static final String ACTION_GET_TEXT = "getText";
     private static final String ACTION_SCREENSHOT = "screenshot";
     private static final String ACTION_EVALUATE = "evaluate";
+    private static final String ACTION_RUN = "run";
     private static final String ACTION_CLOSE = "close";
 
     /**
@@ -66,9 +74,24 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             ACTION_NAVIGATE, ACTION_CLICK, ACTION_FILL, ACTION_GET_TEXT,
             ACTION_SCREENSHOT, ACTION_EVALUATE, ACTION_CLOSE);
 
+    /** While Jev is the engine (JCLAW-1274) it chooses every step, so the selector actions are withheld. */
+    private static final List<String> JEV_ACTIONS = List.of(ACTION_RUN, ACTION_CLOSE);
+
+    private static final List<ToolAction> ACTION_CATALOG = List.of(
+            new ToolAction(ACTION_NAVIGATE,   "Load a URL, wait for network idle, and return page text"),
+            new ToolAction(ACTION_CLICK,      "Click a DOM element by CSS selector"),
+            new ToolAction(ACTION_FILL,       "Fill a form field with a value by CSS selector"),
+            new ToolAction(ACTION_GET_TEXT,    "Extract the text content of a CSS selector"),
+            new ToolAction(ACTION_SCREENSHOT, "Capture a full-page screenshot and save it to the workspace"),
+            new ToolAction(ACTION_EVALUATE,   "Execute a JavaScript expression and return the result"),
+            new ToolAction(ACTION_RUN,        "Open a URL and let Jev carry out a goal on it, step by step"),
+            new ToolAction(ACTION_CLOSE,      "Close the browser session and free all resources"));
+
     // JSON argument keys
     private static final String ARG_ACTION = "action";
     private static final String ARG_SELECTOR = "selector";
+    private static final String ARG_URL = "url";
+    private static final String ARG_GOAL = "goal";
 
     /**
      * The live browser resources for one agent session. Immutable; a relaunch
@@ -80,10 +103,20 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * host not already pinned tears the browser down and relaunches it with the
      * union, so every host visited in the session is connect-time pinned — not
      * just the entry host.
+     *
+     * <p>{@code driver} is the Node process behind {@code playwright}, or null when it could not be
+     * identified; killing it is the only way to free a thread blocked on a frozen page (JCLAW-1274).
      */
-    private record BrowserSession(Playwright playwright, Browser browser, Page page,
-                                  Set<String> pinnedRules) {
+    private record BrowserSession(Playwright playwright, @Nullable ProcessHandle driver, Browser browser, Page page,
+                                  CDPSession cdp, Set<String> pinnedRules) {
     }
+
+    /** A Playwright client and its Node driver process, or a null process when it could not be identified. */
+    public record Driver(Playwright playwright, @Nullable ProcessHandle process) {
+    }
+
+    // Held across Playwright.create so the one child process that appears during it is that driver.
+    private static final ReentrantLock DRIVER_LAUNCH_LOCK = new ReentrantLock();
 
     /**
      * Per-agent session slot held in the {@link #sessions} map. The map only
@@ -127,24 +160,36 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     @Override
     public String shortDescription() {
+        if (JevSettings.active()) return "Headless browser for JavaScript-heavy pages, where Jev carries out a goal.";
         return "Headless browser automation for SPAs, login flows, and JavaScript-heavy pages.";
+    }
+
+    /** The actions on offer this turn; the schema, the catalog and the refusal all read it. */
+    private static List<String> validActions() {
+        return JevSettings.active() ? JEV_ACTIONS : ACTIONS;
     }
 
     @Override
     public List<ToolAction> actions() {
-        return List.of(
-                new ToolAction(ACTION_NAVIGATE,   "Load a URL, wait for network idle, and return page text"),
-                new ToolAction(ACTION_CLICK,      "Click a DOM element by CSS selector"),
-                new ToolAction(ACTION_FILL,       "Fill a form field with a value by CSS selector"),
-                new ToolAction(ACTION_GET_TEXT,    "Extract the text content of a CSS selector"),
-                new ToolAction(ACTION_SCREENSHOT, "Capture a full-page screenshot and save it to the workspace"),
-                new ToolAction(ACTION_EVALUATE,   "Execute a JavaScript expression and return the result"),
-                new ToolAction(ACTION_CLOSE,      "Close the browser session and free all resources")
-        );
+        var valid = validActions();
+        return ACTION_CATALOG.stream().filter(a -> valid.contains(a.name())).toList();
     }
 
     @Override
     public String description() {
+        if (JevSettings.active()) {
+            return """
+                    Headless browser driven by the Jev engine. Call run with a url and a goal: Jev opens the \
+                    page and chooses every click, text entry, dropdown choice and scroll itself until it judges \
+                    the goal done or blocked, then returns the final page. Your own model writes the text Jev \
+                    types, from the goal, so put every value to enter in it. Write the goal as explicit, ordered \
+                    steps naming the controls to use: fill the fields, submit the search, set the filters, then \
+                    open the result. "Use the destination search: type Lisbon, submit it, set the category to \
+                    Design, tick Free cancellation, then open Casa Flora" works where "Find Design stays in \
+                    Lisbon" can leave the search unsubmitted. Jev never sees or fills password fields, so it \
+                    cannot log in: when a page needs a login, tell the operator rather than retrying. DONE is \
+                    Jev's judgement, not a check: compare the returned page with the goal. Actions: run, close.""";
+        }
         return """
                 Headless browser for JavaScript-heavy web pages. \
                 Use this when web_fetch returns incomplete content (SPAs, dynamic pages, login flows). \
@@ -153,6 +198,22 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     @Override
     public Map<String, Object> parameters() {
+        if (JevSettings.active()) {
+            return Map.of(
+                    SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                    SchemaKeys.PROPERTIES, Map.of(
+                            ARG_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                    SchemaKeys.ENUM, JEV_ACTIONS,
+                                    SchemaKeys.DESCRIPTION, "The browser action to perform"),
+                            ARG_URL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                    SchemaKeys.DESCRIPTION, "Page to open before Jev starts (required for run)"),
+                            ARG_GOAL, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                    SchemaKeys.DESCRIPTION, "What Jev should do, as explicit ordered steps with "
+                                            + "every value to enter (required for run)")
+                    ),
+                    SchemaKeys.REQUIRED, List.of(ARG_ACTION)
+            );
+        }
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
@@ -183,6 +244,16 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             return "Browser session closed.";
         }
 
+        // One read decides both what is refused and what runs, so a Settings change mid-call cannot split them.
+        var jevKey = JevSettings.activeKey();
+        var valid = jevKey != null ? JEV_ACTIONS : ACTIONS;
+        if (!valid.contains(action)) {
+            return refusal(action, valid);
+        }
+        if (ACTION_RUN.equals(action) && (isBlank(args, ARG_URL) || isBlank(args, ARG_GOAL))) {
+            return "Error: run needs both a url and a goal.";
+        }
+
         // JCLAW-731: for a navigation, pin the browser's DNS to the guard-
         // validated IP via --host-resolver-rules, so Chromium connects only
         // where we checked (SNI-safe — the hostname stays in the URL, so the
@@ -194,9 +265,9 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         // every other request as before. An unsafe URL is rejected here, before
         // a browser is even spun up.
         Optional<String> pinRule = Optional.empty();
-        if (ACTION_NAVIGATE.equals(action)) {
+        if (ACTION_NAVIGATE.equals(action) || ACTION_RUN.equals(action)) {
             try {
-                pinRule = SsrfGuard.hostResolverRule(args.get("url").getAsString());
+                pinRule = SsrfGuard.hostResolverRule(args.get(ARG_URL).getAsString());
             } catch (SecurityException e) {
                 return "Error: " + e.getMessage();
             }
@@ -211,9 +282,13 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         var holder = acquireHolder(agent.name);
         try {
             var session = ensureSession(holder, agent.name, pinRule);
+            if (ACTION_RUN.equals(action) && jevKey != null) {
+                return run(holder, session, args.get(ARG_URL).getAsString(), args.get(ARG_GOAL).getAsString(),
+                        jevKey, agent);
+            }
             var page = session.page();
             return switch (action) {
-                case ACTION_NAVIGATE -> navigate(page, args.get("url").getAsString());
+                case ACTION_NAVIGATE -> navigate(page, args.get(ARG_URL).getAsString());
                 case ACTION_CLICK -> click(page, args.get(ARG_SELECTOR).getAsString());
                 case ACTION_FILL -> fill(page, args.get(ARG_SELECTOR).getAsString(),
                                     args.get("value").getAsString());
@@ -221,8 +296,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                         args.has(ARG_SELECTOR) ? args.get(ARG_SELECTOR).getAsString() : "body");
                 case ACTION_SCREENSHOT -> screenshot(page, agent.name, agent.id);
                 case ACTION_EVALUATE -> evaluate(page, args.get("expression").getAsString());
-                default -> "Error: Unknown action '%s'. Valid actions: %s"
-                        .formatted(action, String.join(", ", ACTIONS));
+                default -> refusal(action, valid);
             };
         } catch (PlaywrightException e) {
             return "Browser error: %s".formatted(e.getMessage());
@@ -233,7 +307,23 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         }
     }
 
-    private String navigate(Page page, String url) {
+    private static String refusal(String action, List<String> valid) {
+        var reason = valid.equals(JEV_ACTIONS) && ACTIONS.contains(action)
+                ? "Action '%s' is not available while Jev drives the browser".formatted(action)
+                : "Unknown action '%s'".formatted(action);
+        return "Error: %s. Valid actions: %s".formatted(reason, String.join(", ", valid));
+    }
+
+    private static boolean isBlank(JsonObject args, String key) {
+        var value = args.get(key);
+        return value == null || !value.isJsonPrimitive() || value.getAsString().isBlank();
+    }
+
+    /**
+     * Navigate, returning the refusal when the URL is unsafe and null once the page has loaded. With
+     * {@code idleOptional}, a page that never goes network-idle (a news site's polling) counts as loaded.
+     */
+    private static @Nullable String load(Page page, String url, boolean idleOptional) {
         // JCLAW-116: validate the entry URL before handing it to Chromium.
         // The route interceptor installed in createSession catches subresources
         // and redirects, but the top-level URL is still checked here so we
@@ -244,13 +334,46 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             return "Error: " + e.getMessage();
         }
         page.navigate(url);
-        page.waitForLoadState(LoadState.NETWORKIDLE);
+        try {
+            page.waitForLoadState(LoadState.NETWORKIDLE);
+        } catch (TimeoutError e) {
+            if (!idleOptional) throw e;
+        }
+        return null;
+    }
+
+    private String navigate(Page page, String url) {
+        var refused = load(page, url, false);
+        if (refused != null) return refused;
         var title = page.title();
         var text = page.textContent("body");
         if (text != null && text.length() > MAX_TEXT_LENGTH) {
             text = text.substring(0, MAX_TEXT_LENGTH) + "\n[Truncated]";
         }
         return "Page: %s\n\n%s".formatted(title, text != null ? text : "(empty page)");
+    }
+
+    /**
+     * Jev mode (JCLAW-1274): open {@code url} through the same guarded path as navigate, then let Jev
+     * drive. A browser call that outlives {@link JevPage#CALL_LIMIT} kills the driver to free this
+     * thread, and the session is closed so the next call and shutdown start clean. Runs under
+     * {@code holder.lock}.
+     */
+    private static String run(SessionHolder holder, BrowserSession session, String url, String goal, String apiKey,
+                              Agent agent) {
+        var driver = session.driver();
+        if (driver == null) {
+            return "Error: the browser driver could not be identified, so a frozen page could not be stopped. "
+                    + "Ask the operator to switch Settings → Browser to Playwright.";
+        }
+        var refused = load(session.page(), url, true);
+        if (refused != null) return refused;
+        var jev = new JevPage(session.cdp(), JevPage.CALL_LIMIT, () -> killDriver(driver));
+        var result = JevRun.run(jev, apiKey, goal, JevRun.agentModel(agent), agent.name).format();
+        // A run can last minutes; without this the idle sweep could retire the session just after it.
+        holder.lastUsed = AppClock.now().toEpochMilli();
+        if (jev.frozen()) retire(holder, agent.name);
+        return result;
     }
 
     private String click(Page page, String selector) {
@@ -428,8 +551,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         Browser browser = null;
         Page page = null;
         try {
-            playwright = Playwright.create(new Playwright.CreateOptions()
-                    .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+            var driver = startDriver();
+            playwright = driver.playwright();
+            if (driver.process() == null && JevSettings.active()) {
+                EventLogger.warn("tool", key, null,
+                        "Browser driver process not identified; a Jev run on a frozen page cannot be stopped");
+            }
             // JCLAW-172: headless is hardcoded — there is no UX where running a
             // visible browser on the host serves an LLM-driven agent. The
             // previous {@code playwright.headless} config key is gone.
@@ -458,7 +585,8 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                     route.abort();
                 }
             });
-            return new BrowserSession(playwright, browser, page, Set.copyOf(pinnedRules));
+            var cdp = page.context().newCDPSession(page);
+            return new BrowserSession(playwright, driver.process(), browser, page, cdp, Set.copyOf(pinnedRules));
         } catch (RuntimeException e) {
             // Best-effort teardown of whatever was constructed, newest first,
             // each guarded independently (mirrors destroySession).
@@ -467,6 +595,34 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             if (playwright != null) { try { playwright.close(); } catch (Exception _) { /* best-effort */ } }
             throw e;
         }
+    }
+
+    /** Start a Playwright client, recording its Node driver process. Exposed for tests. */
+    public static Driver startDriver() {
+        DRIVER_LAUNCH_LOCK.lock();
+        try {
+            var before = ProcessHandle.current().children().map(ProcessHandle::pid).collect(Collectors.toSet());
+            var playwright = Playwright.create(new Playwright.CreateOptions()
+                    .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+            var drivers = ProcessHandle.current().children()
+                    .filter(p -> !before.contains(p.pid()))
+                    .filter(p -> p.info().arguments().map(a -> List.of(a).contains("run-driver")).orElse(false))
+                    .toList();
+            return new Driver(playwright, drivers.size() == 1 ? drivers.getFirst() : null);
+        } finally {
+            DRIVER_LAUNCH_LOCK.unlock();
+        }
+    }
+
+    /**
+     * Kill a driver and everything it started, which fails any call blocked on it. Calls no
+     * Playwright method, so it is safe from any thread. Exposed for tests.
+     */
+    public static void killDriver(@Nullable ProcessHandle driver) {
+        if (driver == null) return;
+        // Listed before the driver dies: its children are re-parented once it is gone.
+        driver.descendants().toList().forEach(ProcessHandle::destroyForcibly);
+        driver.destroyForcibly();
     }
 
     public static void closeSession(String agentName) {

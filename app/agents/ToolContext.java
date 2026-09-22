@@ -1,7 +1,9 @@
 package agents;
 
 import org.jspecify.annotations.Nullable;
+import services.TaskRunRegistry;
 
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -26,16 +28,25 @@ public final class ToolContext {
 
     private ToolContext() {}
 
-    /** The scope ids visible to a tool during its dispatch; exactly one is set. */
-    public record Scope(@Nullable Long conversationId, @Nullable Long taskRunId) {}
+    /**
+     * The scope ids visible to a tool during its dispatch; exactly one id is set. {@code cancel}
+     * reads the turn's stop signals (Stop in chat, a subagent kill), or is null when it has none.
+     */
+    public record Scope(@Nullable Long conversationId, @Nullable Long taskRunId, @Nullable BooleanSupplier cancel) {}
 
     private static final ThreadLocal<Scope> SCOPE = new ThreadLocal<>();
 
     /** Run {@code body} with both scope ids visible via {@link #conversationId()} / {@link #taskRunId()}. */
     public static <T> T withScope(@Nullable Long conversationId, @Nullable Long taskRunId,
                                   Supplier<T> body) {
+        return withScope(conversationId, taskRunId, null, body);
+    }
+
+    /** {@link #withScope(Long, Long, Supplier)} plus the turn's stop signal, read by {@link #cancelled()}. */
+    public static <T> T withScope(@Nullable Long conversationId, @Nullable Long taskRunId,
+                                  @Nullable BooleanSupplier cancel, Supplier<T> body) {
         var prev = SCOPE.get();
-        SCOPE.set(new Scope(conversationId, taskRunId));
+        SCOPE.set(new Scope(conversationId, taskRunId, cancel));
         try {
             return body.get();
         } finally {
@@ -59,5 +70,16 @@ public final class ToolContext {
     public static @Nullable Long taskRunId() {
         var s = SCOPE.get();
         return s == null ? null : s.taskRunId();
+    }
+
+    /**
+     * True once the turn dispatching this tool has been stopped — Stop pressed in chat, the task run
+     * cancelled, or the subagent run killed — so a long-running tool can end at its next step.
+     */
+    public static boolean cancelled() {
+        var s = SCOPE.get();
+        if (s == null) return false;
+        var cancel = s.cancel();
+        return (cancel != null && cancel.getAsBoolean()) || TaskRunRegistry.isCancelled(s.taskRunId());
     }
 }
