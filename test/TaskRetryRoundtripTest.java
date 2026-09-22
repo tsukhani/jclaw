@@ -4,6 +4,7 @@ import com.github.kagkarlsson.scheduler.task.ExecutionContext;
 import com.github.kagkarlsson.scheduler.task.ExecutionOperations;
 import com.github.kagkarlsson.scheduler.task.SchedulableInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
+import llm.LlmResilience;
 import models.Agent;
 import models.EventLog;
 import models.Task;
@@ -19,9 +20,13 @@ import services.EventLogger;
 import services.JClawFailureHandler;
 import services.TaskExecutionHandler;
 import services.Tx;
+import utils.AppClock;
+import utils.CircuitBreakers;
 
 import java.net.SocketTimeoutException;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -76,12 +81,16 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class TaskRetryRoundtripTest extends UnitTest {
 
+    private static final Clock FIXED_NOW = Clock.fixed(Instant.parse("2026-09-22T03:00:00Z"), ZoneOffset.UTC);
+
     private com.sun.net.httpserver.HttpServer llmServer;
     private int port;
 
     @BeforeEach
     void setup() throws Exception {
         Thread.sleep(200);
+        // A previous test's buffered TASK_FAILED would otherwise land after the wipe and count here.
+        EventLogger.flush();
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
@@ -282,6 +291,82 @@ class TaskRetryRoundtripTest extends UnitTest {
                 "TASK_FAILED links to the open TaskRun via run_id");
     }
 
+    @Test
+    void recurringTaskMovesOnToItsNextOccurrenceWhenRetriesRunOut() {
+        var agent = createAgent("cron-exhausted-agent", "test-provider", "test-model");
+        var task = persistRecurringTask(agent, Task.Type.CRON, "0 0 9 * * *", null, 3);
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var ops = AppClock.callWith(FIXED_NOW, () -> failFire(task, new SocketTimeoutException("read timed out")));
+
+        assertFalse(ops.stopped, "one failed occurrence must not end the task's schedule");
+        assertEquals(List.of(Instant.parse("2026-09-22T09:00:00Z")), ops.reschedules,
+                "the row moves to the next 09:00 occurrence");
+        JPA.em().clear();
+        var fresh = Tx.run(() -> (Task) Task.findById(task.id));
+        assertEquals(Task.Status.ACTIVE, fresh.status);
+        assertEquals(0, fresh.retryCount, "the next occurrence starts with a full retry budget");
+        assertTrue(fresh.lastError.contains("read timed out"), "lastError keeps the cause, got: " + fresh.lastError);
+        EventLogger.flush();
+        assertEquals(1, loadEventsByCategory("TASK_FAILED").stream().filter(e -> e.message.contains(task.name)).count(),
+                "the failed occurrence is still recorded");
+    }
+
+    @Test
+    void intervalTaskMovesOnToItsNextOccurrenceAfterAPermanentError() {
+        var agent = createAgent("interval-permanent-agent", "test-provider", "test-model");
+        var task = persistRecurringTask(agent, Task.Type.INTERVAL, null, 3600L, 0);
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var ops = AppClock.callWith(FIXED_NOW, () -> failFire(task, new RuntimeException("HTTP 401 Unauthorized")));
+
+        assertFalse(ops.stopped, "a permanent error ends the occurrence, not the schedule");
+        assertEquals(List.of(FIXED_NOW.instant().plusSeconds(3600)), ops.reschedules);
+        JPA.em().clear();
+        var fresh = Tx.run(() -> (Task) Task.findById(task.id));
+        assertEquals(Task.Status.ACTIVE, fresh.status);
+        assertEquals("HTTP 401 Unauthorized", fresh.lastError);
+    }
+
+    @Test
+    void recurringTaskWithNoNextOccurrenceStillFails() {
+        var agent = createAgent("cron-malformed-agent", "test-provider", "test-model");
+        var task = persistRecurringTask(agent, Task.Type.CRON, "not a cron expression", null, 3);
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var ops = failFire(task, new SocketTimeoutException("read timed out"));
+
+        assertTrue(ops.stopped, "with nowhere to move to, the row is stopped as before");
+        assertTrue(ops.reschedules.isEmpty());
+        JPA.em().clear();
+        assertEquals(Task.Status.FAILED, Tx.run(() -> ((Task) Task.findById(task.id)).status));
+    }
+
+    @Test
+    void recurringTaskThatSucceedsOnRetryStartsItsNextOccurrenceWithAFullBudget() throws Exception {
+        var provider = "cron-retry-provider-" + System.nanoTime();
+        try {
+            var agent = createAgent("cron-recovered-agent", provider, "test-model");
+            var task = persistRecurringTask(agent, Task.Type.CRON, "0 0 9 * * *", null, 2);
+            JPA.em().getTransaction().commit();
+            JPA.em().getTransaction().begin();
+            startLlmServer(simpleResponse("Briefing sent."));
+            configureProvider(provider);
+
+            runFire(task);
+
+            JPA.em().clear();
+            var fresh = Tx.run(() -> (Task) Task.findById(task.id));
+            assertEquals(Task.Status.ACTIVE, fresh.status);
+            assertEquals(0, fresh.retryCount, "a recurring task's retry budget is per occurrence, not per lifetime");
+        } finally {
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
     // === Helpers ===
 
     /**
@@ -363,11 +448,54 @@ class TaskRetryRoundtripTest extends UnitTest {
     }
 
     private void configureProvider() {
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
+        configureProvider("test-provider");
+    }
+
+    private void configureProvider(String name) {
+        ConfigService.set("provider." + name + ".baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider." + name + ".apiKey", "sk-test");
+        ConfigService.set("provider." + name + ".models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
+    }
+
+    private Task persistRecurringTask(Agent agent, Task.Type type, String cron, Long intervalSeconds, int retryCount) {
+        var t = persistTask(agent, type + " task " + System.nanoTime(), "Recurring work.", type);
+        t.status = Task.Status.ACTIVE;
+        t.cronExpression = cron;
+        t.intervalSeconds = intervalSeconds;
+        t.timezone = "UTC";
+        t.retryCount = retryCount;
+        t.maxRetries = 3;
+        t.save();
+        return t;
+    }
+
+    /** Hand a failed fire of {@code task} to the failure handler, as db-scheduler would. */
+    private RecordingExecutionOperations failFire(Task task, Throwable error) {
+        var execution = new Execution(AppClock.now(),
+                new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME, task.id.toString()));
+        var ops = new RecordingExecutionOperations(execution);
+        new JClawFailureHandler().onFailure(
+                ExecutionComplete.failure(execution, AppClock.now().minusSeconds(1), AppClock.now(), error), ops);
+        return ops;
+    }
+
+    /** Run one fire of {@code task} through the production lambda on a virtual thread, as db-scheduler would. */
+    private void runFire(Task task) throws Exception {
+        var taskInstance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME, task.id.toString());
+        var ctx = new ExecutionContext(null, new Execution(Instant.now(), taskInstance), null, null);
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                TaskExecutionHandler.buildTask().execute(taskInstance, ctx);
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "the fire should complete within 30s");
+        if (errorRef.get() != null) throw errorRef.get();
     }
 
     private static String simpleResponse(String content) {

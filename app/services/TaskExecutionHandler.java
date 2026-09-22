@@ -8,7 +8,6 @@ import com.github.kagkarlsson.scheduler.task.helper.CustomTask;
 import com.github.kagkarlsson.scheduler.task.helper.Tasks;
 import models.Task;
 import org.jspecify.annotations.Nullable;
-import utils.AppClock;
 
 import java.time.Instant;
 import java.util.concurrent.TimeUnit;
@@ -313,7 +312,7 @@ public final class TaskExecutionHandler {
     private static CompletionHandler<Void> scheduleIntervalNextCompletion(Task task) {
         return (_, executionOperations) -> {
             stopCurrentRow(task, executionOperations);
-            rescheduleNext(task, () -> AppClock.now().plusSeconds(task.intervalSeconds),
+            rescheduleNext(task, () -> TaskSchedulingService.nextOccurrence(task),
                     "INTERVAL", " (every %ds)".formatted(task.intervalSeconds));
         };
     }
@@ -412,13 +411,7 @@ public final class TaskExecutionHandler {
     private static CompletionHandler<Void> scheduleCronNextCompletion(Task task) {
         return (_, executionOperations) -> {
             stopCurrentRow(task, executionOperations);
-            rescheduleNext(task, () -> {
-                // JCLAW-261: same zone resolution as the first-fire computation
-                // in TaskSchedulingService so the next fire matches the user's
-                // intent ("9 am NYC") regardless of the JVM's default zone.
-                var zone = TimezoneResolver.resolve(task);
-                return JClawCronUtils.nextExecution(task.cronExpression, zone);
-            }, "CRON", "");
+            rescheduleNext(task, () -> TaskSchedulingService.nextOccurrence(task), "CRON", "");
         };
     }
 }

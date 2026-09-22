@@ -89,7 +89,7 @@ Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks
 | **Agent**     | Which agent owns the task.                                                                              |
 | **Channel**   | Where the task's output is delivered (e.g. a Telegram/Slack target, or `none`), shown as a humanized name. Editable inline when the row is expanded. |
 | **Next Run**  | When the task will fire next, formatted in the task's effective timezone (see *Timezones*).             |
-| **Retries**   | Current attempts / max attempts. Failed fires are retried up to this cap before marking `FAILED`.       |
+| **Retries**   | Current attempts / max attempts. Failed fires are retried up to this cap before marking `FAILED`; a recurring task gets a fresh budget for each occurrence. |
 | **Actions**   | Per-row controls (see *Per-row actions*).                                                               |
 
 ### Status states
@@ -101,7 +101,7 @@ Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks
 | `RUNNING`   | Mid-fire right now.                                                                                            |
 | `LOST`      | Was `RUNNING` but the scheduler's heartbeat went stale. JClaw auto-recovers the underlying job shortly.       |
 | `COMPLETED` | Terminal for one-shot tasks. Recurring tasks never reach `COMPLETED` unless explicitly cancelled.              |
-| `FAILED`    | Hit the retry cap. Click **Retry** to requeue.                                                                 |
+| `FAILED`    | A one-shot that hit the retry cap or a non-recoverable error. Click **Retry** to requeue. A recurring task does not end here: a failed occurrence waits for the next one. |
 | `CANCELLED` | `cancelTask` was called. Row is preserved; `runNow` revives it.                                                |
 | `PAUSED`    | Shown in place of `PENDING`/`ACTIVE` while you've suspended the schedule. Display-only — pause sets a flag and keeps the underlying state, which is why **Resume** picks a recurring cadence straight back up. A one-off whose moment passes while paused has its fire dropped; resuming re-arms it (immediately, if that moment is now in the past). |
 
@@ -114,7 +114,8 @@ one-shot     PENDING ──▶ RUNNING ──▶ COMPLETED        (done — a fi
 recurring    ACTIVE  ──▶ RUNNING ──▶ ACTIVE           (loops once per cadence)
 
 failure      RUNNING ──▶ PENDING/ACTIVE               (transient: retry on backoff)
-             RUNNING ──▶ FAILED ──▶ (Retry) ──▶ PENDING/ACTIVE   (permanent / retries used up)
+             RUNNING ──▶ FAILED ──▶ (Retry) ──▶ PENDING  (one-shot: permanent / retries used up)
+             RUNNING ──▶ ACTIVE                       (recurring: permanent / retries used up — next occurrence)
 
 crash        RUNNING ──▶ LOST ──▶ (auto re-fire) ──▶ RUNNING ──▶ …
 
@@ -126,7 +127,7 @@ Walking the transitions:
 - **Fire starts.** At the scheduled moment the task flips to `RUNNING` and a fresh run opens — you'll see the blue `RUNNING` pill and a live elapsed-time counter in the run history.
 - **Success.** A one-shot ends `COMPLETED` (it has served its purpose); a recurring task drops back to `ACTIVE` to await its next cadence. If the task has a delivery target, the reply is pushed afterward.
 - **Transient failure.** A recoverable error (network blip, rate-limit) bumps the **Retries** counter and reschedules on a backoff — `30s → 60s → 5m → 15m → 1h`. The task returns to its waiting state between attempts, then re-enters `RUNNING` on the retry.
-- **Permanent failure.** A non-recoverable error, or the retry cap reached, ends the task `FAILED`. **Retry** requeues it.
+- **Permanent failure.** A non-recoverable error, or the retry cap reached, ends a one-shot task `FAILED`; **Retry** requeues it. A recurring task ends only that occurrence: the run is recorded as failed, the error shows on the task, and it returns to `ACTIVE` for its next occurrence with a full retry budget.
 - **Crash recovery.** If the server stops mid-fire, the task is left `RUNNING` with a stale scheduler heartbeat. JClaw marks it `LOST` after ~1 minute so you can see it stalled, then the scheduler automatically re-fires it (~2 minutes) — `LOST → RUNNING → COMPLETED/FAILED` — with no action from you. **Retry** skips the wait.
 - **Time limit.** A single fire may run for at most `fireMaxDurationSeconds` seconds, set at **Settings → Tasks** (default `600`, ten minutes). When it elapses, the fire is cancelled at its next safe point — the top of a model round or between tool calls — so a wedged fire can't run forever. `0` turns the limit off.
 - **Operator stop.** *Cancel* moves a task to `CANCELLED` (the row is kept; `runNow` or **Re-enable** revives it). Cancelling a single in-flight **run** stops only that fire and returns the task to its waiting state — the recurring schedule is left intact.

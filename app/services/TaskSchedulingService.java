@@ -261,6 +261,20 @@ public final class TaskSchedulingService {
         return AppClock.now();
     }
 
+    /**
+     * When a recurring task fires next, counted from now: null for a one-shot, or when its schedule
+     * yields no next fire. The one rule for a completed occurrence and a failed one alike.
+     */
+    public static @Nullable Instant nextOccurrence(Task task) {
+        return switch (task.type) {
+            // JCLAW-261: the task's own zone, so "0 0 9 * * *" means 09:00 where the operator is.
+            case CRON -> JClawCronUtils.nextExecution(task.cronExpression, TimezoneResolver.resolve(task));
+            case INTERVAL -> task.intervalSeconds != null && task.intervalSeconds > 0
+                    ? AppClock.now().plusSeconds(task.intervalSeconds) : null;
+            case IMMEDIATE, SCHEDULED -> null;
+        };
+    }
+
     private static @Nullable Instant computeCronFirstFire(Task task) {
         if (task.cronExpression == null || task.cronExpression.isBlank()) {
             EventLogger.warn("task",

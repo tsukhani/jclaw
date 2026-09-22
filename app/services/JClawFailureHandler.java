@@ -23,7 +23,9 @@ import java.time.Instant;
  *   {@code retryCount &lt; min(maxRetries, backoff schedule length)}.</li>
  *   <li>Permanent failures, or transients with retries exhausted,
  *   mark the Task {@link Task.Status#FAILED} and stop the
- *   db-scheduler row.</li>
+ *   db-scheduler row — except on a recurring Task, where they end only
+ *   the occurrence: the row moves to the next one with a full retry
+ *   budget.</li>
  * </ul>
  *
  * <h2>Why policy is in its own static method</h2>
@@ -59,11 +61,11 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
     static final long[] BACKOFF_SECONDS = {30, 60, 5 * 60, 15 * 60, 60 * 60};
 
     /**
-     * Outcome of {@link #decide}: either reschedule at the carried
-     * instant (transient + retry budget remains) or stop the
-     * scheduler row and mark the Task FAILED.
+     * Outcome of {@link #decide}: retry at the carried instant (transient + retry budget
+     * remains), move a recurring Task on to its next occurrence, or stop the scheduler row
+     * and mark the Task FAILED.
      */
-    public sealed interface Decision permits Decision.Reschedule, Decision.Fail {
+    public sealed interface Decision permits Decision.Reschedule, Decision.NextOccurrence, Decision.Fail {
         /**
          * Try again at {@code nextRunAt}; the Task returns from RUNNING to its
          * alive state (PENDING one-shot / ACTIVE recurring) with bumped
@@ -75,6 +77,14 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
          *                       persist
          */
         record Reschedule(Instant nextRunAt, int newRetryCount) implements Decision {}
+
+        /**
+         * This occurrence of a recurring Task has failed for good; fire again at the next one.
+         *
+         * @param nextRunAt the Task's next occurrence
+         * @param reason    as for {@link Fail#reason}
+         */
+        record NextOccurrence(Instant nextRunAt, String reason) implements Decision {}
 
         /**
          * Stop the row and mark Task FAILED.
@@ -111,6 +121,8 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             switch (decision) {
                 case Decision.Reschedule r ->
                         executionOps.reschedule(executionComplete, r.nextRunAt());
+                case Decision.NextOccurrence n ->
+                        executionOps.reschedule(executionComplete, n.nextRunAt());
                 case Decision.Fail _ -> executionOps.stop();
             }
         } catch (RuntimeException e) {
@@ -124,7 +136,8 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
 
     /**
      * Pure-ish policy step: read the Task, classify the error, mutate
-     * the Task row (retryCount++ on retry, status=FAILED on permanent),
+     * the Task row (retryCount++ on retry, status=FAILED on permanent, or
+     * on to the next occurrence for a recurring Task),
      * return the action db-scheduler should take. Lives in its own
      * method so unit tests can drive it without an
      * {@link ExecutionOperations} stub.
@@ -152,19 +165,22 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                             "Task '%s' transient failure %d/%d, retry in %ds: %s"
                                     .formatted(outcome.taskName(), r.newRetryCount(),
                                             outcome.budget(), outcome.backoffSecs(), errorMessage));
-            case Decision.Fail(String reason) -> {
-                EventLogger.error("task", outcome.agentName(), null,
-                        "Task '%s' failed (%s) after %d attempt(s): %s"
-                                .formatted(outcome.taskName(), reason,
-                                        outcome.attempts(), errorMessage));
-                // JCLAW-21 lifecycle audit: TASK_FAILED, sibling to TASK_STARTED / TASK_COMPLETED
-                // in TaskExecutor. Both the classification (permanent vs exhausted) and the raw
-                // message go out so dashboards can group by class while still showing what happened.
-                TaskLifecycleEvents.recordFailed(outcome.task(), outcome.runForLifecycle(),
-                        reason, errorMessage);
-            }
+            case Decision.NextOccurrence(Instant next, String reason) ->
+                    recordFailure(outcome, reason, errorMessage, "; next occurrence at " + next);
+            case Decision.Fail(String reason) -> recordFailure(outcome, reason, errorMessage, "");
         }
         return outcome.decision();
+    }
+
+    private static void recordFailure(DecideOutcome outcome, String reason, String errorMessage, String suffix) {
+        EventLogger.error("task", outcome.agentName(), null,
+                "Task '%s' failed (%s) after %d attempt(s): %s%s"
+                        .formatted(outcome.taskName(), reason, outcome.attempts(), errorMessage, suffix));
+        // JCLAW-21 lifecycle audit: TASK_FAILED, sibling to TASK_STARTED / TASK_COMPLETED
+        // in TaskExecutor. Both the classification (permanent vs exhausted) and the raw
+        // message go out so dashboards can group by class while still showing what happened.
+        TaskLifecycleEvents.recordFailed(outcome.task(), outcome.runForLifecycle(),
+                reason, errorMessage);
     }
 
     /**
@@ -181,7 +197,8 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
 
     /**
      * Single read+write step run inside one transaction: load the Task,
-     * classify, mutate (retryCount bump on retry, status=FAILED on permanent),
+     * classify, mutate (retryCount bump on retry, status=FAILED on permanent,
+     * or on to the next occurrence for a recurring Task),
      * and on the terminal path also load the latest TaskRun for the lifecycle
      * event — all against the same persistence context. Returns {@code null}
      * when the Task row is gone.
@@ -215,13 +232,23 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
         }
 
         // Permanent OR transient-but-exhausted
+        String reason = isTransient ? "retries exhausted" : "permanent error";
+        var runForLifecycle =
+                (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", jclawTaskId).first();
+        Instant next = task.status == Task.Status.CANCELLED ? null : TaskSchedulingService.nextOccurrence(task);
+        if (next != null) {
+            task.retryCount = 0;
+            task.lastError = errorMessage;
+            task.nextRunAt = next;
+            if (task.status == Task.Status.RUNNING) task.status = Task.Status.ACTIVE;
+            task.save();
+            return new DecideOutcome(new Decision.NextOccurrence(next, reason), task, runForLifecycle,
+                    task.name, agentName, budget, 0L, currentRetry + 1);
+        }
+
         task.status = Task.Status.FAILED;
         task.lastError = errorMessage;
         task.save();
-
-        var runForLifecycle =
-                (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", jclawTaskId).first();
-        String reason = isTransient ? "retries exhausted" : "permanent error";
         return new DecideOutcome(new Decision.Fail(reason), task, runForLifecycle,
                 task.name, agentName, budget, 0L, currentRetry + 1);
     }

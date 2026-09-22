@@ -231,6 +231,21 @@ public final class TaskExecutor {
     }
 
     /**
+     * Close a recurring task's occurrence: back to ACTIVE when still RUNNING, and a full retry budget
+     * for the next one, since the budget is per occurrence rather than for the task's lifetime.
+     */
+    private static void completeOccurrence(Long taskId) {
+        Tx.run(() -> {
+            var fresh = (Task) Task.findById(taskId);
+            if (fresh == null) return null;
+            fresh.retryCount = 0;
+            if (fresh.status == Task.Status.RUNNING) fresh.status = Task.Status.ACTIVE;
+            fresh.save();
+            return null;
+        });
+    }
+
+    /**
      * Transition a task <em>out</em> of {@link Task.Status#RUNNING} to
      * {@code to}, but only while it is still RUNNING — so a concurrent operator
      * action that raced this fire (e.g. cancel → {@link Task.Status#CANCELLED})
@@ -417,7 +432,7 @@ public final class TaskExecutor {
             if (task.type == Task.Type.IMMEDIATE || task.type == Task.Type.SCHEDULED) {
                 leaveRunning(task.id, Task.Status.COMPLETED);
             } else {
-                leaveRunning(task.id, Task.Status.ACTIVE);
+                completeOccurrence(task.id);
             }
             TaskLifecycleEvents.recordCompleted(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
