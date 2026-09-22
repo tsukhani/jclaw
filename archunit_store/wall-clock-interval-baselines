@@ -1,5 +1,5 @@
 Constructor <services.ConversationQueue$QueueState.<init>()> calls method <java.lang.System.currentTimeMillis()> in (ConversationQueue.java:55)
-Constructor <tools.PlaywrightBrowserTool$SessionHolder.<init>()> calls method <java.lang.System.currentTimeMillis()> in (PlaywrightBrowserTool.java:115)
+Constructor <tools.PlaywrightBrowserTool$SessionHolder.<init>(java.lang.String)> calls method <java.lang.System.currentTimeMillis()> in (PlaywrightBrowserTool.java:155)
 Method <agents.StreamingAgentRunner.streamLlmLoop(models.Agent, models.Conversation, java.lang.String, java.lang.String, java.util.concurrent.atomic.AtomicBoolean, agents.AgentRunner$StreamingCallbacks, utils.LatencyTrace)> calls method <java.lang.System.currentTimeMillis()> in (StreamingAgentRunner.java:288)
 Method <agents.UsageMetricsBuilder.buildUsageJson(llm.LlmStreamCarriers$TurnUsage, llm.LlmTypes$ModelInfo, long, models.Agent, models.Conversation, long)> calls method <java.lang.System.currentTimeMillis()> in (UsageMetricsBuilder.java:96)
 Method <agents.UsageMetricsBuilder.emitUsageAndComplete(models.Agent, java.lang.String, java.lang.String, llm.LlmStreamCarriers$TurnUsage, long, java.lang.String, agents.AgentRunner$StreamingCallbacks)> calls method <java.lang.System.currentTimeMillis()> in (UsageMetricsBuilder.java:221)
