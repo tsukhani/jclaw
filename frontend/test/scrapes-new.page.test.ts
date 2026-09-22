@@ -54,6 +54,11 @@ describe('New scrape form', () => {
       sent = await readBody(event)
       return { id: 42 }
     } })
+    let settingsWritten = false
+    registerEndpoint('/api/config', { method: 'POST', handler: () => {
+      settingsWritten = true
+      return {}
+    } })
 
     const form = await mountSuspended(NewScrape)
     await settle()
@@ -69,6 +74,7 @@ describe('New scrape form', () => {
     expect(sent).toMatchObject({ url: 'https://docs.example.test/', maxPages: 2000, agentId: 2, format: 'markdown' })
     expect(Object.keys(sent ?? {}).some(key => /proxy|concurrency/i.test(key))).toBe(false)
     expect(navigateToMock).toHaveBeenCalledWith('/scrapes/42')
+    expect(settingsWritten).toBe(false)
     form.unmount()
   })
 

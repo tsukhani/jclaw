@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { setResponseStatus, type H3Event } from 'h3'
+import { getQuery, setResponseStatus, type H3Event } from 'h3'
 import Scrapes from '~/pages/scrapes/index.vue'
 import type { ScrapeJob, ScrapeJobState } from '~/types/api'
 
@@ -153,6 +153,26 @@ describe('Scrapes page', () => {
     await settle()
 
     expect(page.text()).toContain('pause or stop it before deleting it')
+    page.unmount()
+  })
+
+  it('filters by agent and state', async () => {
+    const queries: Array<Record<string, unknown>> = []
+    registerEndpoint('/api/scrape-jobs', (event: H3Event) => {
+      queries.push(getQuery(event))
+      event.node.res.setHeader('X-Total-Count', '0')
+      return []
+    })
+
+    const page = await mountSuspended(Scrapes)
+    await settle()
+    await page.find('#scrapes-state-filter').setValue('PAUSED')
+    await settle()
+    await page.find('#scrapes-agent-filter').setValue('1')
+    await settle()
+
+    expect(queries.at(-1)).toMatchObject({ state: 'PAUSED', agentId: '1' })
+    expect(page.find('[data-testid="scrapes-empty"]').text()).toContain('No scrapes match these filters')
     page.unmount()
   })
 

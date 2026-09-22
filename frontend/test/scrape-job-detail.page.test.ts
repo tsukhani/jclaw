@@ -107,6 +107,7 @@ describe('Scrape job detail', () => {
     await settle()
 
     expect(view.find('[data-testid="scrape-page-markdown"]').html()).toContain('<h1>Install</h1>')
+    expect(view.find('a[download]').exists()).toBe(false)
     expect(view.find('[data-testid="scrape-page-1"]').attributes('aria-pressed')).toBe('true')
     view.unmount()
   })
@@ -132,10 +133,10 @@ describe('Scrape job detail', () => {
     view.unmount()
   })
 
-  it('says when a job continued after a restart', async () => {
+  it('says when a job continued after a restart, and offers its combined file', async () => {
     routeParams.value = { id: '9' }
     registerEndpoint('/api/scrape-jobs/9/pages', () => [])
-    registerEndpoint('/api/scrape-jobs/9', () => job('SUCCEEDED', { id: 9, interruptions: 1, stopReason: 'page budget (500) reached' }))
+    registerEndpoint('/api/scrape-jobs/9', () => job('SUCCEEDED', { id: 9, interruptions: 1, stopReason: 'page budget (500) reached', combinedFile: 'scrapes/9/combined.md' }))
 
     const view = await mountSuspended(ScrapeJobDetail)
     await settle()
@@ -144,6 +145,7 @@ describe('Scrape job detail', () => {
     expect(header).toContain('Finished')
     expect(header).toContain('Stopped: page budget (500) reached.')
     expect(header).toContain('It continued on its own after JClaw restarted once.')
+    expect(view.find('a[download]').attributes('href')).toBe('/api/scrape-jobs/9/download')
     view.unmount()
   })
 })
