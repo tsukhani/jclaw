@@ -428,6 +428,62 @@ class SsrfGuardTest extends UnitTest {
                 () -> SsrfGuard.assertUrlSafe("file:///etc/passwd"), "a scheme");
     }
 
+    // ── JCLAW-1285: characters a browser sends raw after the host do not make a URL unparseable ──
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://8.8.8.8/css?family=Roboto|Open+Sans",
+            "http://8.8.8.8/img?a=b^c{d}e`f",
+            "http://8.8.8.8/sale?off=100%",
+            "http://8.8.8.8/p%2?q=%zz",
+            "http://8.8.8.8/x#frag|^{}",
+            "http://8.8.8.8/a[0].js",
+            "http://8.8.8.8/p|q/r^s"})
+    void aRawCharacterAfterTheHostIsJudgedOnTheHost(String url) {
+        assertDoesNotThrow(() -> SsrfGuard.assertUrlSafe(url), url);
+        assertEquals(Optional.empty(), SsrfGuard.hostResolverRule(url), url);
+        assertEquals(url, SsrfGuard.pinnedUrl(url), "a literal IP is returned as given");
+    }
+
+    @Test
+    void aBlockedAddressIsStillRefusedWhateverItsQueryHolds() {
+        assertThrows(SsrfGuard.BlockedAddressException.class,
+                () -> SsrfGuard.assertUrlSafe("http://127.0.0.1/css?family=Roboto|Open+Sans"));
+        assertThrows(SsrfGuard.BlockedAddressException.class,
+                () -> SsrfGuard.assertUrlSafe("http://169.254.169.254/latest?x={y}"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://exa|mple.com/", "http://8.8.8.8^/x", "http://{8.8.8.8}/", "http://ho%zzst/"})
+    void theSameCharactersInTheAuthorityAreStillRefused(String url) {
+        var refused = assertThrows(SecurityException.class, () -> SsrfGuard.assertUrlSafe(url), url);
+        assertTrue(refused.getMessage().startsWith("SSRF guard: unparseable URL"),
+                "the authority is parsed as written, not re-encoded: " + refused.getMessage());
+    }
+
+    @Test
+    void aPrefixThatIsNotASchemeIsParsedStrictly() {
+        var refused = assertThrows(SecurityException.class, () -> SsrfGuard.assertUrlSafe("1http://8.8.8.8/a|b"));
+        assertTrue(refused.getMessage().startsWith("SSRF guard: unparseable URL"), refused.getMessage());
+    }
+
+    @Test
+    void aPinnedUrlKeepsTheCallersRawTail() {
+        var pinned = SsrfGuard.pinnedUrl("https://example.com/a[0]/p|q?family=Roboto|Open+Sans&off=100%#a^b");
+        assertTrue(pinned.endsWith("/a[0]/p|q?family=Roboto|Open+Sans&off=100%#a^b"),
+                "the tail is not re-encoded: " + pinned);
+        assertFalse(pinned.contains("example.com"), "the host is pinned to a literal: " + pinned);
+        assertTrue(SsrfGuard.isUrlSafe(pinned), "the pinned URL itself passes the guard: " + pinned);
+    }
+
+    @Test
+    void theProviderGuardStillRefusesARawQueryCharacter() {
+        // A saved base URL is parsed strictly on every turn, so it must fail at the save instead.
+        var refused = assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertProviderUrlSafe("http://localhost:11434/api?tags=a|b"));
+        assertTrue(refused.getMessage().startsWith("SSRF guard: unparseable URL"), refused.getMessage());
+    }
+
     // ── JCLAW-778: relaxed provider/MCP guard (permits loopback/LAN) ──
 
     @Test

@@ -9,12 +9,14 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * SSRF-hardened HTTP client factory used by tools that fetch LLM-supplied URLs.
@@ -76,6 +78,8 @@ public final class SsrfGuard {
 
     /** {@link UnknownHostException} message when a hostname resolves to a blocked IP —
      *  {@code .formatted(hostname, blockedIp)} at each SSRF-guard call site. */
+    private static final Pattern SCHEME = Pattern.compile("[A-Za-z][A-Za-z0-9+.-]*");
+
     private static final String BLOCKED_ADDRESS_MSG =
             "SSRF guard: host %s resolves to blocked address %s";
 
@@ -304,12 +308,7 @@ public final class SsrfGuard {
      */
     public static void assertUrlSafe(@NonNull String url) {
         rejectParserDifferentialChars(url);
-        URI uri;
-        try {
-            uri = URI.create(url);
-        } catch (IllegalArgumentException e) {
-            throw new SecurityException("SSRF guard: unparseable URL: " + url, e);
-        }
+        var uri = parse(url);
         var authority = uri.getRawAuthority();
         if (uri.getRawUserInfo() != null || (authority != null && authority.indexOf('@') >= 0)) {
             throw new SecurityException(
@@ -358,7 +357,7 @@ public final class SsrfGuard {
      */
     public static @NonNull String pinnedUrl(@NonNull String url) {
         assertUrlSafe(url);
-        var uri = URI.create(url);
+        var uri = parse(url);
         var host = uri.getHost();
         if (host == null || isLikelyIpLiteral(host)) {
             return url; // already an approved literal IP — nothing to pin
@@ -371,14 +370,10 @@ public final class SsrfGuard {
         if (uri.getPort() != -1) {
             rebuilt.append(':').append(uri.getPort());
         }
-        if (uri.getRawPath() != null) {
-            rebuilt.append(uri.getRawPath());
-        }
-        if (uri.getRawQuery() != null) {
-            rebuilt.append('?').append(uri.getRawQuery());
-        }
-        if (uri.getRawFragment() != null) {
-            rebuilt.append('#').append(uri.getRawFragment());
+        // The caller's own path, query and fragment, not parse()'s re-encoded copy of them.
+        int tail = tailStart(url);
+        if (tail >= 0) {
+            rebuilt.append(url, tail, url.length());
         }
         return rebuilt.toString();
     }
@@ -397,7 +392,7 @@ public final class SsrfGuard {
      */
     public static @NonNull Optional<String> hostResolverRule(@NonNull String url) {
         assertUrlSafe(url);
-        var host = URI.create(url).getHost();
+        var host = parse(url).getHost();
         if (host == null || isLikelyIpLiteral(host)) {
             return Optional.empty(); // already a validated literal IP — nothing to pin
         }
@@ -430,6 +425,69 @@ public final class SsrfGuard {
                             .formatted(host, pinned.getHostAddress()));
         }
         return pinned;
+    }
+
+    /**
+     * {@link URI#create} of {@code url}, with what {@code URI} rejects but Chromium and OkHttp send raw
+     * after the host percent-encoded first (JCLAW-1285): {@code | ^ { } `} in a query, {@code [ ]} in a
+     * path, and a {@code %} that starts no escape. The authority is never rewritten, so the host checked
+     * is the host the caller wrote.
+     *
+     * @throws SecurityException when the URL still does not parse
+     */
+    private static URI parse(String url) {
+        try {
+            return URI.create(encodeTail(url));
+        } catch (IllegalArgumentException e) {
+            throw new SecurityException("SSRF guard: unparseable URL: " + url, e);
+        }
+    }
+
+    private static String encodeTail(String url) {
+        int tail = tailStart(url);
+        if (tail < 0) return url;
+        StringBuilder out = null;
+        for (int i = tail; i < url.length(); i++) {
+            char c = url.charAt(i);
+            String escape = switch (c) {
+                case '|' -> "%7C";
+                case '^' -> "%5E";
+                case '{' -> "%7B";
+                case '}' -> "%7D";
+                case '`' -> "%60";
+                case '[' -> "%5B";
+                case ']' -> "%5D";
+                case '%' -> startsEscape(url, i) ? null : "%25";
+                default -> null;
+            };
+            if (escape != null && out == null) out = new StringBuilder(url.length() + 16).append(url, 0, i);
+            if (out != null) {
+                if (escape != null) out.append(escape);
+                else out.append(c);
+            }
+        }
+        return out == null ? url : out.toString();
+    }
+
+    private static boolean startsEscape(String url, int percent) {
+        // ASCII only: URI refuses the Unicode digits Character.digit would accept.
+        return percent + 2 < url.length()
+                && HexFormat.isHexDigit(url.charAt(percent + 1))
+                && HexFormat.isHexDigit(url.charAt(percent + 2));
+    }
+
+    /**
+     * Where the authority ends — the first {@code /}, {@code ?} or {@code #} after {@code scheme://} — or
+     * -1 when the URL has no such tail, or what precedes {@code ://} is not a URI scheme.
+     */
+    private static int tailStart(String url) {
+        int separator = url.indexOf("://");
+        if (separator <= 0 || !SCHEME.matcher(url).region(0, separator).matches()) return -1;
+        for (int i = separator + 3; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (c == '/' || c == '?' || c == '#') return i;
+        }
+        return -1;
     }
 
     /**
@@ -572,6 +630,7 @@ public final class SsrfGuard {
      *         host, or the host is a blocked IP literal.
      */
     public static void assertProviderUrlSafe(@NonNull String url) {
+        // Strict on purpose: LlmProvider.buildUri parses the saved base URL with URI.create on every turn.
         URI uri;
         try {
             uri = URI.create(url);

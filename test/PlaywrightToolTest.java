@@ -1029,6 +1029,37 @@ class PlaywrightToolTest extends UnitTest {
         }
     }
 
+    // ─── JCLAW-1285: a subresource whose query holds a raw | is judged on its host ─────
+
+    /** A page whose title becomes "answered <status>" when a server replies to {@code url}, or "failed". */
+    private static String fetchOutcomePage(String url) {
+        return "<!doctype html><head><title>pending</title><script>fetch('" + url + "').then("
+                + "r => { document.title = 'answered ' + r.status; }, () => { document.title = 'failed'; });"
+                + "</script></head><body><p>styled</p></body>";
+    }
+
+    @Test
+    void aSubresourceWithARawPipeInItsQueryLoads() throws IOException {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        // The JDK HttpServer rejects this request line itself, so any answer proves the route let it through.
+        var server = loopbackServer(new AtomicInteger(), Map.of(
+                "/fonts", fetchOutcomePage("/css?family=Roboto|Open+Sans&x={y}^z"),
+                "/control", fetchOutcomePage("http://127.0.0.1:1/css?family=Roboto|Open+Sans")));
+        var origin = origin(server);
+        var tool = new PlaywrightBrowserTool();
+        try {
+            var control = executeAt(tool, origin, navigateTo(origin + "/control"));
+            assertTrue(control.startsWith("Page: failed\n") && control.contains("Note:"),
+                    "control: a request the guard refuses reads as failed: " + control);
+            var result = executeAt(tool, origin, navigateTo(origin + "/fonts"));
+            assertTrue(result.startsWith("Page: answered "), "the request reached a server: " + result);
+            assertFalse(result.contains("Note:"), "nothing was refused: " + result);
+        } finally {
+            PlaywrightBrowserTool.closeSession(agent.name);
+            server.stop(0);
+        }
+    }
+
     // ─── JCLAW-1277: run end to end through the tool's own session ─────────────────────
 
     private static final String ORDER = """
