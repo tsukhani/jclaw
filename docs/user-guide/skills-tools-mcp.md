@@ -129,6 +129,8 @@ The other actions (`navigate`, `click`, `fill`, `getText`, `screenshot`, `evalua
 
 Jev follows explicit instructions best, so the tool asks the agent for a step-by-step goal that names the controls: fill the fields, submit the search, set the filters, then open the result. "Use the destination search: type Lisbon, submit it, set the category to Design, tick Free cancellation, then open Casa Flora" works where "Find Design stays in Lisbon" can leave the search unsubmitted. Text is written by the calling agent's own model from the goal, so the goal should carry every value to enter.
 
+The model answers with `{"text": "…"}`, at most 2,000 characters. Reasoning before that object, or a code fence around it, is ignored. Anything after it, a key other than `text`, or an empty value types nothing and ends the run with an error. When the goal gives no value for a field, the model answers `{"text": null}`, and the run ends with an error saying so; put the value in the goal and run again.
+
 A run ends as **done** or **blocked**. The result gives the final page's title and address, each action taken in order, and the text visible at the end. Done means Jev judged the goal met, not that anything verified it, and the result says so, so the agent compares the final page with the goal before reporting success. If the final page had more than 250 controls, the result says how many Jev was not shown.
 
 A click or text entry whose target changed or became covered just before it ran is refused without sending any input. The refusal goes into the run's history, so Jev sees it among its recent actions and looks again.

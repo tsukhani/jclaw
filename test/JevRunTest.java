@@ -51,7 +51,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * A Jev run end to end in real Chromium (JCLAW-1274), on an inline {@code data:} form. Jev is
  * played by an OkHttp interceptor that decides only from the request body it is sent, so the run
  * succeeds only if the snapshot put the labels, values and checked state on the wire. Gated on
- * {@code JCLAW_PLAYWRIGHT_TEST} like the other live browser tests; the strict text-helper contract
+ * {@code JCLAW_PLAYWRIGHT_TEST} like the other live browser tests; the text-helper contract
  * and the text helper's model resolution need no browser and always run. {@code JevLoopTest}
  * covers the loop itself without a browser.
  */
@@ -425,7 +425,7 @@ class JevRunTest extends UnitTest {
     @Test
     void aFailedTextHelperStopsTheRunWithNothingTyped() {
         requireBrowser();
-        JevRun.TextHelper refuses = _ -> JevRun.parseText("{\"text\": null}");
+        JevRun.TextHelper refuses = _ -> JevRun.parseText("I cannot tell what to type.");
         var outcome = HttpFactories.callWith(new OkHttpClient.Builder().addInterceptor(fakeJev(JevRunTest::next)).build(),
                 () -> JevRun.run(jev, "ts-test-key", GOAL, refuses, "jev-run-test"));
 
@@ -518,16 +518,19 @@ class JevRunTest extends UnitTest {
     }
 
     @Test
-    void aReplyThatIsNotStrictJsonTypesNothing() {
+    void aReasoningPrefixedReplyIsTypedButTextAfterTheObjectIsNot() {
         try (var fixture = new ModelFixture()) {
             var helper = JevRun.agentModel(fixture.agent);
+            // The glm-5.3-flash shape JCLAW-1275 was filed for: leaked reasoning, a stray </think>, then the object.
+            assertEquals("Lisbon", HttpFactories.callWith(llm("The field is the destination.</think>{\"text\": \"Lisbon\"}",
+                    new ArrayList<>()), () -> helper.text(new JsonObject())));
             var e = assertThrows(JevException.class, () -> HttpFactories.callWith(
-                    llm("```json\n{\"text\": \"Lisbon\"}\n```", new ArrayList<>()), () -> helper.text(new JsonObject())));
+                    llm("{\"text\": \"Lisbon\"} and then some", new ArrayList<>()), () -> helper.text(new JsonObject())));
             assertEquals("Text helper returned no valid field value; nothing typed", e.getMessage());
         }
     }
 
-    // --- the strict text contract (no browser) ------------------------------------------------
+    // --- the text-helper contract (no browser) ------------------------------------------------
 
     @Test
     void theTextHelperTakesExactlyOneTextKey() {
@@ -535,16 +538,47 @@ class JevRunTest extends UnitTest {
         assertEquals("Lisbon", JevRun.parseText("  {\"text\":\"Lisbon\"}\n"));
     }
 
+    @Test
+    void aBraceInsideTheValueIsNotAnObject() {
+        assertEquals("x{y}", JevRun.parseText("{\"text\": \"x{y}\"}"));
+        assertEquals("{Lisbon}", JevRun.parseText("Answer: {\"text\": \"{Lisbon}\"}"));
+    }
+
+    @Test
+    void aNullValueSaysTheGoalLacksItAndNeverFallsBackToAnEarlierObject() {
+        var expected = "The goal gives no value for this field; nothing typed. Put every value to enter in the goal";
+        assertEquals(expected, assertThrows(JevException.class, () -> JevRun.parseText("{\"text\": null}")).getMessage());
+        // A guess in the reasoning must not be typed when the final answer declines to give a value.
+        var guessed = "I guess {\"text\": \"John Smith\"} but no name is given.</think>{\"text\": null}";
+        assertEquals(expected, assertThrows(JevException.class, () -> JevRun.parseText(guessed)).getMessage());
+        var guessedThenBlank = "Maybe {\"text\": \"John Smith\"}.</think>{\"text\": \"  \"}";
+        assertThrows(JevException.class, () -> JevRun.parseText(guessedThenBlank));
+    }
+
+    /** JCLAW-1275: the reply shapes live models produced, each ending in the object to type. */
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "```json\n{\"text\": \"Lisbon\"}\n```",
+            "The field is a search box. So I should return {\"text\": \"Porto\"}.</think>{\"text\": \"Lisbon\"}",
+            "The goal says to type \"Lisbon\". So the text should be \"Lisbon\".{\"text\": \"Lisbon\"}",
+            "Reasoning first.\n\n```json\n{\"text\": \"Lisbon\"}\n```\n"
+    })
+    void theFinalObjectIsTypedAfterReasoningOrInsideAFence(String reply) {
+        assertEquals("Lisbon", JevRun.parseText(reply), reply);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "Lisbon",
-            "{\"text\": null}",
             "{\"text\": \"   \"}",
             "{\"text\": 42}",
             "{\"text\": \"Lisbon\", \"why\": \"goal\"}",
+            "Here it is: {\"text\": \"Lisbon\", \"why\": \"goal\"}",
+            "{\"answer\": {\"text\": \"Lisbon\"}}",
             "{text: 'Lisbon'}",
-            "```json\n{\"text\": \"Lisbon\"}\n```",
             "{\"text\": \"Lisbon\"} trailing",
+            "```json\n{\"text\": \"Lisbon\"}\n```\nDone.",
+            "I would type Lisbon but I am not sure.",
             "[\"Lisbon\"]",
             ""
     })

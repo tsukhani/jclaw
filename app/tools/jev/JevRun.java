@@ -51,6 +51,10 @@ public final class JevRun {
     private static final int TEXT_MAX_CHARS = 2000;
     private static final int VISIBLE_TEXT_CHARS = 4000;
     private static final String NOTHING_TYPED = "Text helper returned no valid field value; nothing typed";
+    private static final String NO_VALUE =
+            "The goal gives no value for this field; nothing typed. Put every value to enter in the goal";
+    private static final String FENCE = "```";
+    private static final int EXCERPT_CHARS = 200;
     private static final String ERROR = "error";
     private static final String BLOCKED = "blocked";
 
@@ -320,8 +324,21 @@ public final class JevRun {
             } catch (RuntimeException _) {
                 throw new JevException("The agent's model did not answer; nothing typed");
             }
-            return parseText(reply);
+            try {
+                return parseText(reply);
+            } catch (JevException e) {
+                // The next unexpected reply shape is only diagnosable from what the model actually said.
+                EventLogger.warn("tool", agent.name, null, "Jev text helper refused the reply: " + excerpt(reply));
+                throw e;
+            }
         };
+    }
+
+    private static String excerpt(@Nullable String reply) {
+        if (reply == null) return "(no reply)";
+        var flat = reply.replace('\n', ' ');
+        return flat.length() <= 2 * EXCERPT_CHARS ? flat
+                : flat.substring(0, EXCERPT_CHARS) + " … " + flat.substring(flat.length() - EXCERPT_CHARS);
     }
 
     private static RouteDecision.@Nullable Target effectiveModel(Agent agent) {
@@ -333,24 +350,45 @@ public final class JevRun {
                 ModelResolver.effectiveModelId(agent, conversation));
     }
 
-    /** The field value from a reply that is exactly {@code {"text": "<non-blank, at most 2000 chars>"}}. */
+    /**
+     * The field value from the reply's final JSON object, which must be exactly
+     * {@code {"text": "<non-blank, at most 2000 chars>"}}. Anything before that object and one
+     * closing code fence after it are ignored; any other text after it types nothing.
+     */
     public static String parseText(@Nullable String reply) {
         if (reply == null) throw new JevException(NOTHING_TYPED);
+        var body = reply.strip();
+        if (body.endsWith(FENCE)) body = body.substring(0, body.length() - FENCE.length()).strip();
+        if (!body.endsWith("}")) throw new JevException(NOTHING_TYPED);
+        // JCLAW-1275: models prefix reasoning (glm leaks "…</think>") or fence the object, so take the final one.
+        for (int start = body.lastIndexOf('{'); start >= 0; start = body.lastIndexOf('{', start - 1)) {
+            var object = strictObject(body.substring(start));
+            if (object != null) return textOf(object);
+        }
+        throw new JevException(NOTHING_TYPED);
+    }
+
+    /** {@code candidate} parsed as one strict JSON object with nothing after it, or null. */
+    private static @Nullable JsonObject strictObject(String candidate) {
         try {
-            var reader = new JsonReader(new StringReader(reply));
+            var reader = new JsonReader(new StringReader(candidate));
             reader.setStrictness(Strictness.STRICT);
             JsonElement parsed = JsonParser.parseReader(reader);
-            if (reader.peek() != JsonToken.END_DOCUMENT || !parsed.isJsonObject()) throw new JevException(NOTHING_TYPED);
-            var object = parsed.getAsJsonObject();
-            var text = object.get("text");
-            if (object.size() != 1 || text == null || !text.isJsonPrimitive() || !text.getAsJsonPrimitive().isString()) {
-                throw new JevException(NOTHING_TYPED);
-            }
-            var value = text.getAsString();
-            if (value.isBlank() || value.length() > TEXT_MAX_CHARS) throw new JevException(NOTHING_TYPED);
-            return value;
+            return reader.peek() == JsonToken.END_DOCUMENT && parsed.isJsonObject() ? parsed.getAsJsonObject() : null;
         } catch (JsonParseException | IOException _) {
+            return null;
+        }
+    }
+
+    private static String textOf(JsonObject object) {
+        var text = object.get("text");
+        // The prompt asks for null when the goal holds no value; the calling agent can fix that, so say so.
+        if (object.size() == 1 && text != null && text.isJsonNull()) throw new JevException(NO_VALUE);
+        if (object.size() != 1 || text == null || !text.isJsonPrimitive() || !text.getAsJsonPrimitive().isString()) {
             throw new JevException(NOTHING_TYPED);
         }
+        var value = text.getAsString();
+        if (value.isBlank() || value.length() > TEXT_MAX_CHARS) throw new JevException(NOTHING_TYPED);
+        return value;
     }
 }
