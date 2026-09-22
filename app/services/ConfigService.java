@@ -293,6 +293,12 @@ public class ConfigService {
             }
         }
 
+        // JCLAW-1279: a destination that cannot be dispatched would only surface when an alert fails.
+        if (key.equals(OperatorAlerts.KEY)) {
+            var rejection = OperatorAlerts.rejectionFor(value);
+            if (rejection != null) return rejection;
+        }
+
         // Operator timezone must be a valid IANA zone id. Reject typos here so
         // the system prompt never injects a bad zone — TimezoneResolver.appZone
         // would silently fall back to the server default, hiding the mistake.

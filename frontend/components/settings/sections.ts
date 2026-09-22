@@ -19,6 +19,7 @@ import {
   ArrowsRightLeftIcon,
   ArrowsUpDownIcon,
   ArrowUpTrayIcon,
+  BellAlertIcon,
   BoltIcon,
   ChatBubbleBottomCenterTextIcon,
   ChatBubbleOvalLeftEllipsisIcon,
@@ -49,6 +50,7 @@ import {
   ChartBarSquareIcon,
 } from '@heroicons/vue/24/outline'
 
+import SettingsAlertsPanel from './SettingsAlertsPanel.vue'
 import SettingsApprovalsPanel from './SettingsApprovalsPanel.vue'
 import SettingsBrowserPanel from './SettingsBrowserPanel.vue'
 import SettingsChatPanel from './SettingsChatPanel.vue'
@@ -115,6 +117,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
       { id: 'printers', title: 'Printers', icon: PrinterIcon, component: SettingsPrintersPanel },
       { id: 'telemetry', title: 'Telemetry', icon: ChartBarSquareIcon, component: SettingsTelemetryPanel },
+      { id: 'alerts', title: 'Alerts', icon: BellAlertIcon, component: SettingsAlertsPanel },
       // The last two deliberately: their controls take the instance down, so they
       // shouldn't sit next to the section the rail opens on by default. Database
       // sits beside Maintenance for that reason (restore and repair restart), while

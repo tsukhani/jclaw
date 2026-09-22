@@ -3,6 +3,7 @@
 // regardless of which page actually manages it. Keeps Settings free of
 // exact-key knowledge about other pages' config.
 export const MANAGED_PREFIXES: readonly string[] = [
+  'alerts.', // Operator alert destination (alerts.delivery) — Settings (Alerts). JCLAW-1279.
   'app.', // Operator-wide settings — Settings (Timezone). app.timezone = the
   // assistant's wall-clock zone injected into the system prompt.
   'provider.', // LLM providers — Settings

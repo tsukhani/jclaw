@@ -40,6 +40,7 @@ public final class BreakerAlarms {
         // what changes with the operator is the wording, not the severity.
         if (transition.to() == CircuitBreaker.State.OPEN) EventLogger.warn(CATEGORY, message);
         else EventLogger.info(CATEGORY, message);
+        OperatorAlerts.onBreakerTransition(name, subject, transition);
     }
 
     /** The operator-facing line one transition produces. Public so a test can assert the

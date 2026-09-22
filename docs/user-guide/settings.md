@@ -103,6 +103,22 @@ What leaves the process once enabled: an HTTP server span per request, named fro
 
 When the OpenTelemetry Java agent is attached to the JVM, the panel says so and disables the export toggle: the agent's own `OTEL_*` settings decide where telemetry goes, and the keys here are read once at start rather than live.
 
+## Alerts
+
+Sends you a message on a channel you choose when work that runs without you fails. Off by default. Found under **System → Alerts** in the rail.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `alerts.delivery` | (unset) | Where alerts go, as `channel:target`: `telegram:<chat id>`, `slack:<channel id>`, `whatsapp:<phone number>` or `web:<conversation id>`. Unset means no alerts. **Turn off** removes it. |
+
+Alerts are sent through the `main` agent's channel connections, so the channel you pick must be connected to `main` (or, for `web`, the conversation must exist). You are told when:
+
+- **An LLM provider or MCP server stops answering.** Its circuit breaker opened, and the message says why: the failure rate, slow calls or failures in a row. You get one message per outage, however many times the breaker retries in between, and at most one every 15 minutes for a provider that keeps dropping out and coming back. An outage still going when those 15 minutes are up is reported then.
+- **It recovers**, but only if you were told it went down.
+- **A run of a recurring task fails for good**, after its retries. The message names the task, the error and when it runs next. The task itself keeps its schedule (see [Tasks](tasks.md)).
+
+Isolating a provider yourself (tripping its breaker by hand) sends nothing. A destination that can't be used is refused when you save it; an alert that can't be delivered at the time is written to the event log under `OPERATOR_ALERT` instead.
+
 ## Database
 
 Everything on this instance — conversations, agents, tasks, memories, config — lives in one H2 data file, `data/jclaw.mv.db`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.

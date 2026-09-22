@@ -165,8 +165,10 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                             "Task '%s' transient failure %d/%d, retry in %ds: %s"
                                     .formatted(outcome.taskName(), r.newRetryCount(),
                                             outcome.budget(), outcome.backoffSecs(), errorMessage));
-            case Decision.NextOccurrence(Instant next, String reason) ->
-                    recordFailure(outcome, reason, errorMessage, "; next occurrence at " + next);
+            case Decision.NextOccurrence(Instant next, String reason) -> {
+                recordFailure(outcome, reason, errorMessage, "; next occurrence at " + next);
+                OperatorAlerts.onOccurrenceFailed(outcome.task(), outcome.agentName(), reason, errorMessage, next);
+            }
             case Decision.Fail(String reason) -> recordFailure(outcome, reason, errorMessage, "");
         }
         return outcome.decision();
