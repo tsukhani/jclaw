@@ -13,7 +13,7 @@ test.describe('Scrapes', () => {
     await page.getByRole('link', { name: 'New scrape' }).first().click()
 
     await expect(page).toHaveURL(/\/scrapes\/new$/)
-    await expect(page.getByLabel('Starting URL')).toBeVisible()
+    await expect(page.getByLabel('Starting URL', { exact: true })).toBeVisible()
     await expect(page.getByLabel('Pages', { exact: true })).toHaveValue(/^\d+$/)
     await expect(page.getByText(/An agent may ask for up to \d+ pages; you may go higher\./)).toBeVisible()
     await expect(page.getByRole('button', { name: 'Start scrape' })).toBeDisabled()
