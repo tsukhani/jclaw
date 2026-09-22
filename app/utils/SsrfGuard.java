@@ -79,6 +79,17 @@ public final class SsrfGuard {
     private static final String BLOCKED_ADDRESS_MSG =
             "SSRF guard: host %s resolves to blocked address %s";
 
+    /**
+     * A refusal because the host is, or resolves to, a blocked address (JCLAW-1280). Every other refusal —
+     * no host, an unparseable URL, a host that does not resolve, userinfo, a scheme — is a plain
+     * {@link SecurityException}.
+     */
+    public static final class BlockedAddressException extends SecurityException {
+        BlockedAddressException(String message) {
+            super(message);
+        }
+    }
+
     /** The one origin {@link #permitOriginForTest} admits on the binding thread; never bound in production. */
     private static final ScopedValue<String> PERMITTED_ORIGIN = ScopedValue.newInstance();
 
@@ -246,7 +257,7 @@ public final class SsrfGuard {
             try {
                 var addr = InetAddress.getByName(host);
                 if (isUnsafe(addr)) {
-                    throw new SecurityException(
+                    throw new BlockedAddressException(
                             "SSRF guard: host is a blocked IP literal: %s"
                                     .formatted(addr.getHostAddress()));
                 }
@@ -312,7 +323,7 @@ public final class SsrfGuard {
         try {
             for (var addr : InetAddress.getAllByName(host)) {
                 if (isUnsafe(addr)) {
-                    throw new SecurityException(
+                    throw new BlockedAddressException(
                             BLOCKED_ADDRESS_MSG
                                     .formatted(host, addr.getHostAddress()));
                 }
@@ -414,7 +425,7 @@ public final class SsrfGuard {
             throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
         }
         if (isUnsafe(pinned)) { // defense in depth: never emit an unsafe pin
-            throw new SecurityException(
+            throw new BlockedAddressException(
                     BLOCKED_ADDRESS_MSG
                             .formatted(host, pinned.getHostAddress()));
         }
@@ -441,10 +452,8 @@ public final class SsrfGuard {
 
     /**
      * Non-throwing variant of {@link #assertUrlSafe} — returns {@code false}
-     * when the URL is unsafe or unparseable. Used by hot-path predicates
-     * like route interceptors that need to abort-or-resume hundreds of
-     * subresource requests per page without try/catch overhead on every
-     * decision.
+     * when the URL is unsafe or unparseable, for a caller that needs only the
+     * verdict and not the reason.
      */
     public static boolean isUrlSafe(@NonNull String url) {
         try {
@@ -582,7 +591,7 @@ public final class SsrfGuard {
             try {
                 var addr = InetAddress.getByName(host);
                 if (isBlockedForProvider(addr)) {
-                    throw new SecurityException(
+                    throw new BlockedAddressException(
                             "SSRF guard: host is a blocked IP literal: %s"
                                     .formatted(addr.getHostAddress()));
                 }

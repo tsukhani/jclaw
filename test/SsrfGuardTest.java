@@ -402,6 +402,32 @@ class SsrfGuardTest extends UnitTest {
                 () -> SsrfGuard.hostResolverRule("http://localhost:9000/"));
     }
 
+    // ── JCLAW-1280: a blocked address is a refusal a caller can tell apart ──
+
+    @Test
+    void aBlockedAddressThrowsBlockedAddressException() {
+        assertThrows(SsrfGuard.BlockedAddressException.class,
+                () -> SsrfGuard.assertUrlSafe("http://127.0.0.1:9000/admin"), "a blocked literal");
+        var resolved = assertThrows(SsrfGuard.BlockedAddressException.class,
+                () -> SsrfGuard.assertUrlSafe("http://localhost:9000/"), "a name that resolves to a blocked address");
+        assertTrue(resolved.getMessage().startsWith("SSRF guard: host localhost resolves to blocked address "),
+                resolved.getMessage());
+        assertThrows(SsrfGuard.BlockedAddressException.class,
+                () -> SsrfGuard.hostResolverRule("http://169.254.169.254/"));
+        assertThrows(SsrfGuard.BlockedAddressException.class,
+                () -> SsrfGuard.assertProviderUrlSafe("http://169.254.169.254/"), "the provider guard's literal");
+    }
+
+    @Test
+    void aRefusalForAnyOtherReasonIsAPlainSecurityException() {
+        assertThrowsExactly(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://nonexistent-host-jclaw-1280.invalid/"), "a host that does not resolve");
+        assertThrowsExactly(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://user@example.com/"), "userinfo");
+        assertThrowsExactly(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("file:///etc/passwd"), "a scheme");
+    }
+
     // ── JCLAW-778: relaxed provider/MCP guard (permits loopback/LAN) ──
 
     @Test

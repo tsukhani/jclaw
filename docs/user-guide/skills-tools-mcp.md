@@ -151,7 +151,11 @@ Jev never sees or fills password fields, so logins do not work in Jev mode: swit
 
 The `browser` tool's Chromium sends every HTTP(S) request through the SSRF guard, which refuses loopback, link-local (including the cloud metadata address) and private-network addresses. That covers the pages it loads, their resources and redirects, and pop-up windows or new tabs a page opens.
 
-Pop-ups are closed as soon as they open, because the tool never reads them. A link that opens in a new tab is therefore not followed; `navigate` to its address instead. Service workers are kept from running, since a worker's own requests would bypass the check. WebSocket connections are not screened.
+Pop-ups are closed as soon as they open, because the tool never reads them. A link that opens in a new tab is therefore not followed. The result of the action that opened the tab says so and gives the tab's address, which the agent can `navigate` to (or `run`, in Jev mode). A blank tab, a tab at an address that is not http(s) such as `blob:`, and a tab whose address the guard refused are reported without one. Results also name the hosts of any requests the page made that the guard refused since the previous result. An action that opens a tab can take up to 5 seconds longer while the tool waits for the tab to load, and a tab slower than that is reported on a later result instead.
+
+The browser's own event-log lines name hosts only, never a full address. A browser session logs at most 20 refusal lines and 10 closed-tab lines, then one line for each saying that later ones are not logged. For requests the page makes, a host is logged as a warning the first time a request to it is refused as a blocked address, and as info the first time one is refused for another reason, such as the host not resolving. A closed tab is logged once per host; all blank tabs share one of the 10 lines, and all refused tabs another. A URL passed to `navigate` or `run` that the guard refuses is reported only in the result.
+
+Service workers are kept from running, since a worker's own requests would bypass the check. WebSocket connections are not screened, whether a page or a worker opens them, and neither is any request a shared worker makes.
 
 Only the host of the URL passed to `navigate` or `run` is pinned to the address that was checked, and the pin lasts for the browser session. Every other host is checked on each request, but Chromium resolves it again, so it is not pinned. That includes resources, redirect targets, clicked links, and everything a Jev run reaches.
 

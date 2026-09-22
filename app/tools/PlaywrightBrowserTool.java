@@ -55,6 +55,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static final int MAX_TEXT_LENGTH = 50_000;
     private static final long IDLE_TIMEOUT_MS = 5L * 60 * 1000; // 5 minutes
     private static final ConcurrentHashMap<String, SessionHolder> sessions = new ConcurrentHashMap<>();
+    private static final double TAB_WAIT_MS = 5_000;
 
     // Action names dispatched in execute()
     private static final String ACTION_NAVIGATE = "navigate";
@@ -143,12 +144,20 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * captured it just before removal retries instead of launching into an orphan.
      * All three are guarded by {@link #lock} ({@code lastUsed} is also read racily
      * by {@link #cleanupIdleSessions}'s idle fast-path, hence volatile).
+     *
+     * <p>{@link #log} lives as long as the holder, so a relaunch or a failed launch keeps its event-log
+     * caps and pending notes (JCLAW-1280).
      */
     private static final class SessionHolder {
         final ReentrantLock lock = new ReentrantLock();
+        final BrowserScreenLog log;
         @Nullable BrowserSession session;
         volatile long lastUsed = System.currentTimeMillis();
         boolean removed;
+
+        SessionHolder(String agentName) {
+            log = new BrowserScreenLog(agentName);
+        }
     }
 
     @Override
@@ -282,14 +291,17 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         // runs under this lock rather than inside a ConcurrentHashMap bin monitor
         // (JCLAW-821). Installing the holder is O(1); ensureSession does the launch.
         var holder = acquireHolder(agent.name);
+        BrowserSession session = null;
+        // A closed tab's address is opened with whichever action this engine offers.
+        var openWith = jevKey != null ? ACTION_RUN : ACTION_NAVIGATE;
         try {
-            var session = ensureSession(holder, agent.name, pinRule);
+            session = ensureSession(holder, agent.name, pinRule);
             if (ACTION_RUN.equals(action) && jevKey != null) {
-                return run(holder, session, args.get(ARG_URL).getAsString(), args.get(ARG_GOAL).getAsString(),
-                        jevKey, agent);
+                return withNote(holder, session, run(holder, session, args.get(ARG_URL).getAsString(),
+                        args.get(ARG_GOAL).getAsString(), jevKey, agent), openWith);
             }
             var page = session.page();
-            return switch (action) {
+            return withNote(holder, session, switch (action) {
                 case ACTION_NAVIGATE -> navigate(page, args.get(ARG_URL).getAsString());
                 case ACTION_CLICK -> click(page, args.get(ARG_SELECTOR).getAsString());
                 case ACTION_FILL -> fill(page, args.get(ARG_SELECTOR).getAsString(),
@@ -299,14 +311,34 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 case ACTION_SCREENSHOT -> screenshot(page, agent.name, agent.id);
                 case ACTION_EVALUATE -> evaluate(page, args.get("expression").getAsString());
                 default -> refusal(action, valid);
-            };
+            }, openWith);
         } catch (PlaywrightException e) {
-            return "Browser error: %s".formatted(e.getMessage());
+            return withNote(holder, session, "Browser error: %s".formatted(e.getMessage()), openWith);
         } catch (Exception e) {
-            return "Error: %s".formatted(e.getMessage());
+            return withNote(holder, session, "Error: %s".formatted(e.getMessage()), openWith);
         } finally {
             holder.lock.unlock();
         }
+    }
+
+    /**
+     * {@code result} followed by what the screen did since the previous result (JCLAW-1280), if anything.
+     * A tab Chromium announced is awaited first, so the action that opened it is the one that reports it.
+     */
+    private static String withNote(SessionHolder holder, @Nullable BrowserSession session, String result,
+                                   String openWith) {
+        var log = holder.log;
+        // A retired session's driver may be dead, and a call into it would fail or hang.
+        if (session != null && holder.session == session && log.tabsOpening()) {
+            try {
+                session.page().context().waitForCondition(() -> !log.tabsOpening(),
+                        new BrowserContext.WaitForConditionOptions().setTimeout(TAB_WAIT_MS));
+            } catch (PlaywrightException _) {
+                log.forgetOpeningTabs();
+            }
+        }
+        var note = log.drainNote(openWith);
+        return note.isEmpty() ? result : result + "\n\n" + note;
     }
 
     private static String refusal(String action, List<String> valid) {
@@ -461,7 +493,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      */
     private static SessionHolder acquireHolder(String agentName) {
         while (true) {
-            var holder = sessions.computeIfAbsent(agentName, _ -> new SessionHolder());
+            var holder = sessions.computeIfAbsent(agentName, SessionHolder::new);
             holder.lock.lock();
             if (!holder.removed) {
                 return holder;
@@ -502,12 +534,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             // launching so a launch failure leaves no dangling torn-down session.
             destroySession(existing, agentName);
             holder.session = null;
-            holder.session = launchSession(agentName, relaunchPins.get());
+            holder.session = launchSession(agentName, relaunchPins.get(), holder.log);
             return holder.session;
         }
         var initialPins = new LinkedHashSet<String>();
         hostResolverRule.ifPresent(initialPins::add);
-        holder.session = launchSession(agentName, initialPins);
+        holder.session = launchSession(agentName, initialPins, holder.log);
         return holder.session;
     }
 
@@ -538,8 +570,10 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * this keeps every host validated so far in the session connect-time pinned,
      * not just the entry host (JCLAW-731).
      */
-    private static BrowserSession launchSession(String key, Set<String> pinnedRules) {
+    private static BrowserSession launchSession(String key, Set<String> pinnedRules, BrowserScreenLog log) {
         EventLogger.info("tool", key, null, "Launching headless browser");
+        // A tab the previous browser announced will never be closed by this one.
+        log.forgetOpeningTabs();
         ensureBrowserInstalled();
         // Build the driver -> browser -> screened context -> page chain under a guard: a
         // failure partway through must best-effort close whatever OS processes
@@ -569,8 +603,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 launchOptions.setArgs(List.of("--host-resolver-rules=" + String.join(",", pinnedRules)));
             }
             browser = playwright.chromium().launch(launchOptions);
-            page = openScreenedPage(browser);
+            page = openScreenedPage(browser, log);
             var cdp = page.context().newCDPSession(page);
+            // Chromium announces a tab while the click that opens it is still running; Playwright's page event
+            // waits for the tab's first response, which can land after the tool has returned.
+            cdp.send("Page.enable");
+            cdp.on("Page.windowOpen", _ -> log.tabOpening());
             return new BrowserSession(playwright, driver.process(), browser, page, cdp, Set.copyOf(pinnedRules));
         } catch (RuntimeException e) {
             // Best-effort teardown of whatever was constructed, newest first,
@@ -584,13 +622,14 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     /**
      * The session's page (JCLAW-1276): a context whose every page is screened, with service workers
-     * blocked and popups closed. Exposed for tests, so they exercise the wiring production uses.
+     * blocked and popups closed, each refusal and closed tab recorded in {@code log}. Exposed for tests,
+     * so they exercise the wiring production uses.
      */
-    public static Page openScreenedPage(Browser browser) {
+    public static Page openScreenedPage(Browser browser, BrowserScreenLog log) {
         var context = browser.newContext(screenedContextOptions());
-        screen(context);
+        screen(context, log);
         var page = context.newPage();
-        closePopups(context, page);
+        closePopups(context, page, log);
         return page;
     }
 
@@ -602,23 +641,38 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     /**
      * Abort any request whose URL fails the SSRF guard (JCLAW-116): subresources aimed at private
      * networks, redirects to unsafe hosts, and navigations that bypass {@code navigate()}. Installed
-     * on the context rather than the page (JCLAW-1276), so a popup or new tab is screened too.
-     * Exposed for tests.
+     * on the context rather than the page (JCLAW-1276), so a popup or new tab is screened too. Each
+     * refusal is recorded in {@code log} (JCLAW-1280). Exposed for tests.
      */
-    public static void screen(BrowserContext context) {
+    public static void screen(BrowserContext context, BrowserScreenLog log) {
         context.route("**/*", route -> {
-            if (SsrfGuard.isUrlSafe(route.request().url())) {
-                route.resume();
-            } else {
+            var url = route.request().url();
+            try {
+                SsrfGuard.assertUrlSafe(url);
+            } catch (SecurityException e) {
                 route.abort();
+                log.refused(url, e instanceof SsrfGuard.BlockedAddressException);
+                return;
             }
+            route.resume();
         });
     }
 
-    /** Close every page but {@code primary}: the tool never reads a popup, so it only widens reach. Exposed for tests. */
-    public static void closePopups(BrowserContext context, Page primary) {
+    /**
+     * Close every page but {@code primary}, recording it in {@code log} first: the tool never reads a
+     * popup, so it only widens reach. Exposed for tests.
+     */
+    public static void closePopups(BrowserContext context, Page primary, BrowserScreenLog log) {
         context.onPage(opened -> {
-            if (opened != primary) opened.close();
+            if (opened == primary) return;
+            var url = opened.url();
+            // A tab whose navigation the route refused sits on Chromium's error page instead of its address.
+            if (url.startsWith("chrome-error:")) {
+                log.refusedTabClosed();
+            } else {
+                log.tabClosed(url);
+            }
+            opened.close();
         });
     }
 
