@@ -4,18 +4,16 @@ import agents.SkillLoader;
 import agents.SkillVersionManager;
 import agents.ToolCatalog;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.Strictness;
-import com.google.gson.stream.JsonReader;
+import com.google.gson.JsonParseException;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.ReplyJson;
 import llm.routing.ModelRouter;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
-import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -268,7 +266,8 @@ public final class SkillConformanceService {
             var response = provider.chat(modelId, messages, null, null, null, LLM_TIMEOUT_SECONDS, null);
             var content = response.choices().getFirst().message().content();
             var text = content == null ? "" : content.toString();
-            return Optional.of(parseProposed(parseJsonObjectLenient(text)));
+            return Optional.of(parseProposed(ReplyJson.lenientObject(text)
+                    .orElseThrow(() -> new JsonParseException("the reply holds no JSON object"))));
         } catch (Exception e) {
             EventLogger.warn(CATEGORY, "Conformance LLM pass failed: " + e.getMessage());
             return Optional.empty();
@@ -277,22 +276,6 @@ public final class SkillConformanceService {
 
     private static ProposedSkill parseProposed(JsonObject o) {
         return new ProposedSkill(str(o, "name"), str(o, "description"), str(o, "icon"), strList(o, "tools"));
-    }
-
-    /** Tolerant JSON extraction for LLM output: strip code fences + leading/trailing
-     *  prose (first '{' .. last '}'), then parse leniently. The model returns only
-     *  small frontmatter now (no body), so this rarely has to do much. */
-    private static JsonObject parseJsonObjectLenient(String raw) {
-        var t = raw == null ? "" : raw.strip();
-        if (t.startsWith("```")) {
-            t = t.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").strip();
-        }
-        int i = t.indexOf('{');
-        int j = t.lastIndexOf('}');
-        if (i >= 0 && j > i) t = t.substring(i, j + 1);
-        var reader = new JsonReader(new StringReader(t));
-        reader.setStrictness(Strictness.LENIENT);
-        return JsonParser.parseReader(reader).getAsJsonObject();
     }
 
     private static String conformanceSystemPrompt(String toolCatalog) {

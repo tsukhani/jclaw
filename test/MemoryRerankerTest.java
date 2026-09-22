@@ -28,6 +28,16 @@ class MemoryRerankerTest extends UnitTest {
     }
 
     @Test
+    void aTrailingObjectDoesNotDisplaceTheOrderArray() {
+        assertEquals(List.of(1, 0), MemoryReranker.parseOrder("[1,0] — note: {\"tie\":true}", 2));
+    }
+
+    @Test
+    void leakedReasoningBeforeTheArrayIsTolerated() {
+        assertEquals(List.of(1, 0), MemoryReranker.parseOrder("Snippet [1] is closer.</think>[1,0]", 2));
+    }
+
+    @Test
     void outOfRangeAndDuplicateIndicesAreDroppedAndOmissionsAppendedInFusedOrder() {
         // 5 is out of range, the second 1 is a duplicate; 2 was omitted by the
         // model so it re-enters last, keeping its fused position relative to

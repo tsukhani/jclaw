@@ -1,8 +1,9 @@
 package memory;
 
-import com.google.gson.JsonParser;
+import com.google.gson.JsonParseException;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.ReplyJson;
 import llm.routing.ModelRouter;
 import models.Agent;
 import models.Memory;
@@ -203,19 +204,33 @@ public final class CoreMemoryCapMigration {
             numbered.append(i).append(": ").append(texts.get(i)).append('\n');
         }
         try {
-            var reply = SessionCompactor.firstChoiceText(provider.chat(target.modelId(),
+            return parseAnswers(SessionCompactor.firstChoiceText(provider.chat(target.modelId(),
                     List.of(ChatMessage.system(INSTRUCTIONS), ChatMessage.user(numbered.toString())),
-                    List.of(), 1024, null, null));
-            var arr = JsonParser.parseString(strip(reply)).getAsJsonArray();
-            var out = new ArrayList<String>(arr.size());
-            for (var el : arr) out.add(el.getAsString());
-            return out;
+                    List.of(), 1024, null, null)), texts.size());
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY,
                     "Core-memory classification failed for %s, leaving its overflow as core: %s"
                             .formatted(agent.name, e.getMessage()));
             return List.of();
         }
+    }
+
+    /**
+     * The model's category strings, in memory order; none for a null reply. Throws when the reply
+     * holds no JSON array, or one answer per memory. Public because the test tree compiles into
+     * the default package.
+     */
+    public static List<String> parseAnswers(@Nullable String reply, int expected) {
+        if (reply == null) return List.of();
+        var arr = ReplyJson.lenientArray(reply)
+                .orElseThrow(() -> new JsonParseException("the reply holds no JSON array"));
+        // Answers land on memories by position, so a short or long array recategorises the wrong rows.
+        if (arr.size() != expected) {
+            throw new JsonParseException("the reply answers for %d memories, not %d".formatted(arr.size(), expected));
+        }
+        var out = new ArrayList<String>(arr.size());
+        for (var el : arr) out.add(el.getAsString());
+        return out;
     }
 
     /**
@@ -234,17 +249,5 @@ public final class CoreMemoryCapMigration {
             out.set(i, TARGETS.contains(raw) ? raw : MemoryCategory.coerceForCapture(raw));
         }
         return out;
-    }
-
-    /** Models fence JSON despite being told not to. */
-    private static String strip(@Nullable String s) {
-        if (s == null) return "[]";
-        var t = s.strip();
-        if (t.startsWith("```")) {
-            int nl = t.indexOf('\n');
-            if (nl >= 0) t = t.substring(nl + 1);
-            if (t.endsWith("```")) t = t.substring(0, t.length() - 3);
-        }
-        return t.strip();
     }
 }

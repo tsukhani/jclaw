@@ -1,8 +1,8 @@
 package memory;
 
-import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.ReplyJson;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
@@ -149,19 +149,19 @@ public final class MemoryReranker {
     /**
      * Parse the model's index array into a complete permutation of
      * {@code [0, size)}: valid unique indices in model order first, then any
-     * the model omitted, in original order. Non-JSON or non-array output yields
+     * the model omitted, in original order. Reads the reply's last JSON array
+     * ({@link ReplyJson}); non-JSON or non-array output yields
      * the identity order. Public because the test tree compiles into the
      * default package.
      */
     public static List<Integer> parseOrder(String raw, int size) {
         var seen = new LinkedHashSet<Integer>();
+        var arr = ReplyJson.lenientArray(raw).orElse(null);
+        if (arr == null) return identityOrder(size);
         try {
-            var root = JsonParser.parseString(MemoryAutoCapture.stripFences(raw.strip()));
-            if (root.isJsonArray()) {
-                for (var el : root.getAsJsonArray()) {
-                    int idx = el.getAsInt();
-                    if (idx >= 0 && idx < size) seen.add(idx);
-                }
+            for (var el : arr) {
+                int idx = el.getAsInt();
+                if (idx >= 0 && idx < size) seen.add(idx);
             }
         } catch (Exception _) {
             return identityOrder(size);

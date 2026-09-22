@@ -1,9 +1,10 @@
 package services;
 
-import com.google.gson.JsonParser;
+import com.google.gson.JsonParseException;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.ReplyJson;
 import llm.routing.ModelRouter;
 import models.Agent;
 
@@ -158,11 +159,8 @@ public final class SkillSanitizer {
             EventLogger.info(EVENT_CATEGORY_SKILLS,
                     "LLM sanitization batch response (%d chars)".formatted(text.length()));
 
-            if (text.startsWith("```")) {
-                text = text.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").strip();
-            }
-
-            var json = JsonParser.parseString(text).getAsJsonObject();
+            var json = ReplyJson.lenientObject(text)
+                    .orElseThrow(() -> new JsonParseException("the reply holds no JSON object"));
             var result = new LinkedHashMap<String, String>();
             for (var entry : batch) {
                 if (json.has(entry.getKey())) {

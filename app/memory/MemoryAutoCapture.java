@@ -3,11 +3,11 @@ package memory;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmResilience;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.ReplyJson;
 import llm.routing.ModelRouter;
 import models.Agent;
 import models.ChannelType;
@@ -988,24 +988,16 @@ public final class MemoryAutoCapture {
     // ─── Parsing & helpers ───────────────────────────────────────────────────
 
     /**
-     * Parse the extractor's raw output into candidates. Tolerant of code-fenced
-     * JSON and of either {@code {"memories":[...]}} or a bare array; returns an
+     * Parse the extractor's raw output into candidates, from the reply's last
+     * {@code {"memories":[...]}} object or its last bare array ({@link ReplyJson}); returns an
      * empty list on any malformed/non-JSON output (capture nothing this turn).
      */
     public static List<Candidate> parseCandidates(@Nullable String raw) {
         var out = new ArrayList<Candidate>();
         if (raw == null || raw.isBlank()) return out;
         try {
-            var root = JsonParser.parseString(stripFences(raw.strip()));
-            JsonArray arr;
-            if (root.isJsonObject() && root.getAsJsonObject().has(KEY_MEMORIES)
-                    && root.getAsJsonObject().get(KEY_MEMORIES).isJsonArray()) {
-                arr = root.getAsJsonObject().getAsJsonArray(KEY_MEMORIES);
-            } else if (root.isJsonArray()) {
-                arr = root.getAsJsonArray();
-            } else {
-                return out;
-            }
+            var arr = candidateRows(raw);
+            if (arr == null) return out;
             for (var el : arr) {
                 if (!el.isJsonObject()) continue;
                 var candidate = parseCandidate(el.getAsJsonObject());
@@ -1015,6 +1007,15 @@ public final class MemoryAutoCapture {
             return new ArrayList<>();
         }
         return out;
+    }
+
+    /** The extractor's rows: the last object carrying {@code memories}, else the last bare array. */
+    private static @Nullable JsonArray candidateRows(String raw) {
+        var object = ReplyJson.lenientObject(raw).orElse(null);
+        if (object != null && object.has(KEY_MEMORIES) && object.get(KEY_MEMORIES).isJsonArray()) {
+            return object.getAsJsonArray(KEY_MEMORIES);
+        }
+        return ReplyJson.lenientArray(raw).orElse(null);
     }
 
     /** One extractor row as a {@link Candidate}, or null when it carries no usable text. */
@@ -1076,7 +1077,7 @@ public final class MemoryAutoCapture {
 
     /**
      * Parse the consolidation judge's output into {@code survivor index →
-     * superseded shortlist indices} (JCLAW-525). Tolerant of code fences;
+     * superseded shortlist indices} (JCLAW-525), from the reply's last JSON object;
      * out-of-range and duplicate indices are dropped; any malformed output
      * yields no supersessions (fail-open, the capture stores append-only).
      * Public because the test tree compiles into the default package.
@@ -1085,12 +1086,11 @@ public final class MemoryAutoCapture {
         if (raw == null || raw.isBlank()) return Map.of();
         var out = new LinkedHashMap<Integer, List<Integer>>();
         try {
-            var root = JsonParser.parseString(stripFences(raw.strip()));
-            if (!root.isJsonObject() || !root.getAsJsonObject().has(KEY_SUPERSESSIONS)
-                    || !root.getAsJsonObject().get(KEY_SUPERSESSIONS).isJsonArray()) {
+            var root = ReplyJson.lenientObject(raw).orElse(null);
+            if (root == null || !root.has(KEY_SUPERSESSIONS) || !root.get(KEY_SUPERSESSIONS).isJsonArray()) {
                 return Map.of();
             }
-            for (var el : root.getAsJsonObject().getAsJsonArray(KEY_SUPERSESSIONS)) {
+            for (var el : root.getAsJsonArray(KEY_SUPERSESSIONS)) {
                 addSupersessionIfValid(el, newCount, existingCount, out);
             }
         } catch (Exception _) {
@@ -1162,16 +1162,6 @@ public final class MemoryAutoCapture {
 
     static double jaccard(Set<String> a, Set<String> b) {
         return MemorySimilarity.jaccard(a, b);
-    }
-
-    /** Package-visible: {@link MemoryReranker} parses LLM JSON the same way. */
-    static String stripFences(String s) {
-        if (s.startsWith("```")) {
-            int firstNl = s.indexOf('\n');
-            if (firstNl >= 0) s = s.substring(firstNl + 1);
-            if (s.endsWith("```")) s = s.substring(0, s.length() - 3);
-        }
-        return s.strip();
     }
 
     private static double safeDouble(JsonElement el) {

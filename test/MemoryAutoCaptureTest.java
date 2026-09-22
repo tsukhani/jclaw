@@ -64,6 +64,22 @@ class MemoryAutoCaptureTest extends UnitTest {
     }
 
     @Test
+    void parsesMemoriesAfterLeakedReasoning() {
+        var cands = MemoryAutoCapture.parseCandidates("The user named {Postgres} for prod.</think>"
+                + "{\"memories\":[{\"text\":\"Prod DB is Postgres\",\"category\":\"fact\"}]}");
+        assertEquals(1, cands.size());
+        assertEquals("Prod DB is Postgres", cands.getFirst().text());
+    }
+
+    @Test
+    void aTrailingFootnoteDoesNotDisplaceTheMemoriesObject() {
+        var cands = MemoryAutoCapture.parseCandidates(
+                "{\"memories\":[{\"text\":\"Prod DB is Postgres\",\"category\":\"fact\"}]}\n(1 memory) [1]");
+        assertEquals(1, cands.size(), "the trailing array must not be read as the extractor's rows");
+        assertEquals("Prod DB is Postgres", cands.getFirst().text());
+    }
+
+    @Test
     void malformedOrEmptyJsonYieldsEmpty() {
         assertTrue(MemoryAutoCapture.parseCandidates("not json at all").isEmpty());
         assertTrue(MemoryAutoCapture.parseCandidates("{\"memories\": \"oops\"}").isEmpty());

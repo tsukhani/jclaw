@@ -190,6 +190,31 @@ class SkillLlmMockedPipelineTest extends UnitTest {
     }
 
     @Test
+    void conformParsesTheObjectAfterLeakedReasoning() throws Exception {
+        stageForeignSkill();
+        // A brace in the reasoning is what the first-brace-to-last-brace rule could not survive.
+        nextAssistantContent = "The body runs {cmd} through Bash, so exec.</think>"
+                + "{\"name\": \"reasoned-skill\", \"description\": \"d\", \"icon\": \"🧪\", \"tools\": [\"exec\"]}";
+
+        var result = SkillConformanceService.conform(stagedDir, "fallback-id", "owner/repo");
+
+        assertTrue(result.ok(), "leaked reasoning must not fail conformance: " + result.message());
+        assertEquals("reasoned-skill", result.skillName());
+    }
+
+    @Test
+    void conformKeepsTheFrontmatterObjectDespiteATrailingFootnote() throws Exception {
+        stageForeignSkill();
+        nextAssistantContent = "{\"name\": \"footnoted-skill\", \"description\": \"d\", \"icon\": \"🧪\", "
+                + "\"tools\": [\"exec\"]}\nTools used: [\"exec\"]";
+
+        var result = SkillConformanceService.conform(stagedDir, "fallback-id", "owner/repo");
+
+        assertTrue(result.ok(), "a trailing array must not displace the frontmatter: " + result.message());
+        assertEquals("footnoted-skill", result.skillName());
+    }
+
+    @Test
     void conformFailsWhenLlmReturnsNoJson() throws Exception {
         stageForeignSkill();
         var original = Files.readString(stagedDir.resolve("SKILL.md"));
@@ -246,6 +271,28 @@ class SkillLlmMockedPipelineTest extends UnitTest {
         assertEquals("nothing secret here", result.get("notes.md"),
                 "a file missing from the LLM response keeps its original");
         assertEquals(2, result.size(), "every input file appears in the output");
+    }
+
+    @Test
+    void sanitizeReadsTheObjectAfterLeakedReasoning() throws Exception {
+        var input = new LinkedHashMap<String, String>();
+        input.put("SKILL.md", "key sk-12345");
+        nextAssistantContent = "The key looks live.</think>{\"SKILL.md\": \"key [API_KEY]\"}";
+
+        var result = invokeSanitize(input);
+
+        assertEquals("key [API_KEY]", result.get("SKILL.md"), "the redaction after the reasoning must be applied");
+    }
+
+    @Test
+    void sanitizeKeepsTheRedactionsDespiteATrailingFootnote() throws Exception {
+        var input = new LinkedHashMap<String, String>();
+        input.put("SKILL.md", "key sk-12345");
+        nextAssistantContent = "{\"SKILL.md\": \"key [API_KEY]\"}\nRedacted: [\"SKILL.md\"]";
+
+        var result = invokeSanitize(input);
+
+        assertEquals("key [API_KEY]", result.get("SKILL.md"), "a trailing array must not displace the redactions");
     }
 
     @Test

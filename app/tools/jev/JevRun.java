@@ -2,17 +2,14 @@ package tools.jev;
 
 import agents.ModelResolver;
 import agents.ToolContext;
+import agents.TruncationDiagnostics;
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParseException;
-import com.google.gson.JsonParser;
-import com.google.gson.Strictness;
-import com.google.gson.stream.JsonReader;
-import com.google.gson.stream.JsonToken;
 import com.microsoft.playwright.PlaywrightException;
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.ChatResponse;
 import llm.ProviderRegistry;
+import llm.ReplyJson;
 import llm.routing.ModelRouter;
 import llm.routing.RouteDecision;
 import models.Agent;
@@ -23,8 +20,6 @@ import services.SessionCompactor;
 import services.Tx;
 import utils.AppClock;
 
-import java.io.IOException;
-import java.io.StringReader;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -51,9 +46,10 @@ public final class JevRun {
     private static final int TEXT_MAX_CHARS = 2000;
     private static final int VISIBLE_TEXT_CHARS = 4000;
     private static final String NOTHING_TYPED = "Text helper returned no valid field value; nothing typed";
+    private static final String TRUNCATED =
+            "Text helper's reply was truncated at its " + TEXT_MAX_TOKENS + "-token limit before giving a value; nothing typed";
     private static final String NO_VALUE =
             "The goal gives no value for this field; nothing typed. Put every value to enter in the goal";
-    private static final String FENCE = "```";
     private static final int EXCERPT_CHARS = 200;
     private static final String ERROR = "error";
     private static final String BLOCKED = "blocked";
@@ -316,22 +312,34 @@ public final class JevRun {
             if (target == null || provider == null) {
                 throw new JevException("The agent's model is not configured; nothing typed");
             }
+            ChatResponse response;
             String reply;
             try {
-                reply = SessionCompactor.firstChoiceText(provider.chat(target.modelId(),
+                response = provider.chat(target.modelId(),
                         List.of(ChatMessage.system(JevActionSpace.TEXT_VALUE), ChatMessage.user(context.toString())),
-                        List.of(), TEXT_MAX_TOKENS, null, TEXT_TIMEOUT_SECONDS, null));
+                        List.of(), TEXT_MAX_TOKENS, null, TEXT_TIMEOUT_SECONDS, null);
+                reply = SessionCompactor.firstChoiceText(response);
             } catch (RuntimeException _) {
                 throw new JevException("The agent's model did not answer; nothing typed");
             }
             try {
                 return parseText(reply);
             } catch (JevException e) {
+                var finish = finishReason(response);
                 // The next unexpected reply shape is only diagnosable from what the model actually said.
-                EventLogger.warn("tool", agent.name, null, "Jev text helper refused the reply: " + excerpt(reply));
+                EventLogger.warn("tool", agent.name, null, "Jev text helper refused the reply (finish_reason=%s): %s"
+                        .formatted(finish, excerpt(reply)));
+                // A reply cut off before its object leaves none to find; a complete one keeps its own refusal.
+                if (ReplyJson.strictObject(reply).isEmpty() && TruncationDiagnostics.isTruncationFinish(finish)) {
+                    throw new JevException(TRUNCATED);
+                }
                 throw e;
             }
         };
+    }
+
+    private static @Nullable String finishReason(ChatResponse response) {
+        return response.choices().isEmpty() ? null : response.choices().getFirst().finishReason();
     }
 
     private static String excerpt(@Nullable String reply) {
@@ -356,28 +364,11 @@ public final class JevRun {
      * closing code fence after it are ignored; any other text after it types nothing.
      */
     public static String parseText(@Nullable String reply) {
-        if (reply == null) throw new JevException(NOTHING_TYPED);
-        var body = reply.strip();
-        if (body.endsWith(FENCE)) body = body.substring(0, body.length() - FENCE.length()).strip();
-        if (!body.endsWith("}")) throw new JevException(NOTHING_TYPED);
         // JCLAW-1275: models prefix reasoning (glm leaks "…</think>") or fence the object, so take the final one.
-        for (int start = body.lastIndexOf('{'); start >= 0; start = body.lastIndexOf('{', start - 1)) {
-            var object = strictObject(body.substring(start));
-            if (object != null) return textOf(object);
-        }
-        throw new JevException(NOTHING_TYPED);
-    }
-
-    /** {@code candidate} parsed as one strict JSON object with nothing after it, or null. */
-    private static @Nullable JsonObject strictObject(String candidate) {
-        try {
-            var reader = new JsonReader(new StringReader(candidate));
-            reader.setStrictness(Strictness.STRICT);
-            JsonElement parsed = JsonParser.parseReader(reader);
-            return reader.peek() == JsonToken.END_DOCUMENT && parsed.isJsonObject() ? parsed.getAsJsonObject() : null;
-        } catch (JsonParseException | IOException _) {
-            return null;
-        }
+        var found = ReplyJson.strictObject(reply)
+                .filter(ReplyJson.Found::endsReply)
+                .orElseThrow(() -> new JevException(NOTHING_TYPED));
+        return textOf(found.value());
     }
 
     private static String textOf(JsonObject object) {

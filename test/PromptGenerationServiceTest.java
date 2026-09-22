@@ -35,6 +35,23 @@ class PromptGenerationServiceTest extends UnitTest {
     }
 
     @Test
+    void aTrailingFootnoteDoesNotDisplaceTheObject() {
+        var g = PromptGenerationService.parse(
+                "{\"title\":\"T\",\"category\":\"WRITING\",\"content\":\"c\",\"tags\":\"a\"}\nTags: [a]");
+        assertEquals("T", g.title());
+        assertEquals("c", g.content(), "the trailing array must not send this to the raw-text fallback");
+    }
+
+    @Test
+    void parseReadsTheObjectAfterLeakedReasoning() {
+        var g = PromptGenerationService.parse("A {placeholder} fits here.</think>"
+                + "{\"title\":\"T\",\"category\":\"WRITING\",\"content\":\"c\",\"tags\":\"a\"}");
+        assertEquals("T", g.title());
+        assertEquals("WRITING", g.category());
+        assertEquals("c", g.content());
+    }
+
+    @Test
     void parseFallsBackOnNonJson() {
         var g = PromptGenerationService.parse("just some plain text, not json");
         assertEquals("just some plain text, not json", g.content()); // raw text kept for editing

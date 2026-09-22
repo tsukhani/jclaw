@@ -1,9 +1,9 @@
 package services;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
+import llm.ReplyJson;
 import llm.routing.ModelRouter;
 import models.Agent;
 import models.Prompt;
@@ -100,15 +100,12 @@ public final class PromptGenerationService {
         String tags = "";
         var category = Prompt.Category.CUSTOM;
         try {
-            var el = JsonParser.parseString(stripFences(text));
-            if (el.isJsonObject()) {
-                JsonObject o = el.getAsJsonObject();
-                title = str(o, "title");
-                content = str(o, "content");
-                tags = str(o, "tags");
-                var cat = Prompt.Category.fromValue(str(o, "category"));
-                if (cat != null) category = cat;
-            }
+            var o = ReplyJson.lenientObject(text).orElseThrow();
+            title = str(o, "title");
+            content = str(o, "content");
+            tags = str(o, "tags");
+            var cat = Prompt.Category.fromValue(str(o, "category"));
+            if (cat != null) category = cat;
         } catch (RuntimeException _) {
             // Non-JSON / malformed — leave content blank so the fallback below
             // hands the operator the raw text to edit instead of nothing.
@@ -121,16 +118,5 @@ public final class PromptGenerationService {
 
     private static String str(JsonObject o, String key) {
         return o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsString().strip() : "";
-    }
-
-    /** Strip a leading ```/```json fence and trailing ``` if the model wrapped its JSON. */
-    private static String stripFences(String s) {
-        var t = s.strip();
-        if (t.startsWith("```")) {
-            int nl = t.indexOf('\n');
-            if (nl >= 0) t = t.substring(nl + 1);
-            if (t.endsWith("```")) t = t.substring(0, t.length() - 3);
-        }
-        return t.strip();
     }
 }

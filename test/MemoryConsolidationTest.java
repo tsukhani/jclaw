@@ -68,6 +68,18 @@ class MemoryConsolidationTest extends UnitTest {
                         "```json\n{\"supersessions\":[{\"new\":1,\"old\":[0,2]}]}\n```", 2, 3));
     }
 
+    @Test
+    void aTrailingFootnoteDoesNotDisplaceTheSupersessionsObject() {
+        assertEquals(Map.of(0, List.of(1)), MemoryAutoCapture.parseSupersessions(
+                "{\"supersessions\":[{\"new\":0,\"old\":[1]}]}\nNEW [0] retires EXISTING [1].", 1, 2));
+    }
+
+    @Test
+    void parsesSupersessionsAfterLeakedReasoning() {
+        assertEquals(Map.of(0, List.of(1)), MemoryAutoCapture.parseSupersessions(
+                "NEW 0 retires EXISTING {1}.</think>{\"supersessions\":[{\"new\":0,\"old\":[1]}]}", 1, 2));
+    }
+
     /**
      * JCLAW-942: the judge prompt now asks for the question both texts answer, so live
      * output carries a field the shipped parser never saw. Pinned because the parser is

@@ -502,6 +502,10 @@ class JevRunTest extends UnitTest {
 
     /** Answers every chat request with {@code content}, recording the model each one named. */
     private static OkHttpClient llm(String content, List<String> models) {
+        return llm(content, "stop", models);
+    }
+
+    private static OkHttpClient llm(String content, String finishReason, List<String> models) {
         Interceptor canned = chain -> {
             var buffer = new Buffer();
             chain.request().body().writeTo(buffer);
@@ -512,7 +516,7 @@ class JevRunTest extends UnitTest {
             var choice = new JsonObject();
             choice.addProperty("index", 0);
             choice.add("message", message);
-            choice.addProperty("finish_reason", "stop");
+            choice.addProperty("finish_reason", finishReason);
             var choices = new JsonArray();
             choices.add(choice);
             var completion = new JsonObject();
@@ -555,6 +559,30 @@ class JevRunTest extends UnitTest {
         }
     }
 
+    @Test
+    void aReplyCutOffBeforeItsObjectClosesSaysItWasTruncated() {
+        try (var fixture = new ModelFixture()) {
+            var helper = JevRun.agentModel(fixture.agent);
+            var e = assertThrows(JevException.class, () -> HttpFactories.callWith(
+                    llm("The field is the destination, so {\"text\": \"Lis", "length", new ArrayList<>()),
+                    () -> helper.text(new JsonObject())));
+            assertEquals("Text helper's reply was truncated at its 1024-token limit before giving a value; nothing typed",
+                    e.getMessage());
+        }
+    }
+
+    @Test
+    void aCompleteNullValueKeepsItsOwnMessageEvenWhenTheReplyHitTheCap() {
+        try (var fixture = new ModelFixture()) {
+            var helper = JevRun.agentModel(fixture.agent);
+            var e = assertThrows(JevException.class, () -> HttpFactories.callWith(
+                    llm("{\"text\": null}", "length", new ArrayList<>()),
+                    () -> helper.text(new JsonObject())));
+            assertEquals("The goal gives no value for this field; nothing typed. Put every value to enter in the goal",
+                    e.getMessage(), "the object is complete, so the goal-lacks-it guidance must survive");
+        }
+    }
+
     // --- the text-helper contract (no browser) ------------------------------------------------
 
     @Test
@@ -586,7 +614,8 @@ class JevRunTest extends UnitTest {
             "```json\n{\"text\": \"Lisbon\"}\n```",
             "The field is a search box. So I should return {\"text\": \"Porto\"}.</think>{\"text\": \"Lisbon\"}",
             "The goal says to type \"Lisbon\". So the text should be \"Lisbon\".{\"text\": \"Lisbon\"}",
-            "Reasoning first.\n\n```json\n{\"text\": \"Lisbon\"}\n```\n"
+            "Reasoning first.\n\n```json\n{\"text\": \"Lisbon\"}\n```\n",
+            "If {field} is the destination then…</think>{\"text\": \"Lisbon\"}"
     })
     void theFinalObjectIsTypedAfterReasoningOrInsideAFence(String reply) {
         assertEquals("Lisbon", JevRun.parseText(reply), reply);

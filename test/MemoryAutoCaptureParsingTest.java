@@ -14,7 +14,7 @@ import java.util.Set;
  * {@code parseSupersessions} (the JCLAW-525 judge parser with its many
  * validity guards), the additional {@code parseCandidates} edge arms not
  * already exercised, {@code captureEligible}, and the {@code tokenize} /
- * {@code jaccard} / {@code stripFences} primitives (reached by reflection —
+ * {@code jaccard} primitives (reached by reflection —
  * they are package-private statics).
  *
  * <p>None of these touch the Lucene index or the database, so no
@@ -33,12 +33,6 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
         var m = MemoryAutoCapture.class.getDeclaredMethod("jaccard", Set.class, Set.class);
         m.setAccessible(true);
         return (double) m.invoke(null, a, b);
-    }
-
-    private static String stripFences(String s) throws Exception {
-        var m = MemoryAutoCapture.class.getDeclaredMethod("stripFences", String.class);
-        m.setAccessible(true);
-        return (String) m.invoke(null, s);
     }
 
     // ─── parseSupersessions ──────────────────────────────────────────────────
@@ -218,7 +212,7 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
         assertFalse(MemoryAutoCapture.captureEligible(disabled), "capture disabled → not eligible");
     }
 
-    // ─── tokenize / jaccard / stripFences ────────────────────────────────────
+    // ─── tokenize / jaccard ──────────────────────────────────────────────────
 
     @Test
     void tokenizeLowercasesSplitsAndDropsBlanks() throws Exception {
@@ -238,13 +232,6 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
         assertEquals(0.0, jaccard(Set.of(), Set.of("a")), 1e-9, "one empty → 0.0");
         assertEquals(1.0 / 3.0, jaccard(Set.of("a", "b"), Set.of("b", "c")), 1e-9,
                 "|inter|=1, |union|=3");
-    }
-
-    @Test
-    void stripFencesVariants() throws Exception {
-        assertEquals("{}", stripFences("```json\n{}\n```"), "fenced with language + closing");
-        assertEquals("no fence", stripFences("no fence"), "unfenced unchanged");
-        assertEquals("abc", stripFences("```\nabc"), "opening fence only, no closing");
     }
 
     // --- JCLAW-927: the extractor ignoring its closed set of six ---

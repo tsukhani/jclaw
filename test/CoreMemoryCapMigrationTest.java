@@ -1,3 +1,4 @@
+import com.google.gson.JsonParseException;
 import memory.CoreMemoryCapMigration;
 import memory.MemoryCategory;
 import memory.MemoryStoreFactory;
@@ -86,6 +87,25 @@ class CoreMemoryCapMigrationTest extends UnitTest {
             for (int i = 0; i < texts.size(); i++) out.add(category);
             return out;
         });
+    }
+
+    @Test
+    void theModelsAnswersAreReadAfterLeakedReasoningOrInsideAFence() {
+        assertEquals(List.of("preference", "fact"), CoreMemoryCapMigration.parseAnswers(
+                "Memory 0 is a {like}.</think>[\"preference\", \"fact\"]", 2));
+        assertEquals(List.of("decision"), CoreMemoryCapMigration.parseAnswers("```json\n[\"decision\"]\n```", 1));
+        assertEquals(List.of("fact"), CoreMemoryCapMigration.parseAnswers(
+                "[\"fact\"] — memory {0} only", 1), "a trailing object must not displace the answers");
+        assertEquals(List.of(), CoreMemoryCapMigration.parseAnswers(null, 3));
+        assertThrows(JsonParseException.class, () -> CoreMemoryCapMigration.parseAnswers("I cannot classify these.", 1));
+    }
+
+    @Test
+    void anAnswerPerMemoryOrNoAnswersAtAll() {
+        // Answers land on memories by position, so a short array would recategorise the wrong rows.
+        assertThrows(JsonParseException.class, () -> CoreMemoryCapMigration.parseAnswers("[\"fact\"]", 3));
+        assertThrows(JsonParseException.class,
+                () -> CoreMemoryCapMigration.parseAnswers("[\"fact\",\"lesson\",\"decision\"]", 2));
     }
 
     @Test
