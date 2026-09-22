@@ -35,6 +35,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - In a FunctionalTest, seed what your own HTTP request reads with `commitInFreshTx` — the body is already in a transaction and `Tx.run` joins it. Real HTTP against the autotest server 401s `password_unset` until `AuthFixture.seedAdminPassword` runs; the loadtest harness adds a warmup turn.
 - Frontend: `cd frontend && pnpm test` after edits; `pnpm typecheck` is the TS gate, the LSP's `.vue` import errors are false. After a dependency bump, `rm -rf .nuxt node_modules/.vite && pnpm exec nuxi prepare` before believing a green; in a fresh worktree run `nuxi prepare` first or the suite false-REDs with zero tests.
 - `pnpm test --coverage`, never `pnpm test -- --coverage` (vitest reads it as a filename and passes with no coverage). `pnpm test` never runs e2e; `./jclaw.sh e2e` needs a live instance answering `/api/status`.
+- The live-browser tests in `PlaywrightToolTest`, `JevRunTest` and `JevLoopTest` run only under `JCLAW_PLAYWRIGHT_TEST`, and **only `./jclaw.sh test` sets it** — it exports `1` when a `chromium_headless_shell-*` build is cached (`PLAYWRIGHT_BROWSERS_PATH`, else the platform cache), adding about 2 minutes, and otherwise prints one skip line. So `play autotest` and `./gradlew playAutotest -Ptests=PlaywrightToolTest` come back green having run none of them: export the flag yourself for a targeted run, or where Chromium lives outside those caches. `0` and `false` opt out; pre-push inherits whatever `./jclaw.sh test` decides (JCLAW-1277).
 - Pre-push runs a wildcard-import grep, `spotlessCheck` and `compileJava` before the suite: `./gradlew spotlessApply` after any import-moving change. A pre-commit `.distignore` warning on a new `app/**.java` is expected — dist ships precompiled — don't edit `.distignore`.
 - Jenkins runs Sonar and coverage but never lint, typecheck or e2e; its release notes are the commit body only when the subject is exactly `Release vX.Y.Z`, which `/deploy` writes.
 - Bumping the fork is two-sided: `.play-version` and `/opt/play1` at the same tag, rebuilt (`framework/src/play/version` is a build artifact); a mismatch fails Gradle configure, which reads as a spotless failure at pre-push. `./gradlew --stop` here does not stop the fork's daemon.
@@ -304,7 +305,7 @@ JClaw uses **OkHttp 5.x** (with `okhttp-sse` for streaming) as its single outbou
 
 All HTTP-client provisioning lives in `app/utils/HttpFactories.java` — a single class that exposes named factory methods (`llmStreaming()`, `llmSingleShot()`, `general()`) so call sites declare *intent* rather than reach into named static fields. Internally it shares two connection pools (LLM/64-slot, general/32-slot) and two dispatchers (LLM uses a virtual-thread executor, general uses OkHttp's default cached pool — request volume on the non-LLM path doesn't justify VT scheduling). The Telegram SDK and `WebFetchTool`/`SsrfGuard` build their own clients with stack-specific tuning that doesn't fit any of the three `HttpFactories` tiers (the SDK has its own internal usage; `SsrfGuard` plugs in a per-request DNS allow-list against tool-fetch SSRF).
 
-Because call sites reach the transport through those factory methods, it is substitutable in one place: `HttpFactories.runWith(client, body)` — and its value-returning twin `callWith` — binds a `ScopedValue` that all six accessors (the three tiers plus their SSRF-guarded variants) honour for the dynamic extent of `body`, so a test installs a canned-response OkHttp interceptor instead of standing up a mock server on a port. Nothing binds it in production, and a `ScopedValue` does not follow an unrelated thread, so one test class cannot leak a transport into another that play1 is running concurrently — but for that same reason the binding does not reach Play's own request threads, and a `FunctionalTest` driving a controller still needs a per-collaborator seam such as `WhatsAppCloudApiProbe.installForTest`. The seam also stops at the accessor: nine sites derive a tuned client from `general().newBuilder()`, most of them into a static field at class-init (the rendered and impersonated fetchers, the Telegram/Slack/WhatsApp file downloaders through `StagedDownload`, the Slack uploader, the image-sidecar progress client) or at construction (the sidecar clients through `SidecarHttpClient`), and a binding made later cannot reach a reference captured that early.
+Because call sites reach the transport through those factory methods, it is substitutable in one place: `HttpFactories.runWith(client, body)` — and its value-returning twin `callWith` — binds a `ScopedValue` that all six accessors (the three tiers plus their SSRF-guarded variants) honour for the dynamic extent of `body`, so a test installs a canned-response OkHttp interceptor instead of standing up a mock server on a port. Nothing binds it in production — `CapabilityRulesTest` fails the build on an `app/` caller (see **Test-only seams**) — and a `ScopedValue` does not follow an unrelated thread, so one test class cannot leak a transport into another that play1 is running concurrently — but for that same reason the binding does not reach Play's own request threads, and a `FunctionalTest` driving a controller still needs a per-collaborator seam such as `WhatsAppCloudApiProbe.installForTest`. The seam also stops at the accessor: nine sites derive a tuned client from `general().newBuilder()`, most of them into a static field at class-init (the rendered and impersonated fetchers, the Telegram/Slack/WhatsApp file downloaders through `StagedDownload`, the Slack uploader, the image-sidecar progress client) or at construction (the sidecar clients through `SidecarHttpClient`), and a binding made later cannot reach a reference captured that early.
 
 **Which tier a call site picks.** The plain `llmStreaming()` / `llmSingleShot()` / `general()` clients carry no DNS screen; the `*Guarded()` twins wire `SsrfGuard.PROVIDER_SAFE_DNS`, which refuses link-local (the cloud-metadata address), multicast and `0.0.0.0` while permitting loopback and RFC-1918 — where self-hosted inference lives. Any client dialling a URL an operator or an agent can change reaches for the guarded twin, including the chat path: `OkHttpLlmHttpDriver`'s three sites moved there in JCLAW-1229, because a provider `baseUrl` screened once at discovery says nothing about where the host resolves on the next turn. The guarded clients are `newBuilder()`-derived from the plain ones, so pool, dispatcher, timeouts and the `LlmCallEventListener` are identical, and `HttpFactories.runWith` rebinds all six accessors — a test installing a canned transport is unaffected by the choice. `ConfigService.setWithSideEffects` runs `SsrfGuard.assertProviderUrlSafe` on any `provider.*.baseUrl` write, so the refusal is a 403 at the save rather than an opaque DNS error mid-turn; there is no dedicated provider-write action, `POST /api/config` is the write path, which is why the assert lives at the validation seam.
 
@@ -319,6 +320,8 @@ A test overrides it for the duration of a call with `AppClock.runWith(clock, bod
 `AppClock.callWith(clock, body)`, which bind a `ScopedValue` (final in JDK 25, JEP 506). The binding
 is deliberately **not** a static setter: the play1 fork runs test classes concurrently, so a
 process-global flip would leak a frozen clock into whatever else happens to be running.
+
+The seam itself is guarded: see **Test-only seams** under Capabilities.
 
 **Propagation boundary.** A `ScopedValue` binding is visible to the binding thread and is inherited
 by `StructuredTaskScope` forks. It is *not* inherited by a thread from
@@ -601,6 +604,22 @@ stands in for that at test time: `test/CapabilityRulesTest.java` holds five
 allowlists, one per authority the codebase actually exercises, and a class that picks
 up an authority it was never granted fails `play autotest` with a `because` clause
 naming the capability.
+
+**Test-only seams** are the mirror image of a capability, and `CapabilityRulesTest`
+holds them too: six methods `app/` may never call, enforced by
+`noAppClassCallsATestOnlySeam`. Each binds a `ScopedValue` for the dynamic extent of
+one call — `SsrfGuard.permitOriginForTest` (any http(s) IP-literal origin, so a
+loopback fixture passes the SSRF check), `JevPage.callWithCallLimitForTest` (any
+positive frozen-page bound, in place of the 30 s default), `HttpFactories.runWith` /
+`callWith` (a canned transport) and `AppClock.runWith` / `callWith` (a fixed clock).
+A binding reaches everything that runs inside it, which is why production never takes
+one: every URL screened, every request sent, every time read. The rule also asserts
+each named seam still exists, so a rename fails it rather than leaving it guarding
+nothing. The list is explicit because these names carry no pattern to match —
+`runWith` and `callWith` are ordinary names — and because the `*ForTest` setters are a
+different problem: they flip process-global state, and several are called by other
+test hooks in `app/`, so banning them needs a frozen store rather than this list
+(JCLAW-1282).
 
 | Capability | Holders |
 | --- | --- |

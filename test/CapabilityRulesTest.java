@@ -563,32 +563,46 @@ class CapabilityRulesTest extends UnitTest {
 
     // ===== Test-only seams =====
 
-    /** Each seam's owner and method; a production caller would widen SSRF or the frozen-page bound. */
-    private static final Map<String, String> TEST_SEAMS = Map.of(
-            "utils.SsrfGuard", "permitOriginForTest",
-            "tools.jev.JevPage", "callWithCallLimitForTest");
+    /** Each seam's owner and methods; a production caller would bind one for everything that follows. */
+    private static final Map<String, Set<String>> TEST_SEAMS = Map.of(
+            "utils.SsrfGuard", Set.of("permitOriginForTest"),
+            "tools.jev.JevPage", Set.of("callWithCallLimitForTest"),
+            "utils.HttpFactories", Set.of("runWith", "callWith"),
+            "utils.AppClock", Set.of("runWith", "callWith"));
 
     private static final DescribedPredicate<JavaAccess<?>> TEST_SEAM_ACCESS = DescribedPredicate.describe(
             "a call or method reference to a test-only seam",
-            access -> access.getTarget().getName().equals(TEST_SEAMS.get(access.getTargetOwner().getName())));
+            access -> TEST_SEAMS.getOrDefault(access.getTargetOwner().getName(), Set.of())
+                    .contains(access.getTarget().getName()));
 
     /**
-     * {@code SsrfGuard.permitOriginForTest} admits a loopback origin and
-     * {@code JevPage.callWithCallLimitForTest} shortens the frozen-page bound (JCLAW-1277). Both are
-     * {@code ScopedValue} bindings, so a test cannot leak one into another class, but a production
-     * caller would carry the widened check to every URL it screens.
+     * Every seam here binds a {@code ScopedValue} for the dynamic extent of a call: an IP-literal
+     * origin the SSRF guard would otherwise refuse ({@code SsrfGuard}), the frozen-page bound
+     * ({@code JevPage}, both JCLAW-1277), a canned transport ({@code HttpFactories}) or a fixed clock
+     * ({@code AppClock}, JCLAW-1282). A test cannot leak one into a concurrently running class, but a
+     * production caller would hand its binding to everything that runs inside it — every URL screened,
+     * every request sent, every time read.
+     *
+     * <p>The {@code *ForTest} setters elsewhere in {@code app/} are deliberately not here: they flip
+     * process-global state, and several are called by other test hooks in {@code app/}
+     * ({@code TelegramChannel.installForTest} reaches {@code TelegramClientCache.installForTest}), so
+     * the same ban would fail on legitimate callers. Guarding those needs a frozen store, not this list.
      */
     @Test
     void noAppClassCallsATestOnlySeam() {
-        TEST_SEAMS.forEach((owner, method) -> assertTrue(
-                APP_CLASSES.contain(owner) && APP_CLASSES.get(owner).getMethods().stream()
-                        .anyMatch(m -> m.getName().equals(method)),
-                owner + "." + method + " is gone, so this rule would pass while guarding nothing"));
+        // Collected rather than thrown one at a time: two renamed seams should be one run, not two.
+        var missing = new TreeSet<String>();
+        TEST_SEAMS.forEach((owner, methods) -> methods.stream()
+                .filter(method -> !APP_CLASSES.contain(owner) || APP_CLASSES.get(owner).getMethods().stream()
+                        .noneMatch(m -> m.getName().equals(method)))
+                .forEach(method -> missing.add(owner + "." + method)));
+        assertTrue(missing.isEmpty(),
+                missing + " is gone, so this rule would pass while guarding nothing");
 
         ArchRule rule = noClasses()
                 .should().accessTargetWhere(TEST_SEAM_ACCESS)
-                .because("the seams exist so tests can reach a local fixture and a short bound; "
-                        + "production never binds them (JCLAW-1277)");
+                .because("a test-only seam binds a ScopedValue for everything that runs inside it; "
+                        + "production never binds one (JCLAW-1277, JCLAW-1282)");
         rule.check(APP_CLASSES);
     }
 

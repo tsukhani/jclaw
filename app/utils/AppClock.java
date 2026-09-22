@@ -47,12 +47,18 @@ public final class AppClock {
         return BOUND.orElse(SYSTEM);
     }
 
-    /** Run {@code body} with {@code clock} bound on this thread. */
+    /**
+     * Run {@code body} with {@code clock} bound on this thread. Test seam: {@code CapabilityRulesTest}
+     * fails the build if anything in {@code app/} calls it.
+     */
     public static void runWith(@NonNull Clock clock, @NonNull Runnable body) {
         ScopedValue.where(BOUND, clock).run(body);
     }
 
-    /** Call {@code body} with {@code clock} bound on this thread, propagating its checked exception. */
+    /**
+     * Call {@code body} with {@code clock} bound on this thread, propagating its checked exception.
+     * Test seam: {@code CapabilityRulesTest} fails the build if anything in {@code app/} calls it.
+     */
     public static <R, X extends Throwable> R callWith(
             @NonNull Clock clock, @NonNull CallableOp<R, X> body) throws X {
         return ScopedValue.where(BOUND, clock).call(body);

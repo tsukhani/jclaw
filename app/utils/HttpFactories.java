@@ -257,12 +257,14 @@ public final class HttpFactories {
      * <p>The binding covers only the calling thread's own execution. It does
      * <em>not</em> reach Play's request threads, so a {@code FunctionalTest}
      * driving a controller needs a per-collaborator seam instead.
+     *
+     * <p>Test seam: {@code CapabilityRulesTest} fails the build if anything in {@code app/} calls it.
      */
     public static void runWith(@NonNull OkHttpClient transport, @NonNull Runnable body) {
         ScopedValue.where(TRANSPORT, transport).run(body);
     }
 
-    /** Value-returning {@link #runWith}. */
+    /** Value-returning {@link #runWith}; the same test seam, guarded by the same rule. */
     public static <T> T callWith(@NonNull OkHttpClient transport, @NonNull Supplier<T> body) {
         return ScopedValue.where(TRANSPORT, transport).call(body::get);
     }
