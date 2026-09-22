@@ -1,4 +1,6 @@
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.test.UnitTest;
 import utils.HttpFactories;
 import utils.SsrfGuard;
@@ -6,6 +8,8 @@ import utils.SsrfGuard;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Unit tests for {@link SsrfGuard}. The IP-range checks are pure functions
@@ -477,6 +481,64 @@ class SsrfGuardTest extends UnitTest {
                 () -> SsrfGuard.assertProviderUrlSafe("gopher://evil/"));
         assertThrows(SecurityException.class,
                 () -> SsrfGuard.assertProviderUrlSafe("http:///no-host"));
+    }
+
+    // --- permitOriginForTest (JCLAW-1277) ---
+
+    private static final String FIXTURE = "http://127.0.0.1:4711";
+
+    @Test
+    void anUnboundGuardRefusesTheFixtureOrigin() {
+        assertThrows(SecurityException.class, () -> SsrfGuard.assertUrlSafe(FIXTURE + "/"));
+        assertFalse(SsrfGuard.isUrlSafe(FIXTURE + "/"));
+        assertThrows(SecurityException.class, () -> SsrfGuard.hostResolverRule(FIXTURE + "/"));
+    }
+
+    @Test
+    void aPermittedOriginPassesEveryCheckOnlyOnTheBindingThread() {
+        var elsewhere = new AtomicBoolean(true);
+        SsrfGuard.permitOriginForTest(FIXTURE, () -> {
+            SsrfGuard.assertUrlSafe(FIXTURE + "/form?q=1#top");
+            assertTrue(SsrfGuard.isUrlSafe(FIXTURE + "/"));
+            assertTrue(SsrfGuard.isUrlSafe("HTTP://127.0.0.1:4711/"));
+            assertEquals(Optional.empty(), SsrfGuard.hostResolverRule(FIXTURE + "/order"));
+            assertEquals(FIXTURE + "/order", SsrfGuard.pinnedUrl(FIXTURE + "/order"));
+            var other = Thread.ofVirtual().start(() -> elsewhere.set(SsrfGuard.isUrlSafe(FIXTURE + "/")));
+            try {
+                other.join();
+            } catch (InterruptedException e) {
+                throw new AssertionError(e);
+            }
+            return null;
+        });
+        assertFalse(elsewhere.get(), "another thread does not see the binding");
+        assertFalse(SsrfGuard.isUrlSafe(FIXTURE + "/"), "the binding ends with its body");
+    }
+
+    /** A hostname would still hit the DNS pin, and any other scheme would skip the scheme check. */
+    @ParameterizedTest
+    @ValueSource(strings = {"http://localhost:4711", "http://example.com", "ftp://127.0.0.1:21", "file://127.0.0.1/", "127.0.0.1:4711"})
+    void onlyAnHttpIpLiteralOriginCanBePermitted(String origin) {
+        assertThrows(IllegalArgumentException.class, () -> SsrfGuard.permitOriginForTest(origin, () -> null), origin);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://127.0.0.1:4712/",
+            "http://127.0.0.2:4711/",
+            "https://127.0.0.1:4711/",
+            "http://127.0.0.1/",
+            "http://localhost:4711/",
+            "http://10.0.0.5:4711/",
+            "http://169.254.169.254/",
+            "http://user@127.0.0.1:4711/"
+    })
+    void aPermittedOriginAdmitsNoOther(String url) {
+        SsrfGuard.permitOriginForTest(FIXTURE, () -> {
+            assertThrows(SecurityException.class, () -> SsrfGuard.assertUrlSafe(url), url);
+            assertFalse(SsrfGuard.isUrlSafe(url), url);
+            return null;
+        });
     }
 
     @Test

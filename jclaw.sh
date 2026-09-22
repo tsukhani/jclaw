@@ -4150,6 +4150,22 @@ do_test() {
     _now() { date +%s.%N; }
     _elapsed() { awk -v a="$1" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }'; }
 
+    # JCLAW-1277: the live-browser tests run wherever Playwright's headless Chromium is installed, so this
+    # gate and the pre-push hook that calls it run the same tests. An explicit JCLAW_PLAYWRIGHT_TEST=0 opts out.
+    if [[ -z "${JCLAW_PLAYWRIGHT_TEST:-}" ]]; then
+        local pw_cache="${PLAYWRIGHT_BROWSERS_PATH:-}"
+        if [[ -z "$pw_cache" ]]; then
+            if [[ "$(uname -s)" == "Darwin" ]]; then pw_cache="${HOME:-}/Library/Caches/ms-playwright"
+            else pw_cache="${XDG_CACHE_HOME:-${HOME:-}/.cache}/ms-playwright"; fi
+        fi
+        if compgen -G "$pw_cache/chromium_headless_shell-*" >/dev/null; then
+            export JCLAW_PLAYWRIGHT_TEST=1
+            echo "==> Playwright Chromium found in $pw_cache — running the live-browser tests too."
+        else
+            echo "==> No Playwright headless Chromium in $pw_cache — the live-browser tests stay skipped."
+        fi
+    fi
+
     echo "==> Running backend tests (play autotest)..."
     t0=$(_now)
     # JCLAW-684: clear this run's per-class result sentinels first so the

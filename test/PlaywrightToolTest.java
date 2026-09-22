@@ -1,7 +1,8 @@
 import agents.ToolAction;
-import com.microsoft.playwright.BrowserType;
+import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpServer;
 import models.Agent;
+import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
@@ -14,16 +15,25 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import tools.PlaywrightBrowserTool;
+import tools.jev.JevPage;
 import tools.jev.JevSettings;
+import utils.HttpFactories;
+import utils.SsrfGuard;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 class PlaywrightToolTest extends UnitTest {
 
@@ -210,41 +220,29 @@ class PlaywrightToolTest extends UnitTest {
         //   "Browser error: Object doesn't exist: request@<hash>"
         // This test runs two browser actions concurrently against the same
         // agent and asserts both return non-error results.
-        //
-        // Skipped when Playwright is not configured (no chromium install in CI).
-        if (!isPlaywrightTestEnabled()) {
-            return;
-        }
-
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var server = namedPages("seed", "one");
+        var origin = origin(server);
         var tool = new PlaywrightBrowserTool();
-        // Seed the session with an initial navigate so the screenshot target is
-        // a real page rather than about:blank.
-        var seed = tool.execute(
-                "{\"action\":\"navigate\",\"url\":\"data:text/html,<h1>seed</h1>\"}",
-                agent);
-        assertFalse(seed.startsWith("Browser error"), "seed navigate failed: " + seed);
-
         try {
+            // Seed the session so the screenshot target is a real page rather than about:blank.
+            assertEquals("Page: seed\n\nseed", executeAt(tool, origin, navigateTo(origin + "/seed")));
+
             var results = new String[2];
-            var t1 = Thread.ofVirtual().start(() -> results[0] = tool.execute(
-                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<h1>one</h1>\"}",
-                    agent));
-            var t2 = Thread.ofVirtual().start(() -> results[1] = tool.execute(
-                    "{\"action\":\"screenshot\"}",
-                    agent));
+            // A ScopedValue does not follow a new thread, so each binds the origin itself.
+            var t1 = Thread.ofVirtual().start(() -> results[0] = executeAt(tool, origin, navigateTo(origin + "/one")));
+            var t2 = Thread.ofVirtual().start(() -> results[1] = executeAt(tool, origin, "{\"action\":\"screenshot\"}"));
             t1.join();
             t2.join();
 
-            assertFalse(results[0].contains("Object doesn't exist"),
-                    "navigate must not trip Playwright's request map: " + results[0]);
-            assertFalse(results[1].contains("Object doesn't exist"),
-                    "screenshot must not trip Playwright's request map: " + results[1]);
+            assertEquals("Page: one\n\none", results[0], "navigate must not trip Playwright's request map");
             // Screenshot result must still contain the markdown embed so
             // AgentRunner can prepend the inline image.
             assertTrue(results[1].contains("![Screenshot]("),
                     "screenshot result must still contain the markdown embed: " + results[1]);
         } finally {
             PlaywrightBrowserTool.closeSession(agent.name);
+            server.stop(0);
         }
     }
 
@@ -296,101 +294,92 @@ class PlaywrightToolTest extends UnitTest {
     // ─── Session lifecycle (JCLAW-130 Phase 3) ────────────────────────────
     //
     // The three tests below exercise the navigate-under-failure, tab-reuse,
-    // and crash-recovery paths. Each gates on the same JCLAW_PLAYWRIGHT_TEST
-    // env var the existing parallelBrowserOpsOnSameAgentDoNotCorruptPage test
-    // uses, so headless-CI environments without a Chromium install simply
-    // skip them rather than hang on browser launch.
+    // and crash-recovery paths against a loopback fixture that
+    // SsrfGuard.permitOriginForTest lets through (JCLAW-1277). Each gates on
+    // JCLAW_PLAYWRIGHT_TEST, so environments without a Chromium install skip
+    // them rather than hang on browser launch.
 
     @Test
-    void navigateUnderNetworkFailureReturnsBrowserError() {
-        // Pin: when the underlying chromium navigation can't reach the host
-        // (e.g. RFC 6761 .invalid TLD that DNS guarantees never resolves),
+    void navigateUnderNetworkFailureReturnsBrowserError() throws IOException {
+        // Pin: when the underlying chromium navigation can't reach the host,
         // execute() must surface a "Browser error: ..." string rather than
         // throwing or hanging. This is the regression surface JCLAW-126's
         // OkHttp retry cousin lived in — make sure the Playwright path has
         // the same crisp failure mode.
-        if (!isPlaywrightTestEnabled()) {
-            return;
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        // A freed ephemeral port refuses at once. Chromium blocks port 1 as ERR_UNSAFE_PORT, and on macOS a
+        // bound socket that never listens drops the SYN, so the navigate would hang to its timeout.
+        int port;
+        try (var probe = new ServerSocket()) {
+            probe.bind(new InetSocketAddress("127.0.0.1", 0));
+            port = probe.getLocalPort();
         }
+        var origin = "http://127.0.0.1:" + port;
         var tool = new PlaywrightBrowserTool();
         try {
-            var result = tool.execute(
-                    "{\"action\":\"navigate\",\"url\":\"http://nonexistent-host-jclaw-130.invalid/\"}",
-                    agent);
-            // Either the chromium-level failure surfaces as "Browser error: ..."
-            // (PlaywrightException catch in execute) or the SSRF guard rejects
-            // the .invalid host before it reaches the browser. Both are valid
-            // failure modes — what matters is no exception escapes and the
-            // result clearly signals failure.
-            assertTrue(result.startsWith("Browser error") || result.startsWith("Error"),
-                    "expected error result for unresolvable host, got: " + result);
+            var result = executeAt(tool, origin, navigateTo(origin + "/"));
+            assertTrue(result.startsWith("Browser error"), "the browser, not the guard, reports it: " + result);
+            assertTrue(result.contains("ERR_CONNECTION_REFUSED"), result);
         } finally {
             PlaywrightBrowserTool.closeSession(agent.name);
         }
+    }
+
+    @Test
+    void navigateToAnUnresolvableHostIsRefusedBeforeAnyBrowserStarts() {
+        var result = new PlaywrightBrowserTool().execute(navigateTo("http://nonexistent-host-jclaw-1277.invalid/"), agent);
+        assertTrue(result.startsWith("Error: SSRF guard: cannot resolve host"), result);
     }
 
     @Test
     void sequentialNavigatesReuseTheSameSession() throws Exception {
         // The session map keys on agent.name; subsequent calls for the same
         // agent must hit the cached BrowserSession path rather than launching
-        // a fresh chromium per call. Verified by reflecting into the private
-        // static sessions map and asserting the entry count stays at 1.
-        if (!isPlaywrightTestEnabled()) {
-            return;
-        }
+        // a fresh chromium per call.
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var server = namedPages("first", "second");
+        var origin = origin(server);
         var tool = new PlaywrightBrowserTool();
         try {
-            var first = tool.execute(
-                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<title>first</title><h1>1</h1>\"}",
-                    agent);
-            assertFalse(first.startsWith("Browser error"), "first navigate failed: " + first);
+            assertEquals("Page: first\n\nfirst", executeAt(tool, origin, navigateTo(origin + "/first")));
+            var session = liveSession(agent.name);
+            assertNotNull(session, "the first navigate leaves a live session for the agent");
 
-            int sessionsAfterFirst = sessionCount();
-            assertEquals(1, sessionsAfterFirst,
-                    "first navigate should leave one cached session for the agent");
-
-            var second = tool.execute(
-                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<title>second</title><h1>2</h1>\"}",
-                    agent);
-            assertFalse(second.startsWith("Browser error"), "second navigate failed: " + second);
-
-            int sessionsAfterSecond = sessionCount();
-            assertEquals(sessionsAfterFirst, sessionsAfterSecond,
-                    "second navigate must reuse the same session — no extra entry");
+            assertEquals("Page: second\n\nsecond", executeAt(tool, origin, navigateTo(origin + "/second")));
+            assertSame(session, liveSession(agent.name), "the second navigate must reuse the same session");
         } finally {
             PlaywrightBrowserTool.closeSession(agent.name);
+            server.stop(0);
         }
     }
 
     @Test
-    void executeAfterExplicitCloseRecreatesSessionCleanly() {
-        // Crash recovery: getOrCreateSession's compute() branch re-launches
-        // when the cached page is closed. We can't reliably simulate a SIGSEGV
-        // in chromium from a test, but closing the session out-of-band is the
-        // same observable state from the tool's POV — the next execute() must
-        // see a fresh, working session rather than NPE on the closed Page.
-        if (!isPlaywrightTestEnabled()) {
-            return;
-        }
+    void executeAfterExplicitCloseRecreatesSessionCleanly() throws Exception {
+        // Crash recovery: ensureSession re-launches when the agent has no live
+        // session. We can't reliably simulate a SIGSEGV in chromium from a
+        // test, but closing the session out-of-band is the same observable
+        // state from the tool's POV — the next execute() must see a fresh,
+        // working session rather than NPE on the closed Page.
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var server = namedPages("seed", "after");
+        var origin = origin(server);
         var tool = new PlaywrightBrowserTool();
         try {
-            var seed = tool.execute(
-                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<h1>seed</h1>\"}",
-                    agent);
-            assertFalse(seed.startsWith("Browser error"), "seed navigate failed: " + seed);
+            assertEquals("Page: seed\n\nseed", executeAt(tool, origin, navigateTo(origin + "/seed")));
+            var closed = liveSession(agent.name);
+            assertNotNull(closed, "the seed navigate leaves a live session");
 
             // Simulate the crash window: external close, then a normal call.
             PlaywrightBrowserTool.closeSession(agent.name);
+            assertNull(sessionsMap().get(agent.name), "close retires the agent's session");
 
-            var afterClose = tool.execute(
-                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<h1>after</h1>\"}",
-                    agent);
-            assertFalse(afterClose.startsWith("Browser error"),
-                    "navigate after close must succeed via session re-creation: " + afterClose);
-            assertTrue(afterClose.contains("after") || afterClose.contains("Page:"),
-                    "fresh session should serve the post-close navigate: " + afterClose);
+            assertEquals("Page: after\n\nafter", executeAt(tool, origin, navigateTo(origin + "/after")));
+            var fresh = liveSession(agent.name);
+            assertNotNull(fresh);
+            assertNotSame(closed, fresh, "a fresh session serves the call after close");
         } finally {
             PlaywrightBrowserTool.closeSession(agent.name);
+            server.stop(0);
         }
     }
 
@@ -515,6 +504,11 @@ class PlaywrightToolTest extends UnitTest {
 
     /** A loopback server — an address the SSRF guard refuses — counting hits on {@code /metadata} only. */
     private static HttpServer loopbackServer(AtomicInteger metadataHits) throws IOException {
+        return loopbackServer(metadataHits, Map.of());
+    }
+
+    /** {@link #loopbackServer(AtomicInteger)}, serving each path in {@code pages} its own HTML. */
+    private static HttpServer loopbackServer(AtomicInteger metadataHits, Map<String, String> pages) throws IOException {
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
             var path = exchange.getRequestURI().getPath();
@@ -522,7 +516,7 @@ class PlaywrightToolTest extends UnitTest {
             var js = path.endsWith(".js");
             var body = (js ? "self.addEventListener('install', e => { e.waitUntil(fetch('/metadata')); self.skipWaiting(); });"
                     + "self.addEventListener('activate', e => e.waitUntil(clients.claim()));"
-                    : "<!doctype html><title>internal</title>")
+                    : pages.getOrDefault(path, "<!doctype html><title>internal</title>"))
                     .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", js ? "application/javascript" : "text/html");
             exchange.sendResponseHeaders(200, body.length);
@@ -532,6 +526,26 @@ class PlaywrightToolTest extends UnitTest {
         });
         server.start();
         return server;
+    }
+
+    /** A loopback server whose {@code /<name>} pages are each titled and headed with their name. */
+    private static HttpServer namedPages(String... names) throws IOException {
+        var pages = new HashMap<String, String>();
+        for (var name : names) pages.put("/" + name, "<!doctype html><title>" + name + "</title><h1>" + name + "</h1>");
+        return loopbackServer(new AtomicInteger(), pages);
+    }
+
+    private static String origin(HttpServer server) {
+        return "http://127.0.0.1:" + server.getAddress().getPort();
+    }
+
+    private static String navigateTo(String url) {
+        return "{\"action\":\"navigate\",\"url\":\"" + url + "\"}";
+    }
+
+    /** {@code tool.execute} on this thread with {@code origin} past the SSRF guard. */
+    private String executeAt(PlaywrightBrowserTool tool, String origin, String argsJson) {
+        return SsrfGuard.permitOriginForTest(origin, () -> tool.execute(argsJson, agent));
     }
 
     private static String opener(String target) {
@@ -544,7 +558,7 @@ class PlaywrightToolTest extends UnitTest {
         var hits = new AtomicInteger();
         var server = loopbackServer(hits);
         try (var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
-            var browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            var browser = JevRunTest.launchOrSkip(playwright);
             var target = "http://127.0.0.1:" + server.getAddress().getPort() + "/metadata";
 
             var unscreened = browser.newContext();
@@ -575,7 +589,7 @@ class PlaywrightToolTest extends UnitTest {
         var hits = new AtomicInteger();
         var server = loopbackServer(hits);
         try (var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
-            var browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            var browser = JevRunTest.launchOrSkip(playwright);
             var page = PlaywrightBrowserTool.openScreenedPage(browser);
             page.navigate(opener("http://127.0.0.1:" + server.getAddress().getPort() + "/metadata"));
             var popup = page.context().waitForPage(() -> page.click("button"));
@@ -601,7 +615,7 @@ class PlaywrightToolTest extends UnitTest {
                 + ".then(() => navigator.serviceWorker.ready).then(() => 'ready'), t]); })()";
         var controlled = "navigator.serviceWorker.controller ? 'controlled' : 'not controlled'";
         try (var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
-            var browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            var browser = JevRunTest.launchOrSkip(playwright);
             var origin = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
             // Unscreened contexts, so the loopback origin loads; only the service-worker option differs.
             var allowed = browser.newContext().newPage();
@@ -619,6 +633,117 @@ class PlaywrightToolTest extends UnitTest {
             assertEquals(0, hits.get(), "the worker never ran, so its fetch never reached the server");
             assertEquals("not controlled", blocked.evaluate(controlled));
         } finally {
+            server.stop(0);
+        }
+    }
+
+    // ─── JCLAW-1277: run end to end through the tool's own session ─────────────────────
+
+    private static final String ORDER = """
+            <!doctype html><title>Order</title>
+            <p id="status">Not confirmed</p>
+            <button id="confirm">Confirm order</button>
+            <script>
+              document.getElementById('confirm').addEventListener('click', () => {
+                document.getElementById('status').textContent = 'Order confirmed';
+                document.title = 'Confirmed';
+              });
+            </script>""";
+
+    private static final String FREEZE = """
+            <!doctype html><title>Frozen</title>
+            <button id="freeze">Freeze</button>
+            <script>
+              document.getElementById('freeze').addEventListener('click', () => setTimeout(() => { for (;;) {} }, 20));
+            </script>""";
+
+    /** Jev's side of {@link #ORDER}: click the one button, then DONE once the page says so. */
+    private static String[] confirm(JsonObject state) {
+        if (state.getAsJsonObject("page").get("title").getAsString().equals("Confirmed")) {
+            return new String[] {"DONE", null};
+        }
+        return new String[] {"CLICK", JevRunTest.element(state.getAsJsonArray("elements"), "Confirm order")};
+    }
+
+    /** {@code run} through the tool, with Jev played by {@code policy} and every request body kept in {@code jevBodies}. */
+    private String run(PlaywrightBrowserTool tool, String origin, String url, Function<JsonObject, String[]> policy,
+                       List<String> jevBodies) {
+        var jev = new OkHttpClient.Builder().addInterceptor(JevRunTest.standIn(policy, jevBodies)).build();
+        var args = "{\"action\":\"run\",\"url\":\"" + url + "\",\"goal\":\"Press the button on the page.\"}";
+        return HttpFactories.callWith(jev, () -> executeAt(tool, origin, args));
+    }
+
+    private static void useJev() {
+        ConfigService.set(JevSettings.ENGINE, JevSettings.JEV);
+        ConfigService.set(JevSettings.API_KEY, "ts-test-key");
+    }
+
+    private static void usePlaywright() {
+        ConfigService.delete(JevSettings.ENGINE);
+        ConfigService.delete(JevSettings.API_KEY);
+    }
+
+    @Test
+    void aRunDrivesTheSessionPageToDoneWithOneJevRequestPerDecision() throws IOException {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var server = loopbackServer(new AtomicInteger(), Map.of("/order", ORDER));
+        var origin = origin(server);
+        var bodies = new CopyOnWriteArrayList<String>();
+        var tool = new PlaywrightBrowserTool();
+        try {
+            useJev();
+            var result = run(tool, origin, origin + "/order", PlaywrightToolTest::confirm, bodies);
+
+            assertTrue(result.startsWith("Jev run: done after 2 decisions.\nFinal page: Confirmed — "
+                    + origin + "/order\n"), result);
+            assertTrue(result.contains("\n1. CLICK Confirm order\n"), result);
+            assertTrue(result.contains("Order confirmed"), "the page shows the click: " + result);
+            assertEquals(2, bodies.size(), "one Jev request per decision");
+        } finally {
+            usePlaywright();
+            PlaywrightBrowserTool.closeSession(agent.name);
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void aFrozenRunRetiresTheSessionAndTheNextRunStartsAFreshBrowser() throws Exception {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var server = loopbackServer(new AtomicInteger(), Map.of("/order", ORDER, "/freeze", FREEZE));
+        var origin = origin(server);
+        var tool = new PlaywrightBrowserTool();
+        try {
+            // Launch the session first, so the timing below excludes launch and the driver can be watched.
+            var warm = executeAt(tool, origin, navigateTo(origin + "/order"));
+            assertTrue(warm.startsWith("Page: Order\n"), warm);
+            var driver = sessionDriver(agent.name);
+            assertNotNull(driver, "the session's driver process was identified");
+            var chromium = driver.descendants().toList();
+            assertFalse(chromium.isEmpty(), "Chromium runs under the session's driver");
+
+            useJev();
+            long started = System.nanoTime();
+            var frozen = JevPage.callWithCallLimitForTest(Duration.ofSeconds(5), () -> run(tool, origin,
+                    origin + "/freeze",
+                    state -> new String[] {"CLICK", JevRunTest.element(state.getAsJsonArray("elements"), "Freeze")},
+                    new CopyOnWriteArrayList<>()));
+            long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+
+            assertTrue(frozen.startsWith("Error: the page stopped responding; the browser session was closed\n"),
+                    frozen);
+            // The read after the click may land before the page's busy loop starts, adding "(page unchanged)".
+            assertTrue(frozen.contains("\n1. CLICK Freeze"), frozen);
+            assertTrue(elapsedMs < 20_000, "the 5 s bound reached run, not the 30 s default: took " + elapsedMs + " ms");
+            assertNull(sessionsMap().get(agent.name), "the frozen session was retired");
+            driver.onExit().get(10, TimeUnit.SECONDS);
+            for (var process : chromium) process.onExit().get(10, TimeUnit.SECONDS);
+
+            var next = run(tool, origin, origin + "/order", PlaywrightToolTest::confirm, new CopyOnWriteArrayList<>());
+            assertTrue(next.startsWith("Jev run: done after 2 decisions."), next);
+            assertNotNull(liveSession(agent.name), "the next run launched a fresh browser");
+        } finally {
+            usePlaywright();
+            PlaywrightBrowserTool.closeSession(agent.name);
             server.stop(0);
         }
     }
@@ -775,16 +900,21 @@ class PlaywrightToolTest extends UnitTest {
         return holder;
     }
 
-    /**
-     * Reflective view into the private static {@code sessions} map. Used by
-     * the tab-reuse test to assert the map size doesn't grow across
-     * sequential navigates for the same agent.
-     */
-    private static int sessionCount() throws Exception {
-        var f = PlaywrightBrowserTool.class.getDeclaredField("sessions");
-        f.setAccessible(true);
-        var map = (java.util.Map<?, ?>) f.get(null);
-        return map.size();
+    /** The live {@code BrowserSession} in this agent's holder, or null. Reflective: both types are private. */
+    private static ProcessHandle sessionDriver(String agentName) throws Exception {
+        var session = liveSession(agentName);
+        if (session == null) return null;
+        var driver = session.getClass().getDeclaredMethod("driver");
+        driver.setAccessible(true);
+        return (ProcessHandle) driver.invoke(session);
+    }
+
+    private static Object liveSession(String agentName) throws Exception {
+        var holder = sessionsMap().get(agentName);
+        if (holder == null) return null;
+        var session = holder.getClass().getDeclaredField("session");
+        session.setAccessible(true);
+        return session.get(holder);
     }
 
     private static void deleteDir(java.nio.file.Path dir) {

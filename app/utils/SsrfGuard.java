@@ -3,15 +3,18 @@ package utils;
 import okhttp3.Dns;
 import okhttp3.OkHttpClient;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * SSRF-hardened HTTP client factory used by tools that fetch LLM-supplied URLs.
@@ -75,6 +78,38 @@ public final class SsrfGuard {
      *  {@code .formatted(hostname, blockedIp)} at each SSRF-guard call site. */
     private static final String BLOCKED_ADDRESS_MSG =
             "SSRF guard: host %s resolves to blocked address %s";
+
+    /** The one origin {@link #permitOriginForTest} admits on the binding thread; never bound in production. */
+    private static final ScopedValue<String> PERMITTED_ORIGIN = ScopedValue.newInstance();
+
+    /**
+     * Test seam (JCLAW-1277): run {@code body} with {@link #assertUrlSafe} — and so {@link #isUrlSafe},
+     * {@link #hostResolverRule} and {@link #pinnedUrl} — accepting exactly {@code origin}, the scheme,
+     * host and port of a local fixture, on this thread only. {@code CapabilityRulesTest} fails the
+     * build if anything in {@code app/} calls it.
+     *
+     * @throws IllegalArgumentException unless {@code origin} is http(s) with an IP-literal host
+     */
+    public static <T> T permitOriginForTest(@NonNull String origin, @NonNull Supplier<T> body) {
+        var uri = URI.create(origin);
+        var exact = originOf(uri);
+        // An IP literal skips the DNS pin, and http(s) is all the guard ever admits.
+        if (exact == null || !ALLOWED_SCHEMES.contains(uri.getScheme().toLowerCase(Locale.ROOT))
+                || !isLikelyIpLiteral(uri.getHost())) {
+            throw new IllegalArgumentException("not an http(s) IP-literal origin: " + origin);
+        }
+        return ScopedValue.where(PERMITTED_ORIGIN, exact).call(body::get);
+    }
+
+    /** {@code scheme://host:port}, lower-cased with the default port made explicit, or null without a scheme or host. */
+    private static @Nullable String originOf(URI uri) {
+        var scheme = uri.getScheme();
+        var host = uri.getHost();
+        if (scheme == null || host == null) return null;
+        var lower = scheme.toLowerCase(Locale.ROOT);
+        int port = uri.getPort() != -1 ? uri.getPort() : "https".equals(lower) ? 443 : 80;
+        return lower + "://" + host.toLowerCase(Locale.ROOT) + ":" + port;
+    }
 
     /**
      * An OkHttp {@link Dns} that rejects any hostname resolving to a
@@ -269,6 +304,7 @@ public final class SsrfGuard {
             throw new SecurityException(
                     "SSRF guard: URL must not contain embedded credentials (userinfo)");
         }
+        if (PERMITTED_ORIGIN.isBound() && PERMITTED_ORIGIN.get().equals(originOf(uri))) return;
         assertSafeScheme(uri);
         var host = uri.getHost();
         if (host == null) return; // assertSafeScheme already threw for null host

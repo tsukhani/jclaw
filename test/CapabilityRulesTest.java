@@ -561,6 +561,37 @@ class CapabilityRulesTest extends UnitTest {
         return false;
     }
 
+    // ===== Test-only seams =====
+
+    /** Each seam's owner and method; a production caller would widen SSRF or the frozen-page bound. */
+    private static final Map<String, String> TEST_SEAMS = Map.of(
+            "utils.SsrfGuard", "permitOriginForTest",
+            "tools.jev.JevPage", "callWithCallLimitForTest");
+
+    private static final DescribedPredicate<JavaAccess<?>> TEST_SEAM_ACCESS = DescribedPredicate.describe(
+            "a call or method reference to a test-only seam",
+            access -> access.getTarget().getName().equals(TEST_SEAMS.get(access.getTargetOwner().getName())));
+
+    /**
+     * {@code SsrfGuard.permitOriginForTest} admits a loopback origin and
+     * {@code JevPage.callWithCallLimitForTest} shortens the frozen-page bound (JCLAW-1277). Both are
+     * {@code ScopedValue} bindings, so a test cannot leak one into another class, but a production
+     * caller would carry the widened check to every URL it screens.
+     */
+    @Test
+    void noAppClassCallsATestOnlySeam() {
+        TEST_SEAMS.forEach((owner, method) -> assertTrue(
+                APP_CLASSES.contain(owner) && APP_CLASSES.get(owner).getMethods().stream()
+                        .anyMatch(m -> m.getName().equals(method)),
+                owner + "." + method + " is gone, so this rule would pass while guarding nothing"));
+
+        ArchRule rule = noClasses()
+                .should().accessTargetWhere(TEST_SEAM_ACCESS)
+                .because("the seams exist so tests can reach a local fixture and a short bound; "
+                        + "production never binds them (JCLAW-1277)");
+        rule.check(APP_CLASSES);
+    }
+
     // ===== Shared machinery =====
 
     /**

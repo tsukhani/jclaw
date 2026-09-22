@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * The browser half of a Jev run over one page's CDP session: a port of jev-ultrafast's
@@ -43,6 +44,22 @@ public final class JevPage {
     /** How long one browser call may take before the page counts as frozen. */
     public static final Duration CALL_LIMIT = Duration.ofSeconds(30);
     static final String FROZEN = "the page stopped responding; the browser session was closed";
+
+    private static final ScopedValue<Duration> CALL_LIMIT_OVERRIDE = ScopedValue.newInstance();
+
+    /** {@link #CALL_LIMIT}, or the limit a test bound on this thread with {@link #callWithCallLimitForTest}. */
+    public static Duration callLimit() {
+        return CALL_LIMIT_OVERRIDE.orElse(CALL_LIMIT);
+    }
+
+    /**
+     * Test seam (JCLAW-1277): {@link #callLimit()} answers {@code limit} while {@code body} runs on this
+     * thread. {@code CapabilityRulesTest} fails the build if anything in {@code app/} calls it.
+     */
+    public static <T> T callWithCallLimitForTest(Duration limit, Supplier<T> body) {
+        if (limit.isZero() || limit.isNegative()) throw new IllegalArgumentException("call limit must be positive: " + limit);
+        return ScopedValue.where(CALL_LIMIT_OVERRIDE, limit).call(body::get);
+    }
 
     private static final String ACT = """
             (action => {

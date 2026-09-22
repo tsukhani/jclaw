@@ -6,6 +6,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.PlaywrightException;
 import llm.LlmResilience;
 import llm.ProviderRegistry;
 import models.Agent;
@@ -41,7 +42,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -113,9 +113,26 @@ class JevRunTest extends UnitTest {
     @BeforeAll
     static void launch() {
         if (!isPlaywrightTestEnabled()) return;
-        playwright = Playwright.create(new Playwright.CreateOptions()
-                .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
-        browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+        // startDriver's lock: a driver started beside the tool's own leaves the tool unable to tell which is its.
+        playwright = PlaywrightBrowserTool.startDriver().playwright();
+        browser = launchOrNull(playwright);
+    }
+
+    /** Headless Chromium, or null when Playwright's Chromium is not installed — the browser tests then skip. */
+    static Browser launchOrNull(Playwright playwright) {
+        try {
+            return playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+        } catch (PlaywrightException e) {
+            if (String.valueOf(e.getMessage()).contains("Executable doesn't exist")) return null;
+            throw e;
+        }
+    }
+
+    /** {@link #launchOrNull}, skipping the calling test when there is no Chromium to launch. */
+    static Browser launchOrSkip(Playwright playwright) {
+        var launched = launchOrNull(playwright);
+        Assumptions.assumeTrue(launched != null, "Playwright Chromium is not installed");
+        return launched;
     }
 
     @AfterAll
@@ -129,7 +146,7 @@ class JevRunTest extends UnitTest {
         jevCalls.set(0);
         typedFor.clear();
         jevBodies.clear();
-        if (!isPlaywrightTestEnabled()) return;
+        if (!isPlaywrightTestEnabled() || browser == null) return;
         page = browser.newPage();
         load(page, FIXTURE);
         jev = new JevPage(page.context().newCDPSession(page), JevPage.CALL_LIMIT, () -> {});
@@ -146,13 +163,14 @@ class JevRunTest extends UnitTest {
     }
 
     private static void requireBrowser() {
-        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        Assumptions.assumeTrue(isPlaywrightTestEnabled() && browser != null,
+                "JCLAW_PLAYWRIGHT_TEST is not set, or Playwright Chromium is not installed");
     }
 
     // --- the stand-in for Jev ----------------------------------------------------------------
 
     /** The index of the element Jev was shown under {@code label}. */
-    private static String element(JsonArray elements, String label) {
+    static String element(JsonArray elements, String label) {
         for (var e : elements) {
             if (e.getAsJsonObject().get("label").getAsString().equals(label)) {
                 return e.getAsJsonObject().get("index").getAsString();
@@ -202,12 +220,20 @@ class JevRunTest extends UnitTest {
     }
 
     private Interceptor fakeJev(java.util.function.Function<JsonObject, String[]> policy) {
+        var standIn = standIn(policy, jevBodies);
         return chain -> {
             jevCalls.incrementAndGet();
+            return standIn.intercept(chain);
+        };
+    }
+
+    /** Jev, answering {@code policy}'s {operation, target} for each request's state and recording every body. */
+    static Interceptor standIn(java.util.function.Function<JsonObject, String[]> policy, List<String> bodies) {
+        return chain -> {
             var buffer = new Buffer();
             chain.request().body().writeTo(buffer);
             var raw = buffer.readUtf8();
-            jevBodies.add(raw);
+            bodies.add(raw);
             var body = JsonParser.parseString(raw).getAsJsonObject();
             var decision = policy.apply(body.getAsJsonObject("state"));
             var questions = body.getAsJsonObject("questions");
@@ -311,8 +337,7 @@ class JevRunTest extends UnitTest {
         var driver = PlaywrightBrowserTool.startDriver();
         assertNotNull(driver.process(), "the driver process must be identifiable to bound a frozen page");
         try {
-            var frozen = driver.playwright().chromium().launch(new BrowserType.LaunchOptions().setHeadless(true))
-                    .newPage();
+            var frozen = launchOrSkip(driver.playwright()).newPage();
             load(frozen, FREEZE);
             var chromium = driver.process().descendants().toList();
             assertFalse(chromium.isEmpty(), "Chromium runs under the driver");

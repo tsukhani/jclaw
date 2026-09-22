@@ -357,7 +357,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     /**
      * Jev mode (JCLAW-1274): open {@code url} through the same guarded path as navigate, then let Jev
-     * drive. A browser call that outlives {@link JevPage#CALL_LIMIT} kills the driver to free this
+     * drive. A browser call that outlives {@link JevPage#callLimit()} kills the driver to free this
      * thread, and the session is closed so the next call and shutdown start clean. Runs under
      * {@code holder.lock}.
      */
@@ -370,7 +370,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         }
         var refused = load(session.page(), url, true);
         if (refused != null) return refused;
-        var jev = new JevPage(session.cdp(), JevPage.CALL_LIMIT, () -> killDriver(driver));
+        var jev = new JevPage(session.cdp(), JevPage.callLimit(), () -> killDriver(driver));
         var result = JevRun.run(jev, apiKey, goal, JevRun.agentModel(agent), agent.name).format();
         // A run can last minutes; without this the idle sweep could retire the session just after it.
         holder.lastUsed = AppClock.now().toEpochMilli();
