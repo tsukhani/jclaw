@@ -1,7 +1,10 @@
 import agents.ToolAction;
+import com.microsoft.playwright.BrowserType;
+import com.sun.net.httpserver.HttpServer;
 import models.Agent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -14,10 +17,13 @@ import tools.PlaywrightBrowserTool;
 import tools.jev.JevSettings;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 class PlaywrightToolTest extends UnitTest {
 
@@ -502,6 +508,118 @@ class PlaywrightToolTest extends UnitTest {
         } finally {
             ConfigService.delete(JevSettings.ENGINE);
             ConfigService.delete(JevSettings.API_KEY);
+        }
+    }
+
+    // ─── JCLAW-1276: every page in the session is screened, and popups are closed ─────
+
+    /** A loopback server — an address the SSRF guard refuses — counting hits on {@code /metadata} only. */
+    private static HttpServer loopbackServer(AtomicInteger metadataHits) throws IOException {
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            var path = exchange.getRequestURI().getPath();
+            if (path.equals("/metadata")) metadataHits.incrementAndGet();
+            var js = path.endsWith(".js");
+            var body = (js ? "self.addEventListener('install', e => { e.waitUntil(fetch('/metadata')); self.skipWaiting(); });"
+                    + "self.addEventListener('activate', e => e.waitUntil(clients.claim()));"
+                    : "<!doctype html><title>internal</title>")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", js ? "application/javascript" : "text/html");
+            exchange.sendResponseHeaders(200, body.length);
+            try (var out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+        server.start();
+        return server;
+    }
+
+    private static String opener(String target) {
+        return "data:text/html,<button onclick=\"window.open('" + target + "')\">Open</button>";
+    }
+
+    @Test
+    void theContextRouteAbortsAPopupsRequestToABlockedAddress() throws IOException {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var hits = new AtomicInteger();
+        var server = loopbackServer(hits);
+        try (var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
+            var browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            var target = "http://127.0.0.1:" + server.getAddress().getPort() + "/metadata";
+
+            var unscreened = browser.newContext();
+            var plain = unscreened.newPage();
+            plain.navigate(opener(target));
+            unscreened.waitForPage(() -> plain.click("button")).waitForLoadState();
+            assertEquals(1, hits.get(), "control: an unscreened popup does reach the server");
+            unscreened.close();
+
+            hits.set(0);
+            var screened = browser.newContext();
+            PlaywrightBrowserTool.screen(screened);
+            var failed = new java.util.concurrent.CopyOnWriteArrayList<String>();
+            screened.onRequestFailed(request -> failed.add(request.url()));
+            var page = screened.newPage();
+            page.navigate(opener(target));
+            screened.waitForPage(() -> page.click("button"));
+            screened.waitForCondition(() -> failed.contains(target));
+            assertEquals(0, hits.get(), "the context route aborted the popup's request");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void theSessionPageClosesPopupsAndLetsNoneReachABlockedAddress() throws IOException {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var hits = new AtomicInteger();
+        var server = loopbackServer(hits);
+        try (var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
+            var browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            var page = PlaywrightBrowserTool.openScreenedPage(browser);
+            page.navigate(opener("http://127.0.0.1:" + server.getAddress().getPort() + "/metadata"));
+            var popup = page.context().waitForPage(() -> page.click("button"));
+            for (int i = 0; i < 40 && !popup.isClosed(); i++) page.waitForTimeout(50);
+
+            assertTrue(popup.isClosed(), "the popup was closed");
+            assertFalse(page.isClosed(), "the session's own page stays open");
+            assertEquals(List.of(page), page.context().pages());
+            assertEquals(0, hits.get(), "nothing reached the blocked address");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void theSessionContextKeepsServiceWorkersFromRunning() throws IOException {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var hits = new AtomicInteger();
+        var server = loopbackServer(hits);
+        // BLOCK does not refuse register(); the worker simply never runs, so its own fetch never lands.
+        var install = "(() => { const t = new Promise(r => setTimeout(() => r('timeout'), 4000));"
+                + " return Promise.race([navigator.serviceWorker.register('/sw.js')"
+                + ".then(() => navigator.serviceWorker.ready).then(() => 'ready'), t]); })()";
+        var controlled = "navigator.serviceWorker.controller ? 'controlled' : 'not controlled'";
+        try (var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
+            var browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            var origin = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+            // Unscreened contexts, so the loopback origin loads; only the service-worker option differs.
+            var allowed = browser.newContext().newPage();
+            allowed.navigate(origin);
+            assertEquals("ready", allowed.evaluate(install));
+            allowed.reload();
+            assertEquals(1, hits.get(), "control: a running worker fetches /metadata outside any page route");
+            assertEquals("controlled", allowed.evaluate(controlled));
+
+            hits.set(0);
+            var blocked = browser.newContext(PlaywrightBrowserTool.screenedContextOptions()).newPage();
+            blocked.navigate(origin);
+            assertEquals("timeout", blocked.evaluate(install), "the worker never becomes ready");
+            blocked.reload();
+            assertEquals(0, hits.get(), "the worker never ran, so its fetch never reached the server");
+            assertEquals("not controlled", blocked.evaluate(controlled));
+        } finally {
+            server.stop(0);
         }
     }
 

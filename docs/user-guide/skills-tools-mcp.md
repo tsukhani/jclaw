@@ -147,6 +147,14 @@ Each call into the browser has 30 seconds. A page that stops responding for long
 
 Jev never sees or fills password fields, so logins do not work in Jev mode: switch to Playwright for a site that needs one. Shadow DOM, frames, file uploads and pop-up windows are not supported either.
 
+### Browser network checks
+
+The `browser` tool's Chromium sends every HTTP(S) request through the SSRF guard, which refuses loopback, link-local (including the cloud metadata address) and private-network addresses. That covers the pages it loads, their resources and redirects, and pop-up windows or new tabs a page opens.
+
+Pop-ups are closed as soon as they open, because the tool never reads them. A link that opens in a new tab is therefore not followed; `navigate` to its address instead. Service workers are kept from running, since a worker's own requests would bypass the check. WebSocket connections are not screened.
+
+Only the host of the URL passed to `navigate` or `run` is pinned to the address that was checked, and the pin lasts for the browser session. Every other host is checked on each request, but Chromium resolves it again, so it is not pinned. That includes resources, redirect targets, clicked links, and everything a Jev run reaches.
+
 ## MCP Servers
 
 The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps like JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. An MCP server's tools are managed on the [MCP Servers](/mcp-servers) page — not the Tools page, which lists only JClaw's first-party tools.

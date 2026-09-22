@@ -5,6 +5,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Page;
@@ -12,6 +13,7 @@ import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.LoadState;
+import com.microsoft.playwright.options.ServiceWorkerPolicy;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
@@ -325,7 +327,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      */
     private static @Nullable String load(Page page, String url, boolean idleOptional) {
         // JCLAW-116: validate the entry URL before handing it to Chromium.
-        // The route interceptor installed in createSession catches subresources
+        // The route interceptor installed by screen() catches subresources
         // and redirects, but the top-level URL is still checked here so we
         // can surface a clean error to the agent without spinning up the nav.
         try {
@@ -539,7 +541,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static BrowserSession launchSession(String key, Set<String> pinnedRules) {
         EventLogger.info("tool", key, null, "Launching headless browser");
         ensureBrowserInstalled();
-        // Build the driver -> browser -> page -> route chain under a guard: a
+        // Build the driver -> browser -> screened context -> page chain under a guard: a
         // failure partway through must best-effort close whatever OS processes
         // were already spawned before rethrowing. launchSession runs under the
         // holder lock before holder.session is assigned, so a throw leaves NO
@@ -567,24 +569,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 launchOptions.setArgs(List.of("--host-resolver-rules=" + String.join(",", pinnedRules)));
             }
             browser = playwright.chromium().launch(launchOptions);
-            page = browser.newPage();
-            // JCLAW-116: abort any request (main frame, subresource, or
-            // redirect target) whose URL fails the SSRF guard. Catches
-            // three cases the entry-URL check in navigate() can't:
-            //   (a) subresources embedded in the loaded page that target
-            //       private networks (tracking pixels pointing at
-            //       169.254.169.254, script-loaders reaching loopback, etc.),
-            //   (b) HTTP redirects to unsafe hosts (Chromium follows them
-            //       automatically without re-invoking our one-shot check),
-            //   (c) any future navigation that bypasses navigate() (e.g.
-            //       a click handler that triggers page.navigate internally).
-            page.route("**/*", route -> {
-                if (SsrfGuard.isUrlSafe(route.request().url())) {
-                    route.resume();
-                } else {
-                    route.abort();
-                }
-            });
+            page = openScreenedPage(browser);
             var cdp = page.context().newCDPSession(page);
             return new BrowserSession(playwright, driver.process(), browser, page, cdp, Set.copyOf(pinnedRules));
         } catch (RuntimeException e) {
@@ -595,6 +580,46 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             if (playwright != null) { try { playwright.close(); } catch (Exception _) { /* best-effort */ } }
             throw e;
         }
+    }
+
+    /**
+     * The session's page (JCLAW-1276): a context whose every page is screened, with service workers
+     * blocked and popups closed. Exposed for tests, so they exercise the wiring production uses.
+     */
+    public static Page openScreenedPage(Browser browser) {
+        var context = browser.newContext(screenedContextOptions());
+        screen(context);
+        var page = context.newPage();
+        closePopups(context, page);
+        return page;
+    }
+
+    /** A service worker's fetches bypass Playwright routing, so workers are blocked. Exposed for tests. */
+    public static Browser.NewContextOptions screenedContextOptions() {
+        return new Browser.NewContextOptions().setServiceWorkers(ServiceWorkerPolicy.BLOCK);
+    }
+
+    /**
+     * Abort any request whose URL fails the SSRF guard (JCLAW-116): subresources aimed at private
+     * networks, redirects to unsafe hosts, and navigations that bypass {@code navigate()}. Installed
+     * on the context rather than the page (JCLAW-1276), so a popup or new tab is screened too.
+     * Exposed for tests.
+     */
+    public static void screen(BrowserContext context) {
+        context.route("**/*", route -> {
+            if (SsrfGuard.isUrlSafe(route.request().url())) {
+                route.resume();
+            } else {
+                route.abort();
+            }
+        });
+    }
+
+    /** Close every page but {@code primary}: the tool never reads a popup, so it only widens reach. Exposed for tests. */
+    public static void closePopups(BrowserContext context, Page primary) {
+        context.onPage(opened -> {
+            if (opened != primary) opened.close();
+        });
     }
 
     /** Start a Playwright client, recording its Node driver process. Exposed for tests. */
