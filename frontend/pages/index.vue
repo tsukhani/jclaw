@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ChartBarIcon,
+  GlobeAltIcon,
   HashtagIcon,
   QueueListIcon,
   TableCellsIcon,
@@ -8,7 +9,10 @@ import {
   VideoCameraIcon,
 } from '@heroicons/vue/24/outline'
 import type { Ref } from 'vue'
-import type { Agent, LatencyHistogram, LogEvent } from '~/types/api'
+import type { Agent, LatencyHistogram, LogEvent, ScrapeJob } from '~/types/api'
+import { scrapeSite } from '~/utils/scrape-job'
+import ScrapeJobProgress from '~/components/scrapes/ScrapeJobProgress.vue'
+import ScrapeJobStateBadge from '~/components/scrapes/ScrapeJobStateBadge.vue'
 
 // --- Latency metrics (chat performance panel) ---
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
@@ -217,11 +221,16 @@ interface VideoGenJob {
 const { data: recentVideoJobs, refresh: refreshVideoJobs } = useFetch<VideoGenJob[]>(
   '/api/videogen/jobs/recent', { immediate: false, default: () => [] },
 )
-type ActivityView = 'all' | 'video'
+// Background scrape jobs (JCLAW-1273), lazy for the same reason as the video view.
+const { data: recentScrapeJobs, refresh: refreshScrapeJobs } = useFetch<ScrapeJob[]>(
+  '/api/scrape-jobs?limit=10', { immediate: false, default: () => [] },
+)
+type ActivityView = 'all' | 'video' | 'scrapes'
 const activityView = ref<ActivityView>('all')
 function setActivityView(v: ActivityView) {
   activityView.value = v
   if (v === 'video') refreshVideoJobs()
+  if (v === 'scrapes') refreshScrapeJobs()
 }
 
 function formatMs(ms: number): string {
@@ -281,6 +290,7 @@ onMounted(() => {
     refreshLogs()
     // Only poll video jobs while their view is showing — no cost when the operator is on the events feed.
     if (activityView.value === 'video') refreshVideoJobs()
+    if (activityView.value === 'scrapes') refreshScrapeJobs()
     chatCostRef.value?.refresh()
     // Keep the per-status task counts in lockstep with the rest of the
     // dashboard's 5 s tick. Mostly cheap (3 indexed COUNT queries),
@@ -822,6 +832,24 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
           </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activityView === 'scrapes'"
+            class="p-1.5 transition-colors"
+            :class="activityView === 'scrapes'
+              ? 'bg-muted text-fg-strong'
+              : 'text-fg-muted hover:text-fg-strong'"
+            title="Scrape jobs"
+            aria-label="Scrape jobs"
+            data-testid="activity-scrapes-tab"
+            @click="setActivityView('scrapes')"
+          >
+            <GlobeAltIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
         </div>
       </div>
       <!-- Body reserves its last-known height so the events landing don't move
@@ -880,7 +908,7 @@ onBeforeUnmount(() => {
             No recent events
           </div>
         </template>
-        <template v-else>
+        <template v-else-if="activityView === 'video'">
           <div v-if="recentVideoJobs?.length">
             <!-- Column headers — same flex widths as the rows below. Hidden under
                sm, where the row wraps and the columns no longer line up. -->
@@ -930,6 +958,42 @@ onBeforeUnmount(() => {
             class="px-4 py-8 text-center text-sm text-fg-muted"
           >
             No video generation jobs yet.
+          </div>
+        </template>
+        <template v-else>
+          <div
+            v-if="recentScrapeJobs?.length"
+            class="divide-y divide-border"
+            data-testid="activity-scrapes"
+          >
+            <div
+              v-for="job in recentScrapeJobs"
+              :key="job.id"
+              class="px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-3"
+            >
+              <ScrapeJobStateBadge
+                :state="job.state"
+                class="shrink-0"
+              />
+              <NuxtLink
+                :to="`/scrapes/${job.id}`"
+                class="grow basis-full sm:basis-0 min-w-0 truncate text-sm text-fg-primary hover:underline"
+                :title="job.url"
+              >
+                {{ scrapeSite(job.url) }}
+              </NuxtLink>
+              <ScrapeJobProgress
+                :job="job"
+                class="shrink-0 w-40"
+              />
+              <span class="shrink-0 w-48 text-right text-xs text-fg-muted font-mono">{{ formatActivityTimestamp(job.createdAt) }}</span>
+            </div>
+          </div>
+          <div
+            v-else
+            class="px-4 py-8 text-center text-sm text-fg-muted"
+          >
+            No scrape jobs yet.
           </div>
         </template>
       </div>

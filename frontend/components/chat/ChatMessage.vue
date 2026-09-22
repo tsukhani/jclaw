@@ -18,11 +18,13 @@ import { formatUsageCost, formatUsageCostTooltip, providerMetricRows } from '~/u
 import { routeClassLabel, routeDescription, routeOf } from '~/utils/model-route'
 import { thinkingHeaderLabel } from '~/utils/thinking'
 import type { VideoJobStatus } from '~/utils/video-job'
-import type { Message, MessageAttachment, ToolCall } from '~/types/api'
+import type { Message, MessageAttachment, ScrapeJobRef, ToolCall } from '~/types/api'
 import ChatAttachmentChip from '~/components/chat/ChatAttachmentChip.vue'
 import ChatAudioAttachment from '~/components/chat/ChatAudioAttachment.vue'
 import ChatGeneratedImage from '~/components/chat/ChatGeneratedImage.vue'
 import ChatGeneratedVideo from '~/components/chat/ChatGeneratedVideo.vue'
+import ChatScrapeJobCard from '~/components/chat/ChatScrapeJobCard.vue'
+import ChatScrapeJobNotice from '~/components/chat/ChatScrapeJobNotice.vue'
 import ChatSubagentRow from '~/components/chat/ChatSubagentRow.vue'
 import ChatThinkingCard from '~/components/chat/ChatThinkingCard.vue'
 import ChatToolCalls from '~/components/chat/ChatToolCalls.vue'
@@ -81,6 +83,11 @@ const emit = defineEmits<{
   (e: 'toggle-tool-call-expansion', tc: ToolCall): void
   (e: 'set-tok-stats-hover-key', key: string | number | null): void
 }>()
+
+/** JCLAW-1273: the background scrape jobs this turn's web_scrape calls started. */
+function scrapeJobRefs(msg: Message): ScrapeJobRef[] {
+  return (msg.toolCalls ?? []).flatMap(tc => tc.resultStructured?.scrapeJob ? [tc.resultStructured.scrapeJob] : [])
+}
 
 /** Compact "provider/model-id" label for the switch indicator. */
 function formatModelLabel(msg: Message): string {
@@ -164,6 +171,11 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
     v-show="!runSlice || !runSlice?.collapsed"
     :msg="msg"
     :agent-id="agentId"
+  />
+  <ChatScrapeJobNotice
+    v-else-if="msg.messageKind === 'scrape_job_complete'"
+    v-show="!runSlice || !runSlice?.collapsed"
+    :msg="msg"
   />
   <div
     v-else
@@ -315,6 +327,11 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
           :collapsed="!!(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed"
           @toggle-collapse="emit('toggle-tool-calls', msg)"
           @toggle-call="emit('toggle-tool-call-expansion', $event)"
+        />
+        <ChatScrapeJobCard
+          v-for="jobRef in scrapeJobRefs(msg)"
+          :key="jobRef.id"
+          :job-ref="jobRef"
         />
         <!--
       Thinking/reasoning block, Unsloth-style: bordered card with a

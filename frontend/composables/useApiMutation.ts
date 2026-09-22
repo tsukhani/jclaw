@@ -16,13 +16,14 @@ import type { ApiErrorBody, ApiErrorDetails } from '~/types/api'
  * (method, URL, and the status or `<no response>`), which is all such a failure has to say.
  */
 export function apiErrorDetails(e: unknown): ApiErrorDetails {
-  const err = e as { data?: Partial<ApiErrorBody>, status?: number, statusCode?: number } | undefined
+  const err = e as { data?: Partial<ApiErrorBody> & { field?: unknown }, status?: number, statusCode?: number } | undefined
   const data = err?.data
   return {
     code: data?.code ?? null,
     message: data?.message ?? (e instanceof Error ? e.message : 'Request failed'),
     template: data?.template ?? null,
     status: err?.status ?? err?.statusCode ?? null,
+    field: typeof data?.field === 'string' ? data.field : null,
   }
 }
 

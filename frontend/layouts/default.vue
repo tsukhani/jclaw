@@ -14,6 +14,7 @@ import {
   ClipboardDocumentCheckIcon,
   Cog6ToothIcon,
   ComputerDesktopIcon,
+  GlobeAltIcon,
   HomeIcon,
   LinkIcon,
   MapIcon,
@@ -338,6 +339,8 @@ const navGroups: NavGroup[] = [
       // because the two are conceptually paired — Agents configures the
       // workforce, Subagents shows what that workforce is currently doing.
       { label: 'Subagents', to: '/subagents', icon: UsersRound },
+      // Background scrape jobs (JCLAW-1273): the other long-running work an agent starts and leaves.
+      { label: 'Scrapes', to: '/scrapes', icon: GlobeAltIcon },
       // Apps: operator-hosted mini-apps under public/apps/<slug>/ (SPEC-apps).
       { label: 'Apps', to: '/apps', icon: Squares2X2Icon },
       { label: 'Tasks', to: '/tasks', icon: ClipboardDocumentCheckIcon },

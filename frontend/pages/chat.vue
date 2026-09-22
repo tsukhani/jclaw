@@ -37,6 +37,7 @@ import { useChatScroll } from '~/composables/useChatScroll'
 import { useChatConversation, type ChatConversationLoadHooks } from '~/composables/useChatConversation'
 import { useAgentModel } from '~/composables/useAgentModel'
 import { useChatAnnouncePoller } from '~/composables/useChatAnnouncePoller'
+import { SCRAPE_JOB_REPLY_GRACE_MS, scrapeJobEndedKey } from '~/composables/useScrapeJobChat'
 import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useChatSubagentChips } from '~/composables/useChatSubagentChips'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
@@ -260,7 +261,9 @@ const {
   hasPendingAsyncAnnounce,
   hasRecentTaskCreate,
   pollForAnnounce,
+  keepPollingFor,
 } = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState })
+provide(scrapeJobEndedKey, () => keepPollingFor(SCRAPE_JOB_REPLY_GRACE_MS))
 
 const {
   chips: subagentChips,

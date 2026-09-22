@@ -26,6 +26,7 @@ import {
   CircleStackIcon,
   ClipboardDocumentCheckIcon,
   Cog6ToothIcon,
+  GlobeAltIcon,
   LinkIcon,
   PuzzlePieceIcon,
   RectangleStackIcon,
@@ -43,6 +44,7 @@ import promptsMd from '../../../docs/user-guide/prompts.md?raw'
 import agentsMd from '../../../docs/user-guide/agents.md?raw'
 import conversationsChannelsMd from '../../../docs/user-guide/conversations-and-channels.md?raw'
 import subagentsMd from '../../../docs/user-guide/subagents.md?raw'
+import scrapesMd from '../../../docs/user-guide/scrapes.md?raw'
 import tasksMd from '../../../docs/user-guide/tasks.md?raw'
 import remindersMd from '../../../docs/user-guide/reminders.md?raw'
 import subagentsTasksRemindersMd from '../../../docs/user-guide/subagents-tasks-reminders.md?raw'
@@ -100,6 +102,12 @@ export const sections: GuideSection[] = [
     title: 'Subagents',
     icon: UsersRound,
     content: subagentsMd,
+  },
+  {
+    id: 'scrapes',
+    title: 'Scrapes',
+    icon: GlobeAltIcon,
+    content: scrapesMd,
   },
   {
     id: 'tasks',

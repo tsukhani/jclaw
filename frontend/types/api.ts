@@ -195,6 +195,84 @@ export interface ToolCallResultChip {
 export interface ToolCallResultStructured {
   provider?: string | null
   results?: ToolCallResultChip[]
+  /** JCLAW-1272: the background job a {@code web_scrape} call with {@code background: true} queued. */
+  scrapeJob?: ScrapeJobRef | null
+}
+
+/** The job a background {@code web_scrape} call started, as its tool result names it. */
+export interface ScrapeJobRef {
+  id: number
+  url: string
+  folder: string
+}
+
+/** JCLAW-1272: a background scrape job's state. The last three are final; PAUSED and INTERRUPTED resume. */
+export type ScrapeJobState = 'PENDING' | 'RUNNING' | 'PAUSED' | 'INTERRUPTED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
+
+/** One background scrape job, as {@code GET /api/scrape-jobs} returns it (JCLAW-1272). */
+export interface ScrapeJob {
+  id: number
+  agentId: number
+  agentName: string
+  conversationId: number | null
+  url: string
+  state: ScrapeJobState
+  /** Pages attempted, whatever their outcome. */
+  pagesRead: number
+  /** Pages whose content was retrieved. */
+  pagesFetched: number
+  pagesDiscovered: number
+  stopReason: string | null
+  errorMessage: string | null
+  summary: string | null
+  folder: string
+  /** Workspace path of the file combining every page, once it exists. */
+  combinedFile: string | null
+  /** The {@code web_scrape} arguments the job runs with. */
+  options: ScrapeJobOptions
+  /** Time spent running, across every run; what its time limit counts. */
+  runtimeSeconds: number
+  /** Times a stopped app left it running since it was last resumed. */
+  interruptions: number
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface ScrapeJobOptions {
+  url: string
+  maxPages: number
+  maxDepth: number
+  maxMinutes: number
+  sameHostOnly: boolean
+  respectRobots: boolean
+  seedFromSitemap: boolean
+  language: string
+  format: 'markdown' | 'text' | 'json'
+  extract?: Record<string, string>
+  metadata: boolean
+}
+
+/** One page a scrape job attempted, in the order it read them. */
+export interface ScrapeJobPage {
+  id: number
+  /** 1-based position in fetch order; the polling cursor. */
+  index: number
+  url: string
+  depth: number
+  servedBy: string
+  outcome: 'FETCHED' | 'BLOCKED' | 'FAILED'
+  reason: string | null
+  chars: number
+  hasContent: boolean
+  fetchedAt: string
+}
+
+export interface ScrapeJobPageContent {
+  id: number
+  url: string
+  format: 'markdown' | 'text' | 'json'
+  content: string
 }
 
 /**
@@ -1003,4 +1081,6 @@ export interface ApiErrorDetails {
   template: ApiErrorTemplate | null
   /** HTTP status of the refusal, or null when nothing answered. Play's bare notFound() sends no envelope, so a 404 is only readable here. */
   status?: number | null
+  /** The form field a 400 is about, when the server names one, so a form can mark that field. */
+  field?: string | null
 }

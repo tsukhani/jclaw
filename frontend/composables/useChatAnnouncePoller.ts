@@ -140,12 +140,19 @@ export interface UseChatAnnouncePoller {
   hasPendingAsyncAnnounce: () => boolean
   hasRecentTaskCreate: () => boolean
   pollForAnnounce: () => Promise<void>
+  /**
+   * Poll for {@code ms} from now whatever else holds. A background scrape job's card calls it when the
+   * job ends (JCLAW-1273): the completion message and the agent's reply to it land with no SSE
+   * channel to this tab.
+   */
+  keepPollingFor: (ms: number) => void
 }
 
 export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatAnnouncePoller {
   const { messages, selectedConvoId, streaming, initSubagentCollapsedState } = deps
 
   let announcePollTimer: ReturnType<typeof setInterval> | undefined
+  let pollUntil = 0
 
   /**
    * True when the open conversation has at least one async-spawn tool result
@@ -286,8 +293,13 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     //      DB until the user reloads.
     if (!hasPendingAsyncAnnounce()
       && !isWithinPostAnnounceGrace()
-      && !hasRecentTaskCreate()) return
+      && !hasRecentTaskCreate()
+      && Date.now() >= pollUntil) return
     void pollForAnnounce()
+  }
+
+  function keepPollingFor(ms: number) {
+    pollUntil = Math.max(pollUntil, Date.now() + ms)
   }
 
   onMounted(() => {
@@ -302,5 +314,6 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     hasPendingAsyncAnnounce,
     hasRecentTaskCreate,
     pollForAnnounce,
+    keepPollingFor,
   }
 }

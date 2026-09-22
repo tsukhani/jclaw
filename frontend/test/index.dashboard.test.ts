@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
+import { defineComponent, h } from 'vue'
 import Index from '~/pages/index.vue'
 
 /**
@@ -63,6 +64,61 @@ describe('Dashboard — Recent Activity video toggle (JCLAW-236)', () => {
     await flushPromises()
 
     expect(c.text()).toContain('No video generation jobs yet.')
+  })
+})
+
+describe('Dashboard — Recent Activity scrapes view (JCLAW-1273)', () => {
+  beforeEach(() => clearNuxtData())
+
+  it('loads scrape jobs only when their view opens, and polls them only while it shows', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      setupApi()
+      let calls = 0
+      registerEndpoint('/api/scrape-jobs', () => {
+        calls += 1
+        return [{
+          id: 12, agentId: 1, agentName: 'main', conversationId: null, url: 'https://docs.example.test/', state: 'RUNNING',
+          pagesRead: 8, pagesFetched: 8, pagesDiscovered: 30, stopReason: null, errorMessage: null, summary: null,
+          folder: 'scrapes/12', combinedFile: null,
+          options: { url: 'https://docs.example.test/', maxPages: 500, maxDepth: 2, maxMinutes: 60, sameHostOnly: true,
+            respectRobots: true, seedFromSitemap: true, language: 'en', format: 'markdown', metadata: false },
+          runtimeSeconds: 40, interruptions: 0, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
+        }]
+      })
+      // The 5 s tick refreshes Chat Cost too, so its stub needs the refresh the page calls.
+      const costStub = defineComponent({
+        setup(_, { expose }) {
+          expose({ refresh: async () => {} })
+          return () => h('div')
+        },
+      })
+      const c = await mountSuspended(Index, { global: { stubs: { ...STUBS, ChatCostSection: costStub } } })
+      await flushPromises()
+      vi.advanceTimersByTime(5000)
+      await flushPromises()
+      expect(calls).toBe(0)
+
+      await c.find('[data-testid="activity-scrapes-tab"]').trigger('click')
+      await flushPromises()
+      expect(calls).toBe(1)
+      const rows = c.find('[data-testid="activity-scrapes"]')
+      expect(rows.text()).toContain('Running')
+      expect(rows.find('a[href="/scrapes/12"]').text()).toContain('docs.example.test')
+
+      vi.advanceTimersByTime(5000)
+      await flushPromises()
+      expect(calls).toBe(2)
+
+      await c.find('button[title="All activity"]').trigger('click')
+      vi.advanceTimersByTime(10000)
+      await flushPromises()
+      expect(calls).toBe(2)
+      c.unmount()
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 })
 

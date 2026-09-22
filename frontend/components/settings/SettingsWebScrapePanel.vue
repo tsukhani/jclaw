@@ -6,6 +6,7 @@ import {
   PencilIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import { WEB_SCRAPE_DEFAULTS } from '~/utils/web-scrape-defaults'
 
 const { configData, saving, refresh } = useSettingsConfig()
 
@@ -33,7 +34,7 @@ const GROUPS: { label: string, fields: SettingField[] }[] = [
       {
         key: 'web_scrape.max-depth',
         kind: 'number',
-        fallback: '2',
+        fallback: WEB_SCRAPE_DEFAULTS['web_scrape.max-depth'],
         min: 0,
         tip: 'How many links deep one call follows from the starting URL; 0 reads only that URL. A call asking for more is capped here.',
       },
@@ -62,7 +63,7 @@ const GROUPS: { label: string, fields: SettingField[] }[] = [
       {
         key: 'web_scrape.language',
         kind: 'text',
-        fallback: 'en',
+        fallback: WEB_SCRAPE_DEFAULTS['web_scrape.language'],
         tip: 'Preferred language on sites that publish translations, as an hreflang code such as en, ja or pt-BR. Other translations of a page are skipped. A call\'s own language argument overrides it.',
       },
     ],
@@ -73,13 +74,13 @@ const GROUPS: { label: string, fields: SettingField[] }[] = [
       {
         key: 'web_scrape.respect-robots',
         kind: 'boolean',
-        fallback: 'true',
+        fallback: WEB_SCRAPE_DEFAULTS['web_scrape.respect-robots'],
         tip: 'Honour each site\'s robots.txt. A call can still turn it off for one request when the user asks. Per-host pacing stays on either way.',
       },
       {
         key: 'web_scrape.seed-from-sitemap',
         kind: 'boolean',
-        fallback: 'true',
+        fallback: WEB_SCRAPE_DEFAULTS['web_scrape.seed-from-sitemap'],
         tip: 'Add URLs from the sitemaps a site\'s robots.txt declares to the crawl. Only applies while robots.txt is respected.',
       },
       {
@@ -104,14 +105,14 @@ const GROUPS: { label: string, fields: SettingField[] }[] = [
       {
         key: 'web_scrape.job.max-pages',
         kind: 'number',
-        fallback: '500',
+        fallback: WEB_SCRAPE_DEFAULTS['web_scrape.job.max-pages'],
         min: 1,
         tip: 'Most pages an agent\'s background scrape may read; a larger request is capped here, and it is the default when the agent names none. A scrape you start yourself is not capped. Minimum 1.',
       },
       {
         key: 'web_scrape.job.max-minutes',
         kind: 'number',
-        fallback: '60',
+        fallback: WEB_SCRAPE_DEFAULTS['web_scrape.job.max-minutes'],
         min: 1,
         tip: 'Longest an agent\'s background scrape may run, in minutes, counting only time spent running; a longer request is capped here. When it runs out the job stops and keeps the pages it has read. Minimum 1.',
       },

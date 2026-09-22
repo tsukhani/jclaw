@@ -74,6 +74,7 @@ export const SIDEBAR_ROUTES = [
   { path: '/conversations', label: 'Conversations' },
   { path: '/agents', label: 'Agents' },
   { path: '/subagents', label: 'Subagents' },
+  { path: '/scrapes', label: 'Scrapes' },
   { path: '/apps', label: 'Apps' },
   { path: '/tasks', label: 'Tasks' },
   { path: '/reminders', label: 'Reminders' },
