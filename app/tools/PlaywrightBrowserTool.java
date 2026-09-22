@@ -24,13 +24,11 @@ import tools.jev.JevSettings;
 import utils.AppClock;
 import utils.SsrfGuard;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
@@ -97,21 +95,17 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static final String ARG_GOAL = "goal";
 
     /**
-     * The live browser resources for one agent session. Immutable; a relaunch
-     * (JCLAW-731 DNS re-pin) builds a fresh instance rather than mutating this one.
+     * The live browser resources for one agent session. Immutable; a relaunch builds a fresh
+     * instance rather than mutating this one.
      *
-     * <p>{@code pinnedRules} records the {@code --host-resolver-rules} MAP
-     * clauses this browser was launched with (JCLAW-731). Because that flag is
-     * a launch-time argument, the set grows only by relaunch: a navigation to a
-     * host not already pinned tears the browser down and relaunches it with the
-     * union, so every host visited in the session is connect-time pinned — not
-     * just the entry host.
+     * <p>{@code proxy} is the SOCKS5 screen this Chromium was launched behind (JCLAW-1283); it
+     * belongs to the session and {@link #destroySession} closes it.
      *
      * <p>{@code driver} is the Node process behind {@code playwright}, or null when it could not be
      * identified; killing it is the only way to free a thread blocked on a frozen page (JCLAW-1274).
      */
     private record BrowserSession(Playwright playwright, @Nullable ProcessHandle driver, Browser browser, Page page,
-                                  CDPSession cdp, Set<String> pinnedRules) {
+                                  CDPSession cdp, BrowserScreenProxy proxy) {
     }
 
     /** A Playwright client and its Node driver process, or a null process when it could not be identified. */
@@ -265,20 +259,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             return "Error: run needs both a url and a goal.";
         }
 
-        // JCLAW-731: for a navigation, pin the browser's DNS to the guard-
-        // validated IP via --host-resolver-rules, so Chromium connects only
-        // where we checked (SNI-safe — the hostname stays in the URL, so the
-        // Host header and TLS SNI are preserved). --host-resolver-rules is a
-        // launch arg, so ensureSession relaunches the browser (carrying the
-        // union of all prior pins) whenever a navigation targets a host not
-        // already pinned — every navigated host, not just the entry host, ends
-        // up connect-time pinned. The route interceptor keeps re-validating
-        // every other request as before. An unsafe URL is rejected here, before
-        // a browser is even spun up.
-        Optional<String> pinRule = Optional.empty();
+        // An unsafe entry URL is refused here, before a browser is spun up. Every connection the
+        // session then opens — this one included — is screened again by the proxy (JCLAW-1283),
+        // which is also where the DNS pin lives now.
         if (ACTION_NAVIGATE.equals(action) || ACTION_RUN.equals(action)) {
             try {
-                pinRule = SsrfGuard.hostResolverRule(args.get(ARG_URL).getAsString());
+                SsrfGuard.assertUrlSafe(args.get(ARG_URL).getAsString());
             } catch (SecurityException e) {
                 return "Error: " + e.getMessage();
             }
@@ -295,7 +281,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         // A closed tab's address is opened with whichever action this engine offers.
         var openWith = jevKey != null ? ACTION_RUN : ACTION_NAVIGATE;
         try {
-            session = ensureSession(holder, agent.name, pinRule);
+            session = ensureSession(holder, agent.name);
             if (ACTION_RUN.equals(action) && jevKey != null) {
                 return withNote(holder, session, run(holder, session, args.get(ARG_URL).getAsString(),
                         args.get(ARG_GOAL).getAsString(), jevKey, agent), openWith);
@@ -505,13 +491,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Launch, reuse, or relaunch this agent's browser as needed, returning the
-     * live session. Runs under {@code holder.lock} (held by the caller), so the
-     * blocking launch never executes inside a ConcurrentHashMap callback
-     * (JCLAW-821). Refreshes {@code lastUsed} so idle cleanup sees the activity.
+     * Launch or reuse this agent's browser as needed, returning the live session.
+     * Runs under {@code holder.lock} (held by the caller), so the blocking launch
+     * never executes inside a ConcurrentHashMap callback (JCLAW-821). Refreshes
+     * {@code lastUsed} so idle cleanup sees the activity.
      */
-    private static BrowserSession ensureSession(SessionHolder holder, String agentName,
-                                                Optional<String> hostResolverRule) {
+    private static BrowserSession ensureSession(SessionHolder holder, String agentName) {
         holder.lastUsed = System.currentTimeMillis();
         var existing = holder.session;
         if (existing != null && existing.page().isClosed()) {
@@ -520,57 +505,21 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             existing = null;
         }
         if (existing != null) {
-            // The DNS pin is a launch-time arg, so a navigation to a host not
-            // already pinned can't be added to the running Chromium.
-            var relaunchPins = pinsForNavigation(existing.pinnedRules(), hostResolverRule);
-            if (relaunchPins.isEmpty()) {
-                // Rule empty or already pinned — reuse the live session as-is.
-                return existing;
-            }
-            // Relaunch with the union of prior pins + the new host so every
-            // previously-visited host stays connect-time pinned. This discards
-            // the current page state, but a cross-host navigation loads a fresh
-            // page anyway, so nothing useful is lost. Null the reference before
-            // launching so a launch failure leaves no dangling torn-down session.
-            destroySession(existing, agentName);
-            holder.session = null;
-            holder.session = launchSession(agentName, relaunchPins.get(), holder.log);
-            return holder.session;
+            return existing;
         }
-        var initialPins = new LinkedHashSet<String>();
-        hostResolverRule.ifPresent(initialPins::add);
-        holder.session = launchSession(agentName, initialPins, holder.log);
+        holder.session = launchSession(agentName, holder.log);
         return holder.session;
     }
 
     /**
-     * Decide the DNS pin set a live session should run with for the next
-     * navigation (JCLAW-731). Returns empty when the session already covers the
-     * navigation — the rule is absent (literal-IP / hostless URL) or the host is
-     * already pinned — so the caller reuses the browser untouched. Otherwise
-     * returns the union of the existing pins and the new rule, signaling a
-     * relaunch so the new host is pinned without dropping any prior host.
-     *
-     * <p>Exposed for unit tests; not part of the public tool API.
+     * Launch a fresh headless Chromium session behind its own screening proxy
+     * (JCLAW-1283). {@code <-loopback>} is subtracted from the bypass list because
+     * Chromium otherwise dials loopback directly, unscreened.
      */
-    public static Optional<Set<String>> pinsForNavigation(Set<String> existingPins,
-                                                          Optional<String> newRule) {
-        if (newRule.isEmpty() || existingPins.contains(newRule.get())) {
-            return Optional.empty();
-        }
-        var merged = new LinkedHashSet<>(existingPins);
-        merged.add(newRule.get());
-        return Optional.of(merged);
-    }
-
-    /**
-     * Launch a fresh headless Chromium session pinned to {@code pinnedRules}.
-     * The MAP clauses are joined into a single {@code --host-resolver-rules}
-     * flag ("MAP h1 ip1,MAP h2 ip2") because that flag is a single launch arg;
-     * this keeps every host validated so far in the session connect-time pinned,
-     * not just the entry host (JCLAW-731).
-     */
-    private static BrowserSession launchSession(String key, Set<String> pinnedRules, BrowserScreenLog log) {
+    // MustBeClosed: the proxy outlives this method by design — the session owns it and
+    // destroySession closes it, as the guarded teardown below does on a partial launch.
+    @SuppressWarnings("MustBeClosed")
+    private static BrowserSession launchSession(String key, BrowserScreenLog log) {
         EventLogger.info("tool", key, null, "Launching headless browser");
         // A tab the previous browser announced will never be closed by this one.
         log.forgetOpeningTabs();
@@ -586,7 +535,14 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         Playwright playwright = null;
         Browser browser = null;
         Page page = null;
+        BrowserScreenProxy proxy = null;
         try {
+            try {
+                proxy = new BrowserScreenProxy(log);
+            } catch (IOException e) {
+                // Fail closed: a browser with no proxy to dial is a browser nothing screens.
+                throw new IllegalStateException("the browser's network screen could not start: " + e.getMessage(), e);
+            }
             var driver = startDriver();
             playwright = driver.playwright();
             if (driver.process() == null && JevSettings.active()) {
@@ -596,12 +552,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             // JCLAW-172: headless is hardcoded — there is no UX where running a
             // visible browser on the host serves an LLM-driven agent. The
             // previous {@code playwright.headless} config key is gone.
-            var launchOptions = new BrowserType.LaunchOptions().setHeadless(true);
-            // JCLAW-731: pin DNS for every validated host in this session so Chromium
-            // resolves each to exactly the IP the SSRF guard approved.
-            if (!pinnedRules.isEmpty()) {
-                launchOptions.setArgs(List.of("--host-resolver-rules=" + String.join(",", pinnedRules)));
-            }
+            // <-loopback> subtracts Chromium's implicit bypass, which covers more than its name says:
+            // measured 2026-09-23, 169.254.169.254 reaches the proxy with the flag and is dialled
+            // directly without it, so dropping the flag would unscreen the cloud-metadata address.
+            var launchOptions = new BrowserType.LaunchOptions().setHeadless(true)
+                    .setArgs(List.of("--proxy-server=socks5://127.0.0.1:" + proxy.port(),
+                            "--proxy-bypass-list=<-loopback>"));
             browser = playwright.chromium().launch(launchOptions);
             page = openScreenedPage(browser, log);
             var cdp = page.context().newCDPSession(page);
@@ -609,13 +565,14 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             // waits for the tab's first response, which can land after the tool has returned.
             cdp.send("Page.enable");
             cdp.on("Page.windowOpen", _ -> log.tabOpening());
-            return new BrowserSession(playwright, driver.process(), browser, page, cdp, Set.copyOf(pinnedRules));
+            return new BrowserSession(playwright, driver.process(), browser, page, cdp, proxy);
         } catch (RuntimeException e) {
             // Best-effort teardown of whatever was constructed, newest first,
             // each guarded independently (mirrors destroySession).
             if (page != null) { try { page.close(); } catch (Exception _) { /* best-effort */ } }
             if (browser != null) { try { browser.close(); } catch (Exception _) { /* best-effort */ } }
             if (playwright != null) { try { playwright.close(); } catch (Exception _) { /* best-effort */ } }
+            if (proxy != null) { try { proxy.close(); } catch (Exception _) { /* best-effort */ } }
             throw e;
         }
     }
@@ -642,7 +599,9 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * Abort any request whose URL fails the SSRF guard (JCLAW-116): subresources aimed at private
      * networks, redirects to unsafe hosts, and navigations that bypass {@code navigate()}. Installed
      * on the context rather than the page (JCLAW-1276), so a popup or new tab is screened too. Each
-     * refusal is recorded in {@code log} (JCLAW-1280). Exposed for tests.
+     * refusal is recorded in {@code log} (JCLAW-1280). The proxy underneath screens every connection
+     * the page cannot reach around; this screens the URL a request carries, which SOCKS5 does not
+     * see (JCLAW-1283). Exposed for tests.
      */
     public static void screen(BrowserContext context, BrowserScreenLog log) {
         context.route("**/*", route -> {
@@ -741,6 +700,9 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         try { session.page().close(); } catch (Exception _) { /* best-effort */ }
         try { session.browser().close(); } catch (Exception _) { /* best-effort */ }
         try { session.playwright().close(); } catch (Exception _) { /* best-effort */ }
+        // After the browser, so nothing is still dialling through the screen when it drops the
+        // tunnels it is holding open.
+        try { session.proxy().close(); } catch (Exception _) { /* best-effort */ }
         EventLogger.info("tool", agentName, null, "Browser session closed");
     }
 

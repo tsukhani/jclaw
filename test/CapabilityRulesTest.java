@@ -149,6 +149,7 @@ class CapabilityRulesTest extends UnitTest {
     /** Packages and classes allowed to open a raw socket; see {@link #rawSocketsAreConfinedToThePrintingStack}. */
     private static final String PRINTING_PACKAGE = "services.printing..";
     private static final String PORT_PROBE_CLASS = "services.LocalSidecarDaemon";
+    private static final String BROWSER_PROXY_CLASS = "tools.BrowserScreenProxy";
 
     /** Matches {@code new java.net.Socket(...)}, {@code new java.net.ServerSocket(...)} and
      *  {@code URL.openConnection()} — constructors, methods and references to either, hence {@code JavaAccess}. */
@@ -197,16 +198,19 @@ class CapabilityRulesTest extends UnitTest {
      * socket protocols, not HTTP, and discovery probes reachability by connecting.
      * {@code LocalSidecarDaemon} binds a loopback {@code ServerSocket} to learn whether a
      * port is already held — a probe that sends nothing, not traffic.
+     * {@code BrowserScreenProxy} is SOCKS5, which is a socket protocol and not HTTP, and it
+     * exists to screen what Chromium dials rather than to fetch anything itself (JCLAW-1283).
      */
     @Test
     void rawSocketsAreConfinedToThePrintingStack() {
         ArchRule rule = noClasses()
                 .that().resideOutsideOfPackage(PRINTING_PACKAGE)
                 .and().doNotHaveFullyQualifiedName(PORT_PROBE_CLASS)
+                .and().doNotHaveFullyQualifiedName(BROWSER_PROXY_CLASS)
                 .should().accessTargetWhere(RAW_SOCKET_ACCESS)
                 .because("outbound network access goes through HttpFactories' OkHttp clients "
-                        + "(JCLAW-1151); services.printing speaks LPD/9100 and LocalSidecarDaemon "
-                        + "binds a loopback port probe");
+                        + "(JCLAW-1151); services.printing speaks LPD/9100, LocalSidecarDaemon "
+                        + "binds a loopback port probe, and BrowserScreenProxy speaks SOCKS5");
         rule.check(APP_CLASSES);
 
         assertTrue(APP_CLASSES.stream()
@@ -215,7 +219,36 @@ class CapabilityRulesTest extends UnitTest {
                         .anyMatch(RAW_SOCKET_ACCESS),
                 "no socket call found inside " + PRINTING_PACKAGE + " — the exclusion is carrying "
                         + "nothing, so the predicate has stopped matching and the rule passes vacuously");
+        assertTrue(APP_CLASSES.get(BROWSER_PROXY_CLASS).getAccessesFromSelf().stream()
+                        .anyMatch(RAW_SOCKET_ACCESS),
+                BROWSER_PROXY_CLASS + " matches no socket call, so its exemption guards nothing — if it "
+                        + "moved to SocketChannel the rule would keep passing while the exemption stood");
     }
+
+    /**
+     * {@code permittedOrigin()} is the read side of a test-only {@code ScopedValue}: production never
+     * binds one, so it is always empty there — but {@code BrowserScreenProxy.destinationsFor} skips
+     * the guard entirely on a match, so a second reader would be a second place that can be talked
+     * past. The seam itself is banned from {@code app/} by
+     * {@link #noAppClassCallsATestOnlySeam}; this bounds who may ask what it bound.
+     */
+    @Test
+    void onlyTheBrowserProxyReadsThePermittedOrigin() {
+        var readers = new TreeSet<String>();
+        for (JavaClass javaClass : APP_CLASSES) {
+            if (javaClass.getAccessesFromSelf().stream().anyMatch(PERMITTED_ORIGIN_READ)) {
+                readers.add(javaClass.getName());
+            }
+        }
+        assertEquals(Set.of(BROWSER_PROXY_CLASS), readers,
+                "the permitted origin is read to allow a destination without screening it, so exactly "
+                        + "one caller may read it — and a rename that matches nothing fails here too");
+    }
+
+    private static final DescribedPredicate<JavaAccess<?>> PERMITTED_ORIGIN_READ = DescribedPredicate.describe(
+            "a call or method reference to SsrfGuard.permittedOrigin()",
+            access -> "utils.SsrfGuard".equals(access.getTargetOwner().getName())
+                    && "permittedOrigin".equals(access.getTarget().getName()));
 
     /**
      * Outbound HTTP in app/ is OkHttp-only; the JDK {@code java.net.http.HttpClient}

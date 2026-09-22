@@ -34,7 +34,7 @@ Method <services.LocalSidecarDaemon.spawn(java.lang.String, java.lang.String)> c
 Method <services.LocalSidecarDaemon.spawn(java.lang.String, java.lang.String)> calls method <java.lang.System.currentTimeMillis()> in (LocalSidecarDaemon.java:252)
 Method <tools.PlaywrightBrowserTool.cleanupIdleSessions()> calls method <java.lang.System.currentTimeMillis()> in (PlaywrightBrowserTool.java:514)
 Method <tools.PlaywrightBrowserTool.cleanupIdleSessions()> calls method <java.lang.System.currentTimeMillis()> in (PlaywrightBrowserTool.java:524)
-Method <tools.PlaywrightBrowserTool.ensureSession(tools.PlaywrightBrowserTool$SessionHolder, java.lang.String, java.util.Optional)> calls method <java.lang.System.currentTimeMillis()> in (PlaywrightBrowserTool.java:358)
+Method <tools.PlaywrightBrowserTool.ensureSession(tools.PlaywrightBrowserTool$SessionHolder, java.lang.String)> calls method <java.lang.System.currentTimeMillis()> in (PlaywrightBrowserTool.java:358)
 Method <tools.ShellExecTool.buildTerminalImageEarlyReturn(java.lang.String, models.Agent, int, long, boolean)> calls method <java.lang.System.currentTimeMillis()> in (ShellExecTool.java:692)
 Method <tools.ShellExecTool.execute(java.lang.String, models.Agent)> calls method <java.lang.System.currentTimeMillis()> in (ShellExecTool.java:257)
 Method <tools.ShellExecTool.executeCommand(java.lang.String, java.nio.file.Path, java.nio.file.Path, int, int, java.util.Map, long, models.Agent)> calls method <java.lang.System.currentTimeMillis()> in (ShellExecTool.java:519)

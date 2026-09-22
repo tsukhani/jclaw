@@ -116,6 +116,16 @@ public final class SsrfGuard {
         return ScopedValue.where(PERMITTED_ORIGIN, exact).call(body::get);
     }
 
+    /**
+     * The origin permitted on this thread as {@code scheme://host:port}, lower-cased with the port
+     * explicit — empty in production, where nothing ever binds one. A caller that screens on another
+     * thread, such as the browser's SOCKS5 proxy, captures it here first: a {@code ScopedValue}
+     * binding reaches no thread it did not create.
+     */
+    public static Optional<String> permittedOrigin() {
+        return PERMITTED_ORIGIN.isBound() ? Optional.of(PERMITTED_ORIGIN.get()) : Optional.empty();
+    }
+
     /** {@code scheme://host:port}, lower-cased with the default port made explicit, or null without a scheme or host. */
     private static @Nullable String originOf(URI uri) {
         var scheme = uri.getScheme();
@@ -335,18 +345,23 @@ public final class SsrfGuard {
 
     /**
      * Validate {@code url} and return it with the host swapped for the single
-     * literal IP the guard resolved and approved — the "pinned" form the browser
-     * path (Chromium/Playwright) should connect to.
+     * literal IP the guard resolved and approved, for a caller that can only hand
+     * a URL to something which would otherwise re-parse and re-resolve it.
      *
      * <p>Why (JCLAW-731): {@link #assertUrlSafe} validates the host that
-     * <em>Java's</em> {@link URI} parser and resolver see, but Chromium re-parses
+     * <em>Java's</em> {@link URI} parser and resolver see, but a browser re-parses
      * and re-resolves the same URL on its own. A residual parser divergence, or a
-     * DNS-rebinding flip between the two resolutions, could make the browser
+     * DNS-rebinding flip between the two resolutions, could make it
      * connect to an address the guard never validated. Pinning to the literal IP
      * removes both gaps at once: there is no hostname left to re-parse or
-     * re-resolve, so the validated string is exactly what is fetched. Wire this
-     * into the route interceptor's {@code route.resume(...setUrl(pinnedUrl(...)))}
-     * so every request Chromium issues targets only the approved IP.
+     * re-resolve, so the validated string is exactly what is fetched.
+     *
+     * <p><strong>Not the browser tool's path, and reintroducing it there would be a step back.</strong>
+     * Since JCLAW-1283 that Chromium connects through {@code tools.BrowserScreenProxy}, which screens
+     * every connection below the page and dials the address it checked — a URL rewrite reaches only
+     * the requests {@code context.route} can see, which is neither a WebSocket nor a worker's. Kept
+     * with no {@code app/} caller, and covered by {@code SsrfGuardTest}, as the pin form for a future
+     * caller with no connection of its own to place.
      *
      * <p>Literal-IP URLs are returned unchanged — {@link #assertUrlSafe} already
      * validated the IP and there is nothing left to resolve.
@@ -379,13 +394,17 @@ public final class SsrfGuard {
     }
 
     /**
-     * Browser-path DNS pin (JCLAW-731). Returns a Chromium
-     * {@code --host-resolver-rules} clause — {@code "MAP <host> <ip>"} — that
-     * forces the browser to connect only to the address this guard validated,
-     * closing the DNS-rebinding TOCTOU between our check and Chromium's own
-     * connect-time resolution. Unlike {@link #pinnedUrl}, the hostname stays in
-     * the URL, so the {@code Host} header and TLS SNI are preserved and
+     * A Chromium {@code --host-resolver-rules} clause (JCLAW-731) —
+     * {@code "MAP <host> <ip>"} — forcing the browser to connect only to the
+     * address this guard validated. Unlike {@link #pinnedUrl}, the hostname stays
+     * in the URL, so the {@code Host} header and TLS SNI are preserved and
      * name-based virtual hosts keep working.
+     *
+     * <p>For a browser JClaw does not launch itself: the scrape fetchers pass this to the stealth
+     * sidecar, which owns the launch and so owns the flag. The browser tool does not — since
+     * JCLAW-1283 its Chromium connects through {@code tools.BrowserScreenProxy}, which pins every
+     * host at connect rather than the ones a launch argument could name, and a relaunch per new
+     * host is what that removed.
      *
      * <p>Empty for a literal-IP URL (already pinned) or a URL with no host.
      * Throws every {@link SecurityException} {@link #assertUrlSafe} does.
@@ -401,30 +420,41 @@ public final class SsrfGuard {
     }
 
     /**
-     * Resolve {@code host} and return the first address, re-verified safe — the
-     * security-critical resolve-and-validate DNS pin shared by
-     * {@link #pinnedUrl(String)} and {@link #hostResolverRule(String)} (so a
-     * future hardening edit touches one place). {@link #assertUrlSafe} has
-     * already walked every resolved address and rejected the host if any was
-     * unsafe; this repins to the first and re-checks it as defense in depth so
-     * an unsafe pin can never be emitted.
+     * Resolve {@code host} once and return every address it gave, each screened, in the order the
+     * resolver returned them — what a caller that opens the connection itself dials, such as
+     * {@code tools.BrowserScreenProxy}. One lookup, so a host that rebinds has no second resolution
+     * to answer differently, and every address is checked, so the rest stay usable when the first
+     * has no route.
+     *
+     * @throws SecurityException if the host cannot resolve, or any address it gave is blocked
+     */
+    public static List<InetAddress> resolveSafeAddresses(@NonNull String host) {
+        InetAddress[] addresses;
+        try {
+            addresses = InetAddress.getAllByName(host);
+        } catch (UnknownHostException e) {
+            throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
+        }
+        for (var address : addresses) {
+            if (isUnsafe(address)) {
+                throw new BlockedAddressException(
+                        BLOCKED_ADDRESS_MSG.formatted(host, address.getHostAddress()));
+            }
+        }
+        return List.of(addresses);
+    }
+
+    /**
+     * The first address {@code host} resolves to, re-verified safe — the DNS pin shared by
+     * {@link #pinnedUrl(String)} and {@link #hostResolverRule(String)}, both of which can name only
+     * one. {@link #assertUrlSafe} has already walked every resolved address; this re-checks as
+     * defense in depth, so an unsafe pin can never be emitted.
      *
      * @throws SecurityException if the host cannot resolve, or the pinned
      *         address is in a blocked range.
      */
     private static InetAddress resolveSafePin(@NonNull String host) {
-        InetAddress pinned;
-        try {
-            pinned = InetAddress.getAllByName(host)[0];
-        } catch (UnknownHostException e) {
-            throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
-        }
-        if (isUnsafe(pinned)) { // defense in depth: never emit an unsafe pin
-            throw new BlockedAddressException(
-                    BLOCKED_ADDRESS_MSG
-                            .formatted(host, pinned.getHostAddress()));
-        }
-        return pinned;
+        return resolveSafeAddresses(host).getFirst();
     }
 
     /**
@@ -527,8 +557,11 @@ public final class SsrfGuard {
      * digits+dots (IPv4) or wrapped in brackets (IPv6 RFC 3986 form). False
      * positives still flow into {@link InetAddress#getByName} which handles
      * edge cases (octal, mixed notation) correctly.
+     *
+     * <p>Public because {@code tools.BrowserScreenProxy} asks it the same question: a permitted
+     * origin is honoured without a guard check, so it must be an address and never a name.
      */
-    private static boolean isLikelyIpLiteral(String host) {
+    public static boolean isLikelyIpLiteral(@NonNull String host) {
         if (host.startsWith("[") && host.endsWith("]")) return true; // [::1]
         for (int i = 0; i < host.length(); i++) {
             char c = host.charAt(i);

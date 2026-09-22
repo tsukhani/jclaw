@@ -545,7 +545,8 @@ method. Anything else fails the build.
 
 **What carries the annotation.** Every concrete `AutoCloseable` in `app/`: `McpClient`,
 `McpStdioTransport`, `McpStreamableHttpTransport`, `DirectLuceneMessageSearchRepository`'s
-`LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, `LatencyTrace.bind`, the three
+`LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, `BrowserScreenProxy`,
+`LatencyTrace.bind`, the three
 delegating telemetry leaves `DelegatingSampler`, `DelegatingSpanExporter` and
 `DelegatingMetricExporter` (OTel's `Sampler` and both exporter interfaces extend `Closeable`),
 and `GenAiSpans.Call.makeCurrent`, which hands out a `Scope`. The
@@ -575,9 +576,13 @@ acquire whose `release()` is not in an `@AfterEach`/`@AfterAll` hook or a `final
 release at the end of a test body never runs once an assertion above it fails. **Prefer the
 lease** for any new Lucene test whose window fits in one method.
 
-**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — ten
+**Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — eleven
 sites today. `McpConnectionManager.doConnect` and `McpServerService.testConnection` build a
-transport that a longer-lived owner closes; `VoiceController.initSession` hands its `VoiceVad`
+transport that a longer-lived owner closes, and
+`PlaywrightBrowserTool.launchSession` is the same shape with the owner written down: the
+`BrowserScreenProxy` it opens becomes a component of the `BrowserSession` record it returns, and
+`destroySession` closes it — with the method's own guarded teardown closing it on a launch that
+throws partway, since a throw leaves no reference for anything else to close; `VoiceController.initSession` hands its `VoiceVad`
 to a `VoiceSession` that outlives the method, with a local `handedOff` flag closing it on every
 path that never gets there and a repeated init closing the session it displaces. The five
 telemetry sites are the `McpConnectionManager` shape again: the three delegating leaves
@@ -625,7 +630,7 @@ test hooks in `app/`, so banning them needs a frozen store rather than this list
 | --- | --- |
 | Spawn an OS process | 17 files — the sidecar supervisors, media transcoders, harness runners and `tools.ShellExecTool`; enumerated in `archunit_store/shell-process-spawners` |
 | Resolve a model-controlled path | `tools.FsPaths` → `utils.WorkspacePathGuard`; the sites under `tools..` predating that seam are listed in `archunit_store/filesystem-tool-paths` |
-| Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..` and `services.LocalSidecarDaemon` |
+| Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..`, `services.LocalSidecarDaemon` and `tools.BrowserScreenProxy` |
 | Reach the database | Everything except the subsystems `jobs.ShutdownJob` stops — teardown that needs a connection has no useful recovery when it cannot get one (JCLAW-1143) |
 | Act as the agent principal | Every routed `/api` action declares `@AgentAccess`: `OPEN`, `OWN_ONLY` or `OPERATOR_ONLY`, with no annotation meaning `OPERATOR_ONLY` (JCLAW-1270) |
 

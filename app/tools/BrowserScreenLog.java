@@ -28,6 +28,7 @@ public final class BrowserScreenLog {
     private static final int PENDING_CAP = 1_000;
     private static final int REFUSAL_LINES = 20;
     private static final int TAB_LINES = 10;
+    private static final int SCREEN_LINES = 10;
     private static final String WARN = "WARN";
     private static final String INFO = "INFO";
     private static final String BLANK_TAB = "(blank tab)";
@@ -39,6 +40,8 @@ public final class BrowserScreenLog {
             "Browser: later refused requests in this session are not logged");
     private final LogBudget tabLines = new LogBudget(TAB_LINES, INFO,
             "Browser: later closed tabs in this session are not logged");
+    private final LogBudget screenLines = new LogBudget(SCREEN_LINES, WARN,
+            "Browser: later network-screen problems in this session are not logged");
     private final Pending refusedHosts = new Pending();
     private final Pending tabs = new Pending();
     private boolean blankTab;
@@ -64,6 +67,16 @@ public final class BrowserScreenLog {
         refusalLines.write(level + " " + host, level, blockedAddress
                 ? "Browser refused a request to blocked host " + host
                 : "Browser refused a request to host " + host);
+    }
+
+    /**
+     * The network screen could not do its job for {@code subject} — a destination it passed and then
+     * could not reach, or a connection it could not accept. The reason is for the operator alone:
+     * the caller gets one fixed answer, because telling refused from timed out is a port scan
+     * (JCLAW-1229). Never part of the model's note.
+     */
+    public synchronized void screenFailed(String subject, String reason) {
+        screenLines.write(subject, WARN, "Browser network screen: " + subject + ": " + reason);
     }
 
     /** The page is opening a tab, which Playwright reports only once the tab's first response arrives. */

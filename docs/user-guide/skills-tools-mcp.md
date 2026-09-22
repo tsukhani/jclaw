@@ -149,15 +149,15 @@ Jev never sees or fills password fields, so logins do not work in Jev mode: swit
 
 ### Browser network checks
 
-The `browser` tool's Chromium sends every HTTP(S) request through the SSRF guard, which refuses loopback, link-local (including the cloud metadata address) and private-network addresses. That covers the pages it loads, their resources and redirects, and pop-up windows or new tabs a page opens.
+The `browser` tool's Chromium runs behind a proxy inside JClaw, and every TCP connection it opens is put through the SSRF guard before it is made. The guard refuses loopback, link-local (including the cloud metadata address) and private-network addresses. Because the check sits below the page rather than in it, it covers the pages the browser loads, their resources and redirects, pop-up windows and new tabs, WebSockets, whatever a worker or a shared worker opens, and requests from cross-site frames — and nothing on the page can reach around a check that is not on the page. The exception is WebRTC, which uses UDP rather than TCP: the proxy does not carry it, so Chromium sends it directly and it is not screened.
 
 Pop-ups are closed as soon as they open, because the tool never reads them. A link that opens in a new tab is therefore not followed. The result of the action that opened the tab says so and gives the tab's address, which the agent can `navigate` to (or `run`, in Jev mode). A blank tab, a tab at an address that is not http(s) such as `blob:`, and a tab whose address the guard refused are reported without one. Results also name the hosts of any requests the page made that the guard refused since the previous result. An action that opens a tab can take up to 5 seconds longer while the tool waits for the tab to load, and a tab slower than that is reported on a later result instead.
 
 The browser's own event-log lines name hosts only, never a full address. A browser session logs at most 20 refusal lines and 10 closed-tab lines, then one line for each saying that later ones are not logged. For requests the page makes, a host is logged as a warning the first time a request to it is refused as a blocked address, and as info the first time one is refused for another reason, such as the host not resolving. A closed tab is logged once per host; all blank tabs share one of the 10 lines, and all refused tabs another. A URL passed to `navigate` or `run` that the guard refuses is reported only in the result.
 
-Service workers are kept from running, since a worker's own requests would bypass the check. WebSocket connections are not screened, whether a page or a worker opens them, and neither is any request a shared worker makes.
+Service workers are kept from running, since a worker's own requests would bypass the page-level URL check the tool applies on top of the proxy.
 
-Only the host of the URL passed to `navigate` or `run` is pinned to the address that was checked, and the pin lasts for the browser session. Every other host is checked on each request, but Chromium resolves it again, so it is not pinned. That includes resources, redirect targets, clicked links, and everything a Jev run reaches.
+Every host is pinned to the address that was checked, not just the one in the URL passed to `navigate` or `run`. The guard looks the host up, checks what it got, and the connection is then made to that address, so a name that changes where it points between the check and the connection cannot move it. That covers resources, redirect targets, clicked links, and everything a Jev run reaches.
 
 ## MCP Servers
 

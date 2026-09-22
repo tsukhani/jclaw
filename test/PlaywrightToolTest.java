@@ -17,29 +17,39 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import tools.BrowserScreenLog;
+import tools.BrowserScreenProxy;
 import tools.PlaywrightBrowserTool;
 import tools.jev.JevPage;
 import tools.jev.JevSettings;
 import utils.HttpFactories;
 import utils.SsrfGuard;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 class PlaywrightToolTest extends UnitTest {
@@ -169,49 +179,6 @@ class PlaywrightToolTest extends UnitTest {
         assertTrue(result.startsWith("Error"));
     }
 
-    // ─── JCLAW-731 residual: per-host DNS pin accumulation ────────────────
-    //
-    // getOrCreateSession relaunches the browser with the UNION of prior pins
-    // when a navigation targets a host not already pinned. The relaunch
-    // decision is factored into pinsForNavigation so it's testable without a
-    // real Chromium: empty result = reuse the live session, present result =
-    // relaunch with these pins.
-
-    @Test
-    void pinsForNavigationReusesWhenRuleEmpty() {
-        // A literal-IP or hostless URL yields no MAP clause → nothing to pin,
-        // so the live session is reused (empty result).
-        var existing = java.util.Set.of("MAP a.com 1.2.3.4");
-        assertTrue(PlaywrightBrowserTool.pinsForNavigation(existing, java.util.Optional.empty())
-                .isEmpty(), "empty rule must reuse the session, not relaunch");
-    }
-
-    @Test
-    void pinsForNavigationReusesWhenHostAlreadyPinned() {
-        // Navigating back to a host the browser was already launched with
-        // needs no relaunch — the pin is in effect.
-        var existing = java.util.Set.of("MAP a.com 1.2.3.4");
-        assertTrue(PlaywrightBrowserTool.pinsForNavigation(existing,
-                        java.util.Optional.of("MAP a.com 1.2.3.4"))
-                .isEmpty(), "already-pinned host must reuse the session, not relaunch");
-    }
-
-    @Test
-    void pinsForNavigationUnionsNewHostAndKeepsExisting() {
-        // AC: navigating a session across hosts A then B pins BOTH — the
-        // relaunch for B must carry A's rule too. The union signals a relaunch
-        // (non-empty result) and contains every previously-visited host.
-        var existing = java.util.Set.of("MAP a.com 1.2.3.4");
-        var merged = PlaywrightBrowserTool.pinsForNavigation(existing,
-                java.util.Optional.of("MAP b.com 5.6.7.8"));
-        assertTrue(merged.isPresent(), "cross-host navigation must trigger a relaunch");
-        assertTrue(merged.get().contains("MAP a.com 1.2.3.4"),
-                "entry host A must stay pinned after the relaunch: " + merged.get());
-        assertTrue(merged.get().contains("MAP b.com 5.6.7.8"),
-                "new host B must be added to the pin set: " + merged.get());
-        assertEquals(2, merged.get().size(), "union must hold exactly both hosts: " + merged.get());
-    }
-
     @Test
     void idleSessionCleanupDoesNotThrow() {
         // Just verify the cleanup method runs without error even with no sessions
@@ -326,7 +293,9 @@ class PlaywrightToolTest extends UnitTest {
         try {
             var result = executeAt(tool, origin, navigateTo(origin + "/"));
             assertTrue(result.startsWith("Browser error"), "the browser, not the guard, reports it: " + result);
-            assertTrue(result.contains("ERR_CONNECTION_REFUSED"), result);
+            // Every upstream failure gets one SOCKS5 reply (JCLAW-1283), so the browser reports one error
+            // for all of them — refused against timed out is a port scan, and it is not told apart here.
+            assertTrue(result.contains("ERR_SOCKS_CONNECTION_FAILED"), result);
         } finally {
             PlaywrightBrowserTool.closeSession(agent.name);
         }
@@ -849,10 +818,12 @@ class PlaywrightToolTest extends UnitTest {
             var closed = liveSession(agent.name);
             var log = holderLog(sessionsMap().get(agent.name));
             ((Page) sessionPart(closed, "page")).close();
+            log.tabOpening();
 
             assertEquals("Page: second\n\nsecond", executeAt(tool, origin, navigateTo(origin + "/second")));
             assertNotSame(closed, liveSession(agent.name), "a closed page starts a fresh browser");
             assertSame(log, holderLog(sessionsMap().get(agent.name)), "the event-log caps span the relaunch");
+            assertFalse(log.tabsOpening(), "a tab the retired browser announced is not awaited");
         } finally {
             PlaywrightBrowserTool.closeSession(agent.name);
             server.stop(0);
@@ -1005,30 +976,6 @@ class PlaywrightToolTest extends UnitTest {
         assertTrue(log.tabsOpening(), "a tab that lands after the wait gave up does not cancel a newer one");
     }
 
-    @Test
-    void aPinRelaunchReplacesTheSessionAndKeepsTheScreenLog() throws Exception {
-        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
-        var key = "pin-relaunch-" + System.nanoTime();
-        var holder = newSessionHolder(System.currentTimeMillis());
-        sessionsMap().put(key, holder);
-        var ensure = PlaywrightBrowserTool.class.getDeclaredMethod("ensureSession", holder.getClass(), String.class,
-                Optional.class);
-        ensure.setAccessible(true);
-        var log = holderLog(holder);
-        try {
-            var first = ensure.invoke(null, holder, key, Optional.of("MAP a.test 127.0.0.1"));
-            log.tabOpening();
-            var second = ensure.invoke(null, holder, key, Optional.of("MAP b.test 127.0.0.1"));
-
-            assertNotSame(first, second, "a host not yet pinned relaunches the browser");
-            assertEquals(Set.of("MAP a.test 127.0.0.1", "MAP b.test 127.0.0.1"), sessionPart(second, "pinnedRules"));
-            assertSame(log, holderLog(holder), "the event-log caps span the relaunch");
-            assertFalse(log.tabsOpening(), "a tab the retired browser announced is not awaited");
-        } finally {
-            PlaywrightBrowserTool.closeSession(key);
-        }
-    }
-
     // ─── JCLAW-1285: a subresource whose query holds a raw | is judged on its host ─────
 
     /** A page whose title becomes "answered <status>" when a server replies to {@code url}, or "failed". */
@@ -1057,6 +1004,312 @@ class PlaywrightToolTest extends UnitTest {
         } finally {
             PlaywrightBrowserTool.closeSession(agent.name);
             server.stop(0);
+        }
+    }
+
+    // ─── JCLAW-1283: the screen sits below the page, in a SOCKS5 proxy ─────────────────
+
+    /** How many reads a connection the proxy refused is given to appear at the fixture anyway. */
+    private static final int SETTLE_READS = 30;
+    private static final int FRAME_INTERVAL_MS = 150;
+
+    /**
+     * A loopback site reachable over plain HTTP and WebSocket, counting every TCP connection it
+     * accepts. Raw rather than a {@code HttpServer}, because that cannot upgrade and a WebSocket the
+     * session is allowed to open has to sit on the one origin the session permitted. Every response
+     * closes its connection, so a later request opens a fresh one through the proxy.
+     */
+    private static final class WsSite implements AutoCloseable {
+
+        private final ServerSocket listener;
+        private final Map<String, String> pages;
+        private final AtomicInteger connections = new AtomicInteger();
+
+        WsSite(Map<String, String> pages) throws IOException {
+            this.pages = pages;
+            this.listener = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+            Thread.ofPlatform().daemon().start(this::accept);
+        }
+
+        int port() {
+            return listener.getLocalPort();
+        }
+
+        String origin() {
+            return "http://127.0.0.1:" + port();
+        }
+
+        int connections() {
+            return connections.get();
+        }
+
+        @Override
+        public void close() {
+            try {
+                listener.close();
+            } catch (IOException _) { /* best-effort */ }
+        }
+
+        private void accept() {
+            while (!listener.isClosed()) {
+                Socket socket;
+                try {
+                    socket = listener.accept();
+                } catch (IOException _) {
+                    return;
+                }
+                connections.incrementAndGet();
+                Thread.ofPlatform().daemon().start(() -> serve(socket));
+            }
+        }
+
+        private void serve(Socket socket) {
+            try (socket) {
+                var in = new BufferedReader(
+                        new InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1));
+                var request = in.readLine();
+                if (request == null) return;
+                String key = null;
+                for (var line = in.readLine(); line != null && !line.isEmpty(); line = in.readLine()) {
+                    if (line.toLowerCase(Locale.ROOT).startsWith("sec-websocket-key:")) {
+                        key = line.substring("sec-websocket-key:".length()).trim();
+                    }
+                }
+                var out = socket.getOutputStream();
+                if (key != null) {
+                    var accept = Base64.getEncoder().encodeToString(
+                            MessageDigest.getInstance("SHA-1").digest(
+                                    (key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").getBytes(StandardCharsets.ISO_8859_1)));
+                    out.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                            + "Sec-WebSocket-Accept: " + accept + "\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                    out.flush();
+                    while (!socket.isClosed()) {
+                        out.write(new byte[] {(byte) 0x81, 1, 'x'}); // one unmasked text frame carrying "x"
+                        out.flush();
+                        Thread.sleep(FRAME_INTERVAL_MS);
+                    }
+                    return;
+                }
+                var path = request.split(" ")[1];
+                var body = pages.getOrDefault(path, "").getBytes(StandardCharsets.UTF_8);
+                out.write(("HTTP/1.1 200 OK\r\nContent-Type: "
+                        + (path.endsWith(".js") ? "text/javascript" : "text/html")
+                        + "\r\nContent-Length: " + body.length + "\r\nConnection: close\r\n\r\n")
+                        .getBytes(StandardCharsets.ISO_8859_1));
+                out.write(body);
+                out.flush();
+            } catch (Exception _) { /* the browser went away, or the suite is tearing down */ }
+        }
+    }
+
+    private static final String PLAIN = "<!doctype html><title>plain</title><h1>plain</h1>";
+
+    /** An expression the {@code evaluate} action can return: it starts something and answers at once. */
+    private static String starts(String body) {
+        return "(() => { " + body + "; return 'started'; })()";
+    }
+
+    private static String evaluate(String expression) {
+        return "{\"action\":\"evaluate\",\"expression\":\"" + expression + "\"}";
+    }
+
+    private static boolean waitFor(BooleanSupplier until) throws InterruptedException {
+        for (int i = 0; i < 100 && !until.getAsBoolean(); i++) Thread.sleep(50);
+        return until.getAsBoolean();
+    }
+
+    /**
+     * The shapes that reach the network around {@code context.route} — a page's WebSocket, a worker's,
+     * a shared worker's request, and a frame's cross-site request. Each runs twice: once in an unscreened
+     * browser, which proves the case does reach the fixture, and once through the tool's own session,
+     * where nothing arrives and the next result names the refusal.
+     *
+     * <p>The {@code __pwWebSocketDispatch} case is the shape that defeats {@code routeWebSocket},
+     * which is why that page-world mock was never shipped: the screen it would bypass is below the
+     * page here, so the call changes nothing.
+     */
+    @Test
+    void everyConnectionShapeThatReachesAroundTheRouteIsRefusedByTheProxy() throws Exception {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        try (var blocked = new WsSite(Map.of())) {
+            var pages = new ConcurrentHashMap<String, String>();
+            try (var site = new WsSite(pages)) {
+                var origin = site.origin();
+                var blockedWs = "ws://127.0.0.1:" + blocked.port() + "/ws";
+                var blockedFetch = blocked.origin() + "/fetch";
+                pages.put("/plain", PLAIN);
+                pages.put("/worker.js", "new WebSocket('" + blockedWs + "');");
+                pages.put("/shared.js", "onconnect = () => {}; fetch('" + blockedFetch + "');");
+                pages.put("/frame", "<script>fetch('" + blockedFetch + "')</script>");
+
+                var cases = new LinkedHashMap<String, String>();
+                cases.put("a page's WebSocket", starts("new WebSocket('" + blockedWs + "')"));
+                cases.put("a worker's WebSocket", starts("new Worker('/worker.js')"));
+                cases.put("a shared worker's request", starts("new SharedWorker('/shared.js')"));
+                cases.put("a routeWebSocket passthrough", starts("const s = new WebSocket('" + blockedWs + "');"
+                        + " try { if (typeof __pwWebSocketDispatch === 'function')"
+                        + " __pwWebSocketDispatch({id: s._id, type: 'passthrough'}); } catch (e) {}"));
+                // The frame loads from the permitted origin so that it runs; the request under test is
+                // the one it then makes to another origin. A frame served from elsewhere would have its
+                // own navigation refused, and the request inside it would never happen.
+                cases.put("a frame's cross-site request", starts("const f = document.createElement('iframe');"
+                        + " f.src = '" + origin + "/frame'; document.body.appendChild(f)"));
+
+                try (var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
+                    var browser = JevRunTest.launchOrSkip(playwright);
+                    for (var scenario : cases.entrySet()) {
+                        int before = blocked.connections();
+                        var context = browser.newContext();
+                        var page = context.newPage();
+                        page.navigate(origin + "/plain");
+                        page.evaluate(scenario.getValue());
+                        assertTrue(waitFor(() -> blocked.connections() > before),
+                                "control: " + scenario.getKey() + " reaches the fixture unscreened");
+                        context.close();
+                    }
+                }
+
+                var tool = new PlaywrightBrowserTool();
+                try {
+                    for (var scenario : cases.entrySet()) {
+                        assertTrue(executeAt(tool, origin, navigateTo(origin + "/plain")).startsWith("Page: plain"),
+                                scenario.getKey() + ": the permitted origin still loads");
+                        int before = blocked.connections();
+                        // Playwright Java dispatches a route callback on the thread inside a Playwright
+                        // call, so a worker's script request only moves while a tool call is running —
+                        // hence the polling read rather than a sleep. Each result may carry the refusal.
+                        var heard = new StringBuilder(executeAt(tool, origin, evaluate(scenario.getValue())));
+                        assertTrue(heard.toString().startsWith("started"), scenario.getKey() + " started");
+                        for (int i = 0; i < SETTLE_READS && !heard.toString().contains("refused requests to"); i++) {
+                            Thread.sleep(100);
+                            heard.append(executeAt(tool, origin, getText("h1")));
+                        }
+                        assertTrue(heard.toString().contains("refused requests to"),
+                                scenario.getKey() + ": the model is told of the refusal, got " + heard);
+                        assertEquals(before, blocked.connections(), scenario.getKey() + " reached the fixture");
+                    }
+                } finally {
+                    PlaywrightBrowserTool.closeSession(agent.name);
+                }
+            }
+        }
+    }
+
+    /**
+     * The cloud-metadata address, opened as a WebSocket from inside a dedicated worker — a shape
+     * {@code context.route} never sees, so only the proxy can refuse it. That makes this the one
+     * test that catches link-local slipping back into Chromium's implicit proxy bypass: measured
+     * 2026-09-23, dropping {@code --proxy-bypass-list=<-loopback>} sends it direct and this reds,
+     * while the same address behind a worker's plain {@code fetch} keeps passing because the route
+     * does see that one. There is no control half — a control would be an unscreened browser
+     * dialling 169.254.169.254 for real.
+     */
+    @Test
+    void aWorkersSocketToTheCloudMetadataAddressIsRefusedBelowTheRoute() throws Exception {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        var pages = new ConcurrentHashMap<String, String>();
+        pages.put("/plain", PLAIN);
+        pages.put("/metadata.js", "new WebSocket('ws://169.254.169.254/latest/meta-data/');");
+        try (var site = new WsSite(pages)) {
+            var origin = site.origin();
+            var tool = new PlaywrightBrowserTool();
+            try {
+                assertTrue(executeAt(tool, origin, navigateTo(origin + "/plain")).startsWith("Page: plain"));
+                var heard = new StringBuilder(executeAt(tool, origin, evaluate(starts("new Worker('/metadata.js')"))));
+                for (int i = 0; i < SETTLE_READS && !heard.toString().contains("169.254.169.254"); i++) {
+                    Thread.sleep(100);
+                    heard.append(executeAt(tool, origin, getText("h1")));
+                }
+                assertTrue(heard.toString().contains("refused requests to: 169.254.169.254"),
+                        "the worker's socket reached the proxy and was refused there: " + heard);
+            } finally {
+                PlaywrightBrowserTool.closeSession(agent.name);
+            }
+        }
+    }
+
+    /**
+     * Tearing a session down takes its proxy with it. Without this, a retired session leaves a
+     * listener bound on loopback that any local process can still dial, and the suite stays green.
+     */
+    @Test
+    void closingTheSessionClosesItsProxy() throws Exception {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        try (var site = new WsSite(Map.of("/plain", PLAIN))) {
+            var origin = site.origin();
+            var tool = new PlaywrightBrowserTool();
+            try {
+                assertTrue(executeAt(tool, origin, navigateTo(origin + "/plain")).startsWith("Page: plain"));
+                int port = ((BrowserScreenProxy) sessionPart(liveSession(agent.name), "proxy")).port();
+                try (var dialable = new Socket(InetAddress.getLoopbackAddress(), port)) {
+                    assertTrue(dialable.isConnected(), "precondition: a live session's proxy takes connections");
+                }
+
+                PlaywrightBrowserTool.closeSession(agent.name);
+                assertThrows(IOException.class,
+                        () -> new Socket(InetAddress.getLoopbackAddress(), port).close(),
+                        "the retired session's proxy is no longer listening");
+            } finally {
+                PlaywrightBrowserTool.closeSession(agent.name);
+            }
+        }
+    }
+
+    /**
+     * AC: a page holding an allowed WebSocket keeps receiving frames between two tool calls — the
+     * stall {@code routeWebSocket} caused, by holding an allowed socket until the next call, does not
+     * come back. Doubles as the permitted-origin case: the session's own fixture is reachable.
+     */
+    @Test
+    void anAllowedWebSocketKeepsDeliveringFramesBetweenToolCalls() throws Exception {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        try (var site = new WsSite(Map.of("/plain", PLAIN))) {
+            var origin = site.origin();
+            var tool = new PlaywrightBrowserTool();
+            try {
+                assertTrue(executeAt(tool, origin, navigateTo(origin + "/plain")).startsWith("Page: plain"));
+                assertTrue(executeAt(tool, origin, evaluate(starts("window.__frames = 0;"
+                        + " const s = new WebSocket('ws://' + location.host + '/ws');"
+                        + " s.onmessage = () => window.__frames++"))).startsWith("started"));
+
+                var first = frames(tool, origin);
+                Thread.sleep(1_000);
+                var second = frames(tool, origin);
+                assertTrue(second > first && second >= 3,
+                        "frames kept arriving between two tool calls: " + first + " -> " + second);
+            } finally {
+                PlaywrightBrowserTool.closeSession(agent.name);
+            }
+        }
+    }
+
+    /** The frame count alone: a note riding on the result would otherwise read as a parse error. */
+    private int frames(PlaywrightBrowserTool tool, String origin) {
+        return Integer.parseInt(executeAt(tool, origin, evaluate("window.__frames")).split("\n", 2)[0]);
+    }
+
+    /**
+     * Fail closed: with the session's proxy gone, Chromium reports a failure rather than dialling the
+     * destination itself. Every response from this fixture closes its connection, so the navigation
+     * needs a fresh one through the proxy rather than reusing a pooled tunnel.
+     */
+    @Test
+    void aClosedProxyStopsTheBrowserRatherThanLettingItConnectDirectly() throws Exception {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        try (var site = new WsSite(Map.of("/plain", PLAIN))) {
+            var origin = site.origin();
+            var tool = new PlaywrightBrowserTool();
+            try {
+                assertTrue(executeAt(tool, origin, navigateTo(origin + "/plain")).startsWith("Page: plain"));
+                ((BrowserScreenProxy) sessionPart(liveSession(agent.name), "proxy")).close();
+                int before = site.connections();
+
+                var result = executeAt(tool, origin, navigateTo(origin + "/plain"));
+                assertTrue(result.startsWith("Browser error"), "the browser reports it: " + result);
+                assertEquals(before, site.connections(), "nothing reached the fixture without the proxy");
+            } finally {
+                PlaywrightBrowserTool.closeSession(agent.name);
+            }
         }
     }
 
