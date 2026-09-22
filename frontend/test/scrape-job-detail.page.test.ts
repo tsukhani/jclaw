@@ -106,7 +106,7 @@ describe('Scrape job detail', () => {
     await view.find('[data-testid="scrape-page-1"]').trigger('click')
     await settle()
 
-    expect(view.find('[data-testid="scrape-page-markdown"]').html()).toContain('<h1>Install</h1>')
+    expect(view.find('[data-testid="scrape-page-markdown"]').html()).toContain('<h3>Install</h3>')
     expect(view.find('a[download]').exists()).toBe(false)
     expect(view.find('[data-testid="scrape-page-1"]').attributes('aria-pressed')).toBe('true')
     view.unmount()

@@ -29,28 +29,59 @@ function mediaLink(href: string, label: string): string {
   return `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`
 }
 
+function imageLabel(text: string): string {
+  return `${text || 'Image'} (image)`
+}
+
 const renderer = new Renderer()
-renderer.image = ({ href, text }: Tokens.Image) => mediaLink(href, `${text || 'Image'} (image)`)
+renderer.image = ({ href, text }: Tokens.Image) => mediaLink(href, imageLabel(text))
+// A linked image cannot be a link of its own: the parser splits nested anchors and leaves the outer one nameless.
+renderer.link = function (this: Renderer, { href, title, tokens }: Tokens.Link) {
+  const inner = tokens.map(token => token.type === 'image'
+    ? escapeHtml(imageLabel((token as Tokens.Image).text))
+    : this.parser.parseInline([token])).join('')
+  return `<a href="${escapeHtml(href)}"${title ? ` title="${escapeHtml(title)}"` : ''}>${inner}</a>`
+}
 
 const markdown = new Marked({ gfm: true, breaks: false, renderer })
 
 /**
- * Swap each embed in {@code html} for a link to its source. Parsed into a {@code <template>}, whose
- * content is inert, so nothing loads while the swap happens.
+ * Swap each embed in {@code html} for a link to its source, and re-level the page's headings so they
+ * start beneath the viewer's own h2. Parsed into a {@code <template>}, whose content is inert, so
+ * nothing loads while this happens.
  */
-function linkEmbeds(html: string): string {
+function tame(html: string): string {
   const template = document.createElement('template')
   template.innerHTML = html
   for (const element of Array.from(template.content.querySelectorAll(EMBEDS.join(',')))) {
+    const tag = element.tagName.toLowerCase()
+    const kind = tag === 'img' ? 'image' : tag
+    const label = `${element.getAttribute('alt') || element.getAttribute('title') || kind} (${kind})`
     const source = element.getAttribute('src') ?? element.getAttribute('data') ?? element.getAttribute('srcset')?.split(/\s/)[0]
+    if (element.closest('a')) {
+      // Inside a link already: its own link would nest, and leave the outer one without a name.
+      element.replaceWith(document.createTextNode(label))
+      continue
+    }
     if (!source) {
       element.remove()
       continue
     }
     const link = document.createElement('a')
     link.setAttribute('href', source)
-    link.textContent = `${element.getAttribute('alt') || element.getAttribute('title') || element.tagName.toLowerCase()} (${element.tagName.toLowerCase()})`
+    link.textContent = label
     element.replaceWith(link)
+  }
+  // Re-levelled as an outline, so a site that jumps from h1 to h3 does not carry the skip across.
+  const outline: Array<{ from: number, to: number }> = []
+  for (const heading of Array.from(template.content.querySelectorAll('h1, h2, h3, h4, h5, h6'))) {
+    const from = Number(heading.tagName[1])
+    while (outline.length && outline.at(-1)!.from >= from) outline.pop()
+    const to = Math.min(6, (outline.at(-1)?.to ?? 2) + 1)
+    outline.push({ from, to })
+    const relevelled = document.createElement(`h${to}`)
+    relevelled.append(...heading.childNodes)
+    heading.replaceWith(relevelled)
   }
   return template.innerHTML
 }
@@ -58,7 +89,7 @@ function linkEmbeds(html: string): string {
 export function renderScrapedMarkdown(text: string): string {
   if (!text) return ''
   const html = markdown.parse(text) as string
-  return purifier.sanitize(linkEmbeds(html), {
+  return purifier.sanitize(tame(html), {
     USE_PROFILES: { html: true },
     FORBID_TAGS: [...EMBEDS, 'link', 'style', 'meta', 'base', 'form', 'input', 'button', 'textarea', 'select'],
     FORBID_ATTR: ['style', 'src', 'srcset', 'poster', 'background', 'ping', 'action', 'formaction'],

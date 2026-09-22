@@ -7,7 +7,7 @@ defineProps<{ state: ScrapeJobState }>()
 
 <template>
   <span
-    class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-medium border whitespace-nowrap"
+    class="inline-flex items-center px-1.5 py-0.5 text-xs font-medium border whitespace-nowrap"
     :class="SCRAPE_STATE_BADGE[state]"
     :data-state="state"
   >{{ SCRAPE_STATE_LABEL[state] }}</span>

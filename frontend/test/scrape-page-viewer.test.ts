@@ -40,6 +40,31 @@ describe('scraped page viewer', () => {
     expect(html).toContain('href="https://tracker.example.test/clip.mp4"')
   })
 
+  it('keeps a linked image one named link rather than a link inside a link', () => {
+    const fromMarkdown = renderScrapedMarkdown('[![Tipping the Velvet](https://x.test/cover.jpg)](https://x.test/book/1)')
+    const fromHtml = renderScrapedMarkdown('<a href="https://x.test/book/2"><img src="https://x.test/c2.jpg" alt="Soumission"></a>')
+
+    const holder = document.createElement('div')
+    for (const html of [fromMarkdown, fromHtml]) {
+      holder.innerHTML = html
+      const links = [...holder.querySelectorAll('a')]
+      expect(links, html).toHaveLength(1)
+      expect(links[0]!.textContent?.trim()).toMatch(/\(image\)$/)
+    }
+    expect(fromMarkdown).toContain('href="https://x.test/book/1"')
+    expect(fromMarkdown).toContain('Tipping the Velvet (image)')
+    expect(fromHtml).toContain('Soumission (image)')
+  })
+
+  it('moves the page\'s headings beneath the viewer\'s own, one level at a time', () => {
+    const html = renderScrapedMarkdown('# Title\n\n### Skipped a level\n\n### Sibling\n\n## Back up\n\n<h5>Raw</h5>')
+
+    const levels = [...html.matchAll(/<h(\d)>/g)].map(m => Number(m[1]))
+    expect(levels).toEqual([3, 4, 4, 4, 5])
+    expect(html).toContain('<h3>Title</h3>')
+    expect(html).toContain('<h5>Raw</h5>')
+  })
+
   it('opens links in a new tab without handing the site a referrer or the opener', () => {
     const html = renderScrapedMarkdown('[Docs](https://docs.example.test/)')
 
