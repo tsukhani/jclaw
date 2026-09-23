@@ -314,8 +314,7 @@ if (deepLinkConvoId) {
     if (!convos || !agents.value?.length) return
 
     // Check if the target conversation is in the current agent's list
-    const found = convos.find(c => c.id === deepLinkConvoId)
-    if (found) {
+    if (convos.some(c => c.id === deepLinkConvoId)) {
       // It's in the current list — route through loadConversation so the
       // JCLAW-170 tool-calls hydration runs; skipping it here was the cause
       // of the "N × 1 tool call" split render on first page load.

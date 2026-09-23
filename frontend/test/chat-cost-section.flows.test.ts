@@ -313,7 +313,7 @@ describe('ChatCostSection — per-token chip auto-clear', () => {
     expect(wrapper.text()).toContain('gpt-4.1')
     expect(wrapper.text()).not.toContain('OpenRouter')
     const pressed = wrapper.findAll('button[aria-pressed="true"]')
-    expect(pressed.length).toBe(0)
+    expect(pressed).toHaveLength(0)
   })
 })
 

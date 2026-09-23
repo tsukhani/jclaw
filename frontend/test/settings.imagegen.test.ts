@@ -207,7 +207,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     await btn!.trigger('click')
     await flushPromises()
 
-    expect(pulls.length).toBe(1)
+    expect(pulls).toHaveLength(1)
     c.unmount() // clears the poll interval started by downloadFluxModel()
   })
 

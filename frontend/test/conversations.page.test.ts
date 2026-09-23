@@ -218,7 +218,7 @@ describe('Conversations page — list/pagination/filter init', () => {
     await flushPromises()
     // Both rows render even when header total exceeds row count.
     const rows = component.findAll('tbody tr')
-    expect(rows.length).toBe(2)
+    expect(rows).toHaveLength(2)
   })
 
   it('mounts with a heterogeneous mix of channels and renders all', async () => {
@@ -245,7 +245,7 @@ describe('Conversations page — list/pagination/filter init', () => {
     const component = await mountSuspended(Conversations)
     await flushPromises()
     const rows = component.findAll('tbody tr')
-    expect(rows.length).toBe(3)
+    expect(rows).toHaveLength(3)
   })
 
   it('serializes preview text into the row markup', async () => {
@@ -290,7 +290,7 @@ describe('Conversations page — star, pin and rename', () => {
     expect(html).toContain('Pinned')
     expect(html).toContain('1 of 10')
     // Two tables, one row each — a pinned row must never also appear below.
-    expect(component.findAll('tbody tr').length).toBe(2)
+    expect(component.findAll('tbody tr')).toHaveLength(2)
     expect(html.match(/pinned-row/g)?.length).toBe(2) // cell text + its title attribute
   })
 
@@ -321,7 +321,7 @@ describe('Conversations page — star, pin and rename', () => {
     await flushPromises()
 
     const stars = component.findAll('[data-testid="star-toggle"]')
-    expect(stars.length).toBe(2)
+    expect(stars).toHaveLength(2)
     // aria-pressed carries the current state, so a screen reader announces the
     // toggle rather than an unlabelled button.
     expect(stars[0]!.attributes('aria-pressed')).toBe('false')

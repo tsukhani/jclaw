@@ -139,12 +139,12 @@ describe('FilterBar', () => {
     await input.trigger('keydown', { key: 'Enter' })
     // Find and click the first × button
     const removeButtons = component.findAll('[aria-label^="Remove filter"]')
-    expect(removeButtons.length).toBe(2)
+    expect(removeButtons).toHaveLength(2)
     await removeButtons[0]!.trigger('click')
     // Should have emitted with only one filter remaining
     const emitted = component.emitted('update:filters')
     const lastEmit = emitted![emitted!.length - 1]![0] as Array<{ key: string, value: string }>
-    expect(lastEmit.length).toBe(1)
+    expect(lastEmit).toHaveLength(1)
     expect(lastEmit[0]!.key).toBe('channel')
   })
 

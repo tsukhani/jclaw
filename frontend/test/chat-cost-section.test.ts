@@ -48,6 +48,14 @@ function makeUsage(partial: UsagePartial = {}): string {
 }
 
 describe('ChatCostSection (JCLAW-28)', () => {
+  // clearNuxtData() between tests so useFetch's per-URL cache doesn't
+  // leak a prior test's /api/providers or /api/metrics/cost payload
+  // into the next mount. Same gotcha as the OCR section in
+  // settings.page.test.ts.
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
   it('renders empty state when no rows are returned', async () => {
     registerEndpoint('/api/metrics/cost', () => ({
       since: '2026-04-10T00:00:00Z',
@@ -409,14 +417,6 @@ describe('ChatCostSection (JCLAW-28)', () => {
   // in the section subtitle, and any subscription with zero usage this
   // window shows up as an "unallocated" footnote.
 
-  // clearNuxtData() between tests so useFetch's per-URL cache doesn't
-  // leak a prior test's /api/providers or /api/metrics/cost payload
-  // into the next mount. Same gotcha as the OCR section in
-  // settings.page.test.ts.
-  beforeEach(() => {
-    clearNuxtData()
-  })
-
   /** Fixture: makes both /api/metrics/cost and /api/providers stubs at
    *  once so each test reads as "given this providers config and these
    *  rows, expect this rendered output". */
@@ -513,7 +513,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(text).toContain('OpenAI')
     expect(text).toContain('$20')
     // Per-model table is gone — no <thead> anywhere in the section.
-    expect(wrapper.findAll('thead').length).toBe(0)
+    expect(wrapper.findAll('thead')).toHaveLength(0)
     // Combined-total footer is gone — no "Combined total" row label.
     expect(text).not.toContain('Combined total')
     // No isolated $0 anywhere; the chips' $20 / $100 are non-zero so
@@ -787,7 +787,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(text).toContain('gemini-3-flash')
     // No tfoot Total row should be present in chart view (which would
     // surface the "TOTAL" string from the table tbody/tfoot).
-    expect(wrapper.findAll('tfoot').length).toBe(0)
+    expect(wrapper.findAll('tfoot')).toHaveLength(0)
   })
 
   it('color-keys subscription chart bars by provider via a leading swatch', async () => {

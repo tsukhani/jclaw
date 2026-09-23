@@ -131,7 +131,7 @@ describe('voice playback worklet ring', () => {
     posted = []
     render(p, 160) // 10x the report interval
     const levels = posted.filter(m => m.type === 'level')
-    expect(levels.length).toBe(10)
+    expect(levels).toHaveLength(10)
     const frees = levels.map(l => l.free!)
     expect(frees).toEqual([...frees].sort((a, b) => a - b))
     expect(new Set(frees).size).toBe(frees.length)

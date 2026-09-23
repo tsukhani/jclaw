@@ -73,7 +73,7 @@ describe('AgentWorkspaceManager', () => {
     const component = await mountSuspended(AgentWorkspaceManager, { props: { agentId: 9 } })
     await flushPromises()
 
-    expect(component.findAll('textarea, iframe, img, pre').length).toBe(0)
+    expect(component.findAll('textarea, iframe, img, pre')).toHaveLength(0)
   })
 
   it('says so when the workspace is empty', async () => {

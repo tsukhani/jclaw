@@ -1370,9 +1370,11 @@ class PlaywrightToolTest extends UnitTest {
                 }
 
                 PlaywrightBrowserTool.closeSession(agent.name);
-                assertThrows(IOException.class,
-                        () -> new Socket(InetAddress.getLoopbackAddress(), port).close(),
-                        "the retired session's proxy is no longer listening");
+                try (var probe = new Socket()) {
+                    assertThrows(IOException.class,
+                            () -> probe.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port)),
+                            "the retired session's proxy is no longer listening");
+                }
             } finally {
                 PlaywrightBrowserTool.closeSession(agent.name);
             }

@@ -160,7 +160,7 @@ describe('SettingsCodingPanel — ACP harness detection', () => {
 
     const claude = c.findAll('button').find(b => b.text().includes('Claude Code'))!
     await claude.trigger('click')
-    await vi.waitFor(() => expect(configPosts.length).toBe(2))
+    await vi.waitFor(() => expect(configPosts).toHaveLength(2))
 
     expect(configPosts).toContainEqual({ key: 'subagent.acp.command', value: 'claude -p' })
     expect(configPosts).toContainEqual({ key: 'subagent.acp.harness', value: 'claude' })
@@ -221,7 +221,7 @@ describe('SettingsCodingPanel — acp harness model override', () => {
     expect(values).toEqual(['', 'ollama::qwen3.5:9b'])
 
     await select.setValue('ollama::qwen3.5:9b')
-    await vi.waitFor(() => expect(configPosts.length).toBe(2))
+    await vi.waitFor(() => expect(configPosts).toHaveLength(2))
     expect(configPosts).toContainEqual({ key: 'subagent.acp.modelProvider', value: 'ollama' })
     expect(configPosts).toContainEqual({ key: 'subagent.acp.modelId', value: 'qwen3.5:9b' })
   })
@@ -231,7 +231,7 @@ describe('SettingsCodingPanel — acp harness model override', () => {
     await flushPromises()
 
     await c.find('select[aria-label="ACP harness model"]').setValue('')
-    await vi.waitFor(() => expect(configDeletes.length).toBe(2))
+    await vi.waitFor(() => expect(configDeletes).toHaveLength(2))
     expect(configDeletes).toEqual(['subagent.acp.modelProvider', 'subagent.acp.modelId'])
     expect(configPosts).toEqual([])
   })

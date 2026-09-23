@@ -100,7 +100,7 @@ describe('Subagents admin page', () => {
     // title/aria-label rather than visible text.
     const killButtons = component.findAll('button')
       .filter(b => (b.attributes('title') ?? '').toLowerCase().includes('kill'))
-    expect(killButtons.length).toBe(1)
+    expect(killButtons).toHaveLength(1)
   })
 
   it('renders a "View transcript" link per row with the right href (JCLAW-274)', async () => {
@@ -128,7 +128,7 @@ describe('Subagents admin page', () => {
     // the standard conversation viewer.
     const links = component.findAll('a')
       .filter(a => (a.attributes('title') ?? '').toLowerCase().includes('view transcript'))
-    expect(links.length).toBe(2)
+    expect(links).toHaveLength(2)
     const hrefs = links.map(a => a.attributes('href'))
     expect(hrefs).toContain('/chat?conversation=42')
     expect(hrefs).toContain('/chat?conversation=43')

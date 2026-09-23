@@ -170,7 +170,7 @@ describe('Tasks page — JCLAW-420 inline channel editor → PATCH', () => {
     await saveBtn!.trigger('click')
     await flushPromises()
 
-    expect(captured.length).toBe(1)
+    expect(captured).toHaveLength(1)
     expect(captured[0]!.id).toBe('1')
     expect(captured[0]!.body).toEqual({ delivery: 'telegram:999' })
   })

@@ -550,7 +550,7 @@ class ScrapeJobServiceTest extends UnitTest {
                 while (!listener.stopRequested() && !release.await(20, TimeUnit.MILLISECONDS)) {
                     // held until stopped or released
                 }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 sawInterrupt = true;
                 Thread.currentThread().interrupt();
             }
@@ -574,7 +574,7 @@ class ScrapeJobServiceTest extends UnitTest {
                 while (!listener.stopRequested() && System.nanoTime() < deadline) {
                     try {
                         Thread.sleep(20);
-                    } catch (InterruptedException e) {
+                    } catch (InterruptedException _) {
                         Thread.currentThread().interrupt();
                         break;
                     }

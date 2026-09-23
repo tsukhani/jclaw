@@ -162,7 +162,7 @@ describe('Chat page — conversation switch via loadConversation', () => {
     await flushPromises()
 
     // Both turns landed in the message list.
-    expect(vm.messages.length).toBe(2)
+    expect(vm.messages).toHaveLength(2)
     expect(vm.messages[0]!.role).toBe('user')
     expect(vm.messages[0]!.content).toBe('how do I configure skills?')
     expect(vm.messages[1]!.role).toBe('assistant')
@@ -228,7 +228,7 @@ describe('Chat page — image attachment on a vision-capable model', () => {
     await flushPromises()
 
     expect(vm.attachError).toBeNull()
-    expect(vm.attachedFiles.length).toBe(1)
+    expect(vm.attachedFiles).toHaveLength(1)
     expect(vm.attachedFiles[0]!.name).toBe('snap.png')
   })
 

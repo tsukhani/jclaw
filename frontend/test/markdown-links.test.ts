@@ -111,7 +111,7 @@ describe('rewriteWorkspaceLinks', () => {
       ].join(' ')
       const doc = parse(rewriteWorkspaceLinks(input, AGENT_ID))
       const anchors = doc.querySelectorAll('a')
-      expect(anchors.length).toBe(3)
+      expect(anchors).toHaveLength(3)
       const workspaceAbs = anchors[0]!
       const external = anchors[1]!
       const relative = anchors[2]!

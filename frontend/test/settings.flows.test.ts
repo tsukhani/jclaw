@@ -1871,7 +1871,7 @@ describe('Settings page — Image captioning single-select (JCLAW-214)', () => {
     const component = await mountSettingsSection('image-caption')
 
     const radios = component.findAll('input[name="caption-provider"]')
-    expect(radios.length).toBe(3) // openrouter, openai, ollama-local — no "None"
+    expect(radios).toHaveLength(3) // openrouter, openai, ollama-local — no "None"
     expect(radios[radios.length - 1]!.attributes('value')).toBe('ollama-local') // local is last
     expect(component.text()).toContain('Local VLM (Ollama)')
     // ollama-local is selected → the "local" badge lights up green as the active cue.

@@ -83,10 +83,10 @@ describe('ScheduleCalendar (JCLAW-440)', () => {
     const laned = c.findAll('div[style]')
       .map(d => d.attributes('style') ?? '')
       .filter(s => s.includes('width'))
-    expect(laned.length).toBe(14) // 7 days × 2 markers
+    expect(laned).toHaveLength(14) // 7 days × 2 markers
     expect(laned.every(s => s.includes('width: calc(50% - 4px)'))).toBe(true)
-    expect(laned.filter(s => s.includes('left: calc(0% + 2px)')).length).toBe(7)
-    expect(laned.filter(s => s.includes('left: calc(50% + 2px)')).length).toBe(7)
+    expect(laned.filter(s => s.includes('left: calc(0% + 2px)'))).toHaveLength(7)
+    expect(laned.filter(s => s.includes('left: calc(50% + 2px)'))).toHaveLength(7)
   })
 
   it('fire-projection mode (showRuns=false) mounts and navigates without runs', async () => {

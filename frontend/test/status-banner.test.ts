@@ -40,7 +40,7 @@ describe('StatusBanner', () => {
       props: { message: 'Info message' },
     })
     const buttons = component.findAll('button')
-    expect(buttons.length).toBe(0)
+    expect(buttons).toHaveLength(0)
   })
 
   it('shows dismiss button only when dismissable', async () => {

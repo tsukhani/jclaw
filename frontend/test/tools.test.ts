@@ -86,6 +86,6 @@ describe('tools page All-view grouping', () => {
     await flushPromises()
     await wrapper.findAll('button').find(b => norm(b.text()).startsWith('System'))!.trigger('click')
     await flushPromises()
-    expect(wrapper.findAll('h2').length).toBe(0)
+    expect(wrapper.findAll('h2')).toHaveLength(0)
   })
 })

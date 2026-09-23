@@ -58,7 +58,7 @@ describe('DataTable', () => {
       props: { columns: testColumns as DataTableColumn<RowData>[], data: [] as TestRow[], loading: true },
     })
     const skeletons = component.findAll('.animate-pulse')
-    expect(skeletons.length).toBe(10) // 5 rows × 2 columns
+    expect(skeletons).toHaveLength(10) // 5 rows × 2 columns
   })
 
   it('emits row-click when row is clicked', async () => {

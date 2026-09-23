@@ -78,6 +78,6 @@ describe('AgentWorkspaceManager downloads', () => {
       expect(component.find(`[data-testid="ws-download-${path}"]`).exists()).toBe(true)
     }
     // A Standing Orders row offers the download and nothing else; JCLAW-1249 withholds the delete.
-    expect(component.find('[data-testid="ws-actions-AGENT.md"]').element.children.length).toBe(1)
+    expect(component.find('[data-testid="ws-actions-AGENT.md"]').element.children).toHaveLength(1)
   })
 })

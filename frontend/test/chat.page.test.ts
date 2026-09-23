@@ -267,7 +267,7 @@ describe('Chat page — JCLAW-215 image attachment on a non-vision model', () =>
     await flushPromises()
 
     expect(vm.attachError).toBeNull()
-    expect(vm.attachedFiles.length).toBe(1)
+    expect(vm.attachedFiles).toHaveLength(1)
     expect(vm.attachedFiles[0]!.name).toBe('shot.png')
   })
 
@@ -286,7 +286,7 @@ describe('Chat page — JCLAW-215 image attachment on a non-vision model', () =>
     await flushPromises()
 
     expect(vm.attachError).toBeNull()
-    expect(vm.attachedFiles.length).toBe(1)
+    expect(vm.attachedFiles).toHaveLength(1)
   })
 })
 
@@ -311,7 +311,7 @@ describe('Chat page — JCLAW-131 per-kind upload caps + JCLAW-165 audio univers
     await flushPromises()
 
     expect(vm.attachError).toBeNull()
-    expect(vm.attachedFiles.length).toBe(1)
+    expect(vm.attachedFiles).toHaveLength(1)
     expect(vm.attachedFiles[0]!.name).toBe('memo.wav')
   })
 
@@ -1020,7 +1020,7 @@ describe('Chat page — async subagent announce polling', () => {
     // intermediate empty-assistant + tool + system rows should have been
     // appended as additions.
     const userRows = vm.messages.filter(m => m.role === 'user')
-    expect(userRows.length).toBe(1)
+    expect(userRows).toHaveLength(1)
     expect(userRows[0]!.id).toBe(1100)
     const assistantWithContent = vm.messages.find(m => m.role === 'assistant' && m.content?.startsWith('Run id'))
     expect(assistantWithContent?.id).toBe(1103)
@@ -1188,7 +1188,7 @@ describe('Chat page — truncated reply marker', () => {
     await vm.loadConversation(503)
     await flushPromises()
 
-    expect(component.findAll('[data-testid="truncated-marker"]').length).toBe(0)
+    expect(component.findAll('[data-testid="truncated-marker"]')).toHaveLength(0)
     expect(component.text()).not.toContain('Reply was truncated by the model')
   })
 })
@@ -1756,7 +1756,7 @@ describe('Chat page — new chat reset', () => {
     }
     await vm.loadConversation(960)
     await flushPromises()
-    expect(vm.messages.length).toBe(1)
+    expect(vm.messages).toHaveLength(1)
 
     const newChatBtn = component.find('button[title="New conversation"]')
     expect(newChatBtn.exists()).toBe(true)
@@ -1764,7 +1764,7 @@ describe('Chat page — new chat reset', () => {
     await flushPromises()
 
     // newChat clears messages, the input value, and the selected conversation.
-    expect(vm.messages.length).toBe(0)
+    expect(vm.messages).toHaveLength(0)
     const textarea = component.find('textarea').element as HTMLTextAreaElement
     expect(textarea.value).toBe('')
   })

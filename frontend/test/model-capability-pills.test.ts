@@ -42,7 +42,7 @@ describe('ModelCapabilityPills', () => {
     await nextTick()
     // Audio pill renders as a span, not a button.
     const buttons = wrapper.findAll('button')
-    expect(buttons.length).toBe(0)
+    expect(buttons).toHaveLength(0)
     const text = wrapper.text()
     expect(text).toContain('audio')
   })
@@ -76,7 +76,7 @@ describe('ModelCapabilityPills', () => {
     })
     await nextTick()
     const buttons = wrapper.findAll('button')
-    expect(buttons.length).toBe(0)
+    expect(buttons).toHaveLength(0)
     expect(wrapper.text()).toContain('vision')
   })
 
@@ -88,7 +88,7 @@ describe('ModelCapabilityPills', () => {
     })
     await nextTick()
     const buttons = wrapper.findAll('button')
-    expect(buttons.length).toBe(0)
+    expect(buttons).toHaveLength(0)
     expect(wrapper.text()).toContain('video')
   })
 
@@ -101,7 +101,7 @@ describe('ModelCapabilityPills', () => {
     await nextTick()
     const buttons = wrapper.findAll('button')
     // Only the thinking pill renders as a button now.
-    expect(buttons.length).toBe(1)
+    expect(buttons).toHaveLength(1)
     await buttons[0]!.trigger('click')
     const emits = wrapper.emitted('toggle') ?? []
     expect(emits).toHaveLength(1)
@@ -120,7 +120,7 @@ describe('ModelCapabilityPills', () => {
     })
     await nextTick()
     const buttons = wrapper.findAll('button')
-    expect(buttons.length).toBe(0)
+    expect(buttons).toHaveLength(0)
     const span = wrapper.find('span[title*="always reasons"]')
     expect(span.exists()).toBe(true)
     expect(wrapper.text()).toContain('thinking')

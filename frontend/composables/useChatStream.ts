@@ -2,7 +2,7 @@ import { onUnmounted, ref, triggerRef, nextTick, type Ref, type ShallowRef } fro
 import type { PendingOverrides } from '~/composables/useAgentModel'
 import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import type { UploadedAttachment } from '~/composables/useChatAttachments'
-import type { Message, MessageAttachment, ToolCall } from '~/types/api'
+import type { Message, MessageAttachment, ToolCallResultStructured } from '~/types/api'
 import type { MessageRoute } from '~/utils/usage-cost'
 
 /**
@@ -39,7 +39,7 @@ interface ToolCallEvent {
   icon?: string
   arguments?: string
   resultText?: string | null
-  resultStructured?: ToolCall['resultStructured']
+  resultStructured?: ToolCallResultStructured | null
   // JCLAW-228/562: the tool produced inline attachments (generate_image's image, diarize_audio's
   // per-speaker voice clips); the backend ships them so they render live on the streaming bubble
   // (not only after a reload).

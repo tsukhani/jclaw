@@ -38,7 +38,7 @@ describe('TourIntroDialog', () => {
     expect(startBtn).toBeTruthy()
     startBtn!.click()
     expect(wrapper.emitted('start')).toBeTruthy()
-    expect(wrapper.emitted('start')!.length).toBe(1)
+    expect(wrapper.emitted('start')!).toHaveLength(1)
   })
 
   it('emits skip when the secondary button is clicked', async () => {

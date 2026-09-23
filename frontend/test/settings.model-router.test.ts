@@ -95,7 +95,7 @@ describe('SettingsModelRouterPanel', () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
     await c.find('[data-testid="router-class-chat"] select').setValue('openrouter::z-ai/glm-5.3-flash')
-    await vi.waitFor(() => expect(posts.length).toBe(1), { timeout: 5000 })
+    await vi.waitFor(() => expect(posts).toHaveLength(1), { timeout: 5000 })
     expect(posts).toContainEqual({
       key: 'router.chat.models',
       value: JSON.stringify([
@@ -169,7 +169,7 @@ describe('SettingsModelRouterPanel', () => {
     expect(select.text()).toContain('Keyword rules (no model call)')
 
     await select.setValue('ollama-cloud::glm-5.3-flash')
-    await vi.waitFor(() => expect(posts.length).toBe(2), { timeout: 5000 })
+    await vi.waitFor(() => expect(posts).toHaveLength(2), { timeout: 5000 })
     expect(posts).toContainEqual({ key: 'router.classifier.provider', value: 'ollama-cloud' })
     expect(posts).toContainEqual({ key: 'router.classifier.model', value: 'glm-5.3-flash' })
   })

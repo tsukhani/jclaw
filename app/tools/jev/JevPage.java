@@ -43,7 +43,7 @@ public final class JevPage {
 
     /** How long one browser call may take before the page counts as frozen. */
     public static final Duration CALL_LIMIT = Duration.ofSeconds(30);
-    static final String FROZEN = "the page stopped responding; the browser session was closed";
+    static final String FROZEN_MESSAGE = "the page stopped responding; the browser session was closed";
 
     private static final ScopedValue<Duration> CALL_LIMIT_OVERRIDE = ScopedValue.newInstance();
 
@@ -264,14 +264,14 @@ public final class JevPage {
     }
 
     private JsonObject send(String method, JsonObject params) {
-        if (frozen) throw new JevException(FROZEN);
+        if (frozen) throw new JevException(FROZEN_MESSAGE);
         callStartedNanos = System.nanoTime();
         inCall = true;
         try {
             return cdp.send(method, params);
         } catch (PlaywrightException e) {
             // The hook kills the driver, which fails the blocked call; report why rather than a closed pipe.
-            if (frozen) throw new JevException(FROZEN);
+            if (frozen) throw new JevException(FROZEN_MESSAGE);
             throw e;
         } finally {
             inCall = false;

@@ -39,8 +39,8 @@ describe('expandCron L/# day modifiers (JCLAW-440)', () => {
   })
 
   it('daily / @daily fire every day', () => {
-    expect(expandCron('0 0 9 * * *', from, to).length).toBe(30)
-    expect(expandCron('@daily', from, to).length).toBe(30)
+    expect(expandCron('0 0 9 * * *', from, to)).toHaveLength(30)
+    expect(expandCron('@daily', from, to)).toHaveLength(30)
   })
 
   it('unparseable / unsupported (sec != 0) yields no fires', () => {

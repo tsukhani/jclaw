@@ -157,7 +157,7 @@ describe('Tasks page — JCLAW-328 q: wiring', () => {
       const opts = s.findAll('option').map(o => o.text())
       return opts.includes('All statuses') || opts.includes('All types')
     })
-    expect(legacySelects.length).toBe(0)
+    expect(legacySelects).toHaveLength(0)
   })
 })
 
@@ -197,6 +197,6 @@ describe('Subagents page — JCLAW-328 q: wiring + JCLAW-326 chip integration', 
       const opts = s.findAll('option').map(o => o.text())
       return opts.includes('All parent agents') || opts.includes('All statuses')
     })
-    expect(legacy.length).toBe(0)
+    expect(legacy).toHaveLength(0)
   })
 })

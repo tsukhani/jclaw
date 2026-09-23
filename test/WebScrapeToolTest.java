@@ -313,7 +313,7 @@ class WebScrapeToolTest extends UnitTest {
                 hold.arrived().countDown();
                 try {
                     hold.release().await(4, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             }

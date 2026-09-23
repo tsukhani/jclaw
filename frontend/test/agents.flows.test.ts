@@ -843,7 +843,7 @@ describe('Agents page — Inspect prompt dialog', () => {
 
     // Exactly one donut replaces BOTH tables — sections and tools are disjoint
     // halves of one whole, so two charts would each read as its own 100%.
-    expect(component.findAll('table').length).toBe(0)
+    expect(component.findAll('table')).toHaveLength(0)
     expect(component.findAll('svg[role="img"]')).toHaveLength(1)
 
     // Sections stay individual; the tool schemas arrive as one rolled-up slice

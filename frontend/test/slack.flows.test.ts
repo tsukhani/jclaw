@@ -150,7 +150,7 @@ describe('slack bindings — create flow (canSave gating + POST body)', () => {
     await agentInput.trigger('input')
     await nextTick()
     const options = c.findAll('ul button')
-    expect(options.length).toBe(1)
+    expect(options).toHaveLength(1)
     expect(options[0]!.text()).toContain('main')
     await options[0]!.trigger('mousedown')
     await nextTick()

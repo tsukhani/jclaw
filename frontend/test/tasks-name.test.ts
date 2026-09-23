@@ -101,7 +101,7 @@ describe('Tasks page — JCLAW-426 inline name editor → PATCH', () => {
     await saveBtn!.trigger('click')
     await flushPromises()
 
-    expect(captured.length).toBe(1)
+    expect(captured).toHaveLength(1)
     expect(captured[0]!.id).toBe('1')
     expect(captured[0]!.body).toEqual({ name: 'new name' })
   })
@@ -128,7 +128,7 @@ describe('Tasks page — JCLAW-426 inline name editor → PATCH', () => {
     await saveBtn!.trigger('click')
     await flushPromises()
 
-    expect(captured.length).toBe(0)
+    expect(captured).toHaveLength(0)
     expect(component.text()).toContain('Name cannot be empty')
   })
 })
