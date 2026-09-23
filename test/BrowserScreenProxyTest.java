@@ -170,7 +170,7 @@ class BrowserScreenProxyTest extends UnitTest {
         assertEquals(List.of(), lines, "a command the proxy does not serve is not a refused destination");
     }
 
-    /** UDP is never forwarded, which is also why WebRTC is outside the screen rather than blocked by it. */
+    /** UDP is never forwarded, which is why WebRTC had to be stopped at launch instead: see PlaywrightBrowserTool.launchArgs (JCLAW-1286). */
     @Test
     void udpAssociateIsRefused() throws Exception {
         var lines = new CopyOnWriteArrayList<String>();

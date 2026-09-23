@@ -120,8 +120,13 @@ class JevRunTest extends UnitTest {
 
     /** Headless Chromium, or null when Playwright's Chromium is not installed — the browser tests then skip. */
     static Browser launchOrNull(Playwright playwright) {
+        return launchOrNull(playwright, List.of());
+    }
+
+    /** {@link #launchOrNull(Playwright)} with Chromium launch arguments. */
+    static Browser launchOrNull(Playwright playwright, List<String> args) {
         try {
-            return playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            return playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true).setArgs(args));
         } catch (PlaywrightException e) {
             if (String.valueOf(e.getMessage()).contains("Executable doesn't exist")) return null;
             throw e;
@@ -133,6 +138,13 @@ class JevRunTest extends UnitTest {
         var launched = launchOrNull(playwright);
         Assumptions.assumeTrue(launched != null, "Playwright Chromium is not installed");
         return launched;
+    }
+
+    /** {@link #launchOrSkip(Playwright)} with Chromium launch arguments. */
+    static Browser launchOrSkip(Playwright playwright, List<String> args) {
+        var browser = launchOrNull(playwright, args);
+        Assumptions.assumeTrue(browser != null, "Playwright Chromium is not installed");
+        return browser;
     }
 
     @AfterAll

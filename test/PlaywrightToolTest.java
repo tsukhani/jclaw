@@ -27,10 +27,14 @@ import utils.SsrfGuard;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
@@ -1005,6 +1009,99 @@ class PlaywrightToolTest extends UnitTest {
             PlaywrightBrowserTool.closeSession(agent.name);
             server.stop(0);
         }
+    }
+
+    // ─── JCLAW-1286: WebRTC cannot send UDP around the screen ─────────────────────────
+
+    /**
+     * A page that sends UDP two ways a hostile page controls: ICE gathering against a STUN server, and a
+     * data channel whose remote candidate is the same port, which needs no server to answer at all.
+     */
+    private static String webRtcPage(int udpPort) {
+        return "<!doctype html><title>rtc</title><script>"
+                + "const stun = new RTCPeerConnection({iceServers: [{urls: 'stun:127.0.0.1:" + udpPort + "'}]});"
+                + "stun.createDataChannel('probe');"
+                + "stun.createOffer().then(o => stun.setLocalDescription(o));"
+                + "const direct = new RTCPeerConnection();"
+                + "direct.createDataChannel('probe');"
+                + "direct.createOffer().then(o => direct.setLocalDescription(o)).then(() => "
+                + "direct.setRemoteDescription({type: 'answer', sdp: 'v=0\\r\\no=- 1 1 IN IP4 127.0.0.1\\r\\n"
+                + "s=-\\r\\nt=0 0\\r\\na=group:BUNDLE 0\\r\\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\\r\\n"
+                + "c=IN IP4 0.0.0.0\\r\\na=mid:0\\r\\na=sctp-port:5000\\r\\na=ice-ufrag:probe\\r\\n"
+                + "a=ice-pwd:probeprobeprobeprobe\\r\\na=setup:active\\r\\n"
+                + "a=fingerprint:sha-256 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00\\r\\n"
+                + "a=candidate:1 1 udp 2113937151 127.0.0.1 " + udpPort + " typ host\\r\\n'}))"
+                + ".catch(() => {});"
+                + "</script>";
+    }
+
+    /** Milliseconds until {@code socket} receives anything, or -1 when it does not within {@code millis}. */
+    private static long datagramWithin(DatagramSocket socket, int millis) throws IOException {
+        socket.setSoTimeout(millis);
+        long started = System.nanoTime();
+        try {
+            socket.receive(new DatagramPacket(new byte[512], 512));
+            return (System.nanoTime() - started) / 1_000_000;
+        } catch (SocketTimeoutException _) {
+            return -1;
+        }
+    }
+
+    @Test
+    void webRtcSendsNoUdpAroundTheScreen() throws Exception {
+        Assumptions.assumeTrue(isPlaywrightTestEnabled(), "JCLAW_PLAYWRIGHT_TEST is not set");
+        try (var udp = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
+            var server = loopbackServer(new AtomicInteger(), Map.of("/rtc", webRtcPage(udp.getLocalPort())));
+            var origin = origin(server);
+            var tool = new PlaywrightBrowserTool();
+            long controlMs;
+            try {
+                // The control is the configuration this story changed: behind the same proxy, with the two
+                // flags that shipped before it. Chromium ignores a misspelled WebRTC flag silently, so
+                // without a control that differs in nothing else, the assertion below proves nothing.
+                var log = new BrowserScreenLog(agent.name);
+                try (var proxy = SsrfGuard.permitOriginForTest(origin, () -> newProxy(log));
+                        var playwright = PlaywrightBrowserTool.startDriver().playwright()) {
+                    var args = new ArrayList<>(PlaywrightBrowserTool.launchArgs(proxy.port()));
+                    args.removeIf(arg -> arg.startsWith("--force-webrtc"));
+                    var control = JevRunTest.launchOrSkip(playwright, args).newPage();
+                    control.navigate(origin + "/rtc");
+                    controlMs = datagramWithin(udp, 15_000);
+                    assertTrue(controlMs >= 0, "control: WebRTC reaches the listener without the flag");
+                }
+                for (int drained = 0; datagramWithin(udp, 200) >= 0; drained++) {
+                    assertTrue(drained < 500, "the control's datagrams never stopped arriving on port " + udp.getLocalPort());
+                }
+
+                var result = executeAt(tool, origin, navigateTo(origin + "/rtc"));
+                assertTrue(result.startsWith("Page: rtc"), "the page loaded, so the silence below means something: " + result);
+                // Generous against the control: the flag either stops the UDP or it does not.
+                int window = (int) Math.min(15_000, Math.max(5_000, controlMs * 5));
+                assertEquals(-1, datagramWithin(udp, window),
+                        "no UDP leaves the screened browser; the control took " + controlMs + " ms");
+            } finally {
+                PlaywrightBrowserTool.closeSession(agent.name);
+                server.stop(0);
+            }
+        }
+    }
+
+    @SuppressWarnings("MustBeClosed") // handed straight to the caller's try-with-resources
+    private static BrowserScreenProxy newProxy(BrowserScreenLog log) {
+        try {
+            return new BrowserScreenProxy(log);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Test
+    void theLaunchArgsCarryTheProxyAndBothScreenFlags() {
+        assertEquals(List.of("--proxy-server=socks5://127.0.0.1:4711",
+                        "--proxy-bypass-list=<-loopback>",
+                        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"),
+                PlaywrightBrowserTool.launchArgs(4711),
+                "deleting one of these unscreens a whole class of traffic, and Chromium reports neither");
     }
 
     // ─── JCLAW-1283: the screen sits below the page, in a SOCKS5 proxy ─────────────────

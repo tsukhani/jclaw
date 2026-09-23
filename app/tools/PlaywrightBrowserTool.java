@@ -552,12 +552,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             // JCLAW-172: headless is hardcoded — there is no UX where running a
             // visible browser on the host serves an LLM-driven agent. The
             // previous {@code playwright.headless} config key is gone.
-            // <-loopback> subtracts Chromium's implicit bypass, which covers more than its name says:
-            // measured 2026-09-23, 169.254.169.254 reaches the proxy with the flag and is dialled
-            // directly without it, so dropping the flag would unscreen the cloud-metadata address.
-            var launchOptions = new BrowserType.LaunchOptions().setHeadless(true)
-                    .setArgs(List.of("--proxy-server=socks5://127.0.0.1:" + proxy.port(),
-                            "--proxy-bypass-list=<-loopback>"));
+            var launchOptions = new BrowserType.LaunchOptions().setHeadless(true).setArgs(launchArgs(proxy.port()));
             browser = playwright.chromium().launch(launchOptions);
             page = openScreenedPage(browser, log);
             var cdp = page.context().newCDPSession(page);
@@ -575,6 +570,26 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             if (proxy != null) { try { proxy.close(); } catch (Exception _) { /* best-effort */ } }
             throw e;
         }
+    }
+
+    /**
+     * What the screen costs at launch: the proxy every connection goes through, and the two flags that
+     * decide what reaches it. Both were measured on 2026-09-23 and neither announces a mistake.
+     *
+     * <p>{@code <-loopback>} subtracts Chromium's implicit bypass, which covers more than its name says:
+     * 169.254.169.254 reaches the proxy with the flag and is dialled directly without it, so dropping it
+     * would unscreen the cloud-metadata address. WebRTC is UDP, which a SOCKS5 CONNECT proxy cannot carry:
+     * without the third flag, STUN, TURN and a data channel's connectivity checks all reached loopback
+     * listeners the proxy never saw (JCLAW-1286). Chromium honours only the {@code force} spelling and
+     * ignores {@code --webrtc-ip-handling-policy} silently, so a wrong value fails no faster than a
+     * missing one — which is why a live test holds the behaviour and an ungated one holds this list.
+     *
+     * <p>Exposed for tests.
+     */
+    public static List<String> launchArgs(int proxyPort) {
+        return List.of("--proxy-server=socks5://127.0.0.1:" + proxyPort,
+                "--proxy-bypass-list=<-loopback>",
+                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
     }
 
     /**

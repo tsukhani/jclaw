@@ -29,9 +29,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@link SsrfGuard} before it is made. None of the last three is visible to {@code context.route},
  * and nothing on the page can steer around a check that is not on the page, which is why
  * {@code routeWebSocket} was never shipped: it is a page-world mock a script defeats with
- * {@code __pwWebSocketDispatch}. What is outside the boundary is WebRTC, which is UDP: SOCKS5
- * CONNECT carries TCP only, so Chromium sends it directly, and refusing {@code UDP ASSOCIATE} does
- * not change that — the spike measured a STUN listener taking datagrams either way.
+ * {@code __pwWebSocketDispatch}. WebRTC is UDP, which this proxy cannot carry and refusing
+ * {@code UDP ASSOCIATE} does not stop, so {@link PlaywrightBrowserTool#launchArgs} disables it at
+ * launch instead (JCLAW-1286).
  *
  * <p>Each connection is made to the address the check resolved, so every host is pinned at connect
  * time and not just the entry host. A tunnel is never inspected: the destination is what is
