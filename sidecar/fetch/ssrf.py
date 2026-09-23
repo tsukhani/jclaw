@@ -67,6 +67,9 @@ def is_allowed_proxy_ip(addr):
         ip = ipaddress.ip_address(addr)
     except ValueError:
         return False
+    # Python 3.12.3 (Ubuntu 24.04) classifies ::ffff:169.254.169.254 by its v6 form; Java unwraps it.
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
     return not (ip.is_link_local or ip.is_multicast or ip.is_unspecified)
 
 
