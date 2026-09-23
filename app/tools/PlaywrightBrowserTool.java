@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -523,7 +524,6 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         EventLogger.info("tool", key, null, "Launching headless browser");
         // A tab the previous browser announced will never be closed by this one.
         log.forgetOpeningTabs();
-        ensureBrowserInstalled();
         // Build the driver -> browser -> screened context -> page chain under a guard: a
         // failure partway through must best-effort close whatever OS processes
         // were already spawned before rethrowing. launchSession runs under the
@@ -537,12 +537,15 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         Page page = null;
         BrowserScreenProxy proxy = null;
         try {
+            // Before the install and the driver: a browser nothing screens must not be launched, and
+            // one that will be refused must not be downloaded first either.
             try {
+                if (screenFailsForTest()) throw new IOException("bound port in use");
                 proxy = new BrowserScreenProxy(log);
             } catch (IOException e) {
-                // Fail closed: a browser with no proxy to dial is a browser nothing screens.
                 throw new IllegalStateException("the browser's network screen could not start: " + e.getMessage(), e);
             }
+            ensureBrowserInstalled();
             var driver = startDriver();
             playwright = driver.playwright();
             if (driver.process() == null && JevSettings.active()) {
@@ -570,6 +573,27 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             if (proxy != null) { try { proxy.close(); } catch (Exception _) { /* best-effort */ } }
             throw e;
         }
+    }
+
+    private static final ScopedValue<Boolean> SCREEN_FAILS_FOR_TEST = ScopedValue.newInstance();
+
+    /** Whether a test asked this thread's next launch to find its screen unable to start. */
+    private static boolean screenFailsForTest() {
+        return SCREEN_FAILS_FOR_TEST.isBound();
+    }
+
+    /**
+     * Test seam (JCLAW-1288): run {@code body} with the network screen failing to start, so the one
+     * path that must never launch a browser can be taken on demand — an ephemeral bind does not fail
+     * when asked. Bound on this thread only, which is the thread {@code launchSession} runs on.
+     * {@code CapabilityRulesTest} fails the build if anything in {@code app/} calls it.
+     *
+     * <p>It stands in for the constructor, not for the throw: a future constructor that failed with
+     * an unchecked exception would still fail the launch closed, through the outer guard, but would
+     * no longer carry the message this seam's test asserts.
+     */
+    public static <T> T callWithFailingScreenForTest(Supplier<T> body) {
+        return ScopedValue.where(SCREEN_FAILS_FOR_TEST, Boolean.TRUE).call(body::get);
     }
 
     /**

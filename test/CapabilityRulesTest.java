@@ -3,6 +3,7 @@ import com.tngtech.archunit.core.domain.JavaAccess;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaMethod;
+import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.domain.Source;
 import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
@@ -601,12 +602,17 @@ class CapabilityRulesTest extends UnitTest {
             "utils.SsrfGuard", Set.of("permitOriginForTest"),
             "tools.jev.JevPage", Set.of("callWithCallLimitForTest"),
             "utils.HttpFactories", Set.of("runWith", "callWith"),
-            "utils.AppClock", Set.of("runWith", "callWith"));
+            "utils.AppClock", Set.of("runWith", "callWith"),
+            "tools.PlaywrightBrowserTool", Set.of("callWithFailingScreenForTest"));
 
-    private static final DescribedPredicate<JavaAccess<?>> TEST_SEAM_ACCESS = DescribedPredicate.describe(
-            "a call or method reference to a test-only seam",
-            access -> TEST_SEAMS.getOrDefault(access.getTargetOwner().getName(), Set.of())
-                    .contains(access.getTarget().getName()));
+    private static final DescribedPredicate<JavaAccess<?>> TEST_SEAM_ACCESS = seamAccess(TEST_SEAMS);
+
+    /** The rule's predicate over any seam map, so a control can aim the same logic at a target that exists. */
+    private static DescribedPredicate<JavaAccess<?>> seamAccess(Map<String, Set<String>> seams) {
+        return DescribedPredicate.describe("a call or method reference to a test-only seam",
+                access -> seams.getOrDefault(access.getTargetOwner().getName(), Set.of())
+                        .contains(access.getTarget().getName()));
+    }
 
     /**
      * Every seam here binds a {@code ScopedValue} for the dynamic extent of a call: an IP-literal
@@ -637,6 +643,63 @@ class CapabilityRulesTest extends UnitTest {
                 .because("a test-only seam binds a ScopedValue for everything that runs inside it; "
                         + "production never binds one (JCLAW-1277, JCLAW-1282)");
         rule.check(APP_CLASSES);
+    }
+
+    /**
+     * The rule above passes when nothing matches, so a predicate that stopped matching would guard
+     * nothing and report it in the same green line. Its siblings have a floor for that; this is one
+     * (JCLAW-1288).
+     *
+     * <p>The control aims the rule's own predicate factory at a call {@code app/} certainly makes —
+     * {@code AppClock.now()} — and requires a match. That is what a seam access is, minus the ban:
+     * if ArchUnit stopped feeding {@code getTargetOwner().getName()} and {@code getTarget().getName()}
+     * the way this predicate reads them, the seam rule would match nothing and this fails instead.
+     *
+     * <p>Deliberately not over the compiled test tree, which is where the real callers are: measured
+     * 2026-09-23, {@code playAutotest} does not refresh {@code build/classes/java/test} and pre-push
+     * runs {@code compileJava} alone, so that tree is stale, empty or absent exactly when it would
+     * have to carry a seam this commit adds.
+     */
+    @Test
+    void theTestSeamPredicateStillMatches() {
+        var control = seamAccess(Map.of("utils.AppClock", Set.of("now")));
+        var matched = APP_CLASSES.stream()
+                .flatMap(javaClass -> javaClass.getAccessesFromSelf().stream())
+                .filter(control)
+                .findFirst();
+        assertTrue(matched.isPresent(),
+                "the rule's predicate no longer matches even AppClock.now(), so the seam rule guards nothing");
+    }
+
+    private static boolean isListed(String owner, String method) {
+        return TEST_SEAMS.getOrDefault(owner, Set.of()).contains(method);
+    }
+
+    /**
+     * A {@code ScopedValue} a test binds is a seam whether or not anyone remembered the list, so the
+     * list is checked rather than trusted: a {@code public static *ForTest} method in {@code app/}
+     * that binds one must be named in {@link #TEST_SEAMS}, or the rule above silently stops covering
+     * it (JCLAW-1288). Production bindings — {@code RoutedTurn}, {@code SubagentRegistry} — are not
+     * named {@code *ForTest} and are not seams.
+     */
+    @Test
+    void everyScopedValueSeamInAppIsOnTheList() {
+        var unlisted = new TreeSet<String>();
+        for (var javaClass : APP_CLASSES) {
+            for (var method : javaClass.getMethods()) {
+                if (!method.getName().endsWith("ForTest") || !method.getModifiers().contains(JavaModifier.STATIC)
+                        || !method.getModifiers().contains(JavaModifier.PUBLIC)) {
+                    continue;
+                }
+                boolean binds = method.getMethodCallsFromSelf().stream()
+                        .anyMatch(call -> call.getTargetOwner().getName().equals("java.lang.ScopedValue")
+                                || call.getTargetOwner().getName().startsWith("java.lang.ScopedValue$"));
+                if (binds && !isListed(javaClass.getName(), method.getName())) {
+                    unlisted.add(javaClass.getName() + "." + method.getName());
+                }
+            }
+        }
+        assertTrue(unlisted.isEmpty(), unlisted + " binds a ScopedValue for a test but is not in TEST_SEAMS");
     }
 
     // ===== Shared machinery =====

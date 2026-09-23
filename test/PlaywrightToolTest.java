@@ -1011,6 +1011,33 @@ class PlaywrightToolTest extends UnitTest {
         }
     }
 
+    // ─── JCLAW-1288: no browser without its screen ────────────────────────────────────
+
+    /**
+     * Ungated on purpose, and cheap: the screen is built before the Chromium install and before the
+     * driver, so this path spawns nothing and needs no browser (JCLAW-1288).
+     */
+    @Test
+    void aScreenThatCannotStartStopsTheLaunchRatherThanRunningUnscreened() throws Exception {
+        // A freed port for an origin the guard admits; nothing is ever fetched from it.
+        int port;
+        try (var probe = new ServerSocket()) {
+            probe.bind(new InetSocketAddress("127.0.0.1", 0));
+            port = probe.getLocalPort();
+        }
+        var origin = "http://127.0.0.1:" + port;
+        var tool = new PlaywrightBrowserTool();
+        try {
+            var result = PlaywrightBrowserTool.callWithFailingScreenForTest(
+                    () -> executeAt(tool, origin, navigateTo(origin + "/")));
+
+            assertTrue(result.startsWith("Error: the browser's network screen could not start"), result);
+            assertNull(liveSession(agent.name), "no session survives a launch that could not be screened");
+        } finally {
+            PlaywrightBrowserTool.closeSession(agent.name);
+        }
+    }
+
     // ─── JCLAW-1286: WebRTC cannot send UDP around the screen ─────────────────────────
 
     /**
