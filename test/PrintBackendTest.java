@@ -15,8 +15,10 @@ import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * The two print backends that can be exercised without a printer (JCLAW-911).
@@ -447,17 +449,43 @@ class PrintBackendTest extends UnitTest {
                 "nor the port it was learned from: " + boom.getMessage());
     }
 
+    /**
+     * JmDNS {@code close()} costs about 2 s whatever the browse window — 2008 ms for a bare
+     * create-then-close (JCLAW-1254) — so a browse that waits on it pays that every call. What keeps
+     * {@code discover} tracking its timeout is that the close runs on a thread of its own.
+     *
+     * <p>Asserted on the structure rather than on a stopwatch (JCLAW-1292): the wall-clock version
+     * asserted 50 ms against a 1 s bound and failed at 7,766 ms on a machine busy with other work,
+     * which says nothing about the invariant. play1 already runs sixteen classes in parallel, so the
+     * suite's own load was enough to make it marginal. These two reads hold or fail the same on a
+     * loaded machine and an idle one.
+     */
     @Test
-    void discoveryDoesNotWaitForJmdnsTeardown() {
-        // JmDNS close() costs ~2s regardless of the browse window — measured 2008ms for a
-        // bare create-then-close (JCLAW-1254) — so a blocking close would put this call at
-        // 2s+ however short the timeout. Detached, it tracks the window instead. The bound
-        // is deliberately loose: the gap being guarded is 50ms vs 2000ms.
-        var start = System.nanoTime();
-        PrinterDiscovery.discover(java.time.Duration.ofMillis(50));
-        var elapsedMs = (System.nanoTime() - start) / 1_000_000;
-        assertTrue(elapsedMs < 1_000,
-                () -> "discover() took " + elapsedMs + "ms for a 50ms browse — close() is being "
-                        + "waited on again");
+    void jmdnsCloseNeverRunsOnTheBrowseThread() {
+        var discovery = ArchitectureTest.APP_CLASSES.get(PrinterDiscovery.class.getName());
+
+        // ArchUnit folds a lambda's body into the method that declares it, so the flag rather than
+        // the name is what says which side of the detach a call sits on.
+        var closes = discovery.getCodeUnits().stream()
+                .flatMap(unit -> unit.getMethodCallsFromSelf().stream())
+                .filter(call -> call.getTarget().getName().equals("close")
+                        && call.getTargetOwner().getName().startsWith("javax.jmdns."))
+                .toList();
+        assertFalse(closes.isEmpty(), "nothing closes JmDNS any more, so this test reads nothing");
+        var onTheBrowseThread = closes.stream()
+                .filter(call -> !call.isDeclaredInLambda())
+                .map(call -> call.getOrigin().getName())
+                .collect(Collectors.toCollection(TreeSet::new));
+        assertTrue(onTheBrowseThread.isEmpty(),
+                "JmDNS.close() belongs in the detached body, not on the browse thread: " + onTheBrowseThread);
+
+        var detachers = discovery.getCodeUnits().stream()
+                .filter(unit -> unit.getName().equals("closeDetached"))
+                .filter(unit -> unit.getMethodCallsFromSelf().stream()
+                        .anyMatch(call -> call.getTarget().getName().equals("start")
+                                && call.getTargetOwner().getName().startsWith("java.lang.Thread")))
+                .count();
+        assertEquals(1, detachers,
+                "closeDetached must hand that body to a thread rather than running it inline");
     }
 }
