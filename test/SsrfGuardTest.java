@@ -477,6 +477,17 @@ class SsrfGuardTest extends UnitTest {
     }
 
     @Test
+    void anAuthorityOnlyUrlPinsToJustTheAddress() {
+        // There is no tail to carry over, and a rebuild that appended one would put the caller's
+        // whole URL — scheme included — after the pinned host.
+        var pinned = SsrfGuard.pinnedUrl("https://example.com");
+        assertFalse(pinned.contains("example.com"), "the host is pinned to a literal: " + pinned);
+        assertEquals(pinned.indexOf("://"), pinned.lastIndexOf("://"),
+                "nothing may be appended after the authority: " + pinned);
+        assertTrue(SsrfGuard.isUrlSafe(pinned), pinned);
+    }
+
+    @Test
     void theProviderGuardStillRefusesARawQueryCharacter() {
         // A saved base URL is parsed strictly on every turn, so it must fail at the save instead.
         var refused = assertThrows(SecurityException.class,

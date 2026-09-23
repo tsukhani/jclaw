@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient;
 import services.ConfigService;
 import services.EventLogger;
 import utils.RobotsCache;
+import utils.Urls;
 import utils.WebExtraction;
 
 import java.net.URI;
@@ -102,7 +103,8 @@ public final class SitemapSeeder {
             // Paced like any other fetch too: a sitemap index can name several children,
             // and issuing those back-to-back is the crawl-delay guarantee broken before
             // the crawl has read its first page.
-            RobotsCache.awaitSlot(URI.create(sitemapUrl), RobotsCache.DEFAULT_DELAY_MS);
+            // Lenient parse, precautionary only: crawler-commons validates each Sitemap: line first.
+            RobotsCache.awaitSlot(Urls.parse(sitemapUrl), RobotsCache.DEFAULT_DELAY_MS);
             // Through the guarded client like any other fetch — a sitemap lives on the
             // same untrusted host as the pages and gets no exemption.
             var fetched = WebExtraction.fetch(sitemapUrl, client,
@@ -110,7 +112,7 @@ public final class SitemapSeeder {
                             // Explicit: the shared default asks for markdown first, and a
                             // content-negotiating origin would rank that above the XML.
                             "Accept", "application/xml, text/xml;q=0.9"));
-            parsed = parser.parseSiteMap(fetched.body(), URI.create(fetched.finalUrl()).toURL());
+            parsed = parser.parseSiteMap(fetched.body(), Urls.parse(fetched.finalUrl()).toURL());
         } catch (InterruptedException _) {
             // Restored and propagated rather than folded into the catch below: swallowing
             // it leaves the crawl being torn down still walking sitemap children.
@@ -150,7 +152,8 @@ public final class SitemapSeeder {
     private static void parse(String candidate, List<URI> out,
                               Predicate<URI> acceptable) {
         try {
-            var uri = URI.create(candidate);
+            // Likewise precautionary: a <loc> java.net.URL rejects never reaches here (JCLAW-1287).
+            var uri = Urls.parse(candidate);
             if (uri.getHost() != null && acceptable.test(uri)) out.add(uri);
         } catch (RuntimeException _) {
             // one malformed <loc> must not lose the rest of the sitemap

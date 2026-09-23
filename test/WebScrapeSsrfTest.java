@@ -145,6 +145,22 @@ class WebScrapeSsrfTest extends UnitTest {
     }
 
     @Test
+    void aRedirectOntoAUrlBrowsersSendRawIsFollowedRatherThanFailing() {
+        // A Location header is the commonest way a page-supplied URL reaches the fetch loop, and
+        // it was resolved strictly — so an origin redirecting to its own font or tracking URL
+        // failed the hop rather than following it (JCLAW-1287).
+        routes.put("https://site.test/", pageLinking("Home", "/bounce"));
+        routes.redirect("https://site.test/bounce", "https://site.test/x?family=Roboto|Open+Sans");
+        routes.put("https://site.test/x?family=Roboto%7COpen+Sans", pageLinking("Landed"));
+
+        var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
+
+        assertTrue(routes.pageHits().contains("https://site.test/x?family=Roboto%7COpen+Sans"),
+                "the redirect target must be requested, percent-encoded: " + routes.pageHits());
+        assertTrue(out.contains("# Landed"), "and the page it landed on is what the crawl returns");
+    }
+
+    @Test
     void theAllowlistContainsEgressAcrossTheWholeCrawlNotJustTheSeed() {
         ConfigService.set(CFG_ALLOWLIST, "site.test");
         routes.put("https://site.test/", pageLinking("Home", "https://elsewhere.test/x", "/inside"));

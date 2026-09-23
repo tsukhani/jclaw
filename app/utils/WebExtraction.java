@@ -247,6 +247,8 @@ public final class WebExtraction {
             withAccept.put("Accept", DEFAULT_ACCEPT);
             headers = Map.copyOf(withAccept);
         }
+        // Strict, unlike every hop below it: this is the caller's own argument — web_fetch's `url`,
+        // or a crawl seed already validated — so a typo fails here with a message naming it.
         var current = URI.create(url);
         SsrfGuard.assertSafeScheme(current);
         assertHostAllowed(current);
@@ -262,7 +264,7 @@ public final class WebExtraction {
                     throw new IOException(
                             "HTTP %d with no Location header for %s".formatted(code, current));
                 }
-                current = current.resolve(location);
+                current = Urls.resolve(current, location);
                 SsrfGuard.assertSafeScheme(current);
                 assertHostAllowed(current);
                 continue;
@@ -446,7 +448,7 @@ public final class WebExtraction {
                 continue;
             }
             try {
-                var uri = URI.create(abs);
+                var uri = Urls.parse(abs);
                 var scheme = uri.getScheme();
                 // mailto:, javascript:, tel: and friends are not crawlable, and
                 // SsrfGuard would refuse them one layer down anyway.
@@ -570,7 +572,7 @@ public final class WebExtraction {
             var abs = link.attr("abs:href");
             if (lang.isEmpty() || abs.isBlank()) continue;
             try {
-                var uri = URI.create(abs);
+                var uri = Urls.parse(abs);
                 if (uri.getHost() != null) out.putIfAbsent(lang, uri);
             } catch (RuntimeException _) {
                 // a malformed alternate must not lose the rest
@@ -601,7 +603,7 @@ public final class WebExtraction {
      */
     private static List<URI> markdownLinks(FetchResult fetched) {
         var text = new String(fetched.body(), charsetFor(fetched.contentType()));
-        var base = URI.create(fetched.finalUrl());
+        var base = Urls.parse(fetched.finalUrl());
         var out = new LinkedHashSet<URI>();
         var document = MARKDOWN_PARSER.parse(text);
         collectMarkdownLinks(document, base, out);
@@ -613,7 +615,7 @@ public final class WebExtraction {
         for (var child = node.getFirstChild(); child != null; child = child.getNext()) {
             if (child instanceof Link link) {
                 try {
-                    var resolved = base.resolve(link.getUrl().toString());
+                    var resolved = Urls.resolve(base, link.getUrl().toString());
                     var scheme = resolved.getScheme();
                     if (("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
                             && resolved.getHost() != null) {

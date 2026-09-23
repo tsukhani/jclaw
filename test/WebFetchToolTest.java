@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.FetchSidecarManager;
+import services.StealthSidecarManager;
 import tools.WebFetchTool;
 
 import java.io.IOException;
@@ -56,6 +58,7 @@ class WebFetchToolTest extends UnitTest {
     private static final String CFG_MAX_BODY_BYTES = "web_fetch.max-body-bytes";
     private static final String CFG_ALLOWLIST = "web_fetch.allowlist";
 
+    private final ScrapeConfigGuard scrapeConfig = new ScrapeConfigGuard();
     private QueueInterceptor queue;
     private OkHttpClient originalClient;
     private String originalMaxBodyBytes;
@@ -78,6 +81,7 @@ class WebFetchToolTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         CLIENT_FIELD.set(null, originalClient);
+        scrapeConfig.restore();
         ConfigService.delete(CFG_ALLOWLIST);
         if (originalMaxBodyBytes == null) {
             Play.configuration.remove(CFG_MAX_BODY_BYTES);
@@ -742,6 +746,22 @@ class WebFetchToolTest extends UnitTest {
 
         assertEquals("web_bad_argument", errorCode(result));
         assertEquals(0, queue.requests.size());
+    }
+
+    @Test
+    void aUrlArgumentCarryingARawCharacterIsRefusedAtTheEdge() {
+        // The page-supplied paths — a Location, a harvested href, rung 3's final URL — parse
+        // leniently since JCLAW-1287. The caller's own argument deliberately does not: a mistyped
+        // URL is reported with the character named, rather than repaired into a different request.
+        // Rungs off, because an unparseable URL classifies as ERROR and would otherwise escalate.
+        scrapeConfig.set(FetchSidecarManager.CFG_ENABLED, "false");
+        scrapeConfig.set(StealthSidecarManager.CFG_ENABLED, "false");
+
+        var result = new WebFetchTool().executeRich(
+                "{\"url\":\"http://example.test/css?family=Roboto|Open+Sans\"}", null);
+
+        assertEquals("web_fetch_failed", errorCode(result));
+        assertEquals(0, queue.requests.size(), "a URL we cannot parse must not reach the network");
     }
 
     @Test

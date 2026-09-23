@@ -135,6 +135,24 @@ class SitemapSeederTest extends UnitTest {
     }
 
     @Test
+    void aLocCarryingACharacterBrowsersSendRawNeverReachesTheSeeder() {
+        // Measured, not assumed (JCLAW-1287): crawler-commons validates every <loc> and every
+        // robots.txt Sitemap: line with java.net.URL before either reaches this class, so the
+        // lenient parse below it cannot rescue one. Pinned because the obvious reading of
+        // SitemapSeeder says otherwise, and a bump that relaxed the library would make it true.
+        robots("Sitemap: " + HOST + "/sitemap.xml\n");
+        routes.put(HOST + "/sitemap.xml",
+                urlset(HOST + "/orphan?family=Roboto|Open+Sans", HOST + "/plain"), "application/xml");
+        routes.put(HOST + "/", page("Home"));
+        routes.put(HOST + "/orphan?family=Roboto%7COpen+Sans", page("Orphan"));
+        routes.put(HOST + "/plain", page("Plain"));
+
+        var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1}");
+        assertTrue(out.contains("# Plain"), "the sibling entry proves the sitemap was read: " + head(out));
+        assertFalse(out.contains("# Orphan"), "the library drops it, so this is not ours to fix");
+    }
+
+    @Test
     void noSitemapDirectiveIsNotAnError() {
         robots("");
         routes.put(HOST + "/", page("Home"));

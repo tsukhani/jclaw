@@ -98,6 +98,13 @@ class WebScrapeToolTest extends UnitTest {
                 + "</p>" + links + "</article></body></html>";
     }
 
+    /** A markdown body long enough not to read as an empty page, carrying one link. */
+    private static String markdownPage(String title, String href) {
+        return "# " + title + "\n\n"
+                + "This page is about widgets and how they combine. ".repeat(12)
+                + "\n\n[next](" + href + ")\n";
+    }
+
     @Test
     void depthZeroReadsOnlyTheSeed() {
         routes.put("https://site.test/", page("Home", "/a", "/b"));
@@ -219,6 +226,29 @@ class WebScrapeToolTest extends UnitTest {
         assertTrue(out.contains("Not retrieved"), "the failure is reported");
         assertTrue(out.contains("connection reset"));
         assertTrue(out.contains("# Good"), "the crawl continues past a broken link");
+    }
+
+    /** JCLAW-1287: the characters browsers send raw after the host reach a crawl from the page,
+     *  not from the caller, so parsing them strictly cost the link rather than reporting anything. */
+    @Test
+    void aLinkCarryingACharacterBrowsersSendRawIsHarvestedRatherThanDropped() {
+        routes.put("https://site.test/", page("Home", "/x?family=Roboto|Open+Sans"));
+        routes.put("https://site.test/x?family=Roboto%7COpen+Sans", page("Found"));
+        var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
+
+        assertTrue(out.contains("# Found"), "the link is followed, not silently dropped: " + out);
+        assertEquals(2, routes.pageHits().size(), routes.pageHits().toString());
+    }
+
+    @Test
+    void aMarkdownPagesLinkCarriesTheSameCharactersThroughTheSameParse() {
+        // The markdown lane resolves each link against the page's own final URL rather than through
+        // jsoup, so it is a second strict parse of the same page-supplied string.
+        routes.put("https://site.test/", markdownPage("Home", "/x?a=b|c"), "text/markdown; charset=utf-8");
+        routes.put("https://site.test/x?a=b%7Cc", page("Found"));
+        var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
+
+        assertTrue(out.contains("# Found"), "the markdown link is followed: " + out);
     }
 
     @Test

@@ -13,10 +13,10 @@ import services.scrape.ScrapeSidecarException;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.SsrfGuard;
+import utils.Urls;
 import utils.WebExtraction;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
@@ -110,7 +110,7 @@ public final class RenderedFetcher {
             // Bounded like every other transport: a render settles into a DOM the origin
             // controls the size of, and readTimeout is disabled here, so an unbounded
             // read is the one place a page could push arbitrary bytes onto the heap.
-            var body = WebExtraction.readBounded(response.body(), URI.create(url));
+            var body = WebExtraction.readBounded(response.body(), Urls.parse(url));
             if (!response.isSuccessful()) {
                 throw new ScrapeSidecarException("stealth sidecar returned HTTP %d for %s: %s"
                         .formatted(response.code(), url,
@@ -124,12 +124,26 @@ public final class RenderedFetcher {
             if (!"0".equals(status) && upstreamStatus(status, url) >= 400) {
                 throw new IOException("HTTP %s fetching %s".formatted(status, url));
             }
-            var finalUrl = response.header("X-Upstream-Url", url);
-            // The browser may have been redirected; re-validate where it landed so a
-            // hop the interceptor allowed still cannot return an unsafe final URL.
-            SsrfGuard.assertUrlSafe(URI.create(finalUrl).toString());
-            return new WebExtraction.FetchResult(body, "text/html; charset=utf-8", finalUrl);
+            return new WebExtraction.FetchResult(body, "text/html; charset=utf-8",
+                    finalUrl(response, url));
         }
+    }
+
+    /**
+     * Where the render landed, re-validated and normalized — the browser may have been redirected,
+     * so a hop the sidecar's interceptor allowed still cannot return an unsafe final URL.
+     *
+     * <p>The guard reads the string as Chromium wrote it, because its own parse is the lenient one
+     * (JCLAW-1285). What leaves is that string parsed: every other rung's final URL comes from a
+     * {@link java.net.URI}, and {@code WebScrapeTool.pickVariant} matches this one against
+     * alternates that do, so an un-normalized spelling would record one page under two URLs.
+     *
+     * <p>Public because Play's tests live in the default package.
+     */
+    public static String finalUrl(Response response, String requested) {
+        var landed = response.header("X-Upstream-Url", requested);
+        SsrfGuard.assertUrlSafe(landed);
+        return Urls.parse(landed).toString();
     }
 
     /** The count is logged, never parsed: a total in a shape this JVM does not recognize

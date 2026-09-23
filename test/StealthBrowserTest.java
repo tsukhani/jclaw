@@ -1,4 +1,9 @@
 import com.google.gson.JsonParser;
+import okhttp3.MediaType;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import play.Play;
@@ -12,6 +17,7 @@ import utils.SsrfGuard;
 
 import java.io.File;
 import java.net.InetAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -168,6 +174,49 @@ class StealthBrowserTest extends UnitTest {
             assertThrows(SecurityException.class, () -> RenderedFetcher.fetch(url),
                     "expected an SsrfGuard refusal for " + url);
         }
+    }
+
+    @Test
+    void aFinalUrlTheBrowserWroteRawIsRevalidatedAndNormalized() {
+        // X-Upstream-Url carries Chromium's own final URL, and rung 3 used to re-parse it with a
+        // strict URI.create before handing it to the guard — whose parse was already lenient — so a
+        // successful render of a page every browser loads was discarded as a failed attempt.
+        // What leaves is the parsed form: WebScrapeTool.pickVariant matches this against alternates
+        // that came from Urls.parse, and an un-normalized spelling records one page under two URLs.
+        // A literal IP so the guard needs no resolver.
+        var raw = "https://8.8.8.8/css?family=Roboto|Open+Sans";
+        assertThrows(IllegalArgumentException.class, () -> URI.create(raw),
+                "the removed wrapper is what refused this, so the case proves nothing without it");
+        assertEquals("https://8.8.8.8/css?family=Roboto%7COpen+Sans",
+                RenderedFetcher.finalUrl(rendered("X-Upstream-Url", raw), "https://8.8.8.8/"));
+    }
+
+    @Test
+    void aRenderWithNoFinalUrlHeaderFallsBackToWhatWasRequested() {
+        // Without the fallback the requested URL is the only thing that could be reported, and a
+        // sidecar that omits the header would otherwise yield a FetchResult with a null final URL.
+        assertEquals("https://8.8.8.8/p",
+                RenderedFetcher.finalUrl(rendered("X-Other", "x"), "https://8.8.8.8/p"));
+    }
+
+    @Test
+    void anUnsafeFinalUrlIsStillRefusedAfterTheRender() {
+        // The sidecar's own interceptor screens each hop, but a final URL it allowed is checked
+        // again here — the JVM stays authoritative for what rung 3 hands back.
+        assertThrows(SecurityException.class,
+                () -> RenderedFetcher.finalUrl(rendered("X-Upstream-Url", "http://127.0.0.1:9000/api/status"),
+                        "https://8.8.8.8/"));
+    }
+
+    /** A minimal sidecar response carrying one header, for the final-URL seam. */
+    private static Response rendered(String header, String value) {
+        return new Response.Builder()
+                .request(new Request.Builder().url("http://127.0.0.1:9532/render").build())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200).message("OK")
+                .addHeader(header, value)
+                .body(ResponseBody.create("", MediaType.parse("text/html")))
+                .build();
     }
 
     // ==================== Feature detection ====================
