@@ -31,6 +31,11 @@ interface JvmStats {
   llmCallsRunning: number
   llmCallsQueued: number
   llmCallsMax: number
+  javaVersion: string
+  /** Null when the JDK build does not set the property. */
+  javaVendor: string | null
+  /** The distribution's own build string, e.g. Zulu25.32+21-CA; null when unset. */
+  javaVendorVersion: string | null
 }
 
 const REFRESH_MS = 5_000
@@ -176,6 +181,12 @@ const llmContext = computed(() => {
   const s = stats.value
   if (!s) return ''
   return `${s.llmCallsQueued} queued · cap ${s.llmCallsMax}`
+})
+
+const jvmContext = computed(() => {
+  const s = stats.value
+  if (!s) return ''
+  return [s.javaVendor, s.javaVendorVersion].filter(Boolean).join(' · ')
 })
 
 const gcContext = computed(() => {
@@ -363,6 +374,24 @@ const gcContext = computed(() => {
           </dd>
           <dd class="text-[11px] text-fg-muted">
             peak {{ stats?.peakPlatformThreads ?? '—' }}
+          </dd>
+        </div>
+
+        <div class="flex flex-col">
+          <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+            JVM
+          </dt>
+          <dd
+            class="mt-1 text-sm font-mono text-fg-primary"
+            data-testid="jvm-version"
+          >
+            {{ stats?.javaVersion ?? '—' }}
+          </dd>
+          <dd
+            class="text-[11px] text-fg-muted"
+            data-testid="jvm-vendor"
+          >
+            {{ jvmContext }}
           </dd>
         </div>
       </dl>

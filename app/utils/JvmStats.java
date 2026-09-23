@@ -34,6 +34,10 @@ import java.lang.management.ManagementFactory;
  * @param llmCallsQueued      outbound LLM calls waiting on the dispatcher — non-zero
  *                            means the cap is throttling, not the provider
  * @param llmCallsMax         the live dispatcher ceiling those two are measured against
+ * @param javaVersion         feature.interim.update of the running JDK, e.g. {@code 25.0.2}
+ * @param javaVendor          {@code java.vendor}, or null when the build does not set it
+ * @param javaVendorVersion   the distribution's own build string ({@code java.vendor.version},
+ *                            e.g. {@code Zulu25.32+21-CA}), or null — not every build sets it
  */
 public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
                        long nonHeapUsed, long nonHeapCommitted,
@@ -44,7 +48,9 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
                        @Nullable Double processCpuLoad,
                        int availableProcessors,
                        @Nullable Long machineMemoryBytes,
-                       int llmCallsRunning, int llmCallsQueued, int llmCallsMax) {
+                       int llmCallsRunning, int llmCallsQueued, int llmCallsMax,
+                       String javaVersion, @Nullable String javaVendor,
+                       @Nullable String javaVendorVersion) {
 
     /**
      * The reportable share for one raw {@code getProcessCpuLoad()} reading: null when the JVM
@@ -78,6 +84,7 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
         var heap = memory.getHeapMemoryUsage();
         var nonHeap = memory.getNonHeapMemoryUsage();
         var threads = ManagementFactory.getThreadMXBean();
+        var version = Runtime.version();
 
         long gcCount = 0;
         long gcTimeMs = 0;
@@ -114,6 +121,9 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
                 // second endpoint polled on the same 5s cadence would buy nothing.
                 HttpFactories.llmDispatcherRunningCalls(),
                 HttpFactories.llmDispatcherQueuedCalls(),
-                HttpFactories.llmDispatcherMaxRequests());
+                HttpFactories.llmDispatcherMaxRequests(),
+                "%d.%d.%d".formatted(version.feature(), version.interim(), version.update()),
+                System.getProperty("java.vendor"),
+                System.getProperty("java.vendor.version"));
     }
 }

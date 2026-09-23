@@ -40,6 +40,9 @@ function sample(over: Record<string, unknown> = {}) {
     llmCallsRunning: 3,
     llmCallsQueued: 0,
     llmCallsMax: 224,
+    javaVersion: '25.0.2',
+    javaVendor: 'Azul Systems, Inc.',
+    javaVendorVersion: 'Zulu25.32+21-CA',
     ...over,
   }
 }
@@ -269,6 +272,24 @@ describe('SettingsJvmPanel — visuals', () => {
   })
 })
 
+describe('SettingsJvmPanel — the JDK serving the page', () => {
+  it('shows the Java version with the vendor and its build', async () => {
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    expect(c.find('[data-testid="jvm-version"]').text()).toBe('25.0.2')
+    expect(c.find('[data-testid="jvm-vendor"]').text()).toBe('Azul Systems, Inc. · Zulu25.32+21-CA')
+  })
+
+  it('leaves out a vendor build the JDK does not report', async () => {
+    stats = sample({ javaVendorVersion: null })
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    expect(c.find('[data-testid="jvm-vendor"]').text()).toBe('Azul Systems, Inc.')
+  })
+})
+
 describe('SettingsJvmPanel — LLM dispatcher occupancy', () => {
   /**
    * The reason this metric sits here: the dispatcher caps render directly beneath this
@@ -323,7 +344,7 @@ describe('SettingsJvmPanel — LLM dispatcher occupancy', () => {
     expect(labels).toEqual([
       'Heap', 'Non-heap', 'Process memory',
       'CPU', 'Garbage collection', 'LLM calls in flight',
-      'Uptime', 'Platform threads',
+      'Uptime', 'Platform threads', 'JVM',
     ])
   })
 })

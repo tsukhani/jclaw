@@ -66,6 +66,16 @@ class JvmStatsTest extends UnitTest {
     }
 
     @Test
+    void reportsTheRunningJdk() {
+        var s = JvmStats.snapshot();
+        var v = Runtime.version();
+        // Always three parts: a GA build's java.version reads "25", which would sit oddly beside "25.0.2".
+        assertEquals(v.feature() + "." + v.interim() + "." + v.update(), s.javaVersion());
+        assertEquals(System.getProperty("java.vendor"), s.javaVendor());
+        assertEquals(System.getProperty("java.vendor.version"), s.javaVendorVersion());
+    }
+
+    @Test
     void reportsUptimeAndProcessorCount() {
         var s = JvmStats.snapshot();
         assertTrue(s.uptimeMs() > 0, "the JVM running this test has been up for a while");

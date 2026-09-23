@@ -91,7 +91,7 @@ class ApiMetricsControllerTest extends FunctionalTest {
 
         var json = JsonParser.parseString(getContent(response)).getAsJsonObject();
         for (var field : new String[]{"heapUsed", "heapCommitted", "nonHeapUsed",
-                "gcCount", "platformThreads", "uptimeMs", "availableProcessors"}) {
+                "gcCount", "platformThreads", "uptimeMs", "availableProcessors", "javaVersion"}) {
             assertTrue(json.has(field), "jvm must report '" + field + "'; got: " + json);
         }
         var heapUsed = json.get("heapUsed").getAsLong();
