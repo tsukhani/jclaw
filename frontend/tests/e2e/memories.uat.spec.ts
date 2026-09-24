@@ -78,9 +78,13 @@ test.describe('UAT-7 memories', () => {
     const rowId = await firstRow.textContent()
     const input = firstRow.getByTestId('importance-input')
     const original = await input.inputValue()
+    // A reload aborts the save still in flight, so each one waits for the PUT to answer first.
+    const saved = () => page.waitForResponse(r => r.request().method() === 'PUT' && r.url().includes('/api/memories/'))
 
+    const edit = saved()
     await input.fill('0.42')
     await input.blur()
+    expect((await edit).ok()).toBe(true)
     await page.reload()
     await page.waitForLoadState('domcontentloaded')
 
@@ -89,8 +93,10 @@ test.describe('UAT-7 memories', () => {
     await expect(sameRow.getByTestId('importance-input')).toHaveValue('0.42', { timeout: 10_000 })
 
     // Restore, so the operator's ranking survives the UAT run.
+    const restore = saved()
     await sameRow.getByTestId('importance-input').fill(original)
     await sameRow.getByTestId('importance-input').blur()
+    expect((await restore).ok()).toBe(true)
     await page.reload()
     await expect(page.getByTestId('memory-row').first().getByTestId('importance-input'))
       .toHaveValue(original, { timeout: 10_000 })
