@@ -1,4 +1,5 @@
 import { onUnmounted, ref } from 'vue'
+import type { DriverSource } from '~/utils/browser-setup'
 
 /**
  * The browser tool's first-use setup — the Playwright driver's Node.js, then Chromium — as
@@ -9,7 +10,7 @@ export interface BrowserSetupStatus {
   step: string | null
   percent: number | null
   error: string | null
-  driverSource: 'preinstalled' | 'bundled' | 'downloaded' | 'missing' | 'unsupported'
+  driverSource: DriverSource
   platform: string | null
   nodeVersion: string
   chromiumInstalled: boolean

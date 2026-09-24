@@ -52,6 +52,7 @@ and the eval suites.
 | UAT-12 Dashboard | `dashboard.uat.spec.ts` | Four panels, metrics endpoints, logs |
 | UAT-13/14 Apps & guide | `apps-guide.uat.spec.ts` | Hosted apps, cache headers, guide chapters |
 | UAT-15 Chat | `chat.uat.spec.ts` | Mocked stream: tokens, tool calls, error recovery |
+| UAT-22 Browser setup | `browser-setup.uat.spec.ts` | Settings components read live, never downloaded; Download now and the chat bar run on a mocked setup endpoint behind `blockApiWrites` |
 | UAT-16 Accessibility | `accessibility.uat.spec.ts` | axe-core, serious+critical only |
 | UAT-17 Circuit breakers | `breakers.uat.spec.ts` | Registry rows mirrored on the dashboard, grouped by subsystem; read-only |
 | UAT-18 Subagent chips | `subagent-chips.uat.spec.ts` | Stubbed runs and transcripts: status, expand, live poll, close, View all |

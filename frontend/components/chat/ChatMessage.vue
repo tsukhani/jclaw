@@ -6,7 +6,6 @@ import {
   ChevronDownIcon,
   ClipboardIcon,
   ExclamationTriangleIcon,
-  GlobeAltIcon,
   PencilIcon,
   PhotoIcon,
   SpeakerWaveIcon,
@@ -19,7 +18,6 @@ import { formatUsageCost, formatUsageCostTooltip, providerMetricRows } from '~/u
 import { routeClassLabel, routeDescription, routeOf } from '~/utils/model-route'
 import { thinkingHeaderLabel } from '~/utils/thinking'
 import type { VideoJobStatus } from '~/utils/video-job'
-import type { BrowserSetupStatus } from '~/composables/useBrowserSetup'
 import type { Message, MessageAttachment, ScrapeJobRef, ToolCall } from '~/types/api'
 import ChatAttachmentChip from '~/components/chat/ChatAttachmentChip.vue'
 import ChatAudioAttachment from '~/components/chat/ChatAudioAttachment.vue'
@@ -68,9 +66,6 @@ defineProps<{
   videoJobStatus: Record<number, VideoJobStatus>
   imageGenTurnKey: string | null
   imageGenPercent: number | null
-  // Only the main chat page has a browser setup to show; transcripts omit both.
-  browserSetupTurnKey?: string | null
-  browserSetup?: BrowserSetupStatus | null
   tokStatsHoverKey: string | number | null
   runSlice: SubagentRunSlice | null
   runLabel: string
@@ -409,37 +404,6 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
                 :style="{ width: imageGenPercent + '%' }"
               />
             </div>
-          </div>
-        </div>
-        <!-- The browser tool's first-use download, on the turn whose browser call waits on it. -->
-        <div
-          v-if="msg._key === browserSetupTurnKey && browserSetup?.active"
-          class="mt-2 flex items-center gap-2.5 bg-surface-elevated border border-border rounded-xl px-3 py-2 text-xs text-fg-strong"
-          data-testid="browser-setup-progress"
-        >
-          <GlobeAltIcon
-            class="w-4 h-4 shrink-0 text-sky-500"
-            aria-hidden="true"
-          />
-          <div class="flex flex-col gap-1 min-w-0 flex-1">
-            <span class="font-medium">
-              Setting up the browser: {{ browserSetup.step ?? 'preparing' }}…<template v-if="browserSetup.percent != null">
-                {{ browserSetup.percent }}%</template>
-            </span>
-            <div
-              class="h-1 w-full rounded-full bg-border overflow-hidden"
-              role="progressbar"
-              aria-label="Browser setup progress"
-              :aria-valuenow="browserSetup.percent ?? undefined"
-              aria-valuemin="0"
-              aria-valuemax="100"
-            >
-              <div
-                class="h-full bg-sky-500 transition-[width] duration-500"
-                :style="{ width: (browserSetup.percent ?? 0) + '%' }"
-              />
-            </div>
-            <span class="text-fg-muted">A one-time download; later browser calls start straight away.</span>
           </div>
         </div>
         <!-- JCLAW-291: model-output truncation marker. Sits below

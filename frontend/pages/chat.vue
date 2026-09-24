@@ -45,6 +45,7 @@ import { useChatStream } from '~/composables/useChatStream'
 import { useStreamProgress } from '~/composables/useStreamProgress'
 import { findProviderModel, isLocalProvider, modelSupportsTools } from '~/composables/useProviders'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
+import ChatBrowserSetupBar from '~/components/chat/ChatBrowserSetupBar.vue'
 import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import ChatSubagentTranscriptPanel from '~/components/chat/ChatSubagentTranscriptPanel.vue'
@@ -908,8 +909,6 @@ function exportConversation() {
               :video-job-status="videoJobStatus"
               :image-gen-turn-key="imageGenTurnKey"
               :image-gen-percent="imageGenPercent"
-              :browser-setup-turn-key="browserSetupTurnKey"
-              :browser-setup="browserSetup"
               :tok-stats-hover-key="tokStatsHoverKey"
               :run-slice="subagentRunSlices[msgIdx] ?? null"
               :run-label="subagentRunSlices[msgIdx] ? subagentBlockLabel(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
@@ -955,6 +954,10 @@ function exportConversation() {
                 aria-hidden="true"
               >{{ streamProgressElapsed }}</span>
             </div>
+            <ChatBrowserSetupBar
+              v-if="streaming && browserSetupTurnKey && browserSetup?.active"
+              :setup="browserSetup"
+            />
           </div>
         </div>
 

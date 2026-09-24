@@ -5,6 +5,7 @@
 // /api/config rows and neither is seeded, so an absent engine is Playwright.
 import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { BrowserSetupStatus } from '~/composables/useBrowserSetup'
+import { DRIVER_LABELS, browserSetupNeeded, chromiumLabel } from '~/utils/browser-setup'
 
 const { configData, saving, refresh, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
@@ -45,18 +46,7 @@ const { status: setup, start: pollSetup } = useBrowserSetupPolling()
 onMounted(() => pollSetup())
 const { mutate: mutateSetup, errorDetails: setupStartError } = useApiMutation()
 
-const DRIVER_LABELS: Record<BrowserSetupStatus['driverSource'], string> = {
-  bundled: 'Included with this install',
-  preinstalled: 'Provided by the environment',
-  downloaded: 'Downloaded',
-  missing: 'Not downloaded yet',
-  unsupported: 'Not available on this platform',
-}
-const setupNeeded = computed(() => {
-  const s = setup.value
-  if (!s || s.driverSource === 'unsupported') return false
-  return s.driverSource === 'missing' || !s.chromiumInstalled
-})
+const setupNeeded = computed(() => !!setup.value && browserSetupNeeded(setup.value))
 async function downloadNow() {
   const s = await mutateSetup<BrowserSetupStatus>('/api/browser/setup', { method: 'POST' })
   if (s) {
@@ -233,7 +223,7 @@ function saveKey() {
           <span
             class="text-xs text-fg-muted"
             data-testid="browser-chromium-state"
-          >{{ setup ? (setup.chromiumInstalled ? 'Installed' : 'Not downloaded yet') : '—' }}</span>
+          >{{ setup ? chromiumLabel(setup.chromiumInstalled) : '—' }}</span>
         </div>
         <div
           v-if="setup?.active"
