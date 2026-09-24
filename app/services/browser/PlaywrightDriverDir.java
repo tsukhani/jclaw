@@ -80,16 +80,21 @@ public final class PlaywrightDriverDir {
                 EXTRACT_LOCK.unlock();
             }
             Files.createFile(staging.resolve(MARKER));
-            try {
-                Files.move(staging, target, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-                if (!isManaged(target)) throw e;
-            }
+            moveIntoPlace(staging, target);
             return target;
         } catch (URISyntaxException e) {
             throw new IOException(e);
         } finally {
             deleteTree(staging);
+        }
+    }
+
+    // A JVM that loses the rename finds the winner's copy in place and uses it.
+    private static void moveIntoPlace(Path staging, Path target) throws IOException {
+        try {
+            Files.move(staging, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            if (!isManaged(target)) throw e;
         }
     }
 
