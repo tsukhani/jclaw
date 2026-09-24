@@ -1,3 +1,4 @@
+import llm.routing.ReasoningEffort;
 import llm.routing.RouteDecision;
 import llm.routing.RouteDecision.Target;
 import llm.routing.RoutedTurn;
@@ -20,7 +21,7 @@ class RoutedTurnTest extends UnitTest {
     private static final Target FALLBACK = new Target("openrouter", "z-ai/glm-5.3-flash");
 
     private static RouteDecision decision(Target fallback) {
-        return new RouteDecision(TaskClass.CHAT, PRIMARY, fallback, List.of("no task markers"), List.of(),
+        return new RouteDecision(TaskClass.CHAT, ReasoningEffort.LOW, PRIMARY, fallback, List.of("no task markers"), List.of(),
                 false, false, false);
     }
 

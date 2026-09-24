@@ -8,6 +8,7 @@ import java.util.List;
 /**
  * What the router chose for one turn and why (JCLAW-1222).
  *
+ * @param effort      how hard a reasoning model should think, before it is fitted to the chosen model's ladder
  * @param fallback    the next-best candidate on a different provider, or null when none is eligible
  * @param signals     what the classifier matched
  * @param skipped     candidates passed over, each with its reason
@@ -15,7 +16,7 @@ import java.util.List;
  * @param sticky      the previous turn's model was kept to preserve its prompt cache
  * @param relaxed     every candidate was filtered out, so filters were dropped rather than fail the turn
  */
-public record RouteDecision(TaskClass taskClass, Target primary, @Nullable Target fallback,
+public record RouteDecision(TaskClass taskClass, ReasoningEffort effort, Target primary, @Nullable Target fallback,
                             List<String> signals, List<String> skipped,
                             boolean downshifted, boolean sticky, boolean relaxed) {
 

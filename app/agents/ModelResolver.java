@@ -10,7 +10,6 @@ import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import services.ModelOverrideResolver;
 
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -109,12 +108,14 @@ public final class ModelResolver {
      */
     public static @Nullable String resolveThinkingMode(Agent agent, Conversation conv,
                                                        LlmProvider provider) {
-        // The router agent's own thinkingMode belongs to no real model, so a routed turn reasons at
-        // the routed model's middle rung unless the conversation chose a level (or off) itself.
-        if (RoutedTurn.current(conv) != null && !ModelOverrideResolver.hasThinkingOverride(conv)) {
+        // The router agent's own thinkingMode belongs to no real model, so a routed turn reasons at the
+        // effort the router chose for the prompt unless the conversation chose a level (or off) itself.
+        var routed = RoutedTurn.current(conv);
+        if (routed != null && !ModelOverrideResolver.hasThinkingOverride(conv)) {
+            var effort = routed.decision().effort();
             return resolveModelInfo(agent, conv, provider)
                     .filter(ModelInfo::supportsThinking)
-                    .map(m -> middleRung(m.effectiveThinkingLevels()))
+                    .map(m -> effort.fit(m.effectiveThinkingLevels()))
                     .orElse(null);
         }
         var mode = ModelOverrideResolver.thinkingMode(conv, agent);
@@ -138,12 +139,5 @@ public final class ModelResolver {
         var thinking = provider != null ? resolveThinkingMode(agent, conv, provider) : null;
         if (thinking != null) json.addProperty("thinkingMode", thinking);
         return json;
-    }
-
-    /** {@code medium} when advertised, else the ladder's middle entry ({@code low/high/max} → {@code high}). */
-    public static @Nullable String middleRung(List<String> levels) {
-        if (levels.isEmpty()) return null;
-        if (levels.contains("medium")) return "medium";
-        return levels.get(levels.size() / 2);
     }
 }

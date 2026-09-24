@@ -19,6 +19,15 @@ public enum TaskClass {
         return name().toLowerCase(Locale.ROOT);
     }
 
+    /** The effort a reasoning model gets when the keyword rules, not the classifier model, chose the class. */
+    public ReasoningEffort defaultEffort() {
+        return switch (this) {
+            case CHAT, SUMMARIZE -> ReasoningEffort.LOW;
+            case AGENTIC, CODING -> ReasoningEffort.MEDIUM;
+            case REASONING -> ReasoningEffort.HIGH;
+        };
+    }
+
     public static @Nullable TaskClass fromId(@Nullable String id) {
         if (id == null) return null;
         for (var c : values()) {

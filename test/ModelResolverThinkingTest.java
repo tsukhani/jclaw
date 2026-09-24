@@ -1,5 +1,6 @@
 import agents.ModelResolver;
 import llm.ProviderRegistry;
+import llm.routing.ReasoningEffort;
 import llm.routing.RouteDecision;
 import llm.routing.RouteDecision.Target;
 import llm.routing.RoutedTurn;
@@ -74,41 +75,46 @@ class ModelResolverThinkingTest extends UnitTest {
                 "a model without thinking ignores the override rather than sending an unknown level");
     }
 
-    private static String routed(String modelId, Conversation conv) {
+    private static String routed(String modelId, ReasoningEffort effort, Conversation conv) {
         var router = new Agent();
         router.modelProvider = "router";
         router.modelId = "auto";
-        var decision = new RouteDecision(TaskClass.CHAT, new Target(PROVIDER, modelId), null,
+        var decision = new RouteDecision(TaskClass.CHAT, effort, new Target(PROVIDER, modelId), null,
                 List.of("test"), List.of(), false, false, false);
         return RoutedTurn.callWith(decision, conv,
                 () -> ModelResolver.resolveThinkingMode(router, conv, ProviderRegistry.get(PROVIDER)));
     }
 
     @Test
-    void aRoutedReasoningModelThinksAtItsMiddleRung() {
-        assertEquals("medium", routed("defaults", new Conversation()));
-        assertEquals("high", routed("glm", new Conversation()), "no medium on low/high/max: the middle entry");
-        assertEquals("high", routed("thinker", new Conversation()), "low/high: size/2 picks high");
-        assertNull(routed("plain", new Conversation()), "a routed model without thinking stays off");
+    void aRoutedReasoningModelThinksAtTheEffortTheRouterChose() {
+        assertEquals("low", routed("defaults", ReasoningEffort.LOW, new Conversation()));
+        assertEquals("medium", routed("defaults", ReasoningEffort.MEDIUM, new Conversation()));
+        assertEquals("high", routed("defaults", ReasoningEffort.HIGH, new Conversation()));
+        assertNull(routed("plain", ReasoningEffort.HIGH, new Conversation()), "a routed model without thinking stays off");
     }
 
     @Test
-    void aConversationThinkingChoiceBeatsTheRoutedDefault() {
+    void anEffortTheLadderLacksLandsOnTheNearestRung() {
+        assertEquals("low", routed("glm", ReasoningEffort.LOW, new Conversation()));
+        assertEquals("high", routed("glm", ReasoningEffort.MEDIUM, new Conversation()), "low/high/max: medium is the middle");
+        assertEquals("high", routed("glm", ReasoningEffort.HIGH, new Conversation()), "a named rung wins over the top one");
+        assertEquals("high", routed("thinker", ReasoningEffort.MEDIUM, new Conversation()), "low/high: size/2 picks high");
+        assertEquals("max", ReasoningEffort.HIGH.fit(List.of("minimal", "max")), "no high rung: the top one");
+        assertNull(ReasoningEffort.MEDIUM.fit(List.of()));
+    }
+
+    @Test
+    void aConversationThinkingChoiceBeatsTheRoutedEffort() {
         var off = new Conversation();
         off.thinkingModeOverride = Conversation.THINKING_OFF;
-        assertNull(routed("defaults", off));
+        assertNull(routed("defaults", ReasoningEffort.HIGH, off));
 
         var low = new Conversation();
         low.thinkingModeOverride = "low";
-        assertEquals("low", routed("defaults", low));
+        assertEquals("low", routed("defaults", ReasoningEffort.HIGH, low));
 
         var max = new Conversation();
         max.thinkingModeOverride = "max";
-        assertNull(routed("defaults", max), "a level the routed model does not advertise is still dropped");
-    }
-
-    @Test
-    void middleRungOfAnEmptyLadderIsNull() {
-        assertNull(ModelResolver.middleRung(List.of()));
+        assertNull(routed("defaults", ReasoningEffort.HIGH, max), "a level the routed model does not advertise is still dropped");
     }
 }

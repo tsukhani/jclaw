@@ -29,8 +29,15 @@ import java.util.regex.Pattern;
  */
 public final class PromptClassifier {
 
-    /** @param signals what matched, for the decision log and the persisted route; never empty */
-    public record Classification(TaskClass taskClass, List<String> signals) {}
+    /**
+     * @param effort  how hard a reasoning model should think; the class's default unless the classifier model named one
+     * @param signals what matched, for the decision log and the persisted route; never empty
+     */
+    public record Classification(TaskClass taskClass, ReasoningEffort effort, List<String> signals) {
+        public Classification(TaskClass taskClass, List<String> signals) {
+            this(taskClass, taskClass.defaultEffort(), signals);
+        }
+    }
 
     /** A follow-up longer than this is a new request, whatever words it is made of. */
     static final int FOLLOW_UP_MAX_CHARS = 40;

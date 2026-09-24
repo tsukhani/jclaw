@@ -2,6 +2,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmResilience;
 import llm.ProviderRegistry;
+import llm.routing.ReasoningEffort;
 import llm.routing.RouterClassifier;
 import llm.routing.RouterPolicy;
 import llm.routing.RouterPolicy.Candidate;
@@ -96,6 +97,37 @@ class RouterClassifierTest extends UnitTest {
         assertEquals(TaskClass.REASONING, c.taskClass(),
                 "the model's answer wins over the keyword rules, which would have said agentic");
         assertEquals(List.of("classified by " + provider + "/tiny"), c.signals());
+    }
+
+    @Test
+    void theModelsAnswerAlsoSetsTheEffort() {
+        var c = HttpFactories.callWith(canned(200, completion("reasoning high")),
+                () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        assertEquals(TaskClass.REASONING, c.taskClass());
+        assertEquals(ReasoningEffort.HIGH, c.effort());
+
+        var lowReasoning = HttpFactories.callWith(canned(200, completion("{\"class\": \"reasoning\", \"effort\": \"low\"}")),
+                () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        assertEquals(ReasoningEffort.LOW, lowReasoning.effort(), "the model's effort overrides the class default");
+    }
+
+    @Test
+    void aClassWithoutAnEffortTakesTheClassDefault() {
+        var c = HttpFactories.callWith(canned(200, completion("reasoning")),
+                () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        assertEquals(ReasoningEffort.HIGH, c.effort());
+    }
+
+    @Test
+    void theRulesSetTheEffortFromTheClass() {
+        var c = HttpFactories.callWith(canned(200, completion("coding")),
+                () -> RouterClassifier.classify(PROMPT, null, 0, withoutClassifier()));
+        assertEquals(TaskClass.AGENTIC, c.taskClass());
+        assertEquals(ReasoningEffort.MEDIUM, c.effort());
+        assertEquals(ReasoningEffort.LOW, TaskClass.CHAT.defaultEffort());
+        assertEquals(ReasoningEffort.LOW, TaskClass.SUMMARIZE.defaultEffort());
+        assertEquals(ReasoningEffort.MEDIUM, TaskClass.CODING.defaultEffort());
+        assertEquals(ReasoningEffort.HIGH, TaskClass.REASONING.defaultEffort());
     }
 
     @Test

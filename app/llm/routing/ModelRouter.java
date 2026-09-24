@@ -89,7 +89,7 @@ public final class ModelRouter {
         if (!policy.available()) return null;
         var classification = RouterClassifier.classify(
                 request.userMessage(), request.priorClass(), request.priorToolCalls(), policy);
-        return select(policy, classification.taskClass(), classification.signals(), request);
+        return select(policy, classification.taskClass(), classification.effort(), classification.signals(), request);
     }
 
     /**
@@ -104,7 +104,8 @@ public final class ModelRouter {
         var policy = RouterPolicy.load();
         if (!policy.available()) return null;
         var request = new RouteRequest("", null, null, 0, 0, false, false, false);
-        var decision = select(policy, TaskClass.CHAT, List.of("call outside a chat turn"), request);
+        var decision = select(policy, TaskClass.CHAT, TaskClass.CHAT.defaultEffort(),
+                List.of("call outside a chat turn"), request);
         return decision != null ? decision.primary() : null;
     }
 
@@ -156,8 +157,8 @@ public final class ModelRouter {
                 || (PaymentModality.supportedFor(provider.name()).isEmpty() && ProviderLocality.isLocal(provider.name()));
     }
 
-    private static @Nullable RouteDecision select(RouterPolicy policy, TaskClass taskClass, List<String> signals,
-                                                  RouteRequest request) {
+    private static @Nullable RouteDecision select(RouterPolicy policy, TaskClass taskClass, ReasoningEffort effort,
+                                                  List<String> signals, RouteRequest request) {
         var skipped = new ArrayList<String>();
         var own = resolve(policy.candidates(taskClass), skipped);
         var chat = resolve(policy.candidates(TaskClass.CHAT), new ArrayList<>());
@@ -185,7 +186,7 @@ public final class ModelRouter {
                 .findFirst()
                 .map(Choice::target)
                 .orElse(null);
-        return new RouteDecision(taskClass, primary.target(), fallback, signals,
+        return new RouteDecision(taskClass, effort, primary.target(), fallback, signals,
                 List.copyOf(new LinkedHashSet<>(skipped)), eligible.downshifted(), sticky, relaxed);
     }
 

@@ -13,7 +13,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Labels a prompt with its {@link TaskClass}, through a model when the operator has named one
+ * Labels a prompt with its {@link TaskClass} and the {@link ReasoningEffort} it deserves, through a model when the operator has named one
  * ({@code router.classifier.provider} / {@code .model}) and through {@link PromptClassifier}'s local
  * rules otherwise (JCLAW-1222).
  *
@@ -42,8 +42,10 @@ public final class RouterClassifier {
     private static final String ROUTER = "router";
 
     private static final String INSTRUCTIONS = """
-            You route one user message to the model class that should answer it. Reply with exactly one \
-            word and nothing else, from this list:
+            You route one user message to the model class that should answer it, and say how hard that \
+            model should think. Reply with exactly two words and nothing else: the class, then the effort.
+
+            Classes:
 
             chat — greetings, small talk, clarifications, short factual lookups, light writing.
             summarize — a request to summarize, recap, condense or extract key points from material.
@@ -53,9 +55,16 @@ public final class RouterClassifier {
             critique, comparisons, causes, open questions, design trade-offs.
             coding — code, stack traces, debugging, or writing and changing software.
 
-            Choose the single best class. Answer with one word.""";
+            Efforts:
+
+            low — the answer is quick to give: small talk, a lookup, a routine edit.
+            medium — some care is needed: a few steps, a moderate amount of code, a balanced judgement.
+            high — hard: a proof, a subtle bug, a design with real trade-offs, anything easy to get wrong.
+
+            Choose the single best class and effort, e.g. "reasoning high". Answer with two words.""";
 
     private static final Pattern CLASS_WORD = Pattern.compile("(?<![a-z])(chat|summarize|agentic|reasoning|coding)(?![a-z])");
+    private static final Pattern EFFORT_WORD = Pattern.compile("(?<![a-z])(low|medium|high)(?![a-z])");
 
     private RouterClassifier() {}
 
@@ -71,15 +80,22 @@ public final class RouterClassifier {
         var classifier = policy.classifier();
         if (classifier == null) return PromptClassifier.classify(message, priorClass, priorToolCalls);
 
-        var labelled = askModel(message, classifier, policy.classifierTimeoutSeconds());
+        var answer = askModel(message, classifier, policy.classifierTimeoutSeconds());
+        var labelled = parse(answer);
         if (labelled != null) {
-            return new Classification(labelled, List.of("classified by " + classifier.describe()));
+            var effort = parseEffort(answer);
+            return new Classification(labelled, effort != null ? effort : labelled.defaultEffort(),
+                    List.of("classified by " + classifier.describe()));
+        }
+        if (answer != null) {
+            EventLogger.warn(ROUTER, "Classifier %s answered with no class (%s); using the keyword rules"
+                    .formatted(classifier.describe(), answer.isBlank() ? "empty" : abbreviate(answer)));
         }
         return PromptClassifier.classify(message, priorClass, priorToolCalls);
     }
 
     /**
-     * One classification call, or null when it could not produce a class.
+     * The classifier's raw answer, or null when the call itself failed.
      *
      * <p>The request carries exactly two messages — these instructions and the prompt — and no tools.
      * None of the turn's own context reaches it: no assembled system prompt, no standing orders, no
@@ -87,7 +103,7 @@ public final class RouterClassifier {
      * and keeps a classifier on a different provider from becoming a second copy of the conversation.
      * {@code RouterClassifierTest.theClassifierRequestCarriesOnlyItsOwnInstructionAndThePrompt} pins it.
      */
-    private static @Nullable TaskClass askModel(String message, Candidate classifier, int timeoutSeconds) {
+    private static @Nullable String askModel(String message, Candidate classifier, int timeoutSeconds) {
         var provider = ProviderRegistry.get(classifier.provider());
         if (provider == null) {
             EventLogger.warn(ROUTER, "Classifier provider '%s' is not configured; using the keyword rules"
@@ -106,12 +122,7 @@ public final class RouterClassifier {
             return null;
         }
         var answer = firstContent(response);
-        var parsed = parse(answer);
-        if (parsed == null) {
-            EventLogger.warn(ROUTER, "Classifier %s answered with no class (%s); using the keyword rules"
-                    .formatted(classifier.describe(), answer == null ? "empty" : abbreviate(answer)));
-        }
-        return parsed;
+        return answer != null ? answer : "";
     }
 
     /** The first class named anywhere in the answer, so {@code "reasoning."} and {@code {"class":"chat"}} both read. */
@@ -119,6 +130,13 @@ public final class RouterClassifier {
         if (answer == null || answer.isBlank()) return null;
         var m = CLASS_WORD.matcher(answer.toLowerCase(Locale.ROOT));
         return m.find() ? TaskClass.fromId(m.group(1)) : null;
+    }
+
+    /** The first effort named in the answer; null when the model gave only a class. */
+    static @Nullable ReasoningEffort parseEffort(@Nullable String answer) {
+        if (answer == null || answer.isBlank()) return null;
+        var m = EFFORT_WORD.matcher(answer.toLowerCase(Locale.ROOT));
+        return m.find() ? ReasoningEffort.fromId(m.group(1)) : null;
     }
 
     private static @Nullable String firstContent(ChatResponse response) {

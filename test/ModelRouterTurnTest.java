@@ -90,8 +90,8 @@ class ModelRouterTurnTest extends UnitTest {
         assertEquals(1, subscriptionCalls.get());
         assertEquals(0, perTokenCalls.get(), "the per-token model is only the fallback");
         assertTrue(harness.statuses.stream().anyMatch(s -> s.startsWith("{\"route\":") && s.contains(subscription)
-                        && s.contains("\"thinkingMode\":\"high\"")),
-                "the chosen model, and the middle effort it reasons at, precede the reply: " + harness.statuses);
+                        && s.contains("\"thinkingMode\":\"low\"")),
+                "the chosen model, and the low effort a chat prompt gets, precede the reply: " + harness.statuses);
 
         var usage = lastAssistantUsage(convo);
         assertEquals(subscription, usage.get("modelProvider").getAsString());
@@ -99,7 +99,7 @@ class ModelRouterTurnTest extends UnitTest {
         var route = usage.getAsJsonObject("route");
         assertEquals("chat", route.get("class").getAsString());
         assertFalse(route.has("failover"));
-        assertEquals("high", route.get("thinkingMode").getAsString(), "a reload shows the effort the reply ran at");
+        assertEquals("low", route.get("thinkingMode").getAsString(), "a reload shows the effort the reply ran at");
 
         var prior = TurnRouting.readPriorTurn(convo.id, null);
         assertEquals(TaskClass.CHAT, prior.taskClass(), "the next turn reads the route back for stickiness");
@@ -122,7 +122,7 @@ class ModelRouterTurnTest extends UnitTest {
         assertEquals(1, subscriptionCalls.get());
         assertEquals(1, perTokenCalls.get());
         assertTrue(harness.statuses.stream().anyMatch(s -> s.contains("\"failover\":true") && s.contains(perToken)
-                        && s.contains("\"thinkingMode\":\"high\"")),
+                        && s.contains("\"thinkingMode\":\"low\"")),
                 "the switch is announced so the badge can say so: " + harness.statuses);
 
         var usage = lastAssistantUsage(convo);
