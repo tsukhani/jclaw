@@ -182,7 +182,10 @@ RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH}
     gradle --no-daemon playBundle -PtargetArch=${TARGETARCH} && \
     mkdir /staging && \
     unzip -q dist/jclaw-bundle.zip -d /staging && \
-    rm dist/jclaw-bundle.zip
+    rm dist/jclaw-bundle.zip && \
+    mkdir /pw-driver-src && mv /staging/jclaw/lib/driver-bundle-*.jar /pw-driver-src/
+# driver-bundle carries Node.js for all five Playwright platforms (~194 MB);
+# chromium-stage keeps only the target's, so the runtime image never sees the jar.
 
 # ── Stage 2: Pre-install Chromium on a Playwright-supported base ────────────
 # Playwright's CLI fingerprints the OS via /etc/os-release + uname and
@@ -197,13 +200,27 @@ RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH}
 # browser launches.
 FROM azul/zulu-openjdk:25.0.3 AS chromium-stage
 
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+ARG TARGETARCH
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
+    PLAYWRIGHT_DRIVER_DIR=/opt/pw-driver
 
 # Only the Playwright JARs are needed; rest of the bundle is dead weight
 # in this stage.
 COPY --from=bundle-stage /staging/jclaw/lib/ /tmp/lib/
+COPY --from=bundle-stage /pw-driver-src/ /tmp/pw-driver-src/
 
-RUN java -cp "$(echo /tmp/lib/playwright-*.jar /tmp/lib/driver-*.jar | tr ' ' ':')" \
+# The single-platform driver: the target's node from driver-bundle plus the JS
+# package from the driver jar. `install chromium` runs through it with
+# driver-bundle off the classpath, so a bad extraction fails the image build.
+RUN case "$TARGETARCH" in amd64) plat=linux ;; arm64) plat=linux-arm64 ;; \
+        *) echo "no Playwright driver for $TARGETARCH" >&2; exit 1 ;; esac && \
+    mkdir -p /tmp/x "$PLAYWRIGHT_DRIVER_DIR" && cd /tmp/x && \
+    jar xf /tmp/pw-driver-src/driver-bundle-*.jar "driver/$plat/node" && \
+    jar xf "$(ls /tmp/lib/driver-[0-9]*.jar)" driver/package && \
+    mv "driver/$plat/node" "$PLAYWRIGHT_DRIVER_DIR/node" && \
+    mv driver/package "$PLAYWRIGHT_DRIVER_DIR/package" && \
+    chmod 755 "$PLAYWRIGHT_DRIVER_DIR/node" && cd / && rm -rf /tmp/x && \
+    java -cp "$(echo /tmp/lib/playwright-*.jar /tmp/lib/driver-[0-9]*.jar | tr ' ' ':')" \
         com.microsoft.playwright.CLI install chromium
 
 # ── Stage 3: Runtime on Ubuntu 26.04 + Zulu 25 JRE ──────────────────────────
@@ -278,6 +295,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
 ENV JAVA_HOME=/usr/lib/jvm/zulu25 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_DRIVER_DIR=/opt/pw-driver \
     JCLAW_CONTAINER=1
 
 # Chromium browser tree (~150 MB). Sourced from chromium-stage, which
@@ -285,6 +303,7 @@ ENV JAVA_HOME=/usr/lib/jvm/zulu25 \
 # dep version. Placed BEFORE the bundle COPY so a typical source-only
 # iteration doesn't pay the 150 MB COPY cost.
 COPY --from=chromium-stage /opt/pw-browsers /opt/pw-browsers
+COPY --from=chromium-stage /opt/pw-driver /opt/pw-driver
 
 # Entrypoint script. Cache hits unless docker-entrypoint.sh changes.
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
