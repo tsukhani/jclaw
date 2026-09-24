@@ -131,7 +131,8 @@ public final class BrowserSetup {
     // ── Is Chromium already installed? ────────────────────────────────────────
     // `install chromium` fetches these three; each finished one gets an INSTALLATION_COMPLETE marker
     // in <browsers>/<name>-<revision>/, with the revision this Playwright expects in its browsers.json.
-    private static final List<String> CHROMIUM_SET = List.of("chromium", "chromium-headless-shell", "ffmpeg");
+    private static final String PLAYWRIGHT_CACHE_DIR = "ms-playwright";
+    private static final List<String> CHROMIUM_SET =List.of("chromium", "chromium-headless-shell", "ffmpeg");
 
     public static boolean chromiumInstalled() {
         var root = browsersPath(System.getenv(), System.getProperty("os.name", ""), System.getProperty("user.home", ""));
@@ -154,11 +155,11 @@ public final class BrowserSetup {
         if (os.contains("windows")) {
             var local = env.get("LOCALAPPDATA");
             return (local != null && !local.isBlank() ? Path.of(local) : Path.of(home, "AppData", "Local"))
-                    .resolve("ms-playwright");
+                    .resolve(PLAYWRIGHT_CACHE_DIR);
         }
-        if (os.contains("mac os x")) return Path.of(home, "Library", "Caches", "ms-playwright");
+        if (os.contains("mac os x")) return Path.of(home, "Library", "Caches", PLAYWRIGHT_CACHE_DIR);
         var xdg = env.get("XDG_CACHE_HOME");
-        return (xdg != null && !xdg.isBlank() ? Path.of(xdg) : Path.of(home, ".cache")).resolve("ms-playwright");
+        return (xdg != null && !xdg.isBlank() ? Path.of(xdg) : Path.of(home, ".cache")).resolve(PLAYWRIGHT_CACHE_DIR);
     }
 
     /** The revisions the driver jar's browsers.json pins, by browser name. */
@@ -172,7 +173,7 @@ public final class BrowserSetup {
                 out.put(o.get("name").getAsString(), o.get("revision").getAsString());
             }
             return out;
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException _) {
             return Map.of();
         }
     }

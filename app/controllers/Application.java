@@ -1,5 +1,6 @@
 package controllers;
 
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.mvc.Controller;
 
@@ -13,9 +14,10 @@ public class Application extends Controller {
     private static final String HTML_CONTENT_TYPE_PREFIX = "text/html; charset=";
     private static final String CACHE_CONTROL = "Cache-Control";
     private static final String NO_CACHE = "no-cache";
+    private static final String INDEX_HTML = "index.html";
 
     public static void index() {
-        File spaIndex = Play.getFile("public/spa/index.html");
+        File spaIndex = Play.getFile("public/spa/" + INDEX_HTML);
         if (spaIndex.exists()) {
             // The SPA shell references content-hashed _nuxt/ chunks, so it MUST always
             // revalidate — otherwise the browser keeps a cached index.html pointing at
@@ -93,17 +95,13 @@ public class Application extends Controller {
             if (path != null && !path.contains("..")) {
                 File target = new File(appsRoot, path);
                 if (target.isDirectory()) {
-                    target = new File(target, "index.html");
+                    target = new File(target, INDEX_HTML);
                 }
-                File appDir = target.getParentFile();
-                // The slug check keeps a hand-made directory name out of the HTML AppPwa injects.
-                var app = appDir.getParentFile().getCanonicalPath().equals(appsRoot.getCanonicalPath())
-                        && ApiAppsController.SLUG.matcher(appDir.getName()).matches()
-                        ? ApiAppsController.readApp(appDir.toPath()) : null;
+                var app = registeredApp(appsRoot, target.getParentFile());
                 if (target.exists() && target.isFile()
                         && target.getCanonicalPath().startsWith(appsRoot.getCanonicalPath() + File.separator)) {
                     response.setHeader(CACHE_CONTROL, NO_CACHE);
-                    if (app != null && target.getName().equals("index.html")) {
+                    if (app != null && target.getName().equals(INDEX_HTML)) {
                         // Lenient decode: a stray invalid byte must not turn the app into a 404.
                         var html = new String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8);
                         renderHtml(AppPwa.inject(html, app, params.get("install") != null));
@@ -118,6 +116,13 @@ public class Application extends Controller {
             }
         } catch (IOException _) {}
         notFound();
+    }
+
+    // The slug check keeps a hand-made directory name out of the HTML AppPwa injects.
+    private static ApiAppsController.@Nullable AppEntry registeredApp(File appsRoot, File appDir) throws IOException {
+        return appDir.getParentFile().getCanonicalPath().equals(appsRoot.getCanonicalPath())
+                && ApiAppsController.SLUG.matcher(appDir.getName()).matches()
+                ? ApiAppsController.readApp(appDir.toPath()) : null;
     }
 
     /**
@@ -139,7 +144,7 @@ public class Application extends Controller {
             }
         } catch (IOException _) {}
 
-        File index = new File(spaRoot, "index.html");
+        File index = new File(spaRoot, INDEX_HTML);
         if (!index.exists()) {
             notFound("SPA not built. Run: cd frontend && pnpm generate, then copy .output/public/* to public/spa/");
         }

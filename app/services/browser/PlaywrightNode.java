@@ -42,25 +42,33 @@ public final class PlaywrightNode {
      */
     public record Build(String platform, String url, String sha256, String entry) {}
 
-    private static Build official(String platform, String dist, String sha256, String binary) {
+    private static final String MAC_ARM64 = "mac-arm64";
+    private static final String MAC = "mac";
+    private static final String LINUX_ARM64 = "linux-arm64";
+    private static final String LINUX = "linux";
+    private static final String WIN32_X64 = "win32_x64";
+
+    private static Build official(String platform, String dist, String sha256) {
         var dir = "node-v" + VERSION + "-" + dist;
-        var archive = dir + (dist.startsWith("win") ? ".zip" : ".tar.xz");
-        return new Build(platform, "https://nodejs.org/dist/v" + VERSION + "/" + archive, sha256, dir + "/" + binary);
+        var windows = dist.startsWith("win");
+        var archive = dir + (windows ? ".zip" : ".tar.xz");
+        return new Build(platform, "https://nodejs.org/dist/v" + VERSION + "/" + archive, sha256,
+                dir + (windows ? "/node.exe" : "/bin/node"));
     }
 
     // From https://nodejs.org/dist/v24.21.0/SHASUMS256.txt. Pinned here rather than fetched beside
     // the archive, so a compromised mirror cannot vouch for its own download.
     private static final Map<String, Build> BUILDS = Map.of(
-            "mac-arm64", official("mac-arm64", "darwin-arm64",
-                    "6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe", "bin/node"),
-            "mac", official("mac", "darwin-x64",
-                    "0ae5a24c24bb7d015cd816c5036b3f90f2945aa872fcf54e58da054753b3a299", "bin/node"),
-            "linux-arm64", official("linux-arm64", "linux-arm64",
-                    "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2", "bin/node"),
-            "linux", official("linux", "linux-x64",
-                    "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6", "bin/node"),
-            "win32_x64", official("win32_x64", "win-x64",
-                    "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541", "node.exe"));
+            MAC_ARM64, official(MAC_ARM64, "darwin-arm64",
+                    "6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe"),
+            MAC, official(MAC, "darwin-x64",
+                    "0ae5a24c24bb7d015cd816c5036b3f90f2945aa872fcf54e58da054753b3a299"),
+            LINUX_ARM64, official(LINUX_ARM64, "linux-arm64",
+                    "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2"),
+            LINUX, official(LINUX, "linux-x64",
+                    "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"),
+            WIN32_X64, official(WIN32_X64, "win-x64",
+                    "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541"));
 
     /** The archives are 26-36 MB; the hash is only known once the last byte arrives. */
     static final long MAX_ARCHIVE_BYTES = 200L * 1024 * 1024;
@@ -78,9 +86,9 @@ public final class PlaywrightNode {
     public static @Nullable String platform(String osName, String osArch) {
         var name = osName.toLowerCase(Locale.ROOT);
         var arm = osArch.toLowerCase(Locale.ROOT).equals("aarch64");
-        if (name.contains("windows")) return "win32_x64";
-        if (name.contains("linux")) return arm ? "linux-arm64" : "linux";
-        if (name.contains("mac os x")) return arm ? "mac-arm64" : "mac";
+        if (name.contains("windows")) return WIN32_X64;
+        if (name.contains("linux")) return arm ? LINUX_ARM64 : LINUX;
+        if (name.contains("mac os x")) return arm ? MAC_ARM64 : MAC;
         return null;
     }
 
@@ -138,7 +146,7 @@ public final class PlaywrightNode {
             fetch(build, archive, onPercent);
             extract(build, archive, staged);
             if (!build.platform().startsWith("win")) {
-                Files.setPosixFilePermissions(staged, PosixFilePermissions.fromString("rwxr-xr-x"));
+                Files.setPosixFilePermissions(staged, PosixFilePermissions.fromString("rwx------"));
             }
             var target = installedNode(cacheRoot, build.platform());
             Files.move(staged, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
