@@ -507,7 +507,7 @@ public final class SsrfGuard {
      * edge cases (octal, mixed notation) correctly.
      *
      * <p>Public because {@code tools.BrowserScreenProxy} asks it the same question: a permitted
-     * origin is honoured without a guard check, so it must be an address and never a name.
+     * origin is honored without a guard check, so it must be an address and never a name.
      */
     public static boolean isLikelyIpLiteral(@NonNull String host) {
         if (host.startsWith("[") && host.endsWith("]")) return true; // [::1]

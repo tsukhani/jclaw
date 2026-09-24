@@ -62,7 +62,7 @@ import java.util.Set;
  *
  * <p>The gate runs on {@link HttpUrl#encodedPath()} rather than on the model's string, so a
  * path cannot resolve past it on its way out -- {@code /api/skills/x/files/../../../logs} left
- * as {@code /api/logs} when checked raw, and normalising also keeps a path from escaping
+ * as {@code /api/logs} when checked raw, and normalizing also keeps a path from escaping
  * {@code /api/} into the routes file's {@code {controller}/{action}} catch-all (JCLAW-1227).
  * Catalog text comes from the Swagger {@code @Operation} summary and {@code @RequestBody}
  * schema, synthesized from the action name and request DTO when those are absent.

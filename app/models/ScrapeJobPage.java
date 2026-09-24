@@ -51,7 +51,7 @@ public class ScrapeJobPage extends Model {
     @Column(nullable = false, length = 2048)
     public String url;
 
-    /** The URL the crawl queued, which is how a resumed crawl recognises the page. */
+    /** The URL the crawl queued, which is how a resumed crawl recognizes the page. */
     @Column(name = "requested_url", length = 2048)
     public String requestedUrl;
 

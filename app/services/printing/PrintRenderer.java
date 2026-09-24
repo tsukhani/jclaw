@@ -26,7 +26,7 @@ import java.util.List;
  * rejects {@code text/plain} outright and has no PDF interpreter. Sending the
  * source bytes and hoping is how a print job silently produces a blank page.
  *
- * <p>So JClaw rasterises first and lets {@link PrintFormatNegotiator} choose an
+ * <p>So JClaw rasterizes first and lets {@link PrintFormatNegotiator} choose an
  * encoding the printer actually claims to support. Rendering is deliberately
  * plain: this is a utility print path, not a layout engine.
  */
@@ -107,7 +107,7 @@ public final class PrintRenderer {
     }
 
     /**
-     * Rasterise {@code document} into one bitmap per page.
+     * Rasterize {@code document} into one bitmap per page.
      *
      * @param document     the source bytes
      * @param sourceFormat MIME type of {@code document}
@@ -120,7 +120,7 @@ public final class PrintRenderer {
     }
 
     /**
-     * Rasterise, optionally straight to 8-bit grayscale.
+     * Rasterize, optionally straight to 8-bit grayscale.
      *
      * <p>The gray path is not just smaller on the wire — it is a quarter of the
      * heap. An A4 page at 600 DPI is 4961x7016; as {@code TYPE_INT_RGB} that is

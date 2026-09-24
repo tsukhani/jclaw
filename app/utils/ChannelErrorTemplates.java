@@ -18,7 +18,7 @@ import java.util.Map;
  * its billing lapsed. They get {@link #forChannelReader}; the operator's remedy goes to the event
  * log through {@link #operatorDetail}.
  *
- * <p>Nothing static registers here: the useful templates are parameterised by the failing call, so
+ * <p>Nothing static registers here: the useful templates are parameterized by the failing call, so
  * {@link #forTurnFailure} builds them and {@link ErrorTemplates#forCode} falls back for the codes.
  */
 public final class ChannelErrorTemplates {
@@ -86,7 +86,7 @@ public final class ChannelErrorTemplates {
     }
 
     /**
-     * Render for a channel, honouring what it can display and how much of it.
+     * Render for a channel, honoring what it can display and how much of it.
      *
      * <p>Truncation takes from the middle, never the end: cutting the tail drops the retry
      * instruction, the only part the reader acts on. If even the first and last sections do

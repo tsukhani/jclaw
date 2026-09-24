@@ -58,7 +58,7 @@ public final class ScrapeOutput {
     /**
      * Read {@code format}, {@code extract} and {@code metadata} from a call's arguments.
      *
-     * @param fallback the format when the call names none, which lets {@code web_fetch} honour its
+     * @param fallback the format when the call names none, which lets {@code web_fetch} honor its
      *                 older {@code mode} argument
      * @throws IllegalArgumentException with an agent-facing message naming the bad argument
      */

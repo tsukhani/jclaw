@@ -27,7 +27,7 @@ import java.util.Set;
  * no interpreter for ASCII.
  *
  * <p>So the rule is: send the source untouched when the printer claims to
- * understand it, and otherwise rasterise and re-encode into something it does.
+ * understand it, and otherwise rasterize and re-encode into something it does.
  */
 public final class PrintFormatNegotiator {
 
@@ -47,7 +47,7 @@ public final class PrintFormatNegotiator {
      *
      * @param document    bytes to transmit
      * @param format      MIME type to declare
-     * @param converted   whether the source was rasterised rather than passed through
+     * @param converted   whether the source was rasterized rather than passed through
      * @param explanation one line for the operator; null when the source went as-is
      */
     public record Prepared(byte[] document, String format, boolean converted, @Nullable String explanation,
@@ -104,7 +104,7 @@ public final class PrintFormatNegotiator {
             // A Canon E3300 advertising image/jpeg accepted a progressive one with
             // successful-ok, fed the sheet and printed nothing: the advertisement
             // covers the MIME type, not every encoding of it. Re-encode rather than
-            // rasterise — a photo rasterised to A4 at 600 DPI is tens of MB because
+            // rasterize — a photo rasterized to A4 at 600 DPI is tens of MB because
             // RLE barely compresses photographic content, which timed the IPP upload
             // out at 60s and fell back to RAW. Baseline keeps the payload at roughly
             // source size and the printer renders it correctly.

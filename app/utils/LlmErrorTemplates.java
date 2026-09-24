@@ -173,7 +173,7 @@ public final class LlmErrorTemplates {
     }
 
     /**
-     * Nothing static to register: a template here is parameterised by the call that produced it —
+     * Nothing static to register: a template here is parameterized by the call that produced it —
      * the provider actually used, the model actually requested, the retry-after the provider
      * returned — so {@link ErrorTemplates#forCode} falls back for these codes by design. Kept so
      * this file stays in the registry's one-file-per-surface merge (JCLAW-60).
