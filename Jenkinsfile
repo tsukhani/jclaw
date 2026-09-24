@@ -376,6 +376,15 @@ pipeline {
                 // is worse than a red build.
                 sh 'test -f dist/jclaw.zip && test -f dist/jclaw-bundle.zip'
 
+                // Guard the debug-strip: both zips must ship precompiled classes with
+                // no LocalVariableTable (javap-based, bin/verify-debug-stripped.sh). A
+                // change that silently disabled -Pjclaw.stripDebugInfo or the
+                // stripPrecompiledDebugInfo task would otherwise publish decompilable
+                // classes on a green build. Runs before archiveArtifacts so a
+                // non-stripped artifact is never archived or released.
+                sh 'bin/verify-debug-stripped.sh dist/jclaw-bundle.zip'
+                sh 'bin/verify-debug-stripped.sh dist/jclaw.zip'
+
                 // Both zips ride the same archiveArtifacts call, so the bundle
                 // falls under the job's artifact retention
                 // (artifactNumToKeepStr: '5' in options.buildDiscarder) exactly
