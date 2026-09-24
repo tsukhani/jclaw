@@ -211,6 +211,21 @@ const {
   startImageProgressPolling,
 } = useMediaGenPolling(messages, streaming)
 
+// The browser tool's first-use download (driver Node.js + Chromium), shown on the turn whose
+// browser call is waiting on it. The grace covers the gap between the "Using tool: browser"
+// status and the backend marking the setup in flight.
+const { status: browserSetup, start: startBrowserSetup, stop: stopBrowserSetupPolling } = useBrowserSetupPolling()
+const browserSetupTurnKey = ref<string | null>(null)
+function startBrowserSetupPolling() {
+  startBrowserSetup(5000)
+}
+watch(streaming, (on) => {
+  if (!on) {
+    stopBrowserSetupPolling()
+    browserSetupTurnKey.value = null
+  }
+})
+
 onMounted(() => {
   // Capture phase: image load errors don't bubble, so a document-level listener
   // only sees them in capture. The handler is scoped to `.prose-chat`.
@@ -480,6 +495,8 @@ const {
   focusInput,
   imageGenTurnKey,
   startImageProgressPolling,
+  browserSetupTurnKey,
+  startBrowserSetupPolling,
   startVideoPolling,
   reconcileMessageIds,
   refreshConversations,
@@ -891,6 +908,8 @@ function exportConversation() {
               :video-job-status="videoJobStatus"
               :image-gen-turn-key="imageGenTurnKey"
               :image-gen-percent="imageGenPercent"
+              :browser-setup-turn-key="browserSetupTurnKey"
+              :browser-setup="browserSetup"
               :tok-stats-hover-key="tokStatsHoverKey"
               :run-slice="subagentRunSlices[msgIdx] ?? null"
               :run-label="subagentRunSlices[msgIdx] ? subagentBlockLabel(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"

@@ -74,6 +74,8 @@ export interface UseChatStreamDeps {
   focusInput: () => void
   imageGenTurnKey: Ref<string | null>
   startImageProgressPolling: () => void
+  browserSetupTurnKey: Ref<string | null>
+  startBrowserSetupPolling: () => void
   startVideoPolling: () => void
   reconcileMessageIds: () => Promise<void>
   /** JCLAW-1196: picks made on a fresh chat, carried by the message that creates its conversation. */
@@ -141,6 +143,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     attachedFiles, attachError, attachmentPreviews, uploadAttachments,
     scrollToBottom, focusInput,
     imageGenTurnKey, startImageProgressPolling, startVideoPolling,
+    browserSetupTurnKey, startBrowserSetupPolling,
     reconcileMessageIds, refreshConversations, refreshAgents,
   } = deps
 
@@ -269,6 +272,12 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   function handleStreamStatusEvent(ctx: StreamContext, event: { content?: string }) {
     const content = event.content
     if (content && (tryApplyUsageFromStatusContent(ctx, content) || tryApplyRouteFromStatusContent(ctx, content))) return
+    // Sent just before the call runs, whereas its tool_call frame arrives only once it has finished —
+    // too late to show a first-use download while it happens. Scoped to this turn, like the image bar.
+    if (content === 'Using tool: browser') {
+      browserSetupTurnKey.value = messages.value[ctx.assistantIdx]?._key ?? null
+      startBrowserSetupPolling()
+    }
     streamStatus.value = content ?? ''
   }
 

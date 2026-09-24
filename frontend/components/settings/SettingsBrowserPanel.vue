@@ -4,6 +4,7 @@
 // Jev, which takes a URL and a goal and chooses each step itself. Both keys are ordinary
 // /api/config rows and neither is seeded, so an absent engine is Playwright.
 import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import type { BrowserSetupStatus } from '~/composables/useBrowserSetup'
 
 const { configData, saving, refresh, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
@@ -38,6 +39,32 @@ function startEditKey() {
   editingKey.value = API_KEY
   editValue.value = ''
 }
+// The browser tool's driver (Node.js) and Chromium. A bundle install downloads them on the first
+// browser call; downloading here spares that call the wait. Polls only while a setup runs.
+const { status: setup, start: pollSetup } = useBrowserSetupPolling()
+onMounted(() => pollSetup())
+const { mutate: mutateSetup, errorDetails: setupStartError } = useApiMutation()
+
+const DRIVER_LABELS: Record<BrowserSetupStatus['driverSource'], string> = {
+  bundled: 'Included with this install',
+  preinstalled: 'Provided by the environment',
+  downloaded: 'Downloaded',
+  missing: 'Not downloaded yet',
+  unsupported: 'Not available on this platform',
+}
+const setupNeeded = computed(() => {
+  const s = setup.value
+  if (!s || s.driverSource === 'unsupported') return false
+  return s.driverSource === 'missing' || !s.chromiumInstalled
+})
+async function downloadNow() {
+  const s = await mutateSetup<BrowserSetupStatus>('/api/browser/setup', { method: 'POST' })
+  if (s) {
+    setup.value = s
+    pollSetup()
+  }
+}
+
 // Saving the editor untouched would store a blank key over the real one, so it cancels instead.
 function saveKey() {
   if (!editValue.value.trim()) editingKey.value = null
@@ -175,5 +202,85 @@ function saveKey() {
         />
       </div>
     </template>
+
+    <section
+      class="space-y-2"
+      aria-labelledby="browser-components-heading"
+    >
+      <h3
+        id="browser-components-heading"
+        class="text-xs font-medium text-fg-muted"
+      >
+        Browser components
+      </h3>
+      <p class="text-xs text-fg-muted">
+        The browser tool runs on a driver and Chromium installed on this machine. Any that are missing
+        download the first time an agent uses the browser, delaying that reply by a few minutes.
+        Download them now to skip the wait.
+      </p>
+      <div class="bg-surface-elevated border border-border divide-y divide-border">
+        <div class="px-4 py-2.5 flex items-center gap-3">
+          <span class="flex-1 text-sm text-fg-primary">
+            Driver <span class="text-xs text-fg-muted">Node.js {{ setup?.nodeVersion ?? '' }}</span>
+          </span>
+          <span
+            class="text-xs text-fg-muted"
+            data-testid="browser-driver-state"
+          >{{ setup ? DRIVER_LABELS[setup.driverSource] : '—' }}</span>
+        </div>
+        <div class="px-4 py-2.5 flex items-center gap-3">
+          <span class="flex-1 text-sm text-fg-primary">Chromium</span>
+          <span
+            class="text-xs text-fg-muted"
+            data-testid="browser-chromium-state"
+          >{{ setup ? (setup.chromiumInstalled ? 'Installed' : 'Not downloaded yet') : '—' }}</span>
+        </div>
+        <div
+          v-if="setup?.active"
+          class="px-4 py-2.5 flex items-center gap-3"
+          data-testid="browser-setup-progress"
+        >
+          <span class="flex-1 text-xs text-fg-strong">{{ setup.step ?? 'Preparing' }}…</span>
+          <div
+            class="w-32 h-2 bg-muted border border-input overflow-hidden"
+            role="progressbar"
+            aria-label="Browser setup progress"
+            :aria-valuenow="setup.percent ?? undefined"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <div
+              class="h-full bg-emerald-600 transition-[width] duration-300"
+              :style="{ width: (setup.percent ?? 0) + '%' }"
+            />
+          </div>
+          <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
+            {{ setup.percent != null ? setup.percent + '%' : '' }}
+          </span>
+        </div>
+        <div
+          v-else-if="setupNeeded"
+          class="px-4 py-2.5 flex items-center justify-end"
+        >
+          <button
+            type="button"
+            class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+            data-testid="browser-setup-download"
+            @click="downloadNow"
+          >
+            Download now
+          </button>
+        </div>
+        <p
+          v-if="setup?.error && !setup.active"
+          class="px-4 py-2.5 text-xs text-red-700 dark:text-red-400"
+          role="alert"
+          data-testid="browser-setup-error"
+        >
+          {{ setup.error }}
+        </p>
+      </div>
+      <ApiErrorAlert :error="setupStartError" />
+    </section>
   </div>
 </template>

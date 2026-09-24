@@ -50,6 +50,8 @@ function makeDeps(over: Partial<UseChatStreamDeps> = {}) {
     focusInput: vi.fn(),
     imageGenTurnKey: ref<string | null>(null),
     startImageProgressPolling: vi.fn(),
+    browserSetupTurnKey: ref<string | null>(null),
+    startBrowserSetupPolling: vi.fn(),
     startVideoPolling: vi.fn(),
     reconcileMessageIds: vi.fn(async () => {}),
     refreshConversations: vi.fn(),
@@ -121,6 +123,23 @@ describe('useChatStream', () => {
     expect(deps.scrollToBottom).toHaveBeenCalled()
     expect(deps.refreshConversations).toHaveBeenCalled()
     expect(deps.refreshAgents).toHaveBeenCalled()
+  })
+
+  it('starts browser-setup polling on the turn that calls the browser, before the call finishes', async () => {
+    const deps = makeDeps({ input: ref('open the page') })
+    streamWith([
+      'data: {"type":"init","conversationId":42}\n',
+      'data: {"type":"status","content":"Using tool: web_fetch"}\n',
+      'data: {"type":"status","content":"Using tool: browser"}\n',
+      'data: {"type":"complete","content":"done"}\n',
+    ])
+    const { api } = await mountStream(deps)
+    await api.sendMessage()
+    await flushPromises()
+
+    // Once, for the browser status only — web_fetch never downloads a browser.
+    expect(deps.startBrowserSetupPolling).toHaveBeenCalledTimes(1)
+    expect(deps.browserSetupTurnKey.value).toBe(deps.messages.value[1]!._key)
   })
 
   it('sends fresh-chat picks with the first message and never with a follow-up (JCLAW-1196)', async () => {

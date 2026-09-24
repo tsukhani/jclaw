@@ -183,9 +183,12 @@ RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH}
     mkdir /staging && \
     unzip -q dist/jclaw-bundle.zip -d /staging && \
     rm dist/jclaw-bundle.zip && \
-    mkdir /pw-driver-src && mv /staging/jclaw/lib/driver-bundle-*.jar /pw-driver-src/
-# driver-bundle carries Node.js for all five Playwright platforms (~194 MB);
-# chromium-stage keeps only the target's, so the runtime image never sees the jar.
+    mkdir /pw-driver-src && \
+    pw=$(ls /staging/jclaw/lib | sed -n 's/^playwright-\([0-9.]*\)\.jar$/\1/p') && \
+    cp "$(find /root/.gradle/caches/modules-2 -name "driver-bundle-$pw.jar" | head -n 1)" /pw-driver-src/
+# The bundle ships without driver-bundle (Node.js for all five Playwright platforms, ~194 MB), so
+# chromium-stage takes the target's node from the copy Gradle resolved into its cache — the one
+# matching the bundle's playwright jar. An empty find fails the cp, and with it the build.
 
 # ── Stage 2: Pre-install Chromium on a Playwright-supported base ────────────
 # Playwright's CLI fingerprints the OS via /etc/os-release + uname and

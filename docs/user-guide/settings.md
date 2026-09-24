@@ -597,6 +597,20 @@ Chooses what drives the `browser` tool, for every agent at once.
 
 With Jev, every step sends TypeSafe AI the goal, the page's address and title, what is visible on it (its text, element labels and form values, but not hidden password fields) and the text typed earlier in the run, and TypeSafe may record or retain them. Keep Playwright for pages whose content must not leave this instance. Switching back to Playwright keeps the key, so you can switch again without re-entering it. The key is refused if it contains spaces or characters outside printable ASCII, and saving the key editor without typing anything leaves the stored key as it was.
 
+### Browser components
+
+The `browser` tool needs two things on this machine: a driver, which is a copy of Node.js that Playwright runs, and Chromium. The panel shows where each one stands.
+
+| Driver status | Meaning |
+|---|---|
+| Included with this install | A developer checkout or a source install already carries every platform's driver. |
+| Provided by the environment | The Docker image, or `PLAYWRIGHT_DRIVER_DIR` or `PLAYWRIGHT_NODEJS_PATH` set by you, supplies it. |
+| Downloaded | Fetched earlier into `data/playwright-node/`. |
+| Not downloaded yet | The release bundle ships without one; it downloads when first needed. |
+| Not available on this platform | Playwright has no driver for this operating system. |
+
+Anything missing downloads the first time an agent uses the browser: the official Node.js release from nodejs.org, checked against a hash built into JClaw, then Chromium from Playwright's own servers. Together that is roughly 300 MB, so that first reply waits a few minutes, and the chat shows a progress bar under it while it does. **Download now** fetches both ahead of time, with the same progress shown here. A download needs access to nodejs.org and Playwright's download servers; on a machine without it, set `PLAYWRIGHT_NODEJS_PATH` to a Node.js you have installed. If a download fails, the panel says why and offers the button again.
+
 ## Tasks
 
 Three knobs for the [Tasks](/guide#tasks) subsystem:

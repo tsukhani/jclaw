@@ -18,6 +18,8 @@ import models.Agent;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
+import services.browser.BrowserSetup;
+import services.browser.PlaywrightNode;
 import tools.jev.JevPage;
 import tools.jev.JevRun;
 import tools.jev.JevSettings;
@@ -27,6 +29,7 @@ import utils.SsrfGuard;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -545,7 +548,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             } catch (IOException e) {
                 throw new IllegalStateException("the browser's network screen could not start: " + e.getMessage(), e);
             }
-            ensureBrowserInstalled();
+            ensureBrowserReady();
             var driver = startDriver();
             playwright = driver.playwright();
             if (driver.process() == null && JevSettings.active()) {
@@ -679,8 +682,11 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         DRIVER_LAUNCH_LOCK.lock();
         try {
             var before = ProcessHandle.current().children().map(ProcessHandle::pid).collect(Collectors.toSet());
-            var playwright = Playwright.create(new Playwright.CreateOptions()
-                    .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+            var env = new HashMap<String, String>();
+            env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
+            var node = BrowserSetup.driver().node();
+            if (node != null) env.put("PLAYWRIGHT_NODEJS_PATH", node.toString());
+            var playwright = Playwright.create(new Playwright.CreateOptions().setEnv(env));
             var drivers = ProcessHandle.current().children()
                     .filter(p -> !before.contains(p.pid()))
                     .filter(p -> p.info().arguments().map(a -> List.of(a).contains("run-driver")).orElse(false))
@@ -773,6 +779,76 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     }
 
     /**
+     * First-use setup: the Playwright driver's Node.js, then Chromium. Both steps are no-ops once
+     * done, and one lock serialises them, so concurrent sessions and the Settings button share a
+     * single download. Throws {@link IllegalStateException} when the driver cannot be obtained.
+     */
+    public static void ensureBrowserReady() {
+        INSTALL_LOCK.lock();
+        try {
+            // Only real work marks a setup in flight, so a routine launch never flashes a progress bar.
+            if (setupNeeded()) BrowserSetup.begin();
+            try {
+                ensureDriver();
+                ensureBrowserInstalled();
+            } finally {
+                if (BrowserSetup.active()) BrowserSetup.end();
+            }
+        } finally {
+            INSTALL_LOCK.unlock();
+        }
+    }
+
+    private static boolean setupNeeded() {
+        return BrowserSetup.driver().source() == PlaywrightNode.Source.MISSING
+                || (!browserInstalled && !chromiumPreinstalled() && !BrowserSetup.chromiumInstalled());
+    }
+
+    // The release bundle ships without driver-bundle, so a bundle install downloads the one official
+    // Node.js its host needs. Dev, tests and the Docker image already have one and skip straight past.
+    private static void ensureDriver() {
+        var status = BrowserSetup.driver();
+        switch (status.source()) {
+            case PREINSTALLED, BUNDLED, DOWNLOADED -> { return; }
+            case UNSUPPORTED -> throw new IllegalStateException(
+                    "Playwright has no browser driver for this platform (%s)".formatted(System.getProperty("os.name")));
+            case MISSING -> { }
+        }
+        var platform = status.platform();
+        var build = platform == null ? null : PlaywrightNode.build(platform);
+        if (build == null) throw new IllegalStateException("no Node.js build for " + platform);
+        BrowserSetup.step("Downloading the browser driver (Node.js %s)".formatted(PlaywrightNode.VERSION));
+        try {
+            var node = PlaywrightNode.download(build, BrowserSetup.cacheRoot(), BrowserSetup::percent);
+            EventLogger.info("tool", "Downloaded the Playwright driver's Node.js to " + node);
+        } catch (IOException e) {
+            BrowserSetup.failed("The browser driver could not be downloaded: " + e.getMessage());
+            EventLogger.warn("tool", "Playwright driver download failed: %s".formatted(e.getMessage()));
+            throw new IllegalStateException("the browser driver could not be downloaded (" + e.getMessage()
+                    + "); retry, or download it from Settings > Browser", e);
+        }
+    }
+
+    /**
+     * Run {@link #ensureBrowserReady} off the request thread for the Settings button, returning at
+     * once. Clears the no-retry latch first, so an operator's explicit retry re-runs a failed install.
+     */
+    public static void startBrowserSetup() {
+        if (BrowserSetup.active()) return;
+        browserInstalled = false;
+        if (!setupNeeded()) return;
+        // Marked before the thread starts, so the POST's own response already reads as in flight.
+        BrowserSetup.begin();
+        Thread.ofVirtual().name("browser-setup").start(() -> {
+            try {
+                ensureBrowserReady();
+            } catch (RuntimeException e) {
+                EventLogger.warn("tool", "Browser setup from Settings failed: %s".formatted(e.getMessage()));
+            }
+        });
+    }
+
+    /**
      * Ensure only Chromium is installed. Playwright's driver auto-install
      * downloads ALL browsers (Chromium, Firefox, WebKit) by default. This
      * invokes the CLI with {@code install chromium} once per JVM lifetime
@@ -806,6 +882,10 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 browserInstalled = true;
                 return;
             }
+            if (BrowserSetup.chromiumInstalled()) {
+                browserInstalled = true;
+                return;
+            }
             try {
                 EventLogger.info("tool", "Installing Chromium browser (skipping Firefox/WebKit)");
                 // Build classpath from the same JARs the server uses
@@ -815,16 +895,24 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                         "-cp", cp,
                         "com.microsoft.playwright.CLI",
                         "install", "chromium");
-                pb.inheritIO();
+                var node = BrowserSetup.driver().node();
+                if (node != null) pb.environment().put("PLAYWRIGHT_NODEJS_PATH", node.toString());
+                pb.redirectErrorStream(true);
                 var proc = pb.start();
+                // Read, not inherited: the lines drive the chat and Settings progress bars.
+                try (var out = proc.inputReader()) {
+                    out.lines().forEach(BrowserSetup::onInstallLine);
+                }
                 var exitCode = proc.waitFor();
                 if (exitCode != 0) {
+                    BrowserSetup.failed("The Chromium install exited with code %d".formatted(exitCode));
                     EventLogger.warn("tool", "Playwright chromium install exited with code %d".formatted(exitCode));
                 }
                 browserInstalled = true;
             } catch (Exception e) {
                 if (e instanceof InterruptedException) Thread.currentThread().interrupt();
                 browserInstalled = true; // don't retry on every session
+                BrowserSetup.failed("The Chromium install failed: " + e.getMessage());
                 EventLogger.warn("tool", "Playwright chromium install failed: %s".formatted(e.getMessage()));
             }
         } finally {

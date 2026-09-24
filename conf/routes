@@ -54,6 +54,10 @@ GET     /api/imagegen/progress                   ApiImagegenController.progress
 GET     /api/imagegen/capability                 ApiImagegenController.capability
 POST    /api/imagegen/capability/probe           ApiImagegenController.probeCapability
 
+# Browser tool first-use setup: driver Node.js + Chromium status, and download-now (Settings > Browser)
+GET     /api/browser/setup                      ApiBrowserController.setup
+POST    /api/browser/setup                      ApiBrowserController.install
+
 # Video generation job status — chat progress polling (JCLAW-234)
 GET     /api/videogen/jobs                       ApiVideogenController.jobs
 # Recent video jobs — dashboard Recent Activity (video view) (JCLAW-236)

@@ -1,6 +1,8 @@
 import net.ltgt.gradle.errorprone.CheckSeverity
 import net.ltgt.gradle.errorprone.errorprone
 import org.gradle.process.CommandLineArgumentProvider
+import java.nio.file.FileSystems
+import java.nio.file.Files
 
 plugins {
     id("org.playframework.play1")
@@ -744,3 +746,37 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
         tasks.named(t) { dependsOn(stripPrecompiledDebugInfo) }
     }
 }
+
+// ── Release bundle: no Playwright driver-bundle ────────────────────────────────
+// driver-bundle is Node.js for all five Playwright platforms (~194 MB, near half the bundle).
+// A bundle install downloads its one platform's official Node on first browser use
+// (services.browser.PlaywrightNode), and the Docker image extracts its own from the Gradle
+// cache, so the zip needs none. Dev, tests and `play run` keep the jar on the classpath.
+abstract class DropZipEntries : DefaultTask() {
+    // Rewritten in place, so neither an input nor an output to Gradle's up-to-date check.
+    @get:Internal abstract val archive: RegularFileProperty
+    @get:Input abstract val entryPattern: Property<String>
+
+    @TaskAction
+    fun drop() {
+        val zip = archive.get().asFile.toPath()
+        val pattern = Regex(entryPattern.get())
+        FileSystems.newFileSystem(zip).use { fs ->
+            val matches = Files.walk(fs.getPath("/")).use { paths ->
+                paths.filter { pattern.matches(it.toString()) }.toList()
+            }
+            // Loud rather than silent: a renamed or removed jar means this step and the Dockerfile's
+            // extraction are both stale.
+            require(matches.isNotEmpty()) { "no entry in ${zip.fileName} matches ${entryPattern.get()}" }
+            matches.forEach { Files.delete(it) }
+        }
+    }
+}
+
+val dropBundledPlaywrightDriver by tasks.registering(DropZipEntries::class) {
+    description = "Remove Playwright's all-platform driver-bundle jar from the release bundle"
+    archive.set(tasks.named<play.gradle.PlayBundleTask>("playBundle").flatMap { it.outputFile })
+    entryPattern.set("/[^/]+/lib/driver-bundle-[0-9.]+\\.jar")
+    outputs.upToDateWhen { false }
+}
+tasks.named("playBundle") { finalizedBy(dropBundledPlaywrightDriver) }

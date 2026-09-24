@@ -120,7 +120,7 @@ A job can be paused and resumed. Pausing lets the pages being fetched finish and
 
 ### Jev mode
 
-The `browser` tool drives a headless Chromium for pages that need JavaScript, and by default the agent's own model steers it one selector at a time. When [Settings → Browser](/guide#settings-browser) selects Jev and has a key, the tool changes shape. It offers only two actions:
+The `browser` tool drives a headless Chromium for pages that need JavaScript, and by default the agent's own model steers it one selector at a time. If this machine does not have the browser yet, the first call downloads it and the chat shows the progress under that reply; [Settings → Browser](/guide#settings-browser) can download it ahead of time. When [Settings → Browser](/guide#settings-browser) selects Jev and has a key, the tool changes shape. It offers only two actions:
 
 - **`run`** with a `url` and a `goal`, both required. JClaw opens the URL through the same checks as `navigate`, then Jev works through the goal: clicking, typing, choosing from dropdowns, scrolling and waiting, one decision at a time. Jev can act only on what it saw on the page. Nothing it answers becomes a selector or a script, and every action is checked against the current page just before it happens.
 - **`close`**, as before.

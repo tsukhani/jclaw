@@ -16,6 +16,17 @@ let stored: Map<string, string>
 let posted: Array<{ key: string, value: string }>
 let deleted: string[]
 let reads: number
+// /api/browser/setup answers, one per GET (the last repeats), and the POSTs it received.
+let setupScript: Array<Record<string, unknown>>
+let setupGets: number
+let setupPosts: number
+
+function setupStatus(o: Record<string, unknown> = {}) {
+  return {
+    active: false, step: null, percent: null, error: null,
+    driverSource: 'bundled', platform: 'mac-arm64', nodeVersion: '24.21.0', chromiumInstalled: true, ...o,
+  }
+}
 
 function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } = {}) {
   registerEndpoint('/api/agents', () => [])
@@ -41,6 +52,14 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } 
       // The API masks a key on read, as ConfigService.maskValue does.
       stored.set(body.key, body.key.endsWith('apiKey') ? `${body.value.slice(0, 4)}****` : body.value)
       return { status: 'ok' }
+    },
+  })
+  registerEndpoint('/api/browser/setup', () => setupScript[Math.min(setupGets++, setupScript.length - 1)])
+  registerEndpoint('/api/browser/setup', {
+    method: 'POST',
+    handler: () => {
+      setupPosts++
+      return setupStatus({ active: true, driverSource: 'missing', chromiumInstalled: false })
     },
   })
   registerEndpoint('/api/config/browser.jev.apiKey', {
@@ -72,6 +91,9 @@ describe('Settings page — Browser', () => {
     posted = []
     deleted = []
     reads = 0
+    setupScript = [setupStatus()]
+    setupGets = 0
+    setupPosts = 0
   })
 
   it('sits after Web Scraping under Agents & Automation', () => {
@@ -187,5 +209,58 @@ describe('Settings page — Browser', () => {
     expect(component.find('button[title="Save"]').attributes('disabled')).toBeDefined()
     release()
     await vi.waitFor(() => expect(component.find('button[title="Save"]').attributes('disabled')).toBeUndefined())
+  })
+
+  describe('browser components', () => {
+    it('reports what this install already has, with nothing to download', async () => {
+      baseEndpoints()
+      const component = await mountBrowser()
+      expect(component.find('[data-testid="browser-driver-state"]').text()).toBe('Included with this install')
+      expect(component.find('[data-testid="browser-chromium-state"]').text()).toBe('Installed')
+      expect(component.find('[data-testid="browser-setup-download"]').exists()).toBe(false)
+    })
+
+    it('downloads now on request, shows its progress, then what it installed', async () => {
+      setupScript = [
+        setupStatus({ driverSource: 'missing', chromiumInstalled: false }),
+        setupStatus({ active: true, driverSource: 'missing', chromiumInstalled: false,
+          step: 'Downloading the browser driver (Node.js 24.21.0)', percent: 55 }),
+        setupStatus({ driverSource: 'downloaded', chromiumInstalled: true }),
+      ]
+      baseEndpoints()
+      const component = await mountBrowser()
+      expect(component.find('[data-testid="browser-driver-state"]').text()).toBe('Not downloaded yet')
+      expect(component.find('[data-testid="browser-chromium-state"]').text()).toBe('Not downloaded yet')
+
+      await component.find('[data-testid="browser-setup-download"]').trigger('click')
+      await flushPromises()
+      expect(setupPosts).toBe(1)
+      // The POST's own answer already reads as in flight, so the bar replaces the button at once.
+      expect(component.find('[data-testid="browser-setup-progress"]').exists()).toBe(true)
+      expect(component.find('[data-testid="browser-setup-download"]').exists()).toBe(false)
+
+      await vi.waitFor(() => {
+        expect(component.find('[data-testid="browser-driver-state"]').text()).toBe('Downloaded')
+      }, { timeout: 5000 })
+      expect(component.find('[data-testid="browser-chromium-state"]').text()).toBe('Installed')
+      expect(component.find('[data-testid="browser-setup-progress"]').exists()).toBe(false)
+    })
+
+    it('shows why the last setup failed, with the button to try again', async () => {
+      setupScript = [setupStatus({ driverSource: 'missing', chromiumInstalled: false,
+        error: 'The browser driver could not be downloaded: HTTP 503' })]
+      baseEndpoints()
+      const component = await mountBrowser()
+      expect(component.find('[data-testid="browser-setup-error"]').text()).toContain('HTTP 503')
+      expect(component.find('[data-testid="browser-setup-download"]').exists()).toBe(true)
+    })
+
+    it('offers no download where Playwright has no driver build', async () => {
+      setupScript = [setupStatus({ driverSource: 'unsupported', chromiumInstalled: false, platform: null })]
+      baseEndpoints()
+      const component = await mountBrowser()
+      expect(component.find('[data-testid="browser-driver-state"]').text()).toBe('Not available on this platform')
+      expect(component.find('[data-testid="browser-setup-download"]').exists()).toBe(false)
+    })
   })
 })
