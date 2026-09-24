@@ -364,7 +364,11 @@ pipeline {
                 //                       the GHCR image.
                 // Both carry the jclaw/ inner prefix (project.name from
                 // settings.gradle.kts).
-                sh 'GRADLE_OPTS="$GRADLE_OPTS -Dorg.gradle.daemon=false" ./gradlew playDist playBundle'
+                // -Pjclaw.stripDebugInfo=true runs the ProGuard debug-strip between
+                // playPrecompile and the zip tasks, so both dist and bundle carry
+                // precompiled classes with their local-variable name tables removed
+                // (build.gradle.kts stripPrecompiledDebugInfo). Off outside this stage.
+                sh 'GRADLE_OPTS="$GRADLE_OPTS -Dorg.gradle.daemon=false" ./gradlew playDist playBundle -Pjclaw.stripDebugInfo=true'
 
                 // Preserves the existence check ./jclaw.sh dist used to perform.
                 // Neither PlayDistTask nor PlayBundleTask fails if its zip

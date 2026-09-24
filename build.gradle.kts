@@ -1,5 +1,6 @@
 import net.ltgt.gradle.errorprone.CheckSeverity
 import net.ltgt.gradle.errorprone.errorprone
+import org.gradle.process.CommandLineArgumentProvider
 
 plugins {
     id("org.playframework.play1")
@@ -667,5 +668,79 @@ dependencies {
         // Telegram/Slack/Playwright SDKs above) — exclude so our log4j binding wins.
         exclude(group = "org.slf4j", module = "slf4j-nop")
         exclude(group = "org.slf4j", module = "slf4j-simple")
+    }
+}
+
+// ── Release hardening: strip debug info from the precompiled classes ──────────
+// Drops the local-variable / parameter name tables a decompiler reads to reprint
+// readable source, while keeping names, logic, line numbers and every
+// runtime-read attribute intact (conf/proguard-debug-strip.pro). Full renaming
+// was spiked and deferred — it breaks Play's string-based class resolution, and
+// only a commercial tool makes logic unreadable. This step is behaviour-neutral,
+// so it is gated on a property and OFF by default: the Jenkins Package stage
+// turns it on with -Pjclaw.stripDebugInfo=true, while `play run`, `play autotest`
+// and a plain `./jclaw.sh dist` are untouched.
+//
+// Three typed tasks rather than doLast{} closures, so the chain stays
+// configuration-cache compatible (delete()/sync() on the project script are not):
+// clean the output dir, run ProGuard dir->dir, then Sync the result back over
+// precompiled/java so playDist / playBundle zip the stripped classes.
+val proguard: Configuration by configurations.creating
+dependencies {
+    // Debug-strip engine only. The `proguard` configuration is on no compile or
+    // runtime classpath, so nothing here reaches the dist.
+    proguard("com.guardsquare:proguard-base:7.10.0")
+}
+
+val strippedPrecompiledDir = layout.buildDirectory.dir("proguard/precompiled-java")
+
+val cleanStrippedPrecompiled by tasks.registering(Delete::class) {
+    delete(strippedPrecompiledDir)
+}
+
+val proguardStripPrecompiled by tasks.registering(JavaExec::class) {
+    description = "Run ProGuard to strip local-variable name tables from precompiled/java"
+    dependsOn("playPrecompile", cleanStrippedPrecompiled)
+    mustRunAfter("playPrecompile")
+    classpath = proguard
+    mainClass.set("proguard.ProGuard")
+    val config = layout.projectDirectory.file("conf/proguard-debug-strip.pro").asFile.absolutePath
+    val inDir = layout.projectDirectory.dir("precompiled/java").asFile.absolutePath
+    val outDir = strippedPrecompiledDir.get().asFile.absolutePath
+    val jmods = "${System.getProperty("java.home")}/jmods(!**.jar;!module-info.class)"
+    args("@$config", "-injars", inDir, "-outjars", outDir, "-libraryjars", jmods)
+    // ProGuard needs the full type hierarchy even to strip (its partial evaluator
+    // computes common supertypes), so the app compile classpath — the Play framework
+    // jar plus every resolved dependency — goes in as -libraryjars. Passed through an
+    // argument provider capturing the FileCollection, so the task stays
+    // configuration-cache compatible (resolving the configuration eagerly here would not).
+    // compileClasspath carries the resolved app dependencies but NOT the Play
+    // framework itself (the fork provides play.* at runtime), so add the framework
+    // jar and the framework's own libs — the same /opt/play1 the version check above
+    // reads — to complete the hierarchy (play.db.jpa.Model, jakarta.*, Hibernate).
+    val libClasspath = files(
+        configurations.named("compileClasspath"),
+        fileTree("/opt/play1/framework") { include("play-*.jar", "lib/*.jar") },
+    )
+    inputs.files(libClasspath).withPropertyName("libraryClasspath")
+    argumentProviders.add(CommandLineArgumentProvider {
+        val cp = libClasspath.files.joinToString(System.getProperty("path.separator")) { it.absolutePath }
+        if (cp.isEmpty()) emptyList() else listOf("-libraryjars", cp)
+    })
+}
+
+// Swap the stripped classes back over the originals. Sync mirrors, so a stale
+// class from a prior run cannot survive into the dist.
+val stripPrecompiledDebugInfo by tasks.registering(Sync::class) {
+    description = "Replace precompiled/java with its debug-stripped copy (release hardening)"
+    dependsOn(proguardStripPrecompiled)
+    from(strippedPrecompiledDir)
+    into(layout.projectDirectory.dir("precompiled/java"))
+}
+
+// Wire the strip between precompile and packaging only when explicitly requested.
+if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
+    listOf("playDist", "playBundle").forEach { t ->
+        tasks.named(t) { dependsOn(stripPrecompiledDebugInfo) }
     }
 }
