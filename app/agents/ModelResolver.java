@@ -1,5 +1,6 @@
 package agents;
 
+import com.google.gson.JsonObject;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import llm.ProviderRegistry;
@@ -123,6 +124,20 @@ public final class ModelResolver {
                 .filter(m -> m.effectiveThinkingLevels().contains(mode))
                 .map(_ -> mode)
                 .orElse(null);
+    }
+
+    /**
+     * The routed turn's route record: why this model answered, and the effort it reasons at.
+     * Null outside a {@link RoutedTurn}.
+     */
+    public static @Nullable JsonObject routeJson(Agent agent, Conversation conv) {
+        var routed = RoutedTurn.current(conv);
+        if (routed == null) return null;
+        var json = routed.decision().toJson(routed.active(), routed.failedOver());
+        var provider = ProviderRegistry.get(routed.active().provider());
+        var thinking = provider != null ? resolveThinkingMode(agent, conv, provider) : null;
+        if (thinking != null) json.addProperty("thinkingMode", thinking);
+        return json;
     }
 
     /** {@code medium} when advertised, else the ladder's middle entry ({@code low/high/max} → {@code high}). */

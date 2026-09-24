@@ -99,6 +99,7 @@ class ModelRouterTurnTest extends UnitTest {
         var route = usage.getAsJsonObject("route");
         assertEquals("chat", route.get("class").getAsString());
         assertFalse(route.has("failover"));
+        assertEquals("high", route.get("thinkingMode").getAsString(), "a reload shows the effort the reply ran at");
 
         var prior = TurnRouting.readPriorTurn(convo.id, null);
         assertEquals(TaskClass.CHAT, prior.taskClass(), "the next turn reads the route back for stickiness");

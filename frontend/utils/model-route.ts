@@ -43,6 +43,7 @@ export function routeClassLabel(route: MessageRoute): string {
 /** One sentence for a tooltip or a screen reader: the class, the model, and whatever bent the choice. */
 export function routeDescription(route: MessageRoute): string {
   const parts = [`Auto router: ${routeClassLabel(route)} → ${route.provider}/${route.model}`]
+  if (route.thinkingMode) parts.push(`${route.thinkingMode} reasoning effort`)
   if (route.failover) parts.push('the first choice failed, so its fallback answered')
   if (route.downshifted) parts.push('moved to a lighter model to save subscription credit')
   if (route.reason) parts.push(route.reason)

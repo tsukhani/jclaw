@@ -74,6 +74,8 @@ export interface MessageRoute {
   downshifted?: boolean
   sticky?: boolean
   failover?: boolean
+  /** The reasoning effort the routed model ran at; absent when it did not reason. */
+  thinkingMode?: string
 }
 
 export interface UsageCostBreakdown {

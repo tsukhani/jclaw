@@ -4,7 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
-import llm.routing.RoutedTurn;
 import models.Agent;
 import models.Conversation;
 import org.jspecify.annotations.Nullable;
@@ -208,10 +207,8 @@ public final class UsageMetricsBuilder {
         if (resolvedProvider != null) usageMap.addProperty("modelProvider", resolvedProvider);
         if (resolvedModelId != null) usageMap.addProperty("modelId", resolvedModelId);
         // JCLAW-1222: a routed turn also records why this model answered; the next turn reads it back.
-        var routed = RoutedTurn.current(conversation);
-        if (routed != null) {
-            usageMap.add("route", routed.decision().toJson(routed.active(), routed.failedOver()));
-        }
+        var route = ModelResolver.routeJson(agent, conversation);
+        if (route != null) usageMap.add("route", route);
     }
 
     /**

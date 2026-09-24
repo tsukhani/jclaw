@@ -432,6 +432,11 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
             aria-hidden="true"
           >{{ routeOf(msg)!.model }}</span>
           <span
+            v-if="routeOf(msg)!.thinkingMode"
+            aria-hidden="true"
+            data-testid="route-effort"
+          >· {{ routeOf(msg)!.thinkingMode }} effort</span>
+          <span
             v-if="routeOf(msg)!.failover"
             class="px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20"
             aria-hidden="true"

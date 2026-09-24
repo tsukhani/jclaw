@@ -61,5 +61,7 @@ describe('route display helpers (JCLAW-1222)', () => {
     expect(text).toContain('Agent work → ollama-cloud/glm-5.3-flash')
     expect(text).toContain('lighter model')
     expect(text).toContain('actions: send, schedule')
+    expect(text).not.toContain('reasoning effort')
+    expect(routeDescription({ ...route, thinkingMode: 'high' })).toContain('high reasoning effort')
   })
 })

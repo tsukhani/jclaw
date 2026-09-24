@@ -258,11 +258,9 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
   function tryApplyRouteFromStatusContent(ctx: StreamContext, content: string): boolean {
     if (!content.startsWith('{"route"')) return false
     try {
-      const parsed = JSON.parse(content) as { route?: MessageRoute, thinkingMode?: string }
+      const parsed = JSON.parse(content) as { route?: MessageRoute }
       if (!parsed.route) return false
       messages.value[ctx.assistantIdx]!._route = parsed.route
-      // The init frame predates routing, so the routed model's effort arrives here.
-      if (parsed.thinkingMode) streamStatus.value = `thinking (${parsed.thinkingMode})...`
       triggerRef(messages)
       return true
     }

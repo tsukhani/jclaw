@@ -7,7 +7,6 @@ import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
-import llm.routing.RouteDecision;
 import llm.routing.RoutedTurn;
 import llm.routing.SubscriptionUsage;
 import memory.MemoryAutoCapture;
@@ -262,8 +261,7 @@ final class StreamingAgentRunner {
         }
         RoutedTurn.callWith(route, conversation, () -> {
             // Emitted before the prologue so the chat shows the model while the reply is still streaming.
-            cb.onStatus().accept(routeFrame(agent, conversation, route.primary(), false,
-                    ProviderRegistry.get(route.primary().provider())));
+            cb.onStatus().accept(routeFrame(agent, conversation));
             streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
             return null;
         });
@@ -434,21 +432,14 @@ final class StreamingAgentRunner {
         routed.promote();
         EventLogger.warn("router", agent.name, channelType, "Failing over from %s to %s: %s"
                 .formatted(from.describe(), to.describe(), failure.getMessage()));
-        cb.onStatus().accept(routeFrame(agent, conversation, to, true, provider));
+        cb.onStatus().accept(routeFrame(agent, conversation));
         return provider;
     }
 
-    /**
-     * The route status frame, carrying the effort the routed model will reason at: the init frame
-     * went out before routing, so it could only report the router agent's own setting. Call inside
-     * the {@link RoutedTurn} binding.
-     */
-    private static String routeFrame(Agent agent, Conversation conversation, RouteDecision.Target served,
-                                     boolean failover, @Nullable LlmProvider provider) {
+    /** The route status frame; call inside the {@link RoutedTurn} binding. */
+    private static String routeFrame(Agent agent, Conversation conversation) {
         var frame = new JsonObject();
-        frame.add("route", Objects.requireNonNull(RoutedTurn.current(conversation)).decision().toJson(served, failover));
-        var thinking = provider != null ? ModelResolver.resolveThinkingMode(agent, conversation, provider) : null;
-        if (thinking != null) frame.addProperty("thinkingMode", thinking);
+        frame.add("route", Objects.requireNonNull(ModelResolver.routeJson(agent, conversation)));
         return frame.toString();
     }
 
