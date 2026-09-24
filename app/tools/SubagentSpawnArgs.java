@@ -104,10 +104,8 @@ record SubagentSpawnArgs(
      * One child of a batch fan-out: its own task/label/agentId over the batch-wide mode,
      * context and timeout {@link SubagentSpawnTool#executeBatch} has already validated.
      *
-     * <p>The model override is read from the top-level call here rather than at the call
-     * site, which built this record by hand and passed null for it — so a
-     * {@code modelProvider} honoured for a single spawn was dropped for a batch
-     * (JCLAW-1231).
+     * <p>The model override comes from the top-level call, so a batch child honors it as a
+     * single spawn does (JCLAW-1231).
      */
     static SubagentSpawnArgs batchChild(JsonObject args, String task, @Nullable String label,
                                         @Nullable Long agentId, String mode, String context,

@@ -430,9 +430,8 @@ public final class AttachmentService {
     }
 
     /**
-     * JCLAW-1231: the per-attachment JSON the chat UI reads, built in one place. The
-     * conversation-reload response and the live SSE {@code tool_call} frame each had
-     * their own copy and the copies had drifted apart on {@code deleted}.
+     * JCLAW-1231: the per-attachment JSON the chat UI reads, shared by the conversation-reload
+     * response and the live SSE {@code tool_call} frame so the two cannot drift apart.
      */
     public static Map<String, Object> toView(MessageAttachment a) {
         var view = new LinkedHashMap<String, Object>();
@@ -448,7 +447,6 @@ public final class AttachmentService {
         return view;
     }
 
-    /** {@link #toView(MessageAttachment)} over a list, in order. */
     public static List<Map<String, Object>> toViews(List<MessageAttachment> attachments) {
         return attachments.stream().map(AttachmentService::toView).toList();
     }

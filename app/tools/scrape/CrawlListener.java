@@ -25,7 +25,7 @@ public interface CrawlListener {
     boolean stopRequested();
 
     /**
-     * @param requested the URL the crawl queued, which is how a resumed crawl recognises the page;
+     * @param requested the URL the crawl queued, which is how a resumed crawl recognizes the page;
      *                  {@code url} is where it ended up after redirects
      * @param content   the page as the job's format renders it — Markdown, plain text, or its JSON
      *                  record — or null when the page was not retrieved

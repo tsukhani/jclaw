@@ -280,7 +280,7 @@ public final class ContextWindowManager {
     /**
      * Bearer-aware overload: drop-oldest shifts every surviving position down, so the media
      * bearers that address the list have to move with it or they rewrite the wrong slot
-     * (JCLAW-1232). Delegates to the same trim and re-bases the bearers by what it dropped.
+     * (JCLAW-1232).
      */
     static MessageHydrator.Hydration trimToContextWindow(MessageHydrator.Hydration hydration, Agent agent,
                                                          Conversation conv, LlmProvider provider,

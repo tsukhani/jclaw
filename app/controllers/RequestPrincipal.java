@@ -33,7 +33,7 @@ public final class RequestPrincipal {
      *
      * <p>One token serves every agent, so the credential cannot say which one is calling. The
      * tool builds the request from the {@link Agent} it is handed; the model supplies only method
-     * and path and never sees this header, so it cannot forge one. Honoured only on an
+     * and path and never sees this header, so it cannot forge one. Honored only on an
      * agent-originated request — an operator session that sent it is ignored.
      */
     public static final String AGENT_ID_HEADER = "x-jclaw-agent-id";

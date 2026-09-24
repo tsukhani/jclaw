@@ -89,11 +89,8 @@ public final class InternalApiTokenService {
 
         var current = plaintext;
         if (current != null && !current.isBlank()) {
-            // JCLAW-852: verify the row on every call rather than trusting the field. A cache
-            // that skipped this left the service handing out a credential authenticating
-            // against nothing for the life of the JVM, and made the self-healing branch below
-            // unreachable. Holding the plaintext in memory does not re-open that: only the
-            // lookup decides whether it is still good.
+            // JCLAW-852 (see token()): the field is not a cache; the row lookup alone decides
+            // validity.
             if (ApiToken.findActiveByPlaintext(current) != null) return current;
 
             // JCLAW-1034: an absent row is self-healing, a revoked one is not — it is handed

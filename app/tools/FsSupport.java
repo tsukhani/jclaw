@@ -25,8 +25,7 @@ final class FsSupport {
      * {@link ErrorTemplate} behind it (JCLAW-1132).
      *
      * <p>The template rather than the text is what the family passes around, so a caller
-     * asking "did this fail?" reads a field instead of matching the prose. That prose match
-     * is the thing {@code Outcome.DISPATCHED} was introduced to remove from the layer above.
+     * asking "did this fail?" reads a field instead of matching the prose.
      */
     record FsOutcome(String text, @Nullable ErrorTemplate error) {
         static FsOutcome ok(String text) { return new FsOutcome(text, null); }

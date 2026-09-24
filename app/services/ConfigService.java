@@ -140,10 +140,8 @@ public class ConfigService {
         return defaultValue;
     }
 
-    // JCLAW-1136: a typo'd numeric value used to be discarded at the three getters above, which
-    // left the instance running on a value the operator never chose with nothing anywhere saying
-    // so. One entry per key, holding the value last reported, so a key is bounded and a corrected
-    // (or newly broken) value shouts again.
+    // JCLAW-1136: one entry per key, holding the value last reported, so a key is bounded and a
+    // corrected (or newly broken) value shouts again.
     private static final ConcurrentMap<String, String> reportedParseFailures = new ConcurrentHashMap<>();
 
     /**
@@ -638,9 +636,8 @@ public class ConfigService {
         if (key.startsWith(OtelConfig.KEY_PREFIX)) {
             OtelRuntime.applyConfig();
         }
-        // JCLAW-1231: clearing a cap reverts it to the compiled default, which the live
-        // dispatcher only picks up here — without this the deleted cap stayed in force
-        // until the next restart.
+        // JCLAW-1231: a cleared cap's compiled default reaches the live dispatcher only here;
+        // without this the deleted cap stays in force until restart.
         if (isDispatcherCapKey(key)) {
             HttpFactories.applyDispatcherConfig();
         }

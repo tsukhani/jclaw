@@ -94,8 +94,8 @@ public final class BrowserScreenProxy implements AutoCloseable {
         try {
             listener.close();
         } catch (IOException _) { /* best-effort */ }
-        // Closing the listener leaves established tunnels running, and a session's tunnels must not
-        // outlive it. Closing the client end ends both pumps and the upstream socket with them.
+        // Tunnels must not outlive the session: closing the client end ends both pumps and the
+        // upstream socket with them.
         open.forEach(BrowserScreenProxy::closeQuietly);
     }
 
@@ -220,7 +220,7 @@ public final class BrowserScreenProxy implements AutoCloseable {
     /**
      * The address of the origin the session permitted, when {@code host}:{@code port} is that origin,
      * else null. Matched on address and port, because SOCKS5 carries no scheme to compare; both sides
-     * must be IP literals, since honouring a name here would skip the guard on whatever it resolves
+     * must be IP literals, since honoring a name here would skip the guard on whatever it resolves
      * to, and a literal needs no lookup of its own.
      */
     private static @Nullable InetAddress permitted(@Nullable String permittedOrigin, String host, int port) {

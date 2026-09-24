@@ -345,11 +345,10 @@ public final class ToolErrorTemplates {
     }
 
     // --- MCP (JCLAW-1132 follow-up) ---
-    // The AC asks an MCP failure to say whether it was connection, protocol or tool-level.
-    // That distinction already exists on the wire and was being collapsed: the invoker declares
-    // `throws IOException, McpException`, where IOException is transport and McpException is a
-    // JSON-RPC error, a contract violation or a timeout. These factories keep them apart, and
-    // every one names the server — an operator running several cannot act on "an MCP tool failed".
+    // Connection, protocol and tool-level failures stay apart, as the invoker already splits them
+    // with `throws IOException, McpException`: IOException is transport, McpException a
+    // JSON-RPC error, a contract violation or a timeout. Every one names the server — an operator
+    // running several cannot act on "an MCP tool failed".
 
     public static ErrorTemplate mcpConnectionFailed(String server, String tool, String detail) {
         return new ErrorTemplate(MCP_CONNECTION_FAILED,
@@ -400,11 +399,9 @@ public final class ToolErrorTemplates {
     }
 
     /**
-     * Nothing static to register. A tool failure's template is parameterised by the call that
-     * produced it — the command, the exit status, the path, the URL — so the rows above are
-     * factories rather than table entries, and {@link ErrorTemplates#forCode} falls back for
-     * these codes by design. The method exists so this file still satisfies the registry's
-     * one-file-per-surface contract (JCLAW-60) and stays visible to its merge.
+     * Nothing static to register: the rows above are factories, so {@link ErrorTemplates#forCode}
+     * falls back for these codes by design. It keeps this file in the registry's
+     * one-file-per-surface merge (JCLAW-60).
      */
     static Map<String, ErrorTemplate> templates() {
         return Map.of();

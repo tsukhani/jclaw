@@ -74,7 +74,7 @@ public final class ToolContext {
 
     /**
      * True once the turn dispatching this tool has been stopped — Stop pressed in chat, the task run
-     * cancelled, or the subagent run killed — so a long-running tool can end at its next step.
+     * canceled, or the subagent run killed — so a long-running tool can end at its next step.
      */
     public static boolean cancelled() {
         var s = SCOPE.get();

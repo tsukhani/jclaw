@@ -264,7 +264,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
         // An unsafe entry URL is refused here, before a browser is spun up. Every connection the
         // session then opens — this one included — is screened again by the proxy (JCLAW-1283),
-        // which is also where the DNS pin lives now.
+        // which also holds the DNS pin.
         if (ACTION_NAVIGATE.equals(action) || ACTION_RUN.equals(action)) {
             try {
                 SsrfGuard.assertUrlSafe(args.get(ARG_URL).getAsString());
@@ -606,9 +606,9 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * 169.254.169.254 reaches the proxy with the flag and is dialled directly without it, so dropping it
      * would unscreen the cloud-metadata address. WebRTC is UDP, which a SOCKS5 CONNECT proxy cannot carry:
      * without the third flag, STUN, TURN and a data channel's connectivity checks all reached loopback
-     * listeners the proxy never saw (JCLAW-1286). Chromium honours only the {@code force} spelling and
+     * listeners the proxy never saw (JCLAW-1286). Chromium honors only the {@code force} spelling and
      * ignores {@code --webrtc-ip-handling-policy} silently, so a wrong value fails no faster than a
-     * missing one — which is why a live test holds the behaviour and an ungated one holds this list.
+     * missing one — which is why a live test holds the behavior and an ungated one holds this list.
      *
      * <p>Exposed for tests.
      */
@@ -780,7 +780,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     /**
      * First-use setup: the Playwright driver's Node.js, then Chromium. Both steps are no-ops once
-     * done, and one lock serialises them, so concurrent sessions and the Settings button share a
+     * done, and one lock serializes them, so concurrent sessions and the Settings button share a
      * single download. Throws {@link IllegalStateException} when the driver cannot be obtained.
      */
     public static void ensureBrowserReady() {

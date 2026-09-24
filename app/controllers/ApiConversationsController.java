@@ -467,8 +467,7 @@ public class ApiConversationsController extends Controller {
             reason = "one conversation the calling agent owns; main reaches every agent's (JCLAW-1270)")
     public static void getQueueStatus(Long id) {
         // Loaded rather than read straight off the id: the queue is keyed by conversation id
-        // alone, so without this an agent could size another agent's backlog (JCLAW-1270). The
-        // 404 for an unknown id is new and follows from the load.
+        // alone, so without this an agent could size another agent's backlog (JCLAW-1270).
         requireConversation(id);
         var busy = ConversationQueue.isBusy(id);
         var queueSize = ConversationQueue.getQueueSize(id);
@@ -824,10 +823,9 @@ public class ApiConversationsController extends Controller {
     // --- Helpers ---
 
     /**
-     * Pin a list query to the caller's own conversations, rather than refusing one that names
-     * someone else: a list is not a row, so there is nothing to 403 — the fix is a query that
-     * cannot return another agent's rows in the first place. Returns the requested value
-     * unchanged for the operator and for {@code main}, both of which see everything.
+     * Pin a list query to the caller's own conversations rather than refusing one that names
+     * someone else: a list is not a row, so there is nothing to 403. The operator and {@code main}
+     * get {@code requested} unchanged.
      */
     private static @Nullable Long scopedAgentId(@Nullable Long requested) {
         if (!RequestPrincipal.isAgentOriginated()) return requested;
@@ -844,10 +842,9 @@ public class ApiConversationsController extends Controller {
      * Load the addressed conversation or end the request — 404 when it does not exist, 403 when
      * it belongs to another agent (JCLAW-1270).
      *
-     * <p>Every {@code /api/conversations/{id}} action routes through here, which is the point:
-     * the ownership check is one statement in one place rather than a line each action has to
-     * remember, and {@code Conversation.agent} is non-null so there is no unowned row to fall
-     * through it. {@code main} reaches every agent's conversations; nothing reaches up or across.
+     * <p>Every {@code /api/conversations/{id}} action routes through here, so the ownership check
+     * lives in one place; {@code Conversation.agent} is non-null, so no unowned row falls through.
+     * {@code main} reaches every agent's conversations; nothing reaches up or across.
      */
     private static Conversation requireConversation(Long id) {
         Conversation conversation = ConversationService.findById(id);

@@ -230,7 +230,7 @@ public record JevActionSpace(JsonArray elements, Map<String, Map<String, JsonObj
         return action.has(key) ? action.get(key) : new JsonPrimitive("");
     }
 
-    /** A dropdown option is labelled {@code "Field → Option"}; the element is the part before the arrow. */
+    /** A dropdown option is labeled {@code "Field → Option"}; the element is the part before the arrow. */
     private static String beforeOption(String label) {
         int arrow = label.indexOf(" → ");
         return arrow < 0 ? label : label.substring(0, arrow);

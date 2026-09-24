@@ -191,7 +191,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
     }
 
     /** The format a call gets when it names none. {@code mode} predates {@code format} (JCLAW-1271)
-     *  and is still honoured, so a prompt or skill written against it keeps working. */
+     *  and is still honored, so a prompt or skill written against it keeps working. */
     private static ScrapeOutput.Format legacyFormat(JsonObject args) {
         return args.has("mode") && "html".equals(args.get("mode").getAsString())
                 ? ScrapeOutput.Format.HTML : ScrapeOutput.Format.MARKDOWN;
@@ -244,7 +244,6 @@ public class WebFetchTool implements ToolRegistry.Tool {
         }
     }
 
-    /** The page in the form the call asked for. */
     private String render(ScrapeOutput.Request output, String url, WebExtraction.FetchResult body,
                           String text, ScrapeRung servedBy, Agent agent) {
         if (output.json()) {

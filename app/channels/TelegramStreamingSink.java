@@ -627,8 +627,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         if (messageId != null) deletePlaceholderSafely();
         // JCLAW-369: the error reply replaces the placeholder for this turn, so
         // it carries the same reply target + topic thread.
-        // Plain: Telegram rejects stray markup, and an error that fails to send because of its
-        // own formatting is the worst outcome on this path. TELEGRAM_MAX is the API's hard cap.
+        // Plain: Telegram rejects stray markup, and an error reply must not fail on its own markup.
         TelegramChannel.forToken(botToken).sendTurn(chatId,
                 ChannelErrorTemplates.render(ChannelErrorTemplates.forChannelReader(),
                         ErrorRendering.PLAIN, TELEGRAM_MAX_CHARS),

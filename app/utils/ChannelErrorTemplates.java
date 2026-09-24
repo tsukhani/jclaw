@@ -18,7 +18,7 @@ import java.util.Map;
  * its billing lapsed. They get {@link #forChannelReader}; the operator's remedy goes to the event
  * log through {@link #operatorDetail}.
  *
- * <p>Nothing static registers here: the useful templates are parameterised by the failing call, so
+ * <p>Nothing static registers here: the useful templates are parameterized by the failing call, so
  * {@link #forTurnFailure} builds them and {@link ErrorTemplates#forCode} falls back for the codes.
  */
 public final class ChannelErrorTemplates {
@@ -86,13 +86,11 @@ public final class ChannelErrorTemplates {
     }
 
     /**
-     * Render for a channel, honouring what it can display and how much of it.
+     * Render for a channel, honoring what it can display and how much of it.
      *
-     * <p>Truncation takes from the middle, never the end. The natural thing — cut the tail — drops
-     * the retry instruction, which is the only part the reader acts on; a message that explains a
-     * failure and then stops short of what to do about it is the shape this epic exists to remove.
-     * If even the first and last sections do not fit, the check section goes entirely rather than
-     * the message being cut mid-word.
+     * <p>Truncation takes from the middle, never the end: cutting the tail drops the retry
+     * instruction, the only part the reader acts on. If even the first and last sections do
+     * not fit, the check section goes entirely rather than the message being cut mid-word.
      *
      * @param maxChars the channel's hard message cap
      */

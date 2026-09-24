@@ -58,12 +58,11 @@ import java.util.Set;
  * nothing is refused, so a newly-added endpoint is unreachable until someone opts it in. This
  * check is not the security boundary -- {@link controllers.AgentAccessGate} enforces the same
  * annotation at the request layer, so an agent that reached the route by some other means is
- * refused there too. Until JCLAW-1270 the two were separate mechanisms and only this one
- * existed for most routes, which meant they hid rather than refused.
+ * refused there too.
  *
  * <p>The gate runs on {@link HttpUrl#encodedPath()} rather than on the model's string, so a
  * path cannot resolve past it on its way out -- {@code /api/skills/x/files/../../../logs} left
- * as {@code /api/logs} when checked raw, and normalising also keeps a path from escaping
+ * as {@code /api/logs} when checked raw, and normalizing also keeps a path from escaping
  * {@code /api/} into the routes file's {@code {controller}/{action}} catch-all (JCLAW-1227).
  * Catalog text comes from the Swagger {@code @Operation} summary and {@code @RequestBody}
  * schema, synthesized from the action name and request DTO when those are absent.
@@ -230,13 +229,9 @@ public class JClawApiTool implements ToolRegistry.Tool {
             return "Error: could not construct URL for path: " + path;
         }
         // Gate the path that will actually be sent, not the one the model typed: HttpUrl
-        // resolves dot-segments while parsing, so `/api/skills/x/files/../../../logs`
-        // checked raw passes both layers and then leaves as `/api/logs` (JCLAW-1227).
+        // resolves dot-segments while parsing (JCLAW-1227).
         var gatedPath = url.encodedPath();
-        // Default-deny gate: a route is callable only where its action declares @AgentAccess
-        // OPEN or OWN_ONLY -- the same set `discover` advertises. The request layer enforces
-        // the same annotation, so an agent that reached the route another way is refused
-        // there too; before JCLAW-1270 this check was the only one and hid rather than refused.
+        // Default-deny, the same set `discover` advertises; AgentAccessGate re-checks it.
         if (!isCallable(method, gatedPath)) {
             return "Error: %s %s is not callable through jclaw_api (no such endpoint, or it is deny-listed). "
                     .formatted(method, gatedPath)
@@ -248,11 +243,9 @@ public class JClawApiTool implements ToolRegistry.Tool {
                 .header("Authorization", "Bearer " + InternalApiTokenService.token())
                 .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON);
 
-        // One token serves every agent, so the credential cannot say which one is calling; this
-        // header is how an agent-scoped route learns that (JCLAW-1270). Built here from the Agent
-        // the registry hands us, never from the model's arguments. A null agent is the tool driven
-        // straight from a test, and an unstamped request reads as an unidentified agent, which
-        // agent-scoped routes refuse.
+        // JCLAW-1270: stamped from the Agent the registry hands us, never from the model's
+        // arguments. A null agent is a test driving the tool; the unstamped request reads as an
+        // unidentified agent, which agent-scoped routes refuse.
         if (agent != null && agent.id != null) {
             requestBuilder.header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agent.id));
         }
