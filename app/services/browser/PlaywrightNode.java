@@ -115,7 +115,7 @@ public final class PlaywrightNode {
      */
     public static Status resolve(Path cacheRoot, Map<String, String> env, ClassLoader classLoader,
                                  @Nullable String platform) {
-        if (present(env.get("PLAYWRIGHT_DRIVER_DIR")) || present(System.getProperty("playwright.cli.dir"))
+        if (present(env.get("PLAYWRIGHT_DRIVER_DIR")) || operatorDriverDir(System.getProperty(PlaywrightDriverDir.CLI_DIR_PROPERTY))
                 || present(env.get("PLAYWRIGHT_NODEJS_PATH")) || present(System.getProperty("playwright.nodejs.path"))) {
             return new Status(Source.PREINSTALLED, platform, null);
         }
@@ -130,6 +130,11 @@ public final class PlaywrightNode {
 
     private static boolean present(@Nullable String v) {
         return v != null && !v.isBlank();
+    }
+
+    /** jclaw points playwright.cli.dir at its own copy of the bundled driver; only another directory is an operator's. */
+    public static boolean operatorDriverDir(@Nullable String dir) {
+        return dir != null && !dir.isBlank() && !PlaywrightDriverDir.isManaged(Path.of(dir));
     }
 
     /**

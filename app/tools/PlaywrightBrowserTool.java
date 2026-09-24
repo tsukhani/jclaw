@@ -19,6 +19,7 @@ import org.jspecify.annotations.Nullable;
 import services.AgentService;
 import services.EventLogger;
 import services.browser.BrowserSetup;
+import services.browser.PlaywrightDriverDir;
 import services.browser.PlaywrightNode;
 import tools.jev.JevPage;
 import tools.jev.JevRun;
@@ -679,6 +680,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     public static Driver startDriver() {
         DRIVER_LAUNCH_LOCK.lock();
         try {
+            PlaywrightDriverDir.pin();
             var before = ProcessHandle.current().children().map(ProcessHandle::pid).collect(Collectors.toSet());
             var env = new HashMap<String, String>();
             env.put("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1");
