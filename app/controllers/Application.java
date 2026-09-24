@@ -5,6 +5,8 @@ import play.mvc.Controller;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 public class Application extends Controller {
 
@@ -81,7 +83,8 @@ public class Application extends Controller {
      * the content-hashed SPA chunks (immutable, see {@link #nuxtCacheControl}), these
      * mini-apps keep stable filenames, so <em>every</em> file must revalidate — hence
      * {@code no-cache} across the board. A directory request serves its
-     * {@code index.html}, matching the old {@code staticDir} behavior.
+     * {@code index.html}, matching the old {@code staticDir} behavior. A registered
+     * app's {@code index.html} and {@code manifest.webmanifest} go through {@link AppPwa}.
      */
     @SuppressWarnings("java:S2259")
     public static void appAsset(String path) {
@@ -92,10 +95,25 @@ public class Application extends Controller {
                 if (target.isDirectory()) {
                     target = new File(target, "index.html");
                 }
+                File appDir = target.getParentFile();
+                // The slug check keeps a hand-made directory name out of the HTML AppPwa injects.
+                var app = appDir.getParentFile().getCanonicalPath().equals(appsRoot.getCanonicalPath())
+                        && ApiAppsController.SLUG.matcher(appDir.getName()).matches()
+                        ? ApiAppsController.readApp(appDir.toPath()) : null;
                 if (target.exists() && target.isFile()
                         && target.getCanonicalPath().startsWith(appsRoot.getCanonicalPath() + File.separator)) {
                     response.setHeader(CACHE_CONTROL, NO_CACHE);
+                    if (app != null && target.getName().equals("index.html")) {
+                        // Lenient decode: a stray invalid byte must not turn the app into a 404.
+                        var html = new String(Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8);
+                        renderHtml(AppPwa.inject(html, app, params.get("install") != null));
+                    }
                     renderBinary(target);
+                }
+                if (app != null && target.getName().equals(AppPwa.MANIFEST_FILE)) {
+                    response.setHeader(CACHE_CONTROL, NO_CACHE);
+                    response.contentType = AppPwa.MANIFEST_CONTENT_TYPE;
+                    renderText(AppPwa.manifestJson(app));
                 }
             }
         } catch (IOException _) {}

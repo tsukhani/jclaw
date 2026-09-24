@@ -4,6 +4,7 @@ import play.Play;
 import play.mvc.Http.Response;
 import play.test.FunctionalTest;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -82,6 +83,46 @@ class AppAssetCacheControlTest extends FunctionalTest {
         assertIsOk(r);
         assertEquals("no-cache", r.getHeader("Cache-Control"),
                 "non-hashed app scripts must also revalidate, not just index.html");
+    }
+
+    @Test
+    void registeredAppIsServedAsAnInstallablePwa() throws IOException {
+        String slug = newApp("<!doctype html><html><head><title>hosted</title></head><body></body></html>");
+        Files.writeString(Play.getFile("public/apps/" + slug + "/app.json").toPath(),
+                "{\"name\":\"Hosted\",\"icon\":\"icon.svg\"}");
+        Response page = GET("/apps/" + slug + "/");
+        assertIsOk(page);
+        assertEquals("no-cache", page.getHeader("Cache-Control"));
+        String html = getContent(page);
+        assertTrue(html.contains("<link rel=\"manifest\" href=\"/apps/" + slug + "/manifest.webmanifest\">"), html);
+        assertFalse(html.contains("<script>"), "the install banner is opt-in via ?install");
+
+        Response manifest = GET("/apps/" + slug + "/manifest.webmanifest");
+        assertIsOk(manifest);
+        assertContentType("application/manifest+json", manifest);
+        assertTrue(getContent(manifest).contains("\"start_url\":\"/apps/" + slug + "/\""));
+
+        assertTrue(getContent(GET("/apps/" + slug + "/?install=1")).contains("beforeinstallprompt"));
+    }
+
+    @Test
+    void unregisteredDirHasNoManifestAndUntouchedHtml() throws IOException {
+        String slug = newApp("<!doctype html><title>hosted</title>");
+        // Streamed as the file itself (renderBinary sets direct), not re-rendered with injected tags.
+        assertInstanceOf(File.class, GET("/apps/" + slug + "/").direct);
+        assertStatus(404, GET("/apps/" + slug + "/manifest.webmanifest"));
+    }
+
+    @Test
+    void nonSlugDirectoryNameIsNeverInjected() throws IOException {
+        Path dir = Play.getFile("public/apps").toPath().resolve(PREFIX + "NotASlug-" + UUID.randomUUID());
+        Files.createDirectories(dir);
+        created.add(dir);
+        Files.writeString(dir.resolve("index.html"), "<!doctype html><title>hosted</title>");
+        Files.writeString(dir.resolve("app.json"), "{\"name\":\"Hand made\"}");
+        String name = dir.getFileName().toString();
+        assertInstanceOf(File.class, GET("/apps/" + name + "/").direct);
+        assertStatus(404, GET("/apps/" + name + "/manifest.webmanifest"));
     }
 
     @Test

@@ -38,7 +38,7 @@ public class ApiAppsController extends Controller {
 
     /** A hosted-app slug is a single path segment of lowercase alphanumerics and
      *  hyphens — no dots or slashes, so it can never traverse out of public/apps/. */
-    private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
+    static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]*$");
 
     /** The manifest filename every hosted app carries under {@code public/apps/<slug>/}. */
     private static final String APP_JSON = "app.json";
@@ -123,7 +123,7 @@ public class ApiAppsController extends Controller {
 
     /** Parse one app directory into an entry, or null when it isn't a valid,
      *  launchable app (missing app.json/index.html, or unparseable manifest). */
-    private static @Nullable AppEntry readApp(Path dir) {
+    static @Nullable AppEntry readApp(Path dir) {
         if (!Files.isRegularFile(dir.resolve(APP_JSON))
                 || !Files.isRegularFile(dir.resolve("index.html"))) {
             return null;

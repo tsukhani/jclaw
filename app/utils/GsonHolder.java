@@ -63,6 +63,9 @@ public final class GsonHolder {
             })
             .create();
 
+    /** Keeps Gson's HTML escaping, for a value embedded raw in an HTML {@code <script>}. */
+    public static final Gson SCRIPT_SAFE = new Gson();
+
     private GsonHolder() {}
 
     /** ISO-8601 codec for {@link Instant}. {@code null} round-trips

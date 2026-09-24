@@ -304,6 +304,22 @@ describe('Apps page', () => {
     expect(arg.query.compose).toContain('app.json "price" = "$5"')
   })
 
+  it('offers a desktop install link only for apps with an icon', async () => {
+    appsEndpoint([
+      { id: 'tetris', url: '/apps/tetris/', name: 'Tetris', version: '1.0.0', creator: null,
+        icon: '/apps/tetris/icon.svg', price: null, description: null },
+      { id: 'bare', url: '/apps/bare/', name: 'Bare', version: '1.0.0', creator: null,
+        icon: null, price: null, description: null },
+    ])
+    const c = await mountSuspended(Apps)
+    await flushPromises()
+
+    const install = c.find('[data-testid="install-app-tetris"]')
+    expect(install.attributes('href')).toBe('/apps/tetris/?install=1')
+    expect(install.attributes('target')).toBe('_blank')
+    expect(c.find('[data-testid="install-app-bare"]').exists()).toBe(false)
+  })
+
   it('renders a delete button per app card', async () => {
     appsEndpoint([
       { id: 'to-remove', url: '/apps/to-remove/', name: 'To Remove', version: '1.0.0',

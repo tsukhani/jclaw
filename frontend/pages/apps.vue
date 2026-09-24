@@ -3,7 +3,7 @@
 // discovered from public/apps/<slug>/ via GET /api/apps. Clicking a card opens
 // the app in a new tab at /apps/<slug>/. Pricing is metadata-only — a label.
 // The "Create app" affordance (slice 3) will sit above the grid.
-import { MagnifyingGlassIcon, PencilSquareIcon, PlusIcon, Squares2X2Icon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { ArrowDownTrayIcon, MagnifyingGlassIcon, PencilSquareIcon, PlusIcon, Squares2X2Icon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 
 interface AppEntry {
@@ -177,7 +177,8 @@ async function deleteApp(app: AppEntry) {
     </h1>
     <p class="text-sm text-fg-muted mb-6">
       Operator-hosted web apps, each a static site under
-      <span class="font-mono">public/apps/&lt;slug&gt;/</span>. Click an app to open it in a new tab.
+      <span class="font-mono">public/apps/&lt;slug&gt;/</span>. Click an app to open it in a new tab, or
+      install it as a desktop app from its card.
     </p>
 
     <ApiErrorAlert
@@ -452,6 +453,23 @@ async function deleteApp(app: AppEntry) {
             aria-hidden="true"
           />
         </button>
+        <!-- The browser offers install only on the app's own page, so this opens it with ?install
+             and the page's injected banner prompts. Chrome refuses a manifest with no icon. -->
+        <a
+          v-if="app.icon"
+          :href="`${app.url}?install=1`"
+          target="_blank"
+          rel="noopener"
+          :data-testid="`install-app-${app.id}`"
+          class="absolute bottom-1 right-1 p-[5px] rounded-md text-fg-muted opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-emerald-700 dark:hover:text-emerald-400 transition-opacity"
+          title="Install as a desktop app"
+          aria-label="Install as a desktop app"
+        >
+          <ArrowDownTrayIcon
+            class="w-3.5 h-3.5"
+            aria-hidden="true"
+          />
+        </a>
         <button
           type="button"
           :data-testid="`delete-app-${app.id}`"
