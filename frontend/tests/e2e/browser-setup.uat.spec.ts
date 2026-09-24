@@ -111,7 +111,7 @@ test.describe('UAT-22 browser setup', () => {
         },
       }
       window.fetch = (input, init) => {
-        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+        const url = input instanceof Request ? input.url : String(input)
         if (!url.includes('/api/chat/stream')) return realFetch(input, init)
         const body = new ReadableStream<Uint8Array>({
           start(c) {

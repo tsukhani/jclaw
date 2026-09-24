@@ -49,7 +49,8 @@ chatRenderer.code = (token: Tokens.Code) =>
 // own because Marked reads them as escaped brackets.
 const KATEX_OPTIONS: KatexOptions = { throwOnError: false, strict: 'ignore' }
 
-function mathExtension(name: string, level: 'block' | 'inline', rule: RegExp,
+// Each rule is anchored and captures the TeX in group 1; the first that matches wins, as in an alternation.
+function mathExtension(name: string, level: 'block' | 'inline', rules: RegExp[],
   startAt: RegExp): TokenizerAndRendererExtension {
   return {
     name,
@@ -59,10 +60,13 @@ function mathExtension(name: string, level: 'block' | 'inline', rule: RegExp,
       return i < 0 ? undefined : i
     },
     tokenizer(src) {
-      const m = rule.exec(src)
-      const tex = m?.slice(1).find(g => g !== undefined)
-      if (!m || !tex) return undefined
-      return { type: name, raw: m[0], text: tex.trim(), displayMode: level === 'block' || m[0].startsWith('$$') || m[0].startsWith('\\[') }
+      for (const rule of rules) {
+        const m = rule.exec(src)
+        if (m?.[1]) {
+          return { type: name, raw: m[0], text: m[1].trim(), displayMode: level === 'block' || m[0].startsWith('$$') || m[0].startsWith(String.raw`\[`) }
+        }
+      }
+      return undefined
     },
     renderer(token) {
       return katex.renderToString(token.text as string, { ...KATEX_OPTIONS, displayMode: token.displayMode as boolean })
@@ -72,10 +76,13 @@ function mathExtension(name: string, level: 'block' | 'inline', rule: RegExp,
 
 const chatMarked = new Marked({ breaks: true, gfm: true }, {
   extensions: [
-    mathExtension('mathBlock', 'block', /^\$\$([\s\S]+?)\$\$[ \t]*(?:\n+|$)/, /^\$\$/m),
-    mathExtension('mathInline', 'inline',
-      /^\$\$((?:\\.|[^\\$])+?)\$\$|^\$(?!\s)((?:\\.|[^\\\n$])+?)(?<!\s)\$(?!\d)|^\\\(([\s\S]+?)\\\)|^\\\[([\s\S]+?)\\\]/,
-      /\$|\\[([]/),
+    mathExtension('mathBlock', 'block', [/^\$\$([\s\S]+?)\$\$[ \t]*(?:\n+|$)/], /^\$\$/m),
+    mathExtension('mathInline', 'inline', [
+      /^\$\$((?:\\.|[^\\$])+?)\$\$/,
+      /^\$(?!\s)((?:\\.|[^\\\n$])+?)(?<!\s)\$(?!\d)/,
+      /^\\\(([\s\S]+?)\\\)/,
+      /^\\\[([\s\S]+?)\\\]/,
+    ], /\$|\\[([]/),
   ],
 })
 
