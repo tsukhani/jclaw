@@ -658,7 +658,7 @@ public class ApiAgentsController extends Controller {
 
         // A workspace file is agent-writable, so it is served as an attachment unless the type
         // renders without executing: SVG carries script and text/html is a same-origin XSS with
-        // the operator's session, and both used to match the old `image/` + PDF inline test.
+        // the operator's session.
         var inline = isRasterImage(contentType)
                 || contentType.startsWith("audio/")
                 || contentType.startsWith("application/pdf");

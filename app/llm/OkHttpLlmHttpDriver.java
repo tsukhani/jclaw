@@ -29,12 +29,11 @@ import java.util.function.Consumer;
  * sourced via {@link utils.HttpFactories#llmStreamingGuarded()} and
  * {@link utils.HttpFactories#llmSingleShotGuarded()}.
  *
- * <p>The guarded tiers, not the plain ones (JCLAW-1229). A provider base URL
- * used to be screened once at discovery and never again, so a host that
- * resolved somewhere respectable then and to 169.254.169.254 afterwards
- * reached the metadata endpoint on the chat path. The relaxed provider guard
- * permits loopback and RFC-1918, so self-hosted Ollama and LM Studio are
- * unaffected — see {@code SsrfGuard.isBlockedForProvider}.
+ * <p>The guarded tiers, not the plain ones (JCLAW-1229): a base URL screened
+ * once at discovery can later resolve to 169.254.169.254, so every call is
+ * screened. The relaxed provider guard permits loopback and RFC-1918, so
+ * self-hosted Ollama and LM Studio are unaffected — see
+ * {@code SsrfGuard.isBlockedForProvider}.
  *
  * <p>OkHttp does not issue an {@code Upgrade: h2c} on plain HTTP, so the
  * LM-Studio Express upgrade-event hang the previous JDK driver had to

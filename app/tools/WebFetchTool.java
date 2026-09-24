@@ -244,7 +244,6 @@ public class WebFetchTool implements ToolRegistry.Tool {
         }
     }
 
-    /** The page in the form the call asked for. */
     private String render(ScrapeOutput.Request output, String url, WebExtraction.FetchResult body,
                           String text, ScrapeRung servedBy, Agent agent) {
         if (output.json()) {

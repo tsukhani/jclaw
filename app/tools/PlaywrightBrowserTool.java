@@ -264,7 +264,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
         // An unsafe entry URL is refused here, before a browser is spun up. Every connection the
         // session then opens — this one included — is screened again by the proxy (JCLAW-1283),
-        // which is also where the DNS pin lives now.
+        // which also holds the DNS pin.
         if (ACTION_NAVIGATE.equals(action) || ACTION_RUN.equals(action)) {
             try {
                 SsrfGuard.assertUrlSafe(args.get(ARG_URL).getAsString());

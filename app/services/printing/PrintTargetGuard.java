@@ -23,10 +23,6 @@ import java.util.List;
  * ways. {@link Verdict#REFUSED} is a range no approval can make correct;
  * {@link Verdict#UNVETTED} is a plausible address nobody chose, which is a decision
  * for the operator rather than a refusal.
- *
- * <p>A destination nobody chose is the interesting case: a discovered printer or the
- * saved default was picked by a human or announced itself over mDNS, whereas an
- * address the model composed was not.
  */
 public final class PrintTargetGuard {
 
@@ -104,8 +100,7 @@ public final class PrintTargetGuard {
                 }
             }
         } catch (UnknownHostException _) {
-            // Not a refusal — see the Javadoc; UNVETTED already puts it in front of
-            // the operator.
+            // Not a refusal — see the Javadoc.
         }
         return false;
     }

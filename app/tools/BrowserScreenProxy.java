@@ -94,8 +94,8 @@ public final class BrowserScreenProxy implements AutoCloseable {
         try {
             listener.close();
         } catch (IOException _) { /* best-effort */ }
-        // Closing the listener leaves established tunnels running, and a session's tunnels must not
-        // outlive it. Closing the client end ends both pumps and the upstream socket with them.
+        // Tunnels must not outlive the session: closing the client end ends both pumps and the
+        // upstream socket with them.
         open.forEach(BrowserScreenProxy::closeQuietly);
     }
 

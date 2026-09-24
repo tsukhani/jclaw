@@ -68,8 +68,7 @@ public record ScrapeProxy(Kind kind, String host, int port,
 
     /**
      * {@code base} routed through the configured proxy, or {@code base} itself when there is
-     * none — so an install without a proxy, and every test that substitutes a client, runs
-     * exactly as before.
+     * none, so a client a test substitutes is used as given.
      */
     public static OkHttpClient client(OkHttpClient base) {
         return current().map(p -> p.apply(base)).orElse(base);

@@ -87,10 +87,8 @@ public class AuthCheck extends Controller {
             }
         }
 
-        // JCLAW-1270: the bearer branch used to return here, which would have left the widest
-        // principal the one the access gate never saw — the same shape as the JCLAW-1034 bug
-        // above it. Both paths now fall through, because a session carrying the system owner's
-        // name reads as the agent principal too.
+        // JCLAW-1270: both branches reach the gate — an early bearer return would skip the widest
+        // principal, and a session carrying the system owner's name is the agent too.
         AgentAccessGate.enforce();
     }
 

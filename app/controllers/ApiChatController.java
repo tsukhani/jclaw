@@ -583,10 +583,7 @@ public class ApiChatController extends Controller {
                     reasoningCoalescer.drain();
                     SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
                     close.finished().set(true);
-                    // JCLAW-1133: the reader gets the 3-part template, rich because the web chat
-                    // renders Markdown; the raw throwable text stays in the EventLogger line below.
-                    // It used to be sent verbatim, which is the one thing the epic rules out —
-                    // technical detail belongs in event_log, never in front of a person.
+                    // JCLAW-1133: the raw throwable text goes only to the EventLogger line below.
                     sse.send(webErrorFrame(error));
                     sse.close();
                     EventLogger.error("channel", agent.name, "web",

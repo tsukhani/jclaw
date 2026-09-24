@@ -401,8 +401,7 @@ public final class SsrfGuard {
      * <p>For a browser JClaw does not launch itself: the scrape fetchers pass this to the stealth
      * sidecar, which owns the launch and so owns the flag. The browser tool does not — since
      * JCLAW-1283 its Chromium connects through {@code tools.BrowserScreenProxy}, which pins every
-     * host at connect rather than the ones a launch argument could name, and a relaunch per new
-     * host is what that removed.
+     * host at connect rather than only the ones a launch argument could name.
      *
      * <p>Empty for a literal-IP URL (already pinned) or a URL with no host.
      * Throws every {@link SecurityException} {@link #assertUrlSafe} does.

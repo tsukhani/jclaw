@@ -95,13 +95,9 @@ public class ToolRegistry {
         public static ToolResult text(String text) { return new ToolResult(text, null, List.of(), null); }
 
         /**
-         * JCLAW-1132: a tool that ran and failed, carrying the failure's
-         * {@link ErrorTemplate} as well as the text the model reads.
-         *
-         * <p>Still {@code DISPATCHED} — the tool ran. The template rides in
-         * {@code structuredJson}, which already persists to
-         * {@code message.tool_result_structured}, so a transcript recorded before this
-         * simply has null there.
+         * JCLAW-1132: a tool that ran and failed, carrying the failure's {@link ErrorTemplate}
+         * in {@code structuredJson} as well as the text the model reads. Still
+         * {@code DISPATCHED} — the tool ran.
          */
         public static ToolResult error(ErrorTemplate template) {
             return new ToolResult(ToolErrorTemplates.render(template),

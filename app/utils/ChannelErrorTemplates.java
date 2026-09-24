@@ -88,11 +88,9 @@ public final class ChannelErrorTemplates {
     /**
      * Render for a channel, honouring what it can display and how much of it.
      *
-     * <p>Truncation takes from the middle, never the end. The natural thing — cut the tail — drops
-     * the retry instruction, which is the only part the reader acts on; a message that explains a
-     * failure and then stops short of what to do about it is the shape this epic exists to remove.
-     * If even the first and last sections do not fit, the check section goes entirely rather than
-     * the message being cut mid-word.
+     * <p>Truncation takes from the middle, never the end: cutting the tail drops the retry
+     * instruction, the only part the reader acts on. If even the first and last sections do
+     * not fit, the check section goes entirely rather than the message being cut mid-word.
      *
      * @param maxChars the channel's hard message cap
      */

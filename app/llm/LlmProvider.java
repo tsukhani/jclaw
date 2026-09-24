@@ -143,7 +143,6 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     public ProviderConfig config() { return config; }
 
-    /** The OpenAI-compatible wire every provider speaks; {@link #wireFor} answers it unless overridden. */
     private final ChatWire openAiWire = new OpenAiWire();
 
     /**

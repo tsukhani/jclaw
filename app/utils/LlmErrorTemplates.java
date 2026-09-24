@@ -18,10 +18,6 @@ import java.util.Map;
  * them, and send the operator to four different screens. {@link Remedy} is that second cut, and
  * nothing here changes the fault-location classes.
  *
- * <p>Separate from {@link ErrorTemplates} because none of this is keyed off an
- * {@code ApiResponses} code: an LLM failure names the provider and model of the call that
- * produced it, so its template is built per failure rather than looked up from a table.
- *
  * <p><b>No provider text reaches a template.</b> A provider error body is
  * attacker-influenceable (JCLAW-730), so only values this codebase owns are interpolated: the
  * configured provider name, the model id sent on the wire, the already-clamped retry-after, and
@@ -177,12 +173,10 @@ public final class LlmErrorTemplates {
     }
 
     /**
-     * Nothing static to register. A provider failure's template is parameterised by the call
-     * that produced it — the provider actually used, the model actually requested, the
-     * retry-after the provider returned — so the rows above are built per failure rather than
-     * held as table entries, and {@link ErrorTemplates#forCode} falls back for these codes by
-     * design. The method exists so this file still satisfies the registry's one-file-per-surface
-     * contract (JCLAW-60) and stays visible to its merge.
+     * Nothing static to register: a template here is parameterised by the call that produced it —
+     * the provider actually used, the model actually requested, the retry-after the provider
+     * returned — so {@link ErrorTemplates#forCode} falls back for these codes by design. Kept so
+     * this file stays in the registry's one-file-per-surface merge (JCLAW-60).
      */
     static Map<String, ErrorTemplate> templates() {
         return Map.of();

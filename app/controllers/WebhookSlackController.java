@@ -130,9 +130,8 @@ public class WebhookSlackController extends Controller {
         }
         if (!SlackChannel.verifySignature(binding.signingSecret,
                 timestamp.value(), rawBody, signature.value())) {
-            // JCLAW-1135: name the binding and point at the secret. The template takes neither the
-            // stored secret nor the received signature, so neither can reach the log. The 401 body
-            // Slack receives is unchanged — it is for Slack's servers, not a person.
+            // JCLAW-1135: the template takes neither the stored secret nor the received signature,
+            // so neither can reach the log. The 401 body stays terse: it is for Slack's servers.
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_SLACK,
                     ChannelErrorTemplates.render(
                             ChannelErrorTemplates.slackSignatureMismatch(bindingId, binding.teamId),
