@@ -1,11 +1,13 @@
 package agents;
 
+import com.google.gson.JsonObject;
 import io.opentelemetry.context.Context;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
+import llm.routing.RouteDecision;
 import llm.routing.RoutedTurn;
 import llm.routing.SubscriptionUsage;
 import memory.MemoryAutoCapture;
@@ -258,9 +260,10 @@ final class StreamingAgentRunner {
             streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
             return;
         }
-        // Emitted before the prologue so the chat shows the model while the reply is still streaming.
-        cb.onStatus().accept("{\"route\":%s}".formatted(route.toJson(route.primary(), false)));
         RoutedTurn.callWith(route, conversation, () -> {
+            // Emitted before the prologue so the chat shows the model while the reply is still streaming.
+            cb.onStatus().accept(routeFrame(agent, conversation, route.primary(), false,
+                    ProviderRegistry.get(route.primary().provider())));
             streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
             return null;
         });
@@ -351,7 +354,7 @@ final class StreamingAgentRunner {
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         if (accumulator.error() != null) SubscriptionUsage.noteFailure(accumulator.error());
-        var promoted = routed != null ? promoteRoutedFailover(routed, accumulator, agent, channelType, cb) : null;
+        var promoted = routed != null ? promoteRoutedFailover(routed, accumulator, agent, conversation, channelType, cb) : null;
         if (promoted != null) {
             primary = promoted;
             effectiveModelIdForCall = Objects.requireNonNull(
@@ -417,7 +420,8 @@ final class StreamingAgentRunner {
      */
     private static @Nullable LlmProvider promoteRoutedFailover(RoutedTurn.Binding routed,
                                                                LlmProvider.StreamAccumulator accumulator,
-                                                               Agent agent, String channelType,
+                                                               Agent agent, Conversation conversation,
+                                                               String channelType,
                                                                AgentRunner.StreamingCallbacks cb) {
         if (!(accumulator.error() instanceof LlmProvider.LlmException failure)) return null;
         if (!accumulator.content().isEmpty() || !accumulator.toolCalls().isEmpty() || accumulator.reasoningChars() > 0) {
@@ -430,8 +434,22 @@ final class StreamingAgentRunner {
         routed.promote();
         EventLogger.warn("router", agent.name, channelType, "Failing over from %s to %s: %s"
                 .formatted(from.describe(), to.describe(), failure.getMessage()));
-        cb.onStatus().accept("{\"route\":%s}".formatted(routed.decision().toJson(to, true)));
+        cb.onStatus().accept(routeFrame(agent, conversation, to, true, provider));
         return provider;
+    }
+
+    /**
+     * The route status frame, carrying the effort the routed model will reason at: the init frame
+     * went out before routing, so it could only report the router agent's own setting. Call inside
+     * the {@link RoutedTurn} binding.
+     */
+    private static String routeFrame(Agent agent, Conversation conversation, RouteDecision.Target served,
+                                     boolean failover, @Nullable LlmProvider provider) {
+        var frame = new JsonObject();
+        frame.add("route", Objects.requireNonNull(RoutedTurn.current(conversation)).decision().toJson(served, failover));
+        var thinking = provider != null ? ModelResolver.resolveThinkingMode(agent, conversation, provider) : null;
+        if (thinking != null) frame.addProperty("thinkingMode", thinking);
+        return frame.toString();
     }
 
     /**

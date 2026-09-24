@@ -89,8 +89,9 @@ class ModelRouterTurnTest extends UnitTest {
         assertEquals("from the subscription", harness.completed.get());
         assertEquals(1, subscriptionCalls.get());
         assertEquals(0, perTokenCalls.get(), "the per-token model is only the fallback");
-        assertTrue(harness.statuses.stream().anyMatch(s -> s.startsWith("{\"route\":") && s.contains(subscription)),
-                "the chosen model is announced before the reply streams: " + harness.statuses);
+        assertTrue(harness.statuses.stream().anyMatch(s -> s.startsWith("{\"route\":") && s.contains(subscription)
+                        && s.contains("\"thinkingMode\":\"high\"")),
+                "the chosen model, and the middle effort it reasons at, precede the reply: " + harness.statuses);
 
         var usage = lastAssistantUsage(convo);
         assertEquals(subscription, usage.get("modelProvider").getAsString());
@@ -119,7 +120,8 @@ class ModelRouterTurnTest extends UnitTest {
         assertEquals("from per-token", harness.completed.get());
         assertEquals(1, subscriptionCalls.get());
         assertEquals(1, perTokenCalls.get());
-        assertTrue(harness.statuses.stream().anyMatch(s -> s.contains("\"failover\":true") && s.contains(perToken)),
+        assertTrue(harness.statuses.stream().anyMatch(s -> s.contains("\"failover\":true") && s.contains(perToken)
+                        && s.contains("\"thinkingMode\":\"high\"")),
                 "the switch is announced so the badge can say so: " + harness.statuses);
 
         var usage = lastAssistantUsage(convo);

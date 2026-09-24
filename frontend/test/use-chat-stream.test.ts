@@ -182,6 +182,21 @@ describe('useChatStream', () => {
     expect(assistant._route).toMatchObject({ provider: 'openrouter', model: 'glm-5.3-flash', failover: true })
   })
 
+  it('shows the routed model\'s reasoning effort, which the init frame could not know', async () => {
+    const deps = makeDeps({ input: ref('hello') })
+    const route = { class: 'chat', provider: 'ollama-cloud', model: 'glm-5.3-flash', reason: 'no task markers' }
+    streamWith([
+      'data: {"type":"init","conversationId":42}\n',
+      `data: ${JSON.stringify({ type: 'status', content: JSON.stringify({ route, thinkingMode: 'medium' }) })}\n`,
+    ])
+    const { api } = await mountStream(deps)
+    await api.sendMessage()
+    await flushPromises()
+
+    expect(deps.messages.value[1]!._route).toMatchObject({ model: 'glm-5.3-flash' })
+    expect(api.streamStatus.value).toBe('thinking (medium)...')
+  })
+
   it('stamps the reasoning→content transition (collapses the thinking card once)', async () => {
     const deps = makeDeps({ input: ref('think then answer') })
     streamWith([
