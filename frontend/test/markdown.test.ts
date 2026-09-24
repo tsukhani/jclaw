@@ -79,4 +79,31 @@ describe('renderMarkdown', () => {
     const result = renderMarkdown('[docs](https://example.com/path)')
     expect(result).toContain('href="https://example.com/path"')
   })
+
+  it('typesets $…$ math, keeping its underscores away from emphasis', () => {
+    const result = renderMarkdown('$N = 4(p_1\\cdots p_n) - 1$, so it is odd.')
+    expect(result).toContain('class="katex"')
+    expect(result).not.toContain('<em>')
+    expect(result).toContain('<annotation encoding="application/x-tex">N = 4(p_1\\cdots p_n) - 1</annotation>')
+  })
+
+  it('typesets \\(…\\) inline and $$…$$ and \\[…\\] as display math', () => {
+    expect(renderMarkdown('Inline \\(a^2+b^2=c^2\\) here.')).toContain('class="katex"')
+    expect(renderMarkdown('$$P = p_1 p_2$$')).toContain('katex-display')
+    expect(renderMarkdown('\\[\n\\int_0^1 x\\,dx\n\\]')).toContain('katex-display')
+  })
+
+  it('leaves dollar amounts in prose alone', () => {
+    expect(renderMarkdown('It costs $5 and $10 today.')).toBe('<p>It costs $5 and $10 today.</p>\n')
+  })
+
+  it('shows malformed TeX as an error span instead of throwing', () => {
+    expect(renderMarkdown('Bad: $\\frac{1}{$ end')).toContain('katex-error')
+  })
+
+  it('does not let math smuggle a javascript: link', () => {
+    // KaTeX refuses \\href without `trust`; the TeX survives only as annotation text.
+    const result = renderMarkdown('$\\href{javascript:alert(1)}{x}$ done')
+    expect(result).not.toMatch(/href=|<a[\s>]/)
+  })
 })

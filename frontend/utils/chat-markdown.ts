@@ -13,8 +13,10 @@
  * caller. Do not move these into a factory or per-call path — the /api/ src+href
  * allow-list and the cache bound both depend on the single-instance semantics.
  */
-import { marked, Renderer, type Tokens } from 'marked'
+import { marked, Marked, Renderer, type Tokens, type TokenizerAndRendererExtension } from 'marked'
 import DOMPurify from 'dompurify'
+import katex, { type KatexOptions } from 'katex'
+import markedKatex from 'marked-katex-extension'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 import type { MessageUsage } from '~/utils/usage-cost'
 
@@ -41,6 +43,29 @@ chatRenderer.code = (token: Tokens.Code) =>
   + `<button type="button" class="code-copy">Copy</button>`
   + renderCodeBlock(token)
   + `</div>`
+
+// Its own instance keeps math off the skills page and the guide. `\(…\)`/`\[…\]` need their own rule:
+// Marked reads them as escaped brackets. "$5 and $10" stays prose: a `$` must sit after a space or line start.
+const KATEX_OPTIONS: KatexOptions = { throwOnError: false, strict: 'ignore' }
+
+const texBracketMath: TokenizerAndRendererExtension = {
+  name: 'texBracketMath',
+  level: 'inline',
+  start(src) {
+    const i = src.search(/\\[([]/)
+    return i < 0 ? undefined : i
+  },
+  tokenizer(src) {
+    const m = /^\\\(([\s\S]+?)\\\)|^\\\[([\s\S]+?)\\\]/.exec(src)
+    if (!m) return undefined
+    return { type: 'texBracketMath', raw: m[0], text: (m[1] ?? m[2] ?? '').trim(), displayMode: m[2] !== undefined }
+  },
+  renderer(token) {
+    return katex.renderToString(token.text as string, { ...KATEX_OPTIONS, displayMode: token.displayMode as boolean })
+  },
+}
+
+const chatMarked = new Marked({ breaks: true, gfm: true }, markedKatex(KATEX_OPTIONS), { extensions: [texBracketMath] })
 
 export function formatTokensPerSec(usage: MessageUsage): string | null {
   if (!usage.durationMs || usage.durationMs <= 0 || !usage.completion) return null
@@ -89,10 +114,11 @@ const markdownCache = new Map<string, string>()
 const MARKDOWN_CACHE_MAX = 200
 
 function renderMarkdownInner(text: string, agentId: number | null): string {
-  const html = marked.parse(normalizeMarkdownLinks(text), { renderer: chatRenderer }) as string
+  const html = chatMarked.parse(normalizeMarkdownLinks(text), { renderer: chatRenderer }) as string
   const sanitized = DOMPurify.sanitize(html, {
-    ADD_TAGS: ['img', 'audio', 'video', 'source'],
-    ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target'],
+    // semantics/annotation: KaTeX's MathML carries its TeX there; stripped, the TeX leaks into what a screen reader reads.
+    ADD_TAGS: ['img', 'audio', 'video', 'source', 'semantics', 'annotation'],
+    ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target', 'encoding'],
   })
   return agentId == null ? sanitized : rewriteWorkspaceLinks(sanitized, agentId)
 }

@@ -271,3 +271,6 @@ html.dark .code-copy {
   color: #a3a3a3;
 }
 html.dark .code-copy[data-copied] { color: #6ee7b7; }
+
+/* A display equation wider than the bubble scrolls inside it rather than widening the transcript. */
+.katex-display { overflow: auto hidden; }

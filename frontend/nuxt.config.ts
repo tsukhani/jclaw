@@ -33,6 +33,7 @@ export default defineNuxtConfig({
 
   css: [
     '~/assets/css/tailwind.css',
+    'katex/dist/katex.min.css',
     'driver.js/dist/driver.css',
     '~/assets/css/driver-theme.css',
   ],
