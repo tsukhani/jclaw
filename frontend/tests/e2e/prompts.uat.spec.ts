@@ -78,10 +78,16 @@ test.describe('UAT-5 prompts library', () => {
 
   test('category filter narrows the visible set', async ({ page }) => {
     await gotoPage(page, '/prompts')
-    const all = await page.locator('[data-testid^="prompt-card-"]').count()
+    const cards = page.locator('[data-testid^="prompt-card-"]')
+    // count() does not wait, so each count follows a signal: the fixture (category CUSTOM) is on
+    // screen once the list has loaded, and gone once the Coding filter has applied.
+    const fixture = page.getByTestId(`prompt-card-${promptId}`)
+    await expect(fixture).toBeVisible({ timeout: 15_000 })
+    const all = await cards.count()
     await page.getByTestId('category-filter-CODING').click()
-    const coding = await page.locator('[data-testid^="prompt-card-"]').count()
-    expect(coding, 'a category filter must show no more than the unfiltered set').toBeLessThanOrEqual(all)
+    await expect(fixture).toBeHidden()
+    const coding = await cards.count()
+    expect(coding, 'the Coding filter must drop at least the CUSTOM fixture').toBeLessThan(all)
     expect(coding, 'the seeded Coding category is non-empty').toBeGreaterThan(0)
   })
 
