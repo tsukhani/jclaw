@@ -93,8 +93,26 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('\\[\n\\int_0^1 x\\,dx\n\\]')).toContain('katex-display')
   })
 
+  it('closes math right before a bracket, and keeps it out of the next pair', () => {
+    const result = renderMarkdown('(since $N$ is odd, none can be $2$), so each $q_j$ is odd.')
+    expect(result).not.toContain('katex-error')
+    expect(result).toContain('<annotation encoding="application/x-tex">2</annotation>')
+    expect(result).toContain('<annotation encoding="application/x-tex">q_j</annotation>')
+  })
+
+  it('keeps an inline $$…$$ in its paragraph', () => {
+    const result = renderMarkdown('so $$x^2$$ holds here')
+    expect(result.match(/<p>/g)).toHaveLength(1)
+    expect(result).toContain('katex-display')
+  })
+
+  it('typesets a $$ block on its own lines', () => {
+    expect(renderMarkdown('Let\n\n$$\nP = p_1 p_2\n$$\n\nthen')).toContain('katex-display')
+  })
+
   it('leaves dollar amounts in prose alone', () => {
     expect(renderMarkdown('It costs $5 and $10 today.')).toBe('<p>It costs $5 and $10 today.</p>\n')
+    expect(renderMarkdown('Budget $20,000 and $30,000.')).not.toContain('katex')
   })
 
   it('shows malformed TeX as an error span instead of throwing', () => {

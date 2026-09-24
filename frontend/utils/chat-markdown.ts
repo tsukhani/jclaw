@@ -16,7 +16,6 @@
 import { marked, Marked, Renderer, type Tokens, type TokenizerAndRendererExtension } from 'marked'
 import DOMPurify from 'dompurify'
 import katex, { type KatexOptions } from 'katex'
-import markedKatex from 'marked-katex-extension'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 import type { MessageUsage } from '~/utils/usage-cost'
 
@@ -44,28 +43,41 @@ chatRenderer.code = (token: Tokens.Code) =>
   + renderCodeBlock(token)
   + `</div>`
 
-// Its own instance keeps math off the skills page and the guide. `\(…\)`/`\[…\]` need their own rule:
-// Marked reads them as escaped brackets. "$5 and $10" stays prose: a `$` must sit after a space or line start.
+// Its own instance keeps math off the skills page and the guide. Dollar math follows Pandoc's rule — the
+// opening $ is followed by a non-space, the closing one follows a non-space and precedes no digit — so
+// "$5 and $10" stays prose and "(none can be $2$)" still closes. `\(…\)`/`\[…\]` need a rule of their
+// own because Marked reads them as escaped brackets.
 const KATEX_OPTIONS: KatexOptions = { throwOnError: false, strict: 'ignore' }
 
-const texBracketMath: TokenizerAndRendererExtension = {
-  name: 'texBracketMath',
-  level: 'inline',
-  start(src) {
-    const i = src.search(/\\[([]/)
-    return i < 0 ? undefined : i
-  },
-  tokenizer(src) {
-    const m = /^\\\(([\s\S]+?)\\\)|^\\\[([\s\S]+?)\\\]/.exec(src)
-    if (!m) return undefined
-    return { type: 'texBracketMath', raw: m[0], text: (m[1] ?? m[2] ?? '').trim(), displayMode: m[2] !== undefined }
-  },
-  renderer(token) {
-    return katex.renderToString(token.text as string, { ...KATEX_OPTIONS, displayMode: token.displayMode as boolean })
-  },
+function mathExtension(name: string, level: 'block' | 'inline', rule: RegExp,
+  startAt: RegExp): TokenizerAndRendererExtension {
+  return {
+    name,
+    level,
+    start(src) {
+      const i = src.search(startAt)
+      return i < 0 ? undefined : i
+    },
+    tokenizer(src) {
+      const m = rule.exec(src)
+      const tex = m?.slice(1).find(g => g !== undefined)
+      if (!m || !tex) return undefined
+      return { type: name, raw: m[0], text: tex.trim(), displayMode: level === 'block' || m[0].startsWith('$$') || m[0].startsWith('\\[') }
+    },
+    renderer(token) {
+      return katex.renderToString(token.text as string, { ...KATEX_OPTIONS, displayMode: token.displayMode as boolean })
+    },
+  }
 }
 
-const chatMarked = new Marked({ breaks: true, gfm: true }, markedKatex(KATEX_OPTIONS), { extensions: [texBracketMath] })
+const chatMarked = new Marked({ breaks: true, gfm: true }, {
+  extensions: [
+    mathExtension('mathBlock', 'block', /^\$\$([\s\S]+?)\$\$[ \t]*(?:\n+|$)/, /^\$\$/m),
+    mathExtension('mathInline', 'inline',
+      /^\$\$((?:\\.|[^\\$])+?)\$\$|^\$(?!\s)((?:\\.|[^\\\n$])+?)(?<!\s)\$(?!\d)|^\\\(([\s\S]+?)\\\)|^\\\[([\s\S]+?)\\\]/,
+      /\$|\\[([]/),
+  ],
+})
 
 export function formatTokensPerSec(usage: MessageUsage): string | null {
   if (!usage.durationMs || usage.durationMs <= 0 || !usage.completion) return null
