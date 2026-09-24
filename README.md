@@ -29,7 +29,7 @@
 
 Get JClaw running in one command. The installer downloads the self-contained
 `jclaw-bundle.zip` from the latest GitHub Release, verifies Java 25+ (the bundle's
-**only** runtime dependency) — offering to download a self-contained Zulu JRE 25
+**only** prerequisite) — offering to download a self-contained Zulu JRE 25
 into `~/.jclaw/jre` when none is found — extracts it to `~/.jclaw`, and starts JClaw on
 <http://localhost:9000>.
 
@@ -72,7 +72,13 @@ shows the newest release's notes too.
 
 **Requirements:** a Java 25+ runtime ([Zulu](https://www.azul.com/downloads/?version=java-25)
 or Temurin), or let the installer download one. Nothing else — the bundle bakes in
-the framework, app dependencies, precompiled classes, and the prebuilt SPA.
+the framework, app dependencies, precompiled classes, and the prebuilt SPA. The one
+exception is the browser tool: the bundle and the Docker image leave out the Node.js its
+Playwright driver runs on and Chromium (roughly 300 MB together), and JClaw downloads both
+the first time an agent uses the browser, or ahead of time from **Settings → Agents &
+Automation → Browser** (**Download now**). That needs access to nodejs.org and Playwright's
+download servers; on a machine without it, set `PLAYWRIGHT_NODEJS_PATH` to an installed
+Node.js and provide Chromium under `PLAYWRIGHT_BROWSERS_PATH`.
 
 **Configuration** (optional environment variables):
 
@@ -105,7 +111,7 @@ JClaw is Abundent's AI-powered automation platform, built from scratch in **pure
 - **[JavaClaw](https://github.com/jobrunr/javaclaw)** (Spring Boot) — job scheduling, background task processing, browser automation
 - **[Hermes](https://github.com/NousResearch/hermes-agent)** (Python) — cron/task scheduling parity, subagent delegation patterns
 
-The implementation is entirely original — no code is shared with any of them. JClaw is built on lean library primitives (OkHttp 5, db-scheduler, ProcessBuilder, virtual threads, JPA) with no Spring, no heavy framework bloat, and no Node.js runtime on the server — the only Python is in the optional local sidecars the JVM spawns (ASR, diarization, TTS, image, video, fetch, stealth). The result is a leaner, faster, more maintainable platform for building AI agents and automation workflows.
+The implementation is entirely original — no code is shared with any of them. JClaw is built on lean library primitives (OkHttp 5, db-scheduler, ProcessBuilder, virtual threads, JPA) with no Spring, no heavy framework bloat, and no Node.js in the application itself — the one piece that runs on Node.js is the browser tool's Playwright driver, which a bundle or Docker install downloads on first use, and the only Python is in the optional local sidecars the JVM spawns (ASR, diarization, TTS, image, video, fetch, stealth). The result is a leaner, faster, more maintainable platform for building AI agents and automation workflows.
 
 ---
 
@@ -123,15 +129,19 @@ The implementation is entirely original — no code is shared with any of them. 
 - 🤖 **Agent System** — Conversational AI agents with memory and context
 - 💬 **Channels** — Web chat plus per-agent Telegram, Slack and WhatsApp bindings (the official Cloud API or unofficial WhatsApp Web)
 - ⚡ **Job Scheduling** — Persistent cron & scheduled tasks via db-scheduler, with automatic retries and crash recovery
-- 🔧 **Pure Java** — The server is all Java; Python is needed only by the optional local sidecars, JavaScript only to build the SPA
-- 📦 **Built-in Frontend** — Nuxt 4 SPA (Vue 3 + TypeScript)
+- 🔧 **Pure Java** — The server is all Java; Python is needed only by the optional local sidecars, and Node.js only to build the SPA and to run the browser tool's Playwright driver
+- 📦 **Built-in Frontend** — Nuxt 4 SPA (Vue 3 + TypeScript); chat and the conversation viewer render Markdown and typeset math with KaTeX
+- 🧭 **Model Router** — Choose `router/auto` wherever a model is picked: each prompt is classed as chat, summarize, agentic, reasoning or coding, sent to the first usable model on that class's list, and given a reasoning effort of its own; the lists live under **Settings → Providers → Model Router**
+- 🌐 **Browsing & Scraping** — A browser tool whose every Chromium connection is screened inside the JVM, so a page cannot reach loopback, private or other internal addresses, with TypeSafe AI's Jev as an optional operator-selected engine; large site crawls run as background scrape jobs you start, pause, resume and read from the Scrapes page
 - 🔌 **Plugin Architecture** — Modular, extensible design
 - 🧠 **Memory & Context** — Persistent conversations across sessions
 - ⏰ **Tasks & Reminders** — User-facing scheduled tasks and reminders, managed from the Tasks and Reminders pages
 - 🧩 **Skills, MCP & Subagents** — Reusable skills, MCP server tools, and subagent delegation including ACP coding harnesses
 - 📡 **OpenTelemetry** — Opt-in OTLP traces and metrics with GenAI spans per model call, reconfigurable live without a restart
 - 🎙️ **Voice, Image & Video** — Real-time voice mode, local ASR/TTS and image/video generation through the optional Python sidecars
-- 🗂️ **Apps** — Static mini-apps under `public/apps`, managed from the Apps page
+- 🗂️ **Apps** — Static mini-apps under `public/apps`, managed from the Apps page and installable as desktop PWAs
+- 📁 **Workspace Manager** — Browse each agent's workspace with sizes from the Agents page, download a file or a folder as a zip, back up the whole workspace, and delete entries, with Standing Orders files protected
+- 🔔 **Operator Alerts** — Name one channel under **Settings → System → Alerts** and JClaw messages you there when an LLM provider or MCP server circuit breaker opens or recovers, or a recurring task's occurrence fails for good
 - 🛡️ **Tool Approvals & Sandboxing** — Dangerous actions (shell commands, coding-harness launches) ask you for approval; opt-in OS sandboxing (`shell.sandbox`, `subagent.acp.sandbox`) confines what those processes can write and read
 - 🚀 **Lightweight** — Minimal resource footprint, fast startup
 
@@ -162,7 +172,7 @@ jclaw/
 │   ├── routes                    # URL routing
 │   ├── play.plugins              # Play plugin registration
 │   └── log4j2.xml                # Logging configuration
-├── docs/                         # User guide, generated architecture docs, spikes, reports
+├── docs/                         # User guide + generated architecture docs (other subdirectories are gitignored, local to each clone)
 ├── frontend/                     # Nuxt 4 SPA (SPA-only; ssr: false)
 │   ├── app.vue                   # Root component
 │   ├── layouts/                  # Page layouts
@@ -194,7 +204,8 @@ jclaw/
 That's the whole list. The [Abundent Play 1.x fork](https://github.com/tsukhani/play1),
 app dependencies, precompiled classes, and the prebuilt SPA all ship **inside**
 `jclaw-bundle.zip`, so a Java 25 runtime is the only thing the host needs to run
-JClaw — see [Quick Install](#quick-install-one-line). (Building from source instead
+JClaw — see [Quick Install](#quick-install-one-line), which also covers the Node.js and
+Chromium the browser tool downloads on first use. (Building from source instead
 adds a dev toolchain — Node.js, pnpm, and the `play` CLI — which the
 [Dev Container](#dev-container-recommended) installs for you.)
 
@@ -280,6 +291,27 @@ the `lm-studio` row and either run **Discover Models** against
 `http://localhost:1234/v1` or enter the model you loaded in the
 **Add model** form. Bind an agent to
 `lm-studio` from the Agent Edit page to use it.
+
+**uv** — required only by the optional local sidecars (ASR, diarization,
+TTS, image, video, fetch, stealth). JClaw launches each one with
+`uv run serve.py`, and [uv](https://docs.astral.sh/uv/) provisions the
+Python and packages it runs on, so no system Python is needed. The image
+and video generation checks look for `uv` once and remember the answer,
+so restart JClaw after installing it.
+
+**ffmpeg** — required for local Whisper transcription (it converts audio
+to the PCM Whisper reads), speaker diarization, shrinking large or
+lossless audio attachments before they are sent to a model, encoding
+spoken replies for the channel that plays them, and sampling frames for
+video interpretation. The Docker image already includes it.
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install ffmpeg
+
+# macOS
+brew install ffmpeg
+```
 
 ### Clone
 
@@ -556,6 +588,8 @@ This runs `play autotest` (backend JUnit + functional tests), `pnpm test` (front
 
 Each check writes its full output to `logs/test-<check>.log` (e.g. `logs/test-backend.log`, `logs/test-typecheck.log`) for post-mortem on failure. The command exits non-zero if any check failed, so it's safe to wire into git hooks or CI.
 
+When a Playwright headless Chromium is cached (under `PLAYWRIGHT_BROWSERS_PATH`, else Playwright's per-OS cache), the backend run also includes the live-browser tests; otherwise it prints one line saying they stay skipped. Set `JCLAW_PLAYWRIGHT_TEST=0` to skip them.
+
 A few more developer commands sit beside it:
 
 ```bash
@@ -580,13 +614,13 @@ Validating and scoring are offline — no backend, no model call, no database �
 
 #### Git hooks
 
-`./jclaw.sh setup` wires the three in-repo hooks from `.githooks/` once per clone. `pre-commit` runs lint-staged over staged `frontend/**` files; `pre-push` runs `./jclaw.sh test` before a push reaches the remote and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite; `post-checkout` seeds a new worktree via `./jclaw.sh init-worktree`. To wire them by hand instead:
+`./jclaw.sh setup` wires the three in-repo hooks from `.githooks/` once per clone. `pre-commit` runs lint-staged over staged `frontend/**` files; `pre-push` skips by itself when the push changes only documentation (`docs/`, `*.md`, `.github/`) or only the `application.version` line; otherwise it runs a wildcard-import check, `spotlessCheck` and `compileJava`, then `./jclaw.sh test`, before a push reaches the remote, and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite; `post-checkout` seeds a new worktree via `./jclaw.sh init-worktree`. To wire them by hand instead:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP_TESTS=1 git push origin HEAD`.
+To bypass for a one-off push (e.g. urgent hotfix): `JCLAW_SKIP_TESTS=1 git push origin HEAD`.
 
 ---
 
@@ -607,7 +641,7 @@ To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP
 - **UI components**: [shadcn-nuxt](https://www.shadcn-vue.com/) on [Reka UI](https://reka-ui.com/) primitives, with `class-variance-authority` + `tailwind-merge` for variants
 - **Styling**: Tailwind CSS v4 (via `@tailwindcss/vite`), Lucide + Heroicons icons, Inter variable font
 - **State**: Composables backed by `useState` (no Pinia); `@vueuse/core` utilities
-- **Data & rendering**: `@tanstack/vue-table` for tables, `marked` + `dompurify` for safe Markdown, `zod` for validation
+- **Data & rendering**: `@tanstack/vue-table` for tables, `marked` + `dompurify` for safe Markdown, `katex` for math, `zod` for validation
 - **API**: Cookie-session authenticated `$fetch` to the Play backend, proxied via Nitro in dev
 - **Tooling**: Vitest + `@nuxt/test-utils` + jsdom, Playwright e2e, ESLint + Stylelint, `vue-tsc` typecheck, a11y via `vue-axe`/`axe-core`
 

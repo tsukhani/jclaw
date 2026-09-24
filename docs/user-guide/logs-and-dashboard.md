@@ -76,6 +76,12 @@ decision never reads back as the provider having broken. With OpenTelemetry expo
 transitions arrive as the `jclaw.breaker.transitions` counter and a `circuit_breaker.transition`
 span event; alarm on the transition to `OPEN`, not on the errors underneath it.
 
+With `alerts.delivery` set under [Settings → Alerts](/guide#settings-alerts), JClaw also messages
+you when a provider or MCP server breaker opens, saying why it tripped, and again when it
+recovers. Each outage is announced once, a breaker that keeps reopening at most once every 15
+minutes, and a breaker you isolate or restore by hand sends nothing. An alert that cannot be
+delivered is written to the event log under `OPERATOR_ALERT`.
+
 ### Chat Performance
 
 Latency percentiles per pipeline segment of a turn — queue wait, TTFT, the tool rounds or reasoning before the first text, stream body, tool execution, the voice group, total — rather than per model. Filters sit in the panel header: a **7d / 30d / All** window (default 30d), an agent select, and a channel select. Three views, toggled in the panel header:
@@ -110,10 +116,11 @@ A live tail of the last 10 events. It shows the same message columns as the [Log
 | **Message** | flex      | One-line description.                       |
 | **Timestamp**| wide, right-aligned | Local date · time (matches Logs format). |
 
-A segmented toggle in the panel header switches the table between two views:
+A segmented toggle in the panel header switches the table between three views:
 
 - **All** (default) — the event tail described above.
 - **Video** — recent video-generation jobs with their state (`PENDING` / `RUNNING` / `SUCCEEDED` / `FAILED`), prompt, submitted time, and a *see in conversation* link to where each was requested. Use it to track `generate_video` jobs as they run, without leaving the dashboard.
+- **Scrape jobs** — the 10 most recent [background scrapes](/guide#scrapes) with their state, site, progress and start time; the site links to the job's page on [Scrapes](/scrapes).
 
 For full filtering and expansion, click through to the [Logs](/logs) page.
 
@@ -125,7 +132,7 @@ The [Logs](/logs) page is the operator's microscope. Every meaningful event — 
 
 Three filters across the top:
 
-- **Category** — restrict to one subsystem. The list is built from the categories already present in the event log, so every category that has written an event is selectable (e.g. `llm`, `channel`, `tool`, `CIRCUIT_BREAKER`). Per-event categories are grouped: **Subagents** (`SUBAGENT_*`), **Tasks** (`TASK_*`) and **MCP** (`MCP_*`); a group appears once one of its categories has an event. The list reloads each time you focus the filter, so a category first written while the page is open shows up without a reload.
+- **Category** — restrict to one subsystem. The list is built from the categories already present in the event log, so every category that has written an event is selectable (e.g. `llm`, `channel`, `tool`, `CIRCUIT_BREAKER`, `router` for the Auto router's choices and failovers, `OPERATOR_ALERT` for an alert that could not be delivered). Per-event categories are grouped: **Subagents** (`SUBAGENT_*`), **Tasks** (`TASK_*`) and **MCP** (`MCP_*`); a group appears once one of its categories has an event. The list reloads each time you focus the filter, so a category first written while the page is open shows up without a reload.
 - **Level** — `ERROR`, `WARN`, or `INFO`.
 - **Search** — free-text match on the message body.
 
@@ -169,7 +176,7 @@ Logs include the metadata of what happened, not the full conversation content. M
 :::
 
 :::note Retention
-Events older than the configured retention window (default 30 days, set under **Settings → Logging → Event Log Retention**) are swept by `EventLogCleanupJob` at startup and on a daily tick. Active investigations should be exported before the cutoff.
+Events older than the configured retention window (default 30 days, set under **Settings → Logging → Event Log Retention**) are swept by `EventLogCleanupJob` at startup and on a daily tick. The Logs page has no export, so copy out what an active investigation needs before the cutoff.
 :::
 
 ## Sidebar status pip

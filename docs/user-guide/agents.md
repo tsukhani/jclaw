@@ -9,13 +9,13 @@ Every agent appears in the **Agent** dropdown on [Chat](/chat); once an agent is
 The page splits into two sections:
 
 - **Main Agent** — the built-in singleton. Always enabled, can't be renamed or deleted. It's the agent [Chat](/chat) opens on; external [channels](/channels) reach it only through a binding, the same as any other agent.
-- **Custom Agents** — every agent you create yourself. You can enable or disable, edit, or delete these freely.
+- **Custom Agents** — every agent you create yourself. You can enable or disable, edit, or delete these freely; **Delete All** in the section header removes every custom agent at once, behind a typed confirmation, and leaves the Main Agent alone.
 
 Both kinds use the same configuration surface, with a single difference: you can't change the Main Agent's **Name**, and the Main Agent gets a couple of extra knobs that custom agents don't need (see *Shell Exec Privileges* below).
 
 ## Creating or editing an agent
 
-Click **New Agent** at the top of the page, or click any existing row to edit it. The edit view groups configuration into sections, scrollable on one long page.
+Click **New Agent** at the top of the page, or click an existing agent's name to edit it. The edit view groups configuration into sections, scrollable on one long page.
 
 ### Basics
 
@@ -24,13 +24,13 @@ Click **New Agent** at the top of the page, or click any existing row to edit it
 | **Name**             | How the agent appears in the Chat Agent dropdown and breadcrumbs.                                              |
 | **Description**      | A short blurb shown under the name. Optional but useful when you have many agents.                             |
 | **Default Provider** | Which model provider to use. Must be configured in [Settings → LLM Providers](/guide#settings) first.          |
-| **Default Model**    | The specific model id within that provider. The capability pills (thinking / vision / audio / video / no tools) update to reflect what that model supports. |
+| **Default Model**    | The specific model id within that provider. The capability pills (thinking / vision / audio / video / no tools) update to reflect what that model supports. Once the [Model Router](/guide#settings-model-router) lists a model for its Chat class, provider **router** with model **Auto (best value)** is offered too, and picks a model per prompt. |
 | **Fallback Provider** | Optional. Where a turn goes when the default provider's circuit breaker refuses it — any configured provider other than the default. Leave it at **None** and a refused turn fails fast instead. See [When a provider misbehaves](/guide#settings-when-a-provider-misbehaves). |
 | **Fallback Model**   | The model to use on the fallback provider. It is your choice, not the default model's id: the fallback need not offer the same models. Set together with the provider. |
 
 ### System prompt
 
-A free-form text field. This is what the model sees before every turn. Use it to set the agent's voice, role, constraints, and any context that doesn't change between conversations.
+There is no free-form prompt field: what the model sees before every turn is assembled from this agent's workspace files (see *Workspace file contents* below), its skills, its core memories and the platform's own standing context. Set the agent's voice, role, constraints, and any context that doesn't change between conversations in those files — `AGENT.md` and `SOUL.md` are the usual places.
 
 You can preview exactly what the agent will receive — including any standing context the platform adds from workspace files and skills — by clicking **Inspect prompt** at the top of the edit form. The breakdown shows each section with character and token counts.
 
@@ -78,6 +78,17 @@ A small workspace of named markdown files the platform reads into every turn's s
 
 These files are read on every turn when the system prompt is assembled, through a 30-second cache that is invalidated the moment you save, so an edit is picked up on the agent's next turn without a conversation reset or a restart.
 
+### Workspace manager
+
+Below the editor, once the agent has been saved, the **Workspace** panel lists everything on disk under this agent's workspace — whatever the agent has written, not only the five files above:
+
+- **Tree and sizes** — folders expand in place, every row shows its size (a folder's is everything under it), and the header shows the workspace **Total**. Folders, text files and other files each get their own color and icon.
+- **Filter** — the filter bar narrows the tree to the entries whose name matches, keeping open the folders that lead to them. A very large tree shows its first 1,000 rows.
+- **Auto-refresh** — the tree reloads every 10 seconds while the tab is visible, so a file a running agent writes shows up on its own.
+- **Download** — a file downloads as itself; a folder downloads as a zip.
+- **Back up** — in the panel header, downloads the whole workspace as one zip, Standing Orders included.
+- **Delete** — the trash icon asks for an inline **Confirm**; a folder goes with everything in it, and a symlink is removed without touching what it points to. The five files above, the Standing Orders, are marked **protected** and can't be deleted — edit them in the tabs instead.
+
 ### Other sections
 
 Five more sections on the same page, one line each:
@@ -86,7 +97,7 @@ Five more sections on the same page, one line each:
 - **Memory Autocapture** — automatically capture durable facts from this agent's conversations into long-term memory.
 - **Core memories** — the memories always loaded into this agent's prompt, independent of autocapture, with a cap and a **Migrate excess** action that refiles anything over it.
 - **Content Compression** — shrink large tool output (JSON arrays, code, prose) before it reaches the model: a master toggle, per-type sub-toggles, and an aggressiveness slider.
-- **Standing Tool Approvals** — the tools this agent may run without being asked, each granted by an "always allow" tap, with **Revoke** on every row. A grant has no channel dimension: it applies wherever the agent runs.
+- **Standing Tool Approvals** — the tools this agent may run without being asked, each granted by an "always allow" tap, with **Revoke** on every row. A grant counts only on a turn you started — your web chat, or a channel turn the binding proved is yours; a guest's turn in a group chat still goes through the approval prompt or the off-channel policy.
 
 :::note Tool Approvals
 Whether a dangerous action (such as `exec`) runs at all when nobody can be asked is decided platform-wide under [Settings → Security → Tool Approvals](/guide#settings) (`tool.approval.offChannelPolicy`: `allow`, `deny`, or `ask`). The two per-agent toggles below only widen what the Main Agent's shell may reach.
@@ -137,7 +148,7 @@ Each agent row shows a strip of capability pills derived from the chosen model; 
 
 Only the **thinking** pill is clickable: clicking it toggles the agent's reasoning mode on or off and saves it immediately. The other pills are informational. A model that always thinks shows a locked-on thinking pill that can't be toggled.
 
-This page is the only place the defaults change. The model picker and Think pill in [Chat](/guide#chat-model-and-thinking-for-this-conversation), and `/model` and `/think` on the other channels, override them for one conversation and leave the agent as it is here.
+This page is the only place the defaults change. The model picker and Think pill in [Chat](/guide#chat-model-and-thinking-for-this-conversation), and `/model` and `/think` on the other channels (the `/model` switch only from the binding's owner — see [Slash commands](/guide#chat-slash-commands)), override them for one conversation and leave the agent as it is here.
 
 ## Tips and gotchas
 
@@ -150,7 +161,7 @@ A small amber **provider not configured** pill on an agent row means the agent's
 :::
 
 :::note Editing doesn't rewrite history
-Editing an agent doesn't retroactively change past conversations — they keep the model and prompt they were created with. Only new turns use the updated config.
+Editing an agent doesn't retroactively change past replies — they keep the model and prompt they were answered with. The next turn in any conversation, old or new, uses the updated config, unless that conversation carries its own model or thinking override.
 :::
 
 ## Where to go next

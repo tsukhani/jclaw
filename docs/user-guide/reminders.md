@@ -25,7 +25,7 @@ The agent picks the right schedule shape and writes the *description* as the rem
 - A **recurring interval** (`every 30m`, `every 2h`, `every 1d`) for a **repeating** reminder on a fixed cadence.
 - A **cron expression** for a **repeating** reminder with calendar-aligned timing — "every Monday at 10am."
 
-**A one-time reminder fires once and then completes** (status `PENDING` → `COMPLETED`, and by default it auto-deletes itself — see [Auto-delete after firing](/guide#reminders)). **A repeating reminder stays `ACTIVE`** and keeps firing on its cadence. Use an absolute date-time, not a cron, for something that should happen only once — a cron with a fixed month/day would silently repeat every year.
+**A one-time reminder fires once and then completes** (status `PENDING` → `COMPLETED`, and by default it auto-deletes itself — see [Auto-delete after firing](/guide#reminders-auto-delete-after-firing)). **A repeating reminder stays `ACTIVE`** and keeps firing on its cadence. Use an absolute date-time, not a cron, for something that should happen only once — a cron with a fixed month/day would silently repeat every year.
 
 The agent should not phrase the description as instructions to itself — when a reminder fires, that text is delivered verbatim.
 
@@ -76,14 +76,16 @@ To **keep** a particular one-off reminder after it fires, untick its **Auto-dele
 
 ## The Reminders page
 
-Lists every reminder you've ever scheduled, with the same row regardless of delivery channel. Above the list, three cards track the lifecycle states that matter for reminders — **Active** (recurring reminders), **Pending** (one-time reminders waiting to fire), and **Failed**. Reminders skip the LLM, so there are no run-rate or success-rate metrics here.
+Lists every reminder you've ever scheduled, with the same row regardless of delivery channel. Above the list, four cards track the lifecycle states that matter for reminders — **Active** (recurring reminders), **Pending** (one-time reminders waiting to fire), **Paused**, and **Failed**. Reminders skip the LLM, so there are no run-rate or success-rate metrics here.
+
+A reminder can be paused like any task — ask the agent (`task_manager`'s `pause` and `resume`) or call `POST /api/tasks/{id}/pause`; this page has no pause control of its own. A paused reminder skips its fires until resumed, counts under **Paused** rather than **Active** or **Pending**, and keeps showing its underlying status in the table; `status:PAUSED` in the filter bar lists them.
 
 | Column        | Meaning                                                                                                       |
 |---------------|---------------------------------------------------------------------------------------------------------------|
-| **Reminder**  | The text you (or the agent) wrote. Falls back to the task name when the description is empty.                  |
+| **Reminder**  | The reminder's name. Expand the row (the chevron) to read the text you (or the agent) wrote; it falls back to the name when the description is empty. |
 | **Schedule**  | How it's scheduled, humanized — a recurring reminder shows its cadence ("every Tuesday at 5 PM", "every 30 min"); a one-shot shows a live countdown ("in 3 hours"). Never a raw cron or ISO value. |
 | **Status**    | Same enum as tasks — a one-time reminder is `PENDING` (waiting) then `COMPLETED`; a recurring one is `ACTIVE`. |
-| **Channel**   | `web` or `telegram`. `web (auto)` means the channel was inferred from the calling chat at creation time. A reminder that delivers itself through a tool shows the bare tool name (e.g. `send_gmail_message`). |
+| **Channel**   | `web` or `telegram`, including when the agent inferred the route from the calling chat. `web (auto)` means no delivery was stored at all, and such a reminder is delivered nowhere when it fires. A reminder that delivers itself through a tool shows the bare tool name (e.g. `send_gmail_message`). |
 | **When**      | The exact wall-clock date and time of the next fire, in the effective timezone ("10 Jun 2026 · 1:15 pm"); `—` once a one-time reminder has `COMPLETED`. |
 | **Fired**     | When the most recent fire happened. The truth-of-record for "did the reminder go off when I said?"             |
 | **Auto-delete** | For a one-time reminder, a checkbox: ticked (the default) means the reminder removes itself after it fires; untick to keep it. Recurring reminders show `—` (not applicable). |
@@ -110,6 +112,7 @@ To create a reminder from the API directly rather than via the agent:
 ```text
 POST /api/tasks
 {
+  "agentId": 1,
   "name": "pay-salaries",
   "description": "Pay salaries — Stripe + WhatsApp confirmations",
   "schedule": "0 0 9 * * *",
@@ -118,9 +121,9 @@ POST /api/tasks
 }
 ```
 
-- `delivery` omitted → auto-routes to the calling chat (when posted from a chat session).
-- `delivery: "web"` or `"telegram"` (channel name only, no `:target`) → fills the target from the calling chat.
-- `delivery: "telegram:<chatId>"` → explicit Telegram route, regardless of where the call originated.
+- `agentId` is required — the agent that owns the reminder; the request is refused without it.
+- `delivery` is stored exactly as sent: this endpoint has no calling chat, so it fills in nothing. Omitted, the reminder fires but is delivered nowhere; `"telegram"` with no chat id fails at fire time. Only an agent creating the reminder through `task_manager` gets the auto-routing described above.
+- `delivery: "telegram:<chatId>"` → explicit Telegram route.
 
 You'll likely never touch this endpoint — say it out loud in [Chat](/chat) and the agent will do the right thing.
 

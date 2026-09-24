@@ -19,7 +19,7 @@ The two axes are deliberately different. **Categories** are a closed taxonomy (n
 
 ## The Prompts page
 
-The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view they're grouped into a labelled section per category; pick a single category to see just that one.
+The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view they're grouped into a labeled section per category; pick a single category to see just that one. A library with no prompts at all is given a set of sample prompts when JClaw starts; one that holds any prompt is left alone, so emptying it entirely brings the samples back at the next restart.
 
 - **Category pills** — filter the grid by category. Each pill carries an absolute count of prompts in that category (whole library, not the current search).
 - **Search** — the search box filters live across each prompt's **title, text, and tags**.
@@ -45,7 +45,7 @@ The **Generate** step calls your **main agent's** model, so it only works once t
 
 The active agent is whichever one you have selected in Chat — a saved prompt carries text, not an agent binding, so the same prompt works with any agent.
 
-You can also reach the library from the chat composer with the `/prompt` slash command — `/prompt <search words>` picks a saved prompt matching those words. It works on every channel: on the web it prefills the composer just like **Run**; on Telegram, Slack and WhatsApp the bot replies with the prompt text for you to copy, since a bot can't prefill a message box there. On Slack, type it as `!prompt`.
+You can also reach the library from the chat composer with the `/prompt` slash command — `/prompt <search words>` picks a saved prompt matching those words. On the web it prefills the composer just like **Run**; on Telegram and Slack the bot replies with the prompt text for you to copy, since a bot can't prefill a message box there. Off the web it answers only the binding's owner, so a Slack binding with no owner user id refuses it, and so does WhatsApp, where no sender counts as the owner (see [Slash commands](/guide#chat-slash-commands)). On Slack, type it as `!prompt`.
 
 ## Editing and deleting
 

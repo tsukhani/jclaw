@@ -36,8 +36,9 @@ launches and drives; the stealth survives.
 ## SSRF containment moved with the launch
 
 `--host-resolver-rules` is a launch-time flag. Moving the launch out of the JVM moved
-the pinning with it, so the containment is rebuilt here in two layers, mirroring what
-`PlaywrightBrowserTool` does in-process (JCLAW-731):
+the pinning with it, so the containment is rebuilt here in two layers (JCLAW-731).
+`PlaywrightBrowserTool` no longer pins at launch: since JCLAW-1283 it screens every
+connection through an in-JVM SOCKS5 proxy, so only the route gate below is shared with it.
 
 1. **Launch pin.** The JVM resolves and validates the entry host with `SsrfGuard` and
    sends the address it actually approved. The sidecar turns it into a `MAP` clause, so
@@ -133,8 +134,8 @@ sidecar's semantics exactly, because the JVM sends both rungs the same
 `WebExtraction.maxBodyBytes()` and a field that meant opposite things at the two ends
 would cap one rung and uncap the other.
 
-`400` means a malformed request — a body that is not a JSON object, a `pins` that is not
-one, a `timeoutMs`/`settleMs`/`maxBytes` that will not parse as a number, a negative
+`400` means a malformed request — a body that is not a JSON object, a missing `url`, a
+`pins` that is not one, a `timeoutMs`/`settleMs`/`maxBytes` that will not parse as a number, a negative
 `maxBytes`, or a pin whose target is not a public address. `502` is a failed navigation.
 
 ## Looking like a real browser

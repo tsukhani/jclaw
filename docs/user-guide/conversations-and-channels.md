@@ -40,6 +40,8 @@ Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversat
 
 Click any row to open the conversation in [Chat](/chat) (read-only if it came from a subagent run; fully editable if it's your own thread).
 
+**View details** opens a read-only page for the thread: its channel, agent, peer, message count and dates, token totals (input, cached, output, average speed, cost and cache savings), then every message. Assistant replies render as Markdown, math included, the same as in Chat, and name the model that answered — a routed reply adds `(auto: <class>)`; user and tool messages show as raw text. **Open in Chat** and **Export conversation as Markdown** sit in its header.
+
 ### Naming, starring and pinning
 
 Three per-row actions let you organize the archive as it grows:
@@ -103,7 +105,7 @@ Below the bindings, **Channel defaults** set how every Telegram binding behaves:
 - whether replies quote the message being answered, and whether link previews appear
 - the 👀 / ✅ / ❌ progress reaction
 - delivery-failure notices and their cooldown
-- which message reactions the agent hears about
+- which message reactions the agent hears about — in a private chat only the binding owner's reactions reach it, whatever this is set to
 - how long pastes and forwarded bursts are joined into one turn
 - group-chat wake words, and where inline keyboards work
 - which message actions the agent may take: reply, edit, delete, react, poll and pin. Pinning starts off, because it changes the chat for everyone; the rest start on.
@@ -117,6 +119,7 @@ Click the **Slack** card to open its per-app binding list, then **+ New binding*
 - **botToken** — your Slack app's bot token (`xoxb-…`).
 - **signingSecret** — the signing secret from your Slack app's Basic Information page (Events API transport).
 - **agent** — the [agent](/agents) this Slack app routes to (required).
+- **owner user id** — your Slack member id (`U…`), required when the agent is the Main Agent. Set, the bot is private to you (DMs, and channels where you @mention it) and you approve its dangerous-tool requests; blank, anyone can DM or @mention it, and `/subagent`, `/prompt` and the `/model` switch are refused to everyone, you included.
 
 The binding's **transport** decides how messages reach JClaw. **Events API** (the default) is a webhook: it needs the signing secret and a public HTTPS **webhookBaseUrl** for the app's Request URL (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). **Socket Mode** opens a WebSocket from JClaw instead — no public URL and no signing secret, just the app-level **appToken** (`xapp-…`).
 
@@ -136,6 +139,8 @@ Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
 
 A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language) used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** is **Cloud API (official)** by default and can instead be **WhatsApp-Web (unofficial)** — a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all; proactive sends go to the paired owner.
 
+When Meta refuses a Cloud-API reply because the 24-hour window has closed (its error 131047), JClaw doesn't retry it: the refusal is logged at `INFO` under `channel`, saying whether the binding has a template and what to do next.
+
 ## How channels and conversations connect
 
 When a message arrives over an external channel, JClaw:
@@ -143,6 +148,8 @@ When a message arrives over an external channel, JClaw:
 1. Looks up the channel + peer (external user id) to find or create a conversation.
 2. Routes the message to the binding's agent.
 3. Streams the reply back over the same channel.
+
+If the turn fails, the person on the channel gets a generic reply — the message could not be answered, nothing on their side, try again later — that says nothing about your provider or setup. What broke and how to fix it goes to the [Logs](/logs) instead; only the web chat, whose reader is you, shows the full explanation.
 
 The end result: each external user sees a private, persistent thread with the agent, and you see all of it consolidated in [Conversations](/conversations) and [Chat](/chat).
 

@@ -25,7 +25,7 @@ Every app self-describes through a small `app.json` alongside its `index.html`. 
 | `icon`        | Filename of an icon inside the app directory (e.g. `icon.svg`). Cards fall back to a placeholder tile when absent or unloadable. |
 | `price`       | A **metadata-only** pricing label (`Free`, `$20`, `$9/mo`). Purely a badge — JClaw charges nothing. |
 | `agent`       | Optional id of the single agent this app is allowed to invoke. Omit for a non-invoking app.        |
-| `limit`       | Optional cap on `invoke` calls per 60-second window. Default 30, hard ceiling 120; a manifest value can only tighten (a higher one is clamped to the ceiling). Over the limit, invoke answers HTTP 429 until the window rolls. |
+| `limit`       | Optional cap on `invoke` calls per 60-second window. Default 30; a manifest value replaces it, up to a hard ceiling of 120 (a higher one is clamped to the ceiling). Over the limit, invoke answers HTTP 429 until the window rolls. |
 
 ## The Apps page
 
@@ -34,6 +34,9 @@ The [Apps](/apps) page is a grid of app cards, styled like a phone home screen. 
 - **Search** — a floating search bar at the bottom filters the grid by app name in real time.
 - **Update** (pencil, top-left on hover) — hands the app to the app-creator skill for an edit (see below).
 - **Delete** (trash, top-right on hover) — removes the app behind a confirmation.
+- **Install** (download arrow, bottom-right on hover; only on an app with an icon) — opens the app ready to install as a desktop app (see below).
+
+Every hosted app installs as a standalone desktop app (a PWA) from Chrome, Edge or Safari, with no change to its own files: JClaw serves each app a web manifest built from its `app.json` (name, description, icon) and links it into `index.html` as it's served — an app that ships its own manifest link is left alone. **Install** opens the app with a banner offering an **Install** button where the browser supports one, or pointing to the browser menu otherwise (**Install app** in Chrome and Edge, **File → Add to Dock** in Safari). Browsers install only over a secure connection, so open JClaw at its `https://` address.
 
 ## Creating an app
 

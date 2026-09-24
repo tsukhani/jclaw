@@ -17,11 +17,12 @@ The whole product layers on a single core loop: you send a message in [Chat](/ch
 3. **[Agents](/guide#agents)** is where you configure the entities answering you — model, prompt, tools, skills.
 4. **[Conversations & Channels](/guide#conversations-and-channels)** is your chat history *and* how to make agents reachable from Slack, Telegram, and WhatsApp instead of just the web app.
 5. **[Subagents](/guide#subagents)**, **[Tasks](/guide#tasks)**, and **[Reminders](/guide#reminders)** are three flavors of "stuff happens outside the current chat turn" — parallel work *now*, scheduled work *later*, and pure scheduled notifications. [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) is the side-by-side comparison if you're not sure which fits.
-6. **[Skills, Tools & MCP Servers](/guide#skills-tools-mcp)** is how you extend what agents can do beyond plain text — web search, shell exec, external systems.
-7. **[Apps](/guide#apps)** is how a repeatable ask becomes a small self-contained web app — the agent builds it, JClaw hosts it.
-8. **[Settings](/guide#settings)** is the operator's control panel for everything above.
-9. **[Memories](/guide#memory)** is what your agents have captured about you and your work, and where you curate it.
-10. **[Logs & Dashboard](/guide#logs-and-dashboard)** is how you watch what's happening across the whole platform.
+6. **[Scrapes](/guide#scrapes)** is where you start, watch and read background scrapes — a website read page by page, well beyond what fits in one chat turn.
+7. **[Skills, Tools & MCP Servers](/guide#skills-tools-mcp)** is how you extend what agents can do beyond plain text — web search, shell exec, external systems.
+8. **[Apps](/guide#apps)** is how a repeatable ask becomes a small self-contained web app — the agent builds it, JClaw hosts it.
+9. **[Settings](/guide#settings)** is the operator's control panel for everything above.
+10. **[Memories](/guide#memory)** is what your agents have captured about you and your work, and where you curate it.
+11. **[Logs & Dashboard](/guide#logs-and-dashboard)** is how you watch what's happening across the whole platform.
 
 Read in that order if it's your first time. Skim if you're hunting for a specific thing.
 
@@ -29,7 +30,7 @@ Read in that order if it's your first time. Skim if you're hunting for a specifi
 
 1. **Set a theme.** The toggle is in the top-right of every page (system / light / dark).
 2. **Visit [Settings](/settings) and add at least one LLM provider.** Without an API key (or a local provider like Ollama configured), no agent can answer. See the [Settings](/guide#settings) section of this guide for what each provider needs.
-3. **Visit [Agents](/agents) and create or enable an agent.** Pick a model, write a short system prompt, and turn on whatever tools you need. The default agent template is a sensible starting point.
+3. **Visit [Agents](/agents) and create or enable an agent.** Pick a model, describe its role in the `AGENT.md` workspace file, and turn on whatever tools you need. The default agent template is a sensible starting point.
 4. **Open [Chat](/chat), pick that agent from the Agent dropdown in the header, and say hello.** Your conversation is saved, and you can reopen it later from [Conversations](/conversations).
 
 That's the minimum loop. Everything else in this guide is how to do more with it.
@@ -48,7 +49,7 @@ The left sidebar is grouped by intent:
 | --- | --- |
 | _(top)_ | [Dashboard](/) — the home overview, sits above the groups. |
 | **Chat** | [Chats](/chat) (live conversations), [Prompts](/prompts) (saved, reusable prompts you run into the composer), [Channels](/channels) (external chat surfaces like Slack), [Conversations](/conversations) (every prior thread). |
-| **Ops** | [Agents](/agents), [Subagents](/subagents), [Apps](/apps), [Tasks](/tasks), [Reminders](/reminders) (your scheduled nudges), [Skills](/skills), [Tools](/tools), [MCP Servers](/mcp-servers). |
+| **Ops** | [Agents](/agents), [Subagents](/subagents), [Scrapes](/scrapes) (background website crawls), [Apps](/apps), [Tasks](/tasks), [Reminders](/reminders) (your scheduled nudges), [Skills](/skills), [Tools](/tools), [MCP Servers](/mcp-servers). |
 | **Admin** | [Settings](/settings), [Memories](/memories) (captured agent memories), [Logs](/logs). |
 | **Help** | Feedback, Guided Tour, this **User Guide**. |
 

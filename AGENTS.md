@@ -61,7 +61,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - Retention is one resolver, `jobs.RetentionDays`: absent or blank → the caller's default; **0 or negative → `DISABLED`, and the job returns before it computes a cutoff**; over the caller's ceiling or non-numeric → the default plus a warn. Zero never means "delete everything" — a cutoff at or after now takes the whole table, which is how `logs.retentionDays=0` emptied the event log (JCLAW-1269). The ceiling stays per-caller: tasks and latency pass 3650, the event log `NO_CEILING`. `ConfigService` refuses that key below 1 and Settings pins `:min="1"`, so the non-positive branch is a net for a value written around the API, not a selectable setting.
 - `Model.find().fetch()` is raw: copy elementwise. Fix a lazy N+1 with `@BatchSize`, not a manual IN query. `FunctionalTest` has no PATCH helper.
 - A media bearer addresses its message by position (`chatMessageIndex`), and two steps of prompt preparation replace the list under it: `CompactionGate` rebuilds it from the persisted rows, and `ContextWindowManager`'s drop-oldest branch shifts every survivor down. Apply a media rewrite through the `MessageHydrator.Hydration`-taking overloads of both, which re-base the bearers and return them — never before compaction, which discards anything written earlier. Pruning, compression, tool-result truncation and `CurrentTimeInjector` are index-preserving and are not part of this. `VisionAudioAssembler.holdsUserTurn` bounds-checks the slot and its `USER` role, so a future rebuild surfaces as a skipped rewrite rather than a thrown turn (JCLAW-1232).
-- `ContentTypeDetector.detectLanguage` returns on the first hint that matches, so routing to `CODE` additionally demands two hint-carrying lines, or at most five non-blank lines in total — one stray line compressed 99.94% of a prose document away. `JS_HINT` still answers JAVASCRIPT for any line beginning `export `; the signal count, not the hint, is what keeps prose out of `CODE`. Bias toward TEXT: misrouting code costs compression quality, misrouting prose costs the content. JavaParser's default language level is `JAVA_11`, at which 425 of `app/`'s 750 files fail to parse and none do at `BLEEDING_EDGE` — pin `BLEEDING_EDGE` so a dependency bump cannot leave the parser a release behind, share the `ParserConfiguration` and build a `JavaParser` per call, because the instance is not thread-safe and the configuration is (JCLAW-1230).
+- `CodeCompressor.detectLanguage` returns on the first hint that matches, so routing to `CODE` additionally demands two hint-carrying lines, or at most five non-blank lines in total — one stray line compressed 99.94% of a prose document away. `JS_HINT` still answers JAVASCRIPT for any line beginning `export `; the signal count, not the hint, is what keeps prose out of `CODE`. Bias toward TEXT: misrouting code costs compression quality, misrouting prose costs the content. JavaParser's default language level is `JAVA_11`, at which 425 of `app/`'s 750 files fail to parse and none do at `BLEEDING_EDGE` — pin `BLEEDING_EDGE` so a dependency bump cannot leave the parser a release behind, share the `ParserConfiguration` and build a `JavaParser` per call, because the instance is not thread-safe and the configuration is (JCLAW-1230).
 - Bulk and cascade deletes skip `@PostRemove` and orphan Lucene docs — evict explicitly. A Lucene codec-boundary bump: wipe `data/jclaw-lucene/` while pre-v1 rather than add backward-codecs, and verify through the live search endpoint.
 - ArchUnit rules import `build/classes/java/main`, never the running JVM's `CodeSource` — stale precompiled bytecode under FirePhoque manufactures violations.
 - "Zero call sites" is not dead code: a retention Javadoc, `@SuppressWarnings("unused")` or a reflection test marks a deliberate keep. Drop an applied `renameKeyIfPresent` call site, keep the helper.
@@ -219,7 +219,7 @@ bin/diagnostics.test.mjs` its parser tests.
 
 It parses, it does not add builds. It runs `./gradlew compileTestJava` — with `--tests`,
 `play autotest` as well — and reads javac's output plus the xunit reports already on
-disk. Parsing the ~560 reports costs milliseconds against a compile measured in seconds
+disk. Parsing the ~616 reports costs milliseconds against a compile measured in seconds
 and a suite measured in minutes.
 
 Three contracts make the output safe to believe. A clean tree prints `[]`, never nothing:
@@ -657,7 +657,7 @@ this capability and is not gated.
 The agent-principal capability is the one rule that reads `conf/routes`. ArchUnit imports
 bytecode and cannot see the routes file, so `everyRoutedApiActionDeclaresAnAgentAccessLevel`
 parses it the way `WebhookControllerTest.webhookRoutes` does and checks the action each route
-binds to. It is not frozen — all 249 routes are adjudicated, so the rule lands green and a new
+binds to. It is not frozen — all 261 routes are adjudicated, so the rule lands green and a new
 route with no level fails immediately. The floor is on the route count rather than on matched
 files, because a routes file that stopped parsing would otherwise adjudicate nothing and pass.
 Reads are in scope: skipping them on the grounds that a leaky GET is a masking problem is what
@@ -677,8 +677,8 @@ The levels are not interchangeable. `OPEN` means any agent may call it, and on a
 its `reason` is mandatory and must name what bounds it instead (a scoped tool,
 `DangerousActionGate`, `SsrfGuard`, `LoadtestAuthCheck`) — an empty reason there is worse than no
 annotation, because it reads as adjudicated. `OWN_ONLY` means an agent reaches only rows its own
-agent owns, and the rule matches the enforcement by the check it *reaches* — up to two hops
-through helpers on the same controller — not by a helper's name, so renaming one is safe and a
+agent owns, and the rule matches the enforcement by the check it *reaches* — through
+any chain of helpers on the same controller — not by a helper's name, so renaming one is safe and a
 `requireOwner` that checks nothing does not pass. It accepts either
 `RequestPrincipal.mayReachAgentScopedRow` or `callingAgent`, because an `OWN_ONLY` route has two
 honest shapes: a row route refuses one it does not own, and a list route pins its query to the
@@ -794,7 +794,7 @@ condition. `services.SidecarCapabilityProbe` runs the image and video sidecars' 
 ### Frontend
 - Nuxt 4 SPA in `frontend/` with Tailwind CSS v4
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
-- Backend calls use Nuxt's auto-imported `useFetch` / `$fetch` directly; `frontend/composables/` adds `useApiParsed` (schema-validated reads, JCLAW-287) and `useApiMutation` (POST/PUT/DELETE) as consistent wrappers
+- Backend calls use Nuxt's auto-imported `useFetch` / `$fetch` directly; `frontend/composables/` adds `fetchParsed` in `useApiParsed.ts` (schema-validated reads, JCLAW-287) and `useApiMutation` (POST/PUT/DELETE) as consistent wrappers
 - Package manager: **pnpm 12+**, version pinned in `frontend/package.json`'s `packageManager` field. pnpm installs standalone (`curl -fsSL https://get.pnpm.io/install.sh | sh -`) and switches itself to the pinned version on first use — **not** through corepack, which cannot launch pnpm 12 (per-platform native binary, no `bin/pnpm.cjs`) and which Node 25+ no longer ships.
 
   **Where the integrity check lives.** The pin is a bare version; a `+sha512-...` suffix, when one is present, is what corepack verified against, and pnpm ignores it — measured, not assumed. pnpm records its own per-platform releases in `frontend/pnpm-lock.yaml` under `packageManagerDependencies` and refuses to run one whose bytes do not match a published, signed npm release (`ERR_PNPM_PNPM_ENGINE_IDENTITY_MISMATCH`, reproduced by tampering with one integrity line). That is a stronger guarantee than the old one — provenance rather than agreement with a locally-edited string — and it is committed, reviewable in a diff, and covers every platform rather than whichever one last ran `corepack use`.

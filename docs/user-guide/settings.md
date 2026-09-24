@@ -45,7 +45,7 @@ Memory appears as three separate figures, because they measure different things 
 - **Non-heap** — metaspace, code cache and direct buffers. Invisible to every heap figure, and where the outbound HTTP stack's buffers live.
 - **Process memory** — what the operating system charges JClaw, and the figure to compare against the machine's RAM. It sits **well above** the heap, because the JVM also holds non-heap memory and reserves address space the heap hasn't filled. A large gap is normal and is not a leak. On a platform with no supported way to read it, this shows a dash rather than a substituted heap number.
 
-Alongside those: processor share and core count, garbage collections (both the running total and how many happened since the last sample — the total alone says little), uptime, and **platform threads** with their high-water mark. That last label is deliberate: it excludes virtual threads, which is where chat turns and tool calls actually run, so a low flat count here does not mean the instance is idle.
+Alongside those: processor share and core count, garbage collections (both the running total and how many happened since the last sample — the total alone says little), **LLM calls in flight** with how many are queued behind the dispatcher cap below, uptime, **platform threads** with their high-water mark, and the **JVM** itself — the Java version, with the vendor and its build string beneath it. The platform-threads label is deliberate: it excludes virtual threads, which is where chat turns and tool calls actually run, so a low flat count here does not mean the instance is idle.
 
 OkHttp dispatcher concurrency caps for outbound LLM calls:
 
@@ -115,7 +115,7 @@ Alerts are sent through the `main` agent's channel connections, so the channel y
 
 - **An LLM provider or MCP server stops answering.** Its circuit breaker opened, and the message says why: the failure rate, slow calls or failures in a row. You get one message per outage, however many times the breaker retries in between, and at most one every 15 minutes for a provider that keeps dropping out and coming back. An outage still going when those 15 minutes are up is reported then.
 - **It recovers**, but only if you were told it went down.
-- **A run of a recurring task fails for good**, after its retries. The message names the task, the error and when it runs next. The task itself keeps its schedule (see [Tasks](tasks.md)).
+- **A run of a recurring task fails for good**, after its retries. The message names the task, the error and when it runs next. The task itself keeps its schedule (see [Tasks](/guide#tasks)).
 
 Isolating a provider yourself (tripping its breaker by hand) sends nothing. A destination that can't be used is refused when you save it; an alert that can't be delivered at the time is written to the event log under `OPERATOR_ALERT` instead.
 
@@ -195,7 +195,7 @@ The panel shows the version you're running and the newest published release. **C
 
 When JClaw is served from a git checkout, the panel also names the commit it's running, marked when the working tree has uncommitted changes. A checkout keeps the same version number across many commits, so the version alone can't tell you which build is live. A packaged install has no repository and shows nothing here.
 
-**The download happens while JClaw keeps serving.** The release (~400 MB for a bundle install) is fetched, checksum-verified and unpacked before anything is stopped, so a network failure, a bad download or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
+**The download happens while JClaw keeps serving.** The release (~190 MB for a bundle install) is fetched, checksum-verified and unpacked before anything is stopped, so a network failure, a bad download or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
 
 ### What is kept
 
@@ -267,21 +267,23 @@ A **Pricing** subsection at the top of LLM Providers, with one opt-in toggle: **
 
 The most important section. Each row is a model provider JClaw can talk to:
 
-- **OpenAI, Anthropic, Google, Mistral, etc.** — first-party APIs. Paste in your API key and toggle **Enabled**.
+- **OpenAI** — the first-party API. Paste in your API key and toggle **Enabled**.
 - **Ollama (local or cloud)** — runs models on your hardware or on Ollama's cloud. Set the base URL; no API key needed for local.
-- **LM Studio, vLLM** — other self-hosted, OpenAI-compatible servers running on your own hardware. Set the base URL (vLLM defaults to `http://localhost:8000/v1`); no API key needed. With Ollama Local these make up the **Local** group of the provider list.
-- **OpenRouter, Groq, DeepSeek, Z.AI, Kimi, etc.** — aggregators and frontier-model providers. Same shape: base URL + API key.
+- **LM Studio, vLLM, llama.cpp** — other self-hosted, OpenAI-compatible servers running on your own hardware. Set the base URL (vLLM defaults to `http://localhost:8000/v1`, llama.cpp to `http://localhost:8080/v1`); no API key needed. With Ollama Local these make up the **Local** group of the provider list.
+- **OpenRouter, TogetherAI** — aggregators serving many vendors' models. Same shape: base URL + API key.
+
+Those are the rows a new install starts with. Any other OpenAI-compatible provider gets a card of its own once you write its `provider.<name>.baseUrl` and `provider.<name>.apiKey` with `POST /api/config`.
 
 For each provider you can:
 
-- Set the **API key** (stored encrypted at rest).
+- Set the **API key** — stored as plain text in the Config DB, because it is a credential for the provider's API and has to be sent as written, and masked whenever it is shown, so editing it means retyping the whole value.
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
 - Set **local** — the provider's Remote/Local classification. It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp; absent means remote. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
 - Set the **paymentModality** — how the provider bills you. `PER_TOKEN` estimates cost per turn from model pricing; `SUBSCRIPTION` ignores per-token pricing and pro-rates a flat monthly fee instead. A provider that supports only one billing model shows it locked.
 - Set **subscriptionMonthlyUsd** — shown only when the modality is `SUBSCRIPTION`: the monthly USD you pay the provider, which the Dashboard's Chat Cost **Subscription** block pro-rates to the selected window (`monthly × window_days / 30`).
 - Set **keepAlive** — Ollama Local only (`provider.ollama-local.keepAlive`, default `5m`): how long a model stays loaded between requests. `-1` keeps it loaded for good; longer values hold GPU memory per model.
-- Toggle **useNativeApi** — Ollama providers only (`provider.<name>.useNativeApi`, default off): send chat requests to the daemon's native `/api/chat` instead of the OpenAI-compatible endpoint. Same request semantics; the response adds the daemon's per-request timings (model load, prompt evaluation, generation), shown in each message's [usage popover](chat.md#per-message-usage) and as histograms on the Chat Performance dashboard. A local daemon reports all of them; Ollama Cloud reports total duration only. If the address serves no `/api/chat` (a gateway that exposes only the OpenAI surface), the request falls back to the OpenAI-compatible endpoint and the event log says so.
+- Toggle **useNativeApi** — Ollama providers only (`provider.<name>.useNativeApi`, default off): send chat requests to the daemon's native `/api/chat` instead of the OpenAI-compatible endpoint. Same request semantics; the response adds the daemon's per-request timings (model load, prompt evaluation, generation), shown in each message's [usage popover](/guide#chat-per-message-usage) and as histograms on the Chat Performance dashboard. A local daemon reports all of them; Ollama Cloud reports total duration only. If the address serves no `/api/chat` (a gateway that exposes only the OpenAI surface), the request falls back to the OpenAI-compatible endpoint and the event log says so.
 - **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability badges (vision, audio, video, thinking) confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess).
 - **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
 
@@ -322,6 +324,27 @@ The [Dashboard](/) shows every breaker's state under **Circuit Breakers**, and l
 
 Every value is a whole number; a write outside these bounds is refused.
 
+## Model Router
+
+`router/auto` is a virtual model you can pick wherever a model is picked. For each prompt it chooses a task class, then the first usable model on that class's list. The chat shows which model answered each reply. Nothing is seeded, and `router/auto` is offered in the model pickers only once the **Chat** list has a model.
+
+| Class | Takes |
+|-------|-------|
+| **Chat** | Quick conversation. Also the list every other class uses until you give it one of its own, and where the heavier classes drop when a subscription passes the downshift threshold. |
+| **Summarize** | Summaries, recaps and key points. |
+| **Agent work** | Multi-step work with tools, or a follow-up to a tool-heavy turn. |
+| **Reasoning** | Proofs, trade-offs, root causes and math. |
+| **Coding** | Code blocks, stack traces and code-heavy requests. |
+
+Each list is stored as `router.<class>.models` (`chat`, `summarize`, `agentic`, `reasoning`, `coding`); add models from the dropdown and reorder them with the arrows. A list naming a model that isn't registered under LLM Providers is refused.
+
+- **Prefer subscription and self-hosted models** (`router.preferPrepaid`, on by default) — a model on a subscription or a self-hosted provider is tried before a per-token one, whatever the order, so included credit is spent before money. A per-token model in a list that also holds a prepaid one is badged **fallback only**. Off, the lists are followed exactly as written; the budget guard applies either way.
+- **Classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules**) — the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slow (`router.classifier.timeoutSeconds`, default 8, no row in the panel) or answers with something else, the keyword rules decide.
+- **Reasoning effort** — a thinking model reasons at the effort the router chose for the prompt: the classifier's, or else the class default — low for Chat and Summarize, medium for Agent work and Coding, high for Reasoning. It is fitted to the levels the model offers. A thinking level chosen on the conversation still wins, including off.
+- **Budget guard** — usage is read from each Ollama Cloud provider's quota windows. Past **Downshift at** (`router.budget.downshiftAt`, default 0.75, shown as 75%) the four heavier classes stop using that provider and fall back to the Chat list; past **Exhausted at** (`router.budget.exhaustedAt`, default 0.95) no class uses it. Downshift must stay below Exhausted. Any provider that answers a call with "out of credit" is also benched for a while.
+
+Beneath the thresholds, a table lists each provider on your lists as **Prepaid** or **Per-token**, with each quota window's usage (amber past downshift, red past exhausted), and names anything benched for running out of credit with the time it returns. A provider with no usage API shows that it is benched only after an out-of-credit reply.
+
 ## Search Providers
 
 Web search engines available to the `web_search` tool. Drag rows to **reorder priority** — providers are tried in order, and the next one is tried automatically if the first fails. Each row shows three states:
@@ -340,9 +363,9 @@ Master toggle, then a backend radio group:
 
 - **OpenRouter** — reuses your OpenRouter API key from LLM Providers.
 - **OpenAI** — reuses your OpenAI API key.
-- **Self-Hosted Whisper** — runs `whisper.cpp` locally; the chosen model file (tiny / base / small / medium / large variants, ~75 MB to ~3 GB) downloads from Hugging Face on first use with a progress bar. Requires `ffmpeg` on PATH; the page warns inline if it's missing.
+- **Local** — runs a speech-recognition model in the local ASR sidecar (a Python process; needs `uv` on PATH): Whisper **Small**, **Medium**, **Large v3 Turbo** or **Large v3** (all multilingual), or **MERaLiON-3 3B**, tuned for Southeast Asian speech. The chosen model (~950 MB to ~6.6 GB) downloads from Hugging Face on first use with a progress bar. Requires `ffmpeg` on PATH; the page warns inline if it's missing.
 
-Cloud backends are disabled in the radio group until their underlying provider key is configured in LLM Providers. An **Active:** status line above the toggle shows the current backend (cloud provider, or Self-Hosted Whisper with the chosen model), or that transcription is off.
+Cloud backends are disabled in the radio group until their underlying provider key is configured in LLM Providers. An **Active:** status line above the toggle shows the current backend (cloud provider, or Local with the chosen model), or that transcription is off.
 
 Below the backend picker, a **Diarization** subsection covers the who-spoke-when pipeline (independent of the master transcription toggle, since the `diarize_audio` tool runs its own local pipeline):
 
@@ -432,7 +455,7 @@ The model picker is a dropdown of that backend's **vision-tagged** models — cl
 
 ## Image Generation
 
-Backend for the agent's `generate_image` tool (off per-agent by default; toggle it on the [Tools](/tools) page). The tool stays hidden from agents until you pick a backend here — the master switch is the `imagegen.provider` key, unset by default.
+Backend for the agent's `generate_image` tool (off per-agent by default; turn it on for an agent on its [Agents](/agents) page). The tool stays hidden from agents until you pick a backend here — the master switch is the `imagegen.provider` key, unset by default.
 
 Master toggle, then a backend radio group:
 
@@ -667,7 +690,7 @@ Restricted to the same providers as embeddings, for the same reason: the reranke
 
 ## Tool Approvals
 
-What a dangerous action does when it can't reach you for approval. It covers the shell tool and the launch of a coding-harness subagent, and it is instance-wide — there is no per-agent override.
+What a dangerous action does when it can't reach you for approval. It covers every action the approval gate holds — the shell tool, launching a coding-harness subagent, installing an app, a write through the `jclaw_api` tool, printing to an address that is neither a found printer nor your default, and calls to an MCP server marked as needing approval, among them — and it is instance-wide: there is no per-agent override.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -685,25 +708,25 @@ This setting is a **fallback, not a replacement for the approval prompt**. When 
 :::gotcha
 `allow` only ever loosens **your own** turns. Someone else on a channel that can reach you is prompted either way, and one that cannot fails closed under both `allow` and `deny` — so raising the setting cannot weaken it. Only `ask` gives an unaskable origin any route through, and only by confirming with you first.
 
-Separately, an agent you have granted **always allow** for a tool runs it with no prompt on any origin. That standing grant is checked before this policy and overrides it — so if an agent stopped asking, a grant is why, not this setting.
+Separately, an agent you have granted **always allow** for a tool runs it with no prompt on your own turns — the web UI, or a Telegram/Slack message the channel proves is yours. That standing grant is checked before this policy and overrides it — so if an agent stopped asking you, a grant is why, not this setting. It never covers someone else's turn, which is prompted or refused as the table above says.
 
-A standing grant is created when you tap **always allow** on an approval prompt, and it lasts until you revoke it. Tap it only for a tool you are content for that agent to run unattended from any channel.
+A standing grant is created when you tap **always allow** on an approval prompt, and it lasts until you revoke it. Tap it only for a tool you are content for that agent to run on your behalf without asking.
 :::
 
 Under its two settings rows, the panel lists every standing grant: how many there are, and which tools each agent holds, with a link to that agent. The list is read-only — revoke a grant from the **Standing Tool Approvals** block on the agent's own [Agents](/agents) page.
 
 ## Shell Execution
 
-Allowlist and timeout for the shell tool. Per-agent enable/disable lives on the [Tools](/tools) page; this section configures the shared execution policy.
+Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each agent's [Agents](/agents) page; this section configures the shared execution policy.
 
 | Key                            | Default | Meaning                                                                                              |
 |--------------------------------|---------|------------------------------------------------------------------------------------------------------|
-| `shell.allowlist`              | (empty) | Comma-separated list of commands (with optional argument patterns) the agent may run.              |
+| `shell.allowlist`              | seeded list | Comma-separated command names the agent may run. A command passes when its first word, or that word's file name, is listed; arguments are not checked. First start seeds common commands (`git`, `ls`, `grep`, `curl`, `python3`, `node`, …). |
 | `shell.defaultTimeoutSeconds`  | 30      | Per-command wall-clock budget (1–300 s).                                                              |
 | `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Has no row in the panel — set it with `POST /api/config`. |
 
 :::gotcha
-The allowlist is the safety floor for shell access. An empty allowlist plus no per-agent **Bypass allowlist** means agents can't run anything via the shell tool. Be deliberate about what you add here.
+The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents can't run anything via the shell tool.
 :::
 
 `shell.sandbox` covers `exec`, `diarize_audio`'s ffmpeg extraction, and the ffmpeg transcode of an audio attachment on its way to a model. On macOS the process runs under `sandbox-exec`: writes are denied outside the agent's workspace and the system temp directories (the two ffmpeg runs get only their temp directory), and reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube` and `~/.netrc` are refused. On Linux it runs under `bwrap`, which builds the visible filesystem from nothing, so those secrets are absent rather than denied.

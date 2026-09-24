@@ -162,7 +162,7 @@ To see only one conversation's runs, either click the funnel button beside an id
 
 ### 3. The `/subagent` slash command (in [Chat](/chat))
 
-Operator surface for the parent agent's *own* runs. Five subcommands:
+Operator surface for subagent runs. `list` covers the current conversation, `history` only runs the current agent spawned, and `info`, `log` and `kill` any run on the instance. Five subcommands:
 
 | Command                  | What it does                                                                   |
 |--------------------------|--------------------------------------------------------------------------------|
@@ -171,6 +171,8 @@ Operator surface for the parent agent's *own* runs. Five subcommands:
 | `/subagent log <id>`     | Last ~50 events for a run (spawn, complete, error, kill).                      |
 | `/subagent kill <id>`    | Cooperatively cancel a running child.                                          |
 | `/subagent history <id>` | Inline render of the child's transcript (capped to ~20 messages, 500 chars).   |
+
+On a channel, `/subagent` answers *Only the operator can use this command.* to anyone the channel cannot prove is you: a Telegram group member who @mentions the bot, every WhatsApp sender, anyone but the owner on a Slack binding, and everyone — you included — on a Slack binding with no owner configured. Web chat is always you.
 
 ### 4. The `conversation_history` tool
 

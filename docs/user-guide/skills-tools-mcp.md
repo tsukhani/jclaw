@@ -67,9 +67,11 @@ Tools listed here are *available*. To make a tool *active* for a specific agent:
 1. Open [Agents](/agents).
 2. Click the agent.
 3. Scroll to **Tools** in the edit form.
-4. Tick the box next to the tool.
+4. Turn on the switch next to the tool.
 
 A few tools require extra setup (an API key, a workspace path, a shell allowlist entry); that config lives under the matching [Settings](/guide#settings) section.
+
+When `exec`, `filesystem`, `web_fetch` or `web_scrape` fails, the agent gets the error in three parts — what broke, what to check, and how to retry — so it can correct the call rather than repeat it.
 
 :::note Why isn't this just one page?
 Tools are a *catalog* and binding tools to agents is an *agent* concern. Keeping them on separate pages means the catalog stays clean as your roster of agents grows.
@@ -89,17 +91,25 @@ Three backends are tried in order, and the order is about **how much each can te
 | Raw socket (JetDirect) | 9100 | No — a successful write only proves the bytes left this machine |
 | LPD (RFC 1179) | 515 | Barely — a one-byte acknowledgement of receipt |
 
+An agent can pass `protocol` (`IPP`, `IPPS`, `RAW` or `LPD`) to use that one backend, with no fallback.
+
 That difference is surfaced, not hidden. When a job goes out over raw socket or LPD, the tool's reply says explicitly that the backend cannot confirm the document printed. An agent reporting "printed successfully" off a blind write would be stating something it has no way to know.
 
-**Job options.** `sides` (one-sided, two-sided-long-edge, two-sided-short-edge), `color` (color, monochrome, auto) and `media` (a paper size like `iso_a4_210x297mm`, or a tray name the printer advertises). Omit any of them to use the printer's own default.
+**Job options.** `sides` (one-sided, two-sided-long-edge, two-sided-short-edge), `color` (color, monochrome, auto) and `media` (a paper size like `iso_a4_210x297mm`, or a tray name the printer advertises). Omit any of them to use the job options saved in [Settings → Printers](/guide#settings-printers), then the printer's own default.
 
 These are **IPP-only** — they travel as RFC 8011 job-template attributes, and the byte-stream backends have nowhere to put them. If a job asks for double-sided and then falls back to raw socket or LPD, it prints single-sided; the tool says so explicitly rather than letting you discover it from the paper.
 
 :::caution Printing is physical and irreversible
-Paper comes out of a device in someone's room and there is no undo. The tool never guesses a target — `print` requires a printer you named — and it is **off by default for every agent**. Turn it on deliberately, per agent, on the [Agents](/agents) page.
+Paper comes out of a device in someone's room and there is no undo. The tool never guesses a target — `print` goes to the printer the agent names, or to the default saved in [Settings → Printers](/guide#settings-printers), and refuses when there is neither — and it is **off by default for every agent**. Turn it on deliberately, per agent, on the [Agents](/agents) page.
 :::
 
-If `discover` returns nothing, that is often the network rather than the printer: mDNS is link-local, so it is routinely blocked on VPNs and in containers without a multicast route. Pass the printer's address as `host` to bypass discovery.
+If `discover` returns nothing, that is often the network rather than the printer: mDNS is link-local, so it is routinely blocked on VPNs and in containers without a multicast route. Pass the printer's address as `host` to bypass discovery. An address that is neither a discovered printer nor the saved default is treated as a dangerous action and goes through the same approval gate as `exec` (see [Settings → Tool Approvals](/guide#settings-tool-approvals)); a link-local, multicast or `0.0.0.0` address is refused outright.
+
+### Image generation
+
+`generate_image` draws an image from a text prompt and shows it inline in the reply. It is **off by default for every agent**, and it works only once a backend is chosen in [Settings → Image Generation](/guide#settings-image-generation); until then a call returns an error asking you to pick one. An agent can set a size or an aspect ratio, restyle the image the user last uploaded in the conversation (`use_reference_image`), and write a copy to its workspace with `save_to`.
+
+On the Replicate backend, `model` picks the model for one image, as an owner/name slug such as `black-forest-labs/flux-kontext-pro`; the configured model is left as it is. The call is refused, and nothing is sent to the provider, when the backend is not Replicate, when the slug is not in the Replicate catalog (the refusal lists the ones that are), or when that catalog cannot be loaded.
 
 ---
 
@@ -163,7 +173,7 @@ Every host is pinned to the address that was checked, not just the one in the UR
 
 The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps like JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. An MCP server's tools are managed on the [MCP Servers](/mcp-servers) page — not the Tools page, which lists only JClaw's first-party tools.
 
-The [MCP Servers](/mcp-servers) page is where you register and configure those servers. Once registered, an MCP server's tools become available to any agent that has the server ticked in its config.
+The [MCP Servers](/mcp-servers) page is where you register and configure those servers. Once registered, an MCP server's tools become available to any agent that has the server switched on in its config.
 
 ### Two transport flavors
 
@@ -178,7 +188,7 @@ When you click **Add server**, you pick one:
 |---------------------------|------------------------------------------------------------------------------------|
 | **Name**                  | Anything memorable; this is the label across the UI.                                |
 | **Command**               | Executable path. Example: `npx`.                                                    |
-| **Args**                  | One argument per line. Example: `-y` then `@modelcontextprotocol/server-postgres`.  |
+| **Arguments (one per line)** | One argument per line. Example: `-y` then `@modelcontextprotocol/server-postgres`. |
 | **Environment variables** | Key/value pairs added to the subprocess environment (for API keys, DB URLs, etc.).  |
 
 ### HTTP configuration
@@ -186,7 +196,7 @@ When you click **Add server**, you pick one:
 | Field          | What to fill in                                                                   |
 |----------------|-----------------------------------------------------------------------------------|
 | **Name**       | Memorable label.                                                                  |
-| **URL**        | Full URL to the server's MCP endpoint.                                            |
+| **Endpoint URL** | Full URL to the server's MCP endpoint.                                          |
 | **Headers**    | Auth headers, etc. Common keys: `Authorization`, `X-Api-Key`.                     |
 
 ### Testing a server
@@ -197,7 +207,7 @@ A successful test doesn't guarantee a server's tools will work end-to-end — yo
 
 ### Binding a server to an agent
 
-Same flow as tools: open [Agents](/agents), open the agent, scroll to **MCP Servers**, tick the box. The agent now sees that server's tools the next time it generates.
+Same flow as tools: open [Agents](/agents), open the agent, scroll to **MCP Servers**, turn on its switch. The agent now sees that server's tools the next time it generates.
 
 ### Enabling and disabling
 
@@ -212,10 +222,14 @@ Two independent guards keep a misbehaving server from taking a whole turn down w
 
 A tool that runs and reports its own error (a file that does not exist, a query that fails) does not count against the breaker: the server answered, and that is tool-level semantics. A successful reconnect clears a breaker that opened on its own, since the dead client's failures say nothing about the fresh one.
 
+An MCP tool error names the server and says which of three things failed: the connection (the server never answered — its row on this page shows the connection state), the protocol (it answered with a JSON-RPC error, broke the contract, or timed out — its own log is the place to look), or the tool itself (it ran and rejected the arguments). Like the built-in tools' errors, each comes as what broke, what to check, and how to retry.
+
 The [Dashboard](/)'s **Circuit Breakers** panel shows every server's breaker and lets you **Isolate** one by hand — useful to take a flaky server out of an agent's reach for a cooldown without disabling it. An isolated server's tool calls fail with `isolated by the operator`, so neither the agent nor the log reads your decision as the server having broken, and a reconnect does not undo it. **Restore** lifts it early.
 
+With [Alerts](/guide#settings-alerts) on, you're sent a message when a server's breaker opens and again when it recovers; isolating one yourself sends nothing.
+
 :::gotcha STDIO servers run with your user's permissions
-A STDIO server is just a subprocess. It inherits the JClaw server's environment and process privileges. Only register servers you trust to run code on your behalf — the same care you'd take installing a CLI from npm.
+A STDIO server is just a subprocess. It inherits the JClaw server's environment and process privileges. Only register servers you trust to run code on your behalf — the same care you'd take installing a CLI from npm. For the same reason, only you and the `main` agent can add a STDIO server or change its command, arguments or environment; any other agent calling the API is refused and can configure HTTP servers only.
 :::
 
 :::tip Start with the official servers

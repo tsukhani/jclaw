@@ -25,7 +25,7 @@ Each row offers what its state allows:
 
 - **Pause** a waiting or running scrape. The pages being fetched finish, no new one starts, and the scrape keeps everything it has read.
 - **Resume** a paused or interrupted scrape. It continues from the pages it already has; none of them is read again.
-- **Stop** ends a scrape for good. It keeps its pages but cannot be resumed.
+- **Stop** ends a scrape for good. It keeps its pages but cannot be resumed. It asks first.
 - **Delete** removes a scrape that is not waiting or running, with its pages and its workspace folder. It asks first.
 
 A scrape that was running when JClaw stopped continues on its own once JClaw is back, from where it left off. Its time limit counts only the time it spends running, not time paused or while JClaw was down.

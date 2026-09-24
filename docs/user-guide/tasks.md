@@ -47,7 +47,9 @@ For something that should happen **once** on a given day, use the absolute date-
 | `listRecurringTasks`  | List every recurring task currently configured for this agent.                                              |
 | `listReminders`       | List every reminder (`payloadType="reminder"`) currently scheduled for this agent.                          |
 
-For the agent to be able to use any of these actions, **Tools → task_manager** must be ticked for that agent on the [Agents](/agents) page.
+`createTask` and `updateTask` also take `enabledToolNames`, a JSON array of the tools a fire may use: the agent's other tools are withheld from that task, and leaving it unset gives the task all of them.
+
+For the agent to be able to use any of these actions, **Tools → task_manager** must be switched on for that agent on the [Agents](/agents) page.
 
 ### Cancel vs delete
 
@@ -101,7 +103,7 @@ Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks
 | `RUNNING`   | Mid-fire right now.                                                                                            |
 | `LOST`      | Was `RUNNING` but the scheduler's heartbeat went stale. JClaw auto-recovers the underlying job shortly.       |
 | `COMPLETED` | Terminal for one-shot tasks. Recurring tasks never reach `COMPLETED` unless explicitly cancelled.              |
-| `FAILED`    | A one-shot that hit the retry cap or a non-recoverable error. Click **Retry** to requeue. A recurring task does not end here: a failed occurrence waits for the next one. |
+| `FAILED`    | A one-shot that hit the retry cap or a non-recoverable error. Click **Retry** to requeue. A recurring task does not end here: a failed occurrence waits for the next one, unless its schedule has no next fire (a malformed cron, say). |
 | `CANCELLED` | `cancelTask` was called. Row is preserved; `runNow` revives it.                                                |
 | `PAUSED`    | Shown in place of `PENDING`/`ACTIVE` while you've suspended the schedule. Display-only — pause sets a flag and keeps the underlying state, which is why **Resume** picks a recurring cadence straight back up. A one-off whose moment passes while paused has its fire dropped; resuming re-arms it (immediately, if that moment is now in the past). |
 
@@ -127,7 +129,7 @@ Walking the transitions:
 - **Fire starts.** At the scheduled moment the task flips to `RUNNING` and a fresh run opens — you'll see the blue `RUNNING` pill and a live elapsed-time counter in the run history.
 - **Success.** A one-shot ends `COMPLETED` (it has served its purpose); a recurring task drops back to `ACTIVE` to await its next cadence. If the task has a delivery target, the reply is pushed afterward.
 - **Transient failure.** A recoverable error (network blip, rate-limit) bumps the **Retries** counter and reschedules on a backoff — `30s → 60s → 5m → 15m → 1h`. The task returns to its waiting state between attempts, then re-enters `RUNNING` on the retry.
-- **Permanent failure.** A non-recoverable error, or the retry cap reached, ends a one-shot task `FAILED`; **Retry** requeues it. A recurring task ends only that occurrence: the run is recorded as failed, the error shows on the task, and it returns to `ACTIVE` for its next occurrence with a full retry budget. With [Alerts](settings.md#alerts) on, you're sent a message when this happens.
+- **Permanent failure.** A non-recoverable error, or the retry cap reached, ends a one-shot task `FAILED`; **Retry** requeues it. A recurring task ends only that occurrence: the run is recorded as failed, the error shows on the task, and it returns to `ACTIVE` for its next occurrence with a full retry budget. With [Alerts](/guide#settings-alerts) on, you're sent a message when this happens.
 - **Crash recovery.** If the server stops mid-fire, the task is left `RUNNING` with a stale scheduler heartbeat. JClaw marks it `LOST` after ~1 minute so you can see it stalled, then the scheduler automatically re-fires it (~2 minutes) — `LOST → RUNNING → COMPLETED/FAILED` — with no action from you. **Retry** skips the wait.
 - **Time limit.** A single fire may run for at most `fireMaxDurationSeconds` seconds, set at **Settings → Tasks** (default `600`, ten minutes). When it elapses, the fire is cancelled at its next safe point — the top of a model round or between tool calls — so a wedged fire can't run forever. `0` turns the limit off.
 - **Operator stop.** *Cancel* moves a task to `CANCELLED` (the row is kept; `runNow` or **Re-enable** revives it). Cancelling a single in-flight **run** stops only that fire and returns the task to its waiting state — the recurring schedule is left intact.
@@ -198,6 +200,12 @@ Independently of that day-based TTL, JClaw keeps only the **10 most recent runs 
 ## Editing a task's instructions
 
 Expand a task's row to see its **Instructions** — the description the agent runs on. If the description is a list (one step per line), it renders as numbered steps; a plain description renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent, the inline **Channel** editor, and inline editors for the task's **name** and **timezone** live in the same expanded detail.
+
+The same detail has a read-only **Permissions** block:
+
+- **Origin** — the channel the task was created from, which cannot be raised later. `web` lets a fire's dangerous tools follow the [Tool Approvals](/guide#settings-tool-approvals) policy; any other channel, or `unrecorded`, is untrusted, so they fail closed (for a channel origin, unless that policy is `ask`).
+- **Model** — *follows the agent*: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too.
+- **Tools** — the `enabledToolNames` allow-list as pills, or *all the agent's tools* when there is none.
 
 ## What a task run looks like
 
