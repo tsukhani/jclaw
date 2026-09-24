@@ -1,5 +1,9 @@
 import agents.ModelResolver;
 import llm.ProviderRegistry;
+import llm.routing.RouteDecision;
+import llm.routing.RouteDecision.Target;
+import llm.routing.RoutedTurn;
+import llm.routing.TaskClass;
 import models.Agent;
 import models.Conversation;
 import org.junit.jupiter.api.BeforeEach;
@@ -7,6 +11,8 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
+
+import java.util.List;
 
 /**
  * JCLAW-1196: the per-turn thinking resolution honours a conversation override ahead of the
@@ -23,6 +29,8 @@ class ModelResolverThinkingTest extends UnitTest {
         ConfigService.set("provider." + PROVIDER + ".apiKey", "sk-test");
         ConfigService.set("provider." + PROVIDER + ".models",
                 "[{\"id\":\"thinker\",\"contextWindow\":1000,\"supportsThinking\":true,\"thinkingLevels\":[\"low\",\"high\"]},"
+                        + "{\"id\":\"defaults\",\"contextWindow\":1000,\"supportsThinking\":true},"
+                        + "{\"id\":\"glm\",\"contextWindow\":1000,\"supportsThinking\":true,\"thinkingLevels\":[\"low\",\"high\",\"max\"]},"
                         + "{\"id\":\"plain\",\"contextWindow\":1000}]");
         ProviderRegistry.refresh();
     }
@@ -64,5 +72,43 @@ class ModelResolverThinkingTest extends UnitTest {
         onPlainModel.thinkingModeOverride = "high";
         assertNull(ModelResolver.resolveThinkingMode(agent("high"), onPlainModel, provider),
                 "a model without thinking ignores the override rather than sending an unknown level");
+    }
+
+    private static String routed(String modelId, Conversation conv) {
+        var router = new Agent();
+        router.modelProvider = "router";
+        router.modelId = "auto";
+        var decision = new RouteDecision(TaskClass.CHAT, new Target(PROVIDER, modelId), null,
+                List.of("test"), List.of(), false, false, false);
+        return RoutedTurn.callWith(decision, conv,
+                () -> ModelResolver.resolveThinkingMode(router, conv, ProviderRegistry.get(PROVIDER)));
+    }
+
+    @Test
+    void aRoutedReasoningModelThinksAtItsMiddleRung() {
+        assertEquals("medium", routed("defaults", new Conversation()));
+        assertEquals("high", routed("glm", new Conversation()), "no medium on low/high/max: the middle entry");
+        assertEquals("high", routed("thinker", new Conversation()), "low/high: size/2 picks high");
+        assertNull(routed("plain", new Conversation()), "a routed model without thinking stays off");
+    }
+
+    @Test
+    void aConversationThinkingChoiceBeatsTheRoutedDefault() {
+        var off = new Conversation();
+        off.thinkingModeOverride = Conversation.THINKING_OFF;
+        assertNull(routed("defaults", off));
+
+        var low = new Conversation();
+        low.thinkingModeOverride = "low";
+        assertEquals("low", routed("defaults", low));
+
+        var max = new Conversation();
+        max.thinkingModeOverride = "max";
+        assertNull(routed("defaults", max), "a level the routed model does not advertise is still dropped");
+    }
+
+    @Test
+    void middleRungOfAnEmptyLadderIsNull() {
+        assertNull(ModelResolver.middleRung(List.of()));
     }
 }

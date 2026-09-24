@@ -9,6 +9,7 @@ import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import services.ModelOverrideResolver;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -107,6 +108,14 @@ public final class ModelResolver {
      */
     public static @Nullable String resolveThinkingMode(Agent agent, Conversation conv,
                                                        LlmProvider provider) {
+        // The router agent's own thinkingMode belongs to no real model, so a routed turn reasons at
+        // the routed model's middle rung unless the conversation chose a level (or off) itself.
+        if (RoutedTurn.current(conv) != null && !ModelOverrideResolver.hasThinkingOverride(conv)) {
+            return resolveModelInfo(agent, conv, provider)
+                    .filter(ModelInfo::supportsThinking)
+                    .map(m -> middleRung(m.effectiveThinkingLevels()))
+                    .orElse(null);
+        }
         var mode = ModelOverrideResolver.thinkingMode(conv, agent);
         if (mode == null || mode.isBlank()) return null;
         return resolveModelInfo(agent, conv, provider)
@@ -114,5 +123,12 @@ public final class ModelResolver {
                 .filter(m -> m.effectiveThinkingLevels().contains(mode))
                 .map(_ -> mode)
                 .orElse(null);
+    }
+
+    /** {@code medium} when advertised, else the ladder's middle entry ({@code low/high/max} → {@code high}). */
+    public static @Nullable String middleRung(List<String> levels) {
+        if (levels.isEmpty()) return null;
+        if (levels.contains("medium")) return "medium";
+        return levels.get(levels.size() / 2);
     }
 }
