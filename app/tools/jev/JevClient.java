@@ -15,7 +15,6 @@ import utils.HttpKeys;
 import utils.RetryScheduler;
 
 import java.io.IOException;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -125,7 +124,7 @@ public final class JevClient {
             }
             double sum = 0;
             double max = Double.NEGATIVE_INFINITY;
-            for (Map.Entry<String, JsonElement> p : probabilities.entrySet()) {
+            for (var p : probabilities.entrySet()) {
                 double value = unitNumber(p.getValue());
                 sum += value;
                 max = Math.max(max, value);

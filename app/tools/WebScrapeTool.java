@@ -424,7 +424,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         /** Pages an earlier run read, by requested URL, each taken out as it is replayed. */
         final Map<String, CrawlListener.Recorded> recorded;
         /** Which harvested links the crawl may follow; set once the seed is known. */
-        Predicate<URI> inScope = uri -> true;
+        Predicate<URI> inScope = _ -> true;
         final List<Page> pages = new ArrayList<>();
         final List<Refusal> refused = new ArrayList<>();
         final LinkedHashSet<String> seen = new LinkedHashSet<>();

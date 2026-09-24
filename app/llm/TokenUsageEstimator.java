@@ -46,7 +46,7 @@ public final class TokenUsageEstimator {
      */
     private static final Cache<TokenKey, Integer> COUNT_CACHE = Caffeine.newBuilder()
             .maximumWeight(16_000_000)
-            .weigher((TokenKey k, Integer v) -> k.text().length())
+            .weigher((TokenKey k, Integer _) -> k.text().length())
             .recordStats()
             .build();
 
