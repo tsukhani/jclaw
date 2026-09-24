@@ -97,6 +97,19 @@ describe('Conversation detail page', () => {
     expect(c.text()).toContain('12345')
   })
 
+  it('renders an assistant reply as chat does, math included, and keeps user input raw', async () => {
+    setupApi({ messages: [
+      msg({ id: 1, role: 'user', content: '**not bold** and $x_1$' }),
+      msg({ id: 2, role: 'assistant', content: '**Proof.** Let $p_1, p_2$ be primes.' }),
+    ] })
+    const c = await mountPage()
+    const rendered = c.findAll('[data-testid="message-body-rendered"]')
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0]!.html()).toContain('<strong>Proof.</strong>')
+    expect(rendered[0]!.find('.katex').exists()).toBe(true)
+    expect(c.text()).toContain('**not bold** and $x_1$')
+  })
+
   it('renders a placeholder for a conversation with no peer', async () => {
     setupApi({ convo: { ...CONVO, peerId: null, preview: null } })
     const c = await mountPage()

@@ -6,6 +6,7 @@ import {
 import type { Conversation, Message } from '~/types/api'
 import { computeUsageCostBreakdown } from '~/utils/usage-cost'
 import { routeClassLabel, routeDescription } from '~/utils/model-route'
+import { renderMarkdown } from '~/utils/chat-markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -358,7 +359,20 @@ function exportConversation() {
                 · {{ formatModelLabel(msg) }}<template v-if="msg.usage.route"> (auto: {{ routeClassLabel(msg.usage.route) }}{{ msg.usage.route.failover ? ', failover' : '' }})</template>
               </span>
             </div>
-            <div class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap">
+            <!-- Assistant replies render as chat renders them, math included; user and tool rows stay
+                 raw, as chat keeps user input out of the HTML path. -->
+            <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify before returning. -->
+            <div
+              v-if="msg.role === 'assistant' && msg.content"
+              class="prose-chat bg-muted border border-border px-3 py-2 text-sm text-fg-primary"
+              data-testid="message-body-rendered"
+              v-html="renderMarkdown(msg.content, conversation?.agentId ?? null)"
+            />
+            <!-- eslint-enable vue/no-v-html -->
+            <div
+              v-else
+              class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap"
+            >
               {{ msg.content || '(tool call)' }}
             </div>
           </div>
