@@ -27,8 +27,6 @@ import utils.AppClock;
 import utils.SsrfGuard;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -801,7 +799,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     private static boolean setupNeeded() {
         return BrowserSetup.driver().source() == PlaywrightNode.Source.MISSING
-                || (!browserInstalled && !chromiumPreinstalled() && !BrowserSetup.chromiumInstalled());
+                || (!browserInstalled && !BrowserSetup.chromiumInstalled());
     }
 
     // The release bundle ships without driver-bundle, so a bundle install downloads the one official
@@ -871,17 +869,8 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         INSTALL_LOCK.lock();
         try {
             if (browserInstalled) return;
-            // Skip the CLI install when an external installer (e.g. the Docker
-            // image's chromium-stage) has already placed Chromium under
-            // PLAYWRIGHT_BROWSERS_PATH. Playwright's CLI runs an OS-allowlist
-            // check *before* its "already installed?" detection, so on hosts
-            // the CLI doesn't recognize (e.g. ubuntu26.04 resolute) the install
-            // call aborts noisily even when the browser is sitting right there.
-            if (chromiumPreinstalled()) {
-                EventLogger.info("tool", "Using pre-installed Chromium under PLAYWRIGHT_BROWSERS_PATH");
-                browserInstalled = true;
-                return;
-            }
+            // Revision-exact, not "any chromium* directory": a Playwright upgrade leaves the old
+            // revision on a persistent PLAYWRIGHT_BROWSERS_PATH, and it would not launch.
             if (BrowserSetup.chromiumInstalled()) {
                 browserInstalled = true;
                 return;
@@ -917,37 +906,6 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             }
         } finally {
             INSTALL_LOCK.unlock();
-        }
-    }
-
-    /**
-     * Returns true if Chromium (or its headless-shell variant) is already
-     * installed under {@code $PLAYWRIGHT_BROWSERS_PATH}. Reads the env var,
-     * then delegates the directory inspection to {@link #chromiumPreinstalledAt(Path)}
-     * so that branch can be unit-tested without per-OS env mocking.
-     */
-    private static boolean chromiumPreinstalled() {
-        var path = System.getenv("PLAYWRIGHT_BROWSERS_PATH");
-        if (path == null || path.isBlank()) return false;
-        return chromiumPreinstalledAt(Path.of(path));
-    }
-
-    /**
-     * Returns true if {@code dir} contains a {@code chromium*} subdirectory.
-     * Playwright's layout is {@code <root>/chromium-<rev>/} and
-     * {@code <root>/chromium_headless_shell-<rev>/}; either is sufficient
-     * for our launchers, so any {@code chromium*} subdirectory counts.
-     *
-     * <p>Exposed for unit tests; not part of the public tool API. The env-var
-     * lookup lives in {@link #chromiumPreinstalled()} which delegates here.
-     */
-    public static boolean chromiumPreinstalledAt(Path dir) {
-        if (!Files.isDirectory(dir)) return false;
-        try (var entries = Files.list(dir)) {
-            return entries.anyMatch(p ->
-                    p.getFileName().toString().startsWith("chromium") && Files.isDirectory(p));
-        } catch (Exception _) {
-            return false;
         }
     }
 }

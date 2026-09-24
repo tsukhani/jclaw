@@ -106,7 +106,7 @@ class CapabilityRulesTest extends UnitTest {
     // ===== Capability: resolve a model-controlled filesystem path =====
 
     /** Files under {@code tools..} building a path directly when the baseline was frozen (JCLAW-1152). */
-    private static final int FROZEN_DIRECT_PATH_FILES = 5;
+    private static final int FROZEN_DIRECT_PATH_FILES = 4;
 
     private static final DescribedPredicate<JavaAccess<?>> DIRECT_PATH_CONSTRUCTION = DescribedPredicate.describe(
             "a call or method reference that builds a filesystem path directly",

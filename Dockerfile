@@ -32,7 +32,7 @@
 # framework lib, Gradle-resolved app deps, extracted modules, the built
 # SPA, and a launcher (./play at the bundle root, +x preserved via
 # ZipFileSystem POSIX attrs) that invokes `java -classpath ...
-# play.server.Server` directly. We unpack it inline so Stage 3's COPY
+# play.server.Server` directly. We unpack it inline so Stage 2's COPY
 # pulls a flat /app tree.
 #
 # --platform=$BUILDPLATFORM pins this stage to the builder's own architecture
@@ -165,7 +165,7 @@ COPY . /src/
 # --no-daemon because this runs in a container that exits — the daemon
 # is overhead with no warm-cache payoff. After the bundle is built we
 # extract it and drop the zip to keep the stage's layer slim (the
-# unpacked tree gets COPY'd into Stage 3, the zip would just be dead
+# unpacked tree gets COPY'd into Stage 2, the zip would just be dead
 # weight on the way through).
 #
 # Deliberately NOT running `gradle playSecret` here. Baking a secret into
@@ -182,51 +182,9 @@ RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH}
     gradle --no-daemon playBundle -PtargetArch=${TARGETARCH} && \
     mkdir /staging && \
     unzip -q dist/jclaw-bundle.zip -d /staging && \
-    rm dist/jclaw-bundle.zip && \
-    mkdir /pw-driver-src && \
-    pw=$(ls /staging/jclaw/lib | sed -n 's/^playwright-\([0-9.]*\)\.jar$/\1/p') && \
-    cp "$(find /root/.gradle/caches/modules-2 -name "driver-bundle-$pw.jar" | head -n 1)" /pw-driver-src/
-# The bundle ships without driver-bundle (Node.js for all five Playwright platforms, ~194 MB), so
-# chromium-stage takes the target's node from the copy Gradle resolved into its cache — the one
-# matching the bundle's playwright jar. An empty find fails the cp, and with it the build.
+    rm dist/jclaw-bundle.zip
 
-# ── Stage 2: Pre-install Chromium on a Playwright-supported base ────────────
-# Playwright's CLI fingerprints the OS via /etc/os-release + uname and
-# matches against an internal allowlist. Ubuntu 26.04 (resolute) is a
-# development release Microsoft hasn't published browser builds for on
-# arm64 yet, so an `install chromium` invocation on resolute aborts with
-# "Playwright does not support chromium on ubuntu26.04-arm64". This
-# dedicated stage on Azul's Zulu image (noble-based) sidesteps that:
-# `install chromium` without `--with-deps` only downloads the browser
-# tarball, no shared-lib check, so this stage doesn't need the runtime's
-# libnss3/libcups2 stack. Stage 3 still installs those for actual
-# browser launches.
-FROM azul/zulu-openjdk:25.0.3 AS chromium-stage
-
-ARG TARGETARCH
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
-    PLAYWRIGHT_DRIVER_DIR=/opt/pw-driver
-
-# Only the Playwright JARs are needed; rest of the bundle is dead weight
-# in this stage.
-COPY --from=bundle-stage /staging/jclaw/lib/ /tmp/lib/
-COPY --from=bundle-stage /pw-driver-src/ /tmp/pw-driver-src/
-
-# The single-platform driver: the target's node from driver-bundle plus the JS
-# package from the driver jar. `install chromium` runs through it with
-# driver-bundle off the classpath, so a bad extraction fails the image build.
-RUN case "$TARGETARCH" in amd64) plat=linux ;; arm64) plat=linux-arm64 ;; \
-        *) echo "no Playwright driver for $TARGETARCH" >&2; exit 1 ;; esac && \
-    mkdir -p /tmp/x "$PLAYWRIGHT_DRIVER_DIR" && cd /tmp/x && \
-    jar xf /tmp/pw-driver-src/driver-bundle-*.jar "driver/$plat/node" && \
-    jar xf "$(ls /tmp/lib/driver-[0-9]*.jar)" driver/package && \
-    mv "driver/$plat/node" "$PLAYWRIGHT_DRIVER_DIR/node" && \
-    mv driver/package "$PLAYWRIGHT_DRIVER_DIR/package" && \
-    chmod 755 "$PLAYWRIGHT_DRIVER_DIR/node" && cd / && rm -rf /tmp/x && \
-    java -cp "$(echo /tmp/lib/playwright-*.jar /tmp/lib/driver-[0-9]*.jar | tr ' ' ':')" \
-        com.microsoft.playwright.CLI install chromium
-
-# ── Stage 3: Runtime on Ubuntu 26.04 + Zulu 25 JRE ──────────────────────────
+# ── Stage 2: Runtime on Ubuntu 26.04 + Zulu 25 JRE ──────────────────────────
 # The unpacked bundle just needs a Java 25 runtime to launch via the
 # bundled `./play` launcher — no javac, no Node, no pnpm, no Python, no
 # Play CLI. We install Azul's Zulu 25 JRE from their apt repo onto
@@ -244,14 +202,16 @@ RUN case "$TARGETARCH" in amd64) plat=linux ;; arm64) plat=linux-arm64 ;; \
 #   - ffmpeg                      WhisperTranscriber audio→PCM coercion
 #                                 (local Whisper only; cloud transcription
 #                                 clients ship raw bytes to the API)
-#   - lib(asound|atk|...)t64+ etc Playwright/Chromium shared libs
+#   - lib(asound|atk|...)t64+ etc Playwright/Chromium shared libs. Chromium itself and the
+#                                 Playwright driver's Node.js are not baked in: JClaw downloads
+#                                 them on first browser use, as a bundle install does, onto the
+#                                 data volume so they survive image upgrades.
 #   - curl                        docker-compose healthcheck probe
 #   - bash                        ./play launcher (already in base)
 #
 # Layer order is engineered for cache stability across source-only
 # rebuilds. The volatile bundle COPY (~880 MB unpacked) sits at the end
-# so apt installs, ENV declarations, the chromium tree COPY (~150 MB),
-# the entrypoint COPY, and `mkdir` all stay cached when only application
+# so apt installs, ENV declarations, the entrypoint COPY, and `mkdir` all stay cached when only application
 # code changes. Metadata instructions (ENTRYPOINT, EXPOSE, CMD) sit
 # after the bundle COPY because they re-stamp cheaply (no filesystem
 # diff) — a quick CMD edit shouldn't drag the bundle COPY into a
@@ -290,23 +250,16 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
         libxkbcommon0 libxrandr2 && \
     rm -rf /var/lib/apt/lists/*
 
-# Combined into one ENV block — four values, one layer.
+# Combined into one ENV block — three values, one layer.
 # JCLAW_CONTAINER makes the in-app upgrade refuse: here the image is the
 # upgrade unit, and a tree swap under /app is discarded by the next
 # `docker compose up`. Read by UpgradeService.isContainer and jclaw.sh's
 # is_container, alongside a /.dockerenv probe for images built elsewhere.
+# PLAYWRIGHT_BROWSERS_PATH puts the first-use Chromium on the data volume beside the
+# driver's Node.js (data/playwright-node), so neither re-downloads on an image upgrade.
 ENV JAVA_HOME=/usr/lib/jvm/zulu25 \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    PLAYWRIGHT_DRIVER_DIR=/opt/pw-driver \
+    PLAYWRIGHT_BROWSERS_PATH=/app/data/pw-browsers \
     JCLAW_CONTAINER=1
-
-# Chromium browser tree (~150 MB). Sourced from chromium-stage, which
-# itself only invalidates when build.gradle.kts bumps the playwright
-# dep version. Placed BEFORE the bundle COPY so a typical source-only
-# iteration doesn't pay the 150 MB COPY cost.
-COPY --from=chromium-stage /opt/pw-browsers /opt/pw-browsers
-COPY --from=chromium-stage /opt/pw-driver /opt/pw-driver
 
 # Entrypoint script. Cache hits unless docker-entrypoint.sh changes.
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

@@ -378,8 +378,7 @@ class PlaywrightToolTest extends UnitTest {
     // ─── Pure-unit coverage (no Chromium needed) ──────────────────────────
     //
     // These tests cover the no-launch surface of the tool — metadata
-    // accessors, the directory-driven half of chromiumPreinstalled, and
-    // the idle-session cleanup path. Together they let CI exercise large
+    // accessors and the idle-session cleanup path. Together they let CI exercise large
     // chunks of the file even though JCLAW_PLAYWRIGHT_TEST is unset and
     // the live action handlers (navigate, click, fill, ...) get skipped.
 
@@ -1578,74 +1577,6 @@ class PlaywrightToolTest extends UnitTest {
     private static List<String> actionEnum(PlaywrightBrowserTool tool) {
         var props = (Map<String, Object>) tool.parameters().get("properties");
         return (List<String>) ((Map<String, Object>) props.get("action")).get("enum");
-    }
-
-    // ─── chromiumPreinstalledAt: directory-listing branch ─────────────────
-    //
-    // The env-var lookup is in the private wrapper; this overload is the
-    // pure helper the wrapper delegates to. Four states cover both
-    // branches of the Files.isDirectory check and both arms of the
-    // anyMatch over the directory contents.
-
-    @Test
-    void chromiumPreinstalledAtReturnsFalseForMissingDir() throws Exception {
-        var tmp = Files.createTempDirectory("playwright-coverage-");
-        try {
-            var nonExistent = tmp.resolve("does-not-exist");
-            assertFalse(PlaywrightBrowserTool.chromiumPreinstalledAt(nonExistent));
-        } finally {
-            deleteDir(tmp);
-        }
-    }
-
-    @Test
-    void chromiumPreinstalledAtReturnsFalseForEmptyDir() throws Exception {
-        var tmp = Files.createTempDirectory("playwright-coverage-");
-        try {
-            assertFalse(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
-        } finally {
-            deleteDir(tmp);
-        }
-    }
-
-    @Test
-    void chromiumPreinstalledAtReturnsTrueForChromiumSubdir() throws Exception {
-        var tmp = Files.createTempDirectory("playwright-coverage-");
-        try {
-            Files.createDirectory(tmp.resolve("chromium-1234"));
-            assertTrue(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
-        } finally {
-            deleteDir(tmp);
-        }
-    }
-
-    @Test
-    void chromiumPreinstalledAtReturnsTrueForHeadlessShellSubdir() throws Exception {
-        // Per the helper's javadoc, the chromium_headless_shell-<rev> layout
-        // is equally acceptable — the shell variant has the same launcher
-        // contract from our POV.
-        var tmp = Files.createTempDirectory("playwright-coverage-");
-        try {
-            Files.createDirectory(tmp.resolve("chromium_headless_shell-5678"));
-            assertTrue(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
-        } finally {
-            deleteDir(tmp);
-        }
-    }
-
-    @Test
-    void chromiumPreinstalledAtReturnsFalseWhenOnlyOtherBrowsersPresent() throws Exception {
-        // Defensive: if a host has Firefox or WebKit installed but not
-        // Chromium, we must NOT skip the install step — Playwright would
-        // launch with a missing browser. This test pins that invariant.
-        var tmp = Files.createTempDirectory("playwright-coverage-");
-        try {
-            Files.createDirectory(tmp.resolve("firefox-1234"));
-            Files.createDirectory(tmp.resolve("webkit-5678"));
-            assertFalse(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
-        } finally {
-            deleteDir(tmp);
-        }
     }
 
     // ─── cleanupIdleSessions: stale-entry removal ─────────────────────────
