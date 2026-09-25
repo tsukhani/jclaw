@@ -11,7 +11,7 @@ Answer one question: **under load, does JClaw leak memory, run short of memory, 
 
 ## The rule that governs this command
 
-**Provider behaviour is never a finding.** On the real pass, `ttft`, `stream_body`, tokens/s, reasoning time, the provider's 429s and 5xx, and a breaker opened by provider failures all belong to the provider. They get one line of context in the report and nothing more. A finding is something JClaw's own code, threads, locks, heap or sockets did.
+**Provider behavior is never a finding.** On the real pass, `ttft`, `stream_body`, tokens/s, reasoning time, the provider's 429s and 5xx, and a breaker opened by provider failures all belong to the provider. They get one line of context in the report and nothing more. A finding is something JClaw's own code, threads, locks, heap or sockets did.
 
 **A clean result is a result.** If no check crosses its threshold, the deliverable is a short paragraph saying so, plus the checks table with its numbers. No "could be faster" rows, no speculative tuning, no findings table with nothing in it.
 
@@ -56,7 +56,7 @@ Read `$OUT/digest.md`. Before any verdict, confirm the harness measured what it 
 1. **Every pass has a JSON report and `requests = c × t`.** A missing report means the pass failed at the HTTP level; read `<pass>.out`. Errors on the real pass don't void it. Classify them from `real.app.log`: provider-side errors (429, 5xx, timeouts, breaker short-circuits after those) are one line of context. Judge the JClaw rows on the turns that succeeded, and mark them *Not measured* only if none did.
 2. **The sampler recorded heap values in every phase** (the `with heap` column is non-zero in each row). If it is zero, the sampler broke, and any claim about peak heap is unfounded.
 3. **Every JFR has execution samples and GC cycles.** A recording with none measured nothing.
-4. **The mock honoured its stub.** `ttft above stub` on the mock passes should be single-digit ms. Hundreds of ms is either a JClaw finding or a broken harness; `queue_wait` and `dispatcher_wait` tell you which.
+4. **The mock honored its stub.** `ttft above stub` on the mock passes should be single-digit ms. Hundreds of ms is either a JClaw finding or a broken harness; `queue_wait` and `dispatcher_wait` tell you which.
 5. **The host was not saturated.** JFR's machine CPU sitting far above the JVM's is normal on a workstation: the validation run averaged 52% machine against 6% JVM and still met its stub to within 0.4 ms. Only machine CPU near 100% (a mean above ~85%) makes timing unreliable, and even then the mock proves the point directly: if it still met its stub (check 4) and wall clock stayed within 1.10× ideal, the host kept up. If it did not, say so and keep only the memory verdicts, which do not depend on timing.
 
 If a check fails, name it and withhold the verdicts that depended on it.
@@ -83,7 +83,7 @@ Never take the live set from `GC.heap_info`'s "used". Under ZGC it includes what
 
 **Known-benign, so not a finding:**
 
-- **`ScheduledThreadPoolExecutor$ScheduledFutureTask`** (and its queue's backing array) grows by about one per chat request. `utils.InactivityTimer` schedules each stream's inactivity timeout on a scheduler without `setRemoveOnCancelPolicy(true)`, so a cancelled timer stays queued as a ~96-byte shell until its budget elapses (`ApiChatController.chatStreamTimeout()`, about 12 minutes). It will appear in the "grew on both" table. To confirm it is still benign, re-histogram once the budget has passed (`jcmd <pid> GC.class_histogram | grep ScheduledFutureTask`): the count falls back. If it does not fall back, it is a finding.
+- **`ScheduledThreadPoolExecutor$ScheduledFutureTask`** (and its queue's backing array) grows by about one per chat request. `utils.InactivityTimer` schedules each stream's inactivity timeout on a scheduler without `setRemoveOnCancelPolicy(true)`, so a canceled timer stays queued as a ~96-byte shell until its budget elapses (`ApiChatController.chatStreamTimeout()`, about 12 minutes). It will appear in the "grew on both" table. To confirm it is still benign, re-histogram once the budget has passed (`jcmd <pid> GC.class_histogram | grep ScheduledFutureTask`): the count falls back. If it does not fall back, it is a finding.
 - **`org.h2.*` rows, values and tokens** growing at 0.5–1 instance per request on both passes. By type, these are H2's MVStore page cache and its per-connection parsed-statement caches, both bounded. On a healthy run they add a few hundred KB per pass while the live heap stays flat.
 - **`services.ConversationQueue$QueueState`** growing by one per conversation: +101 on each mock pass (100 workers plus the warmup), which is under the "grew on both" filter's per-request rate. `jobs.ConversationQueueEvictionJob` runs hourly and removes entries idle for more than an hour (`conversation.queue.idleEvictionMs`); after the first audit it logged "Evicted 208 idle conversation queue state(s)". It is a finding only if that log line stops appearing, or the count outlives two hours.
 - **Growth on mock1 only**, when mock2 is flat.
