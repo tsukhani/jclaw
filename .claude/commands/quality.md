@@ -8,7 +8,7 @@ argument-hint: "[empty | comments | spelling | deadcode | modernize | imports | 
 
 **Code Quality Sweep Workflow**
 
-Run up to six behavior-preserving cleanup passes over JClaw's production Java: **(1)** trim verbose/redundant comments, **(2)** normalize British spellings to American, **(3)** remove code that is *provably* dead, **(4)** modernize stale syntax to idiomatic Java 25, **(5)** replace inline fully-qualified names with imports, and **(6)** remove dependencies that are *provably* unused. Every pass runs in an **isolated git worktree**, is validated with `./gradlew spotlessApply && ./gradlew compileJava compileTestJava` and — for the passes that change behavior surface (dead code, modernization, imports, deps) — a full `play autotest`, and lands as its **own commit**. Nothing is pushed. Use `/usr/bin/git` for every git invocation (project convention).
+Run up to six behavior-preserving cleanup passes over JClaw's production Java: **(1)** trim verbose/redundant comments, **(2)** normalize British spellings to American, **(3)** remove code that is *provably* dead, **(4)** modernize stale syntax to idiomatic Java 25, **(5)** replace inline fully-qualified names with imports, and **(6)** remove dependencies that are *provably* unused. Every pass runs in an **isolated git worktree**, is validated with `./gradlew spotlessApply && ./gradlew compileJava compileTestJava` and — for the passes that change behavior surface (spelling's identifier renames, dead code, modernization, imports, deps) — a full `play autotest`, and lands as its **own commit**. Nothing is pushed. Use `/usr/bin/git` for every git invocation (project convention).
 
 The bias throughout is **conservatism**: this codebase already scored A-/A on Clean Code and Imports & Idiom in the JCLAW-717 audit — its comments are largely intentional "why"s, its idiom is already broadly Java-25, and its deps are lean. So the job is to find the genuine residue, not to churn healthy code. **When in doubt, leave it and report it** rather than change it.
 
@@ -21,7 +21,7 @@ The bias throughout is **conservatism**: this codebase already scored A-/A on Cl
 
 Reject anything else with a clear message; do not guess.
 
-**Always out of scope** (never touch): the vendored `app/com/aspose/**` blob, anything under `precompiled/` or generated, `conf/routes` semantics (read it, don't rewrite it), and the entire `frontend/` tree. The `test/` tree is read (to prove usage) and only edited when a pass legitimately requires it (e.g. a test referencing code you're modernizing).
+**Always out of scope** (never touch): the vendored `app/com/aspose/**` blob, anything under `precompiled/` or generated, `conf/routes` semantics (read it, don't rewrite it), and the entire `frontend/` tree. The `test/` tree is read (to prove usage) and only edited when a pass legitimately requires it (e.g. a test referencing code you're modernizing), or when the spelling pass renames an identifier declared there.
 
 ---
 
@@ -59,8 +59,13 @@ Goal: comments become concise; genuinely unnecessary ones are removed. This is t
 
 Goal: one dialect across the source prose. American is the house convention — it matches the JDK and framework vocabulary the code sits in, and the existing majority. Runs after Phase 1 so it only normalizes comment text that survived trimming.
 
-6. **Scope: comments and Javadoc only.** Not identifiers, not string literals, not config keys, not resource files.
-   - **Identifiers stay.** `isCancelled`, `cancelledReturn`, `STREAM_CANCELLED_MSG` keep their spelling. `Future.isCancelled()` and `CancellationException` are JDK names, so a local rename breaks an override or a call site. Renaming an identifier is an API change, not a spelling fix.
+6. **Scope: comments, Javadoc and identifiers** — in the path scope, plus identifiers declared in `test/` (test method names, helpers, locals), since a rename carries every reference with it wherever it lives. Not string literals, not config keys, not resource files.
+   - **Identifiers are renamed with every reference.** In an identifier, match the listed words as camelCase or `UPPER_SNAKE` segments: `semanticNeighbours` → `semanticNeighbors`, `realisedCounts` → `realizedCounts`, `createHonoursPaused` → `createHonorsPaused`. A class rename moves its file too (`/usr/bin/git mv`).
+   - **Identifiers that keep their spelling**, each named in the report with its reason:
+     - the `cancelled` / `cancelling` family (`isCancelled`, `cancelledReturn`, `STREAM_CANCELLED_MSG`, `RunCancelledException`, `onCancelled`). The JDK spells it that way (`Future.isCancelled()`, `CancellationException`), and JClaw's own names follow the JDK: the operator's decision (2026-09-25). Comments still become "canceled".
+     - a name that overrides or implements a JDK or library method.
+     - a name that is a wire or storage contract. That covers every field and class in `models` (JPA maps a column or table name from the Java name unless `@Column`/`@Table` pins it); a field or record component Gson serializes onto the API (the name is the JSON key the SPA reads); a Play controller action or its parameters (`conf/routes` and HTTP parameters bind by name); and any name read reflectively (`getDeclaredMethod("…")`, `getDeclaredField("…")`), where a missed string only fails at run time.
+   - **Frozen ArchUnit stores key on signatures.** Before renaming a member, `grep -rn` it in `archunit_store/`. A listed member's line must change in the same commit, or the frozen rule fails the suite (`Updating frozen violations is disabled`).
    - **String literals are reported, never changed.** Tests assert on message text and config keys are persisted in the DB, so a silent rewrite reddens the suite or orphans stored state. List any British spelling found in a literal and hand it to the user as a separate decision.
    - **Never touch** `LICENSE`, SPDX identifiers, third-party API names, quoted external text (a library's error strings, spec excerpts), the vendored `app/com/aspose/**` blob, or anything under `precompiled/`.
 
@@ -84,11 +89,15 @@ Goal: one dialect across the source prose. American is the house convention — 
 
 8. **Change the spelling and nothing else.** Do not re-hyphenate (`multi-part` → `multipart`), rewrap lines, reflow paragraphs, or fix grammar while you are in the comment. Those are separate judgments carrying their own risk, and bundling them is how a sweep silently changes meaning — an observed run turned *"skips the frame work entirely"* into *"skips the framework entirely"*, which says something different and wrong. If a comment also reads badly, report it for Phase 1 rather than fixing it here.
 
-   Verify with `./gradlew spotlessApply` and `./gradlew compileJava compileTestJava` — a compile error means an edit strayed out of a comment and into code. No `play autotest` is needed for a comment-only pass; if anything outside a comment changed, the pass exceeded its scope — revert it. Commit:
+   Commit comments and identifiers separately, so the prose change reviews apart from the API change. After the comment edits, `./gradlew spotlessApply` and `./gradlew compileJava compileTestJava`: a compile error means an edit strayed out of a comment and into code. Commit:
    ```
    docs(app): normalize British spellings to American
    ```
-   Report the words changed with per-word counts, plus the string-literal hits left for the user.
+   After the identifier renames, `./gradlew spotlessApply`, `./gradlew compileJava compileTestJava`, then a full `play autotest`. A compile only proves the references javac can see; a name bound by reflection, a route or a serializer fails at run time. A red test means a rename crossed a contract: restore it and add it to the kept list. Commit:
+   ```
+   refactor: rename British-spelled identifiers to American
+   ```
+   Report the words changed with per-word counts, the identifiers renamed and the ones kept (with reasons), plus the string-literal hits left for the user.
 
 ---
 
@@ -183,7 +192,7 @@ Goal: remove `build.gradle.kts` dependencies **definitely** unused. This is the 
 
 23. Final gate from the worktree: `cd ../jclaw-quality && ./gradlew spotlessApply && play autotest`. Confirm the JCLAW-684 green signal — the log contains `~ All tests passed` **and** there are no `test-result/*.class.failed.html` sentinels (exit code alone can lie). 
     - **Env-flake guard:** if a broad batch of *unrelated* controller/functional tests fails (401s, FK violations, `awaitCommitted` timeouts), that's the known live-app / load interference (the primary tree's dev server adds load) — confirm the worktree's hook-seeded `PLAY_TEST_PORT` is actually free (`lsof -nP -iTCP:<port> -sTCP:LISTEN`) and re-run once; don't chase it as a real failure.
-24. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), British spellings normalized (per-word counts + the string-literal hits left for the user), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, fully-qualified names converted to imports (+ every FQN deliberately left and why), and deps dropped (+ any "possibly unused" left) **or the "skipped — subtree scope" note** — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`. **If no pass produced a commit** (e.g. an already-clean subtree, as `app/utils` is post-audit), say so plainly and remove the empty worktree (`/usr/bin/git worktree remove ../jclaw-quality`) rather than leaving an empty branch to review.
+24. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), British spellings normalized (per-word counts, identifiers renamed and kept with reasons, and the string-literal hits left for the user), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, fully-qualified names converted to imports (+ every FQN deliberately left and why), and deps dropped (+ any "possibly unused" left) **or the "skipped — subtree scope" note** — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`. **If no pass produced a commit** (e.g. an already-clean subtree, as `app/utils` is post-audit), say so plainly and remove the empty worktree (`/usr/bin/git worktree remove ../jclaw-quality`) rather than leaving an empty branch to review.
 
 ---
 
@@ -193,7 +202,7 @@ Goal: remove `build.gradle.kts` dependencies **definitely** unused. This is the 
 - **Every pass is behavior-preserving and gated.** `spotlessApply` + `compileJava`/`compileTestJava` after every pass; a full `play autotest` after the dead-code, modernization, and dependency passes. Red means the change wasn't safe — revert it, don't force it.
 - **Always `spotlessApply` before each commit** — the pre-push gate rejects import-order drift, and these passes (especially dead-code and modernization) churn imports.
 - Work in the `../jclaw-quality` worktree only; never edit the primary working tree. **Never `git push` or merge** — that's the user's call (`/deploy`). Remove the worktree only on the user's say-so (`/usr/bin/git worktree remove ../jclaw-quality`).
-- **The spelling pass changes spelling, nothing else.** Comments and Javadoc only — never identifiers (`isCancelled` overrides a JDK name), never string literals (tests assert on them, config keys persist), and never bundled with re-hyphenation, rewrapping, or grammar edits. Match an explicit word list, never an `-ise`/`-our`/`-re` suffix regex.
+- **The spelling pass changes spelling, nothing else.** Comments, Javadoc and identifiers, with every reference renamed — except the `cancelled` family (JDK vocabulary), overrides of JDK or library methods, and names that are a wire or storage contract (`models`, Gson-serialized fields, controller actions and their parameters, reflective lookups). Never string literals (tests assert on them, config keys persist), and never bundled with re-hyphenation, rewrapping, or grammar edits. Match an explicit word list, never an `-ise`/`-our`/`-re` suffix regex.
 - **Preserve the "why".** Keep threat-model, perf, framework-quirk, and `JCLAW-xxx`-anchored comments even when terse trimming is tempting; only *what*-restating and dead-commented code go.
 - **Don't over-modernize.** No virtual-thread introduction, no public-API reshaping, no style-only rewrites of already-idiomatic code, and keep the known Java-25 traps in mind (`S1612` method-refs on Play finders stay lambdas).
 - One commit per pass, each independently revertable. Never run an interactive `jshell` to "probe" — it blocks on stdin and orphans; use `./gradlew compileJava`.
