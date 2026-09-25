@@ -8,7 +8,8 @@ import { test, expect, gotoPage, applyFilter, expectFilterChip } from './helpers
  * the selection tests assert on checkbox state rather than following through.
  *
  * Importance is editable inline; this spec writes a value and restores the
- * original in the same test so the operator's ranking is unchanged.
+ * original in the same test, through the API if the UI path fails, so the
+ * operator's ranking is unchanged.
  *
  * Serial because of that write: the importance edit briefly reorders the
  * corpus, and the sort and filter tests read row order from the same live
@@ -84,22 +85,34 @@ test.describe('UAT-7 memories', () => {
     const edit = saved()
     await input.fill('0.42')
     await input.blur()
-    expect((await edit).ok()).toBe(true)
-    await page.reload()
-    await page.waitForLoadState('domcontentloaded')
+    const edited = await edit
+    expect(edited.ok()).toBe(true)
 
-    const sameRow = page.getByTestId('memory-row').first()
-    expect(await sameRow.textContent(), 'table reordered — refusing to restore onto another row').toBe(rowId)
-    await expect(sameRow.getByTestId('importance-input')).toHaveValue('0.42', { timeout: 10_000 })
+    // From here the operator's memory holds 0.42, so any failure below still restores it, by the
+    // id the PUT went to rather than by table position.
+    let restored = false
+    try {
+      await page.reload()
+      await page.waitForLoadState('domcontentloaded')
 
-    // Restore, so the operator's ranking survives the UAT run.
-    const restore = saved()
-    await sameRow.getByTestId('importance-input').fill(original)
-    await sameRow.getByTestId('importance-input').blur()
-    expect((await restore).ok()).toBe(true)
-    await page.reload()
-    await expect(page.getByTestId('memory-row').first().getByTestId('importance-input'))
-      .toHaveValue(original, { timeout: 10_000 })
+      const sameRow = page.getByTestId('memory-row').first()
+      expect(await sameRow.textContent(), 'table reordered — refusing to restore onto another row').toBe(rowId)
+      await expect(sameRow.getByTestId('importance-input')).toHaveValue('0.42', { timeout: 10_000 })
+
+      const restore = saved()
+      await sameRow.getByTestId('importance-input').fill(original)
+      await sameRow.getByTestId('importance-input').blur()
+      expect((await restore).ok()).toBe(true)
+      restored = true
+      await page.reload()
+      await expect(page.getByTestId('memory-row').first().getByTestId('importance-input'))
+        .toHaveValue(original, { timeout: 10_000 })
+    }
+    finally {
+      if (!restored) {
+        await page.request.put(edited.url(), { data: { importance: Number(original) } })
+      }
+    }
   })
 
   test('recall endpoint answers a semantic query', async ({ request }) => {
