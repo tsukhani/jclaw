@@ -7,9 +7,7 @@
 # restarts the backend.
 #
 # Usage: loadtest/audit.sh <new-out-dir> [--provider P] [--model M] [--concurrency N] [--turns N]
-#   --concurrency/--turns size the real pass (default 20 x 20); the mock passes are 100 x 50.
-#   The real pass stops at its first failed turn: a provider that starts refusing would otherwise
-#   hold open the circuit breaker the operator's own agents share.
+#   --concurrency/--turns size the real pass (default 50 x 20); the mock passes are 100 x 50.
 # Exit: 0 collected, 2 usage or no backend, 3 the smoke call failed, 4 the backend died.
 set -euo pipefail
 
@@ -19,10 +17,9 @@ USAGE="usage: loadtest/audit.sh <new-out-dir> [--provider P] [--model M] [--conc
 [[ $# -ge 1 ]] || { echo "$USAGE" >&2; exit 2; }
 OUT=$1
 shift
-# The paid variant: the :free one's per-minute and daily caps refuse any concurrent pass.
-PROVIDER=openrouter
-MODEL=nvidia/nemotron-3-super-120b-a12b
-REAL_C=20
+PROVIDER=ollama-cloud
+MODEL=nemotron-3-super
+REAL_C=50
 REAL_T=20
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -177,10 +174,7 @@ echo "==> mock2 (${MOCK_C}x${MOCK_T})"
 run_pass mock2 --concurrency "$MOCK_C" --turns "$MOCK_T" --prompts "$PROMPTS"
 echo "==> real ($PROVIDER/$MODEL ${REAL_C}x${REAL_T})"
 run_pass real --concurrency "$REAL_C" --turns "$REAL_T" --prompts "$PROMPTS" \
-    --provider "$PROVIDER" --model "$MODEL" --stop-on-error
-if grep -q '"stoppedOnError": true' "$OUT/real.out"; then
-    echo "==> real pass stopped at its first failed turn; see $OUT/real.app.log"
-fi
+    --provider "$PROVIDER" --model "$MODEL"
 
 echo "load-after=$(uptime)" >> "$OUT/env.txt"
 touch "$OUT/.stop"

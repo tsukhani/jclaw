@@ -132,8 +132,7 @@ public class ApiMetricsController extends Controller {
                                    int avgReasoningTokens, double avgTokensPerSec,
                                    String provider, String model,
                                    List<LoadTestRunner.TurnBucket> turnBuckets,
-                                   List<LoadTestRunner.SegmentBreakdown> serverSegments,
-                                   boolean stoppedOnError) {}
+                                   List<LoadTestRunner.SegmentBreakdown> serverSegments) {}
 
     /** GET /api/metrics/latency — JSON snapshot of segment histograms.
      *  Returns the raw {@code LatencyStats.snapshot()} JSON tree which has a
@@ -487,7 +486,7 @@ public class ApiMetricsController extends Controller {
                                  int responseTokens, int simulatedToolCalls, int toolSleepMs,
                                  boolean compress, @Nullable String provider, @Nullable String model,
                                  boolean real, boolean toolAgent, @Nullable String userMessage,
-                                 List<String> prompts, @Nullable String agentName, boolean stopOnError) {}
+                                 List<String> prompts, @Nullable String agentName) {}
 
     /**
      * POST /api/metrics/loadtest — run a synchronous load test against
@@ -525,11 +524,6 @@ public class ApiMetricsController extends Controller {
      * {@code HttpClient} sends no Accept-Encoding and the compressor passes
      * traffic through as identity — so loadtest results reflect the controller
      * hot path, not the encoding path.
-     *
-     * <p>{@code stopOnError=true} stops workers from starting another turn once
-     * any turn fails, and the response then carries {@code stoppedOnError}. A
-     * real-provider run that keeps going after the provider starts refusing
-     * holds that provider's circuit breaker open for the operator's own agents.
      *
      * <p>Returns the aggregate counts + wall-clock. Use GET
      * /api/metrics/latency afterwards for per-segment histograms.
@@ -583,7 +577,7 @@ public class ApiMetricsController extends Controller {
                     new LoadTestHarness.Scenario(input.ttftMs(), input.tokensPerSecond(), input.responseTokens(),
                             input.simulatedToolCalls(), input.toolSleepMs()),
                     input.real(), input.toolAgent(), input.provider(), input.model(), input.userMessage(), input.prompts(),
-                    input.agentName(), input.stopOnError()));
+                    input.agentName()));
 
             long toolInvocations = LoadTestSleepTool.invocations() - toolInvocationsBefore;
             teardownLoadtest(input);
@@ -636,7 +630,6 @@ public class ApiMetricsController extends Controller {
         int simulatedToolCalls = readInt(body, "simulatedToolCalls", 0);
         int toolSleepMs = readInt(body, "toolSleepMs", 200);
         boolean compress = readBool(body, "compress", false);
-        boolean stopOnError = readBool(body, "stopOnError", false);
 
         // Real-provider mode is implied by both `provider` and `model` being
         // set (non-blank). Operators don't pass a separate `real` flag — its
@@ -680,7 +673,7 @@ public class ApiMetricsController extends Controller {
 
         return new LoadtestInput(concurrency, turns, ttftMs, tokensPerSecond, responseTokens,
                 simulatedToolCalls, toolSleepMs, compress, provider, model, real, toolAgent, userMessage, prompts,
-                agentName, stopOnError);
+                agentName);
     }
 
     /**
@@ -792,9 +785,6 @@ public class ApiMetricsController extends Controller {
         if (input.real()) {
             out.addProperty("provider", input.provider());
             out.addProperty("model", input.model());
-        }
-        if (input.stopOnError()) {
-            out.addProperty("stoppedOnError", result.stoppedOnError());
         }
         // Tools benchmark: how often the real model actually invoked
         // loadtest_sleep. No forced tool_choice, so the call is prompt-driven —

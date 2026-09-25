@@ -112,12 +112,8 @@ def harness_section(results):
             out.append(f"- Mean request above stub: {data['avgPerRequestMs'] - ttft - stream:+.1f} ms.")
             out.append(f"- Wall clock vs ideal ({shape[1]} turns x {ttft + stream:.0f} ms): "
                        f"{data['wallClockMs'] / ideal_wall:.3f}x.")
-        if data.get("stoppedOnError"):
-            out.append(f"- **Stopped at its first failed turn** after {data['totalRequests']} requests "
-                       f"of {shape[0] * shape[1] if shape else '?'}.")
-        # Buckets count successful turns only; a position where every turn failed is empty.
-        buckets = [b for b in data.get("turnBuckets") or [] if b["count"] > 0]
-        if len(buckets) >= 3 and buckets[1]["turn"] == 2 and buckets[1]["durationMeanMs"] > 0:
+        buckets = data.get("turnBuckets") or []
+        if len(buckets) >= 3:
             dur = [b["durationMeanMs"] for b in buckets]
             late = statistics.median(dur[-5:])
             out.append(f"- Per-turn duration mean: turn 1 {dur[0]} ms, turn 2 {dur[1]} ms, "
@@ -136,12 +132,10 @@ def harness_section(results):
 
 def snapshot(tag):
     s = {}
-    # The histogram forces a full collection and counts only live objects. GC.heap_info's "used",
-    # read seconds after GC.run, also holds whatever was allocated since, so it is not a live set.
-    m = re.search(r"^Total\s+\d+\s+(\d+)", read(f"{tag}.histo.txt"), re.M)
-    if m:
-        s["heap_mb"] = int(m[1]) / 2 ** 20
     heap = read(f"{tag}.heap.txt")
+    m = re.search(r"used (\d+)([KMG])", heap)
+    if m:
+        s["heap_mb"] = mb(m[1], m[2])
     # ZGC: "capacity 1302M"; G1: "committed 262144K".
     m = re.search(r"(?:capacity|committed) (\d+)([KMG])", heap)
     if m:
@@ -190,7 +184,7 @@ def snapshot(tag):
 
 def snapshot_section(snaps):
     out = ["## Settled state (two GC.run 5 s apart before each reading)", ""]
-    fields = (("heap_mb", "live heap MB (histogram)"), ("committed_mb", "committed heap MB"),
+    fields = (("heap_mb", "live heap MB"), ("committed_mb", "committed heap MB"),
               ("metaspace_mb", "metaspace MB"), ("classes", "classes"), ("loaders", "class loaders"),
               ("platform_threads", "platform threads"), ("virtual_threads", "virtual threads"),
               ("fds", "open fds"), ("rss_mb", "RSS MB"), ("rss_outside_heap_mb", "RSS outside heap MB"))
