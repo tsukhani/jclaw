@@ -249,7 +249,7 @@ public class ApiTasksController extends Controller {
         // Stays a controller guard, ordered after the duplicate-recurring 409 and before the persist.
         rejectInvalidTimezone(body);
 
-        var origin = creationOrigin();
+        var origin = RequestPrincipal.callerOrigin();
         var saved = Tx.run(() -> TaskWriteService.persistNewTask(body, agent, name, spec, origin));
 
         TaskSchedulingService.register(saved);
@@ -259,18 +259,6 @@ public class ApiTasksController extends Controller {
                         .formatted(saved.name, saved.id, saved.type));
 
         renderJSON(gson.toJson(TaskView.of(saved)));
-    }
-
-    /**
-     * The origin to record on a task created here, for the dangerous-tool gate to judge a
-     * fire of it by (JCLAW-1021): the operator's web UI, or — when an agent drives this
-     * endpoint through {@code jclaw_api} — the origin of the turn that made the call, which
-     * {@code task_manager} would record for the same creation. Stamping {@code web} for every
-     * agent call would hand an external peer's task operator trust at fire time; an
-     * unstamped call records nothing, which classifies as UNKNOWN and fails closed.
-     */
-    private static @Nullable String creationOrigin() {
-        return RequestPrincipal.callerOrigin();
     }
 
     /**
