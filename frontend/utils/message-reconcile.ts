@@ -78,6 +78,11 @@ export function backfillServerIds(local: Message[], fresh: Message[]): boolean {
     L.id = list.pop()!
     const R = freshById.get(L.id)
     if (R?.truncated) L.truncated = true
+    // A reply's stored text carries its quoted block (JCLAW-1299); render that rather than the client copy.
+    if (L._quote && R) {
+      L.content = R.content
+      delete L._quote
+    }
     mutated = true
   }
   return mutated

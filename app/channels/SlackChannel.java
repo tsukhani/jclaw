@@ -136,7 +136,11 @@ public class SlackChannel implements Channel {
     /** A single {@code chat.postMessage} attempt, surfacing Slack's error code and any
      *  rate-limit hint (JCLAW-454) so both the {@link SendResult} path and the
      *  error-reporting delivery path can build on one wire call. Never throws. */
-    private record PostAttempt(boolean ok, @Nullable String error, long retryAfterMs) {}
+    private record PostAttempt(boolean ok, @Nullable String error, long retryAfterMs, @Nullable String ts) {
+        PostAttempt(boolean ok, @Nullable String error, long retryAfterMs) {
+            this(ok, error, retryAfterMs, null);
+        }
+    }
 
     private static PostAttempt postOnce(String botToken, String channelId, String text,
                                         @Nullable String threadTs) {
@@ -146,7 +150,7 @@ public class SlackChannel implements Channel {
             if (resp.isOk()) {
                 EventLogger.info(CHANNEL, null, CHANNEL_NAME,
                         "Message sent to channel %s".formatted(channelId));
-                return new PostAttempt(true, null, 0L);
+                return new PostAttempt(true, null, 0L, resp.getTs());
             }
             if (ERR_RATELIMITED.equals(resp.getError())) {
                 EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "Rate-limited (API error)");
@@ -179,8 +183,13 @@ public class SlackChannel implements Channel {
      * {@link services.DeliveryDispatcher} can record the real cause on a
      * {@code TaskRun}'s {@code delivery_error} instead of a generic message.
      */
-    public record DeliveryOutcome(boolean ok, @Nullable String error) {
+    public record DeliveryOutcome(boolean ok, @Nullable String error, @Nullable String channelId, @Nullable String ts) {
+        public DeliveryOutcome(boolean ok, @Nullable String error) { this(ok, error, null, null); }
         public static DeliveryOutcome delivered() { return new DeliveryOutcome(true, null); }
+        /** JCLAW-1295: where the post landed, so a thread reply under it can be matched. */
+        public static DeliveryOutcome delivered(String channelId, @Nullable String ts) {
+            return new DeliveryOutcome(true, null, channelId, ts);
+        }
         public static DeliveryOutcome failed(@Nullable String error) { return new DeliveryOutcome(false, error); }
     }
 
@@ -214,7 +223,7 @@ public class SlackChannel implements Channel {
         String channelId = res.channelId();
         String body = SlackMarkdownFormatter.format(text);
         var a = postOnce(botToken, channelId, body, null);
-        if (a.ok()) return DeliveryOutcome.delivered();
+        if (a.ok()) return DeliveryOutcome.delivered(channelId, a.ts());
         // One retry only on a rate-limit hint, scheduled off the VT carrier (JDK-8373224
         // safe). channel_not_found / not_in_channel are not transient, so don't retry them.
         if (a.retryAfterMs() > 0) {
@@ -223,7 +232,8 @@ public class SlackChannel implements Channel {
                 var retried = RetryScheduler.schedule(
                                 () -> postOnce(botToken, channelId, body, null), delayMs)
                         .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
-                return retried.ok() ? DeliveryOutcome.delivered() : DeliveryOutcome.failed(retried.error());
+                return retried.ok() ? DeliveryOutcome.delivered(channelId, retried.ts())
+                        : DeliveryOutcome.failed(retried.error());
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 return DeliveryOutcome.failed("interrupted");

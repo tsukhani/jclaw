@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowDownTrayIcon,
+  ArrowUturnLeftIcon,
   EyeIcon,
   FilmIcon,
   LightBulbIcon,
@@ -28,7 +29,7 @@ import { formatSize } from '~/utils/format'
 // suppression rule closes.
 import { isBackgroundSubagentAnnounce, shouldDisplayMessage } from '~/utils/display-message-filter'
 
-import type { Agent, AgentSkill, AgentTool, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
+import type { Agent, AgentSkill, AgentTool, ChatQuote, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
 import { useChatComposer } from '~/composables/useChatComposer'
 import { useChatMessageActions } from '~/composables/useChatMessageActions'
 import { useChatUsageMeter } from '~/composables/useChatUsageMeter'
@@ -42,6 +43,8 @@ import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useChatSubagentChips } from '~/composables/useChatSubagentChips'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useChatStream } from '~/composables/useChatStream'
+import { useChatReplyHandoff } from '~/composables/useChatReplyHandoff'
+import { QUOTE_KIND_LABELS, quoteFor } from '~/utils/quoted-reply'
 import { useStreamProgress } from '~/composables/useStreamProgress'
 import { findProviderModel, isLocalProvider, modelSupportsTools } from '~/composables/useProviders'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
@@ -179,6 +182,8 @@ const {
   refreshConversations,
 })
 const input = ref('')
+// JCLAW-1299: the message the next send replies to, shown above the composer until sent or dismissed.
+const pendingQuote = ref<ChatQuote | null>(null)
 // `streaming` and `streamReasoning` (below) are page-level shared refs, not
 // owned by useChatStream: useChatScroll pins the reasoning body off them,
 // useMediaGenPolling tears down on streaming-end, and displayMessages /
@@ -374,6 +379,21 @@ function focusInput() {
   })
 }
 
+function replyToMessage(msg: Message) {
+  pendingQuote.value = quoteFor(msg)
+  focusInput()
+}
+
+// A reminder toast's "Reply in chat" (JCLAW-1299): open its agent's chat with the reminder quoted.
+const replyHandoff = useChatReplyHandoff()
+watch(replyHandoff, (handoff) => {
+  if (!handoff) return
+  replyHandoff.value = null
+  selectedAgentId.value = handoff.agentId
+  pendingQuote.value = handoff.quote
+  focusInput()
+}, { immediate: true })
+
 // After a model pick, land the cursor back in the composer — the same focus
 // the page does on load — so the user can start typing without a second click.
 // The combobox suppresses reka-ui's default focus-return-to-trigger on a pick
@@ -503,6 +523,7 @@ const {
   refreshConversations,
   refreshAgents,
   pendingOverrides,
+  quote: pendingQuote,
 })
 
 // Live "Prefilling… / Generating…" indicator with a running elapsed timer for
@@ -924,6 +945,7 @@ function exportConversation() {
               @edit-user-message="editUserMessage"
               @delete-message="deleteMessage"
               @regenerate-message="regenerateMessage"
+              @reply-message="replyToMessage"
               @set-tok-stats-hover-key="tokStatsHoverKey = $event"
             />
             <!--
@@ -1065,9 +1087,39 @@ function exportConversation() {
             @paste="handlePaste"
           >
             <div
-              v-if="attachedFiles.length || attachError || overrideError || actionError"
+              v-if="pendingQuote || attachedFiles.length || attachError || overrideError || actionError"
               class="px-3 pt-2.5 pb-1 flex flex-wrap gap-1.5"
             >
+              <div
+                v-if="pendingQuote"
+                data-testid="reply-quote"
+                class="basis-full flex items-start gap-2 px-2 py-1.5 bg-muted border-l-2 border-input rounded text-xs text-fg-primary"
+              >
+                <ArrowUturnLeftIcon
+                  class="w-3.5 h-3.5 mt-0.5 text-fg-muted shrink-0"
+                  aria-hidden="true"
+                />
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium text-fg-muted">
+                    {{ QUOTE_KIND_LABELS[pendingQuote.kind] }}
+                  </div>
+                  <div class="line-clamp-2 whitespace-pre-wrap break-words">
+                    {{ pendingQuote.text }}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="-m-1.5 p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Cancel reply"
+                  data-testid="reply-quote-dismiss"
+                  @click="pendingQuote = null"
+                >
+                  <XMarkIcon
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
               <span
                 v-for="(f, idx) in attachedFiles"
                 :key="`${f.name}-${idx}`"

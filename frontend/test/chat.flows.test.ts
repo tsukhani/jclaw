@@ -414,3 +414,59 @@ describe('Chat page — model selector re-syncs after a mid-turn model switch', 
     expect(vm.selectedModelKey).toBe('ollama-cloud::kimi-k2.6')
   })
 })
+
+describe('Chat page — replying to a message (JCLAW-1299)', () => {
+  function stubStream() {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const encoder = new TextEncoder()
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":42}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
+          controller.close()
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    })
+  }
+
+  function streamBodies(fetchSpy: ReturnType<typeof stubStream>) {
+    return fetchSpy.mock.calls
+      .filter(call => String(call[0] ?? '').includes('/api/chat/stream'))
+      .map(call => JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>)
+  }
+
+  async function send(component: VueWrapper, text: string) {
+    await component.find<HTMLTextAreaElement>('textarea').setValue(text)
+    await component.find('form').trigger('submit.prevent')
+    await flushPromises()
+  }
+
+  it('quotes the message above the composer, sends the quote once, and can be dismissed', async () => {
+    setupChatApi()
+    registerEndpoint('/api/conversations/42/messages', () => [])
+    const fetchSpy = stubStream()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    await send(component, 'first message')
+
+    await component.find('[data-testid="reply-message"]').trigger('click')
+    const preview = component.find('[data-testid="reply-quote"]')
+    expect(preview.text()).toContain('Replying to your message')
+    expect(preview.text()).toContain('first message')
+
+    await component.find('[data-testid="reply-quote-dismiss"]').trigger('click')
+    expect(component.find('[data-testid="reply-quote"]').exists()).toBe(false)
+
+    await component.find('[data-testid="reply-message"]').trigger('click')
+    await send(component, 'about that')
+    await send(component, 'unrelated')
+
+    const [, reply, after] = streamBodies(fetchSpy)
+    expect(reply!.quote).toEqual({ kind: 'user', text: 'first message' })
+    expect(reply!.message).toBe('about that')
+    expect(after!.quote).toBeUndefined()
+    expect(component.find('[data-testid="reply-quote"]').exists()).toBe(false)
+    component.unmount()
+  })
+})

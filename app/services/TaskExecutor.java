@@ -525,7 +525,8 @@ public final class TaskExecutor {
         // short Tx — the db-scheduler carrier thread has no inherited one.
         var result = isReminder(task)
                 ? Tx.run(() -> ReminderDispatcher.dispatch(task, closed, spec, content))
-                : Tx.run(() -> DeliveryDispatcher.dispatchSpec(task.agent, spec, content));
+                : Tx.run(() -> DeliveryDispatcher.dispatchSpec(task.agent, spec, content,
+                        "the result of task '%s'".formatted(task.name)));
         if (result.ok()) {
             stampDelivery(closed.id, TaskRun.DeliveryStatus.DELIVERED, spec, null);
             TaskLifecycleEvents.recordDelivered(task, closed, spec);

@@ -485,7 +485,8 @@ public class MessageTool implements ToolRegistry.Tool {
             return "Error: channel '" + channel + "' is not a deliverable channel "
                     + "(supported: telegram, slack, whatsapp, web).";
         }
-        var result = DeliveryDispatcher.dispatch(agent, channel, target, message);
+        var result = DeliveryDispatcher.dispatch(agent, channel, target, message,
+                "a message agent '%s' sent".formatted(agent.name));
         if (result.ok()) {
             var payload = new LinkedHashMap<String, Object>();
             payload.put(PARAM_ACTION, "sent");

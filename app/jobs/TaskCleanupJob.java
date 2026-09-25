@@ -1,5 +1,6 @@
 package jobs;
 
+import models.DeliveredMessage;
 import models.Task;
 import play.db.jpa.JPA;
 import play.jobs.Every;
@@ -80,11 +81,13 @@ public class TaskCleanupJob extends Job<Void> {
 
         var cutoff = AppClock.now().minus(retentionDays, ChronoUnit.DAYS);
         int deleted = Tx.run(() -> deleteExpired(cutoff));
+        // What a task delivered stays quotable as long as its history is kept (JCLAW-1295).
+        int deliveries = Tx.run(() -> DeliveredMessage.delete("createdAt < ?1", cutoff));
 
-        if (deleted > 0) {
+        if (deleted > 0 || deliveries > 0) {
             EventLogger.info(EVENT_CATEGORY, null, null,
-                    "Deleted %d terminal task(s) older than %d day(s) (cutoff=%s)"
-                            .formatted(deleted, retentionDays, cutoff));
+                    "Deleted %d terminal task(s) and %d delivery record(s) older than %d day(s) (cutoff=%s)"
+                            .formatted(deleted, deliveries, retentionDays, cutoff));
         }
         // Suppress zero-delete log noise: the job runs daily and silence
         // here means "system is healthy, nothing to clean", which doesn't

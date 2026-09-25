@@ -2,7 +2,7 @@ import { onUnmounted, ref, triggerRef, nextTick, type Ref, type ShallowRef } fro
 import type { PendingOverrides } from '~/composables/useAgentModel'
 import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import type { UploadedAttachment } from '~/composables/useChatAttachments'
-import type { Message, MessageAttachment, ToolCallResultStructured } from '~/types/api'
+import type { ChatQuote, Message, MessageAttachment, ToolCallResultStructured } from '~/types/api'
 import type { MessageRoute } from '~/utils/usage-cost'
 
 /**
@@ -80,6 +80,8 @@ export interface UseChatStreamDeps {
   reconcileMessageIds: () => Promise<void>
   /** JCLAW-1196: picks made on a fresh chat, carried by the message that creates its conversation. */
   pendingOverrides?: { readonly value: PendingOverrides | null }
+  /** JCLAW-1299: the message the next send replies to; cleared once sent. */
+  quote?: Ref<ChatQuote | null>
   refreshConversations: () => Promise<void> | void
   refreshAgents: () => Promise<void> | void
 }
@@ -480,6 +482,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     if (subagentTranscript.value) return
     const rawText = input.value.trim()
     if (!rawText && !attachedFiles.value.length) return
+    const quote = deps.quote?.value ?? null
 
     attachError.value = null
     const pending = attachedFiles.value.slice()
@@ -493,6 +496,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     const text = rawText
 
     input.value = ''
+    if (deps.quote) deps.quote.value = null
     revokeAttachmentPreviews(pending)
     attachedFiles.value = []
     if (chatInput.value) chatInput.value.style.height = 'auto'
@@ -501,7 +505,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     // hidden until the next /messages refetch surfaced the persisted
     // {@link MessageAttachment} rows — observable as "I uploaded a file
     // but it doesn't show until I leave and come back."
-    messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachments: buildOptimisticAttachments(uploaded) })
+    messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachments: buildOptimisticAttachments(uploaded), ...(quote ? { _quote: quote } : {}) })
     triggerRef(messages)
     scrollToBottom()
 
@@ -535,6 +539,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
           conversationId: selectedConvoId.value,
           message: text,
           attachments: uploaded,
+          ...(quote ? { quote } : {}),
           ...(selectedConvoId.value == null ? (deps.pendingOverrides?.value ?? {}) : {}),
         }),
       })

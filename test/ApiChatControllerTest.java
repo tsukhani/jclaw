@@ -163,6 +163,37 @@ class ApiChatControllerTest extends FunctionalTest {
                 "response must carry the synthetic slash response: " + content);
     }
 
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+            "{\"text\": \"x\", \"kind\": \"system\"}",
+            "{\"text\": \" \", \"kind\": \"user\"}",
+            "{\"kind\": \"user\"}",
+            "\"just a string\""
+    })
+    void sendRejectsAMalformedQuote(String quote) {
+        // JCLAW-1299: refused before any LLM round, so nothing runs with a quote it cannot frame.
+        login();
+        var id = createAgent("send-bad-quote");
+        var body = """
+                {"agentId": %s, "message": "hi", "quote": %s}
+                """.formatted(id, quote);
+        var response = POST("/api/chat/send", "application/json", body);
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void aSlashCommandSentAsAReplyStillRunsAsACommand() {
+        login();
+        var id = createAgent("send-slash-quoted");
+        var body = """
+                {"agentId": %s, "message": "/help", "quote": {"text": "an earlier line", "kind": "user"}}
+                """.formatted(id);
+        var response = POST("/api/chat/send", "application/json", body);
+        assertIsOk(response);
+        assertTrue(getContent(response).contains("\"response\""),
+                "the quote must not turn /help into text for the model: " + getContent(response));
+    }
+
     // =====================
     // POST /api/chat/stream — slash command path only
     // =====================

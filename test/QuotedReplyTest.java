@@ -64,4 +64,24 @@ class QuotedReplyTest extends UnitTest {
     void aReplyWithNoWordsOfItsOwnIsJustTheBlock() {
         assertEquals("[Replying to x]\n> q", QuotedReply.fold("", "[Replying to x]\n> q"));
     }
+
+    @Test
+    void aWebReplyNamesItsSourceByTheKindTheChatSent() {
+        // JCLAW-1299
+        assertEquals("[Replying to a reminder]\n> call the dentist", QuotedReply.webBlock("reminder", "call the dentist"));
+        assertEquals("[Replying to an earlier reply from you]\n> a", QuotedReply.webBlock("assistant", "a"));
+        assertEquals("[Replying to an earlier message of mine]\n> u", QuotedReply.webBlock("user", "u"));
+        assertEquals("[Replying to a message delivered to this chat]\n> d", QuotedReply.webBlock("delivered", "d"));
+    }
+
+    @Test
+    void aWebReplyOfAnUnknownKindHasNoBlock() {
+        assertNull(QuotedReply.webBlock("system", "x"));
+        assertNull(QuotedReply.webBlock(null, "x"));
+    }
+
+    @Test
+    void aWebReplyIsCappedLikeEveryOther() {
+        assertTrue(QuotedReply.webBlock("reminder", "a".repeat(20_000)).endsWith("[truncated: the original is 20000 characters]"));
+    }
 }

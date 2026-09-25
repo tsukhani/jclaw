@@ -78,6 +78,15 @@ async function acknowledge(id: number) {
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
 
+// JCLAW-1299: open the reminder's agent in chat with the reminder quoted, and mark it seen.
+const replyHandoff = useChatReplyHandoff()
+async function replyInChat(t: NotificationView) {
+  if (t.agentId == null) return
+  replyHandoff.value = { agentId: t.agentId, quote: { kind: 'reminder', text: t.content } }
+  await acknowledge(t.id)
+  await navigateTo('/chat')
+}
+
 async function dismiss(id: number) {
   // User-intent for the trash icon is "delete this reminder entirely" —
   // including the underlying Task row that drives the /reminders page,
@@ -160,12 +169,22 @@ onUnmounted(() => {
                 {{ t.content }}
               </p>
               <div class="mt-2 flex items-center justify-between gap-3">
-                <button
-                  class="text-xs font-medium text-amber-700 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
-                  @click="acknowledge(t.id)"
-                >
-                  Mark as seen
-                </button>
+                <div class="flex items-center gap-3">
+                  <button
+                    class="text-xs font-medium text-amber-700 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                    @click="acknowledge(t.id)"
+                  >
+                    Mark as seen
+                  </button>
+                  <button
+                    v-if="t.agentId != null"
+                    data-testid="reminder-reply"
+                    class="text-xs font-medium text-amber-700 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                    @click="replyInChat(t)"
+                  >
+                    Reply in chat
+                  </button>
+                </div>
                 <button
                   class="rounded p-1 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-900/30 dark:hover:text-amber-300"
                   title="Delete reminder"

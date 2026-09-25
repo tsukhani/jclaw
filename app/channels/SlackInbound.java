@@ -3,6 +3,7 @@ package channels;
 import agents.AgentRunner;
 import agents.DangerousActionGate;
 import com.google.gson.JsonObject;
+import models.DeliveredMessage;
 import models.SlackBinding;
 import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
@@ -63,8 +64,8 @@ public final class SlackInbound {
             SlackBinding b = SlackBinding.findById(bindingId);
             return b != null && b.agent != null && b.agent.isMain();
         }));
-        if (!SlackAccessPolicy.isAllowed(binding.ownerUserId, message.userId(),
-                message.channelType(), message.botMentioned(), agentIsMain)) {
+        var parent = deliveredParent(message);
+        if (!admitted(binding.ownerUserId, message, parent, agentIsMain)) {
             EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "Message from %s in %s (%s) dropped by access policy".formatted(
                             message.userId(), message.channelId(), message.channelType()));
@@ -84,7 +85,7 @@ public final class SlackInbound {
                 && binding.ownerUserId.equals(message.userId());
         Thread.ofVirtual().name("slack-inbound").start(() ->
                 DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
-                    processMessage(bindingId, botToken, message);
+                    processMessage(bindingId, botToken, message, parent);
                     return null;
                 }));
     }
@@ -133,7 +134,37 @@ public final class SlackInbound {
         return eventCallbackPayload.has("event_id") ? eventCallbackPayload.get("event_id").getAsString() : null;
     }
 
-    private static void processMessage(Long bindingId, String botToken, SlackChannel.InboundMessage message) {
+    /**
+     * Whether the access policy serves {@code message}. A reply in the thread under a post JClaw
+     * delivered answers the bot, as a Telegram reply to the bot does, so it needs no @mention (JCLAW-1298).
+     */
+    public static boolean admitted(@Nullable String ownerUserId, SlackChannel.InboundMessage message,
+                                   @Nullable DeliveredMessage parent, boolean agentIsMain) {
+        return SlackAccessPolicy.isAllowed(ownerUserId, message.userId(), message.channelType(),
+                message.botMentioned() || parent != null, agentIsMain);
+    }
+
+    /** The delivered post a thread reply sits under (JCLAW-1298), or null for any other message. */
+    public static @Nullable DeliveredMessage deliveredParent(SlackChannel.InboundMessage message) {
+        var parentTs = message.threadTs();
+        return parentTs == null ? null
+                : Tx.run(() -> DeliveredMessage.findDelivered(CHANNEL_SLACK, message.channelId(), parentTs));
+    }
+
+    /**
+     * {@code text} with the delivered parent quoted ahead of it on the thread's first reply only:
+     * every later reply sits under the same parent and finds it in the conversation already.
+     */
+    public static String turnText(String text, @Nullable DeliveredMessage parent) {
+        if (parent == null || QuotedReply.isCommand(text)
+                || !Tx.run(() -> DeliveredMessage.markFirstQuote(parent.id))) {
+            return text;
+        }
+        return QuotedReply.fold(text, QuotedReply.block(parent.source, parent.text, false));
+    }
+
+    private static void processMessage(Long bindingId, String botToken, SlackChannel.InboundMessage message,
+                                       @Nullable DeliveredMessage parent) {
         try {
             // JCLAW-83: capture the inbound thread_ts so the reply lands in-thread
             // (null for a non-threaded message → posts at channel level).
@@ -156,7 +187,7 @@ public final class SlackInbound {
             // commands use a ! prefix in messages; rewrite !cmd → /cmd here so the
             // shared slash interception below handles it and the canned reply lands
             // in-thread via the sink.
-            var text = Commands.rewriteBangCommand(message.text());
+            var text = turnText(Commands.rewriteBangCommand(message.text()), parent);
             // JCLAW-442: route through the shared higher-level entry (as Telegram does)
             // so slash commands + the conversation lifecycle are handled centrally. The
             // factory owns the per-binding bot token + channel/thread;

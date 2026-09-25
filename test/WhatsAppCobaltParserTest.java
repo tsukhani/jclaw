@@ -87,6 +87,17 @@ class WhatsAppCobaltParserTest extends UnitTest {
     }
 
     @Test
+    void capturesTheQuotedMessageIdOfAReply() {
+        // JCLAW-1297: the id a delivered message is looked up by.
+        ContextInfo ctx = new ContextInfoBuilder().quotedMessageId("QUOTED-1").build();
+        var reply = new TextMessageBuilder().text("which one?").contextInfo(ctx).build();
+        var msg = WhatsAppCobaltParser.parse(info(USER, USER, "ID-9", reply, "Alice"), BOT);
+
+        assertNotNull(msg);
+        assertEquals("QUOTED-1", msg.quotedMessageId());
+    }
+
+    @Test
     void parsesGroupTextWithChatIdAndSender() {
         var info = info(GROUP, USER, "ID-2", text("hi group"), "Bob");
         var msg = WhatsAppCobaltParser.parse(info, BOT);

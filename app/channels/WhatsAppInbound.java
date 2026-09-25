@@ -2,6 +2,7 @@ package channels;
 
 import agents.AgentRunner;
 import models.Agent;
+import models.DeliveredMessage;
 import models.WhatsAppBinding;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
@@ -107,8 +108,7 @@ public final class WhatsAppInbound {
 
             var attachments = WhatsAppMediaDownloader.downloadAll(binding, msg, agent.name);
             var peerId = conversationPeerId(msg);
-            // A caption-less media message carries no text; the pipeline expects "", as Telegram's parser sends (JCLAW-1161).
-            var text = Objects.requireNonNullElse(senderAttributed(msg), "");
+            var text = turnText(msg);
             AgentRunner.processInboundForAgentStreaming(
                     agent, CHANNEL_WHATSAPP, peerId, text,
                     _ -> new WhatsAppStreamingSink(channel, peerId, agent),
@@ -128,6 +128,20 @@ public final class WhatsAppInbound {
      */
     public static String conversationPeerId(WhatsAppInboundMessage msg) {
         return msg.isGroup() ? msg.chatId() : msg.from();
+    }
+
+    /**
+     * The user turn {@code msg} becomes: sender-attributed in a group, with the delivered message it
+     * quotes ahead of it when JClaw recorded one (JCLAW-1297). The Cloud API sends only the quoted id.
+     */
+    public static String turnText(WhatsAppInboundMessage msg) {
+        // A caption-less media message carries no text; the pipeline expects "", as Telegram's parser sends (JCLAW-1161).
+        var text = Objects.requireNonNullElse(senderAttributed(msg), "");
+        var quotedId = msg.quotedMessageId();
+        if (quotedId == null) return text;
+        var delivered = Tx.run(() -> DeliveredMessage.findDelivered(CHANNEL_WHATSAPP, null, quotedId));
+        return QuotedReply.fold(text,
+                delivered != null ? QuotedReply.block(delivered.source, delivered.text, false) : null);
     }
 
     /**

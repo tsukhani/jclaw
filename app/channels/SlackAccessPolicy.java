@@ -1,5 +1,7 @@
 package channels;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * JCLAW-354 inbound access policy for Slack messages — the Slack analog of
  * {@link TelegramAccessPolicy}, collapsed to the per-agent binding's single owner.
@@ -41,14 +43,14 @@ public final class SlackAccessPolicy {
      *                      with no owner configured it reaches no one (fail closed)
      * @return true to serve the message, false to silently ignore it
      */
-    public static boolean isAllowed(String ownerUserId, String fromUserId, String channelType,
+    public static boolean isAllowed(@Nullable String ownerUserId, String fromUserId, String channelType,
                                     boolean botMentioned, boolean ownerRequired) {
         var ownerConfigured = ownerUserId != null && !ownerUserId.isBlank();
 
         if (ownerConfigured) {
             // Private: only the owner. A channel still needs the @mention so the bot
             // isn't triggered by every owner message.
-            var fromOwner = ownerUserId.equals(fromUserId);
+            var fromOwner = fromUserId.equals(ownerUserId);
             return isGroupLike(channelType) ? (botMentioned && fromOwner) : fromOwner;
         }
         if (ownerRequired) {

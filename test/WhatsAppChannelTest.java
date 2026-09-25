@@ -22,6 +22,7 @@ import utils.HttpFactories;
 import java.io.File;
 import java.nio.file.Files;
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Behavior coverage for {@link WhatsAppChannel}'s config resolution, guard
@@ -245,6 +246,34 @@ class WhatsAppChannelTest extends UnitTest {
         assertTrue(logExists("%binding 987654 held a reply%"), "the rejection is logged");
         assertFalse(logExists("%binding 987654 held a reply%none configured%"),
                 "this binding has a template, so the log must not say it has none");
+    }
+
+    // ── JCLAW-1297: the ids a send returns, for a reply that quotes it ──
+
+    @Test
+    void anInWindowSendReturnsTheIdGraphAssignedEachChunk() {
+        var binding = boundBinding("wa-ch-ids-agent", null);
+        binding.phoneNumberId = "1550002";
+        binding.accessToken = "EAAG-tok";
+        var peer = "wa-ids-peer-" + System.nanoTime();
+        WhatsAppConversationWindow.recordInbound(binding.id, peer, Instant.now());
+        var sent = "{\"messaging_product\":\"whatsapp\",\"messages\":[{\"id\":\"wamid.SENT\"}]}";
+
+        var result = HttpFactories.callWith(cannedClient(200, sent),
+                () -> WhatsAppChannel.forBinding(binding).sendText(peer, "x".repeat(5000)));
+
+        assertTrue(result.ok());
+        assertEquals(List.of("wamid.SENT", "wamid.SENT"), result.messageIds(),
+                "a text over the 4096 cap goes as two messages, each quotable by its own id");
+    }
+
+    @Test
+    void sentMessageIdReadsTheFirstMessageAndNeverThrows() {
+        assertEquals("wamid.A", WhatsAppChannel.sentMessageId("{\"messages\":[{\"id\":\"wamid.A\"}]}"));
+        assertNull(WhatsAppChannel.sentMessageId("{\"messages\":[]}"));
+        assertNull(WhatsAppChannel.sentMessageId("{\"error\":{\"code\":1}}"));
+        assertNull(WhatsAppChannel.sentMessageId("not json"));
+        assertNull(WhatsAppChannel.sentMessageId(null));
     }
 
     // ── verifySignature guard ──

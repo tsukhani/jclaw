@@ -1,10 +1,13 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { mountSuspended, registerEndpoint, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { enableAutoUnmount } from '@vue/test-utils'
 import { setResponseStatus, type H3Event } from 'h3'
 import NotificationBar from '~/components/NotificationBar.vue'
 
 enableAutoUnmount(afterEach)
+
+const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn().mockResolvedValue(undefined) }))
+mockNuxtImport('navigateTo', () => navigateToMock)
 
 let unregister: Array<() => void> = []
 
@@ -79,5 +82,24 @@ describe('NotificationBar — a reminder toast only leaves once the server has l
     button('Delete reminder').click()
     await vi.waitFor(() => expect(document.body.textContent).not.toContain('Call the dentist'))
     expect(notificationDeletes).toBe(2)
+  })
+})
+
+describe('NotificationBar — Reply in chat (JCLAW-1299)', () => {
+  it('marks the reminder seen and opens its agent\'s chat with the reminder quoted', async () => {
+    let acked = false
+    stub('/api/notifications/7/ack', 'POST', () => {
+      acked = true
+      return { status: 'ok' }
+    })
+    await mountWithReminder()
+
+    button('Reply in chat').click()
+
+    await vi.waitFor(() => expect(navigateToMock).toHaveBeenCalledWith('/chat'))
+    expect(acked).toBe(true)
+    expect(useChatReplyHandoff().value).toEqual({ agentId: 1, quote: { kind: 'reminder', text: 'Call the dentist' } })
+    expect(document.body.textContent).not.toContain('Call the dentist')
+    useChatReplyHandoff().value = null
   })
 })

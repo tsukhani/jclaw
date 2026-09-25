@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArrowPathIcon,
+  ArrowUturnLeftIcon,
   ArrowsRightLeftIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -17,6 +18,7 @@ import { formatTokensPerSec, renderMarkdown } from '~/utils/chat-markdown'
 import { formatUsageCost, formatUsageCostTooltip, providerMetricRows } from '~/utils/usage-cost'
 import { routeClassLabel, routeDescription, routeOf } from '~/utils/model-route'
 import { thinkingHeaderLabel } from '~/utils/thinking'
+import { QUOTE_KIND_LABELS, splitQuotedReply, type QuotedReplyParts } from '~/utils/quoted-reply'
 import type { VideoJobStatus } from '~/utils/video-job'
 import type { Message, MessageAttachment, ScrapeJobRef, ToolCall } from '~/types/api'
 import ChatAttachmentChip from '~/components/chat/ChatAttachmentChip.vue'
@@ -75,7 +77,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (
-    e: 'toggle-tool-calls' | 'toggle-thinking' | 'copy-reasoning' | 'copy-message' | 'edit-user-message' | 'delete-message' | 'regenerate-message',
+    e: 'toggle-tool-calls' | 'toggle-thinking' | 'copy-reasoning' | 'copy-message' | 'edit-user-message' | 'delete-message' | 'regenerate-message' | 'reply-message',
     msg: Message,
   ): void
   (e: 'toggle-subagent-run', runId: number): void
@@ -83,6 +85,12 @@ const emit = defineEmits<{
   (e: 'toggle-tool-call-expansion', tc: ToolCall): void
   (e: 'set-tok-stats-hover-key', key: string | number | null): void
 }>()
+
+/** A reply's quoted block: stored in its text, or held client-side on an optimistic row (JCLAW-1299). */
+function quotedParts(msg: Message): QuotedReplyParts | null {
+  if (msg._quote) return { label: QUOTE_KIND_LABELS[msg._quote.kind], quoted: msg._quote.text, reply: msg.content ?? '' }
+  return splitQuotedReply(msg.content)
+}
 
 /** JCLAW-1273: the background scrape jobs this turn's web_scrape calls started. */
 function scrapeJobRefs(msg: Message): ScrapeJobRef[] {
@@ -221,6 +229,18 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
         />
         <!-- eslint-enable vue/no-v-html -->
         <div
+          v-else-if="quotedParts(msg)"
+          class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
+        >
+          <blockquote
+            data-testid="message-quote"
+            class="mb-1.5 border-l-2 border-input pl-2 text-sm text-fg-muted line-clamp-4"
+            :title="quotedParts(msg)!.quoted"
+          >
+            <span class="block text-xs font-medium">{{ quotedParts(msg)!.label }}</span>{{ quotedParts(msg)!.quoted }}
+          </blockquote>{{ quotedParts(msg)!.reply }}
+        </div>
+        <div
           v-else
           class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
         >
@@ -241,6 +261,18 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
             <CheckIcon
               v-else
               class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
+            title="Reply"
+            data-testid="reply-message"
+            @click="emit('reply-message', msg)"
+          >
+            <ArrowUturnLeftIcon
+              class="w-4 h-4"
               aria-hidden="true"
             />
           </button>
@@ -490,6 +522,18 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
             <CheckIcon
               v-else
               class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
+            title="Reply"
+            data-testid="reply-message"
+            @click="emit('reply-message', msg)"
+          >
+            <ArrowUturnLeftIcon
+              class="w-4 h-4"
               aria-hidden="true"
             />
           </button>

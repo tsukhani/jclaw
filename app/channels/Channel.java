@@ -5,6 +5,7 @@ import services.EventLogger;
 import utils.RetryScheduler;
 
 import java.io.File;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -40,13 +41,22 @@ public interface Channel {
     // and is the form every call site already uses. Renaming would be net
     // negative for readability.
     @SuppressWarnings("java:S1845")
-    record SendResult(boolean ok, long retryAfterMs, boolean permanent) {
+    record SendResult(boolean ok, long retryAfterMs, boolean permanent, List<String> messageIds) {
         public static final SendResult OK = new SendResult(true, 0L, false);
         public static final SendResult FAILED = new SendResult(false, 0L, false);
         /** Refused by a platform rule; the channel has already logged why. */
         public static final SendResult REJECTED = new SendResult(false, 0L, true);
         public static SendResult rateLimited(long retryAfterMs) {
             return new SendResult(false, retryAfterMs, false);
+        }
+
+        public SendResult(boolean ok, long retryAfterMs, boolean permanent) {
+            this(ok, retryAfterMs, permanent, List.of());
+        }
+
+        /** A success carrying the platform's ids for what was sent (JCLAW-1295). */
+        public static SendResult sent(List<String> messageIds) {
+            return new SendResult(true, 0L, false, List.copyOf(messageIds));
         }
     }
 
@@ -75,24 +85,28 @@ public interface Channel {
      * direct {@code Thread.sleep} on many concurrent VTs would trigger.
      */
     default boolean sendWithRetry(String peerId, String text) {
+        return sendWithRetryResult(peerId, text).ok();
+    }
+
+    /** {@link #sendWithRetry}, returning the attempt that decided it, with any message ids it carries. */
+    default SendResult sendWithRetryResult(String peerId, String text) {
         SendResult result = trySend(peerId, text);
-        if (result.ok()) return true;
-        if (result.permanent()) return false;
+        if (result.ok() || result.permanent()) return result;
         long delayMs = Math.min(result.retryAfterMs() > 0 ? result.retryAfterMs() : 1000L, 60_000L);
         try {
             // 5 s slack covers the scheduler hop + the second trySend's own latency.
-            boolean ok = RetryScheduler.schedule(() -> trySend(peerId, text).ok(), delayMs)
+            var retried = RetryScheduler.schedule(() -> trySend(peerId, text), delayMs)
                     .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
-            if (ok) return true;
+            if (retried.ok()) return retried;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            return false;
+            return SendResult.FAILED;
         } catch (ExecutionException | TimeoutException _) {
             // Fall through to the error-log branch below.
         }
         EventLogger.error("channel", null, channelName(),
                 "Failed to send message to %s after retries".formatted(peerId));
-        return false;
+        return SendResult.FAILED;
     }
 
     /**
@@ -105,7 +119,8 @@ public interface Channel {
      * planner path) override this. Must not throw.
      */
     default SendResult sendText(String peerId, String text) {
-        return sendWithRetry(peerId, text) ? SendResult.OK : SendResult.FAILED;
+        var sent = sendWithRetryResult(peerId, text);
+        return sent.ok() ? sent : SendResult.FAILED;
     }
 
     /**

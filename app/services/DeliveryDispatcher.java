@@ -6,6 +6,7 @@ import channels.TelegramChannel;
 import channels.WhatsAppChannelFactory;
 import models.Agent;
 import models.Conversation;
+import models.DeliveredMessage;
 import models.MessageRole;
 import models.SlackBinding;
 import models.TelegramBinding;
@@ -14,6 +15,7 @@ import org.jspecify.annotations.Nullable;
 import utils.GsonHolder;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -64,8 +66,16 @@ public final class DeliveryDispatcher {
      *               delivery failure so the {@code message} tool can hint
      *               at setup steps
      * @param reason human-readable explanation
+     * @param receipt where a delivered message landed, when the channel reports its id
      */
-    public record DispatchResult(boolean ok, Status status, String reason) {
+    public record DispatchResult(boolean ok, Status status, String reason, @Nullable Receipt receipt) {
+
+        /** The platform's ids for a delivered message, for a reply that quotes it (JCLAW-1295). */
+        public record Receipt(String channelType, String chatId, List<String> messageIds) {}
+
+        public DispatchResult(boolean ok, Status status, String reason) {
+            this(ok, status, reason, null);
+        }
 
         public enum Status {
             /** Message accepted by the channel API. */
@@ -80,6 +90,10 @@ public final class DeliveryDispatcher {
 
         public static DispatchResult delivered() {
             return new DispatchResult(true, Status.DELIVERED, "Delivered");
+        }
+        public static DispatchResult delivered(String channelType, String chatId, List<String> messageIds) {
+            return messageIds.isEmpty() ? delivered() : new DispatchResult(true, Status.DELIVERED, "Delivered",
+                    new Receipt(channelType, chatId, List.copyOf(messageIds)));
         }
         public static DispatchResult unsupported(String channelType) {
             return new DispatchResult(false, Status.CHANNEL_UNSUPPORTED,
@@ -159,6 +173,30 @@ public final class DeliveryDispatcher {
                 text);
     }
 
+    /**
+     * {@link #dispatchSpec(Agent, String, String)}, recording what was delivered so a reply quoting
+     * it carries its text into the agent's turn (JCLAW-1295). Must run inside a JPA transaction.
+     *
+     * @param source completes "Replying to …" in the quoted block, e.g. "the result of task 'x'"
+     */
+    public static DispatchResult dispatchSpec(Agent agent, String deliverySpec, String text, String source) {
+        return recorded(dispatchSpec(agent, deliverySpec, text), text, source);
+    }
+
+    /** {@link #dispatch(Agent, String, String, String)}, recorded as {@link #dispatchSpec(Agent, String, String, String)} is. */
+    public static DispatchResult dispatch(Agent agent, String channelType, @Nullable String target, String text,
+                                          String source) {
+        return recorded(dispatch(agent, channelType, target, text), text, source);
+    }
+
+    private static DispatchResult recorded(DispatchResult result, String text, String source) {
+        var receipt = result.receipt();
+        if (receipt != null) {
+            DeliveredMessage.record(receipt.channelType(), receipt.chatId(), receipt.messageIds(), source, text);
+        }
+        return result;
+    }
+
     private static DispatchResult dispatchTelegram(Agent agent, String chatId, String text) {
         if (agent == null) {
             return DispatchResult.failedDelivery(
@@ -214,9 +252,12 @@ public final class DeliveryDispatcher {
         // or a literal id — sendForDelivery resolves it and reports Slack's real error code
         // so a failure lands on the run's delivery_error, not just the log.
         var outcome = SlackChannel.sendForDelivery(binding.botToken, channelId, text);
-        return outcome.ok()
-                ? DispatchResult.delivered()
-                : DispatchResult.failedDelivery(slackFailureReason(channelId, outcome.error()));
+        if (!outcome.ok()) return DispatchResult.failedDelivery(slackFailureReason(channelId, outcome.error()));
+        var postedTo = outcome.channelId();
+        var ts = outcome.ts();
+        return postedTo != null && ts != null
+                ? DispatchResult.delivered(SLACK, postedTo, List.of(ts))
+                : DispatchResult.delivered();
     }
 
     /** JCLAW-454: turn Slack's error code into an actionable {@code delivery_error}
@@ -272,8 +313,9 @@ public final class DeliveryDispatcher {
                     "WhatsApp transport '" + binding.transport
                             + "' for agent '" + binding.agent.name + "' has no outbound channel yet.");
         }
-        return channel.sendText(phoneNumber, text, agent).ok()
-                ? DispatchResult.delivered()
+        var sent = channel.sendText(phoneNumber, text, agent);
+        return sent.ok()
+                ? DispatchResult.delivered(WHATSAPP, phoneNumber, sent.messageIds())
                 : DispatchResult.failedDelivery(
                         "WhatsApp API rejected the message (see logs for details).");
     }

@@ -106,4 +106,18 @@ describe('backfillServerIds', () => {
     const fresh = [m({ id: 1, role: 'user' })]
     expect(backfillServerIds(local, fresh)).toBe(false)
   })
+
+  it('gives a sent reply the stored text, quoted block included (JCLAW-1299)', () => {
+    const local = [m({ role: 'user', content: 'which locker?', _quote: { kind: 'reminder', text: 'Collect the parcel' } })]
+    const stored = '[Replying to a reminder]\n> Collect the parcel\n\nwhich locker?'
+    backfillServerIds(local, [m({ id: 7, role: 'user', content: stored })])
+    expect(local[0]!.content).toBe(stored)
+    expect(local[0]!._quote).toBeUndefined()
+  })
+
+  it('leaves a row sent without a quote as typed', () => {
+    const local = [m({ role: 'user', content: 'hi' })]
+    backfillServerIds(local, [m({ id: 7, role: 'user', content: 'hi (server)' })])
+    expect(local[0]!.content).toBe('hi')
+  })
 })

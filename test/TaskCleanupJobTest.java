@@ -1,5 +1,6 @@
 import jobs.TaskCleanupJob;
 import models.Agent;
+import models.DeliveredMessage;
 import models.Task;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -98,6 +99,20 @@ class TaskCleanupJobTest extends UnitTest {
     }
 
     @Test
+    void deletesDeliveryRecordsOlderThanRetentionDays() {
+        // JCLAW-1295: what a task delivered stays quotable only as long as its history is kept.
+        ConfigService.set(CONFIG_KEY, "30");
+        var old = seedDelivery(Instant.now().minus(31, ChronoUnit.DAYS));
+        var fresh = seedDelivery(Instant.now().minus(29, ChronoUnit.DAYS));
+
+        new TaskCleanupJob().doJob();
+        JPA.em().clear();
+
+        assertNull(DeliveredMessage.findById(old.id), "a delivery record past TTL must be deleted");
+        assertNotNull(DeliveredMessage.findById(fresh.id), "a delivery record inside TTL must survive");
+    }
+
+    @Test
     void retentionZeroDisablesCleanup() {
         // tasks.retentionDays=0 is the operator-facing "never auto-delete"
         // switch. The job runs but no rows go.
@@ -179,6 +194,18 @@ class TaskCleanupJobTest extends UnitTest {
 
     /** Insert a Task in the requested status. @PrePersist stamps updatedAt
      *  to Instant.now(); use {@link #backdate} to shift it backward. */
+    private static DeliveredMessage seedDelivery(Instant createdAt) {
+        var d = new DeliveredMessage();
+        d.channelType = "slack";
+        d.chatId = "CCLEANUP";
+        d.platformMessageId = "ts-" + System.nanoTime();
+        d.source = "the result of task 'brief'";
+        d.text = "the briefing";
+        d.createdAt = createdAt;
+        d.save();
+        return d;
+    }
+
     private static Task seedTask(Agent agent, String name, Task.Status status) {
         var t = new Task();
         t.agent = agent;

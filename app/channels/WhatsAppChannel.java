@@ -148,15 +148,22 @@ public class WhatsAppChannel implements Channel {
         if (!isWithinWindow(peerId)) {
             // Out of window: a template (its own body) re-opens the conversation;
             // the agent's reply text can't go free-form until the user replies.
-            return sendOutOfWindowOpener(peerId, text) ? SendResult.OK : SendResult.FAILED;
+            return sendOutOfWindowOpener(peerId, text);
         }
 
         // In window: free-form, chunked at the 4096 cap.
+        return sendChunks(peerId, text);
+    }
+
+    private SendResult sendChunks(String peerId, String text) {
         boolean allOk = true;
+        var ids = new ArrayList<String>();
         for (var chunk : chunkText(text, MAX_TEXT_CHARS)) {
-            allOk = sendWithRetry(peerId, chunk) && allOk;
+            var sent = sendWithRetryResult(peerId, chunk);
+            allOk = sent.ok() && allOk;
+            ids.addAll(sent.messageIds());
         }
-        return allOk ? SendResult.OK : SendResult.FAILED;
+        return allOk ? SendResult.sent(ids) : SendResult.FAILED;
     }
 
     /**
@@ -275,11 +282,12 @@ public class WhatsAppChannel implements Channel {
                 .post(RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
                 .build();
         try (var response = HttpFactories.general().newCall(request).execute()) {
+            var responseBody = response.body().string();
             if (response.code() == 200) {
                 EventLogger.info(CHANNEL, null, WHATSAPP, successLog);
-                return SendResult.OK;
+                var id = sentMessageId(responseBody);
+                return id != null ? SendResult.sent(List.of(id)) : SendResult.OK;
             }
-            var responseBody = response.body().string();
             if (metaErrorCode(responseBody) == ChannelErrorTemplates.META_OUTSIDE_WINDOW) {
                 // JCLAW-1135: a business rule, not a fault — logged at INFO and worded as a
                 // constraint, so an operator is not sent looking for a break that is not there.
@@ -317,6 +325,22 @@ public class WhatsAppChannel implements Channel {
             return code != null && code.isJsonPrimitive() ? code.getAsInt() : -1;
         } catch (RuntimeException _) {
             return -1;
+        }
+    }
+
+    /** The {@code messages[0].id} of a Graph send response, or null; never throws, the send already succeeded. */
+    public static @Nullable String sentMessageId(@Nullable String body) {
+        if (body == null || body.isBlank()) return null;
+        try {
+            var root = JsonParser.parseString(body);
+            if (!root.isJsonObject()) return null;
+            var messages = root.getAsJsonObject().get("messages");
+            if (messages == null || !messages.isJsonArray() || messages.getAsJsonArray().isEmpty()) return null;
+            var first = messages.getAsJsonArray().get(0);
+            var id = first.isJsonObject() ? first.getAsJsonObject().get("id") : null;
+            return id != null && id.isJsonPrimitive() ? id.getAsString() : null;
+        } catch (RuntimeException _) {
+            return null;
         }
     }
 
@@ -378,20 +402,16 @@ public class WhatsAppChannel implements Channel {
      * reply free-form (chunked; Meta will reject it outside the window, but the
      * failure is an operator-config gap we surface rather than swallow).
      */
-    private boolean sendOutOfWindowOpener(String peerId, String text) {
+    private SendResult sendOutOfWindowOpener(String peerId, String text) {
         if (templateName == null || templateName.isBlank()) {
             EventLogger.warn(CHANNEL, null, WHATSAPP,
                     ("Outbound to %s is outside the 24h window and no template is configured "
                             + "— best-effort free-form send (likely to be rejected by Meta)")
                             .formatted(peerId));
-            boolean allOk = true;
-            for (var chunk : chunkText(text, MAX_TEXT_CHARS)) {
-                allOk = sendWithRetry(peerId, chunk) && allOk;
-            }
-            return allOk;
+            return sendChunks(peerId, text);
         }
         var config = effectiveConfig();
-        if (config == null) return false;
+        if (config == null) return SendResult.FAILED;
         var lang = templateLanguage != null && !templateLanguage.isBlank()
                 ? templateLanguage : DEFAULT_TEMPLATE_LANGUAGE;
         var body = gson.toJson(Map.of(
@@ -402,7 +422,8 @@ public class WhatsAppChannel implements Channel {
                         "name", templateName,
                         "language", Map.of("code", lang))
         ));
-        return postMessage(config, body, "template '%s' sent to %s".formatted(templateName, peerId)).ok();
+        var sent = postMessage(config, body, "template '%s' sent to %s".formatted(templateName, peerId));
+        return sent.ok() ? sent : SendResult.FAILED;
     }
 
     /**

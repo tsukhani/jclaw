@@ -1,7 +1,9 @@
 import channels.WhatsAppInbound;
 import channels.WhatsAppInboundMessage;
+import models.DeliveredMessage;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.Tx;
 
 import java.util.List;
 
@@ -59,5 +61,45 @@ class WhatsAppInboundTest extends UnitTest {
     void blankGroupTextIsNotAttributed() {
         var m = msg("447911111111", "group-123@g.us", WhatsAppInboundMessage.CHAT_GROUP, "", "Ada");
         assertEquals("", WhatsAppInbound.senderAttributed(m), "blank text is left untouched");
+    }
+
+    // ── JCLAW-1297: a quote of a delivered message carries it into the turn ──
+
+    private static WhatsAppInboundMessage quoting(String quotedId, String chatType, String text) {
+        return new WhatsAppInboundMessage(
+                "mid-" + System.nanoTime(), "15550100", "15550100", chatType, null,
+                WhatsAppInboundMessage.MessageType.TEXT, text, null, null, List.of(),
+                true, quotedId, "Ada");
+    }
+
+    private static String delivered(String text) {
+        var id = "wamid.Q" + System.nanoTime();
+        Tx.run(() -> {
+            DeliveredMessage.record("whatsapp", "15550100", List.of(id), "the result of task 'brief'", text);
+            return null;
+        });
+        return id;
+    }
+
+    @Test
+    void aQuoteOfADeliveredMessageCarriesItAheadOfTheReply() {
+        var id = delivered("Rain from 3pm");
+
+        assertEquals("[Replying to the result of task 'brief']\n> Rain from 3pm\n\nwill it clear?",
+                WhatsAppInbound.turnText(quoting(id, WhatsAppInboundMessage.CHAT_DIRECT, "will it clear?")));
+    }
+
+    @Test
+    void aGroupQuoteKeepsTheSenderOnTheReply() {
+        var id = delivered("Rain from 3pm");
+
+        assertEquals("[Replying to the result of task 'brief']\n> Rain from 3pm\n\n[Ada]: umbrella?",
+                WhatsAppInbound.turnText(quoting(id, WhatsAppInboundMessage.CHAT_GROUP, "umbrella?")));
+    }
+
+    @Test
+    void aQuoteOfAMessageJClawHasNoRecordOfIsTheReplyAlone() {
+        assertEquals("what did you mean?", WhatsAppInbound.turnText(
+                quoting("wamid.UNKNOWN" + System.nanoTime(), WhatsAppInboundMessage.CHAT_DIRECT, "what did you mean?")));
     }
 }

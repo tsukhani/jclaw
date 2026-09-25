@@ -2,6 +2,7 @@ package controllers;
 
 import agents.AgentRunner;
 import agents.ModelResolver;
+import channels.QuotedReply;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -80,6 +81,7 @@ public class ApiChatController extends Controller {
     // JSON body keys (request input + per-attachment metadata) and SSE/response payload keys.
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_CONVERSATION_ID = "conversationId";
+    private static final String KEY_QUOTE = "quote";
     private static final String KEY_ATTACHMENTS = "attachments";
     private static final String KEY_ATTACHMENT_ID = "attachmentId";
     private static final String KEY_ORIGINAL_FILENAME = "originalFilename";
@@ -165,7 +167,7 @@ public class ApiChatController extends Controller {
             throw ApiResponses.unreachable();
         }
 
-        var messageText = body.get("message").getAsString();
+        var messageText = QuotedReply.fold(body.get("message").getAsString(), parseQuote(body));
         Long conversationId = (body.has(KEY_CONVERSATION_ID) && !body.get(KEY_CONVERSATION_ID).isJsonNull())
                 ? body.get(KEY_CONVERSATION_ID).getAsLong() : null;
 
@@ -173,6 +175,23 @@ public class ApiChatController extends Controller {
         var overrides = conversationId == null ? parseOverrides(body) : null;
 
         return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments, overrides);
+    }
+
+    /** JCLAW-1299: the quoted block for a reply, or null when the body quotes nothing. */
+    private static @Nullable String parseQuote(JsonObject body) {
+        if (!body.has(KEY_QUOTE) || body.get(KEY_QUOTE).isJsonNull()) return null;
+        String block = null;
+        if (body.get(KEY_QUOTE).isJsonObject()) {
+            var quote = body.getAsJsonObject(KEY_QUOTE);
+            var text = optionalString(quote, "text");
+            if (text != null) block = QuotedReply.webBlock(optionalString(quote, "kind"), text);
+        }
+        if (block == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "'quote' needs a non-blank 'text' and a 'kind' of assistant, user, delivered or reminder");
+            throw ApiResponses.unreachable();
+        }
+        return block;
     }
 
     private static @Nullable String optionalString(JsonObject body, String key) {

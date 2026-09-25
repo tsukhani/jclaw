@@ -345,6 +345,14 @@ export interface SubagentAnnounceMetadata {
 }
 
 /** A single message within a conversation. */
+/** What a web reply quotes; the server maps the kind to the label the agent reads (JCLAW-1299). */
+export type ChatQuoteKind = 'assistant' | 'user' | 'delivered' | 'reminder'
+
+export interface ChatQuote {
+  kind: ChatQuoteKind
+  text: string
+}
+
 export interface Message {
   /** Server-assigned id. Absent on optimistic/streaming placeholders until the backend persists the row. */
   id?: number
@@ -381,6 +389,8 @@ export interface Message {
   truncated?: boolean | null
   /** Frontend-only key assigned to optimistic/streaming placeholders. */
   _key?: string
+  /** Client-only: the quote an optimistic user row was sent with, until the stored text replaces it. */
+  _quote?: ChatQuote
   /** Client-only: whether the thinking/reasoning bubble is collapsed for this message. */
   thinkingCollapsed?: boolean
   /** Client-only: whether the tool-calls block is collapsed for this message (JCLAW-170). */

@@ -100,4 +100,35 @@ describe('ChatMessage (JCLAW-690)', () => {
     await c.find('button[title="Delete message"]').trigger('click')
     expect(c.emitted('delete-message')![0]![0]).toBe(m)
   })
+
+  it.each(['user', 'assistant'] as const)('emits reply-message from a %s message (JCLAW-1299)', async (role) => {
+    const m = msg({ role, content: 'reply to me' })
+    const c = await mountSuspended(ChatMessage, { props: props(m) })
+    await c.find('[data-testid="reply-message"]').trigger('click')
+    expect(c.emitted('reply-message')![0]![0]).toBe(m)
+  })
+
+  it('shows a stored reply\'s quoted block apart from the words typed under it', async () => {
+    const m = msg({ role: 'user', content: '[Replying to a reminder]\n> Collect the parcel\n\nwhich locker?' })
+    const c = await mountSuspended(ChatMessage, { props: props(m) })
+    const quote = c.find('[data-testid="message-quote"]')
+    expect(quote.text()).toContain('Replying to a reminder')
+    expect(quote.text()).toContain('Collect the parcel')
+    expect(c.text()).toContain('which locker?')
+    expect(c.text()).not.toContain('> Collect')
+  })
+
+  it('shows the quote an unsent reply carries before the server stores it', async () => {
+    const m = msg({ role: 'user', content: 'which locker?', _quote: { kind: 'reminder', text: 'Collect the parcel' } })
+    const c = await mountSuspended(ChatMessage, { props: props(m) })
+    const quote = c.find('[data-testid="message-quote"]')
+    expect(quote.text()).toContain('Replying to a reminder')
+    expect(quote.text()).toContain('Collect the parcel')
+  })
+
+  it('shows a message without a quoted block as typed', async () => {
+    const c = await mountSuspended(ChatMessage, { props: props(msg({ role: 'user', content: '[not a quote]\nplain' })) })
+    expect(c.find('[data-testid="message-quote"]').exists()).toBe(false)
+    expect(c.text()).toContain('[not a quote]')
+  })
 })

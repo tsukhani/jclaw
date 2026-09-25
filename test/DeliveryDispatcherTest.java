@@ -2,6 +2,7 @@ import channels.SlackChannel;
 import channels.SlackChannel.DeliveryOutcome;
 import channels.SlackChannel.DeliverySender;
 import models.Agent;
+import models.DeliveredMessage;
 import models.SlackBinding;
 import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
@@ -333,6 +334,36 @@ class DeliveryDispatcherTest extends UnitTest {
         assertEquals(DispatchResult.Status.DELIVERED, result.status());
         assertEquals("daily-briefings", fakeSender.lastTarget,
                 "the channel-name target is handed to the resolve+post path verbatim");
+    }
+
+    @Test
+    void aSlackDeliveryWithASourceIsRecordedForAThreadReplyUnderIt() {
+        // JCLAW-1298: the post's channel and ts are what a thread reply under it carries.
+        var agent = createAgent("ds-ledger");
+        enableSlack(agent);
+        var channel = "CLEDGER" + System.nanoTime();
+        fakeSender.outcome = DeliveryOutcome.delivered(channel, "1700000000.000100");
+
+        var result = Tx.run(() -> DeliveryDispatcher.dispatchSpec(agent, "slack:daily-briefings",
+                "the briefing", "the result of task 'brief'"));
+
+        assertTrue(result.ok(), result.reason());
+        var row = Tx.run(() -> DeliveredMessage.findDelivered("slack", channel, "1700000000.000100"));
+        assertNotNull(row, "the delivery is recorded under the channel id Slack posted to");
+        assertEquals("the briefing", row.text);
+        assertEquals("the result of task 'brief'", row.source);
+    }
+
+    @Test
+    void aDeliveryWithoutASourceRecordsNothing() {
+        var agent = createAgent("ds-no-ledger");
+        enableSlack(agent);
+        var channel = "CNOLEDGER" + System.nanoTime();
+        fakeSender.outcome = DeliveryOutcome.delivered(channel, "1700000000.000200");
+
+        Tx.run(() -> DeliveryDispatcher.dispatchSpec(agent, "slack:" + channel, "an alert"));
+
+        assertNull(Tx.run(() -> DeliveredMessage.findDelivered("slack", channel, "1700000000.000200")));
     }
 
     @Test

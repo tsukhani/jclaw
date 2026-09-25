@@ -16,6 +16,7 @@ import utils.TikaHolder;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -78,9 +79,9 @@ public final class WhatsAppCobaltChannel implements Channel {
         var jid = toJid(peerId);
         if (jid == null) return SendResult.FAILED;
         try {
-            wa.sendMessage(jid, text).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            var info = wa.sendMessage(jid, text).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             EventLogger.info(LOG_CATEGORY, null, WHATSAPP, "Message sent to %s".formatted(peerId));
-            return SendResult.OK;
+            return info != null && info.id() != null ? SendResult.sent(List.of(info.id())) : SendResult.OK;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return SendResult.FAILED;
