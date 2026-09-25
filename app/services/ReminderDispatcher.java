@@ -39,8 +39,9 @@ public final class ReminderDispatcher {
     /** Framing prefix prepended to the reminder body for Telegram sends so
      *  the user can distinguish the reminder from regular agent replies in
      *  their chat scrollback. Web reminders don't need framing because the
-     *  notification toast surface itself signals "this is a reminder". */
-    private static final String TELEGRAM_FRAMING = "🔔 Reminder: ";
+     *  notification toast surface itself signals "this is a reminder". The
+     *  Telegram inbound parser matches it to label a reply to a reminder. */
+    public static final String TELEGRAM_FRAMING = "🔔 Reminder: ";
 
     private static final String TELEGRAM = "telegram";
 

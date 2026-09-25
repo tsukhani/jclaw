@@ -376,7 +376,7 @@ class TelegramEntityParseTest extends UnitTest {
                     "chat":{"id":-100,"type":"supergroup"},"date":1,
                     "text":"shall we ship on Friday?"}}}
                 """,
-                "in reply to: shall we ship on Friday?",
+                "[Replying to a message from Bob]\n> shall we ship on Friday?",
                 "full replied-to text must appear in replyContext"),
             // The message replies to a long body but the user selected a quote
             // substring — the quote wins.
@@ -392,7 +392,7 @@ class TelegramEntityParseTest extends UnitTest {
                     "chat":{"id":-100,"type":"supergroup"},"date":1,
                     "text":"there is a lot here but we should ship on Friday for sure"}}}
                 """,
-                "in reply to (quoted): ship on Friday",
+                "[Quoting part of a message from Bob]\n> ship on Friday",
                 "the native quote substring must be preferred over the full replied-to body"),
             // The replied-to message is a photo with no caption — note its type.
             Arguments.of(
@@ -406,7 +406,7 @@ class TelegramEntityParseTest extends UnitTest {
                     "chat":{"id":-100,"type":"supergroup"},"date":1,
                     "photo":[{"file_id":"P1","file_unique_id":"up1","width":90,"height":90}]}}}
                 """,
-                "in reply to: [photo]",
+                "[Replying to a message from Bob]\n> [photo]",
                 "a media-only replied-to message must note its media type")
         );
     }

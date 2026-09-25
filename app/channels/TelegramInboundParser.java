@@ -16,6 +16,7 @@ import org.telegram.telegrambots.meta.api.objects.stickers.Sticker;
 import services.AttachmentService;
 import services.ConfigService;
 import services.EventLogger;
+import services.ReminderDispatcher;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -211,7 +212,7 @@ public final class TelegramInboundParser {
 
         // JCLAW-366: fold the replied-to / natively-quoted context into a
         // supplemental block carried alongside (not inside) text.
-        String replyContext = buildReplyContext(msg);
+        String replyContext = buildReplyContext(msg, botUserId);
 
         // Fully empty updates (no text, no caption, no attachment, no
         // sticker/location/venue note) are nothing we can act on — drop as
@@ -602,25 +603,36 @@ public final class TelegramInboundParser {
     }
 
     /**
-     * JCLAW-366: build the "in reply to: …" supplemental context block, or null
-     * when this message neither replies to another nor carries a native quote.
-     * Prefers the native {@code quote} substring (the user explicitly selected
-     * that span) over the full replied-to body. When neither text is available
-     * but the replied-to message is media, notes the media type instead so the
-     * agent still knows what was referenced.
+     * JCLAW-366: the quoted block for a reply or native quote, or null when {@code msg} is neither.
+     * A native quote carries only the span the user selected; otherwise the replied-to text, or its
+     * media type when it has none. JCLAW-1296: the block names who wrote the replied-to message.
      */
-    private static @Nullable String buildReplyContext(Message msg) {
+    private static @Nullable String buildReplyContext(Message msg, @Nullable Long botUserId) {
         var quote = msg.getQuote();
         if (quote != null && quote.getText() != null && !quote.getText().isBlank()) {
-            return "in reply to (quoted): " + quote.getText().strip();
+            return QuotedReply.block(replySource(msg, botUserId), quote.getText(), true);
         }
         var replyTo = msg.getReplyToMessage();
         if (replyTo == null) return null;
         String body = replyToText(replyTo);
-        if (!body.isEmpty()) return "in reply to: " + body;
-        String media = replyToMediaType(replyTo);
-        if (media != null) return "in reply to: [" + media + "]";
-        return null;
+        if (body.isEmpty()) {
+            String media = replyToMediaType(replyTo);
+            if (media == null) return null;
+            body = "[" + media + "]";
+        }
+        return QuotedReply.block(replySource(msg, botUserId), body, false);
+    }
+
+    /** Completes "Replying to …" with the replied-to message's author, as far as Telegram names it. */
+    private static String replySource(Message msg, @Nullable Long botUserId) {
+        var replyTo = msg.getReplyToMessage();
+        if (replyTo == null) return "an earlier message";
+        if (isReplyToBot(msg, botUserId)) {
+            return replyToText(replyTo).startsWith(ReminderDispatcher.TELEGRAM_FRAMING)
+                    ? "a reminder this bot sent" : "an earlier message from this bot";
+        }
+        var name = replyTo.getFrom() != null ? displayNameOf(replyTo.getFrom()) : null;
+        return name != null ? "a message from " + name : "an earlier message";
     }
 
     /** Text/caption of the replied-to message, trimmed; "" when it carries neither. */

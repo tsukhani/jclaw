@@ -355,7 +355,7 @@ class TelegramInboundParserTest extends UnitTest {
         assertNotNull(msg);
         assertFalse(msg.botMentioned(),
                 "a reply target without an author can't be a reply to the bot");
-        assertEquals("in reply to: authorless announcement", msg.replyContext());
+        assertEquals("[Replying to an earlier message]\n> authorless announcement", msg.replyContext());
     }
 
     // ── botMentioned: wake-word gating (JCLAW-387 B3) ─────────────────────
@@ -643,7 +643,7 @@ class TelegramInboundParserTest extends UnitTest {
                     "text":"the plan"}}}
                 """);
         assertNotNull(msg);
-        assertEquals("in reply to: the plan", msg.replyContext(),
+        assertEquals("[Replying to a message from Bob]\n> the plan", msg.replyContext(),
                 "a blank quote must fall back to the full replied-to text");
     }
 
@@ -661,7 +661,7 @@ class TelegramInboundParserTest extends UnitTest {
                     "caption":"sunset pic"}}}
                 """);
         assertNotNull(msg);
-        assertEquals("in reply to: sunset pic", msg.replyContext(),
+        assertEquals("[Replying to a message from Bob]\n> sunset pic", msg.replyContext(),
                 "a replied-to media message with a caption must surface the caption, not [photo]");
     }
 
@@ -683,6 +683,57 @@ class TelegramInboundParserTest extends UnitTest {
         assertNull(msg.replyContext(),
                 "an unrecognized replied-to shape carries no usable context");
         assertEquals("lucky roll", msg.text(), "the outer message itself is unaffected");
+    }
+
+    @Test
+    void aReplyToTheBotsReminderNamesItAsOne() throws Exception {
+        var msg = parse("""
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":2,
+                  "text":"done",
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":555,"is_bot":true,"first_name":"Clawdia"},
+                    "chat":{"id":42,"type":"private"},"date":1,
+                    "text":"🔔 Reminder: take the bins out"}}}
+                """);
+        assertNotNull(msg);
+        assertEquals("[Replying to a reminder this bot sent]\n> 🔔 Reminder: take the bins out",
+                msg.replyContext());
+    }
+
+    @Test
+    void aQuoteFromTheBotsTaskResultCarriesOnlyTheQuotedLines() throws Exception {
+        var msg = parse("""
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":2,
+                  "text":"why this one?",
+                  "quote":{"text":"AAPL down 3%\\nMSFT up 1%","position":20},
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":555,"is_bot":true,"first_name":"Clawdia"},
+                    "chat":{"id":42,"type":"private"},"date":1,
+                    "text":"Market summary\\n\\nAAPL down 3%\\nMSFT up 1%\\nNVDA flat"}}}
+                """);
+        assertNotNull(msg);
+        assertEquals("[Quoting part of an earlier message from this bot]\n> AAPL down 3%\n> MSFT up 1%",
+                msg.replyContext());
+    }
+
+    @Test
+    void anotherBotsMessageIsNotLabeledAsThisBots() throws Exception {
+        var msg = parse("""
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":2,
+                  "text":"ignore that",
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":999,"is_bot":true,"first_name":"OtherBot"},
+                    "chat":{"id":-100,"type":"supergroup"},"date":1,
+                    "text":"🔔 Reminder: not ours"}}}
+                """);
+        assertNotNull(msg);
+        assertEquals("[Replying to a message from OtherBot]\n> 🔔 Reminder: not ours", msg.replyContext());
     }
 
     static Stream<Arguments> replyToMediaTypeCases() {
@@ -720,7 +771,7 @@ class TelegramInboundParserTest extends UnitTest {
                     "chat":{"id":-100,"type":"supergroup"},"date":1,
                 """ + mediaFragment + "}}}");
         assertNotNull(msg);
-        assertEquals("in reply to: [" + expectedLabel + "]", msg.replyContext(),
+        assertEquals("[Replying to a message from Bob]\n> [" + expectedLabel + "]", msg.replyContext(),
                 "a caption-less replied-to " + expectedLabel + " must be noted by type");
     }
 

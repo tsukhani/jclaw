@@ -1,12 +1,16 @@
 import channels.InboundMessage;
 import channels.PendingAttachment;
+import channels.TelegramChannel;
 import channels.TelegramClientCache;
+import channels.TelegramInboundTurn;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import models.Agent;
 import models.MessageAttachment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.telegram.telegrambots.meta.TelegramUrl;
+import org.telegram.telegrambots.meta.api.objects.Update;
 import play.test.UnitTest;
 
 import java.util.List;
@@ -58,6 +62,63 @@ class TelegramInboundTurnTest extends UnitTest {
                         .anyMatch(r -> r.method().equalsIgnoreCase("sendMessage")
                                 && r.body().contains("an error occurred"))),
                 "the sender must be told the turn failed, not just the log: " + mock.requests());
+    }
+
+    // ── JCLAW-1296: a reply carries the replied-to message into the user turn ──
+
+    @Test
+    void aDmReplyToAReminderQuotesTheReminderAheadOfTheReply() throws Exception {
+        var turn = turnTextOf("private", """
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":2,
+                  "text":"done, what's next?",
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":555,"is_bot":true,"first_name":"Clawdia"},
+                    "chat":{"id":42,"type":"private"},"date":1,
+                    "text":"🔔 Reminder: stretch"}}}
+                """);
+
+        assertEquals("[Replying to a reminder this bot sent]\n> 🔔 Reminder: stretch\n\ndone, what's next?", turn);
+    }
+
+    @Test
+    void aGroupReplyKeepsTheSenderAttributionOnTheOperatorsWords() throws Exception {
+        var turn = turnTextOf("supergroup", """
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":-100,"type":"supergroup"},"date":2,
+                  "text":"@jclaw_bot why?",
+                  "quote":{"text":"Build failed","position":0},
+                  "reply_to_message":{"message_id":1,
+                    "from":{"id":555,"is_bot":true,"first_name":"Clawdia"},
+                    "chat":{"id":-100,"type":"supergroup"},"date":1,
+                    "text":"Build failed\\nsee the log"}}}
+                """);
+
+        assertEquals("[Quoting part of an earlier message from this bot]\n> Build failed\n\n"
+                + "[Ada (id 42)]: @jclaw_bot why?", turn);
+    }
+
+    @Test
+    void aMessageThatRepliesToNothingIsTheTurnAsTyped() throws Exception {
+        var turn = turnTextOf("private", """
+                {"update_id":1,"message":{"message_id":2,
+                  "from":{"id":42,"is_bot":false,"first_name":"Ada"},
+                  "chat":{"id":42,"type":"private"},"date":2,
+                  "text":"just checking in"}}
+                """);
+
+        assertEquals("just checking in", turn);
+    }
+
+    /** Parse {@code updateJson} as the transports do and return the user turn it becomes. */
+    private static String turnTextOf(String chatType, String updateJson) throws Exception {
+        var message = TelegramChannel.parseUpdate(
+                new ObjectMapper().readValue(updateJson, Update.class), "jclaw_bot", 555L);
+        assertNotNull(message);
+        assertEquals(chatType, message.chatType());
+        return TelegramInboundTurn.turnText(message);
     }
 
     private static boolean await(java.util.function.BooleanSupplier condition) throws InterruptedException {

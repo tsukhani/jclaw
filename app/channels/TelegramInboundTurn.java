@@ -51,8 +51,7 @@ public final class TelegramInboundTurn {
             // sink still routes to the chat id.
             final String peerId = AgentRunner.telegramConversationPeerId(
                     ownerTelegramUserId, chatType, chatId, message.messageThreadId());
-            final String attributedText = AgentRunner.telegramSenderAttributed(
-                    message.text(), chatType, message.fromDisplayName(), message.fromId());
+            final String turnText = turnText(message);
             // JCLAW-377: a forum-topic message runs on its per-topic override agent when one
             // is mapped; peerId and sink are unchanged — only which agent runs the turn.
             final Agent runAgent = resolveTopicAgent(
@@ -68,7 +67,7 @@ public final class TelegramInboundTurn {
             // conversation (plain DM vs group history caps).
             DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
                 AgentRunner.processInboundForAgentStreaming(
-                        runAgent, CHANNEL_NAME, peerId, attributedText,
+                        runAgent, CHANNEL_NAME, peerId, turnText,
                         convId -> new TelegramStreamingSink(
                                 botToken, chatId, bindingAgent, convId, chatType,
                                 message.messageId(), message.messageThreadId()),
@@ -83,6 +82,13 @@ public final class TelegramInboundTurn {
             TelegramChannel.forToken(botToken).sendText(chatId,
                     "Sorry, an error occurred processing your message.");
         }
+    }
+
+    /** The user turn {@code message} becomes: sender-attributed in a group, any quoted reply ahead of it. */
+    public static String turnText(InboundMessage message) {
+        return QuotedReply.fold(AgentRunner.telegramSenderAttributed(
+                message.text(), message.chatType(), message.fromDisplayName(), message.fromId()),
+                message.replyContext());
     }
 
     /**

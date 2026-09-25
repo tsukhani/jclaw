@@ -52,16 +52,14 @@ import java.util.List;
  *                        for plain non-topic messages so a thread id is
  *                        only carried when Telegram actually scopes the
  *                        message to a topic.
- * @param replyContext    JCLAW-366: a supplemental "in reply to: …" context
- *                        block when this message replies to (and/or natively
- *                        quotes) an earlier message. Carries the quoted
- *                        substring (preferred when present) or the
- *                        replied-to message's text/snippet, plus a media-type
- *                        note when the replied-to message is media-only.
- *                        Null when the message is not a reply / has no
- *                        usable reply context. The runner folds this into
- *                        the turn the agent sees; it is NOT part of
- *                        {@code text} so callers can render it distinctly.
+ * @param replyContext    JCLAW-366: the {@link QuotedReply#block} for a
+ *                        message that replies to (or natively quotes) an
+ *                        earlier one: the quoted span when there is one, else
+ *                        the replied-to text, else its media type. Null when
+ *                        the message is not a reply. Kept out of {@code text};
+ *                        {@link TelegramInboundTurn} folds it ahead of the
+ *                        text, so it is stored with the user turn
+ *                        (JCLAW-1296).
  */
 public record InboundMessage(String chatId, @Nullable String chatType, String text,
                              @Nullable String fromId, @Nullable String fromUsername,
