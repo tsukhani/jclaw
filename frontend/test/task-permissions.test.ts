@@ -73,6 +73,21 @@ describe('TaskPermissions', () => {
     expect(pill.attributes('title')).toMatch(/untrusted/i)
   })
 
+  it('offers Trust for an unrecorded or untrusted origin, and emits it on click', async () => {
+    for (const origin of [null, 'telegram']) {
+      const c = await mount(null, origin)
+      const button = c.find('[data-testid="task-origin-trust"]')
+      expect(button.exists()).toBe(true)
+      await button.trigger('click')
+      expect(c.emitted('trust')).toHaveLength(1)
+    }
+  })
+
+  it('offers no Trust once the task already has the operator origin', async () => {
+    const c = await mount(null, 'web')
+    expect(c.find('[data-testid="task-origin-trust"]').exists()).toBe(false)
+  })
+
   it('shows a pinned model as provider and id', async () => {
     const c = await mount(null, 'web', 'ollama-cloud', 'kimi-k2.6')
     expect(c.find('[data-testid="task-model-pill"]').text()).toBe('ollama-cloud / kimi-k2.6')

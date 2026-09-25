@@ -3,8 +3,9 @@
  * JCLAW-1062/1068: what a task fire is permitted to do — its tool allow-list, the
  * origin that decides fire-time trust, and the model it fires on.
  *
- * All read-only here. The allow-list and model pin are set through the task API;
- * origin is recorded at creation and deliberately cannot be raised (JCLAW-1021).
+ * The allow-list and model pin are set through the task API. Origin is recorded at
+ * creation and no edit raises it (JCLAW-1021); the one way up is the operator's own
+ * Trust, which this block offers and the page performs.
  */
 const props = defineProps<{
   enabledToolNames?: string | null
@@ -12,6 +13,8 @@ const props = defineProps<{
   modelProvider?: string | null
   modelId?: string | null
 }>()
+
+const emit = defineEmits<{ trust: [] }>()
 
 /**
  * Mirror of services.TaskToolPolicy.parse. It has to agree exactly: showing pills for
@@ -88,6 +91,16 @@ const model = computed(() => {
         :title="origin.title"
         data-testid="task-origin-pill"
       >{{ origin.label }}</span>
+      <button
+        v-if="originChannel !== 'web'"
+        type="button"
+        class="inline-flex items-center text-xs text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+        title="Vouch for this task: record the operator origin, so its fires run dangerous tools under the Tool Approvals policy instead of failing closed."
+        data-testid="task-origin-trust"
+        @click="emit('trust')"
+      >
+        Trust
+      </button>
     </div>
 
     <div class="flex flex-wrap items-center gap-1.5 mb-2">

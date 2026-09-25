@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
 import play.mvc.Scope;
 import services.InternalApiTokenService;
+import utils.ChannelOriginTrust;
 
 /**
  * Who is making this request — the operator at a browser, or an agent driving the API through
@@ -38,6 +39,14 @@ public final class RequestPrincipal {
      */
     public static final String AGENT_ID_HEADER = "x-jclaw-agent-id";
 
+    /**
+     * Header {@code JClawApiTool} stamps with the calling turn's effective origin — the channel
+     * {@code DangerousActionGate.effectiveOrigin} resolves, which is what {@code task_manager}
+     * records on the same edit. Built by the tool like {@link #AGENT_ID_HEADER}, absent when the
+     * turn has no origin, and honored only on an agent-originated request.
+     */
+    public static final String CALLER_ORIGIN_HEADER = "x-jclaw-caller-origin";
+
     private RequestPrincipal() {}
 
     /**
@@ -52,6 +61,21 @@ public final class RequestPrincipal {
         if (session == null) return false;
         return AGENT.equals(session.get(PRINCIPAL_KEY))
                 || InternalApiTokenService.SYSTEM_OWNER.equals(session.get("username"));
+    }
+
+    /**
+     * The origin of the turn behind this request, for recording on a task it creates or edits
+     * (JCLAW-1021): {@code web} for the operator's own session; for an agent-originated request,
+     * the origin its tool call stamped, or null when none was — an unrecorded origin, which
+     * classifies as UNKNOWN. Null outside a request.
+     */
+    public static @Nullable String callerOrigin() {
+        var request = Http.Request.current();
+        if (request == null) return null;
+        if (!isAgentOriginated()) return ChannelOriginTrust.WEB;
+        var header = request.headers.get(CALLER_ORIGIN_HEADER);
+        var raw = header == null ? null : header.value();
+        return raw == null || raw.isBlank() ? null : raw.trim();
     }
 
     /**

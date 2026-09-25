@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Objects;
 
 import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -262,13 +263,14 @@ public class ApiTasksController extends Controller {
 
     /**
      * The origin to record on a task created here, for the dangerous-tool gate to judge a
-     * fire of it by (JCLAW-1021): the operator's web UI, or nothing when an agent is driving
-     * this endpoint through the {@code jclaw_api} tool. Stamping {@code web} unconditionally
-     * would hand every agent-created task operator trust at fire time — the same hole one
-     * door over; an unrecorded origin classifies as UNKNOWN and fails closed.
+     * fire of it by (JCLAW-1021): the operator's web UI, or — when an agent drives this
+     * endpoint through {@code jclaw_api} — the origin of the turn that made the call, which
+     * {@code task_manager} would record for the same creation. Stamping {@code web} for every
+     * agent call would hand an external peer's task operator trust at fire time; an
+     * unstamped call records nothing, which classifies as UNKNOWN and fails closed.
      */
     private static @Nullable String creationOrigin() {
-        return RequestPrincipal.isAgentOriginated() ? null : ChannelOriginTrust.WEB;
+        return RequestPrincipal.callerOrigin();
     }
 
     /**
@@ -426,13 +428,15 @@ public class ApiTasksController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "No patchable fields in body");
         }
 
-        // The patch rewrites `description`, which IS the prompt a fire runs. An agent repointing
-        // an operator-created task would otherwise leave origin_channel="web" and have the fire
-        // execute an attacker-chosen prompt at operator trust. Trust may fall on mutation, never
-        // rise — the mirror of TaskTool.applyPatch's downgrade, at the REST door (JCLAW-1021).
-        if (RequestPrincipal.isAgentOriginated()
-                && ChannelOriginTrust.isOperatorOrigin(task.originChannel)) {
-            task.originChannel = null;
+        // The patch rewrites `description`, which IS the prompt a fire runs. An untrusted turn
+        // repointing an operator-created task would otherwise leave origin_channel="web" and have
+        // the fire execute its prompt at operator trust. Trust may fall on mutation, never rise,
+        // and it falls to the turn behind the request — the rule TaskTool.downgradeOrigin applies,
+        // so the operator's own chat keeps web whichever door its agent used (JCLAW-1021).
+        var patchOrigin = RequestPrincipal.callerOrigin();
+        if (ChannelOriginTrust.isOperatorOrigin(task.originChannel)
+                && !ChannelOriginTrust.isOperatorOrigin(patchOrigin)) {
+            task.originChannel = patchOrigin;
         }
 
         task.save();
@@ -615,6 +619,31 @@ public class ApiTasksController extends Controller {
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' (id=%d) resumed via API".formatted(task.name, task.id));
         renderJSON(gson.toJson(TaskView.of(Objects.requireNonNull(TaskService.findById(task.id), TASK_DELETED_MID_REQUEST))));
+    }
+
+    /**
+     * POST /api/tasks/{id}/trust — the operator vouches for a task, recording the operator origin
+     * its fires are judged by (JCLAW-1021). The one way an origin rises: every edit can only lower
+     * it, and a task created before origins were recorded has none, so its dangerous tools fail
+     * closed at fire time until the operator does this.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    @Operation(summary = "Record the operator origin on a task so its fires run dangerous tools at operator trust")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "raises a task's fire-time trust to the operator's")
+    public static void trust(Long id) {
+        Task task = TaskService.findById(id);
+        if (task == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        var previous = task.originChannel;
+        task.originChannel = ChannelOriginTrust.WEB;
+        task.save();
+        EventLogger.info("TASK_MGMT_TRUST",
+                task.agent != null ? task.agent.name : null, null,
+                "Task '%s' (id=%d) origin set to web by the operator (was: %s)"
+                        .formatted(task.name, task.id, previous == null ? "none" : previous));
+        renderJSON(gson.toJson(TaskView.of(task)));
     }
 
     /**

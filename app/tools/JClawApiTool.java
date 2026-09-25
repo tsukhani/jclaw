@@ -1,6 +1,8 @@
 package tools;
 
+import agents.DangerousActionGate;
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -248,6 +250,12 @@ public class JClawApiTool implements ToolRegistry.Tool {
         // unidentified agent, which agent-scoped routes refuse.
         if (agent != null && agent.id != null) {
             requestBuilder.header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agent.id));
+        }
+        // JCLAW-1021: a task this call creates or edits is judged by the turn that asked for it,
+        // exactly as task_manager records it; no origin means no header, which reads as UNKNOWN.
+        var origin = DangerousActionGate.effectiveOrigin(ToolContext.conversationId());
+        if (origin != null) {
+            requestBuilder.header(RequestPrincipal.CALLER_ORIGIN_HEADER, origin);
         }
 
         RequestBody body = requestBodyFor(method, args);

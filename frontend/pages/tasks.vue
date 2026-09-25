@@ -172,6 +172,19 @@ async function resumeTask(id: number) {
   refreshAll()
 }
 
+// JCLAW-1021: the one way a task's origin rises. Its fires then run dangerous tools
+// (exec among them) at operator trust, so the operator confirms having read the steps.
+async function trustTask(task: Task) {
+  const ok = await confirm({
+    title: 'Trust this task?',
+    message: `"${task.name}" will run dangerous tools such as exec at operator trust whenever it fires. Only trust a task whose instructions you have read.`,
+    confirmText: 'Trust',
+  })
+  if (!ok) return
+  if (await mutate(`/api/tasks/${task.id}/trust`, { method: 'POST' }) === null) return
+  refresh()
+}
+
 // Re-enable — restore a CANCELLED task's schedule at its next natural fire
 // (no immediate run for CRON). The one-off counterpart to resume.
 async function reenableTask(id: number) {
@@ -1506,13 +1519,13 @@ function zoneForTaskRender(task: Task): string | undefined {
                     </section>
 
                     <!-- JCLAW-1062/1068: what this fire may do — tool allow-list and the
-                     origin that decides fire-time trust. Read-only; both are set
-                     elsewhere and origin cannot be raised. -->
+                     origin that decides fire-time trust. Origin rises only through Trust. -->
                     <TaskPermissions
                       :enabled-tool-names="task.enabledToolNames"
                       :origin-channel="task.originChannel"
                       :model-provider="task.modelProvider"
                       :model-id="task.modelId"
+                      @trust="trustTask(task)"
                     />
 
                     <!-- Instructions: the JCLAW-260 step list, read-only by
