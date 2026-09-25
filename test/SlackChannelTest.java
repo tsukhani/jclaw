@@ -84,8 +84,8 @@ class SlackChannelTest extends UnitTest {
 
     @Test
     void streamingAndEditHelpersRejectMissingBotToken() {
-        assertNull(SlackChannel.startStream("C1", "1700.1", "U1", "hi", null));
-        assertNull(SlackChannel.startStream("C1", "1700.1", "U1", "hi", " "));
+        assertNull(SlackChannel.startStream("C1", "1700.1", "U1", "T1", "hi", null));
+        assertNull(SlackChannel.startStream("C1", "1700.1", "U1", "T1", "hi", " "));
         assertFalse(SlackChannel.appendStream("C1", "1700.1", "delta", null));
         assertFalse(SlackChannel.appendStream("C1", "1700.1", "delta", ""));
         assertFalse(SlackChannel.stopStream("C1", "1700.1", null));

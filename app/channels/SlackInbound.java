@@ -77,6 +77,7 @@ public final class SlackInbound {
         // Process async. The bot token (immutable) crosses the thread boundary; the
         // lazy agent association is re-resolved inside a fresh tx on that thread.
         var botToken = binding.botToken;
+        var teamId = binding.teamId;
         // JCLAW-1061: the access policy above already established whether this is the owner —
         // with an owner configured it serves nobody else. Carry that answer to the dangerous-
         // action gate instead of letting it re-ask the operator to confirm their own identity.
@@ -85,7 +86,7 @@ public final class SlackInbound {
                 && binding.ownerUserId.equals(message.userId());
         Thread.ofVirtual().name("slack-inbound").start(() ->
                 DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
-                    processMessage(bindingId, botToken, message, parent);
+                    processMessage(bindingId, botToken, teamId, message, parent);
                     return null;
                 }));
     }
@@ -163,8 +164,8 @@ public final class SlackInbound {
         return QuotedReply.fold(text, QuotedReply.block(parent.source, parent.text, false));
     }
 
-    private static void processMessage(Long bindingId, String botToken, SlackChannel.InboundMessage message,
-                                       @Nullable DeliveredMessage parent) {
+    private static void processMessage(Long bindingId, String botToken, @Nullable String teamId,
+                                       SlackChannel.InboundMessage message, @Nullable DeliveredMessage parent) {
         try {
             // JCLAW-83: capture the inbound thread_ts so the reply lands in-thread
             // (null for a non-threaded message → posts at channel level).
@@ -195,7 +196,8 @@ public final class SlackInbound {
             // LLM. The sink streams natively in assistant threads, else posts a reply.
             AgentRunner.processInboundForAgentStreaming(
                     agent, CHANNEL_SLACK, message.channelId(), text,
-                    _ -> new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken, agent.name),
+                    _ -> new SlackStreamingSink(message.channelId(), threadTs, message.userId(), botToken, teamId,
+                            agent.name),
                     attachments, null);
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_SLACK,

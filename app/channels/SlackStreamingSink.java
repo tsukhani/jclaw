@@ -73,11 +73,11 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     /** JCLAW-441: a live Slacker bound to one agent's bot token. The streaming +
      *  fallback calls all carry {@code botToken} so the reply posts as that
      *  binding's bot, not the legacy app-global identity. */
-    private static Slacker live(String botToken) {
+    private static Slacker live(String botToken, @Nullable String teamId) {
         return new Slacker() {
             @Override public @Nullable String startStream(String c, @Nullable String th,
                                                           @Nullable String u, String init) {
-                return SlackChannel.startStream(c, th, u, init, botToken);
+                return SlackChannel.startStream(c, th, u, teamId, init, botToken);
             }
             @Override public boolean appendStream(String c, String ts, String d) { return SlackChannel.appendStream(c, ts, d, botToken); }
             @Override public boolean stopStream(String c, String ts) { return SlackChannel.stopStream(c, ts, botToken); }
@@ -126,11 +126,11 @@ public final class SlackStreamingSink implements ChannelStreamingSink {
     // contract means collect + seal run on the one streaming virtual thread.
     private final List<String> generatedAttachmentUuids = new ArrayList<>();
 
-    /** Production: stream as the binding's bot; {@code agentName} drives the
-     *  seal-time upload of any files the agent linked in its reply (JCLAW-345). */
+    /** Production: stream as the binding's bot, in its workspace {@code teamId}; {@code agentName}
+     *  drives the seal-time upload of any files the agent linked in its reply (JCLAW-345). */
     public SlackStreamingSink(String channelId, @Nullable String threadTs, @Nullable String recipientUserId,
-                              String botToken, String agentName) {
-        this(channelId, threadTs, recipientUserId, live(botToken), APPEND_THROTTLE_MS, botToken, agentName);
+                              String botToken, @Nullable String teamId, String agentName) {
+        this(channelId, threadTs, recipientUserId, live(botToken, teamId), APPEND_THROTTLE_MS, botToken, agentName);
     }
 
     /** Test seam: inject the Slacker and append throttle (0 = flush every update). */

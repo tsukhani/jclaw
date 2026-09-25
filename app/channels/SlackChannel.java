@@ -252,13 +252,14 @@ public class SlackChannel implements Channel {
      * app to be a Slack AI Assistant with {@code assistant:write}.
      */
     public static @Nullable String startStream(String channelId, @Nullable String threadTs,
-                                     @Nullable String recipientUserId,
+                                     @Nullable String recipientUserId, @Nullable String recipientTeamId,
                                      String initialMarkdown, String botToken) {
         if (botToken == null || botToken.isBlank()) return null;
         try {
+            // A channel thread refuses the stream without the team: missing_recipient_team_id.
             var resp = slack.methods(botToken).chatStartStream(r -> r
                     .channel(channelId).threadTs(threadTs).recipientUserId(recipientUserId)
-                    .markdownText(initialMarkdown));
+                    .recipientTeamId(recipientTeamId).markdownText(initialMarkdown));
             if (resp.isOk()) return resp.getTs();
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "startStream not ok: %s".formatted(resp.getError()));
             return null;
@@ -284,9 +285,11 @@ public class SlackChannel implements Channel {
     public static boolean stopStream(String channelId, String ts, String botToken) {
         if (botToken == null || botToken.isBlank()) return false;
         try {
-            return slack.methods(botToken)
-                    .chatStopStream(r -> r.channel(channelId).ts(ts))
-                    .isOk();
+            var resp = slack.methods(botToken).chatStopStream(r -> r.channel(channelId).ts(ts));
+            if (!resp.isOk()) {
+                EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "stopStream not ok: %s".formatted(resp.getError()));
+            }
+            return resp.isOk();
         } catch (SlackApiException | IOException _) {
             return false;
         }
@@ -301,8 +304,12 @@ public class SlackChannel implements Channel {
                                           String botToken) {
         if (botToken == null || botToken.isBlank()) return;
         try {
-            slack.methods(botToken).assistantThreadsSetStatus(r -> r
+            var resp = slack.methods(botToken).assistantThreadsSetStatus(r -> r
                     .channelId(channelId).threadTs(threadTs).status(status));
+            if (!resp.isOk()) {
+                EventLogger.warn(CHANNEL, null, CHANNEL_NAME,
+                        "setStatus(\"%s\") not ok: %s".formatted(status, resp.getError()));
+            }
         } catch (SlackApiException | IOException e) {
             EventLogger.warn(CHANNEL, null, CHANNEL_NAME, "setStatus failed: %s".formatted(e.getMessage()));
         }
