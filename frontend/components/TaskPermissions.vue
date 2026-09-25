@@ -94,7 +94,7 @@ const model = computed(() => {
       <button
         v-if="originChannel !== 'web'"
         type="button"
-        class="inline-flex items-center text-xs text-fg-muted hover:text-fg-strong transition-colors bg-transparent border-0 cursor-pointer"
+        class="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-transparent border border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-400 hover:bg-blue-600/10 transition-colors cursor-pointer"
         title="Vouch for this task: record the operator origin, so its fires run dangerous tools under the Tool Approvals policy instead of failing closed."
         data-testid="task-origin-trust"
         @click="emit('trust')"
