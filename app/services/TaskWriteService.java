@@ -86,6 +86,9 @@ public final class TaskWriteService {
         if (body.has(KEY_NO_AGENT) && !body.get(KEY_NO_AGENT).isJsonNull()) {
             t.noAgent = body.get(KEY_NO_AGENT).getAsBoolean();
         }
+        if (body.has(KEY_PAUSED) && !body.get(KEY_PAUSED).isJsonNull()) {
+            t.paused = body.get(KEY_PAUSED).getAsBoolean();
+        }
         // Reminders default to auto-delete-after-fire (a fired one-off reminder
         // has served its purpose); regular tasks keep their audit history. An
         // explicit body value overrides.

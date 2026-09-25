@@ -1,3 +1,4 @@
+import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -135,6 +136,30 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
         assertContentMatch("\"workdir\":\"/tmp/wd\"", resp);
         assertContentMatch("\"noAgent\":true", resp);
         assertContentMatch("\"repeatLimit\":5", resp);
+    }
+
+    @Test
+    void createHonorsPaused() {
+        var agentId = seedAgent();
+        var resp = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "created-paused", "schedule": "every 30m", "paused": true}
+                """.formatted(agentId));
+        assertIsOk(resp);
+        assertContentMatch("\"paused\":true", resp);
+        // A paused task has no next fire until it is resumed.
+        assertContentMatch("\"nextRunAt\":null", resp);
+        Task saved = Task.findById(Long.valueOf(extractId(getContent(resp))));
+        assertTrue(saved.paused, "the persisted row must be paused, not just the response");
+    }
+
+    @Test
+    void createWithoutPausedStartsLive() {
+        var agentId = seedAgent();
+        var resp = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "created-live", "schedule": "every 30m"}
+                """.formatted(agentId));
+        assertIsOk(resp);
+        assertContentMatch("\"paused\":false", resp);
     }
 
     // --- 400 paths ---
