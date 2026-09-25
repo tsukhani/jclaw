@@ -650,9 +650,8 @@ public final class TaskExecutor {
                 });
                 return null;
             });
-            // One-shots are reaped by db-scheduler's OnCompleteRemove, but cancel
-            // is idempotent and closes any race that leaves a scheduled_tasks row.
-            TaskSchedulingService.cancel(task.id);
+            // No cancel here: this runs inside the fire, which holds the scheduled_tasks row, so
+            // cancel always fails "currently executing"; the OnCompleteRemove the fire returns reaps it.
             EventLogger.info("TASK_MGMT_AUTO_DELETE",
                     task.agent != null ? task.agent.name : null, null,
                     "Reminder '%s' (id=%d) auto-deleted after a successful fire"

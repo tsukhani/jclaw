@@ -1,3 +1,4 @@
+import com.github.kagkarlsson.scheduler.task.CompletionHandler;
 import com.github.kagkarlsson.scheduler.task.Execution;
 import com.github.kagkarlsson.scheduler.task.ExecutionContext;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
@@ -314,14 +315,15 @@ class TaskFireFunctionalTest extends UnitTest {
      * extracted as a helper because the pause/resume test fires three
      * times across one method.
      */
-    private static void driveFire(com.github.kagkarlsson.scheduler.task.helper.CustomTask<Void> dbTask,
+    private static CompletionHandler<Void> driveFire(com.github.kagkarlsson.scheduler.task.helper.CustomTask<Void> dbTask,
                                    TaskInstance<Void> instance) throws Exception {
         var ctx = new ExecutionContext(null,
                 new Execution(Instant.now(), instance), null, null);
         var errorRef = new AtomicReference<Exception>();
+        var completion = new AtomicReference<CompletionHandler<Void>>();
         var t = Thread.ofVirtual().start(() -> {
             try {
-                dbTask.execute(instance, ctx);
+                completion.set(dbTask.execute(instance, ctx));
             } catch (Exception e) {
                 errorRef.set(e);
             }
@@ -329,6 +331,7 @@ class TaskFireFunctionalTest extends UnitTest {
         t.join(30_000);
         if (t.isAlive()) throw new AssertionError("execute did not finish within 30s");
         if (errorRef.get() != null) throw errorRef.get();
+        return completion.get();
     }
 
     @Test
@@ -368,11 +371,13 @@ class TaskFireFunctionalTest extends UnitTest {
         var agent = createAgent("autodel-agent", "test-provider", "test-model");
         var task = persistReminder(agent, "Visit Bamboo Hills", Task.Type.SCHEDULED, true, null);
 
-        fireViaHandler(task);
+        var completion = fireViaHandler(task);
 
         assertEquals(0L, (long) Tx.run(() -> Task.count("id = ?1", task.id)),
                 "a one-off reminder that opted in is auto-deleted after a successful fire");
         assertTrue(listRunsForTask(task.id).isEmpty(), "its run history is removed too");
+        assertTrue(completion instanceof CompletionHandler.OnCompleteRemove,
+                "the fire's own completion reaps the scheduled_tasks row the auto-delete leaves; got: " + completion);
     }
 
     @Test
@@ -433,13 +438,14 @@ class TaskFireFunctionalTest extends UnitTest {
 
     /** Commit the seeded task, fire it once through the production handler on a
      *  fresh tx (db-scheduler's carrier), then clear the test's stale cache. */
-    private void fireViaHandler(Task task) throws Exception {
+    private CompletionHandler<Void> fireViaHandler(Task task) throws Exception {
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
         var dbTask = TaskExecutionHandler.buildTask();
         var instance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME, task.id.toString());
-        driveFire(dbTask, instance);
+        var completion = driveFire(dbTask, instance);
         JPA.em().clear();
+        return completion;
     }
 
     private Agent createAgent(String name, String provider, String model) {
