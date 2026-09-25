@@ -68,6 +68,7 @@ public class ApiMetricsController extends Controller {
 
     private static final String KEY_PROMPTS = "prompts";
     private static final String KEY_SINCE = "since";
+    private static final String KEY_VALUE = "value";
     private static final String STATUS_RESET = "reset";
 
     /** Latency-store channel for the SPA's own INP reports; never part of a chat turn. */
@@ -226,12 +227,12 @@ public class ApiMetricsController extends Controller {
     public static void webVitals() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !"INP".equals(JsonBodyReader.optString(body, "name", true))
-                || !body.has("value") || body.get("value").isJsonNull()) {
+                || !body.has(KEY_VALUE) || body.get(KEY_VALUE).isJsonNull()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Expected an INP report with a value");
             return;
         }
         // Every field is validated before the save: a 400 Result does not roll the save back.
-        double value = readMs(body, "value");
+        double value = readMs(body, KEY_VALUE);
         double inputDelay = readMs(body, "inputDelay");
         double processing = readMs(body, "processingDuration");
         double presentation = readMs(body, "presentationDelay");
