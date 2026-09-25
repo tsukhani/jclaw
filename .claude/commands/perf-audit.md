@@ -52,6 +52,7 @@ These bands are calibrated for real-world networks and mid-range devices. Measur
    - A layout-shift probe that appends a tall element *below the fold* reports **0**, because CLS only counts elements in the viewport. Insert above visible content and confirm you get a non-zero score before believing a zero elsewhere.
    - A green from a quality gate that prints nothing (`pnpm typecheck`) proves nothing until you have seen it fail. Inject a deliberate error once, watch it report, revert.
    - A trace whose "exit code 0" came from the last command in a pipe (`… | tail`) is not the tool's exit code.
+   - The INP observer below reports nothing for an interaction it never saw. Append a button whose click handler busy-waits 300 ms, click it with the MCP `click` tool, and confirm an entry of at least 300 ms before believing a fast page.
 
 ---
 
@@ -62,8 +63,37 @@ For each page in scope (see the route list at the bottom):
 1. **Navigate first, then trace.** `performance_start_trace` with `reload: true, autoStop: true` records a full navigation.
 2. **Take at least 3 samples per page and report the median.** Single traces vary widely — the same unchanged page measured 112, 154, 155, 160, 162 and 168 ms LCP across one session. One sample is an anecdote.
 3. **Record LCP (with its TTFB / render-delay split), CLS, FCP, and TTFB.** The LCP breakdown is what separates "the server was slow" from "the page rendered nothing while it waited" — a 3 ms TTFB with a 763 ms render delay is a client-side blocking problem, not a backend one.
-4. **INP needs an interaction.** Skip it unless the page has an obvious primary control; if you measure it, say which interaction you drove.
-5. **Capture the network waterfall** (`list_network_requests`, or `performance.getEntriesByType('resource')`) for any page whose LCP is not Good. Request *start* times matter as much as durations: requests that begin only after an earlier one finished reveal a serialization the durations alone hide.
+4. **Measure INP by driving the page's scripted interactions** (table below) — every page that has one, not only the obvious ones. INP is the slowest interaction, so a page nobody interacted with has no INP at all. Install an Event Timing observer as `initScript` on the navigation:
+   ```js
+   window.__ix = new Map();
+   new PerformanceObserver((list) => {
+     for (const e of list.getEntries()) {
+       if (!e.interactionId) continue;
+       const prev = window.__ix.get(e.interactionId);
+       if (!prev || e.duration > prev.duration)
+         window.__ix.set(e.interactionId, { type: e.name, duration: e.duration, target: e.target?.tagName });
+     }
+   }).observe({ type: 'event', durationThreshold: 16, buffered: true });
+   ```
+   Drive each interaction with the MCP input tools (`click`, `press_key`, `type_text`), never `dispatchEvent`: only real input gets an `interactionId`. Wait ~500 ms, then read `[...window.__ix.values()]`. The page's INP for a sample is the slowest entry; report the median over three reloads, and name the interaction that set it. Durations arrive rounded to 8 ms.
+
+   | Page | Scripted interactions (read-only — never submit, save or delete) |
+   | --- | --- |
+   | `/` | Chat Performance: switch Table → Chart, change the window 7d → 30d |
+   | `/chat` | Type 20 characters into the composer (do not send); open the agent picker |
+   | `/conversations` | Type into the filter bar; sort by a column header |
+   | `/agents/main` | Type `md` into the workspace filter; expand a folder row |
+   | `/settings` | Switch section: LLM Providers, then Model Router |
+   | `/tasks` | Toggle Table ↔ Calendar; step the calendar to next month |
+   | `/logs` | Change the level filter with the keyboard; type into the search box |
+   | `/skills`, `/memories` | Type into the page's filter box |
+   | `/tools` | Expand all, then collapse one card |
+   | `/mcp-servers` | Expand a server's tools list (not its enable switch, which writes) |
+   | `/guide` | Click a table-of-contents entry |
+   | any page | `Ctrl+K`, type `set`, `Escape` (the command palette) |
+
+5. **Read the field INP too.** The SPA reports real interactions through `web-vitals` (`plugins/web-vitals.client.ts`). The Dashboard's Chat Performance, with channel **browser** selected, gives INP percentiles over 7d/30d/All. `/logs`, category **browser**, lists every reported interaction over 200 ms with its route, target and input/processing/presentation split. The field data finds slow interactions nobody scripted; the scripted run catches regressions on known-heavy ones. Report both, labelled.
+6. **Capture the network waterfall** (`list_network_requests`, or `performance.getEntriesByType('resource')`) for any page whose LCP is not Good. Request *start* times matter as much as durations: requests that begin only after an earlier one finished reveal a serialization the durations alone hide.
 
 **Where a metric is outside Good, find the actual cause before proposing anything:**
 
@@ -100,7 +130,7 @@ Check for these directly — each was a real, measured defect here:
 
 Lead with the verdict table — every page in scope, whether or not it passed:
 
-| Page | LCP (median) | CLS | FCP | TTFB | Verdict |
+| Page | LCP (median) | CLS | FCP | TTFB | INP (median, interaction) | Verdict |
 
 Verdict is **Good** / **Needs improvement** / **Poor**, set by the worst individual metric.
 
@@ -111,7 +141,7 @@ Then, **only if at least one metric is outside Good**, a remediation table for t
 - **Cause** must be something you observed — a waterfall entry, a per-frame geometry change, a culprit-list element you traced to its mover. Not a guess. If you could not establish the cause, say so and propose no fix for it.
 - **Remediation options**: give the user a genuine choice where one exists, with the trade-off stated, rather than a single verdict. Layout-shift fixes in particular have distinct end states — reserve the space (which may mean internal scrolling), delay the render, or remember the previous size — and they look different on screen. Say which you recommend and why.
 
-Close with: pages covered, pages skipped and why, and **what you could not measure** (INP where there was no sensible interaction, dynamic routes with no id, anything the app's state prevented).
+Close with: pages covered, pages skipped and why, the field INP from the browser channel over the last 7 days, and **what you could not measure** (a page with no scripted interaction, dynamic routes with no id, anything the app's state prevented).
 
 **If every page is Good, that closing paragraph is the whole deliverable.** Say the numbers, say they pass, propose nothing.
 
@@ -144,6 +174,7 @@ Only the rows the user named.
 - **Measure prod on :9000.** Dev-server numbers are not production numbers, and a stale `public/spa` means you are measuring code that is not in the tree.
 - **Warm the JVM first**, and discard the first load after any restart.
 - **Three samples minimum per page, report the median.** One trace is noise.
+- **INP comes from real input on the scripted interactions**, never from `dispatchEvent`, and never from an interaction that writes.
 - **Validate the harness against a known-answer case before trusting a zero.**
 - **Establish the cause before proposing a fix.** A culprit-list entry may be a victim; a near-zero improvement after a "fix" means you fixed the wrong element.
 - **Never restart or stop :9000 without explicit approval** — it may be serving live work, and approval for one restart is not approval for the next.
