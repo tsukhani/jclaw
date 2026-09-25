@@ -14,9 +14,11 @@ import play.db.jpa.JPA;
 import play.libs.F;
 import play.mvc.Before;
 import play.mvc.Controller;
+import play.mvc.Util;
 import play.mvc.results.Result;
 import services.CompressionMetrics;
 import services.ConfigService;
+import services.EventLogger;
 import services.LoadTestHarness;
 import services.LoadTestRunner;
 import tools.LoadTestSleepTool;
@@ -68,8 +70,15 @@ public class ApiMetricsController extends Controller {
     private static final String KEY_SINCE = "since";
     private static final String STATUS_RESET = "reset";
 
+    /** Latency-store channel for the SPA's own INP reports; never part of a chat turn. */
+    static final String BROWSER_CHANNEL = "browser";
+    static final String INP_SEGMENT = "inp";
+    // web.dev's "good" INP bound; slower reports are logged with their attribution.
+    private static final double INP_GOOD_MS = 200;
+    private static final double INP_MAX_MS = 60_000;
+
     // NB: `only` is an allowlist, so an action omitted here is served UNAUTHENTICATED.
-    @Before(only = {"latency", "resetLatency", "latencyRows", "clearLatencyRows",
+    @Before(only = {"latency", "resetLatency", "latencyRows", "clearLatencyRows", "webVitals",
             "cost", "compression", "resetCompression", "dbPool", "jvm", "logs", "purgeLogs"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
@@ -191,7 +200,9 @@ public class ApiMetricsController extends Controller {
             var segment = (String) r[1];
             var latencyMs = (Long) r[2];
             if (rowChannel != null) channels.add(rowChannel);
-            if (channel == null || channel.equals(rowChannel)) {
+            // INP is not a stage of the chat chain, so it shows only when its channel is picked.
+            boolean included = channel == null ? !BROWSER_CHANNEL.equals(rowChannel) : channel.equals(rowChannel);
+            if (included) {
                 bySegment.computeIfAbsent(segment, _ -> new ArrayList<>()).add(latencyMs);
             }
         }
@@ -201,6 +212,79 @@ public class ApiMetricsController extends Controller {
         resp.add("channels", GSON.toJsonTree(channels));
         resp.add("segments", LatencyStats.aggregate(bySegment));
         renderJSON(resp.toString());
+    }
+
+    /**
+     * POST /api/metrics/web-vitals — one Interaction to Next Paint report from the SPA's
+     * web-vitals reporter. The value is persisted under {@link #BROWSER_CHANNEL} so the Chat
+     * Performance dashboard windows it like any other segment. It bypasses
+     * {@link LatencyStats#record}, which would also export it as a chat-turn segment.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
+    @Operation(summary = "Record an Interaction to Next Paint report from the browser")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "records the operator's own browser timings")
+    public static void webVitals() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null || !"INP".equals(JsonBodyReader.optString(body, "name", true))
+                || !body.has("value") || body.get("value").isJsonNull()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Expected an INP report with a value");
+            return;
+        }
+        // Every field is validated before the save: a 400 Result does not roll the save back.
+        double value = readMs(body, "value");
+        double inputDelay = readMs(body, "inputDelay");
+        double processing = readMs(body, "processingDuration");
+        double presentation = readMs(body, "presentationDelay");
+        if (value > INP_MAX_MS) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "'value' is out of range");
+            return;
+        }
+        long ms = Math.round(value);
+        // Saved in this request's transaction rather than via LatencyMetricRecorder: a session
+        // sends a handful, and that queue exists to keep saves off the chat-turn path.
+        var row = new LatencyMetric();
+        row.channel = BROWSER_CHANNEL;
+        row.segment = INP_SEGMENT;
+        row.latencyMs = ms;
+        row.save();
+        if (value > INP_GOOD_MS) {
+            EventLogger.warn(BROWSER_CHANNEL, slowInpMessage(ms,
+                    JsonBodyReader.optString(body, "route", true),
+                    JsonBodyReader.optString(body, "interactionType", true),
+                    JsonBodyReader.optString(body, "interactionTarget", true),
+                    inputDelay, processing, presentation));
+        }
+        renderJSON(GSON.toJson(new StatusResponse("recorded")));
+    }
+
+    /** The event-log line for an INP report slower than the "good" bound; client strings are clipped. */
+    @Util
+    public static String slowInpMessage(long ms, @Nullable String route, @Nullable String interactionType,
+                                        @Nullable String target, double inputDelay, double processing,
+                                        double presentation) {
+        return "INP %d ms on %s: %s on %s (input %d, processing %d, presentation %d ms)".formatted(ms,
+                clip(route, 120), clip(interactionType, 16), clip(target, 200),
+                Math.round(inputDelay), Math.round(processing), Math.round(presentation));
+    }
+
+    /** A non-negative millisecond field; absent reads as 0, anything else non-numeric is a 400. */
+    private static double readMs(JsonObject body, String key) {
+        if (!body.has(key) || body.get(key).isJsonNull()) return 0;
+        double v;
+        try {
+            v = body.get(key).getAsDouble();
+        } catch (Exception _) {
+            v = Double.NaN;
+        }
+        if (!Double.isFinite(v) || v < 0) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid duration for '" + key + "'");
+        }
+        return v;
+    }
+
+    private static String clip(@Nullable String s, int max) {
+        if (s == null) return "?";
+        return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 
     /** DELETE /api/metrics/latency/rows — clear the persisted latency time-series (JCLAW-515). */

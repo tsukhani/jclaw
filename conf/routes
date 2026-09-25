@@ -371,6 +371,7 @@ DELETE  /api/metrics/latency                    ApiMetricsController.resetLatenc
 # Time-windowed latency percentiles for the Chat Performance dashboard (JCLAW-515)
 GET     /api/metrics/latency/rows               ApiMetricsController.latencyRows
 DELETE  /api/metrics/latency/rows               ApiMetricsController.clearLatencyRows
+POST    /api/metrics/web-vitals                 ApiMetricsController.webVitals
 # Cost is durable — aggregates persisted Message.usageJson across conversations
 GET     /api/metrics/cost                       ApiMetricsController.cost
 GET     /api/metrics/db-pool                    ApiMetricsController.dbPool

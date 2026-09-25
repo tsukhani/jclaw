@@ -92,6 +92,8 @@ Latency percentiles per pipeline segment of a turn — queue wait, TTFT, the too
 
 Use this to spot a slow segment or a slow channel before users complain.
 
+The **browser** channel is different: it measures the JClaw web app itself rather than a chat turn. Each time an interaction in the app — a click, a keypress — becomes the slowest of your session, the page reports its **Interaction to Next Paint (INP)**, and selecting **browser** shows those as one INP row. "All channels" leaves it out, so it never mixes into the turn figures. An interaction slower than 200 ms (Google's "good" limit) also lands in [Logs](/logs) under category **browser**, naming the page, the element, and how the time split between waiting, running handlers, and repainting.
+
 The **Counts** view holds three per-turn figures that are counts rather than durations, so they get their own view instead of rows in the latency table. Its columns are Metric / turns / total / p50 / p90 / p99 / max — **total** is the windowed sum, which has no meaning for a duration:
 
 | Row                           | What it counts                                                                                          |

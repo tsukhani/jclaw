@@ -135,6 +135,8 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
   total: 'Total',
   terminal_tail: 'Terminal delivery',
   memory_recall: 'Memory recall',
+  // The only segment on the `browser` channel: the SPA's own INP reports, never part of a turn.
+  inp: 'Interaction to next paint (INP)',
 }
 
 /**

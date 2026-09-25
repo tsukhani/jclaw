@@ -1,10 +1,12 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import controllers.ApiMetricsController;
 import models.LatencyMetric;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import play.Play;
 import play.mvc.Http;
 import play.test.Fixtures;
@@ -489,6 +491,65 @@ class ApiMetricsControllerTest extends FunctionalTest {
         assertEquals(600L, chTotal.get("max_ms").getAsLong());
         assertTrue(JsonParser.parseString(byChannel).getAsJsonObject()
                 .getAsJsonArray("channels").toString().contains("verifyweb"), byChannel);
+    }
+
+    // ---- Browser INP reports: POST /api/metrics/web-vitals ----
+
+    private static final String INP_REPORT = """
+            {"name": "INP", "value": 312.4, "route": "/chat", "interactionType": "keyboard",
+             "interactionTarget": "textarea#composer", "inputDelay": 12, "processingDuration": 250,
+             "presentationDelay": 50.4}
+            """;
+
+    private static JsonObject browserSegments() {
+        var since = Instant.now().minus(1, ChronoUnit.DAYS).toString();
+        return segments(getContent(GET("/api/metrics/latency/rows?channel=browser&since=" + since)));
+    }
+
+    @Test
+    void webVitalsIsRefusedWithoutASession() {
+        assertEquals(401, POST("/api/metrics/web-vitals", "application/json", INP_REPORT).status.intValue());
+    }
+
+    @Test
+    void webVitalsRecordsInpUnderTheBrowserChannelOnly() {
+        login();
+        assertIsOk(POST("/api/metrics/web-vitals", "application/json", INP_REPORT));
+
+        var inp = browserSegments().getAsJsonObject("inp");
+        assertEquals(1L, inp.get("count").getAsLong());
+        assertEquals(312L, inp.get("max_ms").getAsLong());
+
+        // The all-channels view is the chat chain: INP is selectable by its channel, never mixed in.
+        var since = Instant.now().minus(1, ChronoUnit.DAYS).toString();
+        var all = JsonParser.parseString(getContent(GET("/api/metrics/latency/rows?since=" + since))).getAsJsonObject();
+        assertFalse(all.getAsJsonObject("segments").has("inp"), all.toString());
+        assertTrue(all.getAsJsonArray("channels").toString().contains("browser"), all.toString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"name\": \"LCP\", \"value\": 900}",
+            "{\"name\": \"INP\"}",
+            "{\"name\": \"INP\", \"value\": null}",
+            "{\"name\": \"INP\", \"value\": -1}",
+            "{\"name\": \"INP\", \"value\": \"slow\"}",
+            "{\"name\": \"INP\", \"value\": 60001}",
+            "{\"name\": \"INP\", \"value\": 300, \"inputDelay\": -4}",
+            "not json"
+    })
+    void webVitalsRejectsAMalformedReportWithoutSavingIt(String body) {
+        login();
+        assertEquals(400, POST("/api/metrics/web-vitals", "application/json", body).status.intValue(), body);
+        assertFalse(browserSegments().has("inp"), body);
+    }
+
+    @Test
+    void slowInpMessageNamesTheInteractionAndClipsClientStrings() {
+        assertEquals("INP 312 ms on /chat: keyboard on textarea#composer (input 12, processing 250, presentation 50 ms)",
+                ApiMetricsController.slowInpMessage(312, "/chat", "keyboard", "textarea#composer", 12, 250, 50.4));
+        var clipped = ApiMetricsController.slowInpMessage(900, null, null, "x".repeat(500), 0, 0, 0);
+        assertTrue(clipped.startsWith("INP 900 ms on ?: ? on " + "x".repeat(200) + "…"), clipped);
     }
 
     @Test

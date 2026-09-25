@@ -127,6 +127,11 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     expect(rows.find(r => r.key === 'some_future_segment')!.isChild).toBe(false)
   })
 
+  it('names the browser channel\'s INP segment, which arrives with no Total beside it', () => {
+    const rows = buildLatencyRows({ inp: h(3, 180) })
+    expect(rows.map(r => [r.key, r.label])).toEqual([['inp', 'Interaction to next paint (INP)']])
+  })
+
   it('keeps Total last even when several segments are unrecognised', () => {
     const rows = buildLatencyRows({
       queue_wait: h(3, 5),
