@@ -235,6 +235,9 @@ Load-test options (only used with the 'loadtest' command):
                           server's HttpContentCompressor engages — measures the cost of the
                           encoding path. Default off (Java HttpClient sends no Accept-Encoding,
                           so compression doesn't engage even when wired into the pipeline).
+  --stop-on-error         Start no further turns once any turn fails, so a real provider that
+                          begins refusing is not kept tripping its circuit breaker, which the
+                          operator's own agents share. Turns already in flight finish.
   --provider <name>       Registered provider name to drive (e.g. ollama-local,
                           ollama-cloud, openrouter, openai). Must be configured
                           (apiKey/baseUrl set). Pairs with --model: providing
@@ -905,6 +908,11 @@ Options:
   --compress              Send 'Accept-Encoding: br, gzip' so the server's
                           HttpContentCompressor engages — measures the cost
                           of the encoding path.
+  --stop-on-error         Start no further turns once any turn fails. Turns
+                          already in flight finish; the report then carries
+                          "stoppedOnError": true and totalRequests counts only
+                          the turns issued. Use it against a real provider,
+                          whose circuit breaker the operator's agents share.
   --provider <name>       Registered provider to drive (e.g. ollama-local,
                           ollama-cloud, openrouter, openai, anthropic-via-
                           openrouter, …). Must be configured (apiKey/baseUrl
@@ -1358,6 +1366,7 @@ LT_RESPONSE_TOKENS="40"
 LT_MOCK_FLAGS_SET=()
 LT_CLEAN=false
 LT_COMPRESS=false
+LT_STOP_ON_ERROR=false
 # Real-provider mode is implied by --provider AND --model both being set.
 # Defaults are blank so the absence of either flag means mock mode; the
 # pair is validated together after argument parsing (one without the
@@ -1444,6 +1453,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --compress)
             LT_COMPRESS=true
+            shift
+            ;;
+        --stop-on-error)
+            LT_STOP_ON_ERROR=true
             shift
             ;;
         --provider)
@@ -3638,8 +3651,8 @@ do_loadtest() {
     # $LT_MODEL because Ollama tags carry a colon (`gemma4:latest`) which
     # would otherwise look like a JSON struct.
     local body
-    body=$(printf '{"concurrency":%s,"turns":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s' \
-        "$LT_CONCURRENCY" "$LT_TURNS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS" "$LT_COMPRESS")
+    body=$(printf '{"concurrency":%s,"turns":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s,"stopOnError":%s' \
+        "$LT_CONCURRENCY" "$LT_TURNS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS" "$LT_COMPRESS" "$LT_STOP_ON_ERROR")
     if [[ "$LT_REAL" == true ]]; then
         body="$body,\"provider\":\"$LT_PROVIDER\",\"model\":\"$LT_MODEL\""
     fi

@@ -35,6 +35,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntFunction;
@@ -146,6 +147,8 @@ public final class LoadTestRunner {
      *                     provider and model are overridden for the run and
      *                     restored afterwards, so point it at a disposable
      *                     agent rather than one serving live traffic.
+     * @param stopOnError  when true, the first failed turn stops every worker
+     *                     from starting another; turns already in flight finish
      */
     public record Request(int concurrency, int turns, boolean compress,
                           LoadTestHarness.Scenario scenario,
@@ -153,7 +156,8 @@ public final class LoadTestRunner {
                           @Nullable String provider, @Nullable String model,
                           @Nullable String userMessage,
                           List<String> prompts,
-                          @Nullable String agentName) {
+                          @Nullable String agentName,
+                          boolean stopOnError) {
 
         /** True when this run drives an existing agent rather than a benchmark twin. */
         public boolean hasNamedAgent() {
@@ -217,6 +221,9 @@ public final class LoadTestRunner {
      *                           Combined with {@code turnBuckets}, lets you
      *                           attribute the cold-start cliff to the dominant
      *                           server-side segment.
+     * @param stoppedOnError     True when {@link Request#stopOnError} ended the run
+     *                           early, so {@code totalRequests} is below
+     *                           {@code concurrency × turns}.
      */
     public record Result(
             int totalRequests,
@@ -234,7 +241,8 @@ public final class LoadTestRunner {
             long completionTokens,
             double costUsd,
             @Nullable List<TurnBucket> turnBuckets,
-            List<SegmentBreakdown> serverSegments) {}
+            List<SegmentBreakdown> serverSegments,
+            boolean stoppedOnError) {}
 
     /**
      * Per-turn-position aggregate across all workers in a run. TTFT is
@@ -342,7 +350,8 @@ public final class LoadTestRunner {
                 ? buildTurnBuckets(metrics.turnTtftMs, metrics.turnDurationMs)
                 : null;
 
-        int total = req.concurrency() * req.turns();
+        // Every issued turn is counted exactly once; below concurrency × turns only when stopOnError fired.
+        int total = metrics.success.get() + metrics.error.get();
         return new Result(
                 total,
                 metrics.success.get(),
@@ -359,7 +368,8 @@ public final class LoadTestRunner {
                 tokenStats.completionTokens(),
                 tokenStats.costUsd(),
                 turnBuckets,
-                serverSegments);
+                serverSegments,
+                metrics.stopped.get());
     }
 
     /**
@@ -555,6 +565,7 @@ public final class LoadTestRunner {
         final AtomicLong totalDuration = new AtomicLong();
         final AtomicLong minDur = new AtomicLong(Long.MAX_VALUE);
         final AtomicLong maxDur = new AtomicLong(Long.MIN_VALUE);
+        final AtomicBoolean stopped = new AtomicBoolean();
         final long[][] turnTtftMs;
         final long[][] turnDurationMs;
 
@@ -598,7 +609,7 @@ public final class LoadTestRunner {
         // hitting any provider-side prompt cache).
         Long conversationId = null;
         try {
-            for (int t = 0; t < ctx.req().turns(); t++) {
+            for (int t = 0; t < ctx.req().turns() && !ctx.metrics().stopped.get(); t++) {
                 conversationId = runTurn(workerIdx, t, ctx, conversationId);
             }
         } finally {
@@ -622,27 +633,32 @@ public final class LoadTestRunner {
         long t0 = System.nanoTime();
         Long newConversationId = conversationId;
         var metrics = ctx.metrics();
+        SseConsumeResult resolved = null;
         try {
-            var resolved = executeChatRequest(ctx.client(), ctx.baseUrl(), ctx.sessionCookie(),
+            resolved = executeChatRequest(ctx.client(), ctx.baseUrl(), ctx.sessionCookie(),
                     turnBody, ctx.req().compress(), t0);
-            if (resolved != null) {
-                if (newConversationId == null && resolved.conversationId() != null) {
-                    newConversationId = resolved.conversationId();
-                }
-                if (resolved.ttftMs() >= 0) {
-                    metrics.turnTtftMs[workerIdx][t] = resolved.ttftMs();
-                }
-                metrics.success.incrementAndGet();
-            } else {
-                metrics.error.incrementAndGet();
-            }
         } catch (Exception _) {
-            metrics.error.incrementAndGet();
-        } finally {
-            long d = (System.nanoTime() - t0) / 1_000_000L;
-            metrics.totalDuration.addAndGet(d);
-            updateMinMax(metrics.minDur, metrics.maxDur, d);
+            // Socket error or timeout: counted below as a failed turn.
+        }
+        long d = (System.nanoTime() - t0) / 1_000_000L;
+        metrics.totalDuration.addAndGet(d);
+        updateMinMax(metrics.minDur, metrics.maxDur, d);
+        if (resolved != null && newConversationId == null && resolved.conversationId() != null) {
+            newConversationId = resolved.conversationId();
+        }
+        // A failed turn is still HTTP 200: the chat stream reports it as an error frame and never
+        // sends the complete frame.
+        if (resolved != null && resolved.completed()) {
+            metrics.success.incrementAndGet();
             metrics.turnDurationMs[workerIdx][t] = d;
+            if (resolved.ttftMs() >= 0) {
+                metrics.turnTtftMs[workerIdx][t] = resolved.ttftMs();
+            }
+        } else {
+            metrics.error.incrementAndGet();
+            if (ctx.req().stopOnError()) {
+                metrics.stopped.set(true);
+            }
         }
         return newConversationId;
     }
@@ -684,8 +700,11 @@ public final class LoadTestRunner {
      * observed (the stream ended without any visible content — e.g. an
      * error response, or an empty completion). Distinct from the server-side
      * {@code web/ttft} histogram, which excludes the network round-trip.
+     *
+     * <p>{@code completed} is whether the {@code type:"complete"} frame arrived — the only
+     * signal that the turn succeeded.
      */
-    private record SseConsumeResult(@Nullable Long conversationId, long ttftMs) {}
+    private record SseConsumeResult(@Nullable Long conversationId, long ttftMs, boolean completed) {}
 
     /**
      * Read the SSE response body line-by-line, capturing the conversationId
@@ -701,6 +720,7 @@ public final class LoadTestRunner {
             throws IOException {
         Long conversationId = null;
         long ttftMs = -1L;
+        boolean completed = false;
         try (var source = body.source()) {
             String line;
             while ((line = source.readUtf8Line()) != null) {
@@ -712,9 +732,12 @@ public final class LoadTestRunner {
                 if (conversationId == null && jsonStr.contains("\"type\":\"init\"")) {
                     conversationId = tryParseConversationId(jsonStr);
                 }
+                if (jsonStr.contains("\"type\":\"complete\"")) {
+                    completed = true;
+                }
             }
         }
-        return new SseConsumeResult(conversationId, ttftMs);
+        return new SseConsumeResult(conversationId, ttftMs, completed);
     }
 
     /** Parse the conversationId out of an init frame; null on any parse error. */
