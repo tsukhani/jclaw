@@ -158,7 +158,7 @@ public final class SlackInbound {
      */
     public static String turnText(String text, @Nullable DeliveredMessage parent) {
         if (parent == null || QuotedReply.isCommand(text)
-                || !Tx.run(() -> DeliveredMessage.markFirstQuote(parent.id))) {
+                || !Boolean.TRUE.equals(Tx.run(() -> DeliveredMessage.markFirstQuote(parent.id)))) {
             return text;
         }
         return QuotedReply.fold(text, QuotedReply.block(parent.source, parent.text, false));

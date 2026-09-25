@@ -334,7 +334,7 @@ public class WhatsAppChannel implements Channel {
         try {
             var root = JsonParser.parseString(body);
             if (!root.isJsonObject()) return null;
-            var messages = root.getAsJsonObject().get("messages");
+            var messages = root.getAsJsonObject().get(KEY_MESSAGES);
             if (messages == null || !messages.isJsonArray() || messages.getAsJsonArray().isEmpty()) return null;
             var first = messages.getAsJsonArray().get(0);
             var id = first.isJsonObject() ? first.getAsJsonObject().get("id") : null;

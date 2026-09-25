@@ -37,8 +37,10 @@ export function splitQuotedReply(content: string | null | undefined): QuotedRepl
 /** The quote a Reply on {@code msg} starts; a message that itself quotes is quoted by its own words only. */
 export function quoteFor(msg: Message): ChatQuote {
   const content = msg.content ?? ''
-  const kind: ChatQuoteKind = msg.messageKind === 'subagent_send'
-    ? 'delivered'
-    : msg.role === 'assistant' ? 'assistant' : 'user'
-  return { kind, text: splitQuotedReply(content)?.reply ?? content }
+  return { kind: quoteKindOf(msg), text: splitQuotedReply(content)?.reply ?? content }
+}
+
+function quoteKindOf(msg: Message): ChatQuoteKind {
+  if (msg.messageKind === 'subagent_send') return 'delivered'
+  return msg.role === 'assistant' ? 'assistant' : 'user'
 }
