@@ -622,13 +622,17 @@ public final class LoadTestRunner {
         long t0 = System.nanoTime();
         Long newConversationId = conversationId;
         var metrics = ctx.metrics();
+        boolean succeeded = false;
         try {
             var resolved = executeChatRequest(ctx.client(), ctx.baseUrl(), ctx.sessionCookie(),
                     turnBody, ctx.req().compress(), t0);
-            if (resolved != null) {
-                if (newConversationId == null && resolved.conversationId() != null) {
-                    newConversationId = resolved.conversationId();
-                }
+            if (resolved != null && newConversationId == null && resolved.conversationId() != null) {
+                newConversationId = resolved.conversationId();
+            }
+            // A failed turn is still HTTP 200: the chat stream reports it as an error frame and never
+            // sends the complete frame.
+            if (resolved != null && resolved.completed()) {
+                succeeded = true;
                 if (resolved.ttftMs() >= 0) {
                     metrics.turnTtftMs[workerIdx][t] = resolved.ttftMs();
                 }
@@ -642,7 +646,9 @@ public final class LoadTestRunner {
             long d = (System.nanoTime() - t0) / 1_000_000L;
             metrics.totalDuration.addAndGet(d);
             updateMinMax(metrics.minDur, metrics.maxDur, d);
-            metrics.turnDurationMs[workerIdx][t] = d;
+            if (succeeded) {
+                metrics.turnDurationMs[workerIdx][t] = d;
+            }
         }
         return newConversationId;
     }
@@ -684,8 +690,11 @@ public final class LoadTestRunner {
      * observed (the stream ended without any visible content — e.g. an
      * error response, or an empty completion). Distinct from the server-side
      * {@code web/ttft} histogram, which excludes the network round-trip.
+     *
+     * <p>{@code completed} is whether the {@code type:"complete"} frame arrived — the only
+     * signal that the turn succeeded.
      */
-    private record SseConsumeResult(@Nullable Long conversationId, long ttftMs) {}
+    private record SseConsumeResult(@Nullable Long conversationId, long ttftMs, boolean completed) {}
 
     /**
      * Read the SSE response body line-by-line, capturing the conversationId
@@ -701,6 +710,7 @@ public final class LoadTestRunner {
             throws IOException {
         Long conversationId = null;
         long ttftMs = -1L;
+        boolean completed = false;
         try (var source = body.source()) {
             String line;
             while ((line = source.readUtf8Line()) != null) {
@@ -712,9 +722,12 @@ public final class LoadTestRunner {
                 if (conversationId == null && jsonStr.contains("\"type\":\"init\"")) {
                     conversationId = tryParseConversationId(jsonStr);
                 }
+                if (jsonStr.contains("\"type\":\"complete\"")) {
+                    completed = true;
+                }
             }
         }
-        return new SseConsumeResult(conversationId, ttftMs);
+        return new SseConsumeResult(conversationId, ttftMs, completed);
     }
 
     /** Parse the conversationId out of an init frame; null on any parse error. */
