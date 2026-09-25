@@ -81,7 +81,7 @@ class MemoryForgetMatchTest extends UnitTest {
     }
 
     @Test
-    void forgetDoesNotTakeANeighbouringMemoryWithIt() {
+    void forgetDoesNotTakeANeighboringMemoryWithIt() {
         // The threshold is lower than capture dedup's, so this is the AC that stops it
         // becoming destructive. Measured containment against the same query: the lido row
         // 0.750, the pool row 0.500, the Saturday row 0.250 — 0.70 separates them.

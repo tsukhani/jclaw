@@ -535,7 +535,7 @@ class LlmProviderTest extends UnitTest {
     // =====================
 
     @Test
-    void recognisesTheProviderWordingsThatMeanNoToolSupport() {
+    void recognizesTheProviderWordingsThatMeanNoToolSupport() {
         // The exact message Ollama returned for dolphin3:8b.
         assertTrue(ToolCapabilityMemo.isToolsUnsupported(
                 "registry.ollama.ai/library/dolphin3:8b does not support tools"));
@@ -729,7 +729,7 @@ class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    void providerMetricsSurviveAMalformedNeighbour() {
+    void providerMetricsSurviveAMalformedNeighbor() {
         // One unparsable value must not cost us the fields either side of it.
         var metrics = openRouter().parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 1, "cost_details": {"upstream_inference_cost": 0.5},

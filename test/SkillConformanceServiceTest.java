@@ -77,7 +77,7 @@ class SkillConformanceServiceTest extends UnitTest {
     }
 
     @Test
-    void aNearMissVersionIsNormalisedRatherThanDiscarded() {
+    void aNearMissVersionIsNormalizedRatherThanDiscarded() {
         assertEquals("2.1.0", SkillConformanceService.resolveVersion("v2.1"));
         assertEquals("3.0.0", SkillConformanceService.resolveVersion("3"));
     }

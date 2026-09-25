@@ -258,7 +258,7 @@ class SubagentYieldToolTest extends UnitTest {
     }
 
     @Test
-    void defaultYieldTimeoutConfigIsHonouredAndZeroDisablesWatchdog() {
+    void defaultYieldTimeoutConfigIsHonoredAndZeroDisablesWatchdog() {
         // JCLAW-812: the operator-configurable global default (Settings →
         // Subagents) is the fallback when a yield omits timeoutSeconds. setup()
         // wiped the config, so unset returns the hard-coded default.

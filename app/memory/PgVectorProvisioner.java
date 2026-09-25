@@ -58,7 +58,7 @@ public final class PgVectorProvisioner {
             // column exists, so it keeps its ORIGINAL dimension forever — changing the model
             // or memory.jpa.vector.dimensions never resizes it. Reporting the leg live anyway
             // would fuse new-model query vectors against old-model stored vectors, and
-            // semanticNeighbours (capture dedup AND the forget matcher) would match the wrong
+            // semanticNeighbors (capture dedup AND the forget matcher) would match the wrong
             // rows, with the Settings panel showing success throughout. Degrading to
             // keyword-only LOUDLY is strictly better than that.
             int observed = observedDimension(conn);

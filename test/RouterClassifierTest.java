@@ -156,7 +156,7 @@ class RouterClassifierTest extends UnitTest {
     }
 
     @Test
-    void anAcknowledgementIsSettledWithoutCallingTheModel() {
+    void anAcknowledgmentIsSettledWithoutCallingTheModel() {
         var c = HttpFactories.callWith(canned(200, completion("coding")),
                 () -> RouterClassifier.classify("yes please", TaskClass.REASONING, 0, withClassifier()));
         assertEquals(TaskClass.REASONING, c.taskClass());

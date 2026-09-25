@@ -151,7 +151,7 @@ class MemoryToolTest extends UnitTest {
     }
 
     @Test
-    void storeHonoursAnExplicitCategoryAndCoercesAnInvalidOne() {
+    void storeHonorsAnExplicitCategoryAndCoercesAnInvalidOne() {
         call("{\"action\":\"store\",\"text\":\"The user prefers tabs\",\"category\":\"preference\"}");
         var stored = MemoryStoreFactory.get().list(String.valueOf(agent.id));
         assertEquals(MemoryCategory.PREFERENCE.label, stored.getFirst().category());

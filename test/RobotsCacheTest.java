@@ -103,7 +103,7 @@ class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    void aDirectiveAimedAtOurTokenIsHonoured() {
+    void aDirectiveAimedAtOurTokenIsHonored() {
         // A rule naming jclaw specifically must bind even when * is permissive.
         routes.put(HOST + "/robots.txt",
                 "User-agent: *\nAllow: /\n\nUser-agent: jclaw\nDisallow: /nope\n", "text/plain");
@@ -134,7 +134,7 @@ class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    void aDeclaredCrawlDelayIsHonouredWithinItsBand() {
+    void aDeclaredCrawlDelayIsHonoredWithinItsBand() {
         routes.put(HOST + "/robots.txt", "User-agent: *\nCrawl-delay: 2\n", "text/plain");
         assertEquals(2_000, RobotsCache.delayMillis(URI.create(HOST + "/"), client, ID));
     }
@@ -200,7 +200,7 @@ class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    void omittingTheArgumentKeepsRobotsHonoured() {
+    void omittingTheArgumentKeepsRobotsHonored() {
         // Opt-out per call, never by omission.
         ConfigService.set(CFG_RESPECT, "true");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /private\n", "text/plain");

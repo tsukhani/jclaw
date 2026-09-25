@@ -85,7 +85,7 @@ class LlmStreamFailoverTest extends UnitTest {
     }
 
     @Test
-    void anOpenSecondaryIsHonouredRatherThanLoopedInto() throws Exception {
+    void anOpenSecondaryIsHonoredRatherThanLoopedInto() throws Exception {
         var primary = streamingProvider("jclaw1182-both-primary", "from-primary");
         var secondary = streamingProvider("jclaw1182-both-secondary", "from-secondary");
         openByFailures("jclaw1182-both-primary");

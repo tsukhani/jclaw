@@ -54,7 +54,7 @@ class ApiTasksControllerResetStatsTest extends FunctionalTest {
     }
 
     @Test
-    void resetHonoursExcludePayloadTypeScope() {
+    void resetHonorsExcludePayloadTypeScope() {
         seed(() -> {
             var agent = mkAgent("scope-agent");
             var automation = mkTask(agent, "automation", Task.Status.RUNNING, null);

@@ -132,12 +132,12 @@ public interface MemoryStore {
      * {@code text}, which is a blocking HTTP round-trip; the capture pipeline calls
      * this in its own phase precisely so the plan transaction never spans it.
      */
-    default List<Long> semanticNeighbours(String agentId, String text, @Nullable String retrievalKey,
+    default List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey,
             int limit, double minCosine) {
-        return semanticNeighbours(agentId, text, limit, minCosine);
+        return semanticNeighbors(agentId, text, limit, minCosine);
     }
 
-    default List<Long> semanticNeighbours(String agentId, String text, int limit, double minCosine) {
+    default List<Long> semanticNeighbors(String agentId, String text, int limit, double minCosine) {
         return List.of();
     }
 
@@ -145,7 +145,7 @@ public interface MemoryStore {
      * Memories within {@code minCosine} of {@code query}, embedded as a <em>query</em> —
      * prefix included, no retrieval key — rather than as a statement (JCLAW-942).
      *
-     * <p>{@link #semanticNeighbours} is the wrong tool for a caller holding a description
+     * <p>{@link #semanticNeighbors} is the wrong tool for a caller holding a description
      * instead of a statement. It embeds bare and symmetric, which is right for comparing a
      * capture candidate against stored rows, and wrong against the same rows when the input
      * is what an operator typed: measured on this corpus, an identical memory scores a mean
@@ -165,7 +165,7 @@ public interface MemoryStore {
      * belongs to the embedding model, so a floor swept for one model silently rejects every
      * vector hit under another and recall degrades to keyword-only with no error. Nothing
      * else on this interface can observe that: {@link #search} returns the keyword leg's
-     * results either way, and {@link #semanticNeighbours} embeds bare, so it cannot see a
+     * results either way, and {@link #semanticNeighbors} embeds bare, so it cannot see a
      * misconfigured query prefix.
      */
     default double bestQueryCosine(String agentId, String query) {

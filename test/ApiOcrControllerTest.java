@@ -121,7 +121,7 @@ class ApiOcrControllerTest extends FunctionalTest {
     }
 
     @Test
-    void refreshHonoursThePinnedTestResult() {
+    void refreshHonorsThePinnedTestResult() {
         // The seam has to beat the probe, or every test forcing the unavailable path
         // would fork the real binary and pass or fail on whether the host has it.
         var saved = OcrHealthProbe.lastResult();

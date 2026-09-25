@@ -442,7 +442,7 @@ class ChannelTest extends UnitTest {
     // === Channel.sendWithRetry ===
 
     @Test
-    void channelSendWithRetryHonoursRetryAfterFromSendResult() {
+    void channelSendWithRetryHonorsRetryAfterFromSendResult() {
         var channel = new Channel() {
             int attempts = 0;
             @Override public String channelName() { return "test"; }

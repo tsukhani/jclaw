@@ -60,7 +60,7 @@ public final class ScrapeCorpus {
 
         /** The counts the entries realize, which is what the gate is scored against; the
          *  builder's recorded {@code realised_strata} is provenance and can be stale. */
-        public Map<String, Integer> realisedCounts() {
+        public Map<String, Integer> realizedCounts() {
             var counts = new LinkedHashMap<String, Integer>();
             strata.forEach(s -> counts.put(s, 0));
             entries.forEach(e -> counts.merge(e.stratum(), 1, Integer::sum));
@@ -75,7 +75,7 @@ public final class ScrapeCorpus {
          *  deliberately never moves that label, so a check of it alone can never fire. */
         public boolean isEqualAllocation() {
             if (!"equal".equals(allocation) || entries.isEmpty()) return false;
-            var counts = realisedCounts();
+            var counts = realizedCounts();
             double mean = (double) entries.size() / counts.size();
             return counts.values().stream()
                     .allMatch(n -> Math.abs(n - mean) <= mean * ALLOCATION_TOLERANCE);
@@ -102,14 +102,14 @@ public final class ScrapeCorpus {
         if (root.has("strata")) {
             root.getAsJsonArray("strata").forEach(s -> strata.add(s.getAsString()));
         }
-        var realised = new LinkedHashMap<String, Integer>();
+        var realized = new LinkedHashMap<String, Integer>();
         if (root.has("realised_strata")) {
             root.getAsJsonObject("realised_strata").entrySet()
-                    .forEach(e -> realised.put(e.getKey(), e.getValue().getAsInt()));
+                    .forEach(e -> realized.put(e.getKey(), e.getValue().getAsInt()));
         }
         var identity = new Identity(
                 str(root, "tranco_list_id"), str(root, "probed_on"),
-                str(root, "reclassified_on"), fingerprint(entries), Map.copyOf(realised),
+                str(root, "reclassified_on"), fingerprint(entries), Map.copyOf(realized),
                 root.has("allocation_spread") ? root.get("allocation_spread").getAsInt() : 0);
         return new Corpus(identity, str(root, "allocation"),
                 List.copyOf(strata), List.copyOf(entries));

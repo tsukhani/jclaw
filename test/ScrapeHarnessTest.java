@@ -324,8 +324,8 @@ class ScrapeHarnessTest extends UnitTest {
 
         assertEquals("equal", corpus.allocation(), "the declared design is untouched");
         assertFalse(corpus.isEqualAllocation(), "3 against 1 is not equal allocation");
-        assertEquals(3, corpus.realisedCounts().get("a").intValue());
-        assertEquals(1, corpus.realisedCounts().get("b").intValue());
+        assertEquals(3, corpus.realizedCounts().get("a").intValue());
+        assertEquals(1, corpus.realizedCounts().get("b").intValue());
 
         assertTrue(fourStratumCorpus().isEqualAllocation(),
                 "and an evenly realised corpus still qualifies");

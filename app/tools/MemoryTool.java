@@ -515,7 +515,7 @@ public class MemoryTool implements ToolRegistry.Tool {
      * interleave — the article sits above one of the beliefs.
      */
     private static List<Memory> relatedByMeaning(String agentId, String text, Set<Long> already) {
-        var ids = semanticNeighbours(agentId, text, null);
+        var ids = semanticNeighbors(agentId, text, null);
         if (ids.isEmpty()) return List.of();
         return Tx.run(() -> {
             var out = new ArrayList<Memory>();
@@ -557,7 +557,7 @@ public class MemoryTool implements ToolRegistry.Tool {
         // deleting on topic removes neighboring facts the operator did not name.
         var ids = (retrievalKey == null || retrievalKey.isBlank())
                 ? List.<Long>of()
-                : semanticNeighbours(agentId, text, retrievalKey);
+                : semanticNeighbors(agentId, text, retrievalKey);
         return Tx.run(() -> {
             var byId = new LinkedHashMap<Long, Memory>();
             for (var id : ids) {
@@ -626,7 +626,7 @@ public class MemoryTool implements ToolRegistry.Tool {
 
     /** Empty on any failure: no vector backend, no embedding provider, or a lookup error
      *  must not make memory unusable — fail open to the lexical tier, as capture does. */
-    private static List<Long> semanticNeighbours(String agentId, String text, @Nullable String retrievalKey) {
+    private static List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey) {
         var store = MemoryStoreFactory.get();
         try {
             // No key means the caller holds a description rather than a stored statement,
@@ -635,7 +635,7 @@ public class MemoryTool implements ToolRegistry.Tool {
                 return store.semanticMatchesForQuery(agentId, text, FORGET_LIMIT,
                         ConfigService.getDouble("memory.forget.match.cosineThreshold", FORGET_COSINE));
             }
-            return store.semanticNeighbours(agentId, text, retrievalKey, FORGET_LIMIT,
+            return store.semanticNeighbors(agentId, text, retrievalKey, FORGET_LIMIT,
                     ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90));
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY, "Semantic memory match failed, using lexical only: %s"

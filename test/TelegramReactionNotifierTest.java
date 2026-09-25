@@ -60,7 +60,7 @@ class TelegramReactionNotifierTest extends UnitTest {
     }
 
     @Test
-    void reactorDerivedTextIsNotLabelledSystem() {
+    void reactorDerivedTextIsNotLabeledSystem() {
         var text = TelegramReactionNotifier.reactionEventText(delta("private", STRANGER));
         assertFalse(text.startsWith("[system]"),
                 "a reactor-chosen display name must not be handed to the model as a system line: " + text);

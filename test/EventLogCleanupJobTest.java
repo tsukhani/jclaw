@@ -32,7 +32,7 @@ class EventLogCleanupJobTest extends UnitTest {
     }
 
     @Test
-    void validRetentionIsHonoured() {
+    void validRetentionIsHonored() {
         assertEquals(7, EventLogCleanupJob.resolveRetentionDays("7"),
                 "a valid value must be parsed as before");
         assertEquals(90, EventLogCleanupJob.resolveRetentionDays(" 90 "),

@@ -61,7 +61,7 @@ class PgVectorProvisionerTest extends UnitTest {
         // "ALTER TABLE ... ADD COLUMN IF NOT EXISTS" is a no-op once the column exists, so the
         // column keeps its ORIGINAL width forever. Enabling the leg anyway would fuse
         // new-model query vectors against old-model stored vectors — semantically wrong
-        // neighbours — and semanticNeighbours backs both capture dedup and the forget matcher.
+        // neighbours — and semanticNeighbors backs both capture dedup and the forget matcher.
         assertFalse(PgVectorProvisioner.dimensionUsable(768, 1536),
                 "a deployment provisioned at 1536 that switches to a 768-dim model must refuse");
         assertFalse(PgVectorProvisioner.dimensionUsable(1536, 768),

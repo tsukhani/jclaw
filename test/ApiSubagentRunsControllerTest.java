@@ -302,12 +302,12 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
             var c = AgentService.create("api-label-c", "openrouter", "gpt-4.1");
             var pc = ConversationService.create(p, "web", "u");
             var cc = ConversationService.create(c, "subagent", null);
-            var labelled = persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
-            SubagentRun run = SubagentRun.findById(labelled);
+            var labeled = persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+            SubagentRun run = SubagentRun.findById(labeled);
             run.label = "summarize the release notes";
             run.save();
-            var unlabelled = persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
-            return new long[]{p.id, labelled, unlabelled};
+            var unlabeled = persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+            return new long[]{p.id, labeled, unlabeled};
         });
 
         var body = getContent(GET("/api/subagent-runs?parentAgentId=" + ids[0]));

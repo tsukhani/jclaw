@@ -48,7 +48,7 @@ public final class MemoryKeyBackfillService {
     private static final String EVENT_CATEGORY = "memory";
 
     /** Beyond a handful the context stops being "related" and starts being the corpus. */
-    private static final int MAX_NEIGHBOURS = 4;
+    private static final int MAX_NEIGHBORS = 4;
 
     private static final String INSTRUCTIONS = """
             You write retrieval keys for a personal memory store. Given one stored MEMORY and \
@@ -160,11 +160,11 @@ public final class MemoryKeyBackfillService {
     }
 
     /** Memories sharing an entity name with {@code row}. */
-    private static List<String> neighbours(Row row, List<Row> all) {
+    private static List<String> neighbors(Row row, List<Row> all) {
         var names = JpaMemoryStore.entityNames(row.text());
         var related = new ArrayList<String>();
         for (var other : all) {
-            if (related.size() >= MAX_NEIGHBOURS) break;
+            if (related.size() >= MAX_NEIGHBORS) break;
             if (other.id().equals(row.id())) continue;
             if (names.stream().anyMatch(n -> other.text().contains(n))) related.add(other.text());
         }
@@ -190,7 +190,7 @@ public final class MemoryKeyBackfillService {
      */
 
     private static @Nullable String keyFor(Row row, List<Row> all, MemoryEvalGenerator.QuestionWriter writer) {
-        var related = neighbours(row, all);
+        var related = neighbors(row, all);
         var prompt = "MEMORY: %s\nRELATED:\n%s".formatted(row.text(),
                 related.isEmpty() ? "(none)" : String.join("\n", related));
         try {

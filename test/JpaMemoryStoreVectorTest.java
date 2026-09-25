@@ -337,7 +337,7 @@ class JpaMemoryStoreVectorTest extends UnitTest {
     }
 
     @Test
-    void loweringTheFloorRestoresThePreGateBehaviour() {
+    void loweringTheFloorRestoresThePreGateBehavior() {
         // The floor is an operator knob because the right value is a property of the
         // embedding model, not of the code — a different model needs a different sweep.
         var agent = agentId("gate-knob");

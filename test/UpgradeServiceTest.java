@@ -68,7 +68,7 @@ class UpgradeServiceTest extends UnitTest {
     }
 
     @Test
-    void planNormalisesAVPrefixedTarget() {
+    void planNormalizesAVPrefixedTarget() {
         // The UI shows the tag as GitHub reports it ("v0.17.50"), so the POST can
         // carry either form; the argv must not end up with "--version vv0.17.50".
         assertTrue(UpgradeService.plan("v0.17.50").command().contains("v0.17.50"));

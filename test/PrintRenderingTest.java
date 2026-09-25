@@ -238,7 +238,7 @@ class PrintRenderingTest extends UnitTest {
     }
 
     @Test
-    void aColourModeThePrinterOffersIsAcceptedEvenIfItIsNotInTheShortList() {
+    void aColorModeThePrinterOffersIsAcceptedEvenIfItIsNotInTheShortList() {
         // Settings now lists what the device reports. The Canon advertises
         // auto-monochrome, which is outside the friendly three shown when there is
         // no printer to ask — validating against that short list would reject a
@@ -340,19 +340,19 @@ class PrintRenderingTest extends UnitTest {
         var caps = new services.printing.IppClient.RasterCapabilities(600, true, Set.of("sgray_8"), null);
         var text = "hello printer".getBytes(StandardCharsets.UTF_8);
 
-        var grey = PrintFormatNegotiator.prepare(text, "text/plain", canon,
+        var gray = PrintFormatNegotiator.prepare(text, "text/plain", canon,
                 JobAttributes.DEFAULTS, caps);
-        var colour = PrintFormatNegotiator.prepare(text, "text/plain", canon,
+        var color = PrintFormatNegotiator.prepare(text, "text/plain", canon,
                 new JobAttributes(null, "color", null), caps);
 
-        assertEquals("image/pwg-raster", grey.format());
-        assertTrue(grey.explanation().contains("600 DPI"), grey.explanation());
-        assertTrue(grey.explanation().contains("greyscale"), grey.explanation());
+        assertEquals("image/pwg-raster", gray.format());
+        assertTrue(gray.explanation().contains("600 DPI"), gray.explanation());
+        assertTrue(gray.explanation().contains("greyscale"), gray.explanation());
         // Asking for colour must actually get colour, not be silently overridden.
-        assertTrue(colour.explanation().contains("colour"), colour.explanation());
-        assertTrue(grey.document().length < colour.document().length,
+        assertTrue(color.explanation().contains("colour"), color.explanation());
+        assertTrue(gray.document().length < color.document().length,
                 "greyscale should be smaller: %d vs %d"
-                        .formatted(grey.document().length, colour.document().length));
+                        .formatted(gray.document().length, color.document().length));
     }
 
     // ─── Negotiation ───

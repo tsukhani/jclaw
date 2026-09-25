@@ -57,7 +57,7 @@ public final class MemoryEvalGenerator {
             "agent.id = ?1 AND supersededAt IS NULL ORDER BY id";
 
     /** Generous: the maxFacts ceiling, not this, is what decides a cluster is too broad. */
-    private static final int MAX_SEMANTIC_NEIGHBOURS = 50;
+    private static final int MAX_SEMANTIC_NEIGHBORS = 50;
 
     private static final String INSTRUCTIONS = """
             You write evaluation questions for a memory-retrieval system. Given one stored \
@@ -588,9 +588,9 @@ public final class MemoryEvalGenerator {
         // against statement+key vectors compares a format difference rather than a
         // similarity, which shrinks every cluster and quietly weakens the coverage suites
         // built from them — the same asymmetry that stopped capture-time dedup firing.
-        var ids = MemoryStoreFactory.get().semanticNeighbours(
+        var ids = MemoryStoreFactory.get().semanticNeighbors(
                 String.valueOf(agent.id), seed.text(), seed.retrievalKey(),
-                MAX_SEMANTIC_NEIGHBOURS, minCosine);
+                MAX_SEMANTIC_NEIGHBORS, minCosine);
         var cluster = new ArrayList<Row>();
         cluster.add(seed);
         for (var id : ids) {

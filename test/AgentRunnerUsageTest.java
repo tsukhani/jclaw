@@ -109,7 +109,7 @@ class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    void buildUsageJsonSingleRoundIsUnchangedFromPreFixBehaviour() {
+    void buildUsageJsonSingleRoundIsUnchangedFromPreFixBehavior() {
         // AC5 regression guard: a turn with zero tool rounds must produce
         // byte-equivalent numbers to pre-fix behaviour. Everything lines up
         // with round 1's numbers because there are no later rounds to fold.

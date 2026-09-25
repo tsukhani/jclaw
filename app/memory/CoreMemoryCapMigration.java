@@ -187,7 +187,7 @@ public final class CoreMemoryCapMigration {
         var answers = classifierOverride != null
                 ? classifierOverride.classify(agent, texts)
                 : askModel(agent, texts);
-        return sanitise(answers, texts.size());
+        return sanitize(answers, texts.size());
     }
 
     /** Raw, unvalidated category strings from the agent's model — empty when it cannot run. */
@@ -240,7 +240,7 @@ public final class CoreMemoryCapMigration {
      * do return values outside the set they are given (JCLAW-927) — so {@code core} is
      * coerced away here rather than trusted not to appear.
      */
-    private static List<String> sanitise(List<String> answers, int size) {
+    private static List<String> sanitize(List<String> answers, int size) {
         var out = new ArrayList<String>(size);
         for (int i = 0; i < size; i++) out.add(null);
         for (int i = 0; i < Math.min(answers.size(), size); i++) {

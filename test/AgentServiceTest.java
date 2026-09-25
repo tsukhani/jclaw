@@ -138,7 +138,7 @@ class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    void workspacePathForUnknownNamePreservesPassThroughBehaviour() {
+    void workspacePathForUnknownNamePreservesPassThroughBehavior() {
         // Pre-2026-05 callers that resolved workspace paths before an
         // Agent row had been committed (admin tooling, certain test
         // fixtures) relied on workspacePath(name) returning the literal

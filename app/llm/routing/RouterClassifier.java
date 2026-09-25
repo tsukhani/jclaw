@@ -81,10 +81,10 @@ public final class RouterClassifier {
         if (classifier == null) return PromptClassifier.classify(message, priorClass, priorToolCalls);
 
         var answer = askModel(message, classifier, policy.classifierTimeoutSeconds());
-        var labelled = parse(answer);
-        if (labelled != null) {
+        var labeled = parse(answer);
+        if (labeled != null) {
             var effort = parseEffort(answer);
-            return new Classification(labelled, effort != null ? effort : labelled.defaultEffort(),
+            return new Classification(labeled, effort != null ? effort : labeled.defaultEffort(),
                     List.of("classified by " + classifier.describe()));
         }
         if (answer != null) {

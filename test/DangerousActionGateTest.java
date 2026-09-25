@@ -734,7 +734,7 @@ class DangerousActionGateTest extends UnitTest {
     }
 
     @Test
-    void ownerInitiatedStillHonoursAnExplicitDenyPolicy() {
+    void ownerInitiatedStillHonorsAnExplicitDenyPolicy() {
         // Owner-initiated resolves AS the operator surface rather than bypassing the gate, so
         // an operator who set the policy to deny still gets deny — the setting keeps meaning
         // what the Tool Approvals panel says it means.

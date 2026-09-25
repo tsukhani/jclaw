@@ -24,7 +24,7 @@ class RetentionDaysTest extends UnitTest {
     }
 
     @Test
-    void aValidWindowIsHonouredEvenWithSurroundingWhitespace() {
+    void aValidWindowIsHonoredEvenWithSurroundingWhitespace() {
         assertEquals(7, RetentionDays.resolve("7", 30, 3650, CATEGORY, KEY));
         assertEquals(90, RetentionDays.resolve(" 90 ", 30, 3650, CATEGORY, KEY));
     }

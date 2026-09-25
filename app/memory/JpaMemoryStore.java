@@ -287,7 +287,7 @@ public class JpaMemoryStore implements MemoryStore {
 
     /**
      * Embed a search query. Distinct from {@link #generateEmbedding}, which stays bare and
-     * is what documents and the symmetric dedup comparison in {@link #semanticNeighbours}
+     * is what documents and the symmetric dedup comparison in {@link #semanticNeighbors}
      * must keep using — prefixing a document would compare a query format against itself.
      */
     private float @Nullable [] generateQueryEmbedding(String query) {
@@ -312,8 +312,8 @@ public class JpaMemoryStore implements MemoryStore {
      * rank-derived or RRF-fused number, neither of which is a similarity.
      */
     @Override
-    public List<Long> semanticNeighbours(String agentId, String text, int limit, double minCosine) {
-        return semanticNeighbours(agentId, text, null, limit, minCosine);
+    public List<Long> semanticNeighbors(String agentId, String text, int limit, double minCosine) {
+        return semanticNeighbors(agentId, text, null, limit, minCosine);
     }
 
     /**
@@ -328,7 +328,7 @@ public class JpaMemoryStore implements MemoryStore {
      * paraphrases only this leg can catch that were silently getting through.
      */
     @Override
-    public List<Long> semanticNeighbours(String agentId, String text, @Nullable String retrievalKey,
+    public List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey,
             int limit, double minCosine) {
         if (!vectorEnabled || text == null || text.isBlank()) return List.of();
         Long pk = pkOrNull(agentId);
@@ -337,8 +337,8 @@ public class JpaMemoryStore implements MemoryStore {
         if (embedding == null) return List.of();
         try {
             return isPostgres
-                    ? pgSemanticNeighbours(pk, embedding, limit, minCosine)
-                    : luceneSemanticNeighbours(agentId, embedding, limit, minCosine);
+                    ? pgSemanticNeighbors(pk, embedding, limit, minCosine)
+                    : luceneSemanticNeighbors(agentId, embedding, limit, minCosine);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY,
                     "Semantic dedup lookup failed, falling back to lexical only: %s".formatted(e.getMessage()));
@@ -346,7 +346,7 @@ public class JpaMemoryStore implements MemoryStore {
         }
     }
 
-    private List<Long> luceneSemanticNeighbours(String agentId, float[] embedding, int limit, double minCosine)
+    private List<Long> luceneSemanticNeighbors(String agentId, float[] embedding, int limit, double minCosine)
             throws IOException {
         var out = new ArrayList<Long>();
         for (var hit : DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit)) {
@@ -373,7 +373,7 @@ public class JpaMemoryStore implements MemoryStore {
         return ids.stream().filter(alive::contains).toList();
     }
 
-    private List<Long> pgSemanticNeighbours(Long pk, float[] embedding, int limit, double minCosine) {
+    private List<Long> pgSemanticNeighbors(Long pk, float[] embedding, int limit, double minCosine) {
         var sql = """
                 SELECT m.id FROM memory m
                 WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL AND m.superseded_at IS NULL
@@ -571,8 +571,8 @@ public class JpaMemoryStore implements MemoryStore {
         if (embedding == null) return List.of();
         try {
             return isPostgres
-                    ? pgSemanticNeighbours(pk, embedding, limit, minCosine)
-                    : luceneSemanticNeighbours(agentId, embedding, limit, minCosine);
+                    ? pgSemanticNeighbors(pk, embedding, limit, minCosine)
+                    : luceneSemanticNeighbors(agentId, embedding, limit, minCosine);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY,
                     "Semantic query match failed, falling back to lexical only: %s".formatted(e.getMessage()));

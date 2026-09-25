@@ -65,7 +65,7 @@ class ModelResolverThinkingTest extends UnitTest {
     }
 
     @Test
-    void anOverrideTheEffectiveModelCannotHonourResolvesToNull() {
+    void anOverrideTheEffectiveModelCannotHonorResolvesToNull() {
         var provider = ProviderRegistry.get(PROVIDER);
         var onPlainModel = new Conversation();
         onPlainModel.modelProviderOverride = PROVIDER;

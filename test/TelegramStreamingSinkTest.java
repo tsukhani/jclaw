@@ -292,7 +292,7 @@ class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    void tryFireNotifierExplicitCooldownIsHonoured() {
+    void tryFireNotifierExplicitCooldownIsHonored() {
         // The explicit-cooldown overload rate-limits against the passed window,
         // not the config default — so a per-binding cooldown is respected.
         TelegramStreamingSinkTestHooks.clearNotifierRateLimiter();

@@ -222,7 +222,7 @@ class PrintBackendTest extends UnitTest {
     // ─── Addressing ───
 
     @Test
-    void ippUriHonoursTheAdvertisedResourcePath() {
+    void ippUriHonorsTheAdvertisedResourcePath() {
         var withRp = new DiscoveredPrinter("HP", "10.0.0.5", 631,
                 PrintProtocol.IPP, Map.of("rp", "ipp/print"));
         // TXT records omit the leading slash by convention; the URI needs it.

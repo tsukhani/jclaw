@@ -611,7 +611,7 @@ public final class MemoryAutoCapture {
      * last Friday" shares too few tokens for any safe lexical threshold.
      *
      * <p>Runs before {@link #plan} and outside its transaction because
-     * {@link MemoryStore#semanticNeighbours} embeds each candidate. Fail-open at
+     * {@link MemoryStore#semanticNeighbors} embeds each candidate. Fail-open at
      * every level: disabled by config, vector memory off, no embedding provider, or
      * a lookup error all yield no semantic drops and the lexical rule stands alone.
      */
@@ -623,7 +623,7 @@ public final class MemoryAutoCapture {
         var store = MemoryStoreFactory.get();
         var out = new HashSet<Integer>();
         for (int i = 0; i < candidates.size(); i++) {
-            var matches = store.semanticNeighbours(agentKey, candidates.get(i).text(),
+            var matches = store.semanticNeighbors(agentKey, candidates.get(i).text(),
                     candidates.get(i).retrievalKey(), limit, minCosine);
             if (matches.isEmpty()) continue;
             out.add(i);

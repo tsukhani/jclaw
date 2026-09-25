@@ -68,7 +68,7 @@ public class ApiScrapeTestController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     ("Corpus is not equal-allocation (declared '%s', realised %s) — the gate "
                             + "threshold is only meaningful against an equal-allocation corpus.")
-                            .formatted(corpus.allocation(), corpus.realisedCounts()));
+                            .formatted(corpus.allocation(), corpus.realizedCounts()));
             throw ApiResponses.unreachable();
         }
 

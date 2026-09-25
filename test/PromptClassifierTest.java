@@ -113,7 +113,7 @@ class PromptClassifierTest extends UnitTest {
     }
 
     @Test
-    void aBareAcknowledgementInheritsThePreviousClass() {
+    void aBareAcknowledgmentInheritsThePreviousClass() {
         var c = PromptClassifier.classify("yes, go ahead!", TaskClass.REASONING, 0);
         assertEquals(TaskClass.REASONING, c.taskClass());
         assertEquals("follow-up inherits reasoning", c.signals().getFirst());

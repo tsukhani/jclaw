@@ -828,7 +828,7 @@ class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
-    void probeToleratesProviderSideIdNormalisation() throws Exception {
+    void probeToleratesProviderSideIdNormalization() throws Exception {
         // A provider that drops or adds a vendor prefix is still serving what was asked
         // for; rejecting that would make legitimate models unselectable.
         assertFalse(substituted("openai/text-embedding-3-small", "text-embedding-3-small"));

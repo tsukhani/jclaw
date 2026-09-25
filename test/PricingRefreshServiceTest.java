@@ -357,7 +357,7 @@ class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    void fillsVisionThinkingAndAudioFromTheCatalogue() {
+    void fillsVisionThinkingAndAudioFromTheCatalog() {
         seedProviderModels("together", """
                 [{"id":"moonshotai/Kimi-K2.5","supportsVision":false,"supportsThinking":false}]""");
         var c = catalog("together_ai/moonshotai/Kimi-K2.5",
@@ -432,7 +432,7 @@ class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    void leavesAModelTheCatalogueDoesNotCoverAlone() {
+    void leavesAModelTheCatalogDoesNotCoverAlone() {
         seedProviderModels("together", """
                 [{"id":"unknown/Model-X","supportsVision":false}]""");
         var c = catalog("something-else", capsJson("supports_vision"));

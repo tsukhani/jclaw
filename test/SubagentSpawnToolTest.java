@@ -538,7 +538,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void defaultRunTimeoutConfigIsHonouredAndNonPositiveCoercesToDefault() {
+    void defaultRunTimeoutConfigIsHonoredAndNonPositiveCoercesToDefault() {
         // JCLAW-812: the operator-configurable global default (Settings →
         // Subagents) is the fallback when a spawn omits runTimeoutSeconds.
         // setup() wiped the config, so unset returns the hard-coded default.

@@ -212,7 +212,7 @@ class ChannelErrorTemplatesTest extends UnitTest {
     }
 
     @Test
-    void metaTheOutOfWindowCodeIsRecognisedFromAGraphApiErrorBody() {
+    void metaTheOutOfWindowCodeIsRecognizedFromAGraphApiErrorBody() {
         var body = "{\"error\":{\"message\":\"Re-engagement message\",\"type\":\"OAuthException\","
                 + "\"code\":131047,\"fbtrace_id\":\"AbC\"}}";
         assertEquals(ChannelErrorTemplates.META_OUTSIDE_WINDOW, WhatsAppChannel.metaErrorCode(body));
