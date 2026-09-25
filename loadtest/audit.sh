@@ -7,7 +7,7 @@
 # restarts the backend.
 #
 # Usage: loadtest/audit.sh <new-out-dir> [--provider P] [--model M] [--concurrency N] [--turns N]
-#   --concurrency/--turns size the real pass (default 50 x 20); the mock passes are 100 x 50.
+#   --concurrency/--turns size the real pass (default 10 x 5); the mock passes are 100 x 50.
 # Exit: 0 collected, 2 usage or no backend, 3 the smoke call failed, 4 the backend died.
 set -euo pipefail
 
@@ -17,10 +17,11 @@ USAGE="usage: loadtest/audit.sh <new-out-dir> [--provider P] [--model M] [--conc
 [[ $# -ge 1 ]] || { echo "$USAGE" >&2; exit 2; }
 OUT=$1
 shift
-PROVIDER=ollama-cloud
-MODEL=nemotron-3-super
-REAL_C=50
-REAL_T=20
+# The smallest and cheapest nemotron chat model; the :free variants' caps refuse concurrent calls.
+PROVIDER=openrouter
+MODEL=nvidia/nemotron-3-nano-30b-a3b
+REAL_C=10
+REAL_T=5
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --provider) PROVIDER=$2; shift 2 ;;

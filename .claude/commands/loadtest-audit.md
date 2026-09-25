@@ -1,13 +1,13 @@
 ---
-description: Load-test the running JClaw backend through jclaw.sh's harness — two identical mock passes plus one real-provider pass (Ollama Cloud nemotron-3-super by default) — while sampling the JVM throughout, then report JClaw-attributable memory leaks, memory bottlenecks and performance bottlenecks, or say plainly that there are none. Provider latency is out of scope.
-argument-hint: "[--provider P --model M] [--concurrency N --turns N]   (sizes the real pass; default ollama-cloud nemotron-3-super, 50 x 20)"
+description: Load-test the running JClaw backend through jclaw.sh's harness — two identical mock passes plus one real-provider pass (OpenRouter nemotron-3-nano by default) — while sampling the JVM throughout, then report JClaw-attributable memory leaks, memory bottlenecks and performance bottlenecks, or say plainly that there are none. Provider latency is out of scope.
+argument-hint: "[--provider P --model M] [--concurrency N --turns N]   (sizes the real pass; default openrouter nvidia/nemotron-3-nano-30b-a3b, 10 x 5)"
 ---
 
 # JClaw load-test audit
 
 Answer one question: **under load, does JClaw leak memory, run short of memory, or add latency of its own?** The evidence comes from `loadtest/audit.sh`, which drives `./jclaw.sh loadtest` against the backend on :9000 and watches that JVM throughout; you judge the digest it writes. Use `/usr/bin/git` for any git invocation.
 
-**Real-pass arguments:** `$ARGUMENTS`. Empty means `ollama-cloud` / `nemotron-3-super` at concurrency 50 × 20 turns. The mock passes are always 100 × 50.
+**Real-pass arguments:** `$ARGUMENTS`. Empty means `openrouter` / `nvidia/nemotron-3-nano-30b-a3b` at concurrency 10 × 5 turns: the smallest and cheapest nemotron chat model there ($0.05/M in, $0.20/M out), well under a cent per run. The `:free` variants' per-minute and daily caps refuse concurrent calls. The mock passes are always 100 × 50.
 
 ## The rule that governs this command
 
@@ -26,6 +26,7 @@ Answer one question: **under load, does JClaw leak memory, run short of memory, 
 - Run one audit at a time, and never alongside another `./jclaw.sh loadtest`.
 - Never clear the operator's metrics (`DELETE /api/metrics/latency`, the Chat Performance rows). The harness already sweeps its own conversations, events and latency samples when each pass ends.
 - If the collector is interrupted mid-pass, its `EXIT` trap stops the JFR recording, but the server-side run is left behind: `./jclaw.sh --clean loadtest` removes it.
+- The real pass shares its provider's circuit breaker with the operator's own agents. Three refused calls in ten trip it for about ten minutes, which is why the real pass stays small. If it tripped, say so in the report.
 
 ---
 
@@ -36,7 +37,7 @@ OUT=<session scratchpad>/loadtest-audit-$(date -u +%Y%m%dT%H%M%SZ)
 loadtest/audit.sh "$OUT" $ARGUMENTS > "$OUT.log" 2>&1
 ```
 
-Run it with `run_in_background: true` and wait for the completion notification; don't poll it. Allow about 4 minutes plus the real pass, which at the default size runs 5–10 minutes. The collector:
+Run it with `run_in_background: true` and wait for the completion notification; don't poll it. Allow about 4 minutes plus the real pass, a minute or two at the default size. The collector:
 
 1. Finds the backend by its :9000 listener and attaches with that JVM's own `jcmd` (a jenv shim costs ~10 s per call).
 2. Makes one real call (c=1 × 1) to prove the provider and model work before spending anything else.
@@ -52,7 +53,7 @@ Keep a real pass under 30 minutes (`jclaw.sh` gives a real run 1800 s before its
 
 Read `$OUT/digest.md`. Before any verdict, confirm the harness measured what it claims. Each of these has a silent failure mode:
 
-1. **Every pass has a JSON report and `requests = c × t`.** A missing report means the pass failed at the HTTP level; read `<pass>.out`.
+1. **Every pass has a JSON report and `requests = c × t`.** A missing report means the pass failed at the HTTP level; read `<pass>.out`. Errors on the real pass don't void it. Classify them from `real.app.log`: provider-side errors (429, 5xx, timeouts, breaker short-circuits after those) are one line of context. Judge the JClaw rows on the turns that succeeded, and mark them *Not measured* only if none did.
 2. **The sampler recorded heap values in every phase** (the `with heap` column is non-zero in each row). If it is zero, the sampler broke, and any claim about peak heap is unfounded.
 3. **Every JFR has execution samples and GC cycles.** A recording with none measured nothing.
 4. **The mock honoured its stub.** `ttft above stub` on the mock passes should be single-digit ms. Hundreds of ms is either a JClaw finding or a broken harness; `queue_wait` and `dispatcher_wait` tell you which.
@@ -70,13 +71,15 @@ Thresholds come from past runs on this codebase (see *Reference* below). Treat t
 
 | Check | Digest source | Healthy | Finding |
 | --- | --- | --- | --- |
-| Live heap on the second identical pass | Settled state, `Δ mock2` | within ~25 MB. That is the measurement's resolution, about 5 KB per request over 5000; say so in the report | larger, *and* a histogram grower accounts for it |
+| Live heap on the second identical pass | Settled state, `live heap MB (histogram)`, `Δ mock2` | within ~25 MB. That is the measurement's resolution, about 5 KB per request over 5000; say so in the report | larger, *and* a histogram grower accounts for it |
 | Per-request retention, JClaw types | "Grew on both identical mock passes", owner `JClaw` | none | any, even with a flat heap: a small shallow size can pin a large retained graph |
 | Per-request retention, library types | same table, owner `H2` or `JDK/lib` | present, with the live-heap row healthy | only when the live-heap row is a finding and these types account for it |
 | Classes and loaders | `Δ mock2` | classes within ~50, loaders within ~10 (hidden classes for method handles and reflection keep trickling in: +7 and +6 on a healthy run) | hundreds of classes or dozens of loaders on the second identical pass: a class-loader leak candidate |
 | Platform threads | thread families | back to baseline | a family that grows every pass |
 | Virtual threads | parking sites | back to baseline | a site holding threads in proportion to requests, or growing every pass |
 | Sockets and fds | TCP table, `open fds` | ESTABLISHED bounded by pool size and no higher after mock2 than after mock1; no CLOSE_WAIT apart from the mock-port sockets below | CLOSE_WAIT that persists or grows (JClaw never closed its end), or fds rising every pass |
+
+Never take the live set from `GC.heap_info`'s "used". Under ZGC it includes whatever was allocated after the collection finished: one audit read +224 MB there against +3 MB in the histogram, while a dashboard polled the metrics endpoints.
 
 **Known-benign, so not a finding:**
 
@@ -142,7 +145,7 @@ Then **stop and ask which findings to pursue.** Make no edits until the user cho
 
 - Mock: 5000/0 in 44.7–44.9 s; per-turn duration flat at 873–892 ms against the 880 ms stub; `prologue` 0.3–0.8 ms per request.
 - This command's first run (v0.19.3, 2026-09-25): mean request +2 to +3 ms above the stub; wall clock 1.016–1.018× ideal; last-5-turns / turn-2 duration 0.99–1.01×; `queue_wait` and `dispatcher_wait` ≤ 0.3 ms.
-- Settled live set: ~290–330 MB after warm-up, drifting ±10 MB between identical passes (308 → 326 → 322 MB on 2026-09-25). The first pass adds 20–40 MB of one-time warm-up.
+- Settled live set by class histogram: 269 → 276 → 279 MB and 227 → 255 → 258 MB on two runs on 2026-09-25 (v0.19.5), so +2 to +3 MB on the second identical pass. The first pass adds 7–28 MB of one-time warm-up.
 - JFR: `ZAllocationStall` 0, `VirtualThreadPinned` 0, longest GC pause 17–236 µs.
 - CPU, with the JVM at 6–8% of cores on the mocks: leaf hot methods are Play's reflective action dispatch (~2%), H2 MVStore and Gson SSE parsing. By leaf-most JClaw frame, `ConversationService.appendMessage`, `Conversation.findById` and `Message.findRecent` lead at ~7–12% each, with ~20% of samples having no JClaw frame.
 - JDK 25 has no `jdk.ZPhasePause` event. The collector reads pauses from `jdk.GarbageCollection`, so a script that reads the old event reports a false zero.
