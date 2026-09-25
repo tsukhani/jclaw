@@ -107,13 +107,16 @@ function formatTimestamp(iso: string): string {
     </div>
 
     <!-- Filters -->
-    <div class="flex gap-3 mb-4">
-      <label :for="categorySelectId">
+    <div class="flex flex-wrap gap-3 mb-4">
+      <label
+        :for="categorySelectId"
+        class="max-w-full"
+      >
         <span class="sr-only">Category filter</span>
         <select
           :id="categorySelectId"
           v-model="categoryFilter"
-          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+          class="max-w-full bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
           @focus="refreshCategories()"
         >
           <option value="">
@@ -164,7 +167,7 @@ function formatTimestamp(iso: string): string {
       </label>
       <label
         :for="searchInputId"
-        class="flex-1 max-w-xs"
+        class="flex-1 min-w-48 max-w-xs"
       >
         <span class="sr-only">Search log messages</span>
         <input

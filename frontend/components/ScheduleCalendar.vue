@@ -328,7 +328,7 @@ function fmtRunTime(run: RecentRunView): string {
 
 <template>
   <div class="bg-surface-elevated border border-border">
-    <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-border">
+    <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-border">
       <!-- Granularity: Month / Week / Day -->
       <div
         class="inline-flex border border-input divide-x divide-border"
@@ -428,7 +428,7 @@ function fmtRunTime(run: RecentRunView): string {
             <li
               v-for="(fire, i) in cell.fires.slice(0, 4)"
               :key="i"
-              class="text-[10px] truncate"
+              class="relative text-[10px] truncate"
               :class="[
                 fire.isPast || fire.taskPaused ? 'text-fg-muted' : (statusColors[fire.taskStatus] || 'text-fg-muted'),
                 fire.taskPaused ? 'line-through' : '',
@@ -448,11 +448,11 @@ function fmtRunTime(run: RecentRunView): string {
             <li v-if="cell.fires.length > 4">
               <button
                 type="button"
-                class="text-[10px] text-fg-muted hover:text-fg-strong underline underline-offset-2 transition-colors"
+                class="text-xs text-fg-muted hover:text-fg-strong underline underline-offset-2 transition-colors"
                 :aria-label="`Show all ${cell.fires.length} on ${cell.date.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`"
                 @click="openDay(cell.date)"
               >
-                +{{ cell.fires.length - 4 }} more
+                +{{ cell.fires.length - 4 }}<span class="max-sm:hidden"> more</span>
               </button>
             </li>
           </ul>

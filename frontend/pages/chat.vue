@@ -1104,7 +1104,7 @@ function exportConversation() {
               <span
                 v-if="overrideError"
                 data-testid="override-error"
-                class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-[11px] text-red-700 dark:text-red-300"
+                class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-xs text-red-700 dark:text-red-300"
               >
                 <span>{{ overrideError }}</span>
                 <button
@@ -1122,7 +1122,7 @@ function exportConversation() {
               <span
                 v-if="actionError"
                 data-testid="action-error"
-                class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-[11px] text-red-700 dark:text-red-300"
+                class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-xs text-red-700 dark:text-red-300"
               >
                 <span>{{ actionError }}</span>
                 <button
@@ -1139,7 +1139,7 @@ function exportConversation() {
               </span>
               <span
                 v-if="attachError"
-                class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-[11px] text-red-700 dark:text-red-300"
+                class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-xs text-red-700 dark:text-red-300"
               >
                 <span>{{ attachError }}</span>
                 <button

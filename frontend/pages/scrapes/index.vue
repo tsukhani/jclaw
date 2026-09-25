@@ -83,7 +83,7 @@ const { pause, resume, stop, remove, actionError, busy } = useScrapeJobActions((
       </h1>
       <NuxtLink
         to="/scrapes/new"
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 text-white text-xs font-medium hover:bg-emerald-600 transition-colors"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 text-white text-xs font-medium hover:bg-emerald-800 transition-colors"
       >
         <PlusIcon
           class="w-4 h-4"

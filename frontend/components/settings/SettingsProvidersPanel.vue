@@ -1973,7 +1973,7 @@ const groupedProviders = computed(() => {
               <span class="text-xs text-fg-muted">{{ discoverySelected.size }} selected</span>
               <button
                 :disabled="discoverySelected.size === 0"
-                class="px-3 py-1 bg-blue-600 text-white text-xs font-medium hover:bg-blue-500 disabled:opacity-40 transition-colors"
+                class="px-3 py-1 bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40 transition-colors"
                 @click="addDiscoveredModels"
               >
                 Add Selected

@@ -274,3 +274,7 @@ html.dark .code-copy[data-copied] { color: #6ee7b7; }
 
 /* A display equation wider than the bubble scrolls inside it rather than widening the transcript. */
 .katex-display { overflow: auto hidden; }
+
+/* A select has no caret, so `focus:outline-hidden` left it with no focus cue at all (2.4.7).
+   Unlayered so it outranks that utility wherever a select carries it. */
+select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }

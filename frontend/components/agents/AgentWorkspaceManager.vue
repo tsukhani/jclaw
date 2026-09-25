@@ -183,9 +183,9 @@ const hiddenRows = computed(() => Math.max(0, allRows.value.length - MAX_ROWS))
 
 // Colour and icon move together so the kind is readable without the colour.
 const STYLE_CLASS = {
-  dir: 'text-sky-600 dark:text-sky-400',
-  text: 'text-emerald-600 dark:text-emerald-400',
-  binary: 'text-amber-600 dark:text-amber-400',
+  dir: 'text-sky-700 dark:text-sky-400',
+  text: 'text-emerald-700 dark:text-emerald-400',
+  binary: 'text-amber-700 dark:text-amber-400',
 } as const
 
 function styleOf(entry: WorkspaceEntry) {
@@ -412,14 +412,14 @@ watch(() => props.agentId, () => {
               <template v-if="pendingDelete === row.entry.path">
                 <button
                   type="button"
-                  class="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-danger"
+                  class="rounded border border-border bg-transparent px-1.5 py-0.5 text-xs text-danger"
                   :aria-label="`Confirm: ${deleteLabel(row.entry)}`"
                   :data-testid="`ws-delete-confirm-${row.entry.path}`"
                   @click="confirmDelete(row.entry.path)"
                 >Confirm</button>
                 <button
                   type="button"
-                  class="rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] text-fg-muted"
+                  class="rounded border border-border bg-transparent px-1.5 py-0.5 text-xs text-fg-muted"
                   :aria-label="`Cancel: ${deleteLabel(row.entry)}`"
                   :data-testid="`ws-delete-cancel-${row.entry.path}`"
                   @click="pendingDelete = null"

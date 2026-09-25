@@ -115,7 +115,7 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
   <div
     ref="tableRef"
     tabindex="0"
-    class="focus:outline-hidden"
+    class="focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
     @keydown="handleKeydown"
   >
     <Table>

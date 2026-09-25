@@ -356,7 +356,7 @@ const inputClass = 'bg-surface-elevated border border-input text-sm text-fg-prim
       <div class="flex items-center gap-2 pt-2">
         <button
           type="submit"
-          class="px-3 py-1.5 bg-emerald-700 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-40"
+          class="px-3 py-1.5 bg-emerald-700 text-white text-sm font-medium hover:bg-emerald-800 disabled:opacity-40"
           :disabled="loading || !form.url.trim() || form.agentId == null"
         >
           {{ loading ? 'Starting…' : 'Start scrape' }}
