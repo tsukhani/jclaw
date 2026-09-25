@@ -8,6 +8,8 @@ import { ROUTE_HISTORY_LIMIT, WEB_VITALS_URL, routeAt, toInpReport, type RouteVi
 const UNREPORTED = new Set(['/login', '/setup-password'])
 
 export default defineNuxtPlugin(() => {
+  // Playwright and the DevTools MCP both set it: an e2e run wrote 48 rows into the field data.
+  if (navigator.webdriver) return
   const router = useRouter()
   const pattern = () => {
     const r = router.currentRoute.value
