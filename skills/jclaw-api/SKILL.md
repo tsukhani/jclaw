@@ -11,7 +11,7 @@ icon: ⚙️
 
 Use this skill when the user asks you to **change JClaw's own state** — adding an MCP server, creating an agent, toggling a tool on an agent, editing a config value, etc.
 
-The `jclaw_api` tool exposes JClaw's own HTTP API, and the list of callable endpoints is **discovered at runtime** — there is no fixed catalog to drift. Do not invent endpoints, and never call one that `discover` does not list. Every `/api/` endpoint is callable by default unless it is deny-listed, so coverage is automatic — a newly-added endpoint appears in `discover` with no skill edit. If `discover` does not list something, it is deliberately off-limits (see below); to *hide* a sensitive endpoint, mark its controller action `@ChatHidden` (or add its prefix to the tool's deny-floor) in the backend, not in this skill.
+The `jclaw_api` tool exposes JClaw's own HTTP API, and the list of callable endpoints is **discovered at runtime** — there is no fixed catalog to drift. Do not invent endpoints, and never call one that `discover` does not list. An endpoint is callable only when its backend action is declared agent-reachable (`@AgentAccess` level `OPEN`, or `OWN_ONLY`, which reaches only your own agent's rows — `main` reaches every agent's); an undeclared action is operator-only. So a new endpoint appears in `discover` once the backend opens it, with no skill edit, and if `discover` does not list something, it is deliberately off-limits (see below). Access is decided by that backend declaration, never by this skill.
 
 ## How to call
 
@@ -55,7 +55,7 @@ The following endpoints exist in JClaw's API but are **deliberately not callable
 - `/api/metrics/loadtest*` — the load-test harness; an agent must not spawn load.
 - `/api/memories*` — the operator's cross-agent view of every agent's stored memories. An agent reaching it could read, edit or delete another agent's corpus. Use the `memory` tool instead, which is scoped to the calling agent's own memories.
 
-Individual destructive or secret-bearing actions inside otherwise-callable controllers are hidden the same way (marked `@ChatHidden` in the backend): bulk conversation deletes, channel-config writes, and the transcription model-download trigger. You won't see them in `discover`.
+Individual destructive or secret-bearing actions inside otherwise-callable controllers are operator-only the same way (no agent-reachable `@AgentAccess` level): bulk conversation deletes, channel-config writes, and the transcription model-download trigger. You won't see them in `discover`.
 
 If the user requests an operation that resolves to one of these, refuse explicitly and explain the boundary. Do not try to compose multiple permitted endpoints to simulate a forbidden one.
 

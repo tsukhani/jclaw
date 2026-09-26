@@ -128,4 +128,4 @@ Reject anything else with a clear message; do not guess.
 - Never amend a prior commit to fold in the version bump — always create a new commit.
 - Never push to `main` with `--force` even if a hook rejects; report the hook failure and let the user decide.
 - Never modify any file other than `conf/application.conf` as part of the bump itself. Whatever else is in the working tree ships as-is.
-- If the current branch is not `main`, proceed anyway but note the branch name prominently in the final summary so the user doesn't assume they're releasing from `main`.
+- If the current branch is not `main`, stop before bumping anything and report the branch — releases go out only from `main`.

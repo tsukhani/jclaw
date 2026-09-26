@@ -620,7 +620,7 @@ Validating and scoring are offline â€” no backend, no model call, no database â€
 git config core.hooksPath .githooks
 ```
 
-To bypass for a one-off push (e.g. urgent hotfix): `JCLAW_SKIP_TESTS=1 git push origin HEAD`.
+A human can bypass it for a one-off push (e.g. urgent hotfix) with `JCLAW_SKIP_TESTS=1 git push origin HEAD`; an agent never does.
 
 ---
 
