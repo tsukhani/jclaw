@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { clearNuxtData } from '#app'
 import SettingsModelRouterPanel from '~/components/settings/SettingsModelRouterPanel.vue'
+import { sectionGroups } from '~/components/settings/sections'
 import { useProvideSettingsConfig } from '~/composables/useSettingsConfig'
 
 /**
@@ -89,6 +90,11 @@ beforeEach(() => {
 })
 
 describe('SettingsModelRouterPanel', () => {
+  it('sits after Chat under Agents & Automation', () => {
+    const ids = sectionGroups.find(g => g.label === 'Agents & Automation')!.sections.map(s => s.id)
+    expect(ids.indexOf('model-router')).toBe(ids.indexOf('chat') + 1)
+  })
+
   it('lists each class, with classes that have no list falling back to Chat', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()

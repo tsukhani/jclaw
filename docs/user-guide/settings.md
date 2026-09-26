@@ -324,38 +324,6 @@ Once a provider has been called, its card shows its breaker's state, with **Isol
 
 Every value is a whole number; a write outside these bounds is refused.
 
-## Model Router
-
-`router/auto` is a virtual model you can pick wherever a model is picked. For each prompt it chooses a task class, then the first usable model on that class's list. The chat shows which model answered each reply. Nothing is seeded, and `router/auto` is offered in the model pickers only once the **Chat** list has a model.
-
-| Class | Takes |
-|-------|-------|
-| **Chat** | Quick conversation. Also the list every other class uses until you give it one of its own, and where the heavier classes drop when a subscription passes the downshift threshold. |
-| **Summarize** | Summaries, recaps and key points. |
-| **Agent work** | Multi-step work with tools, or a follow-up to a tool-heavy turn. |
-| **Reasoning** | Proofs, trade-offs, root causes and math. |
-| **Coding** | Code blocks, stack traces and code-heavy requests. |
-
-Each list is stored as `router.<class>.models` (`chat`, `summarize`, `agentic`, `reasoning`, `coding`); add models from the dropdown and reorder them with the arrows. A list naming a model that isn't registered under LLM Providers is refused.
-
-- **Prefer subscription and self-hosted models** (`router.preferPrepaid`, on by default) — a model on a subscription or a self-hosted provider is tried before a per-token one, whatever the order, so included credit is spent before money. A per-token model in a list that also holds a prepaid one is badged **fallback only**. Off, the lists are followed exactly as written; the budget guard applies either way.
-- **Classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules**) — the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slower than **Classifier timeout** (`router.classifier.timeoutSeconds`, 1 to 60 seconds, default 8, shown once a model or JEV is picked) or answers with something else, the keyword rules decide.
-- **JEV (TypeSafe AI)** (stored as provider `jev`, model `jev-latest`) — TypeSafe AI's decision model as the classifier. One request asks the same two questions, class and effort, about the first 4000 characters of the prompt and nothing else, and JEV answers each with a probability per choice. When its top class is below `router.classifier.jev.minConfidence` (0 to 1, default 0.50, no row in the panel), the keyword rules choose the class and its default effort, and the route notes that JEV was unsure. It uses the TypeSafe API key from [Decision Providers](#settings-decision-providers), and the option is disabled until one is set. The request is tried once within `router.classifier.timeoutSeconds`, never retried; a failure, a timeout, an invalid answer or a missing key falls back to the keyword rules. While JEV's circuit breaker is open or isolated, nothing is sent: the keyword rules decide, and the route notes that the JEV breaker is open. TypeSafe may record or retain the prompts it is sent. Measured on 60 prompts, JEV answered in 0.45 s at the median and 1.4 s at worst; earlier, larger browser-step requests saw about one in nine hang, and the timeout is what bounds that wait. Its default of 8 seconds is sized for LLM classifiers; with JEV, a lower value such as 3 bounds a hang sooner. With JEV, a timeout counts toward the circuit breaker the browser engine shares (see [Decision Providers](#settings-decision-providers)), so keep it at 3 seconds or more. The provider name `jev` is reserved, so no LLM provider can take it.
-- **Reasoning effort** — a thinking model reasons at the effort the router chose for the prompt: the classifier's, or else the class default — low for Chat and Summarize, medium for Agent work and Coding, high for Reasoning. It is fitted to the levels the model offers. A thinking level chosen on the conversation still wins, including off.
-- **Budget guard** — usage is read from each Ollama Cloud provider's quota windows. Past **Downshift at** (`router.budget.downshiftAt`, default 0.75, shown as 75%) the four heavier classes stop using that provider and fall back to the Chat list; past **Exhausted at** (`router.budget.exhaustedAt`, default 0.95) no class uses it. Downshift must stay below Exhausted. Any provider that answers a call with "out of credit" is also benched for a while.
-
-Beneath the thresholds, a table lists each provider on your lists as **Prepaid** or **Per-token**, with each quota window's usage (amber past downshift, red past exhausted), and names anything benched for running out of credit with the time it returns. A provider with no usage API shows that it is benched only after an out-of-credit reply.
-
-## Search Providers
-
-Web search engines available to the `web_search` tool. Drag rows to **reorder priority** — providers are tried in order, and the next one is tried automatically if the first fails. Each row shows three states:
-
-- **active** — enabled *and* API key configured.
-- **needs API key** — enabled but the key is missing.
-- **disabled** — turned off.
-
-Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
-
 ## Decision Providers
 
 A decision provider answers a question by choosing among the options it is given, with a probability for each, rather than by writing text. JClaw features call it directly, and it never answers a chat. Each provider has one card, which holds what its features share: the API key and the circuit breaker. A feature's own settings stay on that feature's page.
@@ -376,6 +344,16 @@ Saving the key editor without typing anything leaves the stored key as it was. A
 TypeSafe AI may record or retain what it is sent.
 
 Both features share one **circuit breaker**, shown on the card once JEV has been called, with **Isolate** or **Restore** to move it by hand. Three failures in a row, or half of the last ten, open it for 60 seconds. A failure is a request that could not reach TypeSafe, timed out, or got HTTP 429 or a 5xx; a browser step's retries count as one. A refused key (401 or 403), any other 4xx, or an answer JClaw cannot read never counts. A Model Router classifier timeout counts too, so with JEV keep that timeout at 3 seconds or more. While the breaker is open or isolated nothing is sent: the Model Router uses its keyword rules, and a Jev browser run ends with an error naming the breaker. Isolating it lasts until the 60-second cooldown ends or you restore it. The thresholds are fixed. An open breaker is also listed on the [Dashboard](/) under **Circuit Breakers**.
+
+## Search Providers
+
+Web search engines available to the `web_search` tool. Drag rows to **reorder priority** — providers are tried in order, and the next one is tried automatically if the first fails. Each row shows three states:
+
+- **active** — enabled *and* API key configured.
+- **needs API key** — enabled but the key is missing.
+- **disabled** — turned off.
+
+Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
 
 ## Transcription
 
@@ -548,6 +526,28 @@ An **Advanced — context window & compaction** collapsible reveals four lower-l
 | `pruneToolResultsMinChars`   | 4000    | Only tool results at least this long are stubbed. |
 | `pruneToolResultsProtectRecent` | 12   | The newest messages are never stubbed, in addition to the whole current turn. |
 | `jtokkit.safetyMultiplier.unmatched` | 1.4× | Fudge factor applied to jtokkit's token estimate when the model uses a fallback encoding (Kimi, DeepSeek, Gemma, Qwen, GLM). Higher = trim/compact earlier, safer. OpenAI-family models use 1.0× regardless. This is the global cold-start default: a per-provider `jtokkit.safetyMultiplier.<provider>` or per-model `jtokkit.safetyMultiplier.<provider>.<model>` key overrides it, and the tokenizer calibration job writes the per-model ones automatically from observed provider-vs-jtokkit deltas. |
+
+## Model Router
+
+`router/auto` is a virtual model you can pick wherever a model is picked. For each prompt it chooses a task class, then the first usable model on that class's list. The chat shows which model answered each reply. Nothing is seeded, and `router/auto` is offered in the model pickers only once the **Chat** list has a model.
+
+| Class | Takes |
+|-------|-------|
+| **Chat** | Quick conversation. Also the list every other class uses until you give it one of its own, and where the heavier classes drop when a subscription passes the downshift threshold. |
+| **Summarize** | Summaries, recaps and key points. |
+| **Agent work** | Multi-step work with tools, or a follow-up to a tool-heavy turn. |
+| **Reasoning** | Proofs, trade-offs, root causes and math. |
+| **Coding** | Code blocks, stack traces and code-heavy requests. |
+
+Each list is stored as `router.<class>.models` (`chat`, `summarize`, `agentic`, `reasoning`, `coding`); add models from the dropdown and reorder them with the arrows. A list naming a model that isn't registered under LLM Providers is refused.
+
+- **Prefer subscription and self-hosted models** (`router.preferPrepaid`, on by default) — a model on a subscription or a self-hosted provider is tried before a per-token one, whatever the order, so included credit is spent before money. A per-token model in a list that also holds a prepaid one is badged **fallback only**. Off, the lists are followed exactly as written; the budget guard applies either way.
+- **Classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules**) — the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slower than **Classifier timeout** (`router.classifier.timeoutSeconds`, 1 to 60 seconds, default 8, shown once a model or JEV is picked) or answers with something else, the keyword rules decide.
+- **JEV (TypeSafe AI)** (stored as provider `jev`, model `jev-latest`) — TypeSafe AI's decision model as the classifier. One request asks the same two questions, class and effort, about the first 4000 characters of the prompt and nothing else, and JEV answers each with a probability per choice. When its top class is below `router.classifier.jev.minConfidence` (0 to 1, default 0.50, no row in the panel), the keyword rules choose the class and its default effort, and the route notes that JEV was unsure. It uses the TypeSafe API key from [Decision Providers](#settings-decision-providers), and the option is disabled until one is set. The request is tried once within `router.classifier.timeoutSeconds`, never retried; a failure, a timeout, an invalid answer or a missing key falls back to the keyword rules. While JEV's circuit breaker is open or isolated, nothing is sent: the keyword rules decide, and the route notes that the JEV breaker is open. TypeSafe may record or retain the prompts it is sent. Measured on 60 prompts, JEV answered in 0.45 s at the median and 1.4 s at worst; earlier, larger browser-step requests saw about one in nine hang, and the timeout is what bounds that wait. Its default of 8 seconds is sized for LLM classifiers; with JEV, a lower value such as 3 bounds a hang sooner. With JEV, a timeout counts toward the circuit breaker the browser engine shares (see [Decision Providers](#settings-decision-providers)), so keep it at 3 seconds or more. The provider name `jev` is reserved, so no LLM provider can take it.
+- **Reasoning effort** — a thinking model reasons at the effort the router chose for the prompt: the classifier's, or else the class default — low for Chat and Summarize, medium for Agent work and Coding, high for Reasoning. It is fitted to the levels the model offers. A thinking level chosen on the conversation still wins, including off.
+- **Budget guard** — usage is read from each Ollama Cloud provider's quota windows. Past **Downshift at** (`router.budget.downshiftAt`, default 0.75, shown as 75%) the four heavier classes stop using that provider and fall back to the Chat list; past **Exhausted at** (`router.budget.exhaustedAt`, default 0.95) no class uses it. Downshift must stay below Exhausted. Any provider that answers a call with "out of credit" is also benched for a while.
+
+Beneath the thresholds, a table lists each provider on your lists as **Prepaid** or **Per-token**, with each quota window's usage (amber past downshift, red past exhausted), and names anything benched for running out of credit with the time it returns. A provider with no usage API shows that it is benched only after an out-of-credit reply.
 
 ## Subagents
 

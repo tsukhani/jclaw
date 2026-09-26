@@ -65,9 +65,9 @@ describe('Settings page — Decision Providers', () => {
     breakers = []
   })
 
-  it('sits after Search Providers in the Providers group', () => {
+  it('sits between LLM Providers and Search Providers in the Providers group', () => {
     const ids = sectionGroups.find(g => g.label === 'Providers')!.sections.map(s => s.id)
-    expect(ids.indexOf('decision-providers')).toBe(ids.indexOf('search') + 1)
+    expect(ids).toEqual(['providers', 'decision-providers', 'search'])
   })
 
   it('shows an unkeyed JEV card with the retention note and neither consumer in use', async () => {

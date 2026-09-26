@@ -132,9 +132,8 @@ export const sectionGroups: SettingsSectionGroup[] = [
     label: 'Providers',
     sections: [
       { id: 'providers', title: 'LLM Providers', icon: CpuChipIcon, component: SettingsProvidersPanel },
-      { id: 'model-router', title: 'Model Router', icon: ArrowsRightLeftIcon, component: SettingsModelRouterPanel },
-      { id: 'search', title: 'Search Providers', icon: MagnifyingGlassIcon, component: SettingsSearchPanel },
       { id: 'decision-providers', title: 'Decision Providers', icon: ScaleIcon, component: SettingsDecisionProvidersPanel },
+      { id: 'search', title: 'Search Providers', icon: MagnifyingGlassIcon, component: SettingsSearchPanel },
     ],
   },
   {
@@ -164,6 +163,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
     label: 'Agents & Automation',
     sections: [
       { id: 'chat', title: 'Chat', icon: ChatBubbleOvalLeftEllipsisIcon, component: SettingsChatPanel },
+      { id: 'model-router', title: 'Model Router', icon: ArrowsRightLeftIcon, component: SettingsModelRouterPanel },
       { id: 'subagents', title: 'Subagents', icon: UserGroupIcon, component: SettingsSubagentsPanel },
       { id: 'coding', title: 'Coding', icon: CodeBracketIcon, component: SettingsCodingPanel },
       { id: 'web-scraping', title: 'Web Scraping', icon: GlobeAltIcon, component: SettingsWebScrapePanel },
