@@ -189,12 +189,12 @@ Options:
 
 Environment:
   JCLAW_JVM_HEAP          Symmetric heap override — sets both -Xms and -Xmx to
-                          the same value. Default is asymmetric (Xms 512m, Xmx
+                          the same value. Default is asymmetric (Xms 128m, Xmx
                           2g) to avoid committing 2 GB at boot on idle deploys;
                           ZGC handles resize without pauses, so a fixed heap
                           isn't required for latency.
                           Example: JCLAW_JVM_HEAP=4g ${INVOKE} start
-  JCLAW_JVM_XMS           Override -Xms only (default: 512m).
+  JCLAW_JVM_XMS           Override -Xms only (default: 128m).
   JCLAW_JVM_XMX           Override -Xmx only (default: 2g).
   JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g) — the size ZGC
                           collects toward, exceeding it only up to -Xmx to
@@ -328,11 +328,11 @@ Options:
 
 Environment:
   JCLAW_JVM_HEAP          Symmetric heap override — sets both -Xms and -Xmx
-                          to the same value. Default is asymmetric (Xms 512m,
-                          Xmx 2g): JClaw commits ~512 MB at boot and grows
+                          to the same value. Default is asymmetric (Xms 128m,
+                          Xmx 2g): JClaw commits ~128 MB at boot and grows
                           to 2 GB on demand. ZGC resizes without pauses.
                           Example: JCLAW_JVM_HEAP=4g ${INVOKE} start
-  JCLAW_JVM_XMS           Override -Xms only (default: 512m).
+  JCLAW_JVM_XMS           Override -Xms only (default: 128m).
   JCLAW_JVM_XMX           Override -Xmx only (default: 2g).
   JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g) — the size ZGC
                           collects toward, exceeding it only up to -Xmx to
@@ -614,9 +614,9 @@ Options:
 
 Environment:
   JCLAW_JVM_HEAP          Symmetric heap — sets both -Xms and -Xmx to the
-                          same value. Default is asymmetric (Xms 512m, Xmx 2g).
+                          same value. Default is asymmetric (Xms 128m, Xmx 2g).
   JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently
-                          (defaults: 512m / 2g).
+                          (defaults: 128m / 2g).
   JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g). Not derived from
                           the heap — raise it when you raise -Xmx.
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins for value
@@ -646,9 +646,9 @@ Options:
 
 Environment:
   JCLAW_JVM_HEAP          Symmetric heap — sets both -Xms and -Xmx to the
-                          same value. Default is asymmetric (Xms 512m, Xmx 2g).
+                          same value. Default is asymmetric (Xms 128m, Xmx 2g).
   JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently
-                          (defaults: 512m / 2g).
+                          (defaults: 128m / 2g).
   JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g). Not derived from
                           the heap — raise it when you raise -Xmx.
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins).
@@ -2851,21 +2851,35 @@ do_start_prod() {
     # impossible AND unnecessary. The presence of app/ is the source-
     # of-truth signal for which side of that fence we're on.
     if [[ -d app ]]; then
-        # Auto-precompile when the existing precompiled/ classes are stale
-        # or missing. Play 1.x's `play start --%prod` loads precompiled/
-        # as-is and does NOT recompile when sources have changed — without
-        # this check, restarts silently boot the prior binary and code
-        # changes don't take effect. The -newer test uses the
-        # precompiled/java directory's mtime as the staleness threshold
-        # (Play refreshes it on each successful precompile), and
-        # -print -quit stops the walk at the first match so a clean tree
-        # costs milliseconds.
-        if [[ ! -d precompiled/java ]] \
-            || [[ -n "$(find app -name '*.java' -newer precompiled/java -print -quit 2>/dev/null)" ]]; then
-            echo "==> Precompiling backend (source newer than precompiled classes)..."
+        # Auto-precompile when the existing precompiled/ output is stale
+        # or missing. The server below boots with -Dprecompiled=true, which
+        # loads precompiled/ as-is and never recompiles — without this
+        # check, restarts silently boot the prior binary and code changes
+        # don't take effect. The inputs are everything precompile bakes in:
+        # app/ (classes and views; directories too, so a deleted or renamed
+        # file registers through its parent's mtime), conf/routes (Play
+        # renders it from precompiled/templates/conf/routes, not the
+        # source), .play-version (the fork's enhancers and framework
+        # templates) and build.gradle.kts (what the classes compiled
+        # against). The threshold is precompiled/java's mtime —
+        # playPrecompile deletes precompiled/ before writing it — and
+        # -print -quit stops at the first match so a clean tree costs
+        # milliseconds.
+        local precompile_trigger=""
+        if [[ ! -d precompiled/java ]]; then
+            precompile_trigger="precompiled/ is missing"
+        else
+            precompile_trigger=$(find app conf/routes .play-version build.gradle.kts \
+                -newer precompiled/java -print -quit 2>/dev/null || true)
+            if [[ -n "$precompile_trigger" ]]; then
+                precompile_trigger="$precompile_trigger is newer than precompiled/"
+            fi
+        fi
+        if [[ -n "$precompile_trigger" ]]; then
+            echo "==> Precompiling backend (${precompile_trigger})..."
             play precompile
         else
-            echo "==> Skipping precompile (precompiled classes are up to date)"
+            echo "==> Skipping precompile (precompiled/ is up to date)"
         fi
 
         validate_pnpm_pin
@@ -2979,14 +2993,16 @@ do_start_prod() {
     #   - ZGC: sub-millisecond pause collector. Matters because SSE streams
     #     hold connections open for seconds/tens of seconds; a 100 ms G1
     #     pause would stutter token output to the client.
-    #   - Asymmetric heap by default (-Xms 512m, -Xmx 2g): the steady-state
-    #     working set fits in ~512 MB, so committing the full 2 GB at boot
-    #     would waste resident memory on idle deployments. ZGC handles
-    #     heap resizing without stop-the-world pauses, so the
-    #     resize-under-load argument that motivates fixed heaps in G1/CMS
-    #     doesn't apply. To force a fixed heap (the previous default),
-    #     set JCLAW_JVM_HEAP=2g — that pins -Xms == -Xmx == 2g. To split
-    #     them independently, use JCLAW_JVM_XMS / JCLAW_JVM_XMX.
+    #   - Asymmetric heap by default (-Xms 128m, -Xmx 2g): committing the
+    #     full 2 GB at boot would waste resident memory on idle deployments,
+    #     and ZGC resizes without stop-the-world pauses, so the
+    #     resize-under-load argument for fixed heaps in G1/CMS doesn't apply.
+    #     -Xms is also the floor ZGC never uncommits below: at 512m with the
+    #     default 300 s ZUncommitDelay, a c=100 x 50-turn loadtest left
+    #     1.1 GB committed six minutes later; 128m with a 60 s delay returned
+    #     RSS from 1.66 GB to 852 MB at unchanged throughput. To force a
+    #     fixed heap, set JCLAW_JVM_HEAP=2g — that pins -Xms == -Xmx == 2g.
+    #     To split them independently, use JCLAW_JVM_XMS / JCLAW_JVM_XMX.
     #   - SoftMaxHeapSize 1g: ZGC's soft target, which ergonomics pin to -Xmx
     #     when -Xmx is explicit — leaving no cushion, so the collector only
     #     reacts near the ceiling and the heap ran to 92% under a c=50 x 20-turn
@@ -3023,10 +3039,10 @@ do_start_prod() {
     # Resolution order (highest priority first):
     #   1. JCLAW_JVM_XMS / JCLAW_JVM_XMX — explicit per-flag override.
     #   2. JCLAW_JVM_HEAP — symmetric override (sets both flags to same value).
-    #   3. Asymmetric default — Xms 512m, Xmx 2g.
+    #   3. Asymmetric default — Xms 128m, Xmx 2g.
     # The nested ${var:-${other:-default}} expansion encodes that order in one line.
     local heap="${JCLAW_JVM_HEAP:-}"
-    local xms="${JCLAW_JVM_XMS:-${heap:-512m}}"
+    local xms="${JCLAW_JVM_XMS:-${heap:-128m}}"
     local xmx="${JCLAW_JVM_XMX:-${heap:-2g}}"
     # Deliberately not derived from xmx: the soft target has to sit above the
     # live set, which scales with workload rather than with the ceiling, so a
@@ -3037,6 +3053,7 @@ do_start_prod() {
         "-Xmx${xmx}"
         "-XX:+UseZGC"
         "-XX:SoftMaxHeapSize=${softmax}"
+        "-XX:ZUncommitDelay=60"
         "-XX:+HeapDumpOnOutOfMemoryError"
         # Both file paths below are relative: do_start_prod cd's to $SCRIPT_DIR, so the JVM
         # inherits it. Absolute breaks Windows, where the bundle runs under Git Bash against a
@@ -3074,19 +3091,20 @@ do_start_prod() {
         echo "    HTTPS: disabled — run '$0 https' to enable HTTPS/h2/h3"
     fi
 
-    # Dist installs have no sources — pass -Dprecompiled=true so Play
-    # short-circuits the Java + template compile passes and loads
-    # precompiled/ verbatim. Per Play 1.x's deployment.textile § "Step 3
-    # — start in precompiled mode": "The system property forces prod mode
-    # and skips both the Java and template compile passes. If precompiled/
-    # is missing, the framework logs 'Precompiled classes are missing!!'
-    # and refuses to start." We keep --%prod alongside as defense-in-depth
-    # in case a future Play release decouples the implication.
-    local mode_label="prod"
-    if [[ ! -d app ]]; then
-        jvm_opts+=( "-Dprecompiled=true" )
-        mode_label="prod, precompiled"
-    fi
+    # -Dprecompiled=true so Play short-circuits the Java + template compile
+    # passes and loads precompiled/ verbatim. Per Play 1.x's
+    # deployment.textile § "Step 3 — start in precompiled mode": "The system
+    # property forces prod mode and skips both the Java and template compile
+    # passes. If precompiled/ is missing, the framework logs 'Precompiled
+    # classes are missing!!' and refuses to start." A dist install ships
+    # precompiled/; a developer clone refreshed it above when stale. Without
+    # it, every boot re-ran ECJ and Groovy inside the server: measured over
+    # five boots, 7.97 s to listening versus 3.56 s, and 35 MB more live heap
+    # left behind by the compilers. We keep --%prod alongside as
+    # defense-in-depth in case a future Play release decouples the
+    # implication.
+    jvm_opts+=( "-Dprecompiled=true" )
+    local mode_label="prod, precompiled"
 
     echo "==> Starting Play backend on port $BACKEND_PORT ($mode_label)..."
     if [[ "$xms" == "$xmx" ]]; then
