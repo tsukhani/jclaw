@@ -279,7 +279,7 @@ const summaryLine = computed(() => {
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-2.5 flex items-center justify-between gap-4">
         <div class="min-w-0">
-          <span class="text-sm font-medium text-fg-strong">JClaw {{ preflight?.currentVersion ?? '' }}</span>
+          <span class="text-sm font-medium text-fg-strong">JClaw Pro {{ preflight?.currentVersion ?? '' }}</span>
           <div class="text-xs text-fg-muted mt-0.5">
             {{ summaryLine }}
           </div>

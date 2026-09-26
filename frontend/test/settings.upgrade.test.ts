@@ -80,6 +80,13 @@ beforeEach(() => {
 })
 
 describe('SettingsUpgradePanel — availability', () => {
+  it('names the edition beside the installed version', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.text()).toContain('JClaw Pro 0.17.49')
+  })
+
   it('explains why a source checkout cannot upgrade, and offers no button', async () => {
     preflight = available({
       available: false,
