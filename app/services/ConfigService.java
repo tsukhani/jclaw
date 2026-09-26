@@ -397,7 +397,7 @@ public class ConfigService {
                 && (value == null || !PDF_STRATEGIES.contains(value.trim().toLowerCase(Locale.ROOT)))) {
             return key + " must be one of auto, no_ocr, ocr_only or ocr_and_text_extraction.";
         }
-        // A retention of 0 or less puts the cutoff at or after now, and the cleanup empties the log.
+        // No "off" for the event log: JCLAW-1269 kept this refusal, leaving 0 a separate decision.
         if (key.equals(EventLogCleanupJob.CONFIG_KEY) && !isIntAtLeast(value, 1)) {
             return key + " must be a whole number of days, at least 1.";
         }

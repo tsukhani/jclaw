@@ -165,4 +165,4 @@ Agent-behaviour datasets in `evals/suites/<id>.json` with deterministic pass cri
 - The Lucene index is derived from DB rows (re-backfilled on boot); a hard crash can lose at most one commit-interval (`jclaw.search.commitIntervalSeconds`, default 30s) of unsynced segments.
 - `ConversationQueue` state is in-process only — multi-instance deployment would need external coordination.
 - In-memory latency metrics reset on JVM restart — intentional; not a Prometheus backend.
-- Caffeine L2 cache is in-process — fine for the single-process Personal Edition; multi-pod would need a distributed JCache provider.
+- Caffeine L2 cache is in-process — fine for the single-process install; multi-pod would need a distributed JCache provider.

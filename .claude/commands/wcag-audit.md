@@ -27,11 +27,11 @@ Audit the JClaw Nuxt frontend (`frontend/`) for **WCAG 2.2 AA**, with particular
    ```
    Do all work in `../jclaw-wcag`. The `post-checkout` hook runs `init-worktree`, which seeds `certs/.env`; the backend port it pins is irrelevant here (this skill runs no `play autotest`) but leave it alone.
 
-2. **Install and prepare the frontend in the worktree.** `node_modules/` and `.nuxt/` are gitignored, so a fresh worktree has neither, and `pnpm test` / `pnpm typecheck` will **false-RED** on a missing `.nuxt/tsconfig.json` rather than on any real defect:
+2. **Install the frontend in the worktree.** `node_modules/` and `.nuxt/` are gitignored, so a fresh worktree has neither, and `pnpm test` / `pnpm typecheck` will **false-RED** on a missing `.nuxt/tsconfig.json` rather than on any real defect. `pnpm install` regenerates `.nuxt/` through the `postinstall` script (`nuxt prepare`):
    ```bash
-   cd ../jclaw-wcag/frontend && pnpm install && pnpm exec nuxi prepare
+   cd ../jclaw-wcag/frontend && pnpm install
    ```
-   Expect this to take a few minutes on first run. If you skip it, every gate in Phase 4 lies.
+   Expect this to take a few minutes on first run. If you skip it, every gate in Phase 4 lies. An explicit `pnpm exec nuxi prepare` is needed only if `.nuxt/` is deleted after the install.
 
 3. **Establish a green baseline** before auditing, so a later red is attributable to the fixes and not to something already broken:
    ```bash

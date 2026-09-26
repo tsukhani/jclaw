@@ -523,14 +523,14 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
                         + resp.headers.get("Content-Disposition").value());
     }
 
-    // --- WhatsApp bindings: PATH_BLOCKLIST names telegram and slack only ---
+    // --- WhatsApp bindings: the writes are OPERATOR_ONLY, the list is OPEN ---
 
     private static final String WHATSAPP_BINDINGS = "/api/channels/whatsapp/bindings";
 
     @Test
     void agentPrincipalCannotWriteAWhatsAppBinding() {
         // A binding decides which agent a WhatsApp presence answers as, and carries the Cloud
-        // API credentials — the same reason the telegram and slack paths are deny-floored.
+        // API credentials — the same reason the Telegram and Slack binding writes are OPERATOR_ONLY.
         var id = createAgent("operator-only-whatsapp");
 
         var create = asAgent(() -> POST(agentRequest(), WHATSAPP_BINDINGS, "application/json",

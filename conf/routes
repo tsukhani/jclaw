@@ -177,7 +177,7 @@ GET     /api/agents/{id}/tools                  ApiToolsController.listForAgent
 PUT     /api/agents/{id}/tools/{name}           ApiToolsController.updateForAgent
 PUT     /api/agents/{id}/tool-groups/{group}    ApiToolsController.updateGroupForAgent
 
-# Tool approvals (JCLAW-1062) — operator-only, @ChatHidden. No create route by design.
+# Tool approvals (JCLAW-1062) — operator-only (@AgentAccess OPERATOR_ONLY). No create route by design.
 GET     /api/tool-approvals/summary             ApiToolApprovalsController.summary
 GET     /api/agents/{id}/tool-approvals         ApiToolApprovalsController.listForAgent
 DELETE  /api/agents/{id}/tool-approvals/{toolName}  ApiToolApprovalsController.revokeForAgent

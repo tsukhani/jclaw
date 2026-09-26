@@ -9,10 +9,9 @@ import java.lang.reflect.Method;
 /**
  * Enforces {@link AgentAccess} at the request layer (JCLAW-1270).
  *
- * <p>Called from {@link AuthCheck#checkAuthentication} and {@link LoadtestAuthCheck}, which
- * between them stand in front of every routed {@code /api} action except the deliberately public
- * {@code GET /api/status}. {@code AgentAccessConformanceTest} fails the build if a route escapes
- * both, so the coverage is checked rather than assumed.
+ * <p>Called from {@link AuthCheck#checkAuthentication}, {@link LoadtestAuthCheck} and
+ * {@link ApiDatabaseController}'s loopback-secret branch, which skips {@code AuthCheck}. A route
+ * behind none of them, such as {@code GET /api/status} or a webhook, never reaches this gate.
  *
  * <p>Play resolves the action and assigns {@code Http.Request.invokedMethod} before it runs any
  * {@code @Before}, so the interceptor reads the annotation off the method that is about to run

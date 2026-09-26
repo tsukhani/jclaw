@@ -749,9 +749,9 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
 
 // ── Release bundle: no Playwright driver-bundle ────────────────────────────────
 // driver-bundle is Node.js for all five Playwright platforms (~194 MB, near half the bundle).
-// A bundle install downloads its one platform's official Node on first browser use
-// (services.browser.PlaywrightNode), and the Docker image extracts its own from the Gradle
-// cache, so the zip needs none. Dev, tests and `play run` keep the jar on the classpath.
+// A bundle install, and the Docker image built from the bundle, downloads its one platform's
+// official Node on first browser use (services.browser.PlaywrightNode), so the zip needs none.
+// Dev, tests and `play run` keep the jar on the classpath.
 abstract class DropZipEntries : DefaultTask() {
     // Rewritten in place, so neither an input nor an output to Gradle's up-to-date check.
     @get:Internal abstract val archive: RegularFileProperty
@@ -765,8 +765,7 @@ abstract class DropZipEntries : DefaultTask() {
             val matches = Files.walk(fs.getPath("/")).use { paths ->
                 paths.filter { pattern.matches(it.toString()) }.toList()
             }
-            // Loud rather than silent: a renamed or removed jar means this step and the Dockerfile's
-            // extraction are both stale.
+            // Loud rather than silent: a renamed or removed jar means this step is stale.
             require(matches.isNotEmpty()) { "no entry in ${zip.fileName} matches ${entryPattern.get()}" }
             matches.forEach { Files.delete(it) }
         }

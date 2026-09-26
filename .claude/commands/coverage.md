@@ -28,7 +28,7 @@ Reject anything else with a clear message; do not guess. Never *lower* an alread
    play precompile
    java -jar bin/jacococli.jar report jacoco.exec --classfiles precompiled/java --sourcefiles app --xml jacoco.xml
    ```
-5. Run the frontend suite with coverage: `cd frontend && pnpm test --coverage` (exactly that form — `pnpm test -- --coverage` makes vitest treat the flag as a test-file pattern). This produces `frontend/coverage/lcov.info`.
+5. Run the frontend suite with coverage: `cd frontend && pnpm test --coverage` (exactly that form — `pnpm test -- --coverage` runs the suite with no coverage). This produces `frontend/coverage/lcov.info`.
 6. Compute the blended number and the gap ranking:
    ```bash
    node bin/coverage-blend.mjs --top=30

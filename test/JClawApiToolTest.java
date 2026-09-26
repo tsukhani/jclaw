@@ -8,18 +8,18 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 
 /**
- * Unit coverage for {@link JClawApiTool}'s argument parsing, deny-floor, and the
- * blacklist discover/call gate.
+ * Unit coverage for {@link JClawApiTool}'s argument parsing, its refusal of unnormalized
+ * paths, and the discover/call gate.
  *
  * <p>Skips the live-HTTP round trip -- bearer-auth + controller dispatch is
  * exercised by the FunctionalTest suite. What only this layer verifies is that
- * the deny layers and arg validation refuse bad inputs before any socket opens.
+ * the gate and arg validation refuse bad inputs before any socket opens.
  *
- * <p>Blacklist model: {@code jclaw_api} discovers/invokes <em>every</em>
- * {@code /api/} route that resolves to a controller action by default, minus the
- * {@code PATH_BLOCKLIST} deny-floor and minus {@code @ChatHidden} actions. These
- * tests run the real route-table scan (UnitTest boots Play, so {@code Router.routes}
- * is populated and controllers carry their runtime annotations).
+ * <p>Gate model: {@code jclaw_api} discovers and invokes only the {@code /api/} routes whose
+ * action declares {@link controllers.AgentAccess} {@code OPEN} or {@code OWN_ONLY}; an
+ * {@code OPERATOR_ONLY} or undeclared action is refused. These tests run the real route-table
+ * scan (UnitTest boots Play, so {@code Router.routes} is populated and controllers carry their
+ * runtime annotations).
  */
 class JClawApiToolTest extends UnitTest {
 
@@ -71,7 +71,7 @@ class JClawApiToolTest extends UnitTest {
                 "got: " + result);
     }
 
-    // ==================== deny-floor (security) ====================
+    // ==================== operator-only routes (security) ====================
 
     @Test
     void blocksChatSendPath() {
@@ -115,7 +115,7 @@ class JClawApiToolTest extends UnitTest {
     void blocksBindingsPath() {
         var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/bindings\"}", null);
         assertTrue(result.contains("/api/bindings"),
-                "bindings (comms routing) must be deny-floored; got: " + result);
+                "bindings (comms routing) must be refused; got: " + result);
     }
 
     @Test
@@ -130,34 +130,34 @@ class JClawApiToolTest extends UnitTest {
     void blocksTailscalePath() {
         var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/tailscale\"}", null);
         assertTrue(result.contains("/api/tailscale"),
-                "tailscale (infra config) must be deny-floored; got: " + result);
+                "tailscale (infra config) must be refused; got: " + result);
     }
 
     @Test
     void blocksLogsPath() {
         var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/logs\"}", null);
         assertTrue(result.contains("/api/logs"),
-                "logs (secret leak) must be deny-floored; got: " + result);
+                "logs (secret leak) must be refused; got: " + result);
     }
 
     @Test
     void blocksLoadtestPath() {
         var result = tool.execute("{\"method\":\"POST\",\"path\":\"/api/metrics/loadtest\"}", null);
         assertTrue(result.contains("/api/metrics/loadtest"),
-                "load-test harness (resource abuse) must be deny-floored; got: " + result);
+                "load-test harness (resource abuse) must be refused; got: " + result);
     }
 
     // ==================== path normalisation (JCLAW-1227) ====================
 
     /**
-     * The traversal the audit found. {@code GET /api/skills/{name}/files/{<.+>filePath}} is a
-     * wildcard route with no {@code @ChatHidden}, so its pattern swallows the {@code ../} and
-     * both gate layers passed the raw string — while OkHttp resolved it to {@code /api/logs}
-     * while parsing, which is the path that actually left. Verified against the shipped
-     * okhttp-jvm-5.5.0: {@code HttpUrl.parse(base + that).encodedPath()} is {@code /api/logs}.
+     * The traversal the audit found. {@code GET /api/skills/{name}/files/{<.+>filePath}} is an
+     * {@code OPEN} wildcard route, so its pattern swallows the {@code ../} and a gate reading the
+     * raw string passes it — while OkHttp resolves it to {@code /api/logs} while parsing, which is
+     * the path that actually leaves. Verified against the shipped okhttp-jvm-5.5.0:
+     * {@code HttpUrl.parse(base + that).encodedPath()} is {@code /api/logs}.
      */
     @Test
-    void aDotSegmentCannotWalkOutOfAWildcardRouteIntoTheDenyFloor() {
+    void aDotSegmentCannotWalkOutOfAWildcardRouteIntoAnOperatorOnlyRoute() {
         var result = tool.execute(
                 "{\"method\":\"GET\",\"path\":\"/api/skills/x/files/../../../logs\"}", null);
         assertTrue(result.startsWith("Error:"), "the traversal must be refused; got: " + result);
@@ -207,43 +207,42 @@ class JClawApiToolTest extends UnitTest {
                 "the query string is not part of the path; got: " + result);
     }
 
-    // ==================== blacklist call gate ====================
+    // ==================== call gate ====================
 
     @Test
-    void callAllowsUnannotatedEndpoint() {
-        // /api/status is a real route carrying no annotation. Under the blacklist
-        // it is callable by default -- execute proceeds past the gate to the HTTP
+    void callAllowsAnOpenEndpoint() {
+        // /api/status declares OPEN, so execute proceeds past the gate to the HTTP
         // call (which then errors at the socket in the unit JVM).
         var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/status\"}", null);
         assertFalse(result.contains("is not callable"),
-                "unannotated /api/status must be callable under the blacklist; got: " + result);
+                "OPEN /api/status must be callable; got: " + result);
         assertFalse(result.contains("reserved and cannot be invoked"),
-                "/api/status is not deny-floored; got: " + result);
+                "/api/status must pass the gate; got: " + result);
     }
 
     @Test
-    void callRejectsChatHiddenEndpoint() {
-        // DELETE /api/conversations (bulk wipe) is @ChatHidden -- refused even
-        // though /api/conversations is not deny-floored.
+    void callRejectsAnOperatorOnlyEndpoint() {
+        // DELETE /api/conversations (bulk wipe) is OPERATOR_ONLY -- refused even
+        // though GET /api/conversations is callable.
         var result = tool.execute("{\"method\":\"DELETE\",\"path\":\"/api/conversations\"}", null);
         assertTrue(result.contains("is not callable"),
-                "@ChatHidden endpoint must be refused; got: " + result);
+                "OPERATOR_ONLY endpoint must be refused; got: " + result);
     }
 
     @Test
-    void isCallableAllowsUnannotatedRoutes() {
+    void isCallableAllowsOpenRoutes() {
         assertTrue(JClawApiTool.isCallable("GET", "/api/status"),
-                "unannotated GET /api/status is callable under the blacklist");
-        // JCLAW-1253 annotated every mutating route, so the ones that stay callable now say so
-        // with @AgentCallable rather than by carrying nothing.
+                "OPEN GET /api/status is callable");
+        // Every route declares a level, so a callable mutating route says so with OPEN or
+        // OWN_ONLY rather than by carrying nothing.
         assertTrue(JClawApiTool.isCallable("DELETE", "/api/tasks/5"),
-                "@AgentCallable DELETE task is callable -- task_manager is the scoped agent path");
+                "OPEN DELETE task is callable -- it removes a task the agent can equally create");
         assertTrue(JClawApiTool.isCallable("POST", "/api/providers/refresh-prices"),
-                "@AgentCallable refresh-prices is callable -- /api/providers is open by design");
+                "OPEN refresh-prices is callable -- /api/providers is open by design");
         assertTrue(JClawApiTool.isCallable("GET", "/api/providers/openrouter/models"),
                 "concrete path resolves against the route pattern");
-        // JCLAW-1020: the read-only halves of the two hidden system actions share their
-        // paths, so hiding by verb is what keeps "what version am I on?" answerable.
+        // JCLAW-1020: the read-only halves of the two operator-only system actions share their
+        // paths, so gating by verb is what keeps "what version am I on?" answerable.
         assertTrue(JClawApiTool.isCallable("GET", "/api/system/upgrade"),
                 "the upgrade preflight is read-only and stays callable");
         assertTrue(JClawApiTool.isCallable("GET", "/api/system/restart"),
@@ -251,41 +250,41 @@ class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    void isCallableRefusesHiddenDenyFlooredAndUnknown() {
+    void isCallableRefusesOperatorOnlyAndUnknown() {
         assertFalse(JClawApiTool.isCallable("DELETE", "/api/conversations"),
-                "deleteConversations is @ChatHidden");
+                "deleteConversations is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("PUT", "/api/channels/web"),
-                "channels save is @ChatHidden");
+                "channels save is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("GET", "/api/tailscale"),
-                "tailscale is deny-floored");
+                "tailscale is OPERATOR_ONLY");
         // JCLAW-941: memory is cross-agent personal data — /api/memories is the operator's
         // admin view over every agent's corpus, so an agent reaching it could read, edit or
         // delete another agent's memories. The scoped `memory` tool is the agent path.
         assertFalse(JClawApiTool.isCallable("GET", "/api/memories"),
-                "listing memories across agents is deny-floored");
+                "listing memories across agents is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("DELETE", "/api/memories/7"),
-                "deleting a memory is deny-floored");
+                "deleting a memory is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("POST", "/api/memories/recall"),
-                "recall for an arbitrary agentId is deny-floored");
+                "recall for an arbitrary agentId is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("GET", "/api/logs"),
-                "logs is deny-floored");
+                "logs is OPERATOR_ONLY");
         // JCLAW-1020: the semver gate stopped the download leaving the pinned repo, but a
         // legitimate older release is still an attacker's goal — v0.17.77 predates this
         // sprint's fixes, so an agent that could reinstall it would reopen them and then
         // walk back through. Restart is the availability twin.
         assertFalse(JClawApiTool.isCallable("POST", "/api/system/upgrade"),
-                "upgrade replaces the install and restarts -- @ChatHidden");
+                "upgrade replaces the install and restarts -- OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("POST", "/api/system/restart"),
-                "restart stops the instance -- @ChatHidden");
+                "restart stops the instance -- OPERATOR_ONLY");
         // JCLAW-1022: the config table holds the instance's own security controls -- the shell
         // allowlist, the approval policy, the funnel switch -- so a caller able to write it
         // widens every other gate rather than defeating one. Reads stay callable and masked.
         assertFalse(JClawApiTool.isCallable("POST", "/api/config"),
-                "writing config is @ChatHidden");
+                "writing config is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("DELETE", "/api/config/shell.allowlist"),
-                "deleting a config row is @ChatHidden");
+                "deleting a config row is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("GET", "/api/no-such-endpoint-xyz"),
-                "nonexistent path matches only the @ChatHidden catch-all -> refused");
+                "nonexistent path matches only the OPERATOR_ONLY 404 catch-all -> refused");
     }
 
     @Test
@@ -302,29 +301,28 @@ class JClawApiToolTest extends UnitTest {
         assertTrue(out.contains("/api/agents"), "agents endpoint missing: " + out);
         assertTrue(out.toLowerCase().contains("list agents"), "@Operation summary missing: " + out);
         assertTrue(out.contains("/api/mcp-servers"), "mcp-servers endpoint missing: " + out);
-        // Body hint mined from the Swagger @RequestBody record. Read off AgentRequest since
-        // JCLAW-1022 hid config-save, which this previously sampled -- a @ChatHidden endpoint
-        // contributes no hint because it is not in the catalog at all.
+        // Body hint mined from the Swagger @RequestBody record, read off AgentRequest: an
+        // OPERATOR_ONLY endpoint such as config-save contributes no hint because it is not in
+        // the catalog at all.
         assertTrue(out.contains("name, modelProvider"),
                 "agent-write body hint from @RequestBody record missing: " + out);
     }
 
     @Test
-    void discoverIncludesPreviouslyHiddenEndpoints() {
-        // The blacklist inversion: routes that were never @ChatSafe now appear too.
+    void discoverIncludesOpenEndpoints() {
         var out = tool.execute("{\"action\":\"discover\"}", null);
-        assertTrue(out.contains("/api/status"), "/api/status must now be discovered: " + out);
-        assertTrue(out.contains("/api/tasks"), "/api/tasks must now be discovered: " + out);
+        assertTrue(out.contains("/api/status"), "OPEN /api/status must be discovered: " + out);
+        assertTrue(out.contains("/api/tasks"), "OPEN /api/tasks must be discovered: " + out);
     }
 
     @Test
-    void discoverExcludesDenyFlooredAndCatchAll() {
+    void discoverExcludesOperatorOnlyAndCatchAll() {
         var out = tool.execute("{\"action\":\"discover\"}", null);
-        assertFalse(out.contains("/api/chat"), "deny-floored /api/chat leaked: " + out);
-        assertFalse(out.contains("/api/auth"), "deny-floored /api/auth leaked: " + out);
-        assertFalse(out.contains("/api/tailscale"), "deny-floored /api/tailscale leaked: " + out);
-        assertFalse(out.contains("/api/logs"), "deny-floored /api/logs leaked: " + out);
-        assertFalse(out.contains("ANY /api/"), "404 catch-all (@ChatHidden) leaked into discover: " + out);
+        assertFalse(out.contains("/api/chat"), "operator-only /api/chat leaked: " + out);
+        assertFalse(out.contains("/api/auth"), "operator-only /api/auth leaked: " + out);
+        assertFalse(out.contains("/api/tailscale"), "operator-only /api/tailscale leaked: " + out);
+        assertFalse(out.contains("/api/logs"), "operator-only /api/logs leaked: " + out);
+        assertFalse(out.contains("ANY /api/"), "404 catch-all (OPERATOR_ONLY) leaked into discover: " + out);
     }
 
     @Test
@@ -385,22 +383,14 @@ class JClawApiToolTest extends UnitTest {
     /**
      * The exact set of endpoints {@code jclaw_api} advertises and will invoke.
      *
-     * <p>JCLAW-1036: the tool is deliberately <em>default-allow</em> — a new {@code /api/}
-     * route is reachable with no annotation, which is what makes it worth giving an operator's
-     * agent at all. Inverting that was considered and rejected: an allow-list would make every
-     * endpoint added from here invisible until someone remembered to mark it, and the tool would
-     * decay silently as the API grew.
-     *
-     * <p>What default-allow lacks is any moment where somebody has to decide. Four
-     * privilege-bearing routes were found by hand after the fact (JCLAW-1023 gated three, the
-     * workspace write was the fourth), each reachable simply because nothing asked. This pin is
-     * that moment: adding a route fails this test until its author either lists it here or marks
-     * it {@link controllers.ChatHidden}. The runtime default stays permissive; the decision moves
-     * to review time.
+     * <p>Every routed {@code /api} action declares {@link controllers.AgentAccess}, and one that
+     * declares nothing is {@code OPERATOR_ONLY}; the tool advertises and calls only the
+     * {@code OPEN} and {@code OWN_ONLY} routes (JCLAW-1270). This pin makes widening that surface
+     * a visible diff: a route that becomes agent-reachable fails this test until its author lists
+     * it here.
      *
      * <p>So a diff to this list is not a chore — it is the review. Adding a line says "an agent
-     * may drive this"; if that is wrong, the fix is {@code @ChatHidden} on the action, or the
-     * deny-floor in {@link JClawApiTool} for a whole subsystem.
+     * may drive this"; if that is wrong, the fix is {@code OPERATOR_ONLY} on the action.
      */
     @Test
     void theCallableApiSurfaceIsExactlyTheseRoutes() {

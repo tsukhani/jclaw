@@ -241,9 +241,8 @@ pipeline {
                             // so frontend/coverage/lcov.info exists by the
                             // time the Sonar stage runs and can be picked up
                             // via sonar.javascript.lcov.reportPaths. No `--`
-                            // separator — pnpm interprets that as end-of-flags
-                            // and vitest then sees `--coverage` as a test-file
-                            // pattern, not a coverage flag.
+                            // separator: `pnpm test -- --coverage` runs the
+                            // suite with no coverage.
                             sh 'pnpm test --coverage'
                         }
                     }

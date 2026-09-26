@@ -401,7 +401,7 @@ class CapabilityRulesTest extends UnitTest {
      * grounds that a leaky GET is a masking problem; that left 91 reads answering to no rule at
      * all, including the conversation history of every other agent.
      *
-     * <p>Not frozen: all 249 routes are adjudicated, so the rule lands green and a new route with
+     * <p>Not frozen: every route is adjudicated, so the rule lands green and a new route with
      * no level fails immediately. The floor is on the route count rather than on matched files,
      * because a routes file that stopped parsing would otherwise adjudicate nothing and pass.
      */

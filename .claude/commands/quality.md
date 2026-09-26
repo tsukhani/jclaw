@@ -112,6 +112,7 @@ Goal: remove code **definitely** not in use. The standard is *proof of non-use*,
    - **Not** loaded reflectively: `Class.forName`, `ServiceLoader`/`META-INF/services`, the `services.compression` SPI, tool/channel/harness registries (a tool wired into a registry map *looks* unreferenced but is dispatched by name).
    - **Not** a serialization/JSON/DTO field a serializer reads reflectively (Gson/Jackson), nor an entity column mapped by JPA.
    - **Not** consumed only by the frontend over an HTTP endpoint.
+   - **Not** marked as a deliberate keep: a retention Javadoc, `@SuppressWarnings("unused")` or a reflection test. The one exception is an applied `renameKeyIfPresent` call site in `DefaultConfigJob` — drop the call, keep the helper.
    If a symbol is reachable by any of these, it is **not** dead — leave it. If evidence is merely *thin* (can't find a caller but can't rule out reflection), classify it **"possibly dead — needs human confirmation"** and report it; do not remove it.
 11. **Present the candidate list** (symbol, file:line, the non-use evidence) and get a quick confirmation before deleting anything. Then remove the confirmed-dead code, plus only the orphans your own deletion creates.
 12. Verify: `./gradlew spotlessApply`, `./gradlew compileJava compileTestJava`, then `play autotest`. A compile error or a newly-red test means the code wasn't dead — restore it and reclassify. Commit:

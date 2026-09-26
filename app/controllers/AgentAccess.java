@@ -16,9 +16,10 @@ import java.lang.annotation.Target;
  *
  * <p><b>The absence of this annotation means {@link Level#OPERATOR_ONLY}.</b> The old gate was
  * default-allow, so a route was agent-reachable until someone remembered to hide it, and every
- * missed route failed open. {@code AgentAccessConformanceTest} still requires an explicit
- * annotation on every routed action, so the default is a backstop rather than a license to omit
- * one.
+ * missed route failed open.
+ * {@code CapabilityRulesTest.everyRoutedApiActionDeclaresAnAgentAccessLevel} still requires an
+ * explicit annotation on every routed action, so the default is a backstop rather than a license
+ * to omit one.
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)

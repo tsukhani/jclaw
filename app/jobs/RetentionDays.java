@@ -32,7 +32,9 @@ public final class RetentionDays {
      * Retention window from a raw config value: absent or blank → {@code defaultDays};
      * non-numeric or above {@code maxDays} → {@code defaultDays} plus a warn; zero or
      * less → {@link #DISABLED}, because any cutoff at or after now deletes the whole
-     * table and 0 is the operator-facing "off" switch on all three keys.
+     * table. Only {@code tasks.retentionDays} offers 0 as "off" in Settings;
+     * {@code ConfigService} refuses {@code logs.retentionDays} below 1, and the latency
+     * key has no write check.
      *
      * <p>Takes the raw value rather than reading config so the fallbacks are testable
      * without writing the shared config table.

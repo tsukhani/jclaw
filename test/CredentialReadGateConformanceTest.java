@@ -27,8 +27,8 @@ import java.util.stream.Stream;
  *
  * <p><b>Why a source scan rather than an ArchUnit rule.</b> A render goes through
  * {@code gson.toJson} on an arbitrary object graph, so no bytecode rule can follow a field to the
- * response without dataflow ArchUnit does not do. The hook used instead already exists: 79 of the
- * 113 {@code GET /api} routes declare their response type in the Swagger
+ * response without dataflow ArchUnit does not do. The hook used instead already exists: most
+ * {@code GET /api} routes declare their response type in the Swagger
  * {@code @ApiResponse(... implementation = X.class)}. That declaration is the render contract, so
  * the check reads it rather than inferring it.
  *
@@ -163,8 +163,9 @@ class CredentialReadGateConformanceTest extends UnitTest {
     }
 
     /**
-     * {@code ApiProvidersController.discoverModels} carries an {@link controllers.AgentCallable} whose
-     * reason names SsrfGuard as one of the two seams keeping that route safely open. Nothing
+     * {@code ApiProvidersController.discoverModels} carries an {@code OPEN}
+     * {@link controllers.AgentAccess} whose reason names SsrfGuard as one of the two seams keeping
+     * that route safely open. Nothing
      * verified it, so the annotation asserted a property the build did not check — and an
      * annotation trusted for a guarantee it does not carry is worse than no annotation
      * (JCLAW-1268).
@@ -184,7 +185,7 @@ class CredentialReadGateConformanceTest extends UnitTest {
         var at = controller.indexOf("public static void discoverModels(");
         assertTrue(at > 0, "ApiProvidersController.discoverModels not found — this check is stale");
         assertTrue(controller.substring(Math.max(0, at - 700), at).contains("SsrfGuard"),
-                "the @AgentCallable reason on discoverModels no longer names SsrfGuard; either it stopped "
+                "the @AgentAccess reason on discoverModels no longer names SsrfGuard; either it stopped "
                         + "claiming the seam, or this check is pinned to the wrong action");
 
         var body = controller.substring(at, Math.min(controller.length(), at + 1200));
