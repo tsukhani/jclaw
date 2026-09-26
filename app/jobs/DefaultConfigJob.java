@@ -15,6 +15,7 @@ import services.InternalApiTokenService;
 import services.SkillPromotionService;
 import services.Tx;
 import services.UvProbe;
+import services.decision.DecisionSettings;
 import services.scanners.ScannerRegistry;
 import services.transcription.AsrModel;
 import services.transcription.FfmpegProbe;
@@ -269,14 +270,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent(ToolResultVerifier.CFG_SKIP_TOOLS, "");
         seedIfAbsent("chat.maxContextMessages", "50");
 
-        // Ollama keep_alive (how long the model + KV cache stays resident) moved from a
-        // global key to per-provider `provider.<name>.keepAlive`, since residency belongs
-        // to the daemon behind a provider rather than to "Ollama" as a whole. Carry the
-        // operator's old value onto ollama-local — the only provider where the setting
-        // does anything (cloud residency is server-side). Not seeded: the 5m default lives
-        // in OllamaProvider.applyCacheDirectives and the Settings row renders that
-        // fallback, so an unset key is the correct resting state.
-        renameKeyIfPresent("ollama.keepAlive", "provider.ollama-local.keepAlive");
+        renameMovedKeys();
 
         // JCLAW-172: playwright.enabled / playwright.headless / shell.enabled are gone (always headless,
         // both tools register unconditionally, per-agent enable via the Tools page); the shell knobs below stay.
@@ -469,6 +463,20 @@ public class DefaultConfigJob extends Job<Void> {
         } catch (IOException e) {
             Logger.warn("Failed to bootstrap skill-creator for main: %s", e.getMessage());
         }
+    }
+
+    private void renameMovedKeys() {
+        // Ollama keep_alive (how long the model + KV cache stays resident) moved from a
+        // global key to per-provider `provider.<name>.keepAlive`, since residency belongs
+        // to the daemon behind a provider rather than to "Ollama" as a whole. Carry the
+        // operator's old value onto ollama-local — the only provider where the setting
+        // does anything (cloud residency is server-side). Not seeded: the 5m default lives
+        // in OllamaProvider.applyCacheDirectives and the Settings row renders that
+        // fallback, so an unset key is the correct resting state.
+        renameKeyIfPresent("ollama.keepAlive", "provider.ollama-local.keepAlive");
+
+        // JCLAW-1302: the TypeSafe key moved to Decision Providers; neither consumer needs it re-entered.
+        renameKeyIfPresent(DecisionSettings.LEGACY_API_KEY, DecisionSettings.API_KEY);
     }
 
     private void seedIfAbsent(String key, String value) {

@@ -1,17 +1,15 @@
 <script setup lang="ts">
 // Browser settings panel (JCLAW-1274). Picks the engine behind the browser tool for every
 // agent: Playwright, where the agent's own model writes selectors and scripts, or TypeSafe's
-// Jev, which takes a URL and a goal and chooses each step itself. Both keys are ordinary
-// /api/config rows and neither is seeded, so an absent engine is Playwright. The key shows whatever
-// the engine, because the Model Router's JEV classifier uses it too (JCLAW-1300).
-import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+// Jev, which takes a URL and a goal and chooses each step itself. The engine is an ordinary
+// /api/config row and is not seeded, so an absent engine is Playwright. The TypeSafe key lives in
+// Decision Providers, because the Model Router's JEV classifier uses it too (JCLAW-1302).
 import type { BrowserSetupStatus } from '~/composables/useBrowserSetup'
 import { DRIVER_LABELS, browserSetupNeeded, chromiumLabel } from '~/utils/browser-setup'
 
-const { configData, saving, refresh, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
+const { configData, saving, refresh } = useSettingsConfig()
 
 const ENGINE_KEY = 'browser.engine'
-const API_KEY = 'browser.jev.apiKey'
 
 const engine = computed(() =>
   configData.value?.entries?.find(e => e.key === ENGINE_KEY)?.value || 'playwright',
@@ -32,15 +30,11 @@ async function setEngine(value: string) {
   saving.value = false
 }
 
-// The stored key comes back masked, so the editor starts blank rather than saving the mask back.
 const keyConfigured = computed(() => {
-  const v = configData.value?.entries?.find(e => e.key === API_KEY)?.value
+  const v = configData.value?.entries?.find(e => e.key === 'decision.jev.apiKey')?.value
   return !!v && v.trim().length > 0
 })
-function startEditKey() {
-  editingKey.value = API_KEY
-  editValue.value = ''
-}
+
 // The browser tool's driver (Node.js) and Chromium. A bundle install downloads them on the first
 // browser call; downloading here spares that call the wait. Polls only while a setup runs.
 const { status: setup, start: pollSetup } = useBrowserSetupPolling()
@@ -54,12 +48,6 @@ async function downloadNow() {
     setup.value = s
     pollSetup()
   }
-}
-
-// Saving the editor untouched would store a blank key over the real one, so it cancels instead.
-function saveKey() {
-  if (!editValue.value.trim()) editingKey.value = null
-  else updateEntry(API_KEY)
 }
 </script>
 
@@ -128,73 +116,16 @@ function saveKey() {
       </p>
     </div>
 
-    <div class="bg-surface-elevated border border-border">
-      <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
-        <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">TypeSafe API key</span>
-        <template v-if="editingKey === API_KEY">
-          <input
-            v-model="editValue"
-            type="password"
-            autocomplete="new-password"
-            aria-label="TypeSafe API key"
-            placeholder="Your TypeSafe API key"
-            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-          >
-          <button
-            class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-            title="Save"
-            :disabled="saving"
-            @click="saveKey()"
-          >
-            <CheckIcon
-              class="w-3.5 h-3.5"
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-            title="Cancel"
-            @click="editingKey = null"
-          >
-            <XMarkIcon
-              class="w-3.5 h-3.5"
-              aria-hidden="true"
-            />
-          </button>
-        </template>
-        <template v-else>
-          <span
-            class="flex-1 text-sm text-fg-primary font-mono truncate"
-            data-testid="browser-jev-key"
-          >{{ keyConfigured ? '••••••••' : '(not set)' }}</span>
-          <button
-            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-            :title="keyConfigured ? 'Change key' : 'Set key'"
-            aria-label="Edit TypeSafe API key"
-            @click="startEditKey()"
-          >
-            <PencilIcon
-              class="w-3.5 h-3.5"
-              aria-hidden="true"
-            />
-          </button>
-        </template>
-      </div>
-      <p
-        class="px-4 pb-2.5 text-xs text-fg-muted"
-        data-testid="browser-jev-key-use"
-      >
-        Used by the Jev engine and by the Model Router's JEV classifier.
-        <template v-if="!keyConfigured && chosenEngine === 'jev'">
-          Until a key is set, agents keep the Playwright actions.
-        </template>
-      </p>
-      <ApiErrorAlert
-        v-if="editingKey === API_KEY"
-        :error="editError"
-        class="px-4 pb-2.5"
-      />
-    </div>
+    <p
+      v-if="chosenEngine === 'jev' && !keyConfigured"
+      class="text-xs text-fg-muted"
+      data-testid="browser-jev-key-hint"
+    >
+      Jev needs a TypeSafe API key, set in <NuxtLink
+        to="/settings?section=decision-providers"
+        class="text-fg-strong underline"
+      >Settings → Decision Providers</NuxtLink>. Until one is set, agents keep the Playwright actions.
+    </p>
 
     <section
       class="space-y-2"

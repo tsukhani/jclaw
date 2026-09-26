@@ -102,6 +102,20 @@ describe('BreakerStatusSection', () => {
     expect(home('mcp:files').attributes('href')).toBe('/mcp-servers')
   })
 
+  it('lists a decision provider\'s breaker after the servers, linked to Decision Providers (JCLAW-1302)', async () => {
+    registerEndpoint('/api/breakers', () => [
+      breaker({ name: 'decision:jev', subsystem: 'decision', target: 'jev', state: 'OPEN', reason: 'CONSECUTIVE_FAILURES' }),
+      breaker({ name: 'mcp:files', subsystem: 'mcp', target: 'files', state: 'OPEN', reason: 'FAILURE_RATE' }),
+    ])
+    const wrapper = await mountSuspended(BreakerStatusSection)
+    await flushPromises()
+
+    expect(wrapper.findAll('section').map(g => g.find('h3').text())).toEqual(['MCP servers', 'Decision providers'])
+    const home = wrapper.find('[data-testid="breaker-row-decision:jev"] [data-testid="breaker-home"]')
+    expect(home.attributes('href')).toBe('/settings?section=decision-providers')
+    expect(home.text()).toBe('jev')
+  })
+
   it('reports an operator isolation as a decision, not as a provider fault', async () => {
     registerEndpoint('/api/breakers', () => [
       breaker({ state: 'OPEN', samples: 0, failures: 0, reason: 'MANUAL_TRIP', manual: true }),

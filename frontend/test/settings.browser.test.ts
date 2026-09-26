@@ -8,9 +8,8 @@ import { sectionGroups } from '~/components/settings/sections'
 
 /**
  * The Browser settings panel (JCLAW-1274): the engine radios, the TypeSafe warning that only Jev
- * shows, the key field shown whatever the engine because the router's JEV classifier uses it too
- * (JCLAW-1300), and that every write is an ordinary /api/config row — switching back to
- * Playwright keeps the stored key rather than deleting it.
+ * shows, and that the engine is an ordinary /api/config row. The TypeSafe key lives in Decision
+ * Providers since JCLAW-1302, so this panel only points there while Jev has no key.
  */
 
 let stored: Map<string, string>
@@ -29,7 +28,7 @@ function setupStatus(o: Record<string, unknown> = {}) {
   }
 }
 
-function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } = {}) {
+function baseEndpoints(opts: { failSaves?: boolean } = {}) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
@@ -45,7 +44,6 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } 
     handler: async (event) => {
       const body = await readBody(event) as { key: string, value: string }
       posted.push(body)
-      if (opts.holdSaves) await opts.holdSaves
       if (opts.failSaves) {
         setResponseStatus(event, 502)
         return '<html><body>Bad Gateway</body></html>'
@@ -63,10 +61,10 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } 
       return setupStatus({ active: true, driverSource: 'missing', chromiumInstalled: false })
     },
   })
-  registerEndpoint('/api/config/browser.jev.apiKey', {
+  registerEndpoint('/api/config/decision.jev.apiKey', {
     method: 'DELETE',
     handler: () => {
-      deleted.push('browser.jev.apiKey')
+      deleted.push('decision.jev.apiKey')
       return { status: 'ok' }
     },
   })
@@ -102,21 +100,18 @@ describe('Settings page — Browser', () => {
     expect(ids.indexOf('browser')).toBe(ids.indexOf('web-scraping') + 1)
   })
 
-  it('defaults to Playwright, with no warning but the key field the router also uses', async () => {
+  it('defaults to Playwright, with no warning, no key field and no pointer to one', async () => {
     baseEndpoints()
     const component = await mountBrowser()
 
     expect(component.html()).toMatch(/<h2[^>]*>\s*Browser\s*</)
     expect(checked(component, '#browser-engine-playwright')).toBe(true)
     expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
-    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('(not set)')
-    const use = component.find('[data-testid="browser-jev-key-use"]').text()
-    expect(use).toContain('Jev engine')
-    expect(use).toContain('JEV classifier')
-    expect(use).not.toContain('Until a key is set')
+    expect(component.find('button[aria-label="Edit TypeSafe API key"]').exists()).toBe(false)
+    expect(component.find('[data-testid="browser-jev-key-hint"]').exists()).toBe(false)
   })
 
-  it('selecting Jev saves the engine and reveals the warning and an unset key', async () => {
+  it('selecting Jev saves the engine, reveals the warning and points to Decision Providers for the key', async () => {
     baseEndpoints()
     const component = await mountBrowser()
 
@@ -131,44 +126,34 @@ describe('Settings page — Browser', () => {
     expect(warning.text()).toContain('not hidden password fields')
     expect(warning.text()).toContain('text typed earlier in the run')
     expect(warning.text()).toContain('record or retain')
-    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('(not set)')
-    expect(component.find('[data-testid="browser-jev-key-use"]').text()).toContain('Until a key is set')
+    const hint = component.find('[data-testid="browser-jev-key-hint"]')
+    expect(hint.text()).toContain('Until one is set, agents keep the Playwright actions')
+    expect(hint.find('a').attributes('href')).toBe('/settings?section=decision-providers')
   })
 
-  it('sets the key through the masked editor, which starts blank', async () => {
+  it('with a key set in Decision Providers, Jev needs no pointer', async () => {
     baseEndpoints()
     stored.set('browser.engine', 'jev')
+    stored.set('decision.jev.apiKey', 'ts-s****')
     const component = await mountBrowser()
 
-    await component.find('button[aria-label="Edit TypeSafe API key"]').trigger('click')
-    const input = component.find('input[aria-label="TypeSafe API key"]')
-    expect((input.element as HTMLInputElement).value).toBe('')
-    expect(input.attributes('autocomplete')).toBe('new-password')
-    await input.setValue('ts-secret-123')
-    await component.find('button[title="Save"]').trigger('click')
-    await flushPromises()
-    await flushPromises()
-
-    expect(posted).toEqual([{ key: 'browser.jev.apiKey', value: 'ts-secret-123' }])
-    // updateEntry refreshes the config without awaiting it.
-    await vi.waitFor(() => expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••'))
+    expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(true)
+    expect(component.find('[data-testid="browser-jev-key-hint"]').exists()).toBe(false)
   })
 
-  it('switching back to Playwright hides the warning but keeps the key field and the stored key', async () => {
+  it('switching back to Playwright hides the warning and leaves the stored key alone', async () => {
     baseEndpoints()
     stored.set('browser.engine', 'jev')
-    stored.set('browser.jev.apiKey', 'ts-s****')
+    stored.set('decision.jev.apiKey', 'ts-s****')
     const component = await mountBrowser()
-    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••')
 
     await component.find('#browser-engine-playwright').setValue(true)
     await flushPromises()
 
     expect(posted).toEqual([{ key: 'browser.engine', value: 'playwright' }])
     expect(deleted).toEqual([])
-    expect(stored.get('browser.jev.apiKey')).toBe('ts-s****')
+    expect(stored.get('decision.jev.apiKey')).toBe('ts-s****')
     expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
-    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••')
   })
 
   it('a failed save puts the saved engine back, names the request and re-reads the settings', async () => {
@@ -184,37 +169,6 @@ describe('Settings page — Browser', () => {
     expect(checked(component, '#browser-engine-jev')).toBe(false)
     expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
     await vi.waitFor(() => expect(reads).toBeGreaterThan(readsBefore))
-  })
-
-  it('saving the key editor untouched cancels rather than storing a blank key', async () => {
-    baseEndpoints()
-    stored.set('browser.engine', 'jev')
-    stored.set('browser.jev.apiKey', 'ts-s****')
-    const component = await mountBrowser()
-
-    await component.find('button[aria-label="Edit TypeSafe API key"]').trigger('click')
-    await component.find('button[title="Save"]').trigger('click')
-    await flushPromises()
-
-    expect(posted).toEqual([])
-    expect(component.find('input[aria-label="TypeSafe API key"]').exists()).toBe(false)
-    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••')
-  })
-
-  it('the key cannot be saved while the engine save is in flight', async () => {
-    let release!: () => void
-    baseEndpoints({ holdSaves: new Promise<void>((resolve) => {
-      release = resolve
-    }) })
-    const component = await mountBrowser()
-
-    await component.find('#browser-engine-jev').setValue(true)
-    await component.find('button[aria-label="Edit TypeSafe API key"]').trigger('click')
-    await component.find('input[aria-label="TypeSafe API key"]').setValue('ts-secret-123')
-
-    expect(component.find('button[title="Save"]').attributes('disabled')).toBeDefined()
-    release()
-    await vi.waitFor(() => expect(component.find('button[title="Save"]').attributes('disabled')).toBeUndefined())
   })
 
   describe('browser components', () => {

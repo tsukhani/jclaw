@@ -37,12 +37,14 @@ When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, et
 
 ### Circuit Breakers
 
-Two groups — **LLM providers** first, then **MCP servers** — with one row per breaker that is not
-serving, showing the state it is in, why it is there, and how many of its recent calls failed. Open
-breakers sit above probing ones. A breaker that is serving is not listed here: it is shown beside
-what it guards, on the provider's card in [Settings → LLM Providers](/settings?section=providers)
-and beneath the server on the [MCP Servers](/mcp-servers) page, and each name here links to that
-place. The panel is absent while every breaker is serving; breakers are created the first time a
+Three groups — **LLM providers** first, then **MCP servers**, then **Decision providers** — with one
+row per breaker that is not serving, showing the state it is in, why it is there, and how many of its
+recent calls failed. Open breakers sit above probing ones. A breaker that is serving is not listed
+here: it is shown beside what it guards, on the provider's card in
+[Settings → LLM Providers](/settings?section=providers), beneath the server on the
+[MCP Servers](/mcp-servers) page, and on JEV's card in
+[Settings → Decision Providers](/settings?section=decision-providers), and each name here links to
+that place. The panel is absent while every breaker is serving; breakers are created the first time a
 subsystem is called.
 
 It sits directly above Chat Performance because that is the blind spot it closes. A breaker that

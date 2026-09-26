@@ -15,11 +15,17 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.Buffer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.UnitTest;
+import services.decision.JevApi;
+import services.telemetry.BreakerMetrics;
+import services.telemetry.OtelRuntime;
+import utils.CircuitBreaker;
+import utils.CircuitBreakers;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -31,8 +37,8 @@ import java.util.function.Supplier;
 /**
  * JCLAW-1300: TypeSafe's JEV as the router's classifier. One request carrying only the truncated
  * prompt and the two questions; JEV's class and effort when it is sure, and the keyword rules —
- * never a failed turn — when it is unsure, wrong, unreachable, or has no key. The key is passed in,
- * because {@code browser.jev.apiKey} is flipped by other classes running concurrently.
+ * never a failed turn — when it is unsure, wrong, unreachable, has no key, or its breaker is open. The key
+ * is passed in, because {@code decision.jev.apiKey} is flipped by other classes running concurrently.
  */
 class JevRouterClassifierTest extends UnitTest {
 
@@ -47,8 +53,14 @@ class JevRouterClassifierTest extends UnitTest {
 
     @BeforeEach
     void reset() {
+        JevBreakerTestSync.acquire();
         requests.clear();
         bodies.clear();
+    }
+
+    @AfterEach
+    void releaseBreaker() {
+        JevBreakerTestSync.release();
     }
 
     @FunctionalInterface
@@ -186,7 +198,7 @@ class JevRouterClassifierTest extends UnitTest {
     void anUnsureClassIsLeftToTheRulesWithoutAWarning() {
         var verdict = withJev(answering("reasoning", 0.62, "high"), () -> classify(PROMPT, KEY, 0.9));
         assertNull(verdict.classification());
-        assertTrue(verdict.unsure(), "unsure is not a fault");
+        assertTrue(verdict.signal(), "unsure is not a fault");
         assertEquals("JEV unsure (0.62 < 0.90)", verdict.reason());
     }
 
@@ -240,7 +252,7 @@ class JevRouterClassifierTest extends UnitTest {
         if (!answers.equals("{}")) result.add("answers", JsonParser.parseString(answers));
         var verdict = withJev(chain -> reply(chain, 200, result.toString()), () -> classify(PROMPT, KEY, 0.0));
         assertNull(verdict.classification(), "even at a minimum confidence of 0: " + answers);
-        assertFalse(verdict.unsure());
+        assertFalse(verdict.signal());
         assertEquals("JEV answered with an invalid class or effort", verdict.reason());
         assertEquals(1, requests.size());
     }
@@ -253,7 +265,7 @@ class JevRouterClassifierTest extends UnitTest {
         var verdict = withJev(chain -> reply(chain, status, "{}"), () -> classify(PROMPT, KEY, 0.9));
         assertEquals(1, requests.size(), "a routed turn never retries JEV");
         assertNull(verdict.classification());
-        assertFalse(verdict.unsure());
+        assertFalse(verdict.signal());
         assertTrue(verdict.reason().contains("HTTP " + status), verdict.reason());
     }
 
@@ -276,6 +288,7 @@ class JevRouterClassifierTest extends UnitTest {
         assertNull(verdict.classification(), "an answer that arrives after the timeout is not used");
         assertTrue(verdict.reason().contains("unreachable"), verdict.reason());
         assertTrue(elapsedMs < 5_000, "one attempt, no backoff: took " + elapsedMs + " ms");
+        assertEquals(1, JevApi.breaker().stats().failures(), "a timeout counts against the breaker");
     }
 
     @Test
@@ -298,6 +311,127 @@ class JevRouterClassifierTest extends UnitTest {
         assertEquals(List.of("asks to run"), c.signals(), "a fault adds nothing to the route; it was logged");
     }
 
+    // --- the breaker (JCLAW-1302) ----------------------------------------------------------
+
+    /** Minted before first use, so the registry hands JEV this one: open, it is probed on the next call. */
+    private static CircuitBreaker breakerWithNoCooldown() {
+        var c = JevApi.BREAKER_CONFIG;
+        CircuitBreakers.remove(JevApi.BREAKER);
+        return CircuitBreakers.get(JevApi.BREAKER, new CircuitBreaker.Config(c.windowSize(), c.failureRateThreshold(),
+                c.minVolume(), 0L, c.halfOpenPermits(), c.slowCallDurationMillis(), c.slowCallRateThreshold(),
+                c.consecutiveFailures()));
+    }
+
+    private void failThreeTimes() {
+        for (var status : new int[] {503, 429, 500}) {
+            withJev(chain -> reply(chain, status, "{}"), () -> classify(PROMPT, KEY, 0.9));
+        }
+    }
+
+    @Test
+    void threeCountedFailuresOpenTheBreakerAndTheRulesAnswerWithoutSendingOrWarning() {
+        failThreeTimes();
+        assertEquals(CircuitBreaker.State.OPEN, JevApi.breaker().state());
+
+        var verdict = withJev(answering("reasoning", 0.97, "high"), () -> classify(PROMPT, KEY, 0.9));
+        assertEquals(3, requests.size(), "an open breaker sends nothing");
+        assertNull(verdict.classification());
+        assertTrue(verdict.signal(), "the breaker is no fault of this turn, so it joins the signals, not the log");
+        assertEquals("JEV breaker open", verdict.reason());
+
+        var c = withJev(answering("reasoning", 0.97, "high"),
+                () -> RouterClassifier.classify(PROMPT, null, 0, jevPolicy(), () -> KEY));
+        assertEquals(3, requests.size());
+        assertEquals(TaskClass.AGENTIC, c.taskClass(), "the rules' class");
+        assertEquals(List.of("asks to run", "JEV breaker open"), c.signals());
+    }
+
+    @Test
+    void nothingIsSentWhileIsolatedAndRestoreResumes() {
+        JevApi.breaker().trip();
+        var verdict = withJev(answering("reasoning", 0.97, "high"), () -> classify(PROMPT, KEY, 0.9));
+        assertTrue(requests.isEmpty(), "an isolated breaker sends nothing");
+        assertTrue(verdict.signal());
+        assertEquals("JEV breaker open", verdict.reason());
+
+        JevApi.breaker().reset();
+        var restored = withJev(answering("reasoning", 0.97, "high"), () -> classify(PROMPT, KEY, 0.9));
+        assertEquals(1, requests.size());
+        assertNotNull(restored.classification());
+    }
+
+    @Test
+    void theRegisteredBreakerReportsItsTransitions() {
+        TelemetryTestSync.acquire();
+        try {
+            OtelRuntime.init();
+            var metrics = OtelRuntime.captureMetricsForTest(this::failThreeTimes);
+            var opened = metrics.stream()
+                    .filter(m -> m.getName().equals(BreakerMetrics.TRANSITIONS))
+                    .flatMap(m -> m.getLongSumData().getPoints().stream())
+                    .filter(p -> JevApi.BREAKER.equals(p.getAttributes().get(BreakerMetrics.BREAKER)))
+                    .map(p -> p.getAttributes().get(BreakerMetrics.STATE) + "/" + p.getAttributes().get(BreakerMetrics.REASON))
+                    .toList();
+            assertEquals(List.of("OPEN/CONSECUTIVE_FAILURES"), opened,
+                    "BreakerAlarms logs the transition, which is why a routed turn warns about nothing");
+        } finally {
+            TelemetryTestSync.release();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {400, 401, 403, 404})
+    void aClientErrorIsNotCounted(int status) {
+        for (int i = 0; i < 4; i++) withJev(chain -> reply(chain, status, "{}"), () -> classify(PROMPT, KEY, 0.9));
+        assertEquals(4, requests.size(), "TypeSafe answering with a 4xx never opens the breaker");
+        var stats = JevApi.breaker().stats();
+        assertEquals(CircuitBreaker.State.CLOSED, stats.state());
+        assertEquals(0, stats.failures());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"<html>gateway</html>", "{\"model\":\"jev-latest\",\"answers\":{}}"})
+    void aMalformedAnswerIsNotCounted(String body) {
+        for (int i = 0; i < 4; i++) withJev(chain -> reply(chain, 200, body), () -> classify(PROMPT, KEY, 0.9));
+        assertEquals(4, requests.size());
+        assertEquals(CircuitBreaker.State.CLOSED, JevApi.breaker().state());
+        assertEquals(0, JevApi.breaker().stats().failures());
+    }
+
+    @Test
+    void aProbeThatAnswersClosesTheBreaker() {
+        var breaker = breakerWithNoCooldown();
+        failThreeTimes();
+        assertEquals(CircuitBreaker.State.OPEN, breaker.state());
+
+        var verdict = withJev(answering("reasoning", 0.97, "high"), () -> classify(PROMPT, KEY, 0.9));
+        assertEquals(4, requests.size(), "the cooldown has elapsed, so the next call is the probe");
+        assertNotNull(verdict.classification());
+        assertEquals(CircuitBreaker.State.CLOSED, breaker.state());
+    }
+
+    @Test
+    void aProbeThatFailsReopensTheBreaker() {
+        var breaker = breakerWithNoCooldown();
+        failThreeTimes();
+        withJev(chain -> reply(chain, 503, "{}"), () -> classify(PROMPT, KEY, 0.9));
+        assertEquals(4, requests.size());
+        assertEquals(CircuitBreaker.State.OPEN, breaker.state());
+        assertEquals(CircuitBreaker.Reason.PROBE_FAILED, breaker.stats().reason());
+    }
+
+    @Test
+    void aProbeTypeSafeRefusesStillHandsBackItsPermit() {
+        var breaker = breakerWithNoCooldown();
+        failThreeTimes();
+        withJev(chain -> reply(chain, 401, "{}"), () -> classify(PROMPT, KEY, 0.9));
+        assertEquals(CircuitBreaker.State.CLOSED, breaker.state(), "a refused key is TypeSafe answering");
+
+        var verdict = withJev(answering("reasoning", 0.97, "high"), () -> classify(PROMPT, KEY, 0.9));
+        assertEquals(5, requests.size());
+        assertNotNull(verdict.classification());
+    }
+
     // --- no key, and acknowledgments -------------------------------------------------------
 
     @Test
@@ -305,8 +439,8 @@ class JevRouterClassifierTest extends UnitTest {
         for (var key : new String[] {null, "", "   "}) {
             var verdict = withJev(answering("reasoning", 0.97, "high"), () -> classify(PROMPT, key, 0.9));
             assertNull(verdict.classification());
-            assertFalse(verdict.unsure());
-            assertTrue(verdict.reason().contains("Settings → Browser"), verdict.reason());
+            assertFalse(verdict.signal());
+            assertTrue(verdict.reason().contains("Settings → Decision Providers"), verdict.reason());
         }
         assertTrue(requests.isEmpty(), "no request without a key");
 

@@ -937,9 +937,9 @@ export interface DiscoverModelsResponse {
 export interface Breaker {
   /** Registry name, `<subsystem>:<target>`: what trip and reset take. */
   name: string
-  /** Registry-name prefix: `llm` or `mcp`. */
+  /** Registry-name prefix: `llm`, `mcp` or `decision`. */
   subsystem: string
-  /** What the breaker guards: a provider name, an MCP server name. */
+  /** What the breaker guards: a provider name, an MCP server name, a decision provider (`jev`). */
   target: string
   state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'
   samples: number

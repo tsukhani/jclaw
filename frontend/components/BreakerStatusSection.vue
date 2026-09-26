@@ -8,8 +8,8 @@
  * Read anywhere else, those graphs would still be believed.
  *
  * A closed breaker distorts nothing here, so it is shown only beside what it guards: the
- * provider's card in Settings, the server's row on the MCP page. Renders nothing while every
- * breaker is serving.
+ * provider's card in Settings, the server's row on the MCP page, the decision provider's card.
+ * Renders nothing while every breaker is serving.
  */
 import type { Breaker } from '~/types/api'
 
@@ -20,6 +20,7 @@ const notServing = computed(() => breakers.value.filter(b => b.state !== 'CLOSED
 const GROUPS: ReadonlyArray<{ subsystem: string, title: string, home?: string }> = [
   { subsystem: 'llm', title: 'LLM providers', home: '/settings?section=providers' },
   { subsystem: 'mcp', title: 'MCP servers', home: '/mcp-servers' },
+  { subsystem: 'decision', title: 'Decision providers', home: '/settings?section=decision-providers' },
 ]
 const SERVING_RANK: Record<Breaker['state'], number> = { OPEN: 0, HALF_OPEN: 1, CLOSED: 2 }
 

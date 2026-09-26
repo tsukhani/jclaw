@@ -202,10 +202,10 @@ describe('SettingsModelRouterPanel', () => {
     expect(jev.text()).toContain('JEV (TypeSafe AI)')
     expect((jev.element as HTMLOptionElement).disabled).toBe(true)
     const hint = c.find('[data-testid="router-jev-key-hint"]')
-    expect(hint.text()).toContain('Settings → Browser')
-    expect(hint.find('a').attributes('href')).toBe('/settings?section=browser')
+    expect(hint.text()).toContain('Settings → Decision Providers')
+    expect(hint.find('a').attributes('href')).toBe('/settings?section=decision-providers')
 
-    entries = [...entries, { key: 'browser.jev.apiKey', value: 'ts-s****' }]
+    entries = [...entries, { key: 'decision.jev.apiKey', value: 'ts-s****' }]
     clearNuxtData()
     const keyed = await mountSuspended(Harness)
     await flushPromises()
@@ -217,7 +217,7 @@ describe('SettingsModelRouterPanel', () => {
   it('picking JEV clears the stored model before writing the pair', async () => {
     entries = [
       ...entries,
-      { key: 'browser.jev.apiKey', value: 'ts-s****' },
+      { key: 'decision.jev.apiKey', value: 'ts-s****' },
       { key: 'router.classifier.provider', value: 'ollama-cloud' },
       { key: 'router.classifier.model', value: 'glm-5.3-flash' },
     ]
@@ -235,7 +235,7 @@ describe('SettingsModelRouterPanel', () => {
   it('leaving JEV for a model clears jev-latest first, so the provider write is not refused', async () => {
     entries = [
       ...entries,
-      { key: 'browser.jev.apiKey', value: 'ts-s****' },
+      { key: 'decision.jev.apiKey', value: 'ts-s****' },
       { key: 'router.classifier.provider', value: 'jev' },
       { key: 'router.classifier.model', value: 'jev-latest' },
     ]
@@ -278,7 +278,7 @@ describe('SettingsModelRouterPanel', () => {
   it('saves the classifier timeout in seconds', async () => {
     entries = [
       ...entries,
-      { key: 'browser.jev.apiKey', value: 'ts-s****' },
+      { key: 'decision.jev.apiKey', value: 'ts-s****' },
       { key: 'router.classifier.provider', value: 'jev' },
       { key: 'router.classifier.model', value: 'jev-latest' },
     ]

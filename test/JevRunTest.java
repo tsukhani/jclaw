@@ -30,8 +30,8 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
+import services.decision.JevException;
 import tools.PlaywrightBrowserTool;
-import tools.jev.JevException;
 import tools.jev.JevPage;
 import tools.jev.JevRun;
 import utils.CircuitBreakers;
@@ -155,6 +155,7 @@ class JevRunTest extends UnitTest {
 
     @BeforeEach
     void openFixture() {
+        JevBreakerTestSync.acquire();
         jevCalls.set(0);
         typedFor.clear();
         jevBodies.clear();
@@ -171,7 +172,11 @@ class JevRunTest extends UnitTest {
 
     @AfterEach
     void closeFixture() {
-        if (page != null) page.close();
+        try {
+            if (page != null) page.close();
+        } finally {
+            JevBreakerTestSync.release();
+        }
     }
 
     private static void requireBrowser() {

@@ -1,5 +1,6 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.routing.JevRouterClassifier;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -8,14 +9,17 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.Buffer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.UnitTest;
+import services.decision.JevApi;
+import services.decision.JevException;
 import tools.jev.JevActionSpace;
 import tools.jev.JevClient;
-import tools.jev.JevException;
+import utils.CircuitBreaker;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -39,8 +43,14 @@ class JevClientTest extends UnitTest {
 
     @BeforeEach
     void reset() {
+        JevBreakerTestSync.acquire();
         requests.clear();
         bodies.clear();
+    }
+
+    @AfterEach
+    void releaseBreaker() {
+        JevBreakerTestSync.release();
     }
 
     /** jev-ultrafast's tests/test_agent.py page: a text field (typed or clicked), a button, and WAIT. */
@@ -119,7 +129,7 @@ class JevClientTest extends UnitTest {
     void aWellFormedAnswerIsAccepted() {
         var answer = JsonParser.parseString(
                 "{\"choice\":\"a\",\"confidence\":1.0,\"probabilities\":{\"a\":1.0,\"b\":0.0}}");
-        assertEquals("a", JevClient.validateChoice(answer, Set.of("a", "b")).get("choice").getAsString());
+        assertEquals("a", JevApi.validateChoice(answer, Set.of("a", "b")).get("choice").getAsString());
     }
 
     @ParameterizedTest
@@ -138,8 +148,8 @@ class JevClientTest extends UnitTest {
     })
     void aMalformedAnswerIsRefused(String raw) {
         var e = assertThrows(JevException.class,
-                () -> JevClient.validateChoice(JsonParser.parseString(raw), Set.of("a", "b")));
-        assertEquals("Invalid Jev response; no action executed", e.getMessage(), raw);
+                () -> JevApi.validateChoice(JsonParser.parseString(raw), Set.of("a", "b")));
+        assertEquals("Invalid Jev response", e.getMessage(), raw);
     }
 
     @Test
@@ -214,6 +224,7 @@ class JevClientTest extends UnitTest {
                 ? reply(chain, 429, "{\"error\":\"rate limited\"}") : ok.reply(chain, attempt, body), this::decide);
         assertEquals(2, requests.size());
         assertEquals("e1", decision.action().get("id").getAsString());
+        assertEquals(0, JevApi.breaker().stats().failures(), "a retried attempt is not an outcome of its own");
     }
 
     @Test
@@ -236,6 +247,7 @@ class JevClientTest extends UnitTest {
         long elapsedMs = (System.nanoTime() - started) / 1_000_000;
         assertEquals("Jev unreachable; no action executed", e.getMessage());
         assertEquals(3, requests.size());
+        assertOneFailure();
         assertTrue(elapsedMs >= 1_500, "backed off 0.5 s then 1 s between attempts, took " + elapsedMs + " ms");
     }
 
@@ -245,8 +257,9 @@ class JevClientTest extends UnitTest {
         var e = assertThrows(JevException.class,
                 () -> withJev((chain, _, _) -> reply(chain, status, "{\"error\":\"bad key\"}"), this::decide));
         assertEquals("TypeSafe refused the Jev API key (HTTP " + status + "); the operator must update it in "
-                + "Settings → Browser. No action executed", e.getMessage());
+                + "Settings → Decision Providers; no action executed", e.getMessage());
         assertEquals(1, requests.size());
+        assertEquals(0, JevApi.breaker().stats().samples(), "a refused key is not counted against TypeSafe");
     }
 
     @Test
@@ -255,6 +268,7 @@ class JevClientTest extends UnitTest {
                 () -> withJev((chain, _, _) -> reply(chain, 503, "{}"), this::decide));
         assertEquals("Jev returned HTTP 503; no action executed", e.getMessage());
         assertEquals(3, requests.size());
+        assertOneFailure();
     }
 
     @Test
@@ -262,5 +276,55 @@ class JevClientTest extends UnitTest {
         var e = assertThrows(JevException.class,
                 () -> withJev((chain, _, _) -> reply(chain, 200, "<html>gateway</html>"), this::decide));
         assertEquals("Invalid Jev response; no action executed", e.getMessage());
+        assertEquals(0, JevApi.breaker().stats().samples(), "a malformed answer is not counted");
+    }
+
+    // --- the breaker (JCLAW-1302) ----------------------------------------------------------
+
+    /** A decision's whole retry loop is one outcome for the breaker, as a chat call's is. */
+    private static void assertOneFailure() {
+        var stats = JevApi.breaker().stats();
+        assertEquals(1, stats.samples(), "three attempts, one outcome");
+        assertEquals(1, stats.failures());
+    }
+
+    @Test
+    void threeFailedDecisionsOpenTheBreakerAndTheRouterSendsNothingEither() {
+        for (int i = 0; i < 3; i++) {
+            assertThrows(JevException.class, () -> withJev((chain, _, _) -> reply(chain, 500, "{}"), this::decide));
+        }
+        assertEquals(3, requests.size(), "500 is not retried");
+        assertEquals(CircuitBreaker.State.OPEN, JevApi.breaker().state());
+
+        var e = assertThrows(JevException.class, () -> withJev(typeIntoSearch(), this::decide));
+        assertEquals("JEV's circuit breaker is open: not calling TypeSafe until it recovers; no action executed",
+                e.getMessage());
+        var verdict = withJev(typeIntoSearch(), () -> JevRouterClassifier.classify("Explain this", "ts-test-key", 0.5, 8));
+        assertEquals("JEV breaker open", verdict.reason());
+        assertEquals(3, requests.size(), "neither consumer sends while the breaker is open");
+    }
+
+    @Test
+    void anOutageTheRouterFoundStopsTheBrowserSending() {
+        for (int i = 0; i < 3; i++) {
+            withJev((chain, _, _) -> reply(chain, 503, "{}"),
+                    () -> JevRouterClassifier.classify("Explain this", "ts-test-key", 0.5, 8));
+        }
+        assertThrows(JevException.class, () -> withJev(typeIntoSearch(), this::decide));
+        assertEquals(3, requests.size(), "the browser shares the router's breaker");
+    }
+
+    @Test
+    void anIsolatedBreakerSendsNothingAndSaysTheOperatorIsolatedIt() {
+        JevApi.breaker().trip();
+        var e = assertThrows(JevException.class, () -> withJev(typeIntoSearch(), this::decide));
+        assertTrue(requests.isEmpty());
+        assertEquals("JEV was isolated by the operator: not calling TypeSafe until the cooldown ends or it is "
+                + "restored; no action executed", e.getMessage());
+    }
+
+    @Test
+    void theBreakerKeepsTheNameThePanelAndTheDashboardLookUp() {
+        assertEquals("decision:jev", JevApi.BREAKER);
     }
 }

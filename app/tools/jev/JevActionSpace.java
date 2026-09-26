@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import services.decision.JevApi;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,7 +29,6 @@ import java.util.Map;
 public record JevActionSpace(JsonArray elements, Map<String, Map<String, JsonObject>> targets,
                              Map<String, JsonObject> controls) {
 
-    public static final String MODEL = "jev-latest";
     static final String DONE = "DONE";
     static final String BLOCKED = "BLOCKED";
 
@@ -146,7 +146,7 @@ public record JevActionSpace(JsonArray elements, Map<String, Map<String, JsonObj
         operationInstructions.addProperty("goal", goal);
         operationInstructions.addProperty("rules", NEXT_ACTION);
         var questions = new JsonObject();
-        questions.add("operation", choiceQuestion(criteria, operationInstructions));
+        questions.add("operation", JevApi.choiceQuestion(criteria, operationInstructions));
         targets.forEach((operation, candidates) -> {
             var targetCriteria = new JsonObject();
             candidates.forEach((index, action) -> {
@@ -166,7 +166,7 @@ public record JevActionSpace(JsonArray elements, Map<String, Map<String, JsonObj
             instructions.addProperty("goal", goal);
             instructions.addProperty("operation", operation);
             instructions.add("rules", rules);
-            questions.add(targetHead(operation), choiceQuestion(targetCriteria, instructions));
+            questions.add(targetHead(operation), JevApi.choiceQuestion(targetCriteria, instructions));
         });
 
         var pageState = new JsonObject();
@@ -176,7 +176,7 @@ public record JevActionSpace(JsonArray elements, Map<String, Map<String, JsonObj
         state.add("elements", elements);
         state.add("recent_actions", recent(history, REQUEST_HISTORY, HISTORY_KEYS));
         var body = new JsonObject();
-        body.addProperty("model", MODEL);
+        body.addProperty("model", JevApi.MODEL);
         body.add("state", state);
         body.add("questions", questions);
         return body;
@@ -203,15 +203,6 @@ public record JevActionSpace(JsonArray elements, Map<String, Map<String, JsonObj
         });
         context.add("recent_actions", recent(executed, TEXT_HISTORY, List.of("action", "text")));
         return context;
-    }
-
-    /** One {@code choice} question: Jev picks a key of {@code criteria}, reading {@code instructions}. */
-    public static JsonObject choiceQuestion(JsonObject criteria, JsonObject instructions) {
-        var question = new JsonObject();
-        question.addProperty("type", "choice");
-        question.add("criteria", criteria);
-        question.add("instructions", instructions);
-        return question;
     }
 
     private static JsonArray recent(JsonArray history, int limit, List<String> keys) {

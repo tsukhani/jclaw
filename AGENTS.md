@@ -16,7 +16,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - Never hand-edit `docs/architecture/` (generated), `skills/**` (vendored), or `workspace/main/*.md` (runtime persona).
 - Commit messages and tags are public on the GitHub mirror: no credentials, customer specifics, or unreleased plans.
 - Don't create worktrees or branches unless asked; work on `main`. Other sessions share this checkout: stage only your own hunks, never `git stash -u`.
-- The `jclaw_api` token is no longer in the Config table to read (JCLAW-1266): it lives in the process for one boot and the database keeps only its hash, so a restart mints a new one. Read-only SELECTs on the live H2 (empty credentials, `AUTO_SERVER`) are fine. The third-party keys under `provider.*`, `search.*` and `scanner.*`, and `browser.jev.apiKey`, are still plaintext by necessity — they are bearer credentials for someone else's API and cannot be hashed.
+- The `jclaw_api` token is no longer in the Config table to read (JCLAW-1266): it lives in the process for one boot and the database keeps only its hash, so a restart mints a new one. Read-only SELECTs on the live H2 (empty credentials, `AUTO_SERVER`) are fine. The third-party keys under `provider.*`, `search.*` and `scanner.*`, and `decision.jev.apiKey`, are still plaintext by necessity — they are bearer credentials for someone else's API and cannot be hashed.
 
 ## Where things are
 

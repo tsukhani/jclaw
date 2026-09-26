@@ -42,6 +42,7 @@ import {
   PhotoIcon,
   PrinterIcon,
   PuzzlePieceIcon,
+  ScaleIcon,
   ShieldCheckIcon,
   SpeakerWaveIcon,
   UserGroupIcon,
@@ -56,6 +57,7 @@ import SettingsBrowserPanel from './SettingsBrowserPanel.vue'
 import SettingsChatPanel from './SettingsChatPanel.vue'
 import SettingsCodingPanel from './SettingsCodingPanel.vue'
 import SettingsDatabasePanel from './SettingsDatabasePanel.vue'
+import SettingsDecisionProvidersPanel from './SettingsDecisionProvidersPanel.vue'
 import SettingsTimezonePanel from './SettingsTimezonePanel.vue'
 import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
 import SettingsImageGenPanel from './SettingsImageGenPanel.vue'
@@ -132,6 +134,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'providers', title: 'LLM Providers', icon: CpuChipIcon, component: SettingsProvidersPanel },
       { id: 'model-router', title: 'Model Router', icon: ArrowsRightLeftIcon, component: SettingsModelRouterPanel },
       { id: 'search', title: 'Search Providers', icon: MagnifyingGlassIcon, component: SettingsSearchPanel },
+      { id: 'decision-providers', title: 'Decision Providers', icon: ScaleIcon, component: SettingsDecisionProvidersPanel },
     ],
   },
   {

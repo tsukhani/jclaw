@@ -127,9 +127,9 @@ const classifierValue = computed(() => {
   return p && m ? `${p}::${m}` : ''
 })
 
-// JCLAW-1300: TypeSafe's JEV as the classifier, on the key set in Settings → Browser.
+// JCLAW-1300: TypeSafe's JEV as the classifier, on the key set in Settings → Decision Providers.
 const JEV_CLASSIFIER = 'jev::jev-latest'
-const jevKeySet = computed(() => configValue('browser.jev.apiKey').trim().length > 0)
+const jevKeySet = computed(() => configValue('decision.jev.apiKey').trim().length > 0)
 
 async function saveClassifier(value: string) {
   saving.value = true
@@ -418,9 +418,9 @@ function usageTone(fraction: number): string {
           data-testid="router-jev-key-hint"
         >
           To classify with JEV, set a TypeSafe API key in <NuxtLink
-            to="/settings?section=browser"
+            to="/settings?section=decision-providers"
             class="text-fg-strong underline"
-          >Settings → Browser</NuxtLink>.
+          >Settings → Decision Providers</NuxtLink>.
         </p>
       </div>
       <div

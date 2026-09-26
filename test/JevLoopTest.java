@@ -14,10 +14,12 @@ import okhttp3.Protocol;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.Buffer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.TaskRunRegistry;
+import services.decision.JevApi;
 import tools.jev.JevPage;
 import tools.jev.JevRun;
 import utils.AppClock;
@@ -58,9 +60,15 @@ class JevLoopTest extends UnitTest {
 
     @BeforeEach
     void reset() {
+        JevBreakerTestSync.acquire();
         site = new FakePage();
         bodies.clear();
         typedFor.clear();
+    }
+
+    @AfterEach
+    void releaseBreaker() {
+        JevBreakerTestSync.release();
     }
 
     // --- the stand-in for Jev ----------------------------------------------------------------
@@ -395,6 +403,16 @@ class JevLoopTest extends UnitTest {
         var outcome = run(unavailable, new JevPage(site, JevPage.CALL_LIMIT, () -> {}), _ -> "Lisbon");
 
         assertEquals("Error: Jev returned HTTP 500; no action executed", outcome.format());
+    }
+
+    @Test
+    void anIsolatedBreakerEndsTheRunBeforeAnythingIsSent() {
+        JevApi.breaker().trip();
+        var outcome = run((_, _) -> new String[] {"DONE"});
+
+        assertEquals("Error: JEV was isolated by the operator: not calling TypeSafe until the cooldown ends or it "
+                + "is restored; no action executed", outcome.format());
+        assertTrue(bodies.isEmpty(), "no request while the breaker is isolated");
     }
 
     @Test

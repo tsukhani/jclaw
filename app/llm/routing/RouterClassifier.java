@@ -7,7 +7,7 @@ import llm.routing.PromptClassifier.Classification;
 import llm.routing.RouterPolicy.Candidate;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
-import tools.jev.JevSettings;
+import services.decision.DecisionSettings;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -88,7 +88,7 @@ public final class RouterClassifier {
      */
     public static Classification classify(String message, @Nullable TaskClass priorClass, int priorToolCalls,
                                           RouterPolicy policy) {
-        return classify(message, priorClass, priorToolCalls, policy, JevSettings::apiKey);
+        return classify(message, priorClass, priorToolCalls, policy, DecisionSettings::apiKey);
     }
 
     /** {@link #classify(String, TaskClass, int, RouterPolicy)}, reading the TypeSafe key from {@code jevKey} only when JEV is asked. */
@@ -117,14 +117,14 @@ public final class RouterClassifier {
         return PromptClassifier.classify(message, priorClass, priorToolCalls);
     }
 
-    /** JEV's class and effort, or the keyword rules' when JEV cannot answer or is not sure enough. */
+    /** JEV's class and effort, or the keyword rules' when JEV cannot answer, is not sure enough, or its breaker is open. */
     private static Classification askJev(String message, @Nullable TaskClass priorClass, int priorToolCalls,
                                          RouterPolicy policy, @Nullable String apiKey) {
         var verdict = JevRouterClassifier.classify(message, apiKey, policy.jevMinConfidence(),
                 policy.classifierTimeoutSeconds());
         if (verdict.classification() != null) return verdict.classification();
         var rules = PromptClassifier.classify(message, priorClass, priorToolCalls);
-        if (!verdict.unsure() || verdict.reason() == null) return rules;
+        if (!verdict.signal() || verdict.reason() == null) return rules;
         var signals = new ArrayList<>(rules.signals());
         signals.add(verdict.reason());
         return new Classification(rules.taskClass(), rules.effort(), List.copyOf(signals));

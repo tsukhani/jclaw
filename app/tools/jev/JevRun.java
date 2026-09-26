@@ -18,6 +18,7 @@ import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.SessionCompactor;
 import services.Tx;
+import services.decision.JevException;
 import utils.AppClock;
 
 import java.time.Duration;

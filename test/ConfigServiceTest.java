@@ -1,5 +1,7 @@
 import jakarta.persistence.EntityManager;
+import jobs.DefaultConfigJob;
 import models.Agent;
+import models.Config;
 import org.hibernate.Session;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,6 +10,8 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.Tx;
+import services.decision.DecisionSettings;
 import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
 import utils.HttpFactories;
@@ -28,16 +32,17 @@ class ConfigServiceTest extends UnitTest {
         assertTrue(rejected.contains("playwright") && rejected.contains("jev"), rejected);
         assertNotEquals("foo", ConfigService.get(JevSettings.ENGINE), "a refused value is not saved");
 
-        var unknownKey = ConfigService.setWithSideEffects("browser.jev.model", "jev-latest");
-        assertNotNull(unknownKey, "no browser.* key other than the engine and the Jev key exists");
-        assertNull(ConfigService.get("browser.jev.model"));
+        for (var other : new String[] {"browser.jev.model", DecisionSettings.LEGACY_API_KEY}) {
+            var unknownKey = ConfigService.setWithSideEffects(other, "jev-latest");
+            assertNotNull(unknownKey, "no browser.* key other than the engine exists: " + other);
+            assertNull(ConfigService.get(other));
+        }
 
         assertNull(JevSettings.rejectionFor(JevSettings.ENGINE, "playwright"));
         assertNull(JevSettings.rejectionFor(JevSettings.ENGINE, "jev"));
         // The panel's radios compare the stored value exactly, so a padded engine is refused, not trimmed.
         assertNotNull(JevSettings.rejectionFor(JevSettings.ENGINE, " jev"));
         assertNotNull(JevSettings.rejectionFor(JevSettings.ENGINE, "JEV"));
-        assertTrue(ConfigService.isSensitive(JevSettings.API_KEY), "the Jev key is masked on every read");
     }
 
     @Test
@@ -52,11 +57,51 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
+    void theJevKeyIsTheOnlyDecisionProviderSetting() {
+        // JCLAW-1302: consumer settings stay with their consumers, so any other decision.* key is refused.
+        assertTrue(ConfigService.isSensitive(DecisionSettings.API_KEY), "the JEV key is masked on every read");
+        var rejected = ConfigService.setWithSideEffects("decision.jev.timeoutSeconds", "3");
+        assertNotNull(rejected);
+        assertTrue(rejected.contains(DecisionSettings.API_KEY), rejected);
+        assertNull(ConfigService.get("decision.jev.timeoutSeconds"), "a refused value is not saved");
+    }
+
+    @Test
+    void theStoredJevKeyMovesToDecisionProvidersOnBoot() throws Exception {
+        // JCLAW-1302. Every writer of decision.jev.apiKey holds this lock.
+        var job = new DefaultConfigJob();
+        var renameMovedKeys = DefaultConfigJob.class.getDeclaredMethod("renameMovedKeys");
+        renameMovedKeys.setAccessible(true);
+        JevBreakerTestSync.acquire();
+        try {
+            ConfigService.set(DecisionSettings.LEGACY_API_KEY, "ts-stored");
+            renameMovedKeys.invoke(job);
+            assertEquals("ts-stored", DecisionSettings.apiKey(), "the key needs no re-entering");
+            Tx.run(() -> assertNull(Config.findByKey(DecisionSettings.LEGACY_API_KEY), "the old row is gone"));
+        } finally {
+            ConfigService.delete(DecisionSettings.LEGACY_API_KEY);
+            ConfigService.delete(DecisionSettings.API_KEY);
+            JevBreakerTestSync.release();
+        }
+
+        // A key already under the new name is kept, and the old row still goes; stand-in keys, same helper.
+        var rename = DefaultConfigJob.class.getDeclaredMethod("renameKeyIfPresent", String.class, String.class);
+        rename.setAccessible(true);
+        var legacy = "cfgtest1302.browser.apiKey";
+        var current = "cfgtest1302.decision.apiKey";
+        ConfigService.set(current, "ts-stored");
+        ConfigService.set(legacy, "ts-stale");
+        rename.invoke(job, legacy, current);
+        assertEquals("ts-stored", ConfigService.get(current));
+        Tx.run(() -> assertNull(Config.findByKey(legacy)));
+    }
+
+    @Test
     void theJevKeyMustSurviveAnAuthorizationHeader() {
-        assertNull(JevSettings.rejectionFor(JevSettings.API_KEY, "ts-anything_1.2/3+4="));
-        assertNull(JevSettings.rejectionFor(JevSettings.API_KEY, ""), "a blank key clears it");
+        assertNull(DecisionSettings.rejectionFor(DecisionSettings.API_KEY, "ts-anything_1.2/3+4="));
+        assertNull(DecisionSettings.rejectionFor(DecisionSettings.API_KEY, ""), "a blank key clears it");
         for (var bad : new String[] {"ts key", " ts-key", "ts-key\n", "ts\tkey", "ts-kéy", "ts-key\u0000"}) {
-            var rejected = JevSettings.rejectionFor(JevSettings.API_KEY, bad);
+            var rejected = DecisionSettings.rejectionFor(DecisionSettings.API_KEY, bad);
             assertNotNull(rejected, "refused: " + bad.replace("\n", "\\n"));
             assertFalse(rejected.contains(bad), "the refusal does not echo the key");
         }

@@ -37,8 +37,8 @@ public class ApiBreakersController extends Controller {
     /**
      * One breaker as the dashboard reads it.
      *
-     * @param subsystem the registry-name prefix: {@code llm} or {@code mcp}
-     * @param target    what the breaker guards — a provider name, an MCP server name
+     * @param subsystem the registry-name prefix: {@code llm}, {@code mcp} or {@code decision}
+     * @param target    what the breaker guards — a provider name, an MCP server name, a decision provider
      * @param reason    what moved it into {@code state}; null before it has ever moved
      * @param manual    whether {@code reason} was an operator's decision rather than the
      *                  breaker acting on its own

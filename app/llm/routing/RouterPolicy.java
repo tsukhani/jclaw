@@ -8,7 +8,7 @@ import com.google.gson.JsonParser;
 import llm.ProviderRegistry;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
-import tools.jev.JevActionSpace;
+import services.decision.JevApi;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -41,7 +41,7 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
     public static final String CLASSIFIER_MODEL = "router.classifier.model";
     public static final String CLASSIFIER_TIMEOUT_SECONDS = "router.classifier.timeoutSeconds";
     public static final String JEV_MIN_CONFIDENCE = "router.classifier.jev.minConfidence";
-    /** The classifier provider that names TypeSafe's JEV rather than an LLM; its one model is {@link JevActionSpace#MODEL}. */
+    /** The classifier provider that names TypeSafe's JEV rather than an LLM; its one model is {@link JevApi#MODEL}. */
     public static final String JEV = "jev";
     /** Absent means true: credit protection is what an operator who has set nothing should get. */
     public static final String PREFER_PREPAID = "router.preferPrepaid";
@@ -168,8 +168,8 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
                     ? CLASSIFIER_MODEL + " needs " + CLASSIFIER_PROVIDER + " as well." : null;
         }
         if (JEV.equals(provider.strip())) {
-            return key.equals(CLASSIFIER_PROVIDER) || JevActionSpace.MODEL.equals(v) ? null
-                    : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevActionSpace.MODEL, CLASSIFIER_PROVIDER, JEV);
+            return key.equals(CLASSIFIER_PROVIDER) || JevApi.MODEL.equals(v) ? null
+                    : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevApi.MODEL, CLASSIFIER_PROVIDER, JEV);
         }
         var registered = ProviderRegistry.get(provider);
         if (registered == null) {

@@ -130,7 +130,7 @@ A job can be paused and resumed. Pausing lets the pages being fetched finish and
 
 ### Jev mode
 
-The `browser` tool drives a headless Chromium for pages that need JavaScript, and by default the agent's own model steers it one selector at a time. If this machine does not have the browser yet, the first call downloads it and the chat shows the progress under that reply; [Settings → Browser](/guide#settings-browser) can download it ahead of time. When [Settings → Browser](/guide#settings-browser) selects Jev and has a key, the tool changes shape. It offers only two actions:
+The `browser` tool drives a headless Chromium for pages that need JavaScript, and by default the agent's own model steers it one selector at a time. If this machine does not have the browser yet, the first call downloads it and the chat shows the progress under that reply; [Settings → Browser](/guide#settings-browser) can download it ahead of time. When [Settings → Browser](/guide#settings-browser) selects Jev and a TypeSafe key is set in [Settings → Decision Providers](/guide#settings-decision-providers), the tool changes shape. It offers only two actions:
 
 - **`run`** with a `url` and a `goal`, both required. JClaw opens the URL through the same checks as `navigate`, then Jev works through the goal: clicking, typing, choosing from dropdowns, scrolling and waiting, one decision at a time. Jev can act only on what it saw on the page. Nothing it answers becomes a selector or a script, and every action is checked against the current page just before it happens.
 - **`close`**, as before.
@@ -153,7 +153,7 @@ A run stops as blocked, with the reason, after:
 - five minutes;
 - **Stop** pressed in the chat, or the task or subagent run being cancelled. The run ends at its next step, and the result lists the actions already taken.
 
-Each call into the browser has 30 seconds. A page that stops responding for longer, for example because a script is stuck in a loop, ends the run with an error, and JClaw closes that agent's browser session so the next call starts fresh. If Jev cannot be reached, or answers with something invalid, the run stops without taking that step and says why. A Jev request that times out, fails to connect or is rate-limited is retried twice first.
+Each call into the browser has 30 seconds. A page that stops responding for longer, for example because a script is stuck in a loop, ends the run with an error, and JClaw closes that agent's browser session so the next call starts fresh. If Jev cannot be reached, or answers with something invalid, the run stops without taking that step and says why. A Jev request that times out, fails to connect or is rate-limited is retried twice first. While JEV's circuit breaker in [Settings → Decision Providers](/guide#settings-decision-providers) is open or isolated, nothing is sent and the run ends with an error naming the breaker.
 
 Jev never sees or fills password fields, so logins do not work in Jev mode: switch to Playwright for a site that needs one. Shadow DOM, frames, file uploads and pop-up windows are not supported either.
 

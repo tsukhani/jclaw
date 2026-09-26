@@ -26,6 +26,7 @@ import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.database.DatabaseService;
+import services.decision.DecisionSettings;
 import services.telemetry.OtelConfig;
 import services.telemetry.OtelRuntime;
 import services.tts.TtsEngine;
@@ -461,6 +462,14 @@ public class ConfigService {
         // JCLAW-1274: an engine the browser tool does not know would read as Playwright without a word.
         if (key.startsWith(JevSettings.KEY_PREFIX)) {
             var rejected = JevSettings.rejectionFor(key, value);
+            if (rejected != null) {
+                return rejected;
+            }
+        }
+
+        // JCLAW-1302: the TypeSafe key rides an Authorization header, and no other decision.* key exists.
+        if (key.startsWith(DecisionSettings.KEY_PREFIX)) {
+            var rejected = DecisionSettings.rejectionFor(key, value);
             if (rejected != null) {
                 return rejected;
             }

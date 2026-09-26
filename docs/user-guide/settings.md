@@ -113,7 +113,7 @@ Sends you a message on a channel you choose when work that runs without you fail
 
 Alerts are sent through the `main` agent's channel connections, so the channel you pick must be connected to `main` (or, for `web`, the conversation must exist). You are told when:
 
-- **An LLM provider or MCP server stops answering.** Its circuit breaker opened, and the message says why: the failure rate, slow calls or failures in a row. You get one message per outage, however many times the breaker retries in between, and at most one every 15 minutes for a provider that keeps dropping out and coming back. An outage still going when those 15 minutes are up is reported then.
+- **An LLM provider, MCP server or decision provider stops answering.** Its circuit breaker opened, and the message says why: the failure rate, slow calls or failures in a row. You get one message per outage, however many times the breaker retries in between, and at most one every 15 minutes for a provider that keeps dropping out and coming back. An outage still going when those 15 minutes are up is reported then.
 - **It recovers**, but only if you were told it went down.
 - **A run of a recurring task fails for good**, after its retries. The message names the task, the error and when it runs next. The task itself keeps its schedule (see [Tasks](/guide#tasks)).
 
@@ -340,7 +340,7 @@ Each list is stored as `router.<class>.models` (`chat`, `summarize`, `agentic`, 
 
 - **Prefer subscription and self-hosted models** (`router.preferPrepaid`, on by default) — a model on a subscription or a self-hosted provider is tried before a per-token one, whatever the order, so included credit is spent before money. A per-token model in a list that also holds a prepaid one is badged **fallback only**. Off, the lists are followed exactly as written; the budget guard applies either way.
 - **Classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules**) — the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slower than **Classifier timeout** (`router.classifier.timeoutSeconds`, 1 to 60 seconds, default 8, shown once a model or JEV is picked) or answers with something else, the keyword rules decide.
-- **JEV (TypeSafe AI)** (stored as provider `jev`, model `jev-latest`) — TypeSafe AI's decision model as the classifier. One request asks the same two questions, class and effort, about the first 4000 characters of the prompt and nothing else, and JEV answers each with a probability per choice. When its top class is below `router.classifier.jev.minConfidence` (0 to 1, default 0.50, no row in the panel), the keyword rules choose the class and its default effort, and the route notes that JEV was unsure. It uses the TypeSafe API key from [Browser](#settings-browser), and the option is disabled until one is set. The request is tried once within `router.classifier.timeoutSeconds`, never retried; a failure, a timeout, an invalid answer or a missing key falls back to the keyword rules. TypeSafe may record or retain the prompts it is sent. Measured on 60 prompts, JEV answered in 0.45 s at the median and 1.4 s at worst; earlier, larger browser-step requests saw about one in nine hang, and the timeout is what bounds that wait. Its default of 8 seconds is sized for LLM classifiers; with JEV, a lower value such as 3 bounds a hang sooner. The provider name `jev` is reserved, so no LLM provider can take it.
+- **JEV (TypeSafe AI)** (stored as provider `jev`, model `jev-latest`) — TypeSafe AI's decision model as the classifier. One request asks the same two questions, class and effort, about the first 4000 characters of the prompt and nothing else, and JEV answers each with a probability per choice. When its top class is below `router.classifier.jev.minConfidence` (0 to 1, default 0.50, no row in the panel), the keyword rules choose the class and its default effort, and the route notes that JEV was unsure. It uses the TypeSafe API key from [Decision Providers](#settings-decision-providers), and the option is disabled until one is set. The request is tried once within `router.classifier.timeoutSeconds`, never retried; a failure, a timeout, an invalid answer or a missing key falls back to the keyword rules. While JEV's circuit breaker is open or isolated, nothing is sent: the keyword rules decide, and the route notes that the JEV breaker is open. TypeSafe may record or retain the prompts it is sent. Measured on 60 prompts, JEV answered in 0.45 s at the median and 1.4 s at worst; earlier, larger browser-step requests saw about one in nine hang, and the timeout is what bounds that wait. Its default of 8 seconds is sized for LLM classifiers; with JEV, a lower value such as 3 bounds a hang sooner. With JEV, a timeout counts toward the circuit breaker the browser engine shares (see [Decision Providers](#settings-decision-providers)), so keep it at 3 seconds or more. The provider name `jev` is reserved, so no LLM provider can take it.
 - **Reasoning effort** — a thinking model reasons at the effort the router chose for the prompt: the classifier's, or else the class default — low for Chat and Summarize, medium for Agent work and Coding, high for Reasoning. It is fitted to the levels the model offers. A thinking level chosen on the conversation still wins, including off.
 - **Budget guard** — usage is read from each Ollama Cloud provider's quota windows. Past **Downshift at** (`router.budget.downshiftAt`, default 0.75, shown as 75%) the four heavier classes stop using that provider and fall back to the Chat list; past **Exhausted at** (`router.budget.exhaustedAt`, default 0.95) no class uses it. Downshift must stay below Exhausted. Any provider that answers a call with "out of credit" is also benched for a while.
 
@@ -355,6 +355,27 @@ Web search engines available to the `web_search` tool. Drag rows to **reorder pr
 - **disabled** — turned off.
 
 Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
+
+## Decision Providers
+
+A decision provider answers a question by choosing among the options it is given, with a probability for each, rather than by writing text. JClaw features call it directly, and it never answers a chat. Each provider has one card, which holds what its features share: the API key and the circuit breaker. A feature's own settings stay on that feature's page.
+
+**JEV (TypeSafe AI)** is the one decision provider today. Its card shows **configured** once a key is set and **needs API key** until then.
+
+| Key                   | Default   | Meaning                                                                                          |
+|-----------------------|-----------|--------------------------------------------------------------------------------------------------|
+| `decision.jev.apiKey` | *(unset)* | Your TypeSafe AI key. Masked like every other secret, and refused if it contains spaces or characters outside printable ASCII. |
+
+Saving the key editor without typing anything leaves the stored key as it was. A key saved in the Browser section before this version is moved here when JClaw starts, so it does not need entering again.
+
+**Used by** lists the two features that call JEV, each marked **in use** when it has chosen JEV:
+
+- [Browser](#settings-browser), where the Jev engine sends TypeSafe AI each step's page content: its address and title, visible text, element labels and form values (but not hidden password fields), with the goal and the text typed earlier in the run. The engine choice stays in Browser.
+- [Model Router](#settings-model-router), where the JEV classifier sends the first 4000 characters of each prompt. The classifier timeout and `router.classifier.jev.minConfidence` stay in Model Router.
+
+TypeSafe AI may record or retain what it is sent.
+
+Both features share one **circuit breaker**, shown on the card once JEV has been called, with **Isolate** or **Restore** to move it by hand. Three failures in a row, or half of the last ten, open it for 60 seconds. A failure is a request that could not reach TypeSafe, timed out, or got HTTP 429 or a 5xx; a browser step's retries count as one. A refused key (401 or 403), any other 4xx, or an answer JClaw cannot read never counts. A Model Router classifier timeout counts too, so with JEV keep that timeout at 3 seconds or more. While the breaker is open or isolated nothing is sent: the Model Router uses its keyword rules, and a Jev browser run ends with an error naming the breaker. Isolating it lasts until the 60-second cooldown ends or you restore it. The thresholds are fixed. An open breaker is also listed on the [Dashboard](/) under **Circuit Breakers**.
 
 ## Transcription
 
@@ -610,16 +631,15 @@ Behind a proxy, JClaw still checks every address before a request leaves, and re
 
 Chooses what drives the `browser` tool, for every agent at once.
 
-| Key                  | Default      | Meaning                                                                                   |
-|----------------------|--------------|-------------------------------------------------------------------------------------------|
-| `browser.engine`     | `playwright` | `playwright` or `jev`. Any other value is refused when you save it.                       |
-| `browser.jev.apiKey` | *(unset)*    | Your TypeSafe AI key, for Jev and the Model Router's JEV classifier. Masked like every other secret. |
+| Key              | Default      | Meaning                                                             |
+|------------------|--------------|---------------------------------------------------------------------|
+| `browser.engine` | `playwright` | `playwright` or `jev`. Any other value is refused when you save it. |
 
 **Playwright**, the default, works as it always has: the agent's own model reads the page and writes CSS selectors and JavaScript, one tool call per step.
 
-**Jev** hands the steps to TypeSafe AI's Jev model. The agent calls `run` with a URL and a goal, and Jev chooses each click, text entry, dropdown choice and scroll until it judges the goal done or blocked. Each step is one request to Jev rather than a round of the agent's own model. The agent's own model still writes any text that is typed. The key field shows whatever the engine, because the [Model Router](#settings-model-router)'s JEV classifier uses the same key. With Jev selected and no key set, agents keep the Playwright actions. See [Jev mode](/guide#skills-tools-mcp-jev-mode) for what the agent sees.
+**Jev** hands the steps to TypeSafe AI's Jev model. The agent calls `run` with a URL and a goal, and Jev chooses each click, text entry, dropdown choice and scroll until it judges the goal done or blocked. Each step is one request to Jev rather than a round of the agent's own model. The agent's own model still writes any text that is typed. Jev needs a TypeSafe API key, set in [Decision Providers](#settings-decision-providers) because the [Model Router](#settings-model-router)'s JEV classifier uses the same key; with Jev selected and no key set, this section links there and agents keep the Playwright actions. See [Jev mode](/guide#skills-tools-mcp-jev-mode) for what the agent sees.
 
-With Jev, every step sends TypeSafe AI the goal, the page's address and title, what is visible on it (its text, element labels and form values, but not hidden password fields) and the text typed earlier in the run, and TypeSafe may record or retain them. Keep Playwright for pages whose content must not leave this instance. Switching back to Playwright keeps the key, so you can switch again without re-entering it. The key is refused if it contains spaces or characters outside printable ASCII, and saving the key editor without typing anything leaves the stored key as it was.
+With Jev, every step sends TypeSafe AI the goal, the page's address and title, what is visible on it (its text, element labels and form values, but not hidden password fields) and the text typed earlier in the run, and TypeSafe may record or retain them. Keep Playwright for pages whose content must not leave this instance. Switching back to Playwright leaves the key in Decision Providers, so you can switch again without re-entering it.
 
 ### Browser components
 

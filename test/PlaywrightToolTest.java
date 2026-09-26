@@ -24,6 +24,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.decision.DecisionSettings;
 import tools.BrowserScreenLog;
 import tools.BrowserScreenProxy;
 import tools.PlaywrightBrowserTool;
@@ -455,9 +456,10 @@ class PlaywrightToolTest extends UnitTest {
     @Test
     void theActionSetFollowsTheBrowserEngine() {
         var tool = new PlaywrightBrowserTool();
+        JevBreakerTestSync.acquire();
         try {
             ConfigService.delete(JevSettings.ENGINE);
-            ConfigService.delete(JevSettings.API_KEY);
+            ConfigService.delete(DecisionSettings.API_KEY);
             assertEquals(ACTIONS, actionEnum(tool), "an absent engine is Playwright, exactly as before");
             assertEquals(ACTIONS, tool.actions().stream().map(ToolAction::name).toList());
 
@@ -466,7 +468,7 @@ class PlaywrightToolTest extends UnitTest {
             assertTrue(tool.execute("{\"action\":\"run\",\"url\":\"https://example.com\",\"goal\":\"x\"}", agent)
                     .startsWith("Error: Unknown action 'run'."));
 
-            ConfigService.set(JevSettings.API_KEY, "ts-test-key");
+            ConfigService.set(DecisionSettings.API_KEY, "ts-test-key");
             assertEquals(List.of("run", "close"), actionEnum(tool));
             assertEquals(List.of("run", "close"), tool.actions().stream().map(ToolAction::name).toList());
             assertTrue(tool.description().contains("step"), tool.description());
@@ -486,10 +488,10 @@ class PlaywrightToolTest extends UnitTest {
             assertEquals(ACTIONS, actionEnum(tool));
             assertTrue(tool.description().contains("navigate"));
             assertTrue(tool.shortDescription().contains("login flows"), tool.shortDescription());
-            assertEquals("ts-test-key", ConfigService.get(JevSettings.API_KEY), "switching back keeps the key");
+            assertEquals("ts-test-key", ConfigService.get(DecisionSettings.API_KEY), "switching back keeps the key");
 
             // JCLAW-1300: the router's JEV classifier reads the key whatever the engine; the browser tool does not.
-            assertEquals("ts-test-key", JevSettings.apiKey());
+            assertEquals("ts-test-key", DecisionSettings.apiKey());
             assertNull(JevSettings.activeKey());
             var jevRequests = new CopyOnWriteArrayList<Request>();
             var jevPolicy = new RouterPolicy(Map.of(TaskClass.CHAT, List.of(new RouterPolicy.Candidate("p", "m"))),
@@ -505,7 +507,8 @@ class PlaywrightToolTest extends UnitTest {
             assertEquals(TaskClass.REASONING, classified.taskClass(), "JEV answered, not the keyword rules");
         } finally {
             ConfigService.delete(JevSettings.ENGINE);
-            ConfigService.delete(JevSettings.API_KEY);
+            ConfigService.delete(DecisionSettings.API_KEY);
+            JevBreakerTestSync.release();
         }
     }
 
@@ -1504,14 +1507,20 @@ class PlaywrightToolTest extends UnitTest {
         return HttpFactories.callWith(jev, () -> executeAt(tool, origin, args));
     }
 
+    /** Holds {@link JevBreakerTestSync} until {@link #usePlaywright()}, which every caller runs in a {@code finally}. */
     private static void useJev() {
+        JevBreakerTestSync.acquire();
         ConfigService.set(JevSettings.ENGINE, JevSettings.JEV);
-        ConfigService.set(JevSettings.API_KEY, "ts-test-key");
+        ConfigService.set(DecisionSettings.API_KEY, "ts-test-key");
     }
 
     private static void usePlaywright() {
-        ConfigService.delete(JevSettings.ENGINE);
-        ConfigService.delete(JevSettings.API_KEY);
+        try {
+            ConfigService.delete(JevSettings.ENGINE);
+            ConfigService.delete(DecisionSettings.API_KEY);
+        } finally {
+            JevBreakerTestSync.release();
+        }
     }
 
     @Test

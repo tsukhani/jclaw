@@ -8,6 +8,7 @@ import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.PlaywrightException;
 import org.jspecify.annotations.Nullable;
 import play.Play;
+import services.decision.JevException;
 import utils.RetryScheduler;
 
 import java.io.IOException;
