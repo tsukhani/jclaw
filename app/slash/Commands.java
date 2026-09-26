@@ -1341,7 +1341,7 @@ public final class Commands {
      * JCLAW-274: {@code /subagent history <id>} — render the child
      * conversation's transcript inline as plain text. Permission mirrors
      * the {@link tools.ConversationHistoryTool} tool path: the calling agent
-     * must own the run. Single-operator Personal Edition has no operator-role /
+     * must own the run. JClaw is single-operator and has no operator-role /
      * multi-user concept, so this parent-agent ownership is the whole gate.
      *
      * <p>Renders up to {@link #SUBAGENT_HISTORY_LIMIT} messages with each

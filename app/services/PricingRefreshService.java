@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit;
  *       tier — is never overwritten. Operators can audit the saved
  *       {@code provider.{name}.models} JSON and trust it reflects their
  *       intent.</li>
- *   <li><b>Off by default.</b> The Personal Edition is meant for general
+ *   <li><b>Off by default.</b> JClaw is meant for general
  *       public use; phoning home to GitHub on a schedule is the kind of
  *       deployment-posture change that should be opt-in. The {@code refresh()}
  *       entrypoint short-circuits when {@code pricing.refresh.enabled != "true"}.</li>

@@ -264,7 +264,7 @@ public class ApiTasksController extends Controller {
     /**
      * Resolve and require the {@code agentId} from the request body.
      *
-     * <p>agentId resolution. Single-operator Personal Edition: the one admin
+     * <p>agentId resolution. Single-operator by design: the one admin
      * principal (admitted by AuthCheck) can address any agent. The 400 here is
      * "you typed an id that doesn't resolve"; a non-existent task addressed in
      * /api/tasks/{id} would be 404, but a non-existent agent named in the

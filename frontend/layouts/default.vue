@@ -437,7 +437,7 @@ const navGroups: NavGroup[] = [
               Control
             </div>
             <div class="text-sm font-bold text-emerald-700 dark:text-emerald-400">
-              JClaw
+              JClaw Pro
             </div>
           </div>
         </div>

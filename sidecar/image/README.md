@@ -13,7 +13,7 @@ Local image generation needs a Python runtime (diffusers / Flux are Python-first
 there is no JNI binding). A resident daemon holds the model in GPU/unified memory
 between calls, so only the first image after idle pays the multi-second model
 load — a per-request subprocess would re-pay it every time, and a model server
-(torchserve) is too heavy for a single-user Personal Edition.
+(torchserve) is too heavy for a single-operator install.
 
 ## Requirements
 

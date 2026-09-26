@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code app.json} but not {@code application.conf}, an app can never raise its own
  * budget — it can only lower it.
  *
- * <p>State is in-process (single-JVM Personal Edition — see the multi-tenancy design);
+ * <p>State is in-process (one JVM per install — see the multi-tenancy design);
  * a restart clears the counters, which is acceptable for a rate limit. The window math
  * takes an explicit {@code nowMillis} so the core is a pure, deterministically testable
  * function with no wall-clock or global-config dependency.

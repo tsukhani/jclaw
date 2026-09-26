@@ -76,7 +76,7 @@ public class ApiVideogenController extends Controller {
 
     /** GET /api/videogen/jobs?ids=1,2,3 — lightweight status for the chat poll loop.
      *
-     *  <p>No owner-scoping: JClaw is single-admin Personal Edition — there is no {@code User} entity or
+     *  <p>No owner-scoping: JClaw is single-operator — there is no {@code User} entity or
      *  owner FK (see {@code ApiToken}/{@code AuthCheck}), so the {@code AuthCheck}-gated operator owns
      *  every job. This mirrors {@code ApiConversationsController} / {@code ApiAttachmentsController},
      *  which likewise serve rows by id/uuid to the one authenticated operator. */

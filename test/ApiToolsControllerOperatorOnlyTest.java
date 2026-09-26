@@ -555,8 +555,8 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
         assertStatus(400, resp);
     }
 
-    /** CONTROL — the binding list is a channel read, which the Personal Edition posture keeps
-     *  open to an agent; only the writes moved. */
+    /** CONTROL — the binding list is a channel read, which stays open to an agent by design;
+     *  only the writes moved. */
     @Test
     void agentPrincipalCanStillListWhatsAppBindings() {
         var token = AuthFixture.seedBearerToken();

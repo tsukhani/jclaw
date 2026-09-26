@@ -49,7 +49,7 @@ public class ApiToken extends Model {
     @Column(name = "secret_hash", nullable = false, length = 64, unique = true)
     public String secretHash;
 
-    /** Token owner — always {@code "system"} in single-operator Personal Edition.
+    /** Token owner — always {@code "system"}, since JClaw is single-operator.
      *  Read by the bearer-auth filter and stashed in {@code session.username} so
      *  downstream code that reads identity sees a stable value. */
     @Column(name = "owner_username", nullable = false, length = 100)

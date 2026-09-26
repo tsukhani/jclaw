@@ -22,7 +22,7 @@ import java.util.Map;
  * JCLAW-326: paginated read tool that lists a parent agent's
  * {@link SubagentRun} rows for the {@code conversation_list} AC. The query
  * is always scoped to the calling agent's owned rows — there is no
- * cross-agent listing path on Personal Edition, mirroring the
+ * cross-agent listing path, mirroring the
  * parent-ownership gates on {@link SubagentYieldTool} and
  * {@link ConversationHistoryTool}.
  *

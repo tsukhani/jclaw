@@ -27,7 +27,7 @@ final class SubagentLimits {
      *
      * <p>Race note: two concurrent spawns from the same parent could both
      * see "N-1 RUNNING" and both proceed, transiently exceeding the breadth
-     * cap by one. Personal Edition rarely runs into this (the parent LLM
+     * cap by one. In practice this is rare (the parent LLM
      * issues tool calls sequentially within a turn); accepted as an
      * advisory limit for now. A {@code SELECT ... FOR UPDATE} on the parent
      * Agent row would close the window if/when it matters.

@@ -16,8 +16,8 @@ import java.util.List;
  *       {@link LuceneIndexer}; the JPA hooks on
  *       {@link TaskRunMessage} drive sync (not DB triggers, since
  *       H2's {@code FullTextLucene} ships an older Lucene that
- *       {@code IllegalAccessError}s against Lucene 10). JCLAW's
- *       Personal Edition operators get full-text without standing up
+ *       {@code IllegalAccessError}s against Lucene 10). JClaw
+ *       operators get full-text without standing up
  *       a separate Postgres instance.</li>
  *   <li>{@link PostgresMessageSearchRepository} — for the
  *       operator-opt-in Postgres path. Uses {@code tsvector}

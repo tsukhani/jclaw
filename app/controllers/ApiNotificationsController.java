@@ -30,7 +30,7 @@ import static utils.GsonHolder.GSON;
  * a row read without removing it, so the past-reminders tab can still
  * show acknowledged entries.
  *
- * <p>Single-operator Personal Edition: the one authenticated admin sees every
+ * <p>Single-operator by design: the one authenticated admin sees every
  * notification — there is no per-user scoping because there is only one user.
  */
 @With(AuthCheck.class)

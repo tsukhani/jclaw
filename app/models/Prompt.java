@@ -12,8 +12,8 @@ import java.util.List;
 /**
  * A saved, reusable prompt in the operator's Prompts Library (JCLAW-813).
  *
- * <p>Operator-level — not scoped per agent or per user (single-operator
- * Personal Edition, same convention as {@link McpServer}). A prompt is one
+ * <p>Operator-level — not scoped per agent or per user (JClaw is
+ * single-operator, same convention as {@link McpServer}). A prompt is one
  * title + free-form prompt text, filed under exactly one fixed {@link Category}
  * (the controlled, scannable axis) and tagged with an optional free-form,
  * comma-separated {@code tags} string (the unlimited, user-defined axis). The

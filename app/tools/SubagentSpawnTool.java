@@ -166,7 +166,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     public static final String MESSAGE_KIND_CODINGRUN_STEP = "codingrun_step";
 
     /**
-     * JCLAW-266: recursion caps. Defaults match Personal Edition posture —
+     * JCLAW-266: recursion caps, defaulted for a single-operator install —
      * single level of delegation (top-level Agent spawns one tier of
      * subagents, no grandchildren) and a small fan-out so one parent can't
      * saturate the executor with concurrent children.
