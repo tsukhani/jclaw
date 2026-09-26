@@ -43,6 +43,7 @@ const CLASS_HELP: Record<string, string> = {
 // Mirrors RouterPolicy's defaults, used while the key is unset.
 const DEFAULT_DOWNSHIFT_AT = 0.75
 const DEFAULT_EXHAUSTED_AT = 0.95
+const DEFAULT_CLASSIFIER_TIMEOUT_SECONDS = 8
 
 const IMAGE_ONLY_PROVIDERS = new Set(['bfl', 'replicate'])
 
@@ -145,6 +146,21 @@ async function saveClassifier(value: string) {
       await $fetch('/api/config/router.classifier.model', { method: 'DELETE' })
     }
   })
+  await refresh()
+  saving.value = false
+}
+
+const TIMEOUT_KEY = 'router.classifier.timeoutSeconds'
+const classifierTimeout = computed(() => configValue(TIMEOUT_KEY) || String(DEFAULT_CLASSIFIER_TIMEOUT_SECONDS))
+const editingTimeout = ref(false)
+const timeoutEdit = ref('')
+
+async function saveTimeout() {
+  saving.value = true
+  const saved = await attempt(async () => {
+    await $fetch('/api/config', { method: 'POST', body: { key: TIMEOUT_KEY, value: String(timeoutEdit.value).trim() } })
+  })
+  if (saved) editingTimeout.value = false
   await refresh()
   saving.value = false
 }
@@ -364,47 +380,103 @@ function usageTone(fraction: number): string {
       questions with a probability for each choice, and leaves a prompt whose class it is unsure of to the
       keyword rules. Either costs one extra call before the reply starts and sees the first 4000 characters
       of the prompt, so a remote classifier is one more place your prompts go: JEV sends them to TypeSafe
-      AI, which may record or retain them. If the classifier is unreachable, slow or answers with something
-      else, the keyword rules decide instead and the turn carries on.
+      AI, which may record or retain them. If the classifier is unreachable, slower than its timeout or
+      answers with something else, the keyword rules decide instead and the turn carries on.
     </p>
-    <div class="bg-surface-elevated border border-border">
-      <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
-        <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0">classifier model</span>
-        <select
-          :value="classifierValue"
-          aria-label="Prompt classifier model"
-          :disabled="saving"
-          class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-          @change="saveClassifier(($event.target as HTMLSelectElement).value)"
+    <div class="bg-surface-elevated border border-border divide-y divide-border">
+      <div>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0">classifier model</span>
+          <select
+            :value="classifierValue"
+            aria-label="Prompt classifier model"
+            :disabled="saving"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            @change="saveClassifier(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">
+              Keyword rules (no model call)
+            </option>
+            <option
+              :value="JEV_CLASSIFIER"
+              :disabled="!jevKeySet"
+            >
+              JEV (TypeSafe AI){{ jevKeySet ? '' : ' — needs a TypeSafe API key' }}
+            </option>
+            <option
+              v-for="o in modelOptions"
+              :key="o.value"
+              :value="o.value"
+            >
+              {{ o.label }}
+            </option>
+          </select>
+        </div>
+        <p
+          v-if="!jevKeySet"
+          class="px-4 pb-2.5 text-xs text-fg-muted"
+          data-testid="router-jev-key-hint"
         >
-          <option value="">
-            Keyword rules (no model call)
-          </option>
-          <option
-            :value="JEV_CLASSIFIER"
-            :disabled="!jevKeySet"
-          >
-            JEV (TypeSafe AI){{ jevKeySet ? '' : ' — needs a TypeSafe API key' }}
-          </option>
-          <option
-            v-for="o in modelOptions"
-            :key="o.value"
-            :value="o.value"
-          >
-            {{ o.label }}
-          </option>
-        </select>
+          To classify with JEV, set a TypeSafe API key in <NuxtLink
+            to="/settings?section=browser"
+            class="text-fg-strong underline"
+          >Settings → Browser</NuxtLink>.
+        </p>
       </div>
-      <p
-        v-if="!jevKeySet"
-        class="px-4 pb-2.5 text-xs text-fg-muted"
-        data-testid="router-jev-key-hint"
+      <div
+        v-if="classifierValue"
+        class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
+        data-testid="router-classifier-timeout"
       >
-        To classify with JEV, set a TypeSafe API key in <NuxtLink
-          to="/settings?section=browser"
-          class="text-fg-strong underline"
-        >Settings → Browser</NuxtLink>.
-      </p>
+        <span class="text-xs font-mono text-fg-muted w-56 max-sm:w-full shrink-0">classifier timeout</span>
+        <template v-if="editingTimeout">
+          <input
+            v-model="timeoutEdit"
+            type="number"
+            min="1"
+            max="60"
+            step="1"
+            aria-label="Classifier timeout (seconds)"
+            class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+          >
+          <span class="text-sm text-fg-muted">s</span>
+          <button
+            class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+            title="Save"
+            :disabled="saving"
+            @click="saveTimeout()"
+          >
+            <CheckIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+            title="Cancel"
+            @click="editingTimeout = false"
+          >
+            <XMarkIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+        </template>
+        <template v-else>
+          <span class="flex-1 text-sm text-fg-primary font-mono">{{ classifierTimeout }} s</span>
+          <button
+            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+            title="Edit"
+            aria-label="Edit classifier timeout"
+            @click="editingTimeout = true; timeoutEdit = classifierTimeout"
+          >
+            <PencilIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+        </template>
+      </div>
     </div>
 
     <h3 class="text-sm font-medium text-fg-muted">

@@ -253,6 +253,44 @@ describe('SettingsModelRouterPanel', () => {
     ])
   })
 
+  it('shows the classifier timeout only once a classifier is picked, at the default until one is stored', async () => {
+    const rules = await mountSuspended(Harness)
+    await flushPromises()
+    expect(rules.find('[data-testid="router-classifier-timeout"]').exists()).toBe(false)
+
+    entries = [
+      ...entries,
+      { key: 'router.classifier.provider', value: 'ollama-cloud' },
+      { key: 'router.classifier.model', value: 'glm-5.3-flash' },
+    ]
+    clearNuxtData()
+    const picked = await mountSuspended(Harness)
+    await flushPromises()
+    expect(picked.find('[data-testid="router-classifier-timeout"]').text()).toContain('8 s')
+
+    entries = [...entries, { key: 'router.classifier.timeoutSeconds', value: '3' }]
+    clearNuxtData()
+    const stored = await mountSuspended(Harness)
+    await flushPromises()
+    expect(stored.find('[data-testid="router-classifier-timeout"]').text()).toContain('3 s')
+  })
+
+  it('saves the classifier timeout in seconds', async () => {
+    entries = [
+      ...entries,
+      { key: 'browser.jev.apiKey', value: 'ts-s****' },
+      { key: 'router.classifier.provider', value: 'jev' },
+      { key: 'router.classifier.model', value: 'jev-latest' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const row = c.find('[data-testid="router-classifier-timeout"]')
+    await row.find('button[aria-label="Edit classifier timeout"]').trigger('click')
+    await c.find('input[aria-label="Classifier timeout (seconds)"]').setValue('3')
+    await c.find('[data-testid="router-classifier-timeout"] button[title="Save"]').trigger('click')
+    await vi.waitFor(() => expect(posts).toContainEqual({ key: 'router.classifier.timeoutSeconds', value: '3' }), { timeout: 5000 })
+  })
+
   it('shows each listed provider\'s quota windows, and says when a provider has none', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
