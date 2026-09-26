@@ -98,7 +98,32 @@ describe('Settings page — Decision Providers', () => {
     expect(portrait.attributes('src')).toBe('/jev.webp')
     expect(portrait.attributes('alt')).toBe('')
     expect([portrait.attributes('width'), portrait.attributes('height')]).toEqual(['143', '176'])
-    expect(portrait.element.nextElementSibling?.getAttribute('data-testid')).toBe('decision-jev-retention')
+    const play = component.find('[data-testid="decision-jev-play"]')
+    expect(play.element.nextElementSibling?.nextElementSibling?.getAttribute('data-testid')).toBe('decision-jev-retention')
+  })
+
+  it('plays the JEV clip from the start when the portrait is clicked, fetching nothing before', async () => {
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+    try {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+
+      const button = component.find('[data-testid="decision-jev-play"]')
+      expect(button.attributes('type')).toBe('button')
+      expect(button.attributes('aria-label')).toBe('Play JEV saying “My name is Jev”')
+      expect(button.attributes('title')).toBe(button.attributes('aria-label'))
+      const audio = component.find('audio')
+      expect(audio.attributes('src')).toBe('/jev.mp3')
+      expect(audio.attributes('preload')).toBe('none')
+
+      ;(audio.element as HTMLAudioElement).currentTime = 0.8
+      await button.trigger('click')
+      expect(playSpy).toHaveBeenCalledTimes(1)
+      expect((audio.element as HTMLAudioElement).currentTime).toBe(0)
+    }
+    finally {
+      playSpy.mockRestore()
+    }
   })
 
   it('marks each consumer that has chosen JEV as in use', async () => {

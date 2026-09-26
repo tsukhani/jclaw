@@ -3,7 +3,7 @@
 // question with a probability per choice rather than with text. A card holds what the provider's
 // consumers share — its key and its circuit breaker — and links to each consumer, where the settings
 // that belong to that consumer alone stay.
-import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { CheckIcon, PencilIcon, SpeakerWaveIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 
 const { configData, saving, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
@@ -38,6 +38,16 @@ const consumers = computed(() => [
 // Minted on JEV's first call, so the card shows no breaker until then.
 const { byName: breakersByName, refresh: refreshBreakers } = useBreakers()
 const breaker = computed(() => breakersByName.value.get('decision:jev'))
+
+// The clip's transcript, so its words reach a reader who cannot hear it (WCAG 1.2.1).
+const JEV_CLIP_LABEL = 'Play JEV saying “My name is Jev”'
+const jevClip = ref<HTMLAudioElement>()
+function playJevClip() {
+  const audio = jevClip.value
+  if (!audio) return
+  audio.currentTime = 0
+  void audio.play()
+}
 </script>
 
 <template>
@@ -70,15 +80,40 @@ const breaker = computed(() => breakersByName.value.get('decision:jev'))
         >needs API key</span>
       </div>
       <div class="px-4 py-2.5 flex items-start gap-3 text-xs text-fg-muted leading-relaxed border-b border-border">
-        <!-- 3lh: the text beside it wraps to three lines in a 1330–1660 px window. -->
-        <img
-          src="/jev.webp"
-          alt=""
-          width="143"
-          height="176"
-          class="h-[3lh] w-auto shrink-0 select-none"
-          data-testid="decision-jev-portrait"
+        <button
+          type="button"
+          class="group relative shrink-0 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          :aria-label="JEV_CLIP_LABEL"
+          :title="JEV_CLIP_LABEL"
+          data-testid="decision-jev-play"
+          @click="playJevClip()"
         >
+          <!-- 3lh: the text beside it wraps to three lines in a 1330–1660 px window. -->
+          <img
+            src="/jev.webp"
+            alt=""
+            width="143"
+            height="176"
+            class="h-[3lh] w-auto select-none"
+            data-testid="decision-jev-portrait"
+          >
+          <!-- Always shown without hover, so a touch screen still gets the cue. -->
+          <span
+            class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-safe:transition-opacity"
+            aria-hidden="true"
+          >
+            <!-- Light, because a dark badge vanishes against JEV's black shirt. -->
+            <span class="rounded-full bg-white/75 p-1 text-neutral-900 shadow-sm backdrop-blur-xs">
+              <SpeakerWaveIcon class="w-3.5 h-3.5" />
+            </span>
+          </span>
+        </button>
+        <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- its words are the button's name and tooltip -->
+        <audio
+          ref="jevClip"
+          src="/jev.mp3"
+          preload="none"
+        />
         <p data-testid="decision-jev-retention">
           TypeSafe AI's decision model. TypeSafe AI may record or retain what it is sent: the Jev browser
           engine sends each step's page content (its address, title, visible text, element labels and form
