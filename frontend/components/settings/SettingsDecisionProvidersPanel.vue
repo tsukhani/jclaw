@@ -69,15 +69,23 @@ const breaker = computed(() => breakersByName.value.get('decision:jev'))
           data-testid="decision-jev-status"
         >needs API key</span>
       </div>
-      <p
-        class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border"
-        data-testid="decision-jev-retention"
-      >
-        TypeSafe AI's decision model. TypeSafe AI may record or retain what it is sent: the Jev browser
-        engine sends each step's page content (its address, title, visible text, element labels and form
-        values, but not hidden password fields) with the goal and the text typed earlier in the run, and
-        the Model Router's classifier sends the first 4000 characters of each prompt.
-      </p>
+      <div class="px-4 py-2.5 flex items-start gap-3 text-xs text-fg-muted leading-relaxed border-b border-border">
+        <!-- 3lh: the text beside it wraps to three lines in a 1330–1660 px window. -->
+        <img
+          src="/jev.webp"
+          alt=""
+          width="143"
+          height="176"
+          class="h-[3lh] w-auto shrink-0 select-none"
+          data-testid="decision-jev-portrait"
+        >
+        <p data-testid="decision-jev-retention">
+          TypeSafe AI's decision model. TypeSafe AI may record or retain what it is sent: the Jev browser
+          engine sends each step's page content (its address, title, visible text, element labels and form
+          values, but not hidden password fields) with the goal and the text typed earlier in the run, and
+          the Model Router's classifier sends the first 4000 characters of each prompt.
+        </p>
+      </div>
       <div class="divide-y divide-border">
         <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">apiKey</span>

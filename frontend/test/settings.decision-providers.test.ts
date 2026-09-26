@@ -90,6 +90,17 @@ describe('Settings page — Decision Providers', () => {
     expect(component.find('[data-testid="decision-jev-breaker"]').exists()).toBe(false)
   })
 
+  it('shows the JEV portrait beside the retention note, decorative and sized before it loads', async () => {
+    baseEndpoints()
+    const component = await mountDecisionProviders()
+
+    const portrait = component.find('[data-testid="decision-jev-portrait"]')
+    expect(portrait.attributes('src')).toBe('/jev.webp')
+    expect(portrait.attributes('alt')).toBe('')
+    expect([portrait.attributes('width'), portrait.attributes('height')]).toEqual(['143', '176'])
+    expect(portrait.element.nextElementSibling?.getAttribute('data-testid')).toBe('decision-jev-retention')
+  })
+
   it('marks each consumer that has chosen JEV as in use', async () => {
     baseEndpoints()
     stored.set('browser.engine', 'jev')
