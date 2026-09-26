@@ -325,6 +325,6 @@ class JevClientTest extends UnitTest {
 
     @Test
     void theBreakerKeepsTheNameThePanelAndTheDashboardLookUp() {
-        assertEquals("decision:jev", JevApi.BREAKER);
+        assertEquals("decision:jev", JevApi.BREAKER_NAME);
     }
 }

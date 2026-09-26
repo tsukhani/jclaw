@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import okhttp3.MediaType;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.jspecify.annotations.Nullable;
 import services.BreakerAlarms;
 import services.EventLogger;
@@ -25,14 +26,14 @@ import java.util.concurrent.TimeUnit;
  * engine and the router's classifier. A port of jev-ultrafast's {@code model.post_json} and
  * {@code model.validate_choice} (MIT, Browser Use; notice in {@code conf/browser/jev-ultrafast-LICENSE}).
  *
- * <p>Every call runs under one breaker, {@link #BREAKER}, shared by both consumers, so an outage
+ * <p>Every call runs under one breaker, {@link #BREAKER_NAME}, shared by both consumers, so an outage
  * that one of them discovers stops the other sending too.
  */
 public final class JevApi {
 
     static final String ENDPOINT = "https://api.typesafe.ai/v1/systemone";
     public static final String MODEL = "jev-latest";
-    public static final String BREAKER = "decision:jev";
+    public static final String BREAKER_NAME = "decision:jev";
     /** Fixed: three counted failures in a row, or half of the last ten, open it for 60 s. */
     public static final CircuitBreaker.Config BREAKER_CONFIG =
             CircuitBreaker.Config.of(10, 0.5, 3, 60_000L).withConsecutiveFailures(3);
@@ -94,23 +95,35 @@ public final class JevApi {
                     pause(BACKOFF_MS << (attempt - 1));
                     continue;
                 }
-                if (code == 401 || code == 403) {
-                    throw new JevException("TypeSafe refused the Jev API key (HTTP %d); the operator must update it "
-                            .formatted(code) + "in Settings → Decision Providers");
-                }
-                if (code == 429 || code >= 500) throw new Outage("Jev returned HTTP " + code);
-                if (!response.isSuccessful()) throw new JevException("Jev returned HTTP " + code);
-                var parsed = JsonParser.parseString(response.body().string());
-                if (!parsed.isJsonObject()) throw new JevException(INVALID);
-                return parsed.getAsJsonObject();
+                failOnStatus(response);
+                return parseAnswer(response);
             } catch (IOException e) {
                 EventLogger.warn(CATEGORY, "Jev request %d of %d failed: %s"
                         .formatted(attempt, attempts, e.getClass().getSimpleName()));
                 if (attempt >= attempts) throw new Outage("Jev unreachable");
                 pause(BACKOFF_MS << (attempt - 1));
-            } catch (JsonParseException _) {
-                throw new JevException(INVALID);
             }
+        }
+    }
+
+    /** Ends the call on a status that is not retried, or has run out of retries. */
+    private static void failOnStatus(Response response) {
+        int code = response.code();
+        if (code == 401 || code == 403) {
+            throw new JevException("TypeSafe refused the Jev API key (HTTP %d); the operator must update it "
+                    .formatted(code) + "in Settings → Decision Providers");
+        }
+        if (code == 429 || code >= 500) throw new Outage("Jev returned HTTP " + code);
+        if (!response.isSuccessful()) throw new JevException("Jev returned HTTP " + code);
+    }
+
+    private static JsonObject parseAnswer(Response response) throws IOException {
+        try {
+            var parsed = JsonParser.parseString(response.body().string());
+            if (!parsed.isJsonObject()) throw new JevException(INVALID);
+            return parsed.getAsJsonObject();
+        } catch (JsonParseException _) {
+            throw new JevException(INVALID);
         }
     }
 
@@ -158,12 +171,12 @@ public final class JevApi {
 
     /** The breaker every JEV call runs under, created on first use. */
     public static CircuitBreaker breaker() {
-        return CircuitBreakers.find(BREAKER).orElseGet(JevApi::registerBreaker);
+        return CircuitBreakers.find(BREAKER_NAME).orElseGet(JevApi::registerBreaker);
     }
 
     private static CircuitBreaker registerBreaker() {
-        var breaker = CircuitBreakers.get(BREAKER, BREAKER_CONFIG);
-        breaker.setTransitionListener(BreakerAlarms.listener(BREAKER, "Decision provider JEV"));
+        var breaker = CircuitBreakers.get(BREAKER_NAME, BREAKER_CONFIG);
+        breaker.setTransitionListener(BreakerAlarms.listener(BREAKER_NAME, "Decision provider JEV"));
         return breaker;
     }
 
