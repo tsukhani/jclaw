@@ -1074,7 +1074,7 @@ bin/README.md is the schema contract.
 
 Options:
   --tests            Also run \`play autotest\` and report its failures
-                     (~7 minutes; without it only the compile is checked)
+                     (~10 minutes; without it only the compile is checked)
   --out <file>       Write the JSON there; stdout stays empty
 
 Exit codes: 0 nothing to report, 1 diagnostics reported, 2 the harness itself

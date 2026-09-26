@@ -79,7 +79,7 @@ public class ApiAppInvokeController extends Controller {
      */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
-            reason = "drives a full agent turn -- the recursion the /api/chat/ deny-floor exists to prevent")
+            reason = "drives a full agent turn -- the same recursion that keeps /api/chat/ OPERATOR_ONLY")
     public static void invoke(String slug, Upload[] files) {
         var agent = resolveDesignatedAgent(slug); // AD-3 — fail-closed 4xx on any miss (own Tx.run inside)
         // AD-2: input is the multipart "message" field plus optional file uploads of

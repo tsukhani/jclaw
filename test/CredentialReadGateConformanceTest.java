@@ -19,8 +19,8 @@ import java.util.stream.Stream;
 /**
  * No agent-reachable read hands back a credential (JCLAW-1268).
  *
- * <p>The JCLAW-1253/1266 stance rule covers mutating routes and says so deliberately: a GET that
- * leaks is a masking problem at the seam. The seam is the right place — what was missing is any
+ * <p>The stance rule ({@code CapabilityRulesTest}) decides which routes an agent may call, reads
+ * included, but not what a read returns: a GET that leaks is a masking problem at the seam. The seam is the right place — what was missing is any
  * check that it was used. Masking is applied correctly in eight files today, arrived at over four
  * tickets, and entirely by memory; a new read that returns a secret gets none unless its author
  * happens to remember, and the omission looks exactly like a decision.

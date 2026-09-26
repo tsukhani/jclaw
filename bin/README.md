@@ -14,7 +14,7 @@ trees. Nothing here ships in a `play dist` tarball.
 
 ```bash
 ./jclaw.sh diagnostics                        # compile errors, on stdout
-./jclaw.sh diagnostics --tests                # also run play autotest (~7 min)
+./jclaw.sh diagnostics --tests                # also run play autotest (~10 min)
 ./jclaw.sh diagnostics --tests --out d.json   # write the document to a file
 ```
 

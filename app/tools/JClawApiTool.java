@@ -235,7 +235,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         var gatedPath = url.encodedPath();
         // Default-deny, the same set `discover` advertises; AgentAccessGate re-checks it.
         if (!isCallable(method, gatedPath)) {
-            return "Error: %s %s is not callable through jclaw_api (no such endpoint, or it is deny-listed). "
+            return "Error: %s %s is not callable through jclaw_api (no such endpoint, or it is operator-only). "
                     .formatted(method, gatedPath)
                     + "Use action=\"discover\" to list the callable endpoints.";
         }
@@ -378,7 +378,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         return "Callable JClaw API endpoints (" + entries.size() + ")"
                 + (needle != null ? " matching \"" + filter + "\"" : "")
                 + ". Invoke one by calling this tool with method + path (and body for mutating verbs); "
-                + "endpoints not listed here are deny-listed and will be refused.\n\n"
+                + "endpoints not listed here are operator-only and will be refused.\n\n"
                 + String.join("\n", entries);
     }
 

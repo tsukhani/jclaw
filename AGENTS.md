@@ -28,7 +28,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 
 ## Running and verifying
 
-- Backend tests: `play autotest`, never `play test` (it starts an interactive test server). One class: `./gradlew playAutotest -Ptests=<Class>`, about 30 s; the full suite takes up to ~9 min. `./jclaw.sh test` runs all five checks to the end and prints a pass/fail summary naming each failed check's `logs/test-*.log`.
+- Backend tests: `play autotest`, never `play test` (it starts an interactive test server). One class: `./gradlew playAutotest -Ptests=<Class>`, about 30 s; the full suite takes about 9–10 min. `./jclaw.sh test` runs all five checks to the end and prints a pass/fail summary naming each failed check's `logs/test-*.log`.
 - Test sources are the default package: test seams must be `public`. A test class must extend `play.test.UnitTest` or `FunctionalTest`; `TestDiscoveryConformanceTest` fails the build on one that does neither, which the runner would never reach.
 - Never pipe the suite (`| tail` returns tail's exit code); redirect to a file and check `test-result/*.failed.html`. Never compile while a run is in flight; `jcmd -l | grep -E "playAutotest|FirePhoque"` first. A `compileJava` that printed `UP-TO-DATE` measured nothing: `--rerun-tasks` when the compile is the evidence.
 - Test classes run concurrently in one JVM: never flip a process-global without its lock (`LuceneTestSync`, `ShellSandboxSync`, `ToolRegistrySync`, `TelemetryTestSync`, `LoadTestHarnessSync`, `SlackWebApiTestSync`, `JevBreakerTestSync`, and `ScrapeConfigGuard` for the scrape config keys); scope shared-table assertions to your own rows; a "seeded row missing" red is usually the `Fixtures.deleteDatabase` race, not a regression. Circuit breakers live in a process-global registry keyed by provider or MCP server name, so a test that drives `chat()`, a stream or `callTool` mints its own name and `CircuitBreakers.remove`s it — never `test-provider`, which another class may be tripping.
@@ -222,7 +222,7 @@ tools already gated through `AgentSkillAllowedTool`.
 ### Diagnostics
 ```bash
 ./jclaw.sh diagnostics                        # compile errors, as JSON on stdout
-./jclaw.sh diagnostics --tests                # also run play autotest (~7 min)
+./jclaw.sh diagnostics --tests                # also run play autotest (~10 min)
 ./jclaw.sh diagnostics --tests --out d.json   # write the document to a file
 ```
 
@@ -276,7 +276,7 @@ git config core.hooksPath .githooks
 Three hooks. The first two run on the commit/push path, layered by speed:
 
 - **`pre-commit`** — runs `lint-staged` on staged frontend files only (ESLint + Stylelint `--fix`). Target: < 5 s typical. Auto-fixes formatting and re-stages; blocks the commit if a non-fixable rule violates. Short-circuits instantly when no `frontend/**` file is staged, so backend-only commits pay zero cost. Requires `cd frontend && pnpm install` first; before that, the hook fails open with a note.
-- **`pre-push`** — runs the full backend + frontend test suite. Caches per-HEAD so the two-remote deploy flow (origin + github) only pays the 5–8 min cost once.
+- **`pre-push`** — runs the full backend + frontend test suite. Caches per-HEAD so the two-remote deploy flow (origin + github) only pays the ~10 min cost once.
 - **`post-checkout`** — fires `./jclaw.sh init-worktree` when `git worktree add` (or a fresh clone) creates a working tree, seeding its `certs/.env` secret and a deterministic `PLAY_TEST_PORT` so parallel `play autotest` runs across worktrees don't collide. No-op on routine branch switches.
 
 Bypass for a single commit / push — for a human only, never an agent (use sparingly):

@@ -147,7 +147,7 @@ class JClawApiToolTest extends UnitTest {
                 "load-test harness (resource abuse) must be refused; got: " + result);
     }
 
-    // ==================== path normalisation (JCLAW-1227) ====================
+    // ==================== path normalization (JCLAW-1227) ====================
 
     /**
      * The traversal the audit found. {@code GET /api/skills/{name}/files/{<.+>filePath}} is an
@@ -216,8 +216,6 @@ class JClawApiToolTest extends UnitTest {
         var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/status\"}", null);
         assertFalse(result.contains("is not callable"),
                 "OPEN /api/status must be callable; got: " + result);
-        assertFalse(result.contains("reserved and cannot be invoked"),
-                "/api/status must pass the gate; got: " + result);
     }
 
     @Test

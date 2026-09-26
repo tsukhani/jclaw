@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pre-push hook: run the consolidated test suite before a push leaves the
 # laptop. Skips the run when the current HEAD has already been tested (so
-# the two-remote deploy flow — origin + github — only pays the 5–8 min cost
+# the two-remote deploy flow — origin + github — only pays the ~10 min cost
 # once). Cache lives inside $GIT_DIR so it stays local to this clone and
 # is automatically scoped per worktree.
 #
@@ -43,7 +43,7 @@ fi
 
 # Path-aware skip: if the entire push range only touches documentation
 # (docs/**, *.md at any depth, .github/**) or only bumps the version
-# line in conf/application.conf, the ~80s test suite has nothing
+# line in conf/application.conf, the test suite has nothing
 # meaningful to validate. Doc-only and version-only-bump pushes drop
 # to instant. Anything that touches real code paths (jclaw.sh, app/,
 # conf/* beyond the version line, frontend/, test/, etc.) still runs

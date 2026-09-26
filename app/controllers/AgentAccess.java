@@ -47,9 +47,11 @@ public @interface AgentAccess {
          * agent's rows, nothing reaches up or across.
          *
          * <p>The row check cannot be central — only the action knows which row it is about — so
-         * this level declares the intent and the action calls
-         * {@link RequestPrincipal#mayReachAgentScopedRow}. The conformance test fails an
-         * {@code OWN_ONLY} action that does not reach it.
+         * this level declares the intent and the action reaches
+         * {@link RequestPrincipal#mayReachAgentScopedRow} (a row route refuses a row it does not own) or
+         * {@link RequestPrincipal#callingAgent} (a list route pins its query to the caller).
+         * {@code CapabilityRulesTest.everyRoutedApiActionDeclaresAnAgentAccessLevel} fails an
+         * {@code OWN_ONLY} action that reaches neither.
          */
         OWN_ONLY,
 
