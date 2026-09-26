@@ -299,13 +299,20 @@ EXPOSE 9000
 EXPOSE 9443/tcp
 EXPOSE 9443/udp
 
-# Heap: asymmetric Xms 512m / Xmx 2g so an idle deploy doesn't commit 2 GB
-# at boot. Override per-flag with `-e JCLAW_JVM_XMS` / `-e JCLAW_JVM_XMX`,
-# or pin both with `-e JCLAW_JVM_HEAP=4g`.
+# GC and heap match jclaw.sh's do_start_prod, which carries the rationale
+# and measurements: ZGC (sub-millisecond pauses, so SSE token streams don't
+# stutter), asymmetric Xms 128m / Xmx 2g, SoftMaxHeapSize 1g, and a 60 s
+# ZUncommitDelay so memory goes back after load — -Xms is the floor ZGC
+# never uncommits below. Override per-flag with `-e JCLAW_JVM_XMS` /
+# `-e JCLAW_JVM_XMX` / `-e JCLAW_JVM_SOFTMAX`, or pin both heap bounds with
+# `-e JCLAW_JVM_HEAP=4g`.
 #
 # JAVA_TOOL_OPTIONS is honored by the JVM and prepended to its argv — we
-# use it to inject heap and prod-only system-property flags without
-# forking the bundle's `play` launcher. The launcher itself sets
+# use it to inject GC, heap and prod-only system-property flags without
+# forking the bundle's `play` launcher. An operator's own
+# `-e JAVA_TOOL_OPTIONS=...` (the README's OpenTelemetry agent recipe) is
+# appended after ours rather than replaced by the export, so it reaches the
+# JVM and wins any value flag it repeats. The launcher itself sets
 # -javaagent (framework jar), -Dprecompiled=true, -Dapplication.path,
 # -Dplay.id, classpath, and execs play.server.Server directly. The
 # launcher also auto-sources certs/.env (so the entrypoint-generated
@@ -342,4 +349,4 @@ EXPOSE 9443/udp
 # is itself replaced by `bash ./play` (exec), which is itself replaced
 # by `java` (exec inside the launcher), so the signal chain is intact
 # end-to-end.
-CMD ["sh", "-c", "export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-512m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -Dio.netty.leakDetection.level=DISABLED\" && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443}"]
+CMD ["sh", "-c", "export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-128m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -XX:+UseZGC -XX:SoftMaxHeapSize=${JCLAW_JVM_SOFTMAX:-1g} -XX:ZUncommitDelay=60 -Dio.netty.leakDetection.level=DISABLED ${JAVA_TOOL_OPTIONS:-}\" && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443}"]
