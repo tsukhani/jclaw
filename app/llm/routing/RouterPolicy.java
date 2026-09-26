@@ -171,6 +171,11 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
             return key.equals(CLASSIFIER_PROVIDER) || JevApi.MODEL.equals(v) ? null
                     : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevApi.MODEL, CLASSIFIER_PROVIDER, JEV);
         }
+        return registeredModelRejection(provider, model);
+    }
+
+    /** A provider the registry does not configure, or a model it does not register. */
+    private static @Nullable String registeredModelRejection(String provider, @Nullable String model) {
         var registered = ProviderRegistry.get(provider);
         if (registered == null) {
             return notConfigured(provider, CLASSIFIER_PROVIDER, "a provider");

@@ -20,7 +20,7 @@ public final class JevBreakerTestSync {
     /** Lock the breaker and drop it. Call first in {@code @BeforeEach}. */
     public static void acquire() {
         LOCK.lock();
-        CircuitBreakers.remove(JevApi.BREAKER);
+        CircuitBreakers.remove(JevApi.BREAKER_NAME);
     }
 
     /**
@@ -29,7 +29,7 @@ public final class JevBreakerTestSync {
      */
     public static void release() {
         try {
-            CircuitBreakers.remove(JevApi.BREAKER);
+            CircuitBreakers.remove(JevApi.BREAKER_NAME);
         } finally {
             if (LOCK.isHeldByCurrentThread()) {
                 LOCK.unlock();

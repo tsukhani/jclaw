@@ -23,9 +23,13 @@ function stateClass(state: Breaker['state']) {
 /** Why it is where it is, phrased so an operator's own decision never reads as a fault. */
 function why(b: Breaker) {
   if (b.manual) return b.state === 'CLOSED' ? 'restored by you' : 'isolated by you'
-  if (b.state === 'CLOSED') return b.samples ? `${b.samples} recent call${b.samples === 1 ? '' : 's'}` : 'no calls yet'
+  if (b.state === 'CLOSED') return b.samples ? recentCalls(b.samples) : 'no calls yet'
   if (b.state === 'HALF_OPEN') return 'probing — the next calls decide'
   return `tripped on ${b.reason?.toLowerCase().replaceAll('_', ' ') ?? 'failures'}`
+}
+
+function recentCalls(n: number) {
+  return n === 1 ? '1 recent call' : `${n} recent calls`
 }
 
 async function isolate() {

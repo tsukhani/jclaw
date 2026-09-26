@@ -127,7 +127,7 @@ class JevRouterClassifierTest extends UnitTest {
         return chain -> {
             try {
                 Thread.sleep(1_300);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             return answering("reasoning", 0.97, "high").reply(chain);
@@ -316,8 +316,8 @@ class JevRouterClassifierTest extends UnitTest {
     /** Minted before first use, so the registry hands JEV this one: open, it is probed on the next call. */
     private static CircuitBreaker breakerWithNoCooldown() {
         var c = JevApi.BREAKER_CONFIG;
-        CircuitBreakers.remove(JevApi.BREAKER);
-        return CircuitBreakers.get(JevApi.BREAKER, new CircuitBreaker.Config(c.windowSize(), c.failureRateThreshold(),
+        CircuitBreakers.remove(JevApi.BREAKER_NAME);
+        return CircuitBreakers.get(JevApi.BREAKER_NAME, new CircuitBreaker.Config(c.windowSize(), c.failureRateThreshold(),
                 c.minVolume(), 0L, c.halfOpenPermits(), c.slowCallDurationMillis(), c.slowCallRateThreshold(),
                 c.consecutiveFailures()));
     }
@@ -369,7 +369,7 @@ class JevRouterClassifierTest extends UnitTest {
             var opened = metrics.stream()
                     .filter(m -> m.getName().equals(BreakerMetrics.TRANSITIONS))
                     .flatMap(m -> m.getLongSumData().getPoints().stream())
-                    .filter(p -> JevApi.BREAKER.equals(p.getAttributes().get(BreakerMetrics.BREAKER)))
+                    .filter(p -> JevApi.BREAKER_NAME.equals(p.getAttributes().get(BreakerMetrics.BREAKER)))
                     .map(p -> p.getAttributes().get(BreakerMetrics.STATE) + "/" + p.getAttributes().get(BreakerMetrics.REASON))
                     .toList();
             assertEquals(List.of("OPEN/CONSECUTIVE_FAILURES"), opened,
