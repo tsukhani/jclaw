@@ -257,6 +257,70 @@ describe('MCP Servers page', () => {
   })
 })
 
+describe('MCP servers page — each server shows its own breaker (JCLAW-1301)', () => {
+  beforeEach(() => clearNuxtData())
+
+  function breaker(name: string, state: string, over: Record<string, unknown> = {}) {
+    return { name, subsystem: name.split(':')[0], target: name.split(':')[1], state, samples: 8, failures: 5, slowCalls: 0, reason: state === 'CLOSED' ? null : 'FAILURE_RATE', manual: false, ...over }
+  }
+
+  async function mountWith(breakers: unknown[]) {
+    setupApi([
+      server(),
+      server({ id: 2, name: 'fetch', toolCount: 0, tools: [] }),
+      server({ id: 3, name: 'files', toolCount: 0, tools: [] }),
+    ])
+    registerEndpoint('/api/breakers', () => breakers)
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    // The breaker read is lazy, so the rows render before their breakers do.
+    await vi.waitFor(() => expect(c.find('[data-testid^="mcp-breaker-toggle-"]').exists()).toBe(true))
+    return c
+  }
+
+  it('adds no column: the breaker sits beside the connection status', async () => {
+    const c = await mountWith([breaker('mcp:github', 'CLOSED')])
+    expect(c.findAll('thead th').map(th => th.text())).toEqual(['Name', 'Transport', 'Endpoint', 'Status', 'Tools', 'Actions'])
+  })
+
+  it('opens the row beneath a server whose breaker is not serving, without being asked', async () => {
+    const c = await mountWith([breaker('mcp:github', 'OPEN')])
+
+    const toggle = c.find('[data-testid="mcp-breaker-toggle-github"]')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    const row = c.find('[data-testid="mcp-breaker-row-github"]')
+    expect(row.exists()).toBe(true)
+    expect(row.text()).toContain('Circuit breaker')
+    expect(row.text()).toContain('OPEN')
+    expect(row.text()).toContain('tripped on failure rate')
+    expect(row.find('button[aria-label="Restore github"]').exists()).toBe(true)
+  })
+
+  it('keeps a serving breaker behind its icon until the operator opens it', async () => {
+    const c = await mountWith([breaker('mcp:fetch', 'CLOSED')])
+
+    const toggle = c.find('[data-testid="mcp-breaker-toggle-fetch"]')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(c.find('[data-testid="mcp-breaker-row-fetch"]').exists()).toBe(false)
+
+    await toggle.trigger('click')
+    const row = c.find('[data-testid="mcp-breaker-row-fetch"]')
+    expect(row.exists()).toBe(true)
+    expect(row.text()).toContain('8 recent calls')
+    expect(row.find('button[aria-label="Isolate fetch"]').exists()).toBe(true)
+
+    await toggle.trigger('click')
+    expect(c.find('[data-testid="mcp-breaker-row-fetch"]').exists()).toBe(false)
+  })
+
+  it('shows nothing for a server that was never called, nor for a provider breaker of the same name', async () => {
+    const c = await mountWith([breaker('mcp:github', 'CLOSED'), breaker('llm:files', 'OPEN')])
+    expect(c.find('[data-testid="mcp-breaker-toggle-fetch"]').exists()).toBe(false)
+    expect(c.find('[data-testid="mcp-breaker-toggle-files"]').exists()).toBe(false)
+    expect(c.find('[data-testid="mcp-breaker-row-files"]').exists()).toBe(false)
+  })
+})
+
 describe('MCP servers page — a failed row action (JCLAW-1221)', () => {
   it('says why a server switch did not take', async () => {
     setupApi([server()])

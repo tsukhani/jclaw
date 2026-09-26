@@ -7,7 +7,8 @@ import BreakerStatusSection from '~/components/BreakerStatusSection.vue'
 /**
  * JCLAW-1170: the dashboard's circuit-breaker panel. What it has to get right is that an
  * operator's own isolation never reads as the provider having broken, and that a healthy
- * install shows nothing rather than an empty box.
+ * install shows nothing rather than an empty box. Since JCLAW-1301 it lists only the breakers
+ * that are not serving; each one's state and action are covered in breaker-control.test.ts.
  */
 function breaker(over: Record<string, unknown> = {}) {
   return {
@@ -36,7 +37,17 @@ describe('BreakerStatusSection', () => {
     expect(wrapper.find('[data-testid="breaker-status"]').exists()).toBe(false)
   })
 
-  it('counts the breakers that are not serving and offers to restore them', async () => {
+  it('renders nothing while every breaker is serving (JCLAW-1301)', async () => {
+    registerEndpoint('/api/breakers', () => [
+      breaker(),
+      breaker({ name: 'mcp:files', subsystem: 'mcp', target: 'files' }),
+    ])
+    const wrapper = await mountSuspended(BreakerStatusSection)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="breaker-status"]').exists()).toBe(false)
+  })
+
+  it('lists only the breakers that are not serving and offers to restore each', async () => {
     registerEndpoint('/api/breakers', () => [
       breaker(),
       breaker({ name: 'llm:ollama', target: 'ollama', state: 'OPEN', samples: 20, failures: 14, reason: 'FAILURE_RATE' }),
@@ -51,29 +62,44 @@ describe('BreakerStatusSection', () => {
     expect(text).toContain('tripped on failure rate')
     expect(text).toContain('14/20 failed')
     expect(text).toContain('probing')
-    // A closed breaker offers isolation; the other two offer the way back.
-    expect(wrapper.text()).toContain('Isolate')
+    // A serving breaker lives beside its provider or server, not here.
+    expect(wrapper.find('[data-testid="breaker-row-llm:openai"]').exists()).toBe(false)
+    expect(text).not.toContain('Isolate')
     expect(wrapper.findAll('button').filter(b => b.text() === 'Restore')).toHaveLength(2)
   })
 
-  it('groups providers before servers and floats the breakers that are not serving', async () => {
+  it('groups providers before servers and puts open breakers before probing ones', async () => {
     registerEndpoint('/api/breakers', () => [
-      breaker({ name: 'mcp:alpha', subsystem: 'mcp', target: 'alpha', samples: 0 }),
+      breaker({ name: 'mcp:alpha', subsystem: 'mcp', target: 'alpha', state: 'HALF_OPEN', samples: 0, reason: 'COOLDOWN_ELAPSED' }),
       breaker({ name: 'mcp:zulu', subsystem: 'mcp', target: 'zulu', state: 'OPEN', samples: 10, failures: 6, reason: 'FAILURE_RATE' }),
-      breaker({ name: 'llm:openai', target: 'openai' }),
+      breaker({ name: 'llm:openai', target: 'openai', state: 'OPEN', reason: 'FAILURE_RATE' }),
       breaker({ name: 'llm:anthropic', target: 'anthropic', state: 'HALF_OPEN', reason: 'COOLDOWN_ELAPSED' }),
+      breaker({ name: 'llm:groq', target: 'groq' }),
     ])
     const wrapper = await mountSuspended(BreakerStatusSection)
     await flushPromises()
 
     const groups = wrapper.findAll('section')
     expect(groups.map(g => g.find('h3').text())).toEqual(['LLM providers', 'MCP servers'])
-    // Registry order is alphabetical; the panel puts the ones that need attention first.
     const rowsOf = (g: typeof groups[number]) => g.findAll('[data-testid^="breaker-row-"]').map(r => r.attributes('data-testid'))
-    expect(rowsOf(groups[0]!)).toEqual(['breaker-row-llm:anthropic', 'breaker-row-llm:openai'])
+    expect(rowsOf(groups[0]!)).toEqual(['breaker-row-llm:openai', 'breaker-row-llm:anthropic'])
     expect(rowsOf(groups[1]!)).toEqual(['breaker-row-mcp:zulu', 'breaker-row-mcp:alpha'])
-    // The group heading carries the subsystem now; the rows no longer repeat it.
+    // The group heading carries the subsystem; the rows do not repeat it.
     expect(groups[0]!.find('[data-testid="breaker-row-llm:openai"]').text()).not.toMatch(/\bllm\b/)
+  })
+
+  it('links each breaker to where its provider or server is configured', async () => {
+    registerEndpoint('/api/breakers', () => [
+      breaker({ state: 'OPEN', reason: 'FAILURE_RATE' }),
+      breaker({ name: 'mcp:files', subsystem: 'mcp', target: 'files', state: 'OPEN', reason: 'FAILURE_RATE' }),
+    ])
+    const wrapper = await mountSuspended(BreakerStatusSection)
+    await flushPromises()
+
+    const home = (name: string) => wrapper.find(`[data-testid="breaker-row-${name}"] [data-testid="breaker-home"]`)
+    expect(home('llm:openai').attributes('href')).toBe('/settings?section=providers')
+    expect(home('llm:openai').text()).toBe('openai')
+    expect(home('mcp:files').attributes('href')).toBe('/mcp-servers')
   })
 
   it('reports an operator isolation as a decision, not as a provider fault', async () => {
@@ -107,27 +133,6 @@ describe('BreakerStatusSection', () => {
     await vi.waitUntil(() => posted !== null)
     // The colon-bearing registry name is what identifies a breaker, not the display target.
     expect(posted).toEqual({ name: 'llm:openai' })
-  })
-
-  it('does not isolate a serving provider until the confirmation resolves', async () => {
-    let tripped = false
-    registerEndpoint('/api/breakers', () => [breaker()])
-    registerEndpoint('/api/breakers/trip', {
-      method: 'POST',
-      handler: () => {
-        tripped = true
-        return breaker()
-      },
-    })
-    const wrapper = await mountSuspended(BreakerStatusSection)
-    await flushPromises()
-
-    // No <ConfirmDialog> is mounted here, so the confirm promise stays pending — which is
-    // exactly the assertion: taking a healthy provider out of rotation is gated, restoring
-    // one is not.
-    await wrapper.findAll('button').filter(b => b.text() === 'Isolate')[0]!.trigger('click')
-    await flushPromises()
-    expect(tripped).toBe(false)
   })
 })
 

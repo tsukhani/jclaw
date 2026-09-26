@@ -933,6 +933,24 @@ export interface DiscoverModelsResponse {
  * Status/lastError/lastConnected* are populated from the runtime
  * McpConnectionManager — they're cross-cutting state not stored on the row.
  */
+/** One circuit breaker as `GET /api/breakers` reports it (JCLAW-1170). */
+export interface Breaker {
+  /** Registry name, `<subsystem>:<target>`: what trip and reset take. */
+  name: string
+  /** Registry-name prefix: `llm` or `mcp`. */
+  subsystem: string
+  /** What the breaker guards: a provider name, an MCP server name. */
+  target: string
+  state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'
+  samples: number
+  failures: number
+  slowCalls: number
+  /** What moved it into `state`; null before it has ever moved. */
+  reason: string | null
+  /** Whether `reason` was an operator's decision rather than the breaker acting alone. */
+  manual: boolean
+}
+
 export interface McpServer {
   id: number
   name: string

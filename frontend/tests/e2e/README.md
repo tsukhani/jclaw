@@ -54,7 +54,7 @@ and the eval suites.
 | UAT-15 Chat | `chat.uat.spec.ts` | Mocked stream: tokens, tool calls, error recovery |
 | UAT-22 Browser setup | `browser-setup.uat.spec.ts` | Settings components read live, never downloaded; Download now and the chat bar run on a mocked setup endpoint behind `blockApiWrites` |
 | UAT-16 Accessibility | `accessibility.uat.spec.ts` | axe-core, serious+critical only |
-| UAT-17 Circuit breakers | `breakers.uat.spec.ts` | Registry rows mirrored on the dashboard, grouped by subsystem; read-only |
+| UAT-17 Circuit breakers | `breakers.uat.spec.ts` | Breakers not serving on the dashboard; every breaker on its provider card or beneath its MCP server; read-only |
 | UAT-18 Subagent chips | `subagent-chips.uat.spec.ts` | Stubbed runs and transcripts: status, expand, live poll, close, View all |
 | UAT-19 Subagents page | `subagents.uat.spec.ts` | Stubbed runs: conversation column, grouping, filter; one read-only contract check |
 | UAT-20 Workspace manager | `workspace.uat.spec.ts` | Throwaway agent; tree, filter, colours, download, backup zip, protected refusal, delete; folder and symlink cases seed on disk and skip on a remote instance |

@@ -37,10 +37,12 @@ When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, et
 
 ### Circuit Breakers
 
-Two groups — **LLM providers** first, then **MCP servers** — with one row per breaker showing
-the state it is in, why it is there, and how many of its recent calls failed. Within each group
-the breakers that are not serving sit at the top, so an open one is never buried under a dozen
-idle servers. The panel is absent until a breaker exists; they are created the first time a
+Two groups — **LLM providers** first, then **MCP servers** — with one row per breaker that is not
+serving, showing the state it is in, why it is there, and how many of its recent calls failed. Open
+breakers sit above probing ones. A breaker that is serving is not listed here: it is shown beside
+what it guards, on the provider's card in [Settings → LLM Providers](/settings?section=providers)
+and beneath the server on the [MCP Servers](/mcp-servers) page, and each name here links to that
+place. The panel is absent while every breaker is serving; breakers are created the first time a
 subsystem is called.
 
 It sits directly above Chat Performance because that is the blind spot it closes. A breaker that
@@ -60,8 +62,8 @@ the streaming budgets behind a slow call, are described under
 [LLM Providers](/guide#settings-when-a-provider-misbehaves) and
 [MCP Servers](/guide#skills-tools-mcp-when-a-server-stops-answering).
 
-Each row carries a button: **Isolate** on a serving breaker (asks first) and **Restore** on one
-that is not. Isolating is bounded rather than latched — it restarts the ordinary cooldown, so a
+Each row here carries **Restore**. **Isolate**, which asks first, is beside the provider or
+server, on its serving breaker. Isolating is bounded rather than latched — it restarts the ordinary cooldown, so a
 provider that is actually healthy closes itself again rather than staying dark until you remember
 it.
 

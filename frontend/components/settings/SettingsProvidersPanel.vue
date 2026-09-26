@@ -27,6 +27,12 @@ const { configData, saving, refresh, getProviderModels, editingKey, editValue, e
 // fetch (Nuxt keys by URL, so this shares the page's request rather than doubling it).
 const { data: agentsList } = await useFetch<Agent[]>('/api/agents')
 
+// A provider that was never called has no breaker yet, so its card shows none.
+const { byName: breakersByName, refresh: refreshBreakers } = useBreakers()
+function providerBreaker(name: string) {
+  return breakersByName.value.get(`llm:${name}`)
+}
+
 const providerInfoMap = computed(() => {
   const map = new Map<string, ProviderInfo>()
   for (const p of providersData.value ?? []) map.set(p.name, p)
@@ -796,6 +802,18 @@ const groupedProviders = computed(() => {
           </p>
         </div>
         <div class="divide-y divide-border">
+          <div
+            v-if="providerBreaker(name)"
+            class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
+            :data-testid="`provider-breaker-${name}`"
+          >
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">circuit breaker</span>
+            <BreakerControl
+              :breaker="providerBreaker(name)!"
+              class="flex-1"
+              @changed="refreshBreakers()"
+            />
+          </div>
           <!-- Non-models entries (baseUrl, apiKey) -->
           <!-- paymentModality + subscriptionMonthlyUsd render below in dedicated rows
                  (JCLAW-280) so the operator gets the right input affordance: dropdown
@@ -2002,7 +2020,7 @@ const groupedProviders = computed(() => {
       <p class="px-4 pb-2.5 text-xs text-fg-muted">
         When a provider keeps failing, its breaker opens and calls to it fail at once instead of
         spending another retry loop. Saving re-tunes every provider breaker that is currently
-        closed; an open or recovering breaker, including one isolated from the Dashboard, keeps its
+        closed; an open or recovering breaker, including one you isolated, keeps its
         state and its old tuning until JClaw restarts. Stream budgets apply from the next stream.
       </p>
       <div class="border-t border-border divide-y divide-border">

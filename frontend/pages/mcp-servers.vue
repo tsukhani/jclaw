@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { McpServer, McpTestResult } from '~/types/api'
-import { ArrowPathIcon, BeakerIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import type { Breaker, McpServer, McpTestResult } from '~/types/api'
+import { ArrowPathIcon, BeakerIcon, BoltIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 
 const { data: servers, refresh } = await useFetch<McpServer[]>('/api/mcp-servers')
 const { mutate, error: mutationError } = useApiMutation()
@@ -196,6 +196,35 @@ async function toggleEnabled(s: McpServer) {
 // Live connection status for as long as the page is open. Owns its own timer
 // and unmount cleanup; kick() collapses its idle wait after a mutation.
 const { kick } = useMcpStatusWatcher(servers, refresh)
+
+// Tool-call breakers, keyed mcp:<server>. A server never called has none.
+const { byName: breakersByName, refresh: refreshBreakers } = useBreakers()
+const expandedBreakerRowId = ref<number | null>(null)
+
+function breakerOf(s: McpServer) {
+  return breakersByName.value.get(`mcp:${s.name}`)
+}
+
+/** A breaker that is not serving opens its row by itself; a serving one only on request. */
+function breakerRowShown(s: McpServer) {
+  const b = breakerOf(s)
+  return !!b && (b.state !== 'CLOSED' || expandedBreakerRowId.value === s.id)
+}
+
+function toggleBreakerRow(id: number) {
+  expandedBreakerRowId.value = expandedBreakerRowId.value === id ? null : id
+}
+
+const breakerIconClass: Record<Breaker['state'], string> = {
+  CLOSED: 'text-fg-muted hover:text-fg-strong',
+  HALF_OPEN: 'text-amber-700 dark:text-amber-400',
+  OPEN: 'text-red-700 dark:text-red-400',
+}
+const breakerAccentClass: Record<Breaker['state'], string> = {
+  CLOSED: 'border-l-border',
+  HALF_OPEN: 'border-l-amber-500',
+  OPEN: 'border-l-red-500',
+}
 
 async function deleteServer(s: McpServer) {
   const ok = await confirm({
@@ -588,11 +617,29 @@ function removeHeaderRow(i: number) {
                 {{ server.transport === 'HTTP' ? server.url : `${server.command || ''} ${(server.args || []).join(' ')}`.trim() }}
               </td>
               <td class="px-4 py-2.5">
-                <span
-                  class="text-[10px] font-mono px-1.5 py-px rounded-sm border"
-                  :class="statusBadgeClass[server.status]"
-                  :title="server.lastError || ''"
-                >{{ server.status }}</span>
+                <div class="flex items-center gap-1.5">
+                  <span
+                    class="text-[10px] font-mono px-1.5 py-px rounded-sm border"
+                    :class="statusBadgeClass[server.status]"
+                    :title="server.lastError || ''"
+                  >{{ server.status }}</span>
+                  <button
+                    v-if="breakerOf(server)"
+                    type="button"
+                    class="p-0.5 transition-colors"
+                    :class="breakerIconClass[breakerOf(server)!.state]"
+                    :title="`Circuit breaker ${breakerOf(server)!.state.replace('_', ' ').toLowerCase()}`"
+                    :aria-label="`Circuit breaker for ${server.name}`"
+                    :aria-expanded="breakerRowShown(server)"
+                    :data-testid="`mcp-breaker-toggle-${server.name}`"
+                    @click="toggleBreakerRow(server.id)"
+                  >
+                    <BoltIcon
+                      class="w-3.5 h-3.5"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
                 <button
@@ -666,6 +713,27 @@ function removeHeaderRow(i: number) {
                   >
                     <TrashIcon class="w-4 h-4" />
                   </button>
+                </div>
+              </td>
+            </tr>
+
+            <tr
+              v-if="breakerRowShown(server)"
+              :data-testid="`mcp-breaker-row-${server.name}`"
+            >
+              <td
+                colspan="6"
+                class="bg-muted/30 px-4 py-2.5 border-l-2"
+                :class="breakerAccentClass[breakerOf(server)!.state]"
+              >
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <span class="text-xs text-fg-muted shrink-0">Circuit breaker</span>
+                  <BreakerControl
+                    :breaker="breakerOf(server)!"
+                    class="flex-1"
+                    :data-testid="`mcp-breaker-${server.name}`"
+                    @changed="refreshBreakers()"
+                  />
                 </div>
               </td>
             </tr>

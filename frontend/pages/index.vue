@@ -450,7 +450,7 @@ onBeforeUnmount(() => {
 
     <!-- Circuit Breakers (JCLAW-1170): above Chat Performance on purpose — an open breaker
          turns calls away in microseconds, so the latency numbers below it improve while the
-         work behind them is failing. Renders nothing until a breaker exists. -->
+         work behind them is failing. Renders nothing while every breaker is serving. -->
     <BreakerStatusSection />
 
     <!-- Chat Performance -->
