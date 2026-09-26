@@ -1,4 +1,4 @@
--- db-scheduler schema for H2 (used by JClaw Personal Edition in MODE=MYSQL).
+-- db-scheduler schema for H2 (JClaw's default database, in MODE=MYSQL).
 --
 -- Adapted from com.github.kagkarlsson:db-scheduler:16.9.0's reference
 -- Postgres schema; indexes are taken from the Postgres reference because the

@@ -24,7 +24,7 @@ import static utils.GsonHolder.GSON;
  * walkthrough itself is purely in-memory, so reloading mid-tour abandons
  * progress and the user must re-enter from the Guided Tour sidebar button.
  *
- * <p>A single Config key — single-admin Personal Edition, so there is no per-user
+ * <p>A single Config key — JClaw is single-operator, so there is no per-user
  * scoping. The prefix {@code onboarding.} is reserved in the Settings page's
  * {@code MANAGED_PREFIXES} list so the unmanaged-keys diagnostic doesn't surface
  * this key.

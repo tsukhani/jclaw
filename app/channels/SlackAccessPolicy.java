@@ -6,7 +6,7 @@ import org.jspecify.annotations.Nullable;
  * JCLAW-354 inbound access policy for Slack messages — the Slack analog of
  * {@link TelegramAccessPolicy}, collapsed to the per-agent binding's single owner.
  * Multi-user allowlists, per-channel user lists, group RBAC, and pairing stores are
- * out of scope by design (Personal Edition).
+ * out of scope by design (JClaw is single-operator).
  *
  * <p>The owner user id is the private/shared switch:
  *

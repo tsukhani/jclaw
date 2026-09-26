@@ -55,7 +55,7 @@ import static utils.GsonHolder.GSON;
  * plus {@code agent} / {@code category} / {@code importance} predicates. The
  * operator can adjust importance (and category) or delete any memory by its id.
  *
- * <p>Single-operator Personal Edition, so memories are addressed by their global
+ * <p>JClaw is single-operator, so memories are addressed by their global
  * id — there is no per-agent access boundary to enforce.
  */
 @With(AuthCheck.class)

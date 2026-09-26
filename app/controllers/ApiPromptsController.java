@@ -26,7 +26,7 @@ import static utils.GsonHolder.GSON;
  * CRUD + import/export over the {@code prompt} table — the Prompts Library
  * (JCLAW-813).
  *
- * <p>Operator-wide (single-operator Personal Edition, no per-user scoping),
+ * <p>Operator-wide (single-operator by design, no per-user scoping),
  * class-level {@code @With(AuthCheck.class)} like every other Api* controller.
  * Categories are a fixed taxonomy ({@link Prompt.Category}), so there is no
  * category CRUD — {@link #categories()} just exposes the closed list for the

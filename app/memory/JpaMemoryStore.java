@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
 
 /**
  * JPA-backed memory store. Text search runs on the direct Lucene index for H2
- * (dev/test and the default Personal Edition) and PostgreSQL full-text search in
+ * (dev/test and the default install) and PostgreSQL full-text search in
  * a Postgres production deployment. When vector memory is enabled
  * ({@code memory.jpa.vector.enabled}), the vector leg is dialect-split
  * (JCLAW-555): pgvector hybrid SQL on Postgres, Lucene HNSW

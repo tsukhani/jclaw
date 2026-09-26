@@ -31,7 +31,7 @@ import java.util.Map;
  *
  * <p><b>Permission model.</b> The calling agent must equal the
  * {@link SubagentRun#parentAgent} — a subagent transcript is readable only by the
- * parent agent that spawned it. JClaw is single-operator Personal Edition: there is
+ * parent agent that spawned it. JClaw is single-operator: there is
  * no operator-role / RBAC / multi-user concept, so this parent-agent equality is the
  * whole gate (a tool call is always made by a concrete agent context).
  *

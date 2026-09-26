@@ -21,7 +21,7 @@ import java.util.Locale;
  * Same pattern {@code DbSchedulerSchemaInitJob} uses: open a
  * connection, read {@code DatabaseMetaData.getDatabaseProductName},
  * substring-match against "postgresql" (case-insensitive). Default
- * is H2 — the JClaw Personal Edition's bundled dialect.
+ * is H2 — JClaw's bundled dialect.
  *
  * <h2>Why static facade vs DI</h2>
  * JClaw's services layer is uniformly static (matches Play 1.x's

@@ -6,7 +6,7 @@ A long-running localhost HTTP daemon, launched on demand by the jclaw JVM
 GPU/unified memory between calls. The shape and protocol were chosen in the
 JCLAW-509 spike: a localhost HTTP daemon beats a per-request subprocess
 (which would re-pay the multi-second model load on every image) and a model
-server like torchserve (too heavy for a single-user Personal Edition).
+server like torchserve (too heavy for a single-operator install).
 
 Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health  -> 200 {status, device, dtype, model, weights_present, loaded}

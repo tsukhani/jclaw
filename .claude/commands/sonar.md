@@ -40,7 +40,7 @@ Assign every **issue** one verdict:
 Assign every **hotspot** one verdict (mark via `mcp__sonarqube__change_security_hotspot_status`, `status: "REVIEWED"` + a resolution + comment):
 
 - **FIXED** — a genuine risk; harden the code, then mark `FIXED` **only after the fix lands** in the worktree.
-- **SAFE** — reviewed and not exploitable given JClaw's trust boundary (single-operator Personal Edition, bounded input, no external multi-tenant attack surface). Mark `SAFE` with the reasoning.
+- **SAFE** — reviewed and not exploitable given JClaw's trust boundary (single-operator by design, bounded input, no external multi-tenant attack surface). Mark `SAFE` with the reasoning.
 - **ACKNOWLEDGED** — a real-but-accepted residual risk (rare — prefer FIXED or SAFE).
 
 Assign every **duplicated file** (>60% density) one verdict. Duplication is a *measure*, not an issue/hotspot — there's **no Sonar status to mark**, so the verdict drives code only, and an ACCEPT is documented in the report rather than mutated in Sonar:
@@ -59,7 +59,7 @@ Apply JClaw's **known triage knowledge — do NOT "fix" these** (doing so reintr
 
 Triage the rest on merits, biased toward JClaw's conventions:
 - **Idiomatic Java 25** — records, pattern matching / `instanceof` binding, unnamed patterns (`_`), `var`, switch expressions, sealed types, virtual threads, text blocks, `Math.clamp`, `StringBuilder.isEmpty()`. Prefer these where a MAJOR/MINOR rule nudges toward them.
-- **Architecture** — Play 1.x static controllers + `Model` entities; the OkHttp-5, no-native-deps stack; single-operator Personal Edition (no multi-tenancy, no speculative owner FKs); `services.compression` SPI + `agents` pipeline. When a rule conflicts with an established codebase idiom, **ACCEPT** with a rationale rather than churn.
+- **Architecture** — Play 1.x static controllers + `Model` entities; the OkHttp-5, no-native-deps stack; single-operator by design (no multi-tenancy, no speculative owner FKs); `services.compression` SPI + `agents` pipeline. When a rule conflicts with an established codebase idiom, **ACCEPT** with a rationale rather than churn.
 - Play 1.x control-flow methods (`badRequest()`, `error()`, `notFound()`, `forbidden()`, `redirect()`) **throw and never return** — Sonar doesn't model this, so any `S2259`/null-deref "after" such a guard is a **FALSE_POSITIVE**.
 - Severity / `vulnerabilityProbability` is a hint, not a mandate — a CRITICAL that's a framework FP is still a FALSE_POSITIVE; a MINOR that's a real null-deref is still a FIX.
 

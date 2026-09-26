@@ -6,7 +6,7 @@ Welcome to JClaw! This user guide will help you understand how JClaw works and m
 
 JClaw is a workbench for building, running, and observing AI agents. You configure agents (their model, system prompt, and tools), give them work to do through [Chat](/chat) or external channels, and watch what they do across the rest of the app.
 
-JClaw Personal Edition is a single-operator workbench: one **admin** login, the built-in **main** agent, and any custom agents you create.
+JClaw Pro is a single-operator workbench: one **admin** login, the built-in **main** agent, and any custom agents you create.
 
 ## How the rest of the guide is organized
 

@@ -341,7 +341,7 @@ public class DefaultConfigJob extends Job<Void> {
             seedIfAbsent(entry.key(), entry.value());
         }
 
-        // JCLAW-266: subagent recursion caps. Personal Edition defaults —
+        // JCLAW-266: subagent recursion caps, defaulted for a single-operator install —
         // single level of delegation (top-level agents may spawn one tier of
         // subagents; grandchildren are refused) and a small fan-out so one
         // parent can't saturate the executor with concurrent children. Both
