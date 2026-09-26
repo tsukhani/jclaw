@@ -8,14 +8,21 @@ import channels.WhatsAppChannel;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.regex.Pattern;
 
 class ChannelTest extends UnitTest {
 
@@ -500,6 +507,47 @@ class ChannelTest extends UnitTest {
         };
         assertFalse(channel.sendWithRetry("peer", "hello"));
         assertEquals(1, channel.attempts, "a rejection must not be retried");
+    }
+
+    /** The wait was once get(delay + 5 s), which reported a slow retry that then succeeded as a failure. */
+    @Test
+    void channelSendWithRetryReportsASlowRetryThatSucceeds() {
+        var channel = new Channel() {
+            int attempts = 0;
+            @Override public String channelName() { return "test"; }
+            @Override public SendResult trySend(String peer, String text) {
+                if (++attempts == 1) return SendResult.rateLimited(1L);
+                try {
+                    Thread.sleep(5_500L);
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                }
+                return SendResult.OK;
+            }
+        };
+        assertTrue(channel.sendWithRetry("peer", "hello"), "a retry slower than 5 s that succeeds is delivered");
+    }
+
+    /** A timed park on many virtual threads is JDK-8373224; the send's own HTTP timeouts bound the wait. */
+    @Test
+    void noRetrySchedulerFutureIsAwaitedWithATimeout() throws Exception {
+        var timedWait = Pattern.compile("RetryScheduler\\.schedule\\((?:(?!;).)*?\\)\\s*\\.get\\(\\s*[^)\\s]",
+                Pattern.DOTALL);
+        List<Path> offenders;
+        try (var files = Files.walk(Play.applicationPath.toPath().resolve("app"))) {
+            offenders = files.filter(p -> p.toString().endsWith(".java"))
+                    .filter(p -> timedWait.matcher(readUnchecked(p)).find())
+                    .toList();
+        }
+        assertTrue(offenders.isEmpty(), () -> "await a RetryScheduler future with an untimed get(): " + offenders);
+    }
+
+    private static String readUnchecked(Path p) {
+        try {
+            return Files.readString(p);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     @Test

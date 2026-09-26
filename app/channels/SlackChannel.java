@@ -18,8 +18,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Slack Web API + Events API client, on the official Slack SDK (com.slack.api).
@@ -229,15 +227,16 @@ public class SlackChannel implements Channel {
         if (a.retryAfterMs() > 0) {
             long delayMs = Math.min(a.retryAfterMs(), 60_000L);
             try {
+                // Untimed: a timed park is JDK-8373224, and a timeout here reported a slow retry that went on to succeed as a failure; the send's own HTTP timeouts bound the wait.
                 var retried = RetryScheduler.schedule(
                                 () -> postOnce(botToken, channelId, body, null), delayMs)
-                        .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
+                        .get();
                 return retried.ok() ? DeliveryOutcome.delivered(channelId, retried.ts())
                         : DeliveryOutcome.failed(retried.error());
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 return DeliveryOutcome.failed("interrupted");
-            } catch (ExecutionException | TimeoutException _) {
+            } catch (ExecutionException _) {
                 return DeliveryOutcome.failed(a.error());
             }
         }

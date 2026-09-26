@@ -7,8 +7,6 @@ import utils.RetryScheduler;
 import java.io.File;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Contract for outbound message delivery to an external channel. Each implementation
@@ -94,14 +92,13 @@ public interface Channel {
         if (result.ok() || result.permanent()) return result;
         long delayMs = Math.min(result.retryAfterMs() > 0 ? result.retryAfterMs() : 1000L, 60_000L);
         try {
-            // 5 s slack covers the scheduler hop + the second trySend's own latency.
-            var retried = RetryScheduler.schedule(() -> trySend(peerId, text), delayMs)
-                    .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
+            // Untimed: a timed park is JDK-8373224, and a timeout here reported a slow retry that went on to succeed as a failure; the send's own HTTP timeouts bound the wait.
+            var retried = RetryScheduler.schedule(() -> trySend(peerId, text), delayMs).get();
             if (retried.ok()) return retried;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return SendResult.FAILED;
-        } catch (ExecutionException | TimeoutException _) {
+        } catch (ExecutionException _) {
             // Fall through to the error-log branch below.
         }
         EventLogger.error("channel", null, channelName(),

@@ -14,8 +14,6 @@ import utils.RetryScheduler;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -499,15 +497,15 @@ final class TelegramMessageSender {
         if (result.ok()) return true;
         long delayMs = Math.min(result.retryAfterMs() > 0 ? result.retryAfterMs() : 1000L, 60_000L);
         try {
-            // 5 s slack covers the scheduler hop + the second trySend's own latency.
+            // Untimed: a timed park is JDK-8373224, and a timeout here reported a slow retry that went on to succeed as a failure; the send's own HTTP timeouts bound the wait.
             boolean ok = RetryScheduler.schedule(
                             () -> trySend(chatId, text, replyParams, messageThreadId).ok(), delayMs)
-                    .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
+                    .get();
             if (ok) return true;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return false;
-        } catch (ExecutionException | TimeoutException _) {
+        } catch (ExecutionException _) {
             // Fall through to the error-log branch below.
         }
         EventLogger.error(LOG_CATEGORY, null, CHANNEL_NAME,
