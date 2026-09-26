@@ -21,13 +21,17 @@ const Harness = defineComponent({
 let entries: { key: string, value: string }[] = []
 let posts: { key: string, value: string }[] = []
 let deletes: string[] = []
+// Every write in the order it arrived, where the order is what the backend's validation depends on.
+let ops: string[] = []
 
 registerEndpoint('/api/config', { method: 'GET', handler: () => ({ entries }) })
 registerEndpoint('/api/config', {
   method: 'POST',
   handler: async (event) => {
     const { readBody } = await import('h3')
-    posts.push(await readBody(event) as { key: string, value: string })
+    const body = await readBody(event) as { key: string, value: string }
+    posts.push(body)
+    ops.push(`POST ${body.key}=${body.value}`)
     return { status: 'ok' }
   },
 })
@@ -43,6 +47,7 @@ for (const key of ['router.classifier.provider', 'router.classifier.model']) {
     method: 'DELETE',
     handler: () => {
       deletes.push(key)
+      ops.push(`DELETE ${key}`)
       return { status: 'ok' }
     },
   })
@@ -73,6 +78,7 @@ beforeEach(() => {
   clearNuxtData()
   posts = []
   deletes = []
+  ops = []
   entries = [
     { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
     { key: 'provider.ollama-cloud.models', value: JSON.stringify([{ id: 'glm-5.3-flash' }, { id: 'kimi-k3' }]) },
@@ -187,6 +193,64 @@ describe('SettingsModelRouterPanel', () => {
 
     await select.setValue('')
     await vi.waitFor(() => expect(deletes).toEqual(['router.classifier.provider', 'router.classifier.model']), { timeout: 5000 })
+  })
+
+  it('offers JEV only once a TypeSafe key is set, and points to where it is set', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const jev = c.find('select[aria-label="Prompt classifier model"] option[value="jev::jev-latest"]')
+    expect(jev.text()).toContain('JEV (TypeSafe AI)')
+    expect((jev.element as HTMLOptionElement).disabled).toBe(true)
+    const hint = c.find('[data-testid="router-jev-key-hint"]')
+    expect(hint.text()).toContain('Settings → Browser')
+    expect(hint.find('a').attributes('href')).toBe('/settings?section=browser')
+
+    entries = [...entries, { key: 'browser.jev.apiKey', value: 'ts-s****' }]
+    clearNuxtData()
+    const keyed = await mountSuspended(Harness)
+    await flushPromises()
+    const enabled = keyed.find('select[aria-label="Prompt classifier model"] option[value="jev::jev-latest"]')
+    expect((enabled.element as HTMLOptionElement).disabled).toBe(false)
+    expect(keyed.find('[data-testid="router-jev-key-hint"]').exists()).toBe(false)
+  })
+
+  it('picking JEV clears the stored model before writing the pair', async () => {
+    entries = [
+      ...entries,
+      { key: 'browser.jev.apiKey', value: 'ts-s****' },
+      { key: 'router.classifier.provider', value: 'ollama-cloud' },
+      { key: 'router.classifier.model', value: 'glm-5.3-flash' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    await c.find('select[aria-label="Prompt classifier model"]').setValue('jev::jev-latest')
+    await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
+    expect(ops).toEqual([
+      'DELETE router.classifier.model',
+      'POST router.classifier.provider=jev',
+      'POST router.classifier.model=jev-latest',
+    ])
+  })
+
+  it('leaving JEV for a model clears jev-latest first, so the provider write is not refused', async () => {
+    entries = [
+      ...entries,
+      { key: 'browser.jev.apiKey', value: 'ts-s****' },
+      { key: 'router.classifier.provider', value: 'jev' },
+      { key: 'router.classifier.model', value: 'jev-latest' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const select = c.find('select[aria-label="Prompt classifier model"]')
+    expect((select.element as HTMLSelectElement).value).toBe('jev::jev-latest')
+
+    await select.setValue('ollama-cloud::glm-5.3-flash')
+    await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
+    expect(ops).toEqual([
+      'DELETE router.classifier.model',
+      'POST router.classifier.provider=ollama-cloud',
+      'POST router.classifier.model=glm-5.3-flash',
+    ])
   })
 
   it('shows each listed provider\'s quota windows, and says when a provider has none', async () => {

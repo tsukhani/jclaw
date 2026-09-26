@@ -26,7 +26,11 @@ public final class JevSettings {
 
     /** The TypeSafe key while Jev is the engine, or null when it is not selected or has no key. */
     public static @Nullable String activeKey() {
-        if (!JEV.equals(ConfigService.get(ENGINE))) return null;
+        return JEV.equals(ConfigService.get(ENGINE)) ? apiKey() : null;
+    }
+
+    /** The TypeSafe key whatever the engine, since the router's JEV classifier uses it too; null when unset. */
+    public static @Nullable String apiKey() {
         var key = ConfigService.get(API_KEY);
         return key == null || key.isBlank() ? null : key.trim();
     }

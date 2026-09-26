@@ -41,6 +41,17 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
+    void theJevProviderNameIsReservedForTheRoutersClassifier() {
+        // JCLAW-1300: router.classifier.provider=jev names TypeSafe's judge, so no LLM provider may take it.
+        for (var key : new String[] {"provider.jev.baseUrl", "provider.jev.apiKey", "provider.jev.models"}) {
+            var rejected = ConfigService.setWithSideEffects(key, "x");
+            assertNotNull(rejected, key);
+            assertTrue(rejected.contains("reserved"), rejected);
+            assertNull(ConfigService.get(key), "a refused value is not saved");
+        }
+    }
+
+    @Test
     void theJevKeyMustSurviveAnAuthorizationHeader() {
         assertNull(JevSettings.rejectionFor(JevSettings.API_KEY, "ts-anything_1.2/3+4="));
         assertNull(JevSettings.rejectionFor(JevSettings.API_KEY, ""), "a blank key clears it");

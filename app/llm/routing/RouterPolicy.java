@@ -8,6 +8,7 @@ import com.google.gson.JsonParser;
 import llm.ProviderRegistry;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
+import tools.jev.JevActionSpace;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -22,13 +23,16 @@ import java.util.Map;
  * @param downshiftAt usage fraction of a prepaid provider at which non-chat classes stop using it
  *                    and drop to the chat list
  * @param exhaustedAt usage fraction at which a prepaid provider is skipped for every class
- * @param classifier  the model that labels each prompt, or null to use the local keyword rules
+ * @param classifier  the model that labels each prompt, {@link #JEV} for TypeSafe's judge, or null to
+ *                    use the local keyword rules
  * @param classifierTimeoutSeconds how long a classifier call may take before the rules answer instead
  * @param preferPrepaid whether subscriptions and self-hosted models are tried before per-token ones
  *                      whatever the listed order; false follows the operator's order exactly
+ * @param jevMinConfidence the probability JEV's class must reach before it is used over the rules
  */
 public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt,
-                           @Nullable Candidate classifier, int classifierTimeoutSeconds, boolean preferPrepaid) {
+                           @Nullable Candidate classifier, int classifierTimeoutSeconds, boolean preferPrepaid,
+                           double jevMinConfidence) {
 
     public static final String PREFIX = "router.";
     public static final String DOWNSHIFT_AT = "router.budget.downshiftAt";
@@ -36,11 +40,16 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
     public static final String CLASSIFIER_PROVIDER = "router.classifier.provider";
     public static final String CLASSIFIER_MODEL = "router.classifier.model";
     public static final String CLASSIFIER_TIMEOUT_SECONDS = "router.classifier.timeoutSeconds";
+    public static final String JEV_MIN_CONFIDENCE = "router.classifier.jev.minConfidence";
+    /** The classifier provider that names TypeSafe's JEV rather than an LLM; its one model is {@link JevActionSpace#MODEL}. */
+    public static final String JEV = "jev";
     /** Absent means true: credit protection is what an operator who has set nothing should get. */
     public static final String PREFER_PREPAID = "router.preferPrepaid";
     public static final double DEFAULT_DOWNSHIFT_AT = 0.75;
     public static final double DEFAULT_EXHAUSTED_AT = 0.95;
     public static final int DEFAULT_CLASSIFIER_TIMEOUT_SECONDS = 8;
+    /** Fitted on 60 labeled prompts (JCLAW-1300): every answer JEV gave scored 0.50 or more, and JEV beat the rules even below 0.70. */
+    public static final double DEFAULT_JEV_MIN_CONFIDENCE = 0.50;
 
     private static final String MODELS_SUFFIX = ".models";
 
@@ -66,6 +75,13 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         this(classes, downshiftAt, exhaustedAt, classifier, classifierTimeoutSeconds, true);
     }
 
+    /** Convenience for a policy with JEV's default minimum confidence. */
+    public RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt,
+                        @Nullable Candidate classifier, int classifierTimeoutSeconds, boolean preferPrepaid) {
+        this(classes, downshiftAt, exhaustedAt, classifier, classifierTimeoutSeconds, preferPrepaid,
+                DEFAULT_JEV_MIN_CONFIDENCE);
+    }
+
     public static String modelsKey(TaskClass taskClass) {
         return PREFIX + taskClass.id() + MODELS_SUFFIX;
     }
@@ -81,7 +97,8 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
                 ConfigService.getDouble(EXHAUSTED_AT, DEFAULT_EXHAUSTED_AT),
                 configuredClassifier(),
                 ConfigService.getInt(CLASSIFIER_TIMEOUT_SECONDS, DEFAULT_CLASSIFIER_TIMEOUT_SECONDS),
-                ConfigService.getBoolean(PREFER_PREPAID, true));
+                ConfigService.getBoolean(PREFER_PREPAID, true),
+                ConfigService.getDouble(JEV_MIN_CONFIDENCE, DEFAULT_JEV_MIN_CONFIDENCE));
     }
 
     /** The classifier model, or null unless the operator named both halves of the pair. */
@@ -113,6 +130,9 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         if (key.equals(CLASSIFIER_TIMEOUT_SECONDS)) {
             return timeoutRejection(value);
         }
+        if (key.equals(JEV_MIN_CONFIDENCE)) {
+            return minConfidenceRejection(value);
+        }
         if (key.equals(PREFER_PREPAID)) {
             // Boolean.parseBoolean maps anything unrecognised to false, which would silently turn the
             // credit protection off on a typo.
@@ -126,13 +146,14 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         return key + " is not a router setting. Use " + modelsKey(TaskClass.CHAT)
                 + " (or another task class: summarize, agentic, reasoning, coding), "
                 + DOWNSHIFT_AT + ", " + EXHAUSTED_AT + ", " + PREFER_PREPAID + ", " + CLASSIFIER_PROVIDER
-                + ", " + CLASSIFIER_MODEL + " or " + CLASSIFIER_TIMEOUT_SECONDS + ".";
+                + ", " + CLASSIFIER_MODEL + ", " + CLASSIFIER_TIMEOUT_SECONDS + " or " + JEV_MIN_CONFIDENCE + ".";
     }
 
     /**
      * The classifier is a pair, so each half is checked against the other's stored value: a provider
      * that is not configured, a model it does not register, or the router itself — which would ask the
-     * router to classify the prompt it is routing — is refused.
+     * router to classify the prompt it is routing — is refused. {@link #JEV} is not a registered
+     * provider and has one model, so its provider write is not checked against the stored model.
      */
     private static @Nullable String classifierRejection(String key, @Nullable String value) {
         if (value == null || value.isBlank()) return null;
@@ -145,6 +166,10 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         if (provider == null || provider.isBlank()) {
             return key.equals(CLASSIFIER_MODEL)
                     ? CLASSIFIER_MODEL + " needs " + CLASSIFIER_PROVIDER + " as well." : null;
+        }
+        if (JEV.equals(provider.strip())) {
+            return key.equals(CLASSIFIER_PROVIDER) || JevActionSpace.MODEL.equals(v) ? null
+                    : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevActionSpace.MODEL, CLASSIFIER_PROVIDER, JEV);
         }
         var registered = ProviderRegistry.get(provider);
         if (registered == null) {
@@ -163,6 +188,16 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
             // Falls through to the message below.
         }
         return CLASSIFIER_TIMEOUT_SECONDS + " must be a whole number of seconds from 1 to 60.";
+    }
+
+    private static @Nullable String minConfidenceRejection(@Nullable String value) {
+        try {
+            var p = Double.parseDouble(value == null ? "" : value.trim());
+            if (p >= 0 && p <= 1) return null;
+        } catch (NumberFormatException _) {
+            // Falls through to the message below.
+        }
+        return JEV_MIN_CONFIDENCE + " must be a probability from 0 to 1, such as 0.5.";
     }
 
     private static @Nullable String modelsRejection(String key, @Nullable String value) {

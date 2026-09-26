@@ -2,7 +2,8 @@
 // Browser settings panel (JCLAW-1274). Picks the engine behind the browser tool for every
 // agent: Playwright, where the agent's own model writes selectors and scripts, or TypeSafe's
 // Jev, which takes a URL and a goal and chooses each step itself. Both keys are ordinary
-// /api/config rows and neither is seeded, so an absent engine is Playwright.
+// /api/config rows and neither is seeded, so an absent engine is Playwright. The key shows whatever
+// the engine, because the Model Router's JEV classifier uses it too (JCLAW-1300).
 import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { BrowserSetupStatus } from '~/composables/useBrowserSetup'
 import { DRIVER_LABELS, browserSetupNeeded, chromiumLabel } from '~/utils/browser-setup'
@@ -114,84 +115,86 @@ function saveKey() {
     </fieldset>
     <ApiErrorAlert :error="saveError" />
 
-    <template v-if="chosenEngine === 'jev'">
-      <div
-        class="border border-amber-400/40 bg-amber-50/50 dark:bg-amber-900/10 px-3 py-2"
-        data-testid="browser-jev-warning"
-      >
-        <p class="text-xs text-amber-800 dark:text-amber-300">
-          On every step, Jev sends TypeSafe AI the goal, the page's address and title, its visible
-          content (text, element labels and form values, but not hidden password fields) and the text
-          typed earlier in the run. TypeSafe AI may record or retain them. Choose Playwright for pages
-          whose content must not leave this instance.
-        </p>
-      </div>
+    <div
+      v-if="chosenEngine === 'jev'"
+      class="border border-amber-400/40 bg-amber-50/50 dark:bg-amber-900/10 px-3 py-2"
+      data-testid="browser-jev-warning"
+    >
+      <p class="text-xs text-amber-800 dark:text-amber-300">
+        On every step, Jev sends TypeSafe AI the goal, the page's address and title, its visible
+        content (text, element labels and form values, but not hidden password fields) and the text
+        typed earlier in the run. TypeSafe AI may record or retain them. Choose Playwright for pages
+        whose content must not leave this instance.
+      </p>
+    </div>
 
-      <div class="bg-surface-elevated border border-border">
-        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">TypeSafe API key</span>
-          <template v-if="editingKey === API_KEY">
-            <input
-              v-model="editValue"
-              type="password"
-              autocomplete="new-password"
-              aria-label="TypeSafe API key"
-              placeholder="Your TypeSafe API key"
-              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            >
-            <button
-              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-              title="Save"
-              :disabled="saving"
-              @click="saveKey()"
-            >
-              <CheckIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Cancel"
-              @click="editingKey = null"
-            >
-              <XMarkIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-          <template v-else>
-            <span
-              class="flex-1 text-sm text-fg-primary font-mono truncate"
-              data-testid="browser-jev-key"
-            >{{ keyConfigured ? '••••••••' : '(not set)' }}</span>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              :title="keyConfigured ? 'Change key' : 'Set key'"
-              aria-label="Edit TypeSafe API key"
-              @click="startEditKey()"
-            >
-              <PencilIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-        </div>
-        <p
-          v-if="!keyConfigured"
-          class="px-4 pb-2.5 text-xs text-fg-muted"
-        >
-          Until a key is set, agents keep the Playwright actions.
-        </p>
-        <ApiErrorAlert
-          v-if="editingKey === API_KEY"
-          :error="editError"
-          class="px-4 pb-2.5"
-        />
+    <div class="bg-surface-elevated border border-border">
+      <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+        <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">TypeSafe API key</span>
+        <template v-if="editingKey === API_KEY">
+          <input
+            v-model="editValue"
+            type="password"
+            autocomplete="new-password"
+            aria-label="TypeSafe API key"
+            placeholder="Your TypeSafe API key"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+          >
+          <button
+            class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+            title="Save"
+            :disabled="saving"
+            @click="saveKey()"
+          >
+            <CheckIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+            title="Cancel"
+            @click="editingKey = null"
+          >
+            <XMarkIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+        </template>
+        <template v-else>
+          <span
+            class="flex-1 text-sm text-fg-primary font-mono truncate"
+            data-testid="browser-jev-key"
+          >{{ keyConfigured ? '••••••••' : '(not set)' }}</span>
+          <button
+            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+            :title="keyConfigured ? 'Change key' : 'Set key'"
+            aria-label="Edit TypeSafe API key"
+            @click="startEditKey()"
+          >
+            <PencilIcon
+              class="w-3.5 h-3.5"
+              aria-hidden="true"
+            />
+          </button>
+        </template>
       </div>
-    </template>
+      <p
+        class="px-4 pb-2.5 text-xs text-fg-muted"
+        data-testid="browser-jev-key-use"
+      >
+        Used by the Jev engine and by the Model Router's JEV classifier.
+        <template v-if="!keyConfigured && chosenEngine === 'jev'">
+          Until a key is set, agents keep the Playwright actions.
+        </template>
+      </p>
+      <ApiErrorAlert
+        v-if="editingKey === API_KEY"
+        :error="editError"
+        class="px-4 pb-2.5"
+      />
+    </div>
 
     <section
       class="space-y-2"

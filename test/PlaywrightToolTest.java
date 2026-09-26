@@ -2,8 +2,16 @@ import agents.ToolAction;
 import com.google.gson.JsonObject;
 import com.microsoft.playwright.Page;
 import com.sun.net.httpserver.HttpServer;
+import llm.routing.RouterClassifier;
+import llm.routing.RouterPolicy;
+import llm.routing.TaskClass;
 import models.Agent;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
@@ -433,6 +441,12 @@ class PlaywrightToolTest extends UnitTest {
         }
     }
 
+    private static final String CONFIDENT_JEV_REPLY = """
+            {"model":"jev-latest","answers":{
+              "task_class":{"choice":"reasoning","confidence":0.97,"probabilities":
+                {"chat":0.0075,"summarize":0.0075,"agentic":0.0075,"reasoning":0.97,"coding":0.0075}},
+              "effort":{"choice":"high","confidence":0.8,"probabilities":{"low":0.1,"medium":0.1,"high":0.8}}}}""";
+
     /**
      * JCLAW-1274: the engine is read on every call. Jev without a key changes nothing; with one
      * the tool offers only run and close and refuses the selector actions before any browser
@@ -473,6 +487,22 @@ class PlaywrightToolTest extends UnitTest {
             assertTrue(tool.description().contains("navigate"));
             assertTrue(tool.shortDescription().contains("login flows"), tool.shortDescription());
             assertEquals("ts-test-key", ConfigService.get(JevSettings.API_KEY), "switching back keeps the key");
+
+            // JCLAW-1300: the router's JEV classifier reads the key whatever the engine; the browser tool does not.
+            assertEquals("ts-test-key", JevSettings.apiKey());
+            assertNull(JevSettings.activeKey());
+            var jevRequests = new CopyOnWriteArrayList<Request>();
+            var jevPolicy = new RouterPolicy(Map.of(TaskClass.CHAT, List.of(new RouterPolicy.Candidate("p", "m"))),
+                    0.75, 0.95, new RouterPolicy.Candidate(RouterPolicy.JEV, "jev-latest"), 8, true, 0.5);
+            var classified = HttpFactories.callWith(new OkHttpClient.Builder().addInterceptor(chain -> {
+                jevRequests.add(chain.request());
+                return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200)
+                        .message("canned").body(ResponseBody.create(CONFIDENT_JEV_REPLY, MediaType.get("application/json")))
+                        .build();
+            }).build(), () -> RouterClassifier.classify("Run daily briefing skill", null, 0, jevPolicy));
+            assertEquals(1, jevRequests.size());
+            assertEquals("Bearer ts-test-key", jevRequests.getFirst().header("Authorization"));
+            assertEquals(TaskClass.REASONING, classified.taskClass(), "JEV answered, not the keyword rules");
         } finally {
             ConfigService.delete(JevSettings.ENGINE);
             ConfigService.delete(JevSettings.API_KEY);

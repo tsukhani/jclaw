@@ -71,19 +71,24 @@ public final class JevClient {
      * a timeout or a dropped connection is retried as well as 429, 503 and 529.
      */
     static JsonObject post(String apiKey, JsonObject body) {
+        return post(apiKey, body, ATTEMPTS, ATTEMPT_TIMEOUT_MS);
+    }
+
+    /** {@link #post(String, JsonObject)} with its own attempt count and per-attempt bound; one attempt never retries. */
+    public static JsonObject post(String apiKey, JsonObject body, int attempts, long attemptTimeoutMs) {
         var request = new Request.Builder().url(ENDPOINT)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
                 .post(RequestBody.create(body.toString(), JSON))
                 .build();
         for (int attempt = 1; ; attempt++) {
             var call = HttpFactories.general().newCall(request);
-            call.timeout().timeout(ATTEMPT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            call.timeout().timeout(attemptTimeoutMs, TimeUnit.MILLISECONDS);
             try (var response = call.execute()) {
                 if (!response.isSuccessful()) {
                     EventLogger.warn("tool", "Jev request %d of %d failed: HTTP %d"
-                            .formatted(attempt, ATTEMPTS, response.code()));
+                            .formatted(attempt, attempts, response.code()));
                 }
-                if (RETRIED_STATUS.contains(response.code()) && attempt < ATTEMPTS) {
+                if (RETRIED_STATUS.contains(response.code()) && attempt < attempts) {
                     pause(BACKOFF_MS << (attempt - 1));
                     continue;
                 }
@@ -99,8 +104,8 @@ public final class JevClient {
                 return parsed.getAsJsonObject();
             } catch (IOException e) {
                 EventLogger.warn("tool", "Jev request %d of %d failed: %s"
-                        .formatted(attempt, ATTEMPTS, e.getClass().getSimpleName()));
-                if (attempt >= ATTEMPTS) throw new JevException("Jev unreachable; no action executed");
+                        .formatted(attempt, attempts, e.getClass().getSimpleName()));
+                if (attempt >= attempts) throw new JevException("Jev unreachable; no action executed");
                 pause(BACKOFF_MS << (attempt - 1));
             } catch (JsonParseException _) {
                 throw new JevException(INVALID);

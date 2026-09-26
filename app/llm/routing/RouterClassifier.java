@@ -7,14 +7,22 @@ import llm.routing.PromptClassifier.Classification;
 import llm.routing.RouterPolicy.Candidate;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import tools.jev.JevSettings;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
  * Labels a prompt with its {@link TaskClass} and the {@link ReasoningEffort} it deserves, through a model when the operator has named one
- * ({@code router.classifier.provider} / {@code .model}) and through {@link PromptClassifier}'s local
+ * ({@code router.classifier.provider} / {@code .model}), TypeSafe's JEV judge when that pair is
+ * {@code jev} / {@code jev-latest} (JCLAW-1300), and through {@link PromptClassifier}'s local
  * rules otherwise (JCLAW-1222).
  *
  * <p>The rules cost nothing and explain themselves, but they read words rather than intent, so a
@@ -41,27 +49,33 @@ public final class RouterClassifier {
     /** Event-log category and the caller tag the provider records for these calls. */
     private static final String ROUTER = "router";
 
+    /** What each class means, in the order both classifiers read it: the LLM in its prompt, JEV as its choices. */
+    static final Map<TaskClass, String> CLASS_DEFINITIONS = ordered(Map.of(
+            TaskClass.CHAT, "greetings, small talk, clarifications, short factual lookups, light writing.",
+            TaskClass.SUMMARIZE, "a request to summarize, recap, condense or extract key points from material.",
+            TaskClass.AGENTIC, "an instruction to DO something with tools: run, search, send, schedule, download, "
+                    + "create a file/task/reminder/image, or multi-step work.",
+            TaskClass.REASONING, "an answer that must be worked out rather than recalled: proofs, maths, judgement, "
+                    + "critique, comparisons, causes, open questions, design trade-offs.",
+            TaskClass.CODING, "code, stack traces, debugging, or writing and changing software."));
+
+    static final Map<ReasoningEffort, String> EFFORT_DEFINITIONS = ordered(Map.of(
+            ReasoningEffort.LOW, "the answer is quick to give: small talk, a lookup, a routine edit.",
+            ReasoningEffort.MEDIUM, "some care is needed: a few steps, a moderate amount of code, a balanced judgement.",
+            ReasoningEffort.HIGH, "hard: a proof, a subtle bug, a design with real trade-offs, anything easy to get wrong."));
+
     private static final String INSTRUCTIONS = """
             You route one user message to the model class that should answer it, and say how hard that \
             model should think. Reply with exactly two words and nothing else: the class, then the effort.
 
             Classes:
 
-            chat — greetings, small talk, clarifications, short factual lookups, light writing.
-            summarize — a request to summarize, recap, condense or extract key points from material.
-            agentic — an instruction to DO something with tools: run, search, send, schedule, download, \
-            create a file/task/reminder/image, or multi-step work.
-            reasoning — an answer that must be worked out rather than recalled: proofs, maths, judgement, \
-            critique, comparisons, causes, open questions, design trade-offs.
-            coding — code, stack traces, debugging, or writing and changing software.
-
+            %s
             Efforts:
 
-            low — the answer is quick to give: small talk, a lookup, a routine edit.
-            medium — some care is needed: a few steps, a moderate amount of code, a balanced judgement.
-            high — hard: a proof, a subtle bug, a design with real trade-offs, anything easy to get wrong.
-
-            Choose the single best class and effort, e.g. "reasoning high". Answer with two words.""";
+            %s
+            Choose the single best class and effort, e.g. "reasoning high". Answer with two words."""
+            .formatted(lines(CLASS_DEFINITIONS, TaskClass::id), lines(EFFORT_DEFINITIONS, ReasoningEffort::id));
 
     private static final Pattern CLASS_WORD = Pattern.compile("(?<![a-z])(chat|summarize|agentic|reasoning|coding)(?![a-z])");
     private static final Pattern EFFORT_WORD = Pattern.compile("(?<![a-z])(low|medium|high)(?![a-z])");
@@ -74,11 +88,20 @@ public final class RouterClassifier {
      */
     public static Classification classify(String message, @Nullable TaskClass priorClass, int priorToolCalls,
                                           RouterPolicy policy) {
+        return classify(message, priorClass, priorToolCalls, policy, JevSettings::apiKey);
+    }
+
+    /** {@link #classify(String, TaskClass, int, RouterPolicy)}, reading the TypeSafe key from {@code jevKey} only when JEV is asked. */
+    public static Classification classify(String message, @Nullable TaskClass priorClass, int priorToolCalls,
+                                          RouterPolicy policy, Supplier<@Nullable String> jevKey) {
         var followUp = PromptClassifier.followUp(message, priorClass, priorToolCalls);
         if (followUp != null) return followUp;
 
         var classifier = policy.classifier();
         if (classifier == null) return PromptClassifier.classify(message, priorClass, priorToolCalls);
+        if (RouterPolicy.JEV.equals(classifier.provider())) {
+            return askJev(message, priorClass, priorToolCalls, policy, jevKey.get());
+        }
 
         var answer = askModel(message, classifier, policy.classifierTimeoutSeconds());
         var labeled = parse(answer);
@@ -92,6 +115,19 @@ public final class RouterClassifier {
                     .formatted(classifier.describe(), answer.isBlank() ? "empty" : abbreviate(answer)));
         }
         return PromptClassifier.classify(message, priorClass, priorToolCalls);
+    }
+
+    /** JEV's class and effort, or the keyword rules' when JEV cannot answer or is not sure enough. */
+    private static Classification askJev(String message, @Nullable TaskClass priorClass, int priorToolCalls,
+                                         RouterPolicy policy, @Nullable String apiKey) {
+        var verdict = JevRouterClassifier.classify(message, apiKey, policy.jevMinConfidence(),
+                policy.classifierTimeoutSeconds());
+        if (verdict.classification() != null) return verdict.classification();
+        var rules = PromptClassifier.classify(message, priorClass, priorToolCalls);
+        if (!verdict.unsure() || verdict.reason() == null) return rules;
+        var signals = new ArrayList<>(rules.signals());
+        signals.add(verdict.reason());
+        return new Classification(rules.taskClass(), rules.effort(), List.copyOf(signals));
     }
 
     /**
@@ -110,7 +146,7 @@ public final class RouterClassifier {
                     .formatted(classifier.provider()));
             return null;
         }
-        var prompt = message.length() > MAX_PROMPT_CHARS ? message.substring(0, MAX_PROMPT_CHARS) : message;
+        var prompt = truncate(message);
         ChatResponse response;
         try {
             response = provider.chat(classifier.model(),
@@ -143,6 +179,20 @@ public final class RouterClassifier {
         if (response.choices() == null || response.choices().isEmpty()) return null;
         var content = response.choices().getFirst().message().content();
         return content instanceof String text ? text : null;
+    }
+
+    static String truncate(String message) {
+        return message.length() > MAX_PROMPT_CHARS ? message.substring(0, MAX_PROMPT_CHARS) : message;
+    }
+
+    private static <E extends Enum<E>> Map<E, String> ordered(Map<E, String> definitions) {
+        return Collections.unmodifiableMap(new EnumMap<>(definitions));
+    }
+
+    private static <E extends Enum<E>> String lines(Map<E, String> definitions, Function<E, String> id) {
+        var out = new StringBuilder();
+        definitions.forEach((k, v) -> out.append(id.apply(k)).append(" — ").append(v).append('\n'));
+        return out.toString();
     }
 
     private static String abbreviate(String text) {

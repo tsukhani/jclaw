@@ -102,6 +102,68 @@ class RouterPolicyTest extends UnitTest {
     }
 
     @Test
+    void jevIsAcceptedAsTheClassifierWithItsOneModel() {
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, RouterPolicy.JEV),
+                "jev is not a registered provider, and needs none");
+        // Only one half is ever stored here, so a concurrent RouterPolicy.load() never sees a classifier.
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, RouterPolicy.JEV);
+        try {
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "jev-latest"));
+            var wrongModel = RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "m1");
+            assertNotNull(wrongModel, "jev has exactly one model");
+            assertTrue(wrongModel.contains("jev-latest"), wrongModel);
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+        }
+    }
+
+    @Test
+    void theJevProviderWriteIsNotCheckedAgainstTheStoredModel() {
+        ConfigService.set(RouterPolicy.CLASSIFIER_MODEL, "m1");
+        try {
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, RouterPolicy.JEV));
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_MODEL);
+        }
+    }
+
+    @Test
+    void leavingJevForAModelSavesOnceTheStoredModelIsCleared() {
+        ConfigService.set(RouterPolicy.CLASSIFIER_MODEL, "jev-latest");
+        try {
+            // Why the panel deletes the model before it writes the provider: this write is cross-checked.
+            assertTrue(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, provider).contains("no model with id"));
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_MODEL);
+        }
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, provider));
+    }
+
+    @Test
+    void jevsMinimumConfidenceIsAProbability() {
+        for (var ok : new String[] {"0", "0.9", "1", " 0.75 "}) {
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.JEV_MIN_CONFIDENCE, ok), () -> "refused " + ok);
+        }
+        for (var bad : new String[] {"-0.01", "1.01", "NaN", "Infinity", "sure", ""}) {
+            assertNotNull(RouterPolicy.rejectionFor(RouterPolicy.JEV_MIN_CONFIDENCE, bad), () -> "accepted " + bad);
+        }
+        var policy = new RouterPolicy(Map.of(TaskClass.CHAT, List.of(new Candidate("p", "m"))), 0.75, 0.95);
+        assertEquals(RouterPolicy.DEFAULT_JEV_MIN_CONFIDENCE, policy.jevMinConfidence());
+        assertEquals(0.50, RouterPolicy.DEFAULT_JEV_MIN_CONFIDENCE);
+    }
+
+    @Test
+    void loadReadsJevsMinimumConfidence() {
+        ConfigService.set(RouterPolicy.JEV_MIN_CONFIDENCE, "0.8");
+        try {
+            assertEquals(0.8, RouterPolicy.load().jevMinConfidence());
+        } finally {
+            ConfigService.delete(RouterPolicy.JEV_MIN_CONFIDENCE);
+        }
+        assertEquals(RouterPolicy.DEFAULT_JEV_MIN_CONFIDENCE, RouterPolicy.load().jevMinConfidence());
+    }
+
+    @Test
     void theClassifierTimeoutMustBeSecondsInRange() {
         assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_TIMEOUT_SECONDS, "8"));
         for (var bad : new String[] {"0", "-1", "61", "soon", ""}) {

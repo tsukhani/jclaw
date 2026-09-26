@@ -7,9 +7,10 @@ import Settings from '~/pages/settings.vue'
 import { sectionGroups } from '~/components/settings/sections'
 
 /**
- * The Browser settings panel (JCLAW-1274): the engine radios, the TypeSafe warning and key
- * field that only Jev shows, and that every write is an ordinary /api/config row — switching
- * back to Playwright keeps the stored key rather than deleting it.
+ * The Browser settings panel (JCLAW-1274): the engine radios, the TypeSafe warning that only Jev
+ * shows, the key field shown whatever the engine because the router's JEV classifier uses it too
+ * (JCLAW-1300), and that every write is an ordinary /api/config row — switching back to
+ * Playwright keeps the stored key rather than deleting it.
  */
 
 let stored: Map<string, string>
@@ -101,14 +102,18 @@ describe('Settings page — Browser', () => {
     expect(ids.indexOf('browser')).toBe(ids.indexOf('web-scraping') + 1)
   })
 
-  it('defaults to Playwright, with no warning and no key field', async () => {
+  it('defaults to Playwright, with no warning but the key field the router also uses', async () => {
     baseEndpoints()
     const component = await mountBrowser()
 
     expect(component.html()).toMatch(/<h2[^>]*>\s*Browser\s*</)
     expect(checked(component, '#browser-engine-playwright')).toBe(true)
     expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
-    expect(component.find('[data-testid="browser-jev-key"]').exists()).toBe(false)
+    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('(not set)')
+    const use = component.find('[data-testid="browser-jev-key-use"]').text()
+    expect(use).toContain('Jev engine')
+    expect(use).toContain('JEV classifier')
+    expect(use).not.toContain('Until a key is set')
   })
 
   it('selecting Jev saves the engine and reveals the warning and an unset key', async () => {
@@ -127,6 +132,7 @@ describe('Settings page — Browser', () => {
     expect(warning.text()).toContain('text typed earlier in the run')
     expect(warning.text()).toContain('record or retain')
     expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('(not set)')
+    expect(component.find('[data-testid="browser-jev-key-use"]').text()).toContain('Until a key is set')
   })
 
   it('sets the key through the masked editor, which starts blank', async () => {
@@ -148,7 +154,7 @@ describe('Settings page — Browser', () => {
     await vi.waitFor(() => expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••'))
   })
 
-  it('switching back to Playwright hides the warning and key but keeps the stored key', async () => {
+  it('switching back to Playwright hides the warning but keeps the key field and the stored key', async () => {
     baseEndpoints()
     stored.set('browser.engine', 'jev')
     stored.set('browser.jev.apiKey', 'ts-s****')
@@ -162,7 +168,7 @@ describe('Settings page — Browser', () => {
     expect(deleted).toEqual([])
     expect(stored.get('browser.jev.apiKey')).toBe('ts-s****')
     expect(component.find('[data-testid="browser-jev-warning"]').exists()).toBe(false)
-    expect(component.find('[data-testid="browser-jev-key"]').exists()).toBe(false)
+    expect(component.find('[data-testid="browser-jev-key"]').text()).toBe('••••••••')
   })
 
   it('a failed save puts the saved engine back, names the request and re-reads the settings', async () => {

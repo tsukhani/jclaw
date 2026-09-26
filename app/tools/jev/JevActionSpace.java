@@ -28,7 +28,7 @@ import java.util.Map;
 public record JevActionSpace(JsonArray elements, Map<String, Map<String, JsonObject>> targets,
                              Map<String, JsonObject> controls) {
 
-    static final String MODEL = "jev-latest";
+    public static final String MODEL = "jev-latest";
     static final String DONE = "DONE";
     static final String BLOCKED = "BLOCKED";
 
@@ -205,7 +205,8 @@ public record JevActionSpace(JsonArray elements, Map<String, Map<String, JsonObj
         return context;
     }
 
-    private static JsonObject choiceQuestion(JsonObject criteria, JsonObject instructions) {
+    /** One {@code choice} question: Jev picks a key of {@code criteria}, reading {@code instructions}. */
+    public static JsonObject choiceQuestion(JsonObject criteria, JsonObject instructions) {
         var question = new JsonObject();
         question.addProperty("type", "choice");
         question.add("criteria", criteria);

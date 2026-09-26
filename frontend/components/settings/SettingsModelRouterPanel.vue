@@ -126,11 +126,17 @@ const classifierValue = computed(() => {
   return p && m ? `${p}::${m}` : ''
 })
 
+// JCLAW-1300: TypeSafe's JEV as the classifier, on the key set in Settings → Browser.
+const JEV_CLASSIFIER = 'jev::jev-latest'
+const jevKeySet = computed(() => configValue('browser.jev.apiKey').trim().length > 0)
+
 async function saveClassifier(value: string) {
   saving.value = true
   await attempt(async () => {
     if (value) {
       const sep = value.indexOf('::')
+      // The provider write is checked against the stored model, which belongs to the classifier being replaced.
+      await $fetch('/api/config/router.classifier.model', { method: 'DELETE' })
       await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.provider', value: value.slice(0, sep) } })
       await $fetch('/api/config', { method: 'POST', body: { key: 'router.classifier.model', value: value.slice(sep + 2) } })
     }
@@ -351,12 +357,15 @@ function usageTone(fraction: number): string {
       Classifier
     </h3>
     <p class="text-xs text-fg-muted">
-      How each prompt gets its task class. The built-in keyword rules are free and instant, but they read
-      words rather than intent, so a demanding prompt phrased in ordinary language can stay on the chat
-      model. Naming a model here replaces them: it is asked which class fits and answers with one word.
-      That costs one extra call before the reply starts, and the model sees the first 4000 characters of
-      the prompt — so a remote classifier is one more place your prompts go. If it is unreachable, slow or
-      answers with something else, the keyword rules decide instead and the turn carries on.
+      How each prompt gets its task class and reasoning effort. The built-in keyword rules are free and
+      instant, but they read words rather than intent, so a demanding prompt phrased in ordinary language
+      can stay on the chat model. Naming a model here replaces them: it is asked which class fits and how
+      hard to think, and answers with two words. JEV, TypeSafe AI's decision model, answers the same two
+      questions with a probability for each choice, and leaves a prompt whose class it is unsure of to the
+      keyword rules. Either costs one extra call before the reply starts and sees the first 4000 characters
+      of the prompt, so a remote classifier is one more place your prompts go: JEV sends them to TypeSafe
+      AI, which may record or retain them. If the classifier is unreachable, slow or answers with something
+      else, the keyword rules decide instead and the turn carries on.
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
@@ -372,6 +381,12 @@ function usageTone(fraction: number): string {
             Keyword rules (no model call)
           </option>
           <option
+            :value="JEV_CLASSIFIER"
+            :disabled="!jevKeySet"
+          >
+            JEV (TypeSafe AI){{ jevKeySet ? '' : ' — needs a TypeSafe API key' }}
+          </option>
+          <option
             v-for="o in modelOptions"
             :key="o.value"
             :value="o.value"
@@ -380,6 +395,16 @@ function usageTone(fraction: number): string {
           </option>
         </select>
       </div>
+      <p
+        v-if="!jevKeySet"
+        class="px-4 pb-2.5 text-xs text-fg-muted"
+        data-testid="router-jev-key-hint"
+      >
+        To classify with JEV, set a TypeSafe API key in <NuxtLink
+          to="/settings?section=browser"
+          class="text-fg-strong underline"
+        >Settings → Browser</NuxtLink>.
+      </p>
     </div>
 
     <h3 class="text-sm font-medium text-fg-muted">

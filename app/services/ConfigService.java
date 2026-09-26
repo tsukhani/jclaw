@@ -366,6 +366,10 @@ public class ConfigService {
         if (key.startsWith(PROVIDER_KEY_PREFIX + ModelRouter.PROVIDER + ".")) {
             return "The provider name '" + ModelRouter.PROVIDER + "' is reserved for the model router.";
         }
+        // The router's classifier names TypeSafe's judge by this provider name (JCLAW-1300).
+        if (key.startsWith(PROVIDER_KEY_PREFIX + RouterPolicy.JEV + ".")) {
+            return "The provider name '" + RouterPolicy.JEV + "' is reserved for the model router's JEV classifier.";
+        }
 
         // JCLAW-1229: the chat path now dials through the provider-guarded client, so a base URL
         // in the metadata range fails at connect as an opaque DNS error on the operator's next
