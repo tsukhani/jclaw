@@ -204,7 +204,7 @@ Expand a task's row to see its **Instructions** — the description the agent ru
 The same detail has a read-only **Permissions** block:
 
 - **Origin** — the channel the task was created from, which cannot be raised later. `web` lets a fire's dangerous tools follow the [Tool Approvals](/guide#settings-tool-approvals) policy; any other channel, or `unrecorded`, is untrusted, so they fail closed (for a channel origin, unless that policy is `ask`).
-- **Model** — *follows the agent*: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too.
+- **Model** — *follows the agent* when nothing is pinned: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too. A task created with its own model shows that model instead and always fires on it; if that model's provider is no longer configured, the fire falls back to the agent's model.
 - **Tools** — the `enabledToolNames` allow-list as pills, or *all the agent's tools* when there is none.
 
 ## What a task run looks like
@@ -236,7 +236,7 @@ The agent rejects a `createTask` call when an agent already has a non-cancelled 
 :::
 
 :::note Per-agent scoping
-Tasks are scoped to the owning agent. One agent never sees, pauses, or cancels another agent's tasks of the same name. The `runNow` and `cancelTask` actions only operate on tasks the calling agent owns.
+The `task_manager` tool is scoped to the owning agent: through it, one agent never sees, pauses, or cancels another agent's tasks, and its `runNow` and `cancelTask` actions only operate on tasks the calling agent owns. The Tasks API itself is instance-wide, so an agent that has the `jclaw_api` tool can reach any task; its writes go through the same dangerous-action approval as every other `jclaw_api` write.
 :::
 
 :::note Watching a fire live

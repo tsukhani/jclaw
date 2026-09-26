@@ -4,6 +4,7 @@ import channels.ChannelStreamingSink;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import llm.routing.RoutedTurn;
 import memory.MemoryAutoCapture;
 import models.Agent;
@@ -438,7 +439,7 @@ public class AgentRunner {
      */
     public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
                                                             AgentExecutionSink sink) {
-        return runForTask(agent, userPrompt, sink, null, null);
+        return runForTask(agent, userPrompt, sink, null, null, null, null);
     }
 
     /**
@@ -447,13 +448,18 @@ public class AgentRunner {
      * list below, which is also what {@code ToolCallLoopRunner} turns into the JCLAW-883
      * dispatch guard — so a withheld tool is neither advertised nor executable.
      *
-     * @param allowedTools parsed {@code Task.enabledToolNames}, or {@code null}
-     * @param taskName     names the task in the audit event; may be {@code null}
+     * @param allowedTools  parsed {@code Task.enabledToolNames}, or {@code null}
+     * @param taskName      names the task in the audit event; may be {@code null}
+     * @param pinnedProvider {@code Task.modelProvider}; with {@code pinnedModelId}, the fire runs
+     *                       on that model instead of the agent's
+     * @param pinnedModelId  {@code Task.modelId}
      */
     public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
                                                             AgentExecutionSink sink,
                                                             @Nullable Set<String> allowedTools,
-                                                            @Nullable String taskName) {
+                                                            @Nullable String taskName,
+                                                            @Nullable String pinnedProvider,
+                                                            @Nullable String pinnedModelId) {
         Objects.requireNonNull(agent, EVT_CATEGORY_AGENT);
         Objects.requireNonNull(userPrompt, "userPrompt");
         Objects.requireNonNull(sink, "sink");
@@ -462,6 +468,7 @@ public class AgentRunner {
 
         var stubConv = new Conversation();
         stubConv.agent = agent;
+        applyTaskModelPin(stubConv, agent, taskName, pinnedProvider, pinnedModelId);
 
         var route = TurnRouting.decide(agent, stubConv, userPrompt, null, null);
         if (route == null && TurnRouting.usesRouter(agent, stubConv)) {
@@ -471,6 +478,21 @@ public class AgentRunner {
         if (route == null) return runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv);
         return RoutedTurn.callWith(route, stubConv,
                 () -> runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv));
+    }
+
+    // The pin rides the conversation override, so routing, the fire log and the call all see it.
+    // A pin naming an unconfigured provider would otherwise reach getPrimary() with a foreign model id.
+    private static void applyTaskModelPin(Conversation stubConv, Agent agent, @Nullable String taskName,
+                                          @Nullable String provider, @Nullable String modelId) {
+        if (provider == null || modelId == null) return;
+        if (!ModelRouter.isRouter(provider, modelId) && ProviderRegistry.get(provider) == null) {
+            EventLogger.warn("llm", agent.name, null,
+                    "Task '%s' pins %s / %s, which is not configured; firing on the agent's model instead"
+                            .formatted(taskName, provider, modelId));
+            return;
+        }
+        stubConv.modelProviderOverride = provider;
+        stubConv.modelIdOverride = modelId;
     }
 
     /** A task fire from prologue to persisted reply, against {@code stubConv}; see {@link #runForTask}. */

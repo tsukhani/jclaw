@@ -228,18 +228,13 @@ public class Task extends TimestampedModel {
     public String payloadType;
 
     /**
-     * JCLAW-294 plumbing for JCLAW-296 (cost-saving extensions). When
-     * set, overrides the agent's default LLM provider for this task's
-     * fires. AgentRunner.runForTask currently reads agent.modelProvider;
-     * JCLAW-296 will check task.modelProvider first and fall back.
+     * With {@link #modelId}, the model this task's fires run on instead of the agent's
+     * (applied by {@code AgentRunner.runForTask}); null inherits the agent's current model.
      */
     @Column(name = "model_provider", length = 100)
     public String modelProvider;
 
-    /**
-     * JCLAW-294 plumbing for JCLAW-296 (cost-saving extensions). Model
-     * id override paired with modelProvider above.
-     */
+    /** Model id paired with {@link #modelProvider}; a half-set pin is ignored. */
     @Column(name = "model_id", length = 100)
     public String modelId;
 
