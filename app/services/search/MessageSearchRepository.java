@@ -11,8 +11,8 @@ import java.util.List;
  * backend tracks the configured Hibernate dialect:
  *
  * <ul>
- *   <li>{@link DirectLuceneMessageSearchRepository} — the Personal
- *       Edition path. JClaw owns its own Lucene 10 index directly via
+ *   <li>{@link DirectLuceneMessageSearchRepository} — the default
+ *       (H2) path. JClaw owns its own Lucene 10 index directly via
  *       {@link LuceneIndexer}; the JPA hooks on
  *       {@link TaskRunMessage} drive sync (not DB triggers, since
  *       H2's {@code FullTextLucene} ships an older Lucene that

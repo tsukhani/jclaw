@@ -47,8 +47,8 @@ import static utils.GsonHolder.GSON;
  * <h2>Single-operator scope</h2>
  * Id-addressed mutations ({@link #update}, {@link #cancel}, {@link #retry},
  * {@link #run}, {@link #pause}, {@link #resume}) authenticate via {@link AuthCheck}
- * and don't add a per-caller ownership check: JClaw is single-operator Personal
- * Edition — one admin owns every agent and task, so there is no other user to scope
+ * and don't add a per-caller ownership check: JClaw is single-operator by
+ * design — one admin owns every agent and task, so there is no other user to scope
  * against. The {@link #list} endpoint honors an optional {@code agentId} filter and
  * otherwise returns all tasks.
  */
