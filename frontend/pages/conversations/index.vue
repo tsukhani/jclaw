@@ -517,7 +517,8 @@ const columns: DataTableColumn<Conversation>[] = [
   },
   {
     id: 'actions',
-    header: 'Actions',
+    // Right-aligned to sit over the justify-end buttons below, as on the Subagents and Tasks lists.
+    header: () => h('div', { class: 'w-full text-right' }, 'Actions'),
     enableSorting: false,
     size: 148,
     cell: ({ row }) => h('div', { class: 'flex items-center justify-end gap-0.5' }, [
