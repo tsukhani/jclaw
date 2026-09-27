@@ -232,7 +232,7 @@ importers:
         version: 1.17.0(@typescript-eslint/utils@8.70.0(eslint@10.11.0(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3))(@vue/compiler-sfc@3.5.43)(crossws@0.4.12(srvx@0.11.22))(esbuild@0.28.2)(eslint@10.11.0(jiti@2.7.0)(supports-color@10.2.2))(magic-string@1.4.1)(magicast@0.5.5)(rolldown@1.2.9)(rollup@4.63.4)(srvx@0.11.22)(supports-color@10.2.2)(typescript@6.0.3)(unplugin@3.4.0(esbuild@0.28.2)(rolldown@1.2.9)(rollup@4.63.4)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       '@nuxt/test-utils':
         specifier: ^4.3.1
-        version: 4.3.2(@playwright/test@1.63.0)(@vue/test-utils@2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@6.0.3)))(esbuild@0.28.2)(jsdom@30.1.0)(magicast@0.5.5)(playwright-core@1.63.0)(rolldown@1.2.9)(rollup@4.63.4)(typescript@6.0.3)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vitest@5.0.1)
+        version: 4.3.2(@playwright/test@1.63.0)(@vue/test-utils@2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@6.0.3)))(esbuild@0.28.2)(jsdom@30.1.1)(magicast@0.5.5)(playwright-core@1.63.0)(rolldown@1.2.9)(rollup@4.63.4)(typescript@6.0.3)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vitest@5.0.1)
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
@@ -259,7 +259,7 @@ importers:
         version: 2.6.0(eslint@10.11.0(jiti@2.7.0)(supports-color@10.2.2))(globals@17.12.0)(supports-color@10.2.2)
       jsdom:
         specifier: ^30.0.0
-        version: 30.1.0
+        version: 30.1.1
       lint-staged:
         specifier: ^17.1.0
         version: 17.5.1
@@ -283,7 +283,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^5.0.1
-        version: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.0)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+        version: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.1)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
       vitest-sonar-reporter:
         specifier: ^3.0.0
         version: 3.0.0(vitest@5.0.1)
@@ -3215,9 +3215,9 @@ packages:
   hookified@2.2.0:
     resolution: {integrity: sha512-p/LgFzRN5FeoD3DLS6bkUapeye6E4SI6yJs6KetENd18S+FBthqYq2amJUWpt5z0EQwwHemidjY5OqJGEKm5uA==}
 
-  html-encoding-sniffer@6.0.0:
-    resolution: {integrity: sha512-CV9TW3Y3f8/wT0BRFc1/KAVQ3TUHiXmaAb6VW9vtiMFf7SLoMd1PdAc4W3KFOFETBJUb90KatHqlsZMWV+R9Gg==}
-    engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+  html-encoding-sniffer@7.0.0:
+    resolution: {integrity: sha512-UikN5yr7xsCDAq87Or5or0PAlD3HJJOKVzM05az588WnpDJ4Ux7a2A53Qi6gofGg2/EtvF/H4hCi/TXfCW4Y6w==}
+    engines: {node: ^22.13.0 || >=24.0.0}
 
   html-entities@2.6.0:
     resolution: {integrity: sha512-kig+rMn/QOVRvr7c86gQ8lWXq+Hkv6CbAH1hLu+RG338StTpE8Z0b44SDVaqVu7HGKf27frdmUYEs9hTUX/cLQ==}
@@ -3424,8 +3424,8 @@ packages:
     resolution: {integrity: sha512-eFY7Rlscvv/BpY6UsVsjKwMhu1tJO/F4U/vC9g3yeRy/JqszuO1UP6Vdq+85G+3FP6fEw/sWR8a5ftPFY86csw==}
     engines: {node: ^22.22.2 || >=24.15.0}
 
-  jsdom@30.1.0:
-    resolution: {integrity: sha512-h/Q+H+KmlGf49ITw3TrykSVbg04S75S2O7ZtJc9gMGOWBrQRZmx5AJIKLtJ01e6Kszl+/tpFthCVqxNifxhoqg==}
+  jsdom@30.1.1:
+    resolution: {integrity: sha512-FahmoPK5vbPc+jxV1iErMHmAZypCZ942NHF4+qqaWAuvaKKTBZxawnmAtrbGWLU7MtlxfqIP0qw6aSI+aWGtLg==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       canvas: ^3.2.3
@@ -5305,9 +5305,9 @@ packages:
       typescript:
         optional: true
 
-  w3c-xmlserializer@5.0.0:
-    resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
-    engines: {node: '>=18'}
+  w3c-xmlserializer@6.0.0:
+    resolution: {integrity: sha512-4Nsy8K5Tr6SPDH9jhKJOHf7ChDrc1zufZTVSF7x72hwuEXBqxqk9G6cK+K2NRUtB3iELRJqjXb4JPDMBjMTl2Q==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   web-vitals@6.2.2:
     resolution: {integrity: sha512-oto5x6dLEgrRqfcWed+pZEUb2q6ikbFmqF54CRDhI/QGbn+qxC49b4C4OkbH+kb9C3a8shpFD3SgR9kRcs80ZQ==}
@@ -6499,7 +6499,7 @@ snapshots:
       rc9: 3.1.0
       std-env: 4.2.0
 
-  '@nuxt/test-utils@4.3.2(@playwright/test@1.63.0)(@vue/test-utils@2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@6.0.3)))(esbuild@0.28.2)(jsdom@30.1.0)(magicast@0.5.5)(playwright-core@1.63.0)(rolldown@1.2.9)(rollup@4.63.4)(typescript@6.0.3)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vitest@5.0.1)':
+  '@nuxt/test-utils@4.3.2(@playwright/test@1.63.0)(@vue/test-utils@2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@6.0.3)))(esbuild@0.28.2)(jsdom@30.1.1)(magicast@0.5.5)(playwright-core@1.63.0)(rolldown@1.2.9)(rollup@4.63.4)(typescript@6.0.3)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vitest@5.0.1)':
     dependencies:
       '@clack/prompts': 1.7.0
       '@nuxt/devtools-kit': 2.7.0(magicast@0.5.5)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
@@ -6532,9 +6532,9 @@ snapshots:
     optionalDependencies:
       '@playwright/test': 1.63.0
       '@vue/test-utils': 2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@6.0.3))
-      jsdom: 30.1.0
+      jsdom: 30.1.1
       playwright-core: 1.63.0
-      vitest: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.0)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      vitest: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.1)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
     transitivePeerDependencies:
       - '@farmfe/core'
       - '@rsbuild/core'
@@ -7286,7 +7286,7 @@ snapshots:
       obug: 2.2.1
       std-env: 4.2.0
       tinyrainbow: 3.1.1
-      vitest: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.0)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      vitest: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.1)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
   '@vitest/istanbul-lib-coverage@1.0.1': {}
 
@@ -8571,7 +8571,7 @@ snapshots:
 
   hookified@2.2.0: {}
 
-  html-encoding-sniffer@6.0.0:
+  html-encoding-sniffer@7.0.0:
     dependencies:
       '@exodus/bytes': 1.15.1
     transitivePeerDependencies:
@@ -8770,7 +8770,7 @@ snapshots:
       '@types/estree': 1.0.9
       '@types/node': 26.6.2
 
-  jsdom@30.1.0:
+  jsdom@30.1.1:
     dependencies:
       '@asamuzakjp/css-color': 7.0.1
       '@asamuzakjp/dom-selector': 9.2.1
@@ -8780,14 +8780,14 @@ snapshots:
       css-tree: 3.2.1
       data-urls: 7.0.0
       decimal.js: 10.6.0
-      html-encoding-sniffer: 6.0.0
+      html-encoding-sniffer: 7.0.0
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.3
       parse5: 8.0.1
       saxes: 6.0.0
       tough-cookie: 6.0.2
       undici: 8.10.2
-      w3c-xmlserializer: 5.0.0
+      w3c-xmlserializer: 6.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
       whatwg-url: 17.1.2
@@ -10674,13 +10674,13 @@ snapshots:
 
   vitest-environment-nuxt@2.0.0:
     dependencies:
-      '@nuxt/test-utils': 4.3.2(@playwright/test@1.63.0)(@vue/test-utils@2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@6.0.3)))(esbuild@0.28.2)(jsdom@30.1.0)(magicast@0.5.5)(playwright-core@1.63.0)(rolldown@1.2.9)(rollup@4.63.4)(typescript@6.0.3)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vitest@5.0.1)
+      '@nuxt/test-utils': 4.3.2(@playwright/test@1.63.0)(@vue/test-utils@2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@6.0.3)))(esbuild@0.28.2)(jsdom@30.1.1)(magicast@0.5.5)(playwright-core@1.63.0)(rolldown@1.2.9)(rollup@4.63.4)(typescript@6.0.3)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))(vitest@5.0.1)
 
   vitest-sonar-reporter@3.0.0(vitest@5.0.1):
     dependencies:
-      vitest: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.0)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      vitest: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.1)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
-  vitest@5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.0)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)):
+  vitest@5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.1)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/mocker': 5.0.1(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
@@ -10699,7 +10699,7 @@ snapshots:
     optionalDependencies:
       '@types/node': 26.6.2
       '@vitest/coverage-v8': 5.0.1(vitest@5.0.1)
-      jsdom: 30.1.0
+      jsdom: 30.1.1
     transitivePeerDependencies:
       - msw
 
@@ -10784,7 +10784,7 @@ snapshots:
     optionalDependencies:
       typescript: 6.0.3
 
-  w3c-xmlserializer@5.0.0:
+  w3c-xmlserializer@6.0.0:
     dependencies:
       xml-name-validator: 5.0.0
 
