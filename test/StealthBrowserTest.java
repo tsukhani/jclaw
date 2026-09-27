@@ -21,7 +21,10 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Rung 3 — the stealth rendering sidecar (JCLAW-1088).
@@ -246,6 +249,42 @@ class StealthBrowserTest extends UnitTest {
     private static boolean solveTurnstileSent() {
         return RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject())
                 .get("solveTurnstile").getAsBoolean();
+    }
+
+    @Test
+    void noMoreRendersReachTheSidecarThanItHasSlots() throws Exception {
+        // A render queued inside the sidecar spends CALL_TIMEOUT waiting behind challenge waits.
+        int callers = RenderedFetcher.RENDER_SLOTS * 2;
+        var inside = new AtomicInteger();
+        var peak = new AtomicInteger();
+        var slotsFull = new CountDownLatch(RenderedFetcher.RENDER_SLOTS);
+        var everyoneIn = new CountDownLatch(callers);
+        var release = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(callers)) {
+            for (int i = 0; i < callers; i++) {
+                pool.submit(() -> RenderedFetcher.inRenderSlot(() -> {
+                    peak.accumulateAndGet(inside.incrementAndGet(), Math::max);
+                    slotsFull.countDown();
+                    everyoneIn.countDown();
+                    try {
+                        release.await(30, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    inside.decrementAndGet();
+                    return null;
+                }));
+            }
+            try {
+                assertTrue(slotsFull.await(10, TimeUnit.SECONDS), "the slots never filled");
+                assertFalse(everyoneIn.await(500, TimeUnit.MILLISECONDS),
+                        "a caller got past a full set of slots");
+            } finally {
+                release.countDown();
+            }
+        }
+        assertEquals(RenderedFetcher.RENDER_SLOTS, peak.get());
+        assertEquals(0, everyoneIn.getCount(), "every queued caller ran once a slot freed");
     }
 
     // ==================== Feature detection ====================

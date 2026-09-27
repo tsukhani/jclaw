@@ -185,7 +185,9 @@ like every other request.
 The JVM sends `timeoutMs` 35 s and `challengeMs` 45 s, which leaves 40 s of its 120 s call timeout
 for the launch, the UA probe (15 s ceiling) and the route gate's resolve budget (15 s).
 `StealthBrowserTest` holds that sum, and `ScrapeSidecarContractTest` holds that the clamps above
-never shorten what the JVM asks for.
+never shorten what the JVM asks for. That timeout covers the render alone: the JVM keeps no more
+renders in flight than this process has permits (`RenderedFetcher.RENDER_SLOTS`), so a render
+never queues here behind another's challenge wait while its call timeout runs.
 
 ## Looking like a real browser
 
@@ -258,10 +260,10 @@ reading the value during load. It is also a weak tell, since a real browser in
 fullscreen or kiosk mode reports the same.
 
 **This is not indistinguishability, and should not be described as such.** Every
-*static* fingerprint matches. What remains distinguishable is behaviour: a page is
+*static* fingerprint matches. What remains distinguishable is behavior: a page is
 loaded, settles, and is read — no scrolling, no dwell time, and no mouse movement. The
 one pointer input is the [challenge click](#cloudflare-challenges), which lands on the
-checkbox with no path leading to it. A detector scoring behaviour rather than
+checkbox with no path leading to it. A detector scoring behavior rather than
 fingerprints can still tell, and a render-only rung structurally cannot produce those
 signals.
 

@@ -19,9 +19,11 @@ import utils.Urls;
 import utils.WebExtraction;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.concurrent.Semaphore;
 
 /**
  * Rung 3: render through the stealth browser sidecar (JCLAW-1088).
@@ -59,6 +61,13 @@ public final class RenderedFetcher {
     /** How long a render polls a standing Cloudflare challenge, in place of its settle window
      *  (JCLAW-1306). */
     private static final Duration CHALLENGE_BUDGET = Duration.ofSeconds(45);
+
+    /** serve.py's {@code DEFAULT_MAX_CONCURRENT}. A render queues for a slot here, where no timer
+     *  runs, rather than in the sidecar against {@link #CALL_TIMEOUT}. Public because Play's tests
+     *  live in the default package. */
+    public static final int RENDER_SLOTS = 4;
+
+    private static final Semaphore SLOTS = new Semaphore(RENDER_SLOTS, true);
 
     private static final OkHttpClient CLIENT = HttpFactories.general().newBuilder()
             .callTimeout(CALL_TIMEOUT)
@@ -122,8 +131,32 @@ public final class RenderedFetcher {
                 .post(RequestBody.create(renderRequest(url, language, pins).toString(), JSON))
                 .build();
 
-        try (var response = CLIENT.newCall(request).execute()) {
-            return rendered(response, url);
+        return inRenderSlot(() -> {
+            try (var response = CLIENT.newCall(request).execute()) {
+                return rendered(response, url);
+            }
+        });
+    }
+
+    /** One call to the sidecar. Public because Play's tests live in the default package. */
+    @FunctionalInterface
+    public interface SidecarCall<T> {
+        T call() throws IOException;
+    }
+
+    /** Run {@code call} holding one of the {@link #RENDER_SLOTS}. Public because Play's tests live
+     *  in the default package. */
+    public static <T> T inRenderSlot(SidecarCall<T> call) throws IOException {
+        try {
+            SLOTS.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new InterruptedIOException("interrupted waiting for a render slot");
+        }
+        try {
+            return call.call();
+        } finally {
+            SLOTS.release();
         }
     }
 
