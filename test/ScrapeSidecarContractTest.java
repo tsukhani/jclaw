@@ -319,4 +319,91 @@ class ScrapeSidecarContractTest extends UnitTest {
             assertEquals(out.get("http"), launch, "every launch carries the proxy: " + launches);
         }
     }
+
+    @Test
+    void theRenderLaunchStatesItsLanguageAndFingerprintAsFlags() throws Exception {
+        // JCLAW-1305. The context locale reached the main thread only, so a Worker kept the host's languages.
+        var out = probe("sidecar/stealth", """
+                import sys, json
+                sys.path.insert(0, sys.argv[1])
+                import serve
+                print("PROBE:" + json.dumps({
+                    "pinned": serve._launch_args({"example.com": "93.184.215.14"}, "de-DE"),
+                    "bare": serve._launch_args({}, "en"),
+                    "context": serve._CONTEXT_OPTIONS,
+                }))
+                """);
+        assertEquals(List.of("--lang=de-DE", "--accept-lang=de-DE,de",
+                        "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,"
+                                + "availablePointerTypes=4",
+                        "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+                        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                        "--host-resolver-rules=MAP example.com 93.184.215.14"),
+                keys(out, "pinned"),
+                "each WebRTC spelling is ignored silently by one of the two builds a render may launch");
+        assertEquals(List.of("--lang=en", "--accept-lang=en"), keys(out, "bare").subList(0, 2));
+        assertFalse(keys(out, "bare").stream().anyMatch(a -> a.startsWith("--host-resolver-rules")),
+                "no pins, no MAP clause");
+        assertEquals("{\"service_workers\":\"block\",\"viewport\":{\"width\":1920,\"height\":1080},"
+                        + "\"screen\":{\"width\":1920,\"height\":1080}}",
+                out.get("context").toString(), "no locale and no Accept-Language: the flags carry both");
+    }
+
+    @Test
+    void theFingerprintCheckNamesEachSurfaceThatDisagrees() throws Exception {
+        // The live self-check only runs where a browser is installed; this holds the verdict it reaches.
+        var out = probe("sidecar/stealth", """
+                import sys, json, copy
+                sys.path.insert(0, sys.argv[1])
+                import serve
+                ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
+                surfaces = {"userAgent": ua, "brands": ["Not=A?Brand", "Google Chrome", "Chromium"],
+                            "language": "de-DE", "languages": ["de-DE", "de", "en-US", "en"],
+                            "intl": "de-DE"}
+                sent = {"user-agent": ua, "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+                        "sec-ch-ua": '"Not=A?Brand";v="99", "Google Chrome";v="153", "Chromium";v="153"'}
+                consistent = {
+                    "main": dict(surfaces, screen=[1920, 1080], viewport=[1920, 1080],
+                                 pointerFine=True, hover=True, navigatorOverrides=[]),
+                    "worker": dict(surfaces),
+                    "headers": {"/": sent, "/echo/main": sent,
+                                "/worker.js": dict(sent, **{"sec-ch-ua": None}),
+                                "/echo/worker": dict(sent, **{"sec-ch-ua": None})},
+                    "webrtcUdp": False,
+                }
+
+                def broken(path, value):
+                    observed = copy.deepcopy(consistent)
+                    target = observed
+                    for key in path[:-1]:
+                        target = target[key]
+                    target[path[-1]] = value
+                    return serve.fingerprint_problems(observed, "de-DE")
+
+                print("PROBE:" + json.dumps({
+                    "consistent": serve.fingerprint_problems(consistent, "de-DE"),
+                    "caught": {
+                        "a Worker on the host's languages": broken(["worker", "languages"], ["en-GB", "en"]),
+                        "Intl on the host's locale": broken(["main", "intl"], "en-GB"),
+                        "a header from a context locale": broken(
+                            ["headers", "/echo/worker", "accept-language"], "de-DE, *;q=0.5"),
+                        "a HeadlessChrome Worker": broken(
+                            ["worker", "userAgent"], ua.replace("Chrome/", "HeadlessChrome/")),
+                        "the Chromium brand on the wire": broken(["headers", "/", "sec-ch-ua"], '"Chromium";v="153"'),
+                        "the default viewport": broken(["main", "viewport"], [1280, 720]),
+                        "no fine pointer": broken(["main", "pointerFine"], False),
+                        "a script override": broken(["main", "navigatorOverrides"], ["webdriver"]),
+                        "WebRTC UDP": broken(["webrtcUdp"], True),
+                        "a Worker that never answered": broken(["worker"], None),
+                        "a request that never arrived": broken(["headers", "/echo/worker"], None),
+                    },
+                }))
+                """);
+        assertEquals("[]", out.get("consistent").toString(),
+                "a consistent fingerprint must pass, or every case below is caught for the wrong reason");
+        for (var caught : out.getAsJsonObject("caught").entrySet()) {
+            assertFalse(caught.getValue().getAsJsonArray().isEmpty(), "the check misses " + caught.getKey());
+        }
+    }
 }

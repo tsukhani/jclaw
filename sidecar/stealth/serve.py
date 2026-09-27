@@ -17,6 +17,8 @@ Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health   -> 200 {status, model, patchright, channel, browser_ready}
   GET  /capability -> 200 {kind, runnable, channel, reason}
   (CLI) --probe  -> the same capability JSON on stdout, one-shot, no browser
+  (CLI) --self-check [--language L] -> renders a loopback fixture with the render's own launch and
+        prints {language, channel, observed, problems}; exit 1 on a problem, 2 when it cannot run
   POST /render {url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?, proxy?}
         -> 200  rendered HTML; X-Upstream-Status / X-Settled-Status / X-Upstream-Url /
                 X-Blocked-Hosts / X-Blocked-Hosts-Count / X-Upstream-Truncated carry
@@ -43,6 +45,8 @@ because moving the launch out of the JVM moves the pinning with it:
      CONTEXT and paired with a WebSocket interceptor: page-level routing does not
      cover popups, service workers or ws:// at all, and a page that could open a
      socket to loopback could read it and write the reply into the DOM we return.
+  3. WebRTC's UDP reaches neither interceptor, so the launch refuses UDP that does not go
+     through a proxy (JCLAW-1305).
 
 Both interceptors fail CLOSED. A URL whose host cannot be parsed is aborted rather
 than allowed, and a scheme that is not http/https/data/blob/about is aborted too.
@@ -60,6 +64,7 @@ import concurrent.futures
 import hmac
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -174,6 +179,151 @@ _UA_PROBE = """async () => {
   return {ua: navigator.userAgent, platform: d ? d.platform : '',
           mobile: d ? d.mobile : false, ...hi};
 }"""
+
+# One story on every surface a challenge compares: page, Workers, headers (JCLAW-1305, README).
+_SCREEN = {"width": 1920, "height": 1080}
+_CONTEXT_OPTIONS = {"service_workers": "block", "viewport": _SCREEN, "screen": _SCREEN}
+_FINGERPRINT_ARGS = [
+    # Headless reports no fine pointer and no hover on a host with no pointing device.
+    "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,"
+    "availablePointerTypes=4",
+    # Neither route gate sees UDP. Each build honors one spelling and silently ignores the
+    # other — the full Chromium this one, the headless-shell fallback the force one (measured).
+    "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+]
+
+
+def _accept_languages(language):
+    """The --accept-lang list for a request's language: the tag, then its primary subtag. Given
+    fr-FR alone, Chromium's header adds fr and navigator.languages does not (measured)."""
+    primary = language.split("-")[0]
+    return [language] if primary == language else [language, primary]
+
+
+def _launch_args(pins, language):
+    """Every flag a render launches with. Language is a flag rather than the context locale,
+    which Playwright applies to the main thread only: a Worker kept the host's languages."""
+    args = ["--lang=" + language, "--accept-lang=" + ",".join(_accept_languages(language))]
+    args += _FINGERPRINT_ARGS
+    if pins:
+        args.append("--host-resolver-rules="
+                    + ",".join("MAP %s %s" % (h, ip) for h, ip in pins.items()))
+    return args
+
+
+def _disguise(context, page, language):
+    """The overrides no launch flag makes, sent before `page` navigates. Dedicated Workers
+    inherit both (measured), so they stay in step with the page."""
+    cdp = context.new_cdp_session(page)
+    # --lang moves Intl on Linux, but Chromium on macOS takes it from the OS (measured).
+    cdp.send("Emulation.setLocaleOverride", {"locale": language})
+    override = Handler._ua_override(context)
+    if override:
+        cdp.send("Emulation.setUserAgentOverride", override)
+
+
+_SURFACES_JS = """() => {
+  const d = navigator.userAgentData;
+  return {userAgent: navigator.userAgent, brands: d ? d.brands.map(b => b.brand) : [],
+          language: navigator.language, languages: [...navigator.languages],
+          intl: Intl.DateTimeFormat().resolvedOptions().locale};
+}"""
+
+# Reports from the page's own world: Patchright's evaluate runs in an isolated one, which would miss
+# a script override on navigator. The RTC half is JCLAW-1286's probe, aimed at the check's socket.
+_FIXTURE_PAGE = r"""<!doctype html><script>
+const surfaces = %(surfaces)s;
+const stun = new RTCPeerConnection({iceServers: [{urls: 'stun:127.0.0.1:%(udp)d'}]});
+stun.createDataChannel('probe');
+stun.createOffer().then(o => stun.setLocalDescription(o)).catch(() => {});
+const direct = new RTCPeerConnection();
+direct.createDataChannel('probe');
+const answer = ['v=0', 'o=- 1 1 IN IP4 127.0.0.1', 's=-', 't=0 0', 'a=group:BUNDLE 0',
+  'm=application 9 UDP/DTLS/SCTP webrtc-datachannel', 'c=IN IP4 0.0.0.0', 'a=mid:0',
+  'a=sctp-port:5000', 'a=ice-ufrag:probe', 'a=ice-pwd:probeprobeprobeprobe', 'a=setup:active',
+  'a=fingerprint:sha-256 ' + Array(32).fill('00').join(':'),
+  'a=candidate:1 1 udp 2113937151 127.0.0.1 %(udp)d typ host', ''].join('\r\n');
+direct.createOffer().then(o => direct.setLocalDescription(o))
+  .then(() => direct.setRemoteDescription({type: 'answer', sdp: answer})).catch(() => {});
+(async () => {
+  const report = {};
+  try {
+    report.main = Object.assign(surfaces(), {
+      screen: [screen.width, screen.height], viewport: [innerWidth, innerHeight],
+      pointerFine: matchMedia('(pointer: fine)').matches,
+      hover: matchMedia('(hover: hover)').matches,
+      navigatorOverrides: Object.getOwnPropertyNames(navigator).concat(
+        Object.entries(Object.getOwnPropertyDescriptors(Navigator.prototype))
+          .filter(([, d]) => d.get && !Function.prototype.toString.call(d.get).includes('[native code]'))
+          .map(([name]) => name))});
+    await fetch('/echo/main');
+    report.worker = await new Promise((resolve, reject) => {
+      const worker = new Worker('/worker.js');
+      worker.onmessage = e => resolve(e.data);
+      worker.onerror = e => reject(new Error('worker: ' + e.message));
+    });
+  } catch (e) {
+    report.error = String(e);
+  }
+  await fetch('/report', {method: 'POST', body: JSON.stringify(report)});
+})();
+</script>"""
+
+_FIXTURE_WORKER = """const surfaces = %(surfaces)s;
+fetch('/echo/worker').finally(() => postMessage(surfaces()));
+"""
+
+# Every request the fixture must see, and the ones Chromium sends Sec-CH-UA on: none from a
+# dedicated Worker, with or without the UA override (measured).
+_FIXTURE_REQUESTS = ("/", "/echo/main", "/worker.js", "/echo/worker")
+_FIXTURE_CLIENT_HINTED = ("/", "/echo/main")
+# Without the WebRTC flags the first datagram arrived ~100 ms after load (measured).
+_WEBRTC_WINDOW_S = 2.0
+
+
+def fingerprint_problems(observed, language):
+    """Each way the self-check's observations disagree with one Chrome in `language`; empty
+    when the page, its Worker and every request header tell the same story."""
+    main, worker = observed.get("main"), observed.get("worker")
+    if not main or not worker:
+        return ["the fixture reported no %s: %s" % ("page" if not main else "Worker",
+                                                   observed.get("error"))]
+    problems = []
+    for field in ("userAgent", "brands", "language", "languages", "intl"):
+        if worker[field] != main[field]:
+            problems.append("the Worker's %s %r differs from the page's %r"
+                            % (field, worker[field], main[field]))
+    for field, label in (("language", "navigator.language"), ("intl", "Intl")):
+        if main[field].lower() != language.lower():
+            problems.append("%s is %r, not %r" % (label, main[field], language))
+    if "HeadlessChrome" in main["userAgent"] or "Google Chrome" not in main["brands"]:
+        problems.append("the User-Agent is not Chrome's: %r %r"
+                        % (main["userAgent"], main["brands"]))
+    for path in _FIXTURE_REQUESTS:
+        sent = observed["headers"].get(path)
+        if sent is None:
+            problems.append("no request for %s reached the fixture" % path)
+            continue
+        if sent["user-agent"] != main["userAgent"]:
+            problems.append("%s went out as User-Agent %r" % (path, sent["user-agent"]))
+        tags = [t.split(";")[0].strip() for t in (sent["accept-language"] or "").split(",")]
+        if tags != main["languages"]:
+            problems.append("%s went out as Accept-Language %r" % (path, sent["accept-language"]))
+        if path in _FIXTURE_CLIENT_HINTED and "Google Chrome" not in (sent["sec-ch-ua"] or ""):
+            problems.append("%s went out as Sec-CH-UA %r" % (path, sent["sec-ch-ua"]))
+    size = [_SCREEN["width"], _SCREEN["height"]]
+    if main["screen"] != size or main["viewport"] != size:
+        problems.append("screen %r and viewport %r are not %r"
+                        % (main["screen"], main["viewport"], size))
+    if not (main["pointerFine"] and main["hover"]):
+        problems.append("pointer: fine is %s and hover: hover is %s"
+                        % (main["pointerFine"], main["hover"]))
+    if main["navigatorOverrides"]:
+        problems.append("a script overrode navigator: %r" % main["navigatorOverrides"])
+    if observed["webrtcUdp"]:
+        problems.append("WebRTC sent UDP, which no route gate sees")
+    return problems
 
 
 def _header_safe(value):
@@ -553,11 +703,6 @@ class Handler(BaseHTTPRequestHandler):
             return _UA_OVERRIDE
 
     def _render(self, url, pins, timeout_ms, settle_ms, wait_until, language, proxy=None):
-        args = []
-        if pins:
-            clauses = ["MAP %s %s" % (h, ip) for h, ip in pins.items()]
-            args.append("--host-resolver-rules=" + ",".join(clauses))
-
         blocked = set()
         budget = _ResolveBudget(_RESOLVE_BUDGET_S)
 
@@ -600,18 +745,12 @@ class Handler(BaseHTTPRequestHandler):
             ws.connect_to_server()
 
         with sync_playwright() as p:
-            browser = _launch(p, args, proxy)
+            browser = _launch(p, _launch_args(pins, language), proxy)
             try:
                 # Routed on the CONTEXT, not the page: a popup the page opens is a
                 # separate Page with no page-level handler, and service workers issue
                 # requests the page handler never sees at all.
-                # Carries the caller's language the way rungs 1 and 2 do. locale
-                # sets navigator.language too, so a page branching in JavaScript sees
-                # the same preference the header states.
-                context = browser.new_context(service_workers="block",
-                                              locale=language,
-                                              extra_http_headers={
-                                                  "Accept-Language": language + ", *;q=0.5"})
+                context = browser.new_context(**_CONTEXT_OPTIONS)
                 context.route("**/*", gate)
                 context.route_web_socket("**/*", ws_gate)
                 page = context.new_page()
@@ -625,10 +764,7 @@ class Handler(BaseHTTPRequestHandler):
                         settled["status"] = resp.status
 
                 page.on("response", track)
-                override = self._ua_override(context)
-                if override:
-                    context.new_cdp_session(page).send(
-                        "Emulation.setUserAgentOverride", override)
+                _disguise(context, page, language)
                 response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
                 if settle_ms > 0:
                     page.wait_for_timeout(settle_ms)
@@ -639,6 +775,71 @@ class Handler(BaseHTTPRequestHandler):
                         blocked)
             finally:
                 browser.close()
+
+
+def self_check(language):
+    """What the page, a dedicated Worker and each request header said under a render's own launch,
+    context and overrides. Loopback rather than a fulfilled route: Chromium adds Accept-Language
+    below the interception point, where a route handler never sees it (measured)."""
+    seen, report, reported = {}, {}, threading.Event()
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp.bind(("127.0.0.1", 0))
+    page_html = _FIXTURE_PAGE % {"surfaces": _SURFACES_JS, "udp": udp.getsockname()[1]}
+    worker_js = _FIXTURE_WORKER % {"surfaces": _SURFACES_JS}
+
+    class Fixture(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            pass
+
+        def _reply(self, content_type, text):
+            body = text.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            seen[self.path] = {name.lower(): self.headers.get(name)
+                               for name in ("User-Agent", "Accept-Language", "Sec-CH-UA")}
+            if self.path == "/":
+                self._reply("text/html", page_html)
+            elif self.path == "/worker.js":
+                self._reply("text/javascript", worker_js)
+            else:
+                self._reply("text/plain", "ok")
+
+        def do_POST(self):
+            report.update(json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0")))))
+            self._reply("text/plain", "ok")
+            reported.set()
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with sync_playwright() as p:
+            browser = _launch(p, _launch_args({}, language))
+            try:
+                context = browser.new_context(**_CONTEXT_OPTIONS)
+                page = context.new_page()
+                _disguise(context, page, language)
+                page.goto("http://127.0.0.1:%d/" % server.server_address[1],
+                          wait_until="domcontentloaded", timeout=15000)
+                reported.wait(15)
+                udp.settimeout(_WEBRTC_WINDOW_S)
+                try:
+                    udp.recv(2048)
+                    leaked = True
+                except socket.timeout:
+                    leaked = False
+            finally:
+                browser.close()
+    finally:
+        server.shutdown()
+        udp.close()
+    observed = dict(report, headers=seen, webrtcUdp=leaked)
+    return {"language": language, "channel": _active_channel(), "observed": observed,
+            "problems": fingerprint_problems(observed, language)}
 
 
 def _idle_watcher(state):
@@ -664,13 +865,27 @@ def main():
                     help="serve unauthenticated — for hand-running this sidecar without the JVM")
     ap.add_argument("--probe", action="store_true",
                     help="print capability JSON and exit without launching a browser")
+    ap.add_argument("--self-check", action="store_true",
+                    help="render a loopback fixture and report whether every surface agrees")
+    ap.add_argument("--language", default=DEFAULT_LANGUAGE,
+                    help="the language --self-check renders in")
     args = ap.parse_args()
 
     if args.probe:
         print(json.dumps(capability()))
         return
+    if args.self_check:
+        try:
+            if sync_playwright is None:
+                raise RuntimeError("patchright unavailable (%s)" % _IMPORT_ERROR)
+            result = self_check(args.language)
+        except Exception as exc:
+            print(json.dumps({"error": "%s: %s" % (type(exc).__name__, exc)}))
+            sys.exit(2)
+        print(json.dumps(result))
+        sys.exit(1 if result["problems"] else 0)
     if args.port is None:
-        ap.error("--port is required unless --probe is given")
+        ap.error("--port is required unless --probe or --self-check is given")
 
     os.makedirs(os.path.abspath(args.cache_dir), exist_ok=True)
     Handler.token = None if args.no_auth else _require_token(ap)
