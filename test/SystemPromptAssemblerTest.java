@@ -308,6 +308,7 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "guidance body should reference Telegram");
         assertTrue(prompt.contains("4000 characters") || prompt.contains("inline photos"),
                 "guidance body should include Telegram-specific hints");
+        assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
     }
 
     @Test
@@ -318,6 +319,8 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "web must produce a Channel Guidance header");
         assertTrue(prompt.contains("admin chat UI") || prompt.contains("download chips"),
                 "guidance body should include web-specific hints");
+        assertTrue(prompt.contains("language hint lewis"),
+                "web guidance must teach the lewis fence the chat draws");
     }
 
     @Test
@@ -337,6 +340,7 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "guidance must forbid the 'I can't hear you' failure mode");
         assertFalse(prompt.contains("admin chat UI"),
                 "voice must NOT get the web-UI markdown guidance");
+        assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
     }
 
     @Test
@@ -345,6 +349,7 @@ class SystemPromptAssemblerTest extends UnitTest {
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "slack").systemPrompt();
         assertFalse(prompt.contains("Channel Guidance"),
                 "slack has no registered guidance — section must be omitted");
+        assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
     }
 
     @Test
@@ -352,6 +357,7 @@ class SystemPromptAssemblerTest extends UnitTest {
         var agent = newAgent("spa-channel-wa");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "whatsapp").systemPrompt();
         assertFalse(prompt.contains("Channel Guidance"));
+        assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
     }
 
     @Test

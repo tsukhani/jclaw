@@ -101,6 +101,11 @@
   border-radius: 0.5em;
 }
 
+/* Lewis structures paint in currentColor, so they take the bubble's text color in either theme. */
+figure.lewis { margin: 0.5em 0; }
+figure.lewis svg { display: block; max-width: 100%; height: auto; }
+.lewis-error { font-size: 0.875em; color: var(--fg-muted); }
+
 .prose-chat table {
   /* Auto layout — each table sizes its columns from its own content. The
      prior approach pinned the first column to 14em + nowrap so a tools

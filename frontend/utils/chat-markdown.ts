@@ -18,6 +18,7 @@ import DOMPurify from 'dompurify'
 import katex, { type KatexOptions } from 'katex'
 // mhchem adds \ce / \pu, so chemical formulas, equations and units typeset through the same KaTeX path as math.
 import 'katex/contrib/mhchem'
+import { ensureLewisLoaded, isLewisLoaded, lewisVersion, renderLewis } from '~/utils/lewis'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 import type { MessageUsage } from '~/utils/usage-cost'
 
@@ -39,11 +40,42 @@ marked.setOptions({
 // button off pages/skills/[[name]].vue, which parses through the same shared instance.
 const chatRenderer = new Renderer()
 const renderCodeBlock = chatRenderer.code.bind(chatRenderer)
-chatRenderer.code = (token: Tokens.Code) =>
+const codeBlock = (token: Tokens.Code) =>
   `<div class="code-block">`
   + `<button type="button" class="code-copy">Copy</button>`
   + renderCodeBlock(token)
   + `</div>`
+
+// A fence still streaming runs to the end of the text, so its raw has no closing line of its own.
+function fenceIsClosed(raw: string): boolean {
+  const lines = raw.trimEnd().split('\n')
+  const open = /^ {0,3}(`{3,}|~{3,})/.exec(lines[0] ?? '')?.[1]
+  const close = lines.length > 1 ? /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(lines.at(-1)!)?.[1] : undefined
+  return !!open && !!close && close[0] === open[0] && close.length >= open.length
+}
+
+function escapeHtml(text: string): string {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+}
+
+// Until SmilesDrawer has loaded, a lewis fence stays a code block; the load bumps lewisVersion, which re-renders it.
+function lewisBlock(token: Tokens.Code): string {
+  if (!isLewisLoaded()) {
+    void ensureLewisLoaded()
+    return codeBlock(token)
+  }
+  // OpenSMILES ends a SMILES at whitespace, so a trailing name such as "[H]O[H] water" is not parsed.
+  const result = renderLewis(token.text.trim().split(/\s/, 1)[0]!)
+  return 'svg' in result
+    ? `<figure class="lewis">${result.svg}</figure>`
+    : `${codeBlock(token)}<p class="lewis-error">${escapeHtml(result.error)}</p>`
+}
+
+// Marked keeps the whole info string in `lang`, so ```Lewis water still names the lewis fence.
+chatRenderer.code = (token: Tokens.Code) =>
+  (token.lang ?? '').split(/\s/, 1)[0]!.toLowerCase() === 'lewis' && fenceIsClosed(token.raw)
+    ? lewisBlock(token)
+    : codeBlock(token)
 
 // Its own instance keeps math off the skills page and the guide. Dollar math follows Pandoc's rule — the
 // opening $ is followed by a non-space, the closing one follows a non-space and precedes no digit — so
@@ -133,6 +165,7 @@ export function normalizeMarkdownLinks(text: string): string {
 // the cache and the LRU bound).
 const markdownCache = new Map<string, string>()
 const MARKDOWN_CACHE_MAX = 200
+let cachedLewisVersion = 0
 
 function renderMarkdownInner(text: string, agentId: number | null): string {
   const html = chatMarked.parse(normalizeMarkdownLinks(text), { renderer: chatRenderer }) as string
@@ -146,7 +179,14 @@ function renderMarkdownInner(text: string, agentId: number | null): string {
 
 export function renderMarkdown(text: string, agentId: number | null = null): string {
   if (!text) return ''
-  const cacheKey = `${agentId}:${text}`
+  // Read reactively, so a caller's render re-runs once SmilesDrawer loads and its lewis fences can draw.
+  const version = lewisVersion.value
+  // The cache stops adding at its bound rather than evicting, so entries from before the load would hold slots forever.
+  if (version !== cachedLewisVersion) {
+    markdownCache.clear()
+    cachedLewisVersion = version
+  }
+  const cacheKey = `${version}:${agentId}:${text}`
   const cached = markdownCache.get(cacheKey)
   if (cached) return cached
 

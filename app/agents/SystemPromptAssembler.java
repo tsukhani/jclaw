@@ -546,6 +546,11 @@ public class SystemPromptAssembler {
             with language hints for code, and inline code for identifiers and short
             snippets. The UI has plenty of width and scroll — do not artificially shorten
             responses. Length is cheap here.
+
+            To show a Lewis electron-dot structure, write a fenced code block with the
+            language hint lewis holding one SMILES string. Write every hydrogen as [H],
+            formal charges and radical centers as bracket atoms ([O-], [N+], [N]), and
+            aromatic rings in Kekulé form. The UI draws the lone pairs itself.
             """;
 
     private static final String TELEGRAM_CHANNEL_GUIDANCE = """

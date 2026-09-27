@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import type { Message } from '~/types/api'
@@ -130,5 +130,23 @@ describe('ChatMessage (JCLAW-690)', () => {
     const c = await mountSuspended(ChatMessage, { props: props(msg({ role: 'user', content: '[not a quote]\nplain' })) })
     expect(c.find('[data-testid="message-quote"]').exists()).toBe(false)
     expect(c.text()).toContain('[not a quote]')
+  })
+})
+
+describe('ChatMessage lewis fence (JCLAW-1309)', () => {
+  it('redraws the fence once SmilesDrawer loads, with no prop change', async () => {
+    // jsdom has no canvas; SmilesDrawer then estimates label widths instead of logging each miss.
+    const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    try {
+      const m = msg({ role: 'assistant', content: 'Water:\n\n```lewis\n[H]O[H]\n```\n' })
+      const c = await mountSuspended(ChatMessage, { props: props(m) })
+      expect(c.find('.prose-chat code.language-lewis').exists()).toBe(true)
+      expect(c.find('.prose-chat svg').exists()).toBe(false)
+      await vi.waitFor(() => expect(c.find('.prose-chat figure.lewis svg').exists()).toBe(true), { timeout: 10_000 })
+      expect(c.find('.prose-chat code.language-lewis').exists()).toBe(false)
+    }
+    finally {
+      canvas.mockRestore()
+    }
   })
 })

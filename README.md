@@ -130,7 +130,7 @@ The implementation is entirely original — no code is shared with any of them. 
 - 💬 **Channels** — Web chat plus per-agent Telegram, Slack and WhatsApp bindings (the official Cloud API or unofficial WhatsApp Web)
 - ⚡ **Job Scheduling** — Persistent cron & scheduled tasks via db-scheduler, with automatic retries and crash recovery
 - 🔧 **Pure Java** — The server is all Java; Python is needed only by the optional local sidecars, and Node.js only to build the SPA and to run the browser tool's Playwright driver
-- 📦 **Built-in Frontend** — Nuxt 4 SPA (Vue 3 + TypeScript); chat and the conversation viewer render Markdown and typeset math with KaTeX
+- 📦 **Built-in Frontend** — Nuxt 4 SPA (Vue 3 + TypeScript); chat and the conversation viewer render Markdown, typeset math with KaTeX and draw Lewis electron-dot structures from SMILES
 - 🧭 **Model Router** — Choose `router/auto` wherever a model is picked: each prompt is classed as chat, summarize, agentic, reasoning or coding, sent to the first usable model on that class's list, and given a reasoning effort of its own; the lists live under **Settings → Agents & Automation → Model Router**
 - 🌐 **Browsing & Scraping** — A browser tool whose every Chromium connection is screened inside the JVM, so a page cannot reach loopback, private or other internal addresses, with TypeSafe AI's Jev as an optional operator-selected engine; large site crawls run as background scrape jobs you start, pause, resume and read from the Scrapes page
 - 🔌 **Plugin Architecture** — Modular, extensible design

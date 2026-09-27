@@ -28,6 +28,8 @@ The reply streams in real time. While the model is generating, the **Send** butt
 
 Replies render as Markdown, and math the model writes in TeX is typeset with KaTeX: `$…$` and `\(…\)` inline, `$$…$$` and `\[…\]` as a display equation, which scrolls inside the bubble when it is too wide. A dollar amount in prose stays text — `$` opens math only when a non-space follows it and closes only after a non-space and before anything but a digit, so "$5 and $10" is left alone. Malformed TeX shows as an inline error rather than breaking the reply.
 
+Ask for a Lewis structure and the model writes a fenced code block with the language hint `lewis` holding one SMILES string; the chat draws it as an electron-dot structure, with every atom labeled and its lone pairs and radicals marked. Rings must be in Kekulé form (`C1=CC=CC=C1`, not `c1ccccc1`), and only main-group elements are drawn. The block shows as code until the drawing has loaded, and a SMILES that cannot be drawn keeps its code block with a one-line reason under it.
+
 If a turn fails, the reply says so in three parts — **What broke**, **What to check** and **How to retry** — and when the provider refused the call (a rejected key, an exhausted balance) it names the provider and model. The raw detail is in [Logs](/logs).
 
 If you regret a message, hover over it: you'll see **Copy to clipboard**, **Edit & resubmit** and **Delete message** controls. Editing rewinds the conversation to that point and re-runs from the edited text. A reply has **Copy to clipboard**, **Regenerate response** and **Delete message** on hover; regenerating removes that reply and the message it answered, then sends your message again for a fresh answer.
