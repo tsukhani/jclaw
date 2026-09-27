@@ -526,7 +526,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         noteDiscovered(state, level.size());
 
         // Declared first so it closes last, once the pool has finished every page that could render.
-        try (var sessions = new ScrapeSessions(sidecars);
+        try (var sessions = new ScrapeSessions(sidecars, state::stopRequested);
              var pool = Executors.newFixedThreadPool(configConcurrency())) {
             while (!level.isEmpty()) {
                 var admitted = withinBudget(admit(level, respectRobots, state), maxPages, state);

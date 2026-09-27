@@ -1123,6 +1123,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(req, dict):
                 raise TypeError("body must be a JSON object")
             url = req.get("url")
+            if url is not None and not isinstance(url, str):
+                raise TypeError("url must be a string")
             pins = req.get("pins") or {}
             if not isinstance(pins, dict):
                 raise TypeError("pins must be a JSON object")

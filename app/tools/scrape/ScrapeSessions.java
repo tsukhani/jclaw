@@ -11,13 +11,17 @@ import utils.Urls;
 import utils.WebExtraction;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 
 /**
@@ -25,8 +29,9 @@ import java.util.regex.Pattern;
  * browser earns on one page carries to the next (JCLAW-1307).
  *
  * <p>Scoped to one crawl and closed when it ends, fails or is cancelled; never shared between crawls
- * or agents. A host's renders queue here, one at a time, where no call timeout runs: a session's
- * browser renders serially, and the first page's cleared challenge is what the next one reuses.
+ * or agents. A host's renders queue here, one at a time, where no call timeout runs but the crawl's
+ * stop does: a session's browser renders serially, and the first page's cleared challenge is what
+ * the next one reuses.
  *
  * <p>Every SSRF screen holds. Each page is still screened by {@link SsrfGuard}; the sidecar launches
  * a session with the pin validated when it opened, serves only its host, and keeps the route and
@@ -41,6 +46,9 @@ public final class ScrapeSessions implements AutoCloseable {
     private static final String EVENT_CATEGORY = "scrape";
 
     private static final Pattern CHROME_MAJOR = Pattern.compile("\\bChrome/(\\d+)\\.");
+
+    /** How often a page queued behind its host's session asks whether the crawl must stop. */
+    private static final Duration STOP_POLL = Duration.ofMillis(500);
 
     /** The two sidecars as a crawl reaches them. Public because Play's tests live in the default package. */
     public interface Sidecars {
@@ -149,21 +157,31 @@ public final class ScrapeSessions implements AutoCloseable {
 
     private final Sidecars sidecars;
     private final boolean clearanceHandoff;
+    private final BooleanSupplier stopRequested;
     private final Map<String, Host> hosts = new ConcurrentHashMap<>();
     private final ReentrantLock majorLock = new ReentrantLock();
     private @Nullable OptionalInt impersonationMajor;
     private volatile boolean closed;
 
-    /** Sessions for one crawl, with the handoff as {@link #CFG_CLEARANCE_HANDOFF} says. */
+    /**
+     * Sessions for one crawl, with the handoff as {@link #CFG_CLEARANCE_HANDOFF} says. A page queued
+     * behind its host's session gives up once {@code stopRequested} holds.
+     */
     @MustBeClosed
-    public ScrapeSessions(Sidecars sidecars) {
-        this(sidecars, ConfigService.getBoolean(CFG_CLEARANCE_HANDOFF, false));
+    public ScrapeSessions(Sidecars sidecars, BooleanSupplier stopRequested) {
+        this(sidecars, ConfigService.getBoolean(CFG_CLEARANCE_HANDOFF, false), stopRequested);
     }
 
     @MustBeClosed
     public ScrapeSessions(Sidecars sidecars, boolean clearanceHandoff) {
+        this(sidecars, clearanceHandoff, () -> false);
+    }
+
+    @MustBeClosed
+    public ScrapeSessions(Sidecars sidecars, boolean clearanceHandoff, BooleanSupplier stopRequested) {
         this.sidecars = sidecars;
         this.clearanceHandoff = clearanceHandoff;
+        this.stopRequested = stopRequested;
     }
 
     public boolean renderAvailable() {
@@ -175,15 +193,17 @@ public final class ScrapeSessions implements AutoCloseable {
     }
 
     /**
-     * Render {@code url} in its host's session, opening one if the host has none.
+     * Render {@code url} in its host's session, opening one if the host has none, or with a browser
+     * of its own when the sidecar holds no session for it.
      *
      * @throws SecurityException when {@link SsrfGuard} refuses {@code url}, before the sidecar is asked
+     * @throws InterruptedIOException when the crawl must stop while {@code url} waits for its host
      */
     public RenderedFetcher.Render render(String url, String language) throws IOException {
         var pin = SsrfGuard.hostResolverRule(url);
         var name = hostOf(url);
         var host = hosts.computeIfAbsent(name, _ -> new Host());
-        host.lock.lock();
+        await(host);
         try {
             // A session the sidecar lost is reopened once: an idle sidecar exits and a new one
             // holds none of the old sessions.
@@ -200,9 +220,23 @@ public final class ScrapeSessions implements AutoCloseable {
                     host.clearance = null;
                 }
             }
-            return sidecars.render(url, language);
         } finally {
             host.lock.unlock();
+        }
+        return sidecars.render(url, language);
+    }
+
+    /** Take {@code host}'s lock, polling so a page queued behind a slow render cannot outlast the crawl. */
+    private void await(Host host) throws InterruptedIOException {
+        try {
+            while (!host.lock.tryLock(STOP_POLL.toMillis(), TimeUnit.MILLISECONDS)) {
+                if (stopRequested.getAsBoolean()) {
+                    throw new InterruptedIOException("the crawl stopped while this page waited for its host's browser");
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new InterruptedIOException("interrupted waiting for this page's host's browser");
         }
     }
 

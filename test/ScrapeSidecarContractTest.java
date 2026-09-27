@@ -910,6 +910,7 @@ class ScrapeSidecarContractTest extends UnitTest {
                 out["otherHost"] = post("/render", {"url": "https://other.example/", "session": sid})["status"]
                 out["withPins"] = post("/render", {"url": "https://example.com/", "session": sid,
                                                    "pins": {"example.com": "93.184.215.14"}})["status"]
+                out["urlNotText"] = post("/render", {"url": 5, "session": sid})["status"]
                 out["plain"] = post("/render", {"url": "https://example.com/p", "session": sid})
                 out["asked"] = post("/render", {"url": "https://example.com/q", "session": sid, "clearance": True})
                 out["crashed"] = post("/render", {"url": "https://example.com/crashed", "session": sid})["status"]
@@ -919,6 +920,10 @@ class ScrapeSidecarContractTest extends UnitTest {
                 out["closed"] = json.loads(post("/session/close", {"id": again})["body"])["closed"]
                 out["closedTwice"] = json.loads(post("/session/close", {"id": again})["body"])["closed"]
                 out["renders"] = renders
+                serve.Handler.token = "sidecar-secret"
+                out["noToken"] = [post(path, body)["status"] for path, body in (
+                    ("/session/open", {"host": "example.com"}), ("/session/close", {"id": again}),
+                    ("/render", {"url": "https://example.com/", "session": again}))]
                 server.shutdown()
                 print("PROBE:" + json.dumps(out))
                 """);
@@ -930,6 +935,7 @@ class ScrapeSidecarContractTest extends UnitTest {
         assertEquals(404, out.get("unknown").getAsInt(), "404 is what makes the JVM open a new session");
         assertEquals(400, out.get("otherHost").getAsInt(), "a session serves only its own host");
         assertEquals(400, out.get("withPins").getAsInt(), "a session render cannot bring a pin of its own");
+        assertEquals(400, out.get("urlNotText").getAsInt(), "a malformed url is a 400, not a dropped connection");
 
         var plain = out.getAsJsonObject("plain");
         assertEquals(200, plain.get("status").getAsInt());
@@ -947,6 +953,7 @@ class ScrapeSidecarContractTest extends UnitTest {
         assertEquals(0, out.get("liveAfterCrash").getAsInt(), "and its slot is free for the reopen");
         assertTrue(out.get("closed").getAsBoolean());
         assertFalse(out.get("closedTwice").getAsBoolean(), "closing twice is harmless: a crawl's finally may");
+        assertEquals("[401,401,401]", out.get("noToken").toString(), "every session route needs the sidecar's token");
     }
 
     @Test

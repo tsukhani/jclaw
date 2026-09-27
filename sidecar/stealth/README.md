@@ -184,8 +184,8 @@ live Chromium besides the ones rendering.
 
 Patchright's sync API binds each object to the thread that made it, so a session's browser
 lives on a thread of its own and renders one page at a time. The JVM queues a host's pages
-before they reach it, where no call timeout runs, and each still holds one of the render slots
-below. Serial is also the point: a host's second page reuses the clearance the first earned
+before they reach it, where no call timeout runs and a queued page gives up once the crawl must
+stop, and each still holds one of the render slots below. Serial is also the point: a host's second page reuses the clearance the first earned
 rather than meeting the challenge beside it.
 
 ## Cloudflare challenges

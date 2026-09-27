@@ -27,6 +27,7 @@ import tools.scrape.WebScrapeSettings;
 import utils.WebExtraction;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -38,8 +39,11 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -95,6 +99,8 @@ class ScrapeSessionsTest extends UnitTest {
         final Set<String> gone = ConcurrentHashMap.newKeySet();
         final Map<String, AtomicInteger> inFlight = new ConcurrentHashMap<>();
         final AtomicInteger peak = new AtomicInteger();
+        final AtomicInteger ownInFlight = new AtomicInteger();
+        final AtomicInteger ownPeak = new AtomicInteger();
         private final AtomicInteger ids = new AtomicInteger();
         volatile int cap = Integer.MAX_VALUE;
         volatile boolean alwaysGone;
@@ -114,9 +120,24 @@ class ScrapeSessionsTest extends UnitTest {
             return impersonateInstalled;
         }
 
-        @Override public RenderedFetcher.Render render(String url, String language) {
+        @Override public RenderedFetcher.Render render(String url, String language) throws IOException {
+            ownPeak.accumulateAndGet(ownInFlight.incrementAndGet(), Math::max);
+            try {
+                pause();
+            } finally {
+                ownInFlight.decrementAndGet();
+            }
             renders.add("own " + url);
             return new RenderedFetcher.Render(fetched(url, pages.apply(url)), null);
+        }
+
+        private void pause() throws IOException {
+            try {
+                if (renderMillis > 0) Thread.sleep(renderMillis);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
+            }
         }
 
         @Override public @Nullable String open(String host, JsonObject pins, String language,
@@ -133,10 +154,7 @@ class ScrapeSessionsTest extends UnitTest {
             var running = inFlight.computeIfAbsent(session, _ -> new AtomicInteger()).incrementAndGet();
             peak.accumulateAndGet(running, Math::max);
             try {
-                if (renderMillis > 0) Thread.sleep(renderMillis);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IOException(e);
+                pause();
             } finally {
                 inFlight.get(session).decrementAndGet();
             }
@@ -260,6 +278,45 @@ class ScrapeSessionsTest extends UnitTest {
         assertEquals(6, sidecars.sessionsUsed().size());
         assertEquals(1, sidecars.peak.get(), "a session renders one page at a time, queued here rather than inside its "
                 + "call timeout");
+    }
+
+    @Test
+    void aPageQueuedBehindItsHostsSessionGivesUpOnceTheCrawlMustStop() throws Exception {
+        var sidecars = new FakeSidecars();
+        sidecars.renderMillis = 2_000;
+        var stop = new AtomicBoolean();
+        try (var sessions = new ScrapeSessions(sidecars, false, stop::get);
+             var pool = Executors.newFixedThreadPool(2)) {
+            var first = pool.submit(() -> sessions.render("https://" + HOST + "/a", "en"));
+            for (int i = 0; i < 500 && sidecars.peak.get() == 0; i++) Thread.sleep(10);
+            assertEquals(1, sidecars.peak.get(), "/a holds the host's session");
+            var queued = pool.submit(() -> sessions.render("https://" + HOST + "/b", "en"));
+            stop.set(true);
+            var failure = assertThrows(ExecutionException.class, () -> queued.get(1_500, TimeUnit.MILLISECONDS),
+                    "a queued page must not wait out another's render once the crawl's time is up");
+            assertInstanceOf(InterruptedIOException.class, failure.getCause());
+            first.get(10, TimeUnit.SECONDS);
+        }
+        assertEquals(List.of("s1 https://" + HOST + "/a"), sidecars.renders, "the render in flight finished; /b never ran");
+    }
+
+    @Test
+    void pastTheCapAHostsPagesRenderSideBySideAsOutsideACrawl() throws Exception {
+        var sidecars = new FakeSidecars();
+        sidecars.cap = 0;
+        sidecars.renderMillis = 500;
+        try (var sessions = new ScrapeSessions(sidecars, false);
+             var pool = Executors.newFixedThreadPool(3)) {
+            var futures = new ArrayList<Future<RenderedFetcher.Render>>();
+            for (int i = 0; i < 3; i++) {
+                var url = "https://" + HOST + "/p" + i;
+                futures.add(pool.submit(() -> sessions.render(url, "en")));
+            }
+            for (var future : futures) future.get(10, TimeUnit.SECONDS);
+        }
+        assertEquals(3, sidecars.renders.size());
+        assertTrue(sidecars.ownPeak.get() > 1, "a page with a browser of its own does not wait for another's: "
+                + sidecars.ownPeak);
     }
 
     @Test
