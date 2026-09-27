@@ -97,7 +97,7 @@ async function turnOff() {
         </label>
         <label
           for="alerts-target"
-          class="flex flex-1 min-w-0 flex-col gap-1 text-xs text-fg-muted"
+          class="flex flex-1 min-w-0 max-sm:basis-full flex-col gap-1 text-xs text-fg-muted"
         >
           {{ targetLabel }}
           <input

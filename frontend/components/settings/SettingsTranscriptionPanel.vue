@@ -507,9 +507,9 @@ onUnmounted(() => stopTranscriptionPolling())
           </div>
           <div
             v-else
-            class="px-4 py-2.5 flex items-center gap-3"
+            class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
           >
-            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model</span>
+            <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Model</span>
             <select
               :value="selectedLocalModel"
               aria-label="ASR model"
@@ -580,8 +580,8 @@ onUnmounted(() => stopTranscriptionPolling())
           v-if="transcriptionIsCloud"
           class="border-t border-border"
         >
-          <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model</span>
+          <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Model</span>
             <input
               id="transcription-model"
               :value="selectedTranscriptionModel"
@@ -778,8 +778,8 @@ onUnmounted(() => stopTranscriptionPolling())
           v-if="!diarizationIsLocal"
           class="border-t border-border"
         >
-          <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Audio model</span>
+          <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Audio model</span>
             <select
               :value="diarizationModelSelectValue"
               aria-label="Diarization audio model"
@@ -819,8 +819,8 @@ onUnmounted(() => stopTranscriptionPolling())
           class="border-t border-border"
         >
           <!-- Speaker diarizer (pyannote) — fixed model, download status -->
-          <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Diarizer</span>
+          <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Diarizer</span>
             <span class="flex-1 text-sm font-mono text-fg-muted truncate">pyannote/speaker-diarization-community-1</span>
             <span
               v-if="!diarizerModelStatus"
@@ -865,8 +865,8 @@ onUnmounted(() => stopTranscriptionPolling())
           </div>
 
           <!-- Emotion (SER) model — operator-selectable, download status -->
-          <div class="px-4 py-2.5 flex items-center gap-3 border-t border-border">
-            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Emotion model</span>
+          <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3 border-t border-border">
+            <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Emotion model</span>
             <select
               id="diarization-emotion-model"
               :value="currentSerRepo"

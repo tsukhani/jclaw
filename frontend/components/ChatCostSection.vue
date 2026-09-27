@@ -1220,7 +1220,7 @@ defineExpose({ refresh })
                        undefined) — the card falls back to the bare fee. -->
                   <div
                     v-if="p.effectivePerMillion !== null"
-                    class="mt-1 font-mono text-[11px] text-fg-secondary"
+                    class="mt-1 font-mono text-[11px] text-fg-muted"
                     :title="`Effective rate — ${p.displayName}'s window fee ÷ all ${formatTokensCompact(p.fleetTokens)} tokens it served this window. Compare against a per-token provider's published $/1M.`"
                   >
                     ≈ {{ formatRatePerMillion(p.effectivePerMillion) }}/1M
@@ -1525,7 +1525,7 @@ defineExpose({ refresh })
                 </div>
                 <div
                   v-if="p.avgPerMillion !== null"
-                  class="mt-1 font-mono text-[11px] text-fg-secondary"
+                  class="mt-1 font-mono text-[11px] text-fg-muted"
                   :title="`Average rate — ${p.displayName}'s total per-token spend ÷ its prompt + completion + reasoning tokens this window.`"
                 >
                   ≈ {{ formatRatePerMillion(p.avgPerMillion) }}/1M

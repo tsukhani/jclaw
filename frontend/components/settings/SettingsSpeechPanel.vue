@@ -312,9 +312,9 @@ onUnmounted(() => stopTtsPolling())
         </div>
         <div
           v-else
-          class="px-4 py-2.5 flex items-center gap-3"
+          class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
         >
-          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model</span>
+          <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Model</span>
           <select
             :value="activeModelId"
             aria-label="Text-to-speech model"
@@ -358,9 +358,9 @@ onUnmounted(() => stopTtsPolling())
         <!-- Speaker voice for the selected model (JCLAW-846) — only when the model offers presets. -->
         <div
           v-if="!ttsStateLoading && activeVoices.length"
-          class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
+          class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3 border-t border-border"
         >
-          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Voice</span>
+          <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Voice</span>
           <select
             :value="selectedVoice"
             aria-label="Text-to-speech speaker voice"
@@ -388,9 +388,9 @@ onUnmounted(() => stopTtsPolling())
         -->
         <div
           v-if="!ttsStateLoading && supportsCloning"
-          class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
+          class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3 border-t border-border"
         >
-          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Voice clip</span>
+          <span class="text-xs font-mono text-fg-muted w-32 max-sm:w-full shrink-0">Voice clip</span>
           <span
             v-if="recording"
             role="status"
