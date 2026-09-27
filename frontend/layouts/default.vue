@@ -399,9 +399,9 @@ const navGroups: NavGroup[] = [
       @update:open="tourIntroOpen = $event"
     />
 
-    <!-- Sidebar -->
+    <!-- Sidebar. Closed below lg it sits off-screen; invisible keeps its links out of the tab order (2.4.7). -->
     <aside
-      :class="sidebarOpen ? 'w-60' : 'w-0 -ml-60 lg:w-14 lg:ml-0'"
+      :class="sidebarOpen ? 'w-60' : 'w-0 -ml-60 lg:w-14 lg:ml-0 max-lg:invisible'"
       class="fixed inset-y-0 left-0 z-30 bg-surface-elevated border-r border-fg-muted/40
              flex flex-col transition-all duration-200 overflow-hidden lg:relative"
     >
