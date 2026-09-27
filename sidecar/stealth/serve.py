@@ -180,13 +180,16 @@ _UA_PROBE = """async () => {
           mobile: d ? d.mobile : false, ...hi};
 }"""
 
-# One story on every surface a challenge compares: page, Workers, headers (JCLAW-1305, README).
+# One story on every surface a challenge compares: frames, Workers, headers (JCLAW-1305, README).
 _SCREEN = {"width": 1920, "height": 1080}
 _CONTEXT_OPTIONS = {"service_workers": "block", "viewport": _SCREEN, "screen": _SCREEN}
 _FINGERPRINT_ARGS = [
     # Headless can report no fine pointer and no hover on a host with no pointing device.
     "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,"
     "availablePointerTypes=4",
+    # Isolated, a cross-site iframe (Turnstile's) is a process the page's CDP overrides never
+    # reach: it reported HeadlessChrome and the host's Intl locale (measured).
+    "--disable-site-isolation-trials",
     # Neither route gate sees UDP. Each build honors one spelling and silently ignores the
     # other — the full Chromium this one, the headless-shell fallback the force one (measured).
     "--webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -213,8 +216,8 @@ def _launch_args(pins, language):
 
 
 def _disguise(context, page, language):
-    """The overrides no launch flag makes, sent before `page` navigates. Dedicated Workers
-    inherit both (measured), so they stay in step with the page."""
+    """The overrides no launch flag makes, sent before `page` navigates. Its iframes and
+    dedicated Workers inherit both (measured), so they stay in step with the page."""
     cdp = context.new_cdp_session(page)
     # --lang moves Intl on Linux, but Chromium on macOS takes it from the OS (measured).
     cdp.send("Emulation.setLocaleOverride", {"locale": language})
@@ -263,6 +266,16 @@ direct.createOffer().then(o => direct.setLocalDescription(o))
       worker.onmessage = e => resolve(e.data);
       worker.onerror = e => reject(new Error('worker: ' + e.message));
     });
+    const framed = await new Promise((resolve, reject) => {
+      addEventListener('message', e => resolve(e.data));
+      setTimeout(() => reject(new Error('the cross-site iframe never answered')), 5000);
+      const frame = document.createElement('iframe');
+      frame.src = 'http://localhost:' + location.port + '/frame';
+      document.documentElement.appendChild(frame);
+    });
+    if (framed.error) throw new Error('iframe ' + framed.error);
+    report.frame = framed.frame;
+    report.frameWorker = framed.worker;
   } catch (e) {
     report.error = String(e);
   }
@@ -270,30 +283,43 @@ direct.createOffer().then(o => direct.setLocalDescription(o))
 })();
 </script>"""
 
+_FIXTURE_FRAME = """<!doctype html><script>
+const surfaces = %(surfaces)s;
+const worker = new Worker('/frame-worker.js');
+worker.onmessage = e => parent.postMessage({frame: surfaces(), worker: e.data}, '*');
+worker.onerror = e => parent.postMessage({error: 'worker: ' + e.message}, '*');
+</script>"""
+
 _FIXTURE_WORKER = """const surfaces = %(surfaces)s;
-fetch('/echo/worker').finally(() => postMessage(surfaces()));
+fetch('%(echo)s').finally(() => postMessage(surfaces()));
 """
 
 # Every request the fixture must see, and the ones Chromium sends Sec-CH-UA on: none from a
 # dedicated Worker, with or without the UA override (measured).
-_FIXTURE_REQUESTS = ("/", "/echo/main", "/worker.js", "/echo/worker")
-_FIXTURE_CLIENT_HINTED = ("/", "/echo/main")
+_FIXTURE_REQUESTS = ("/", "/echo/main", "/worker.js", "/echo/worker",
+                     "/frame", "/frame-worker.js", "/echo/frame-worker")
+_FIXTURE_CLIENT_HINTED = ("/", "/echo/main", "/frame")
+_FIXTURE_THREADS = (("worker", "the Worker"), ("frame", "a cross-site iframe"),
+                    ("frameWorker", "the iframe's Worker"))
 # Without the WebRTC flags the first datagram arrived ~100 ms after load (measured).
 _WEBRTC_WINDOW_S = 2.0
 
 
 def fingerprint_problems(observed, language):
     """Each way the self-check's observations disagree with one Chrome in `language`; empty
-    when the page, its Worker and every request header tell the same story."""
-    main, worker = observed.get("main"), observed.get("worker")
-    if not main or not worker:
-        return ["the fixture reported no %s: %s" % ("page" if not main else "Worker",
-                                                   observed.get("error"))]
+    when the page, its iframe, their Workers and every request header tell the same story."""
+    main = observed.get("main")
+    silent = [label for key, label in (("main", "the page"),) + _FIXTURE_THREADS
+              if not observed.get(key)]
+    if silent:
+        return ["the fixture heard nothing from %s: %s"
+                % (", ".join(silent), observed.get("error"))]
     problems = []
-    for field in ("userAgent", "brands", "language", "languages", "intl"):
-        if worker[field] != main[field]:
-            problems.append("the Worker's %s %r differs from the page's %r"
-                            % (field, worker[field], main[field]))
+    for key, label in _FIXTURE_THREADS:
+        for field in ("userAgent", "brands", "language", "languages", "intl"):
+            if observed[key][field] != main[field]:
+                problems.append("%s's %s %r differs from the page's %r"
+                                % (label, field, observed[key][field], main[field]))
     for field, label in (("language", "navigator.language"), ("intl", "Intl")):
         if main[field].lower() != language.lower():
             problems.append("%s is %r, not %r" % (label, main[field], language))
@@ -778,14 +804,22 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def self_check(language):
-    """What the page, a dedicated Worker and each request header said under a render's own launch,
-    context and overrides. Loopback rather than a fulfilled route: Chromium adds Accept-Language
-    below the interception point, where a route handler never sees it (measured)."""
+    """What the page, a cross-site iframe, their dedicated Workers and each request header said
+    under a render's own launch, context and overrides. Loopback rather than a fulfilled route:
+    Chromium adds Accept-Language below the interception point, where a route handler never sees
+    it (measured). The iframe is on localhost, a different site from the page's 127.0.0.1."""
     seen, report, reported = {}, {}, threading.Event()
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.bind(("127.0.0.1", 0))
-    page_html = _FIXTURE_PAGE % {"surfaces": _SURFACES_JS, "udp": udp.getsockname()[1]}
-    worker_js = _FIXTURE_WORKER % {"surfaces": _SURFACES_JS}
+    def worker_js(echo):
+        return "text/javascript", _FIXTURE_WORKER % {"surfaces": _SURFACES_JS, "echo": echo}
+
+    documents = {
+        "/": ("text/html", _FIXTURE_PAGE % {"surfaces": _SURFACES_JS, "udp": udp.getsockname()[1]}),
+        "/worker.js": worker_js("/echo/worker"),
+        "/frame": ("text/html", _FIXTURE_FRAME % {"surfaces": _SURFACES_JS}),
+        "/frame-worker.js": worker_js("/echo/frame-worker"),
+    }
 
     class Fixture(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
@@ -802,12 +836,7 @@ def self_check(language):
         def do_GET(self):
             seen[self.path] = {name.lower(): self.headers.get(name)
                                for name in ("User-Agent", "Accept-Language", "Sec-CH-UA")}
-            if self.path == "/":
-                self._reply("text/html", page_html)
-            elif self.path == "/worker.js":
-                self._reply("text/javascript", worker_js)
-            else:
-                self._reply("text/plain", "ok")
+            self._reply(*documents.get(self.path, ("text/plain", "ok")))
 
         def do_POST(self):
             report.update(json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0")))))

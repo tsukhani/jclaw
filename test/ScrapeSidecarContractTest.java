@@ -336,6 +336,7 @@ class ScrapeSidecarContractTest extends UnitTest {
         assertEquals(List.of("--lang=de-DE", "--accept-lang=de-DE,de",
                         "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,"
                                 + "availablePointerTypes=4",
+                        "--disable-site-isolation-trials",
                         "--webrtc-ip-handling-policy=disable_non_proxied_udp",
                         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                         "--host-resolver-rules=MAP example.com 93.184.215.14"),
@@ -367,9 +368,13 @@ class ScrapeSidecarContractTest extends UnitTest {
                     "main": dict(surfaces, screen=[1920, 1080], viewport=[1920, 1080],
                                  pointerFine=True, hover=True, navigatorOverrides=[]),
                     "worker": dict(surfaces),
-                    "headers": {"/": sent, "/echo/main": sent,
+                    "frame": dict(surfaces),
+                    "frameWorker": dict(surfaces),
+                    "headers": {"/": sent, "/echo/main": sent, "/frame": sent,
                                 "/worker.js": dict(sent, **{"sec-ch-ua": None}),
-                                "/echo/worker": dict(sent, **{"sec-ch-ua": None})},
+                                "/echo/worker": dict(sent, **{"sec-ch-ua": None}),
+                                "/frame-worker.js": dict(sent, **{"sec-ch-ua": None}),
+                                "/echo/frame-worker": dict(sent, **{"sec-ch-ua": None})},
                     "webrtcUdp": False,
                 }
 
@@ -395,6 +400,10 @@ class ScrapeSidecarContractTest extends UnitTest {
                         "no fine pointer": broken(["main", "pointerFine"], False),
                         "a script override": broken(["main", "navigatorOverrides"], ["webdriver"]),
                         "WebRTC UDP": broken(["webrtcUdp"], True),
+                        "a HeadlessChrome iframe": broken(
+                            ["frame", "userAgent"], ua.replace("Chrome/", "HeadlessChrome/")),
+                        "an iframe's Worker on the host's locale": broken(["frameWorker", "intl"], "en-GB"),
+                        "an iframe that never answered": broken(["frame"], None),
                         "a Worker that never answered": broken(["worker"], None),
                         "a request that never arrived": broken(["headers", "/echo/worker"], None),
                     },

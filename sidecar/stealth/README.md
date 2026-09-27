@@ -227,9 +227,9 @@ rung structurally cannot produce those signals.
 
 ### One story on every surface
 
-A challenge does not only read each signal, it compares them: the page against its own Web
-Workers, and both against the request headers (JCLAW-1305). Measured on a fixture page with
-`language` `de-DE` on an `en-GB` host:
+A challenge does not only read each signal, it compares them: the page against its iframes (the
+Turnstile widget is one) and its Web Workers, and all of them against the request headers
+(JCLAW-1305). Measured on a fixture page with `language` `de-DE` on an `en-GB` host:
 
 | Surface | before | after |
 |---|---|---|
@@ -237,6 +237,7 @@ Workers, and both against the request headers (JCLAW-1305). Measured on a fixtur
 | `navigator.language` / `languages`, dedicated Worker | **`en-GB` / `en-GB, en-US, en`** | `de-DE` / `de-DE, de, en-US, en` |
 | `Accept-Language` | `de-DE` on the document and the Worker script, `de-DE, *;q=0.5` on `fetch` calls | `de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7` on every request, a Worker's included |
 | `Intl` locale, page and Worker | `de-DE` | `de-DE` |
+| `userAgent` / brands, a cross-site iframe and its Worker | **`HeadlessChrome` / `Chromium`**, while the iframe's own document request said Chrome | the page's |
 | viewport and screen | 1280×720 | 1920×1080 |
 
 How each surface is set:
@@ -256,6 +257,13 @@ How each surface is set:
   Worker's requests all match the page, so the mechanism stays. Chromium sends no `Sec-CH-UA` on
   a dedicated Worker's requests with or without the override, so there is nothing there to
   disagree.
+- **Cross-site iframes** render in the page's process: `--disable-site-isolation-trials`.
+  Isolated, each is a target of its own that the page's CDP session never reaches: measured with
+  every override above in place, a cross-site iframe and its Worker still reported
+  `HeadlessChrome`, the `Chromium` brand and the host's `Intl` locale. Their requests pass the
+  context's route gate either way, measured the same with and without the flag. What isolation
+  would add is a process boundary between the sites of one render, in a fresh profile that holds
+  nothing of the operator's.
 - **Viewport and screen** are both 1920×1080, as context options. **Pointer and hover** come
   from `--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4`,
   because headless can report neither on a host with no pointing device — the reason the story
@@ -276,9 +284,10 @@ explicit primary subtag. The self-check reports it. Two-part tags (`de-DE`, `en-
 
 `uv run serve.py --self-check --language de-DE` launches the browser exactly as a render does —
 the same flags, context options and CDP overrides — loads a fixture page from a loopback server
-it starts itself, and prints what the page, a dedicated Worker and each request's headers said,
-with `problems` listing every disagreement. Exit `0` means none, `1` at least one, and `2` that
-it could not run, with the reason in `error`.
+it starts itself, and prints what the page, a cross-site iframe (`localhost`, where the page is
+`127.0.0.1`), their dedicated Workers and each request's headers said, with `problems` listing
+every disagreement. Exit `0` means none, `1` at least one, and `2` that it could not run, with
+the reason in `error`.
 
 The fixture is served on loopback rather than through a fulfilled route, because Chromium adds
 `Accept-Language` below the interception point, where a route handler never sees it. It reports

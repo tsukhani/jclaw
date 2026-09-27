@@ -8,12 +8,14 @@ import play.test.UnitTest;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Rung 3 tells one story on every surface a challenge compares (JCLAW-1305), measured by the stealth
  * sidecar's own {@code --self-check}: a real Patchright browser, launched the way a render is, loads a
- * loopback fixture and reports what the page, a dedicated Worker and each request header said.
+ * loopback fixture and reports what the page, a cross-site iframe, their dedicated Workers and each
+ * request header said.
  *
  * <p>Live-browser, so it runs only under {@code JCLAW_PLAYWRIGHT_TEST}. The verdict logic it relies on is
  * held without a browser by {@code ScrapeSidecarContractTest.theFingerprintCheckNamesEachSurfaceThatDisagrees}.
@@ -65,14 +67,14 @@ class StealthFingerprintTest extends UnitTest {
         assertEquals("chromium", result.get("channel").getAsString(),
                 "the fingerprint is the full build's; the headless-shell fallback launched instead");
         var main = observed.getAsJsonObject("main");
-        var worker = observed.getAsJsonObject("worker");
-        for (var thread : new JsonObject[] {main, worker}) {
-            assertEquals("de-DE", thread.get("language").getAsString(), "observed: " + observed);
-            assertEquals("de-DE", thread.get("intl").getAsString(), "observed: " + observed);
-            assertFalse(thread.get("userAgent").getAsString().contains("HeadlessChrome"), "observed: " + observed);
-            assertTrue(thread.get("brands").toString().contains("Google Chrome"), "observed: " + observed);
+        for (var thread : List.of("main", "worker", "frame", "frameWorker")) {
+            var surfaces = observed.getAsJsonObject(thread);
+            assertEquals("de-DE", surfaces.get("language").getAsString(), thread + ": " + observed);
+            assertEquals("de-DE", surfaces.get("intl").getAsString(), thread + ": " + observed);
+            assertFalse(surfaces.get("userAgent").getAsString().contains("HeadlessChrome"), thread + ": " + observed);
+            assertTrue(surfaces.get("brands").toString().contains("Google Chrome"), thread + ": " + observed);
+            assertEquals(main.get("languages"), surfaces.get("languages"), thread + ": " + observed);
         }
-        assertEquals(main.get("languages"), worker.get("languages"));
         assertEquals("[1920,1080]", main.get("screen").toString());
         assertEquals("[1920,1080]", main.get("viewport").toString());
         assertTrue(main.get("pointerFine").getAsBoolean() && main.get("hover").getAsBoolean());
