@@ -59,6 +59,7 @@ and the eval suites.
 | UAT-19 Subagents page | `subagents.uat.spec.ts` | Stubbed runs: conversation column, grouping, filter; one read-only contract check |
 | UAT-20 Workspace manager | `workspace.uat.spec.ts` | Throwaway agent; tree, filter, colours, download, backup zip, protected refusal, delete; folder and symlink cases seed on disk and skip on a remote instance |
 | UAT-21 Error page | `error-page.uat.spec.ts` | Branded 404 with a way home |
+| UAT-23 Decision Providers | `decision-providers.uat.spec.ts` | JEV portrait and clip served as media (not the SPA fallback), clip fetched only on click and played, badge on hover, keyboard focus and no-hover screens; writes blocked |
 | Page smoke | `pages.smoke.spec.ts` | Pre-existing; ten top-level pages |
 | Prompt caching | `prompt-caching.uat.spec.ts` | Pre-existing; cached-token badge |
 
