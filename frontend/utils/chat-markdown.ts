@@ -16,8 +16,7 @@
 import { marked, Marked, Renderer, type Tokens, type TokenizerAndRendererExtension } from 'marked'
 import DOMPurify from 'dompurify'
 import katex, { type KatexOptions } from 'katex'
-// mhchem adds \ce / \pu so chemical equations and Lewis-style bond notation
-// typeset through the same KaTeX path as math (e.g. \ce{HCOONa}).
+// mhchem adds \ce / \pu, so chemical formulas, equations and units typeset through the same KaTeX path as math.
 import 'katex/contrib/mhchem'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 import type { MessageUsage } from '~/utils/usage-cost'
