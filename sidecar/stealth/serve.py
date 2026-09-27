@@ -602,6 +602,7 @@ def _navigate(context, page, url, timeout_ms, settle_ms, challenge_ms, solve, wa
     return {"html": page.content(),
             "status": response.status if response else 0,
             "settledStatus": settled["status"],
+            "mitigated": settled["mitigated"],
             "url": page.url,
             "challenge": challenge}
 
@@ -1238,6 +1239,8 @@ class Handler(BaseHTTPRequestHandler):
                 # on anything outside latin-1, which would drop the whole response.
                 ("X-Upstream-Url", _header_safe(result["url"])),
             ]
+            if result.get("mitigated"):
+                headers.append(("X-Upstream-cf-mitigated", _header_safe(result["mitigated"])))
             if result["challenge"]:
                 headers.append(("X-Challenge", result["challenge"]))
             blocked = result["blocked"]

@@ -83,6 +83,7 @@ distinguishable from a 403 raised by the sidecar itself:
 - `X-Upstream-Location` — present only on a 3xx
 - `X-Upstream-Content-Type` — the origin's content type
 - `X-Upstream-Url` — the URL actually requested
+- `X-Upstream-cf-mitigated` — the origin's `cf-mitigated` header, present only when it sent one
 - `X-Upstream-Truncated` — `true` when the body hit `maxBytes`
 
 `400` means a malformed request — a body that is not a JSON object, a missing `url`, a

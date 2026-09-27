@@ -421,6 +421,9 @@ class Handler(BaseHTTPRequestHandler):
             location = resp.headers.get("Location")
             if location:
                 headers.append(("X-Upstream-Location", _header_safe(location)))
+            mitigated = resp.headers.get("cf-mitigated")
+            if mitigated:
+                headers.append(("X-Upstream-cf-mitigated", _header_safe(mitigated)))
             if truncated:
                 headers.append(("X-Upstream-Truncated", "true"))
             headers.append(("Content-Length", str(len(body))))

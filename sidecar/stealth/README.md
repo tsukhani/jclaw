@@ -122,6 +122,7 @@ agree on the page and in its workers — see [One story on every surface](#one-s
 | `X-Upstream-Status` | status of the **first** navigation response, from `page.goto` — captured *before* the settle window. `0` means the navigation returned no response object |
 | `X-Settled-Status` | status of the last main-frame navigation the settle or challenge window **ended** on |
 | `X-Upstream-Url` | where the page finally sat |
+| `X-Upstream-cf-mitigated` | the settled navigation's `cf-mitigated` header, present only when the origin sent one |
 | `X-Challenge` | the Cloudflare challenge the render met and how it ended: `<type>; <outcome>`, plus `; clicks=N` when the solver clicked — `managed; cleared`, `interactive; unsolved; clicks=3`. Absent when none stood |
 | `X-Blocked-Hosts` | up to 20 hosts the route gate aborted |
 | `X-Blocked-Hosts-Count` | how many it aborted in total, since the list above is clipped |
