@@ -184,7 +184,7 @@ _UA_PROBE = """async () => {
 _SCREEN = {"width": 1920, "height": 1080}
 _CONTEXT_OPTIONS = {"service_workers": "block", "viewport": _SCREEN, "screen": _SCREEN}
 _FINGERPRINT_ARGS = [
-    # Headless reports no fine pointer and no hover on a host with no pointing device.
+    # Headless can report no fine pointer and no hover on a host with no pointing device.
     "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,"
     "availablePointerTypes=4",
     # Neither route gate sees UDP. Each build honors one spelling and silently ignores the

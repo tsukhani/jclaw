@@ -72,6 +72,15 @@ connection through an in-JVM SOCKS5 proxy, so only the route gate below is share
    without it a page could open `ws://127.0.0.1`, read a loopback service and write the
    reply into the DOM handed back. It applies the same host check to the socket's URL and
    counts a refused one in `X-Blocked-Hosts`.
+3. **WebRTC.** Neither layer sees UDP, so a page could send it anywhere — STUN and a data
+   channel's connectivity checks both reach a loopback listener. The launch passes
+   `disable_non_proxied_udp` under **both** spellings, because each build ignores one of them
+   silently. Measured with a loopback UDP listener: the full Chromium honors
+   `--webrtc-ip-handling-policy` and ignores `--force-webrtc-ip-handling-policy`, and the
+   headless-shell fallback does the reverse. The in-JVM browser launches with no channel, which
+   headless Playwright resolves to the shell — which is why JCLAW-1286 found the force spelling
+   the one that works there. The [self-check](#self-check) aims the same probe at a socket of its
+   own and reports a datagram as a problem.
 
 Layer 2 is a **second implementation of a security check**, which is a real cost. It
 lives in `ssrf.py` — stdlib-only, no Patchright import — and `StealthBrowserTest` runs
@@ -91,6 +100,7 @@ everything from reading as a pass.)
 | `POST /render` | rendered HTML; outcome in `X-Upstream-*` / `X-Settled-Status` / `X-Blocked-Hosts*` |
 | `POST /shutdown` | exits, so a restarted JVM can evict an orphan |
 | `--probe` (CLI) | capability JSON on stdout, no browser launched |
+| `--self-check [--language L]` (CLI) | renders a loopback fixture with a render's own launch and reports whether every surface agrees — see [Self-check](#self-check) |
 
 `channel` is the browser the most recent render actually launched, not the one asked
 for — see [Looking like a real browser](#looking-like-a-real-browser).
@@ -99,8 +109,9 @@ for — see [Looking like a real browser](#looking-like-a-real-browser).
 scrape proxy (`{url, username?, password?}`), given to the browser at launch; it is checked on
 the provider rule (loopback and LAN allowed; link-local, multicast, unspecified and unresolvable
 refused with `400`). The route gate still range-checks every host the page reaches either way.
-Defaults: `timeoutMs` `35000`, `settleMs` `4000`, `language` `en` (sent as `Accept-Language`
-and set as the context locale, so `navigator.language` agrees), `waitUntil` `domcontentloaded`.
+Defaults: `timeoutMs` `35000`, `settleMs` `4000`, `language` `en` (launched as `--lang` and
+`--accept-lang`, so the header and `navigator.language` agree on the page and in its workers —
+see [One story on every surface](#one-story-on-every-surface)), `waitUntil` `domcontentloaded`.
 
 | Response header | Meaning |
 |---|---|
@@ -214,6 +225,69 @@ loaded, settles, and is read — no mouse movement, no scrolling, no dwell time.
 detector scoring behaviour rather than fingerprints can still tell, and a render-only
 rung structurally cannot produce those signals.
 
+### One story on every surface
+
+A challenge does not only read each signal, it compares them: the page against its own Web
+Workers, and both against the request headers (JCLAW-1305). Measured on a fixture page with
+`language` `de-DE` on an `en-GB` host:
+
+| Surface | before | after |
+|---|---|---|
+| `navigator.language` / `languages`, page | `de-DE` / `de-DE` | `de-DE` / `de-DE, de, en-US, en` |
+| `navigator.language` / `languages`, dedicated Worker | **`en-GB` / `en-GB, en-US, en`** | `de-DE` / `de-DE, de, en-US, en` |
+| `Accept-Language` | `de-DE` on the document and the Worker script, `de-DE, *;q=0.5` on `fetch` calls | `de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7` on every request, a Worker's included |
+| `Intl` locale, page and Worker | `de-DE` | `de-DE` |
+| viewport and screen | 1280×720 | 1920×1080 |
+
+How each surface is set:
+
+- **Language** is a pair of launch flags, `--lang` and `--accept-lang` (the tag, then its primary
+  subtag), not the context `locale` — Playwright applies that to the main thread only, which is
+  where the Worker's host languages came from. Chromium then builds the header and
+  `navigator.languages` from one preference. The primary subtag is listed because, given `fr-FR`
+  alone, Chromium's header adds `fr` while `navigator.languages` does not. Chromium adds `en-US`
+  and `en` to a two-entry list by itself, on both surfaces, so they still agree.
+- **`Intl`** needs one more step. `--lang` moves it where Chromium honors the flag (Linux, per
+  Scrapling — not measured here); Chromium on macOS takes its locale from the OS and ignores the
+  flag, measured. `Emulation.setLocaleOverride` on the page's CDP session sets it on both, and
+  dedicated Workers inherit it — measured.
+- **User-Agent.** The `Emulation.setUserAgentOverride` above was measured to reach dedicated
+  Workers: `navigator.userAgent`, the `userAgentData` brands and the `User-Agent` header of a
+  Worker's requests all match the page, so the mechanism stays. Chromium sends no `Sec-CH-UA` on
+  a dedicated Worker's requests with or without the override, so there is nothing there to
+  disagree.
+- **Viewport and screen** are both 1920×1080, as context options. **Pointer and hover** come
+  from `--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4`,
+  because headless can report neither on a host with no pointing device — the reason the story
+  and Scrapling give, not reproducible on the macOS host this was measured on, where both were
+  already true. The same flag set to "none" turned both false there, so it is honored rather
+  than coincidental.
+- **WebRTC** — see [SSRF containment](#ssrf-containment-moved-with-the-launch), item 3.
+- **No script overrides.** Nothing here defines a property on `navigator` (Patchright disables
+  `add_init_script` anyway, above), and the self-check reports any own property on `navigator`
+  and any non-native getter on `Navigator.prototype`.
+
+A language tag with a script subtag is the one case that still disagrees: for `zh-Hant-TW`,
+Chromium's header keeps a bare `zh` that its `navigator.languages` drops, with or without the
+explicit primary subtag. The self-check reports it. Two-part tags (`de-DE`, `en-GB`, `zh-TW`,
+`pt-BR`) and bare ones (`en`, `fr`) agree.
+
+### Self-check
+
+`uv run serve.py --self-check --language de-DE` launches the browser exactly as a render does —
+the same flags, context options and CDP overrides — loads a fixture page from a loopback server
+it starts itself, and prints what the page, a dedicated Worker and each request's headers said,
+with `problems` listing every disagreement. Exit `0` means none, `1` at least one, and `2` that
+it could not run, with the reason in `error`.
+
+The fixture is served on loopback rather than through a fulfilled route, because Chromium adds
+`Accept-Language` below the interception point, where a route handler never sees it. It reports
+from the page's own JavaScript world: Patchright's `evaluate` runs in an isolated one, where a
+script override on `navigator` would not show.
+
+`StealthFingerprintTest` runs it under `JCLAW_PLAYWRIGHT_TEST`; `ScrapeSidecarContractTest` holds
+the launch arguments, the context options and the verdict without a browser.
+
 ## Concurrency
 
 A browser is launched per render, because the DNS pin is a launch argument and cannot
@@ -248,7 +322,8 @@ sidecar it launches; this one reads neither variable, so the two keys have no ef
 `serve.py` flags: `--host` (`127.0.0.1`), `--port`, `--model` (`patchright-chromium` — the
 identity `/health` echoes and the JVM's health check expects), `--cache-dir`
 (`data/stealth-sidecar`), `--idle-timeout-min` (`15`), `--max-concurrent` (`4`; the daemon's
-argv has no slot for it, so the JVM always gets the default), `--no-auth`, `--probe`.
+argv has no slot for it, so the JVM always gets the default), `--no-auth`, `--probe`,
+`--self-check` with `--language` (`en`).
 
 ## Authentication
 
@@ -264,6 +339,7 @@ serve unauthenticated.
 
 ```bash
 uv run serve.py --probe                    # one-shot, no server, no token
+uv run serve.py --self-check --language de-DE   # one render of a loopback fixture, no token
 SIDECAR_TOKEN=dev uv run serve.py --port 9532 --max-concurrent 4
 curl -s -H 'X-Sidecar-Token: dev' localhost:9532/health
 ```
