@@ -19,10 +19,11 @@ Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   (CLI) --probe  -> the same capability JSON on stdout, one-shot, no browser
   (CLI) --self-check [--language L] -> renders a loopback fixture with the render's own launch and
         prints {language, channel, observed, problems}; exit 1 on a problem, 2 when it cannot run
-  POST /render {url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?, proxy?}
+  POST /render {url, pins?, language?, timeoutMs?, settleMs?, challengeMs?, solveTurnstile?,
+                waitUntil?, maxBytes?, proxy?}
         -> 200  rendered HTML; X-Upstream-Status / X-Settled-Status / X-Upstream-Url /
-                X-Blocked-Hosts / X-Blocked-Hosts-Count / X-Upstream-Truncated carry
-                the outcome
+                X-Challenge / X-Blocked-Hosts / X-Blocked-Hosts-Count / X-Upstream-Truncated
+                carry the outcome
         -> 400  {error}  malformed request
         -> 502  {error}  navigation failed
   POST /shutdown -> exits, so a restarted JVM can evict an orphan.
@@ -64,6 +65,8 @@ import concurrent.futures
 import hmac
 import json
 import os
+import random
+import re
 import socket
 import sys
 import threading
@@ -72,15 +75,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 DEFAULT_TIMEOUT_MS = 35_000
-# Cloudflare's interstitial resolves itself a few seconds after load. Waiting for
-# "networkidle" instead hangs on exactly those pages — a challenge that keeps
-# polling never goes idle — so the sidecar waits for domcontentloaded and then
-# settles for a fixed interval.
+# Waiting for "networkidle" hangs on a Cloudflare challenge — one that keeps polling never
+# goes idle — so the sidecar waits for domcontentloaded, then either settles for a fixed
+# interval or, when a challenge stands, polls until it clears (JCLAW-1306).
 DEFAULT_SETTLE_MS = 4_000
-# Both waits hold a render permit for their whole duration and the JVM abandons the call
+DEFAULT_CHALLENGE_MS = 30_000
+# Every wait holds a render permit for its whole duration and the JVM abandons the call
 # at 120s, so an unbounded caller-supplied one parks a browser nobody is waiting for.
 MAX_TIMEOUT_MS = 60_000
 MAX_SETTLE_MS = 15_000
+MAX_CHALLENGE_MS = 45_000
 # Ceiling on what this process relays for one render. The origin decides the DOM size and
 # four renders can be in flight; the driver's own buffer of page.content() is out of reach.
 HARD_MAX_BYTES = 25 * 1024 * 1024
@@ -358,6 +362,106 @@ def _header_safe(value):
     return str(value).encode("ascii", "backslashreplace").decode("ascii")
 
 
+# BlockClassifier's two markers (JCLAW-1304), neither of them page text, so a localized challenge
+# reads as the English one does. ScrapeSidecarContractTest holds the two sides in step.
+_CF_CHALLENGE_OPTIONS = re.compile(r"_cf_chl_opt", re.IGNORECASE)
+_CF_CHALLENGE_TYPE = re.compile(r"ctype\s*:\s*['\"]([a-z-]+)['\"]", re.IGNORECASE)
+# Only a gate page's checkbox is clicked; a Turnstile widget inside a page with content never is.
+_CLICKABLE = ("managed", "interactive")
+_CHALLENGE_FRAME = "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/"
+_MAX_CLICKS = 3
+_CLICK_INTERVAL_S = 8.0
+_POLL_MS = 500
+# Where Turnstile draws its checkbox inside its frame; Scrapling v0.4.15 clicks 26-28 by 25-27.
+_CHECKBOX_OFFSET = (27, 26)
+CLEARED, UNSOLVED = "cleared", "unsolved"
+# page.content() raises while a clearing challenge reloads the page.
+_NAVIGATING = "navigating"
+
+
+def challenge_type(html, mitigated=None):
+    """The Cloudflare challenge `html` stands on: the cType its inline options name, "unknown" when
+    only the navigation's cf-mitigated header says there is one, or None."""
+    options = _CF_CHALLENGE_OPTIONS.search(html)
+    if options:
+        named = _CF_CHALLENGE_TYPE.search(html, options.end())
+        if named:
+            return named.group(1).lower()
+    if (mitigated or "").strip().lower() == "challenge":
+        return "unknown"
+    return None
+
+
+def _click_point(box, rng):
+    """A point on Turnstile's checkbox that stays inside the frame's `box`, or None for a box too
+    small to hold one."""
+    if not box or box["width"] < 2 or box["height"] < 2:
+        return None
+    dx = min(_CHECKBOX_OFFSET[0] + rng.randint(-1, 1), box["width"] - 1)
+    dy = min(_CHECKBOX_OFFSET[1] + rng.randint(-1, 1), box["height"] - 1)
+    return box["x"] + dx, box["y"] + dy
+
+
+def _challenge_box(page):
+    """The box of a visible challenge-platform frame, or None. Chosen by URL, so no other frame
+    is ever clicked."""
+    for frame in page.frames:
+        if not frame.url.startswith(_CHALLENGE_FRAME):
+            continue
+        try:
+            element = frame.frame_element()
+            if element.is_visible():
+                return element.bounding_box()
+        except Exception:
+            continue  # detached between the listing and the read
+    return None
+
+
+def await_challenge(page, standing, budget_ms, solve, clock=time.monotonic, rng=random):
+    """Poll `standing` — the challenge still up, or None — until it clears or `budget_ms` runs out.
+    With `solve`, a managed or interactive challenge's checkbox is clicked at most _MAX_CLICKS
+    times, _CLICK_INTERVAL_S apart. Returns (CLEARED or UNSOLVED, clicks)."""
+    deadline = clock() + budget_ms / 1000.0
+    clicks, next_click = 0, clock()
+    while True:
+        kind = standing()
+        if kind is None:
+            return CLEARED, clicks
+        now = clock()
+        if now >= deadline:
+            return UNSOLVED, clicks
+        if solve and kind in _CLICKABLE and clicks < _MAX_CLICKS and now >= next_click:
+            point = _click_point(_challenge_box(page), rng)
+            if point:
+                page.mouse.click(point[0], point[1], delay=rng.randint(80, 160))
+                clicks += 1
+                next_click = clock() + _CLICK_INTERVAL_S
+        page.wait_for_timeout(max(1, min(_POLL_MS, (deadline - clock()) * 1000)))
+
+
+def _settle(page, navigation, settle_ms, challenge_ms, solve, clock=time.monotonic, rng=random):
+    """Wait out the settle window, or a standing challenge in its place. Returns the X-Challenge
+    report, or None when no challenge stood."""
+    def standing():
+        try:
+            return challenge_type(page.content(), navigation["mitigated"])
+        except Exception:
+            return _NAVIGATING
+
+    kind = standing()
+    if kind in (None, _NAVIGATING):
+        if settle_ms > 0:
+            page.wait_for_timeout(settle_ms)
+        return None
+    started = clock()
+    outcome, clicks = await_challenge(page, standing, challenge_ms, solve, clock, rng)
+    left_ms = challenge_ms - (clock() - started) * 1000
+    if outcome == CLEARED and settle_ms > 0 and left_ms > 0:
+        # The page behind the challenge renders inside what is left of the same budget.
+        page.wait_for_timeout(min(settle_ms, left_ms))
+    return "%s; %s%s" % (kind, outcome, "; clicks=%d" % clicks if clicks else "")
+
+
 class _ResolveBudget:
     """Per-render ceiling on time lost to hosts that never resolve."""
 
@@ -626,6 +730,11 @@ class Handler(BaseHTTPRequestHandler):
                                         MAX_TIMEOUT_MS))
             settle_ms = max(0, min(int(req.get("settleMs") or DEFAULT_SETTLE_MS),
                                    MAX_SETTLE_MS))
+            challenge_ms = max(0, min(int(req.get("challengeMs") or DEFAULT_CHALLENGE_MS),
+                                      MAX_CHALLENGE_MS))
+            solve = req.get("solveTurnstile", False)
+            if not isinstance(solve, bool):
+                raise TypeError("solveTurnstile must be true or false")
             # `or HARD_MAX_BYTES` here would read an explicit 0 as "no cap", which is the
             # opposite of what the same field means to the fetch sidecar the JVM hands
             # the identical value to.
@@ -665,8 +774,9 @@ class Handler(BaseHTTPRequestHandler):
 
         with self.state.render_slots:
             try:
-                html, status, settled_status, final_url, blocked = self._render(
-                    url, pins, timeout_ms, settle_ms, wait_until, language, launch_proxy)
+                html, status, settled_status, final_url, blocked, challenge = self._render(
+                    url, pins, timeout_ms, settle_ms, challenge_ms, solve, wait_until, language,
+                    launch_proxy)
             except Exception as exc:
                 self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
                 return
@@ -690,6 +800,8 @@ class Handler(BaseHTTPRequestHandler):
                 # on anything outside latin-1, which would drop the whole response.
                 ("X-Upstream-Url", _header_safe(final_url)),
             ]
+            if challenge:
+                headers.append(("X-Challenge", challenge))
             if blocked:
                 # The list is clipped, so the count is the only way to tell twenty
                 # blocked hosts from two hundred.
@@ -728,7 +840,8 @@ class Handler(BaseHTTPRequestHandler):
                 _UA_RETRY_AT = time.monotonic() + _UA_RETRY_S
             return _UA_OVERRIDE
 
-    def _render(self, url, pins, timeout_ms, settle_ms, wait_until, language, proxy=None):
+    def _render(self, url, pins, timeout_ms, settle_ms, challenge_ms, solve, wait_until, language,
+                proxy=None):
         blocked = set()
         budget = _ResolveBudget(_RESOLVE_BUDGET_S)
 
@@ -780,7 +893,7 @@ class Handler(BaseHTTPRequestHandler):
                 context.route("**/*", gate)
                 context.route_web_socket("**/*", ws_gate)
                 page = context.new_page()
-                settled = {"status": 0}
+                settled = {"status": 0, "mitigated": None}
 
                 def track(resp):
                     # goto's status is the FIRST navigation response, captured before
@@ -788,17 +901,18 @@ class Handler(BaseHTTPRequestHandler):
                     # again inside it, and this records where that landed.
                     if resp.request.is_navigation_request() and resp.frame == page.main_frame:
                         settled["status"] = resp.status
+                        settled["mitigated"] = resp.headers.get("cf-mitigated")
 
                 page.on("response", track)
                 _disguise(context, page, language)
                 response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
-                if settle_ms > 0:
-                    page.wait_for_timeout(settle_ms)
+                challenge = _settle(page, settled, settle_ms, challenge_ms, solve)
                 return (page.content(),
                         response.status if response else 0,
                         settled["status"],
                         page.url,
-                        blocked)
+                        blocked,
+                        challenge)
             finally:
                 browser.close()
 

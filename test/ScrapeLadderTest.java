@@ -119,11 +119,30 @@ class ScrapeLadderTest extends UnitTest {
                 BlockClassifier.nextRung(ScrapeReason.TURNSTILE, 403, ScrapeRung.PLAIN));
         assertEquals(ScrapeRung.BROWSER,
                 BlockClassifier.nextRung(ScrapeReason.TURNSTILE, 403, ScrapeRung.IMPERSONATE));
-        // A challenge served as a page, not a refusal, keeps the route it always had.
+        // A challenge served as a page, not a refusal, goes straight to the browser.
         assertEquals(ScrapeRung.BROWSER,
                 BlockClassifier.nextRung(ScrapeReason.JS_CHALLENGE, 0, ScrapeRung.PLAIN));
-        assertEquals(ScrapeRung.PROVIDER,
+        assertEquals(ScrapeRung.BROWSER,
                 BlockClassifier.nextRung(ScrapeReason.TURNSTILE, 0, ScrapeRung.PLAIN));
+    }
+
+    @Test
+    void aTurnstileGateIsRenderedWhenRungThreeIsInstalled() {
+        // JCLAW-1306: rung 3 waits a challenge out, and clicks a gate page behind scrape.stealth.solveTurnstile.
+        assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.TURNSTILE));
+        assertEquals(ScrapeRung.BROWSER,
+                BlockClassifier.nextRung(ScrapeReason.TURNSTILE, ScrapeRung.IMPERSONATE));
+        assertEquals(ScrapeRung.PROVIDER,
+                BlockClassifier.nextRung(ScrapeReason.TURNSTILE, ScrapeRung.BROWSER),
+                "past the browser only the descoped rung is left, which nothing installs");
+        assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.POLICY_BLOCK),
+                "a stated refusal is still never escalated, so never clicked");
+
+        assertEquals(tools.scrape.RenderedFetcher.available(),
+                ScrapeLadder.wouldAttempt(ScrapeReason.TURNSTILE, 0),
+                "a Turnstile gate is attempted exactly when rung 3 is installed");
+        config.set(StealthSidecarManager.CFG_ENABLED, "false");
+        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.TURNSTILE, 0));
     }
 
     @Test

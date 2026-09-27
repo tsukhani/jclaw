@@ -4,9 +4,9 @@ package services.scrape;
  * Rungs of the escalation ladder, in cost order (JCLAW-1086).
  *
  * <p>{@link #PLAIN}, {@link #IMPERSONATE} and {@link #BROWSER} ship. {@link #PROVIDER}
- * was descoped, so {@link BlockClassifier#nextRung} still names it for the failures only
- * it could address — a reason kept distinct from {@link #NONE} rather than a rung that
- * will be attempted.
+ * was descoped, so {@link BlockClassifier#nextRung} names it only as the rung past
+ * {@link #BROWSER} — kept distinct from {@link #NONE} rather than a rung that will be
+ * attempted.
  */
 public enum ScrapeRung {
     /** OkHttp + SsrfGuard + Readability. What ships today. */

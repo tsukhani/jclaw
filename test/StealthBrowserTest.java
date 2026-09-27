@@ -1,3 +1,4 @@
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import okhttp3.MediaType;
 import okhttp3.Protocol;
@@ -217,6 +218,34 @@ class StealthBrowserTest extends UnitTest {
                 .addHeader(header, value)
                 .body(ResponseBody.create("", MediaType.parse("text/html")))
                 .build();
+    }
+
+    // ==================== The render request (JCLAW-1306) ====================
+
+    @Test
+    void everyRenderStatesItsBudgetsAndTheyFitInsideTheCallTimeout() {
+        var sent = RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject());
+        long navigation = sent.get("timeoutMs").getAsLong();
+        long challenge = sent.get("challengeMs").getAsLong();
+        assertTrue(challenge > 0, "the sidecar reads a zero budget as its own default: " + sent);
+        // The rest of a render: the UA probe and the route gate's resolve budget, 15 s ceilings each.
+        assertTrue(navigation + challenge + 30_000 < RenderedFetcher.CALL_TIMEOUT.toMillis(),
+                "a render that uses every budget must still answer before the JVM gives up: " + sent);
+    }
+
+    @Test
+    void theTurnstileClickIsOffUntilTheOperatorTurnsItOn() {
+        config.delete(StealthSidecarManager.CFG_SOLVE_TURNSTILE);
+        assertFalse(solveTurnstileSent(), "an absent key means off");
+        config.set(StealthSidecarManager.CFG_SOLVE_TURNSTILE, "true");
+        assertTrue(solveTurnstileSent(), "read per render, so no restart is needed");
+        config.set(StealthSidecarManager.CFG_SOLVE_TURNSTILE, "false");
+        assertFalse(solveTurnstileSent());
+    }
+
+    private static boolean solveTurnstileSent() {
+        return RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject())
+                .get("solveTurnstile").getAsBoolean();
     }
 
     // ==================== Feature detection ====================

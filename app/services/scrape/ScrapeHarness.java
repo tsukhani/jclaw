@@ -122,19 +122,19 @@ public final class ScrapeHarness {
      *
      * <p>Serves two failure modes the epic keeps separate on purpose. {@code THIN_CONTENT}
      * is a rendering problem and occurs at every protection tier including none;
-     * {@code JS_CHALLENGE} is a fingerprint gate. {@code TURNSTILE} is not among them:
-     * it is an interactive widget, so {@link BlockClassifier#nextRung} routes it to the
-     * descoped provider rung and the ladder never spends a render on one. The report
-     * separates
-     * them structurally rather than by annotation: {@code byRendering} scores against the
-     * corpus's client-rendered axis, {@code byStratum} against its protection axis, so a
-     * rendering fix can never be credited to anti-bot work or the reverse.
+     * {@code JS_CHALLENGE} is a fingerprint gate, and {@code TURNSTILE} one that may want a
+     * click; the challenge each render met, and whether it cleared, is recorded per URL
+     * (JCLAW-1306). The report separates them structurally rather than by annotation:
+     * {@code byRendering} scores against the corpus's client-rendered axis, {@code byStratum}
+     * against its protection axis, so a rendering fix can never be credited to anti-bot work
+     * or the reverse.
      */
     public static Rung rung3() {
         return url -> {
             try {
-                var fetched = RenderedFetcher.fetch(url);
-                return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
+                var render = RenderedFetcher.render(url, ScrapeLadder.DEFAULT_LANGUAGE);
+                return ScrapeObservation.of(render.fetched(), WebExtraction.toText(render.fetched()))
+                        .withChallenge(render.challenge());
             } catch (Exception e) {
                 return ScrapeObservation.failed(url, e);
             }
@@ -162,10 +162,15 @@ public final class ScrapeHarness {
                     ScrapeRung.PLAIN, null, plain.extractedText(),
                     BlockClassifier.classify(plain), plain.error(), plain.status());
             var best = ScrapeLadder.climb(url, first);
-            if (best.servedBy() == ScrapeRung.PLAIN) return plain;
-            return best.fetched() == null
-                    ? ScrapeObservation.failed(url, best.detail())
-                    : ScrapeObservation.of(best.fetched(), best.text());
+            ScrapeObservation served;
+            if (best.servedBy() == ScrapeRung.PLAIN) {
+                served = plain;
+            } else {
+                served = best.fetched() == null
+                        ? ScrapeObservation.failed(url, best.detail())
+                        : ScrapeObservation.of(best.fetched(), best.text());
+            }
+            return served.withChallenge(best.challenge());
         };
     }
 
@@ -175,11 +180,14 @@ public final class ScrapeHarness {
      *
      *  <p>{@code nextRung} is what the aggregate cannot say: which rung would have to
      *  exist for this failure to become a success. {@code prerender} counts origins that
-     *  would serve a declared crawler more than they served us. */
+     *  would serve a declared crawler more than they served us. {@code challenge} is the
+     *  stealth sidecar's report of the Cloudflare challenge a render met, such as
+     *  {@code managed; cleared}. */
     public record Result(@Nullable String url, @Nullable String stratum, @Nullable String vendor, @Nullable String outcome,
                          @Nullable String rendering, boolean ok, ScrapeReason reason,
                          ScrapeRung nextRung, boolean prerender,
-                         int chars, boolean titleSeen, long ms, @Nullable String detail) {}
+                         int chars, boolean titleSeen, long ms, @Nullable String detail,
+                         @Nullable String challenge) {}
 
     public record Score(int total, int ok, double rate) {}
 
@@ -216,14 +224,15 @@ public final class ScrapeHarness {
      *  is worth about thirty points and must never travel separately from the number.
      *
      *  <p>{@code corpus} names which ruler produced all of it, because a corpus
-     *  re-classified between runs is a different ruler. */
+     *  re-classified between runs is a different ruler. {@code byChallenge} counts each
+     *  challenge report, so a run tells solved challenges from unsolved ones. */
     public record RungReport(String rung, ScrapeCorpus.Identity corpus, Gate gate,
                              int attempted, int ok, double rate,
                              double prevalenceWeighted, String prevalenceNote,
                              Map<String, Score> byStratum, Map<String, Score> byVendor,
                              Map<String, Score> byRendering, Map<String, Integer> byReason,
-                             Map<String, Integer> byNextRung, int prerenderCapable,
-                             List<Result> results) {}
+                             Map<String, Integer> byNextRung, Map<String, Integer> byChallenge,
+                             int prerenderCapable, List<Result> results) {}
 
     /** Ceiling on one entry, well above the fetch timeout so it only fires on a hang. */
     private static final int RESULT_TIMEOUT_SECONDS = 120;
@@ -266,7 +275,7 @@ public final class ScrapeHarness {
 
     private static Result errored(ScrapeCorpus.Entry e, String detail) {
         return new Result(e.url(), e.stratum(), e.vendor(), e.outcome(), e.rendering(),
-                false, ScrapeReason.ERROR, ScrapeRung.NONE, false, 0, false, 0, detail);
+                false, ScrapeReason.ERROR, ScrapeRung.NONE, false, 0, false, 0, detail, null);
     }
 
     private static String reason(Exception e) {
@@ -303,18 +312,22 @@ public final class ScrapeHarness {
                 ok, reason, BlockClassifier.nextRung(reason, obs.status(), attempted),
                 BlockClassifier.hasPrerenderMarkers(obs),
                 text.length(), gt.titleSeen(text), ms,
-                ok ? null : detail.substring(0, Math.min(200, detail.length())).replace('\n', ' '));
+                ok ? null : detail.substring(0, Math.min(200, detail.length())).replace('\n', ' '),
+                obs.challenge());
     }
 
     private static RungReport report(String rungName, ScrapeCorpus.Corpus corpus,
                                      List<Result> results) {
         var byReason = new LinkedHashMap<String, Integer>();
         var byNextRung = new LinkedHashMap<String, Integer>();
+        var byChallenge = new LinkedHashMap<String, Integer>();
         for (var r : results) {
             byReason.merge(r.reason().name(), 1, Integer::sum);
             if (!r.ok()) {
                 byNextRung.merge(r.nextRung().name(), 1, Integer::sum);
             }
+            var challenge = r.challenge();
+            if (challenge != null) byChallenge.merge(challenge, 1, Integer::sum);
         }
         int ok = (int) results.stream().filter(Result::ok).count();
         int prerender = (int) results.stream()
@@ -354,7 +367,7 @@ public final class ScrapeHarness {
                 gate(rate, weightedPercent, weightingAvailable, byStratum),
                 results.size(), ok, rate, weightedPercent, note,
                 byStratum, group(results, Result::vendor),
-                group(results, Result::rendering), byReason, byNextRung, prerender,
+                group(results, Result::rendering), byReason, byNextRung, byChallenge, prerender,
                 List.copyOf(results));
     }
 

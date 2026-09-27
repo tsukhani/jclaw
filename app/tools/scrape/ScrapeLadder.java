@@ -43,10 +43,18 @@ public final class ScrapeLadder {
     public static final String DEFAULT_LANGUAGE = "en";
 
     /** One rung's product, and which rung produced it. {@code status} is the HTTP status of a
-     *  refused attempt, 0 for any other, and is what a challenge read off a refusal routes on. */
+     *  refused attempt, 0 for any other, and is what a challenge read off a refusal routes on.
+     *  {@code challenge} is the stealth sidecar's report of the Cloudflare challenge a render in
+     *  the climb met, whichever rung's attempt was kept. */
     public record Attempt(ScrapeRung servedBy, WebExtraction.@Nullable FetchResult fetched,
                           @Nullable String text, ScrapeReason reason, @Nullable String detail,
-                          int status) {
+                          int status, @Nullable String challenge) {
+
+        public Attempt(ScrapeRung servedBy, WebExtraction.@Nullable FetchResult fetched,
+                       @Nullable String text, ScrapeReason reason, @Nullable String detail,
+                       int status) {
+            this(servedBy, fetched, text, reason, detail, status, null);
+        }
 
         public boolean usable() {
             return reason == ScrapeReason.OK;
@@ -60,6 +68,11 @@ public final class ScrapeLadder {
         public String resolvedText() {
             if (text == null) throw new IllegalStateException("attempt not usable: " + reason);
             return text;
+        }
+
+        Attempt withChallenge(@Nullable String met) {
+            return met == null || met.equals(challenge) ? this
+                    : new Attempt(servedBy, fetched, text, reason, detail, status, met);
         }
     }
 
@@ -103,14 +116,16 @@ public final class ScrapeLadder {
         var best = plain;
         var last = plain;
         var attempted = plain.servedBy();
+        String challenge = null;
 
         while (true) {
             var next = BlockClassifier.nextRung(last.reason(), last.status(), attempted);
-            if (!isInstalled(next)) return best;
+            if (!isInstalled(next)) return best.withChallenge(challenge);
 
             last = attempt(next, url, language);
             attempted = next;
             if (last.usable()) return last;
+            if (last.challenge() != null) challenge = last.challenge();
             best = better(best, last);
         }
     }
@@ -118,12 +133,18 @@ public final class ScrapeLadder {
     /** Run one URL through {@code rung}, classifying the result the way the harness does. */
     private static Attempt attempt(ScrapeRung rung, String url, String language) {
         try {
-            var fetched = rung == ScrapeRung.BROWSER
-                    ? RenderedFetcher.fetch(url, language)
-                    : ImpersonatedFetcher.fetch(url, impersonatedHeaders(language));
+            WebExtraction.FetchResult fetched;
+            String challenge = null;
+            if (rung == ScrapeRung.BROWSER) {
+                var render = RenderedFetcher.render(url, language);
+                fetched = render.fetched();
+                challenge = render.challenge();
+            } else {
+                fetched = ImpersonatedFetcher.fetch(url, impersonatedHeaders(language));
+            }
             var text = WebExtraction.toText(fetched);
             var obs = ScrapeObservation.of(fetched, text);
-            return new Attempt(rung, fetched, text, BlockClassifier.classify(obs), null, 0);
+            return new Attempt(rung, fetched, text, BlockClassifier.classify(obs), null, 0, challenge);
         } catch (ScrapeSidecarException e) {
             // Ours, not the origin's — and the distinction this type exists to carry was
             // being thrown away by classifying its message: "sidecar returned HTTP 503"
@@ -133,7 +154,8 @@ public final class ScrapeLadder {
                     detail == null || detail.isBlank() ? e.getClass().getSimpleName() : detail, 0);
         } catch (Exception e) {
             var obs = ScrapeObservation.failed(url, e);
-            return new Attempt(rung, null, null, BlockClassifier.classify(obs), obs.error(), obs.status());
+            return new Attempt(rung, null, null, BlockClassifier.classify(obs), obs.error(), obs.status(),
+                    obs.challenge());
         }
     }
 

@@ -4,6 +4,7 @@ import org.jspecify.annotations.Nullable;
 import utils.WebExtraction;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -20,7 +21,8 @@ import java.util.Map;
  *              except on a refused response
  * @param status the HTTP status of a refused response (400 and above), whose body prefix
  *               and classifier headers are then kept too; 0 for anything else
- * @param headers the response headers {@link BlockClassifier} reads, keyed in lower case
+ * @param headers the response headers {@link BlockClassifier} reads, and a render's
+ *                {@link #CHALLENGE_HEADER}, keyed in lower case
  */
 public record ScrapeObservation(@Nullable String url, String contentType, String rawBody,
                                 String extractedText, @Nullable String error,
@@ -29,6 +31,10 @@ public record ScrapeObservation(@Nullable String url, String contentType, String
     /** Cap on the raw markup scanned for markers. Gate pages are small and put their
      *  markers near the top; scanning megabytes of a large article buys nothing. */
     public static final int SCAN_LIMIT = 64 * 1024;
+
+    /** The stealth sidecar's report of the Cloudflare challenge a render met, such as
+     *  {@code managed; cleared} (JCLAW-1306). */
+    public static final String CHALLENGE_HEADER = "x-challenge";
 
     public static ScrapeObservation of(WebExtraction.FetchResult fetched, @Nullable String text) {
         return new ScrapeObservation(fetched.finalUrl(), fetched.contentType(),
@@ -67,6 +73,19 @@ public record ScrapeObservation(@Nullable String url, String contentType, String
 
     public @Nullable String header(String name) {
         return headers.get(name.toLowerCase(Locale.ROOT));
+    }
+
+    public @Nullable String challenge() {
+        return header(CHALLENGE_HEADER);
+    }
+
+    /** This observation carrying {@code challenge}; itself when there is none to add. */
+    public ScrapeObservation withChallenge(@Nullable String challenge) {
+        if (challenge == null || challenge.equals(challenge())) return this;
+        var merged = new LinkedHashMap<>(headers);
+        merged.put(CHALLENGE_HEADER, challenge);
+        return new ScrapeObservation(url, contentType, rawBody, extractedText, error, status,
+                Map.copyOf(merged));
     }
 
     private static String scanned(byte[] body) {

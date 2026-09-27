@@ -180,6 +180,10 @@ public final class BlockClassifier {
      * escalating a client-rendered page to the impersonation rung spends a request to
      * arrive at the same empty page.
      *
+     * <p>{@link ScrapeReason#TURNSTILE} goes to {@link ScrapeRung#BROWSER} with
+     * {@link ScrapeReason#JS_CHALLENGE}: the stealth sidecar waits a challenge out, and clicks a
+     * gate page's checkbox when {@code scrape.stealth.solveTurnstile} is on (JCLAW-1306).
+     *
      * <p>{@link ScrapeReason#TIMEOUT} stays at {@link ScrapeRung#NONE}: an origin too
      * slow to answer a plain fetch will not answer a browser faster, and a render is the
      * most expensive way to wait.
@@ -192,8 +196,7 @@ public final class BlockClassifier {
     public static ScrapeRung nextRung(ScrapeReason reason) {
         return switch (reason) {
             case TLS_BLOCKED, TRUST_BLOCK -> ScrapeRung.IMPERSONATE;
-            case JS_CHALLENGE, THIN_CONTENT -> ScrapeRung.BROWSER;
-            case TURNSTILE -> ScrapeRung.PROVIDER;
+            case JS_CHALLENGE, TURNSTILE, THIN_CONTENT -> ScrapeRung.BROWSER;
             // ERROR reaches here only after TransientRetryInterceptor has already
             // retried the retryable statuses, so what is left is structural — a
             // persistent 400, a redirect loop — and a browser handles those natively

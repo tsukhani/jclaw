@@ -1,13 +1,22 @@
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
+import services.scrape.BlockClassifier;
+import services.scrape.ScrapeObservation;
+import services.scrape.ScrapeReason;
+import tools.scrape.RenderedFetcher;
+import utils.WebExtraction;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -25,14 +34,15 @@ class ScrapeSidecarContractTest extends UnitTest {
      *  writes to stderr, and a sidecar is expected to survive that rather than be silent. */
     private static final String MARKER = "PROBE:";
 
-    /** Run {@code script} with the sidecar directory on {@code sys.path} and parse the
-     *  marked JSON object it prints. */
-    private static JsonObject probe(String sidecar, String script) throws Exception {
+    /** Run {@code script} with the sidecar directory as {@code sys.argv[1]}, then {@code args},
+     *  and parse the marked JSON object it prints. */
+    private static JsonObject probe(String sidecar, String script, String... args) throws Exception {
         var dir = new File(Play.applicationPath, sidecar);
         assertTrue(new File(dir, "serve.py").isFile(), sidecar + " has moved or gone");
 
-        var proc = new ProcessBuilder(List.of("python3", "-c", script, dir.getAbsolutePath()))
-                .redirectErrorStream(true).start();
+        var argv = new ArrayList<>(List.of("python3", "-c", script, dir.getAbsolutePath()));
+        argv.addAll(List.of(args));
+        var proc = new ProcessBuilder(argv).redirectErrorStream(true).start();
         assertTrue(proc.waitFor(90, TimeUnit.SECONDS), sidecar + " probe timed out");
         var stdout = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
         assertEquals(0, proc.exitValue(), sidecar + " probe failed: " + stdout);
@@ -171,16 +181,28 @@ class ScrapeSidecarContractTest extends UnitTest {
                 sys.path.insert(0, sys.argv[1])
                 import serve
                 print("PROBE:" + json.dumps({"timeout": serve.MAX_TIMEOUT_MS, "settle": serve.MAX_SETTLE_MS,
+                                  "challenge": serve.MAX_CHALLENGE_MS,
                                   "bytes": serve.HARD_MAX_BYTES,
                                   "default_timeout": serve.DEFAULT_TIMEOUT_MS,
-                                  "default_settle": serve.DEFAULT_SETTLE_MS}))
+                                  "default_settle": serve.DEFAULT_SETTLE_MS,
+                                  "default_challenge": serve.DEFAULT_CHALLENGE_MS}))
                 """);
-        assertTrue(out.get("timeout").getAsLong() + out.get("settle").getAsLong() < 120_000,
-                "navigation and settle together must finish inside the JVM's call timeout");
+        // A standing challenge is polled in place of the settle window, never after it.
+        long wait = Math.max(out.get("settle").getAsLong(), out.get("challenge").getAsLong());
+        assertTrue(out.get("timeout").getAsLong() + wait < 120_000,
+                "navigation and the longer wait together must finish inside the JVM's call timeout");
         assertTrue(out.get("default_timeout").getAsLong() <= out.get("timeout").getAsLong(),
                 "the default must sit under the ceiling, or the clamp lowers it");
         assertTrue(out.get("default_settle").getAsLong() <= out.get("settle").getAsLong(),
                 "same for the settle window");
+        assertTrue(out.get("default_challenge").getAsLong() <= out.get("challenge").getAsLong(),
+                "and for the challenge budget");
+
+        var sent = RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject());
+        assertTrue(sent.get("timeoutMs").getAsLong() <= out.get("timeout").getAsLong(),
+                "the navigation timeout the JVM sends must survive the sidecar's clamp: " + sent);
+        assertTrue(sent.get("challengeMs").getAsLong() <= out.get("challenge").getAsLong(),
+                "and so must its challenge budget: " + sent);
         assertEquals(25L * 1024 * 1024, out.get("bytes").getAsLong(),
                 "the render body ceiling is the one the README publishes");
     }
@@ -414,5 +436,202 @@ class ScrapeSidecarContractTest extends UnitTest {
         for (var caught : out.getAsJsonObject("caught").entrySet()) {
             assertFalse(caught.getValue().getAsJsonArray().isEmpty(), "the check misses " + caught.getKey());
         }
+    }
+
+    // ==================== Cloudflare challenges (JCLAW-1306) ====================
+
+    /** A Cloudflare gate page as served: the type is named in the inline options, the visible
+     *  text is in whatever language the visitor's locale picked. */
+    private static String gate(String type, String title) {
+        return ("<!DOCTYPE html><html><head><title>%s</title></head><body><script>(function(){"
+                + "window._cf_chl_opt={cvId: '3',cZone: \"x.test\",cType: '%s',cRay: '8c4f0d2e9a1b2c3d'};"
+                + "var cpo=document.createElement('script');"
+                + "cpo.src='/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1';"
+                + "document.head.appendChild(cpo);}());</script></body></html>").formatted(title, type);
+    }
+
+    private static final String TURNSTILE_SCRIPT =
+            "<script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js\"></script>";
+
+    @Test
+    void theSidecarDetectsAChallengeExactlyWhenTheClassifierDoes() throws Exception {
+        // Two implementations of one detection, so they are held against each other on the same bodies.
+        var fixtures = new LinkedHashMap<String, String[]>();
+        fixtures.put("managed", new String[] {gate("managed", "Just a moment..."), null});
+        fixtures.put("managed, French", new String[] {gate("managed", "Un instant…"), null});
+        fixtures.put("interactive, Japanese", new String[] {gate("interactive", "しばらく"), null});
+        fixtures.put("non-interactive", new String[] {gate("non-interactive", "Einen Moment…"), null});
+        fixtures.put("cleared", new String[] {"<html><body><article>" + "Widgets. ".repeat(40)
+                + "</article></body></html>", null});
+        fixtures.put("detection script only", new String[] {"<html><body><script>var s=document.createElement"
+                + "('script');s.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';</script></body></html>", null});
+        fixtures.put("cType outside the options", new String[] {
+                "<script>var config = {cType: 'managed'}; window._cf_chl_opt = {};</script>", null});
+        fixtures.put("header only", new String[] {"<html></html>", "challenge"});
+        fixtures.put("Turnstile script and header", new String[] {TURNSTILE_SCRIPT, "challenge"});
+        fixtures.put("widget in a content page", new String[] {"<html><body>" + TURNSTILE_SCRIPT
+                + "<div class=\"cf-turnstile\"></div><article>real</article></body></html>", null});
+        fixtures.put("another mitigation", new String[] {"<html></html>", "block"});
+
+        var bodies = new JsonArray();
+        fixtures.values().forEach(f -> {
+            var entry = new JsonArray();
+            entry.add(f[0]);
+            entry.add(f[1]);
+            bodies.add(entry);
+        });
+        var out = probe("sidecar/stealth", """
+                import sys, json
+                sys.path.insert(0, sys.argv[1])
+                import serve
+                fixtures = json.loads(sys.argv[2])
+                print("PROBE:" + json.dumps({"types": [serve.challenge_type(b, m) for b, m in fixtures]}))
+                """, bodies.toString());
+
+        var types = out.getAsJsonArray("types");
+        var names = new ArrayList<>(fixtures.keySet());
+        var expected = List.of("managed", "managed", "interactive", "non-interactive", "", "", "",
+                "unknown", "unknown", "", "");
+        for (int i = 0; i < names.size(); i++) {
+            var fixture = fixtures.get(names.get(i));
+            var sidecar = types.get(i).isJsonNull() ? "" : types.get(i).getAsString();
+            assertEquals(expected.get(i), sidecar, names.get(i));
+
+            var headers = fixture[1] == null ? Map.<String, String>of() : Map.of("cf-mitigated", fixture[1]);
+            var jvm = BlockClassifier.classify(ScrapeObservation.failed("https://x.test/",
+                    new WebExtraction.HttpStatusException(403, "https://x.test/",
+                            fixture[0].getBytes(StandardCharsets.UTF_8), "text/html", headers)));
+            assertEquals(!sidecar.isEmpty(), jvm == ScrapeReason.JS_CHALLENGE || jvm == ScrapeReason.TURNSTILE,
+                    "%s: the sidecar says %s where the classifier says %s".formatted(names.get(i), sidecar, jvm));
+            if (sidecar.equals("interactive")) assertEquals(ScrapeReason.TURNSTILE, jvm, names.get(i));
+        }
+        var french = fixtures.get("managed, French")[0].toLowerCase(Locale.ROOT);
+        for (var english : new String[] {"just a moment", "enable javascript", "verifying you are human"}) {
+            assertFalse(french.contains(english), "the localized fixture must carry no English: " + english);
+        }
+    }
+
+    @Test
+    void theSolverClicksOnlyAGateCheckboxAndStopsAtTheCap() throws Exception {
+        // Scrapling's tests/fetchers/test_cloudflare_solver.py shape: a page stub whose waits advance a fake clock.
+        var out = probe("sidecar/stealth", """
+                import sys, json, random
+                sys.path.insert(0, sys.argv[1])
+                import serve
+
+                BOX = {"x": 100, "y": 200, "width": 300, "height": 65}
+                FRAME = "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/"
+
+                class Clock:
+                    now = 0.0
+                    def __call__(self):
+                        return self.now
+
+                class Element:
+                    def __init__(self, box):
+                        self.box = box
+                    def is_visible(self):
+                        return True
+                    def bounding_box(self):
+                        return self.box
+
+                class Frame:
+                    def __init__(self, url, box):
+                        self.url, self.box = url, box
+                    def frame_element(self):
+                        return Element(self.box)
+
+                class Mouse:
+                    def __init__(self, page):
+                        self.page, self.clicks = page, []
+                    def click(self, x, y, delay=0):
+                        self.clicks.append([x, y])
+                        if self.page.clears_on_click:
+                            self.page.html = "<html><body>the article</body></html>"
+
+                class Page:
+                    def __init__(self, html, clock, frames=None, clears_on_click=False, clears_after_waits=None):
+                        self.html, self.clock = html, clock
+                        self.frames = [Frame(FRAME, BOX)] if frames is None else frames
+                        self.clears_on_click, self.clears_after_waits = clears_on_click, clears_after_waits
+                        self.mouse, self.waits = Mouse(self), []
+                    def content(self):
+                        return self.html
+                    def wait_for_timeout(self, ms):
+                        self.waits.append(ms)
+                        self.clock.now += ms / 1000.0
+                        if self.clears_after_waits == len(self.waits):
+                            self.html = "<html><body>the article</body></html>"
+
+                def gate(kind):
+                    return "<title>Un instant</title><script>window._cf_chl_opt={cType: '%s'};</script>" % kind
+
+                def run(html, solve, **kw):
+                    clock = Clock()
+                    page = Page(html, clock, **kw)
+                    report = serve._settle(page, {"mitigated": None}, 4000, 45000, solve, clock, random.Random(7))
+                    return {"report": report, "clicks": page.mouse.clicks, "waited": sum(page.waits)}
+
+                inside = all(
+                    box["x"] < p[0] < box["x"] + box["width"] and box["y"] < p[1] < box["y"] + box["height"]
+                    for box in [BOX, {"x": 0, "y": 0, "width": 10, "height": 12}, {"x": -5, "y": 3, "width": 2, "height": 2}]
+                    for p in [serve._click_point(box, random.Random(seed)) for seed in range(200)])
+
+                print("PROBE:" + json.dumps({
+                    "cap": run(gate("interactive"), True),
+                    "off": run(gate("interactive"), False),
+                    "clickClears": run(gate("managed"), True, clears_on_click=True),
+                    "nonInteractive": run(gate("non-interactive"), True, clears_after_waits=3),
+                    "noChallenge": run("<html><body>the article</body></html>", True),
+                    "embeddedWidget": run('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js">'
+                                          '</script><div class="cf-turnstile"></div><article>real</article>', True),
+                    "foreignFrame": run(gate("interactive"), True, frames=[
+                        Frame("https://ads.example/cdn-cgi/challenge-platform/x", BOX),
+                        Frame("https://challenges.cloudflare.com/turnstile/v0/", BOX)]),
+                    "tinyFrame": run(gate("managed"), True, frames=[Frame(FRAME, {"x": 1, "y": 1, "width": 1, "height": 40})]),
+                    "inside": inside,
+                    "tooSmall": serve._click_point({"x": 0, "y": 0, "width": 1, "height": 1}, random.Random(1)),
+                    "maxClicks": serve._MAX_CLICKS,
+                }))
+                """);
+
+        var cap = out.getAsJsonObject("cap");
+        assertEquals("interactive; unsolved; clicks=3", cap.get("report").getAsString());
+        assertEquals(out.get("maxClicks").getAsInt(), cap.getAsJsonArray("clicks").size(),
+                "a challenge that never clears is clicked up to the cap and no further");
+        assertEquals(45_000, cap.get("waited").getAsDouble(), 1.0, "and polled until the budget ran out");
+        for (var click : cap.getAsJsonArray("clicks")) {
+            var xy = click.getAsJsonArray();
+            assertTrue(xy.get(0).getAsDouble() > 100 && xy.get(0).getAsDouble() < 400
+                            && xy.get(1).getAsDouble() > 200 && xy.get(1).getAsDouble() < 265,
+                    "every click lands inside the challenge-platform frame: " + xy);
+        }
+
+        var off = out.getAsJsonObject("off");
+        assertEquals("interactive; unsolved", off.get("report").getAsString());
+        assertTrue(off.getAsJsonArray("clicks").isEmpty(), "with the switch off a challenge is waited on, never clicked");
+        assertEquals(45_000, off.get("waited").getAsDouble(), 1.0);
+
+        var cleared = out.getAsJsonObject("clickClears");
+        assertEquals("managed; cleared; clicks=1", cleared.get("report").getAsString());
+        assertTrue(cleared.get("waited").getAsDouble() >= 4_000,
+                "the page behind a cleared challenge still gets the settle window to render");
+
+        var nonInteractive = out.getAsJsonObject("nonInteractive");
+        assertEquals("non-interactive; cleared", nonInteractive.get("report").getAsString());
+        assertTrue(nonInteractive.getAsJsonArray("clicks").isEmpty(), "a non-interactive challenge is never clicked");
+
+        for (var unchanged : List.of("noChallenge", "embeddedWidget")) {
+            var run = out.getAsJsonObject(unchanged);
+            assertTrue(run.get("report").isJsonNull(), unchanged + " stood no challenge: " + run);
+            assertTrue(run.getAsJsonArray("clicks").isEmpty(), unchanged + " must never be clicked");
+            assertEquals(4_000, run.get("waited").getAsDouble(), 0.0, unchanged + " keeps the plain settle window");
+        }
+        for (var unclickable : List.of("foreignFrame", "tinyFrame")) {
+            assertTrue(out.getAsJsonObject(unclickable).getAsJsonArray("clicks").isEmpty(),
+                    unclickable + ": only a challenge-platform frame with room for its checkbox is clicked");
+        }
+        assertTrue(out.get("inside").getAsBoolean(), "a click point outside its frame's box");
+        assertTrue(out.get("tooSmall").isJsonNull());
     }
 }

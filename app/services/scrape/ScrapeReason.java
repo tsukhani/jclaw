@@ -15,7 +15,8 @@ public enum ScrapeReason {
     TLS_BLOCKED,
     /** A Cloudflare interstitial — valid HTML, no article behind it. */
     JS_CHALLENGE,
-    /** Interactive challenge. Nothing below rung 4 clears this. */
+    /** Interactive challenge. Rung 3 clears one only on Cloudflare's own gate page, and only
+     *  with {@code scrape.stealth.solveTurnstile} on. */
     TURNSTILE,
     /** The origin declares it blocks agents — a door honest identification could open. */
     POLICY_BLOCK,

@@ -97,7 +97,7 @@ everything from reading as a pass.)
 |---|---|
 | `GET /health` | `{status, model, patchright, channel, browser_ready}` |
 | `GET /capability` | `{kind, runnable, channel, reason}` |
-| `POST /render` | rendered HTML; outcome in `X-Upstream-*` / `X-Settled-Status` / `X-Blocked-Hosts*` |
+| `POST /render` | rendered HTML; outcome in `X-Upstream-*` / `X-Settled-Status` / `X-Challenge` / `X-Blocked-Hosts*` |
 | `POST /shutdown` | exits, so a restarted JVM can evict an orphan |
 | `--probe` (CLI) | capability JSON on stdout, no browser launched |
 | `--self-check [--language L]` (CLI) | renders a loopback fixture with a render's own launch and reports whether every surface agrees — see [Self-check](#self-check) |
@@ -105,39 +105,40 @@ everything from reading as a pass.)
 `channel` is the browser the most recent render actually launched, not the one asked
 for — see [Looking like a real browser](#looking-like-a-real-browser).
 
-`POST /render` takes `{url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?, proxy?}`. `proxy` is the operator's
+`POST /render` takes `{url, pins?, language?, timeoutMs?, settleMs?, challengeMs?, solveTurnstile?, waitUntil?, maxBytes?, proxy?}`. `proxy` is the operator's
 scrape proxy (`{url, username?, password?}`), given to the browser at launch; it is checked on
 the provider rule (loopback and LAN allowed; link-local, multicast, unspecified and unresolvable
 refused with `400`). The route gate still range-checks every host the page reaches either way.
-Defaults: `timeoutMs` `35000`, `settleMs` `4000`, `language` `en` (launched as `--lang` and
-`--accept-lang`, so the header and `navigator.language` agree on the page and in its workers —
-see [One story on every surface](#one-story-on-every-surface)), `waitUntil` `domcontentloaded`.
+Defaults: `timeoutMs` `35000`, `settleMs` `4000`, `challengeMs` `30000`, `solveTurnstile` `false`,
+`language` `en` (launched as `--lang` and `--accept-lang`, so the header and `navigator.language`
+agree on the page and in its workers — see [One story on every surface](#one-story-on-every-surface)),
+`waitUntil` `domcontentloaded`. The JVM leaves `settleMs` at its default but sends `timeoutMs`,
+`challengeMs` and `solveTurnstile` on every render — see [Cloudflare challenges](#cloudflare-challenges).
 
 | Response header | Meaning |
 |---|---|
 | `X-Upstream-Status` | status of the **first** navigation response, from `page.goto` — captured *before* the settle window. `0` means the navigation returned no response object |
-| `X-Settled-Status` | status of the last main-frame navigation the settle window **ended** on |
+| `X-Settled-Status` | status of the last main-frame navigation the settle or challenge window **ended** on |
 | `X-Upstream-Url` | where the page finally sat |
+| `X-Challenge` | the Cloudflare challenge the render met and how it ended: `<type>; <outcome>`, plus `; clicks=N` when the solver clicked — `managed; cleared`, `interactive; unsolved; clicks=3`. Absent when none stood |
 | `X-Blocked-Hosts` | up to 20 hosts the route gate aborted |
 | `X-Blocked-Hosts-Count` | how many it aborted in total, since the list above is clipped |
 | `X-Upstream-Truncated` | `true` when the body was cut at `maxBytes` |
 
 The two status headers differ on exactly the case this rung exists for: an interstitial
-served with 403 that then resolves itself client-side ends the settle window on 200, and
-the settled body is the real page. The JVM currently reads `X-Upstream-Status` only, and
-treats `>= 400` as a failed fetch — so those pages are discarded and scored `TRUST_BLOCK`
-even though the HTML in the same response is good. `X-Settled-Status` is reported so that
-can be fixed deliberately: it changes the measured access rate, so it is a gate decision,
-not a bug fix.
+served with 403 that then resolves itself client-side ends its window on 200, and the
+settled body is the real page. The JVM scores a render from `X-Settled-Status`, falling
+back to `X-Upstream-Status` when the settled one is absent or `0` (JCLAW-1304).
 
 `waitUntil` defaults to `domcontentloaded`, **not** `networkidle`. A challenge page
 that keeps polling never goes idle, so waiting for it hangs on exactly the pages this
-rung exists for. A fixed `settleMs` window afterwards gives the challenge time to
-resolve itself.
+rung exists for. A page with no challenge then settles for a fixed `settleMs`; a standing
+challenge is polled instead — see [Cloudflare challenges](#cloudflare-challenges).
 
-`timeoutMs`, `settleMs` and `maxBytes` are clamped here (60 s / 15 s / 25 MiB) rather than
-trusted. Each holds a render permit — one of four — for its whole duration, and the JVM
-abandons the call at 120 s, so an unbounded request parks a browser nobody is waiting for.
+`timeoutMs`, `settleMs`, `challengeMs` and `maxBytes` are clamped here (60 s / 15 s / 45 s /
+25 MiB) rather than trusted. Each holds a render permit — one of four — for its whole
+duration, and the JVM abandons the call at 120 s, so an unbounded request parks a browser
+nobody is waiting for.
 
 `maxBytes` caps the rendered document this process relays, under that hard ceiling. `0`
 means zero bytes, not "no cap"; omit the field to get the ceiling. These are the fetch
@@ -146,8 +147,45 @@ sidecar's semantics exactly, because the JVM sends both rungs the same
 would cap one rung and uncap the other.
 
 `400` means a malformed request — a body that is not a JSON object, a missing `url`, a
-`pins` that is not one, a `timeoutMs`/`settleMs`/`maxBytes` that will not parse as a number, a negative
-`maxBytes`, or a pin whose target is not a public address. `502` is a failed navigation.
+`pins` that is not one, a `timeoutMs`/`settleMs`/`challengeMs`/`maxBytes` that will not parse as a
+number, a `solveTurnstile` that is not `true` or `false`, a negative `maxBytes`, or a pin whose
+target is not a public address. `502` is a failed navigation.
+
+## Cloudflare challenges
+
+After navigation the sidecar looks for a standing Cloudflare challenge by the two markers
+`BlockClassifier` reads (JCLAW-1304): the `cType` in Cloudflare's inline `_cf_chl_opt` options
+(`non-interactive`, `managed` or `interactive`), or `cf-mitigated: challenge` on the last
+main-frame navigation response, reported as `unknown`. Neither is page text, so a challenge
+served in French or Japanese is found as the English one is. A `/cdn-cgi/challenge-platform/`
+script alone is not a challenge: Cloudflare loads its detection script from there into ordinary
+pages too. `challenge_type` is the pure function, and `ScrapeSidecarContractTest` runs it beside
+the classifier on the same bodies so the two sides cannot drift apart.
+
+With no challenge the render settles for `settleMs`, as it always has. With one, the settle
+window is replaced by a poll every 500 ms until both markers are gone or `challengeMs` runs out.
+Once the markers are gone, the page behind the challenge gets what is left of the budget, up to
+`settleMs`, to render. `X-Challenge` reports the type and whether it cleared.
+
+**The click is off unless the operator turns it on** with `scrape.stealth.solveTurnstile`, which
+the JVM reads per render and sends as `solveTurnstile`. With it on, the checkbox of a `managed` or
+`interactive` gate is clicked once Turnstile's frame is visible: at most three clicks, 8 s apart,
+each at the checkbox's offset inside the frame whose URL starts
+`https://challenges.cloudflare.com/cdn-cgi/challenge-platform/`, clamped to that frame's bounding
+box. No other frame, and no point outside that box, is ever clicked. A `non-interactive` or
+`unknown` challenge is only waited on, and with the switch off so is every challenge. A Turnstile
+widget inside a page with content carries no `_cf_chl_opt`, so it is not a gate: never waited
+on, never clicked.
+
+The click only starts Turnstile's own check of the browser; whether that passes is down to the
+fingerprint — see [One story on every surface](#one-story-on-every-surface). Everything the solve
+sets off comes from the render's own context, so it passes the route gate and the WebSocket gate
+like every other request.
+
+The JVM sends `timeoutMs` 35 s and `challengeMs` 45 s, which leaves 40 s of its 120 s call timeout
+for the launch, the UA probe (15 s ceiling) and the route gate's resolve budget (15 s).
+`StealthBrowserTest` holds that sum, and `ScrapeSidecarContractTest` holds that the clamps above
+never shorten what the JVM asks for.
 
 ## Looking like a real browser
 
@@ -221,9 +259,11 @@ fullscreen or kiosk mode reports the same.
 
 **This is not indistinguishability, and should not be described as such.** Every
 *static* fingerprint matches. What remains distinguishable is behaviour: a page is
-loaded, settles, and is read — no mouse movement, no scrolling, no dwell time. A
-detector scoring behaviour rather than fingerprints can still tell, and a render-only
-rung structurally cannot produce those signals.
+loaded, settles, and is read — no scrolling, no dwell time, and no mouse movement. The
+one pointer input is the [challenge click](#cloudflare-challenges), which lands on the
+checkbox with no path leading to it. A detector scoring behaviour rather than
+fingerprints can still tell, and a render-only rung structurally cannot produce those
+signals.
 
 ### One story on every surface
 
@@ -323,6 +363,7 @@ Keys live in the Config DB (Settings), not `conf/application.conf`; none is seed
 | `scrape.stealth.port` | `9532` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
 | `scrape.stealth.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the process exits after that long without a render |
 | `scrape.stealth.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+| `scrape.stealth.solveTurnstile` | `false` | `StealthSidecarManager.solveTurnstile`, per render | `true` lets a render click a Cloudflare gate's checkbox — see [Cloudflare challenges](#cloudflare-challenges) |
 
 `LocalSidecarDaemon` also reads `scrape.stealth.timeoutSeconds` (exported as
 `SIDECAR_REQUEST_TIMEOUT_SEC`) and `scrape.stealth.hfToken` (exported as `HF_TOKEN`) for every

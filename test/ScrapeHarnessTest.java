@@ -153,7 +153,7 @@ class ScrapeHarnessTest extends UnitTest {
         assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.THIN_CONTENT));
         assertEquals(ScrapeRung.IMPERSONATE, BlockClassifier.nextRung(ScrapeReason.TRUST_BLOCK));
         assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.JS_CHALLENGE));
-        assertEquals(ScrapeRung.PROVIDER, BlockClassifier.nextRung(ScrapeReason.TURNSTILE));
+        assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.TURNSTILE));
     }
 
     @Test
@@ -347,8 +347,9 @@ class ScrapeHarnessTest extends UnitTest {
     private static ScrapeObservation rung3(Response response) {
         var url = "https://8.8.8.8/";
         try {
-            var fetched = RenderedFetcher.rendered(response, url);
-            return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
+            var render = RenderedFetcher.rendered(response, url);
+            return ScrapeObservation.of(render.fetched(), WebExtraction.toText(render.fetched()))
+                    .withChallenge(render.challenge());
         } catch (Exception e) {
             return ScrapeObservation.failed(url, e);
         }
@@ -371,6 +372,53 @@ class ScrapeHarnessTest extends UnitTest {
                 "<script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js\"></script>",
                 "X-Settled-Status", "403", "X-Upstream-cf-mitigated", "challenge"))),
                 "a sidecar forwards an origin header the classifier reads as X-Upstream-<name>");
+    }
+
+    @Test
+    void aRenderCarriesTheChallengeItMetWhetherOrNotItCleared() {
+        var cleared = rung3(render(ARTICLE_HTML, "X-Upstream-Status", "403", "X-Settled-Status", "200",
+                "X-Challenge", "managed; cleared"));
+        assertEquals(ScrapeReason.OK, BlockClassifier.classify(cleared));
+        assertEquals("managed; cleared", cleared.challenge());
+        var unsolved = rung3(render(MANAGED_FR, "X-Upstream-Status", "403", "X-Settled-Status", "403",
+                "X-Challenge", "interactive; unsolved; clicks=3"));
+        assertEquals(403, unsolved.status());
+        assertEquals("interactive; unsolved; clicks=3", unsolved.challenge(),
+                "a refused render keeps the report beside its body");
+        assertNull(rung3(render(ARTICLE_HTML, "X-Upstream-Status", "200")).challenge());
+    }
+
+    @Test
+    void theHarnessCountsSolvedAndUnsolvedChallengesPerUrl() throws Exception {
+        var json = """
+                {"allocation":"equal","strata":["challenge"],"entries":[
+                  {"url":"https://solved.test","stratum":"challenge","vendor":"cloudflare",
+                   "outcome":"challenge","rendering":"ssr","rank":1,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}},
+                  {"url":"https://unsolved.test","stratum":"challenge","vendor":"cloudflare",
+                   "outcome":"challenge","rendering":"ssr","rank":2,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}},
+                  {"url":"https://open.test","stratum":"challenge","vendor":"cloudflare",
+                   "outcome":"challenge","rendering":"ssr","rank":3,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}}]}
+                """;
+        var f = Files.createTempFile("scrape-challenge", ".json");
+        Files.writeString(f, json);
+        var corpus = ScrapeCorpus.load(f);
+        Files.deleteIfExists(f);
+
+        var rep = ScrapeHarness.run("stub", url -> {
+            if (url.contains("unsolved.test")) {
+                return refused(403, MANAGED_EN, CF_CHALLENGE).withChallenge("managed; unsolved; clicks=3");
+            }
+            var page = obs("<html><body>x</body></html>", ARTICLE_TEXT);
+            return url.contains("solved.test") ? page.withChallenge("managed; cleared; clicks=1") : page;
+        }, corpus, 2);
+
+        assertEquals(Map.of("managed; cleared; clicks=1", 1, "managed; unsolved; clicks=3", 1), rep.byChallenge());
+        assertEquals("managed; cleared; clicks=1", rep.results().get(0).challenge());
+        assertEquals("managed; unsolved; clicks=3", rep.results().get(1).challenge());
+        assertNull(rep.results().get(2).challenge(), "a page that met no challenge records none");
     }
 
     @Test

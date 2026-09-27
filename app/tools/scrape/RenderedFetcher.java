@@ -6,9 +6,11 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.LocalSidecarDaemon;
 import services.StealthSidecarManager;
+import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeSidecarException;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -19,6 +21,7 @@ import utils.WebExtraction;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.HashMap;
 
 /**
  * Rung 3: render through the stealth browser sidecar (JCLAW-1088).
@@ -45,10 +48,17 @@ public final class RenderedFetcher {
 
     private static final String HTML = "text/html; charset=utf-8";
 
-    /** A render is slow by nature: navigation, then a settle window for a challenge to
-     *  resolve itself. Well above the sidecar's own per-render timeout so reaching this
-     *  means the sidecar is wedged, not that the page was slow. */
-    private static final Duration CALL_TIMEOUT = Duration.ofSeconds(120);
+    /** A render is slow by nature: navigation, then a settle window or a challenge wait.
+     *  Well above the budgets below so reaching this means the sidecar is wedged, not that
+     *  the page was slow. Public because Play's tests live in the default package. */
+    public static final Duration CALL_TIMEOUT = Duration.ofSeconds(120);
+
+    /** Sent with every render rather than left to the sidecar's defaults, so the budgets are
+     *  this class's to keep inside {@link #CALL_TIMEOUT}. */
+    private static final Duration NAVIGATION_TIMEOUT = Duration.ofSeconds(35);
+    /** How long a render polls a standing Cloudflare challenge, in place of its settle window
+     *  (JCLAW-1306). */
+    private static final Duration CHALLENGE_BUDGET = Duration.ofSeconds(45);
 
     private static final OkHttpClient CLIENT = HttpFactories.general().newBuilder()
             .callTimeout(CALL_TIMEOUT)
@@ -61,6 +71,10 @@ public final class RenderedFetcher {
             .readTimeout(Duration.ZERO)
             .build();
 
+    /** A rendered page, and the challenge the render met as the sidecar's {@code X-Challenge}
+     *  reported it — null when none stood. */
+    public record Render(WebExtraction.FetchResult fetched, @Nullable String challenge) {}
+
     private RenderedFetcher() {}
 
     public static boolean available() {
@@ -72,25 +86,28 @@ public final class RenderedFetcher {
         return fetch(url, ScrapeLadder.DEFAULT_LANGUAGE);
     }
 
+    /** Render {@code url} in the shape the other rungs produce; {@link #render} also says
+     *  which challenge the render met. */
+    public static WebExtraction.FetchResult fetch(String url, String language)
+            throws IOException {
+        return render(url, language).fetched();
+    }
+
     /**
-     * Render {@code url} and return it in the same shape the other rungs produce.
+     * Render {@code url} through the stealth sidecar.
      *
      * <p>{@code language} reaches the browser context, so an escalated page comes back
      * in the language the unescalated one would have. Without it a crawl asking for
      * Japanese got Japanese from rung 1 and English from rung 3, with only a rung
      * marker in the output to explain the difference.
      */
-    public static WebExtraction.FetchResult fetch(String url, String language)
-            throws IOException {
+    public static Render render(String url, String language) throws IOException {
         // Authoritative check stays in the JVM. hostResolverRule throws every
         // SecurityException assertUrlSafe does, so an unsafe entry URL never reaches
         // the browser.
         var pinRule = SsrfGuard.hostResolverRule(url);
         var baseUrl = StealthSidecarManager.ensureRunning();
 
-        var payload = new JsonObject();
-        payload.addProperty("url", url);
-        payload.addProperty("language", language);
         var pins = new JsonObject();
         // "MAP <host> <ip>" — the sidecar rebuilds the flag, so the JVM never has to
         // know Chromium's argument syntax and the guard never has to emit it.
@@ -98,14 +115,11 @@ public final class RenderedFetcher {
             var parts = rule.split(" ");
             if (parts.length == 3) pins.addProperty(parts[1], parts[2]);
         });
-        payload.add("pins", pins);
-        payload.addProperty("maxBytes", WebExtraction.maxBodyBytes());
-        ScrapeProxy.current().ifPresent(proxy -> payload.add("proxy", proxy.toJson()));
 
         var request = new Request.Builder()
                 .url(baseUrl + "/render")
                 .header(LocalSidecarDaemon.AUTH_HEADER, StealthSidecarManager.authToken())
-                .post(RequestBody.create(payload.toString(), JSON))
+                .post(RequestBody.create(renderRequest(url, language, pins).toString(), JSON))
                 .build();
 
         try (var response = CLIENT.newCall(request).execute()) {
@@ -113,16 +127,29 @@ public final class RenderedFetcher {
         }
     }
 
+    /** The body of one render request. Public because Play's tests live in the default package. */
+    public static JsonObject renderRequest(String url, String language, JsonObject pins) {
+        var payload = new JsonObject();
+        payload.addProperty("url", url);
+        payload.addProperty("language", language);
+        payload.add("pins", pins);
+        payload.addProperty("maxBytes", WebExtraction.maxBodyBytes());
+        payload.addProperty("timeoutMs", NAVIGATION_TIMEOUT.toMillis());
+        payload.addProperty("challengeMs", CHALLENGE_BUDGET.toMillis());
+        payload.addProperty("solveTurnstile", StealthSidecarManager.solveTurnstile());
+        ScrapeProxy.current().ifPresent(proxy -> payload.add("proxy", proxy.toJson()));
+        return payload;
+    }
+
     /**
      * The sidecar's answer to a render of {@code url}, in the shape the other rungs produce.
      * Public because Play's tests live in the default package.
      *
      * @throws WebExtraction.HttpStatusException when the render ended on a status of 400 or
-     *         above, carrying the rendered body for the classifier
+     *         above, carrying the rendered body for the classifier and the challenge report
      * @throws ScrapeSidecarException when the sidecar itself failed
      */
-    public static WebExtraction.FetchResult rendered(Response response, String url)
-            throws IOException {
+    public static Render rendered(Response response, String url) throws IOException {
         // Bounded like every other transport: a render settles into a DOM the origin
         // controls the size of, and readTimeout is disabled here, so an unbounded
         // read is the one place a page could push arbitrary bytes onto the heap.
@@ -134,17 +161,20 @@ public final class RenderedFetcher {
         }
         reportBlockedHosts(response, url);
         WebExtraction.noteUpstreamTruncated(response.header("X-Upstream-Truncated"), url);
+        var challenge = response.header(ScrapeObservation.CHALLENGE_HEADER);
         int status = renderedStatus(response, url);
         if (status >= 400) {
-            throw new WebExtraction.HttpStatusException(status, url, body, HTML,
-                    WebExtraction.classifiedHeaders(response, "X-Upstream-"));
+            var headers = new HashMap<>(WebExtraction.classifiedHeaders(response, "X-Upstream-"));
+            if (challenge != null) headers.put(ScrapeObservation.CHALLENGE_HEADER, challenge);
+            throw new WebExtraction.HttpStatusException(status, url, body, HTML, headers);
         }
-        return new WebExtraction.FetchResult(body, HTML, finalUrl(response, url));
+        return new Render(new WebExtraction.FetchResult(body, HTML, finalUrl(response, url)), challenge);
     }
 
     /**
-     * Where the settle window ended decides, when the sidecar reports it: an interstitial
-     * served 403 that resolves itself ends on 200, and the settled body is the real page.
+     * Where the settle or challenge window ended decides, when the sidecar reports it: an
+     * interstitial served 403 that resolves itself ends on 200, and the settled body is the real
+     * page.
      * Without it, the first navigation's status decides.
      */
     private static int renderedStatus(Response response, String url) {

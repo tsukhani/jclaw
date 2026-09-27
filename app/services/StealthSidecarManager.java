@@ -27,6 +27,9 @@ public final class StealthSidecarManager {
     /** Public because Play's tests live in the default package. */
     public static final String CFG_ENABLED = "scrape.stealth.enabled";
 
+    /** Public because Play's tests live in the default package. */
+    public static final String CFG_SOLVE_TURNSTILE = "scrape.stealth.solveTurnstile";
+
     private static final LocalSidecarDaemon DAEMON = new LocalSidecarDaemon(new LocalSidecarDaemon.Config(
             "sidecar/stealth", "data/stealth-sidecar", "scrape.stealth", 9532, 300,
             "scrape", "stealth-sidecar", "stealth browser sidecar",
@@ -44,6 +47,12 @@ public final class StealthSidecarManager {
         if (!ConfigService.getBoolean(CFG_ENABLED, true)) return false;
         if (!UvProbe.isAvailable()) return false;
         return new File(new File(Play.applicationPath, "sidecar/stealth"), "serve.py").isFile();
+    }
+
+    /** Whether a render may click the checkbox of a Cloudflare challenge gate (JCLAW-1306). Read per
+     *  render; absent means off. */
+    public static boolean solveTurnstile() {
+        return ConfigService.getBoolean(CFG_SOLVE_TURNSTILE, false);
     }
 
     /** Base URL of a healthy sidecar, spawning it if needed. Single-flight (JCLAW-830). */
