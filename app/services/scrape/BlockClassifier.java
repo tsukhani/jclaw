@@ -1,5 +1,8 @@
 package services.scrape;
 
+import org.jspecify.annotations.Nullable;
+
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -27,6 +30,16 @@ public final class BlockClassifier {
      *  "HTTP" would never fire. */
     private static final Pattern HTTP_STATUS =
             Pattern.compile("http (\\d{3})", Pattern.CASE_INSENSITIVE);
+
+    /** The response headers {@link #classify} reads off a refused response. */
+    public static final List<String> RESPONSE_HEADERS = List.of("cf-mitigated");
+
+    /** Cloudflare's inline challenge options name the challenge type in every locale;
+     *  matched after {@code _cf_chl_opt} so an unrelated {@code cType} cannot count. */
+    private static final String CF_CHALLENGE_OPTIONS = "_cf_chl_opt";
+    private static final Pattern CF_CHALLENGE_TYPE =
+            Pattern.compile("ctype\\s*:\\s*['\"]([a-z-]+)['\"]");
+    private static final String TURNSTILE_SCRIPT = "challenges.cloudflare.com/turnstile/";
 
     private static final String[] TURNSTILE_MARKERS = {
             "challenges.cloudflare.com/turnstile", "cf-turnstile"
@@ -66,7 +79,11 @@ public final class BlockClassifier {
 
     public static ScrapeReason classify(ScrapeObservation obs, int minChars) {
         if (obs == null) return ScrapeReason.ERROR;
-        if (obs.failed()) return classifyError(obs.resolvedError().toLowerCase(Locale.ROOT));
+        if (obs.failed()) {
+            var challenge = obs.status() >= 400 ? cloudflareChallenge(obs) : null;
+            return challenge != null ? challenge
+                    : classifyError(obs.resolvedError().toLowerCase(Locale.ROOT));
+        }
 
         var raw = obs.rawBody() == null ? "" : obs.rawBody();
 
@@ -93,10 +110,44 @@ public final class BlockClassifier {
     }
 
     /** Whether this origin serves rendered HTML to declared crawlers. See
-     *  {@link #PRERENDER_MARKERS}. */
+     *  {@link #PRERENDER_MARKERS}. A refused response served us nothing to compare. */
     public static boolean hasPrerenderMarkers(ScrapeObservation obs) {
-        return obs != null && obs.rawBody() != null
+        return obs != null && !obs.failed() && obs.rawBody() != null
                 && containsAny(obs.rawBody(), PRERENDER_MARKERS);
+    }
+
+    /**
+     * A Cloudflare challenge on a refused response, or null when there is no evidence of one.
+     *
+     * <p>Evidence is {@code cf-mitigated: challenge} or a {@code cType} in the inline challenge
+     * options. {@code /cdn-cgi/challenge-platform/} alone is not: Cloudflare injects its
+     * detection script there into block pages and ordinary pages alike. Never English page
+     * text, which a localized challenge does not carry.
+     */
+    private static @Nullable ScrapeReason cloudflareChallenge(ScrapeObservation obs) {
+        var raw = obs.rawBody();
+        int options = raw.indexOf(CF_CHALLENGE_OPTIONS);
+        if (options >= 0) {
+            var type = CF_CHALLENGE_TYPE.matcher(raw);
+            // Only "interactive" always wants a click; managed and non-interactive can clear in a browser.
+            if (type.find(options)) {
+                return "interactive".equals(type.group(1)) ? ScrapeReason.TURNSTILE : ScrapeReason.JS_CHALLENGE;
+            }
+        }
+        var mitigated = obs.header("cf-mitigated");
+        if (mitigated == null || !"challenge".equalsIgnoreCase(mitigated.strip())) return null;
+        return raw.contains(TURNSTILE_SCRIPT) ? ScrapeReason.TURNSTILE : ScrapeReason.JS_CHALLENGE;
+    }
+
+    /**
+     * As {@link #nextRung(ScrapeReason, ScrapeRung)} for an attempt that ended on
+     * {@code status} (0 when it was not refused). A challenge read off a refused response
+     * routes as that status alone did: whether a detected challenge should skip rung 2 is a
+     * separate, measured decision (JCLAW-1304).
+     */
+    public static ScrapeRung nextRung(ScrapeReason reason, int status, ScrapeRung attempted) {
+        boolean challenge = reason == ScrapeReason.JS_CHALLENGE || reason == ScrapeReason.TURNSTILE;
+        return nextRung(challenge && status >= 400 ? statusReason(status) : reason, attempted);
     }
 
     /**
@@ -157,18 +208,19 @@ public final class BlockClassifier {
         // SocketTimeoutException the harness now sees says "timeout".
         if (lower.contains("timed out") || lower.contains("timeout")) return ScrapeReason.TIMEOUT;
         var m = HTTP_STATUS.matcher(lower);
-        if (m.find()) {
-            return switch (Integer.parseInt(m.group(1))) {
-                case 401, 402, 451 -> ScrapeReason.POLICY_BLOCK;
-                case 403, 406, 429, 503 -> ScrapeReason.TRUST_BLOCK;
-                // A dead link is not a transport problem: rendering it costs seconds and
-                // an escalation slot to arrive at the same 404. Crawls hit these
-                // constantly, so leaving them in ERROR spent the whole budget on them.
-                case 404, 410 -> ScrapeReason.NOT_FOUND;
-                default -> ScrapeReason.ERROR;
-            };
-        }
-        return ScrapeReason.ERROR;
+        return m.find() ? statusReason(Integer.parseInt(m.group(1))) : ScrapeReason.ERROR;
+    }
+
+    private static ScrapeReason statusReason(int status) {
+        return switch (status) {
+            case 401, 402, 451 -> ScrapeReason.POLICY_BLOCK;
+            case 403, 406, 429, 503 -> ScrapeReason.TRUST_BLOCK;
+            // A dead link is not a transport problem: rendering it costs seconds and
+            // an escalation slot to arrive at the same 404. Crawls hit these
+            // constantly, so leaving them in ERROR spent the whole budget on them.
+            case 404, 410 -> ScrapeReason.NOT_FOUND;
+            default -> ScrapeReason.ERROR;
+        };
     }
 
     /** Mirrors {@code WebExtraction}'s routing: an explicit html content type, or — when

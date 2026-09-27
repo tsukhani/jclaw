@@ -15,7 +15,9 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.Tx;
+import services.scrape.BlockClassifier;
 import services.scrape.ScrapeJobService;
+import services.scrape.ScrapeReason;
 import tools.WebScrapeTool;
 import tools.scrape.WebScrapeSettings;
 
@@ -270,11 +272,28 @@ class WebScrapeToolTest extends UnitTest {
         assertTrue(out.contains("{\"a\":1}"), "JSON passes through unchanged");
     }
 
+    @Test
+    void aRefusedPageReachesTheClassifierWithItsBody() {
+        // The harness scores this path as its own lane, so a crawl's refusals must carry what rung 1's do.
+        routes.refuse("https://site.test/gated", 403,
+                "<script>window._cf_chl_opt={cvId: '3',cType: 'interactive'};</script>",
+                "cf-mitigated", "challenge");
+
+        var obs = new WebScrapeTool().fetchSingle("https://site.test/gated");
+
+        assertEquals(403, obs.status());
+        assertEquals("challenge", obs.header("cf-mitigated"));
+        assertEquals(ScrapeReason.TURNSTILE, BlockClassifier.classify(obs));
+    }
+
     /** Serves canned responses keyed by URL; records every URL actually requested. */
     static final class RouteInterceptor implements Interceptor {
         private final Map<String, String> bodies = new HashMap<>();
         private final Map<String, String> types = new HashMap<>();
         private final Map<String, IOException> failures = new HashMap<>();
+        private final Map<String, Refusal> refusals = new HashMap<>();
+
+        record Refusal(int code, String body, List<String> headers) {}
         // Written from the crawl's fetch workers, several at once.
         final List<String> hits = new CopyOnWriteArrayList<>();
         private final Map<String, Hold> holds = new ConcurrentHashMap<>();
@@ -304,6 +323,10 @@ class WebScrapeToolTest extends UnitTest {
 
         void fail(String url, IOException e) { failures.put(url, e); }
 
+        void refuse(String url, int code, String body, String... headers) {
+            refusals.put(url, new Refusal(code, body, List.of(headers)));
+        }
+
         @Override
         public Response intercept(Chain chain) throws IOException {
             var url = chain.request().url().toString();
@@ -320,6 +343,19 @@ class WebScrapeToolTest extends UnitTest {
             var failure = failures.get(url);
             if (failure != null) {
                 throw failure;
+            }
+            var refusal = refusals.get(url);
+            if (refusal != null) {
+                var refused = new Response.Builder()
+                        .request(chain.request())
+                        .protocol(Protocol.HTTP_1_1)
+                        .code(refusal.code())
+                        .message("Refused")
+                        .body(ResponseBody.create(refusal.body(), MediaType.parse("text/html")));
+                for (int i = 0; i < refusal.headers().size(); i += 2) {
+                    refused.addHeader(refusal.headers().get(i), refusal.headers().get(i + 1));
+                }
+                return refused.build();
             }
             var body = bodies.get(url);
             if (body == null) {

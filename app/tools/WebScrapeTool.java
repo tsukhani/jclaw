@@ -405,7 +405,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             var fetched = WebExtraction.fetch(url, client(), headersFor(WebScrapeSettings.language(), false));
             return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
         } catch (Exception e) {
-            return ScrapeObservation.failed(url, reason(e));
+            return ScrapeObservation.failed(url, e);
         }
     }
 
@@ -875,7 +875,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *  host's next slot overlaps other hosts' fetches instead of blocking the crawl. */
     private record Outcome(WebExtraction.@Nullable FetchResult fetched, @Nullable String text,
                            ScrapeReason reason, ScrapeRung nextRung, @Nullable String detail,
-                           ScrapeRung servedBy) {
+                           ScrapeRung servedBy, int status) {
         boolean usable() {
             return reason == ScrapeReason.OK;
         }
@@ -920,7 +920,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         } catch (Exception e) {
             // One unreachable page must not end the crawl — the caller asked for a
             // site, and a broken link on it is the site's problem, not the run's.
-            plain = classified(uri, null, ScrapeObservation.failed(uri.toString(), reason(e)));
+            plain = classified(uri, null, ScrapeObservation.failed(uri.toString(), e));
         }
         return escalate(uri, plain, state, language);
     }
@@ -937,7 +937,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         if (plain.usable() || !ScrapeLadder.available()) return plain;
         // Ask before claiming: a reason no installed rung addresses would spend the slot
         // without issuing a request, and be counted in the "escalated N pages" line.
-        if (!ScrapeLadder.wouldAttempt(plain.reason())) return plain;
+        if (!ScrapeLadder.wouldAttempt(plain.reason(), plain.status())) return plain;
         // Checked between levels alone this bounds nothing: rung 2 waits up to 90s and
         // rung 3 up to 120s, so a 60s crawl could block an agent turn for minutes. A
         // climb already in flight keeps running — the rungs have no cancellation seam.
@@ -959,14 +959,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
         var best = ScrapeLadder.climb(uri.toString(),
                 new ScrapeLadder.Attempt(ScrapeRung.PLAIN, plain.fetched(), plain.text(),
-                        plain.reason(), plain.detail()),
+                        plain.reason(), plain.detail(), plain.status()),
                 language);
         if (best.servedBy() == ScrapeRung.PLAIN) return plain;
         EventLogger.info(EVENT_CATEGORY, "%s: served by %s after %s at PLAIN"
                 .formatted(uri, best.servedBy(), plain.reason()), null);
         return new Outcome(best.fetched(), best.text(), best.reason(),
-                BlockClassifier.nextRung(best.reason(), best.servedBy()),
-                best.detail(), best.servedBy());
+                BlockClassifier.nextRung(best.reason(), best.status(), best.servedBy()),
+                best.detail(), best.servedBy(), best.status());
     }
 
     /** Runs the shared classifier and records the outcome, so a live install produces
@@ -974,14 +974,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static Outcome classified(URI uri, WebExtraction.@Nullable FetchResult fetched,
                                       ScrapeObservation obs) {
         var reason = BlockClassifier.classify(obs);
-        var next = BlockClassifier.nextRung(reason);
+        var next = BlockClassifier.nextRung(reason, obs.status(), ScrapeRung.PLAIN);
         if (reason != ScrapeReason.OK) {
             EventLogger.info(EVENT_CATEGORY,
                     "%s: %s (would need %s)".formatted(uri, reason, next),
                     obs.failed() ? obs.error() : "extracted %d chars".formatted(obs.textLength()));
         }
         return new Outcome(fetched, obs.extractedText(), reason, next, obs.error(),
-                ScrapeRung.PLAIN);
+                ScrapeRung.PLAIN, obs.status());
     }
 
     /** Runs after a level completes, single-threaded, so {@code seen} needs no

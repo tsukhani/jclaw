@@ -271,7 +271,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
         // unreachable (JCLAW-1099). The SSRF, host-allowlist and TLS branches above
         // deliberately do NOT escalate: those are our own refusals, and retrying
         // them through a different transport would be a way around the guard.
-        var escalated = climb(url, null, null, e.getMessage(), agent);
+        var escalated = climb(url, null, null, e, agent);
         if (escalated.usable()) {
             var escalatedBody = escalated.fetched();
             return ToolRegistry.ToolResult.text(escalatedBody == null ? escalated.resolvedText()
@@ -299,16 +299,17 @@ public class WebFetchTool implements ToolRegistry.Tool {
     /** Hand one URL to the ladder, classifying the plain attempt the way the crawler and
      *  the harness both do so all three agree on what counts as a failure. */
     private static ScrapeLadder.Attempt climb(String url, WebExtraction.@Nullable FetchResult fetched,
-                                              @Nullable String text, @Nullable String error, Agent agent) {
-        var detail = error == null ? "fetch failed" : error;
-        var obs = fetched == null
-                ? ScrapeObservation.failed(url, detail)
-                : ScrapeObservation.of(fetched, text);
+                                              @Nullable String text, @Nullable Exception failure, Agent agent) {
+        var error = failure == null ? null : failure.getMessage();
+        var obs = fetched != null ? ScrapeObservation.of(fetched, text)
+                : failure instanceof WebExtraction.HttpStatusException refusal
+                        ? ScrapeObservation.refused(url, refusal)
+                        : ScrapeObservation.failed(url, error == null ? "fetch failed" : error);
         var plain = new ScrapeLadder.Attempt(
-                ScrapeRung.PLAIN, fetched, text, BlockClassifier.classify(obs), error);
+                ScrapeRung.PLAIN, fetched, text, BlockClassifier.classify(obs), error, obs.status());
         // Ask before claiming, as the crawler does: a reason no installed rung addresses
         // would spend the budget without a request ever being issued.
-        if (plain.usable() || !ScrapeLadder.wouldAttempt(plain.reason())) return plain;
+        if (plain.usable() || !ScrapeLadder.wouldAttempt(plain.reason(), plain.status())) return plain;
         if (!claimEscalation(agent)) {
             EventLogger.info(EVENT_CATEGORY,
                     "%s: not escalated, this agent's budget for the minute is spent".formatted(url),

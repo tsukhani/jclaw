@@ -39,7 +39,7 @@ class ScrapeLadderTest extends UnitTest {
         var fetched = new WebExtraction.FetchResult(
                 text == null ? new byte[0] : text.getBytes(StandardCharsets.UTF_8),
                 "text/html", "https://example.test/");
-        return new ScrapeLadder.Attempt(rung, fetched, text, reason, null);
+        return new ScrapeLadder.Attempt(rung, fetched, text, reason, null, 0);
     }
 
     private static ScrapeLadder.Attempt plain(ScrapeReason reason, String text) {
@@ -100,6 +100,30 @@ class ScrapeLadderTest extends UnitTest {
                                 .formatted(reason, attempted, next));
             }
         }
+    }
+
+    @Test
+    void aChallengeReadOffARefusalStillClimbsThroughRungTwo() {
+        // JCLAW-1304 names the challenge behind a 403; skipping rung 2 for one is a separate,
+        // measured decision, so until then it routes exactly as the bare status did.
+        for (var challenge : java.util.List.of(ScrapeReason.JS_CHALLENGE, ScrapeReason.TURNSTILE)) {
+            for (var status : new int[] {403, 429, 503}) {
+                for (var attempted : ScrapeRung.values()) {
+                    assertEquals(BlockClassifier.nextRung(ScrapeReason.TRUST_BLOCK, attempted),
+                            BlockClassifier.nextRung(challenge, status, attempted),
+                            "%s refused with %d after %s".formatted(challenge, status, attempted));
+                }
+            }
+        }
+        assertEquals(ScrapeRung.IMPERSONATE,
+                BlockClassifier.nextRung(ScrapeReason.TURNSTILE, 403, ScrapeRung.PLAIN));
+        assertEquals(ScrapeRung.BROWSER,
+                BlockClassifier.nextRung(ScrapeReason.TURNSTILE, 403, ScrapeRung.IMPERSONATE));
+        // A challenge served as a page, not a refusal, keeps the route it always had.
+        assertEquals(ScrapeRung.BROWSER,
+                BlockClassifier.nextRung(ScrapeReason.JS_CHALLENGE, 0, ScrapeRung.PLAIN));
+        assertEquals(ScrapeRung.PROVIDER,
+                BlockClassifier.nextRung(ScrapeReason.TURNSTILE, 0, ScrapeRung.PLAIN));
     }
 
     @Test
@@ -200,15 +224,15 @@ class ScrapeLadderTest extends UnitTest {
         assumeTrue(ScrapeLadder.available(),
                 "no scrape sidecar installed — wouldAttempt cannot be distinguished here");
 
-        assertTrue(ScrapeLadder.wouldAttempt(ScrapeReason.THIN_CONTENT),
+        assertTrue(ScrapeLadder.wouldAttempt(ScrapeReason.THIN_CONTENT, 0),
                 "a client-rendered page is exactly what the browser rung is for");
-        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.POLICY_BLOCK),
+        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.POLICY_BLOCK, 0),
                 "a policy refusal reaches no installed rung");
-        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.NOT_FOUND),
+        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.NOT_FOUND, 0),
                 "a dead link reaches no installed rung");
 
         disableEveryRung();
-        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.THIN_CONTENT),
+        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.THIN_CONTENT, 0),
                 "with no sidecar installed nothing is attempted");
     }
 

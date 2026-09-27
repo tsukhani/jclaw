@@ -1,3 +1,8 @@
+import okhttp3.MediaType;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.scrape.BlockClassifier;
@@ -6,10 +11,13 @@ import services.scrape.ScrapeHarness;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
+import tools.scrape.RenderedFetcher;
 import utils.WebExtraction;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Locale;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -223,6 +231,160 @@ class ScrapeHarnessTest extends UnitTest {
         assertEquals(0, rep.ok(), "ground truth must veto a classifier OK");
         assertEquals(ScrapeReason.JS_CHALLENGE, rep.results().get(0).reason());
         Files.deleteIfExists(f);
+    }
+
+    // ==================== Refused responses (JCLAW-1304) ====================
+
+    private static final String REFUSED_URL = "https://x.test/";
+    private static final Map<String, String> CF_CHALLENGE = Map.of("cf-mitigated", "challenge");
+
+    /** A Cloudflare challenge as served with a 403: the type is named in the inline options,
+     *  and the visible text is in whatever language the visitor's locale picked. */
+    private static String challenge(String type, String title, String noscript) {
+        return """
+                <!DOCTYPE html><html><head><title>%s</title>
+                <meta name="robots" content="noindex,nofollow"></head><body>
+                <noscript><span id="challenge-error-text">%s</span></noscript>
+                <script>(function(){window._cf_chl_opt={cvId: '3',cZone: "x.test",cType: '%s',
+                cRay: '8c4f0d2e9a1b2c3d',cH: 'abc'};var cpo=document.createElement('script');
+                cpo.src='/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=8c4f0d2e9a1b2c3d';
+                document.getElementsByTagName('head')[0].appendChild(cpo);}());</script>
+                </body></html>""".formatted(title, noscript, type);
+    }
+
+    private static final String MANAGED_EN = challenge("managed",
+            "Just a moment...", "Enable JavaScript and cookies to continue");
+    private static final String MANAGED_FR = challenge("managed",
+            "Un instant\u2026", "Activez JavaScript et les cookies pour continuer");
+
+    /** Cloudflare's firewall block page: no challenge, but its detection script loads from
+     *  the same /cdn-cgi/challenge-platform/ path a challenge does. */
+    private static final String CF_BLOCK_PAGE = """
+            <!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head>
+            <body><h1>Sorry, you have been blocked</h1><p>Cloudflare Ray ID: 8c4f0d2e9a1b2c3d</p>
+            <script>(function(){var s=document.createElement('script');
+            s.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.head.appendChild(s);})();
+            </script></body></html>""";
+
+    private static final String ARTICLE_HTML = "<html><head><title>Widgets</title></head><body><article><p>"
+            + "Widgets combine several parts into one, and this page explains how. ".repeat(20)
+            + "</p></article></body></html>";
+
+    private static ScrapeObservation refused(int status, String body, Map<String, String> headers) {
+        return ScrapeObservation.failed(REFUSED_URL, new WebExtraction.HttpStatusException(status,
+                REFUSED_URL, body.getBytes(StandardCharsets.UTF_8), "text/html; charset=UTF-8", headers));
+    }
+
+    @Test
+    void aRefusalCarryingCfMitigatedAndAManagedChallengeIsAJsChallenge() {
+        assertEquals(ScrapeReason.JS_CHALLENGE,
+                BlockClassifier.classify(refused(403, MANAGED_EN, CF_CHALLENGE)));
+    }
+
+    @Test
+    void aLocalizedChallengeClassifiesAsTheEnglishOneDoes() {
+        // Scrapling's solver matched English strings and left every other locale unsolved (upstream c032626).
+        var lower = MANAGED_FR.toLowerCase(Locale.ROOT);
+        for (var english : new String[] {"just a moment", "enable javascript", "verifying you are human"}) {
+            assertFalse(lower.contains(english), "the fixture must carry no English: " + english);
+        }
+        assertEquals(ScrapeReason.JS_CHALLENGE,
+                BlockClassifier.classify(refused(403, MANAGED_FR, CF_CHALLENGE)));
+        assertEquals(BlockClassifier.classify(refused(403, MANAGED_EN, Map.of())),
+                BlockClassifier.classify(refused(403, MANAGED_FR, Map.of())),
+                "without the header the inline options still decide, in any language");
+    }
+
+    @Test
+    void aRefusalWithNoChallengeEvidenceStaysATrustBlock() {
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(
+                refused(403, "<html><body><h1>403 Forbidden</h1></body></html>", Map.of())));
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(refused(403, CF_BLOCK_PAGE, Map.of())),
+                "a challenge-platform script alone is Cloudflare's detection, not a challenge");
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(
+                refused(403, "<script>var config = {cType: 'managed'};</script>", Map.of())),
+                "a cType counts only inside Cloudflare's challenge options");
+    }
+
+    @Test
+    void theChallengeTypeDecidesBetweenAJsChallengeAndTurnstile() {
+        assertEquals(ScrapeReason.TURNSTILE, BlockClassifier.classify(refused(403,
+                challenge("interactive", "Un instant\u2026", ""), CF_CHALLENGE)));
+        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(refused(403,
+                challenge("non-interactive", "Just a moment...", ""), CF_CHALLENGE)));
+        assertEquals(ScrapeReason.TURNSTILE, BlockClassifier.classify(refused(403,
+                "<script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js\"></script>",
+                CF_CHALLENGE)), "an embedded widget with no inline options is Turnstile");
+        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(refused(403, "", CF_CHALLENGE)),
+                "the header alone names a challenge even when the body says nothing");
+        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(refused(503, MANAGED_EN, Map.of())),
+                "rungs 2 and 3 see no origin header, so the inline options suffice");
+    }
+
+    /** A stealth-sidecar answer: always 200, with the origin's outcome in its headers. */
+    private static Response render(String body, String... headers) {
+        var b = new Response.Builder()
+                .request(new Request.Builder().url("http://127.0.0.1:9532/render").build())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200).message("OK")
+                .body(ResponseBody.create(body, MediaType.parse("text/html; charset=utf-8")));
+        for (int i = 0; i < headers.length; i += 2) b.addHeader(headers[i], headers[i + 1]);
+        return b.build();
+    }
+
+    private static ScrapeObservation rung3(Response response) {
+        var url = "https://8.8.8.8/";
+        try {
+            var fetched = RenderedFetcher.rendered(response, url);
+            return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
+        } catch (Exception e) {
+            return ScrapeObservation.failed(url, e);
+        }
+    }
+
+    @Test
+    void aRenderThatSettledOn200IsScoredFromItsSettledBody() {
+        assertEquals(ScrapeReason.OK, BlockClassifier.classify(rung3(render(ARTICLE_HTML,
+                "X-Upstream-Status", "403", "X-Settled-Status", "200"))));
+        var unsettled = rung3(render(ARTICLE_HTML, "X-Upstream-Status", "403"));
+        assertEquals(403, unsettled.status(), "without the settled header the first navigation decides");
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(unsettled));
+        assertEquals(403, rung3(render(ARTICLE_HTML,
+                "X-Upstream-Status", "403", "X-Settled-Status", "0")).status(),
+                "a settled 0 reports no navigation, so it cannot overrule the first one");
+        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(rung3(render(MANAGED_FR,
+                "X-Upstream-Status", "403", "X-Settled-Status", "403"))),
+                "a challenge still standing when the window closed is classified from its body");
+        assertEquals(ScrapeReason.TURNSTILE, BlockClassifier.classify(rung3(render(
+                "<script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js\"></script>",
+                "X-Settled-Status", "403", "X-Upstream-cf-mitigated", "challenge"))),
+                "a sidecar forwards an origin header the classifier reads as X-Upstream-<name>");
+    }
+
+    @Test
+    void theUnresolvedHistogramTellsAChallengeFromATrustBlockAndRoutesBothAlike() throws Exception {
+        var json = """
+                {"allocation":"equal","strata":["challenge"],"entries":[
+                  {"url":"https://gated.test","stratum":"challenge","vendor":"cloudflare",
+                   "outcome":"challenge","rendering":"ssr","rank":1,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}},
+                  {"url":"https://refused.test","stratum":"challenge","vendor":"cloudflare",
+                   "outcome":"challenge","rendering":"ssr","rank":2,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}}]}
+                """;
+        var f = Files.createTempFile("scrape-refused", ".json");
+        Files.writeString(f, json);
+        var corpus = ScrapeCorpus.load(f);
+        Files.deleteIfExists(f);
+
+        var rep = ScrapeHarness.run("stub", url -> url.contains("gated.test")
+                ? refused(403, MANAGED_EN, CF_CHALLENGE)
+                : refused(403, CF_BLOCK_PAGE, Map.of()), corpus, 2);
+
+        assertEquals(1, rep.byReason().get(ScrapeReason.JS_CHALLENGE.name()));
+        assertEquals(1, rep.byReason().get(ScrapeReason.TRUST_BLOCK.name()));
+        // Whether a detected challenge should skip rung 2 is its own measured decision.
+        assertEquals(Map.of(ScrapeRung.IMPERSONATE.name(), 2), rep.byNextRung());
     }
 
     // ==================== The gate verdict ====================

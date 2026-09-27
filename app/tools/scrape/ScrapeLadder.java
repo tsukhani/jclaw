@@ -42,9 +42,11 @@ public final class ScrapeLadder {
     /** The language a caller that has no preference of its own escalates in. */
     public static final String DEFAULT_LANGUAGE = "en";
 
-    /** One rung's product, and which rung produced it. */
+    /** One rung's product, and which rung produced it. {@code status} is the HTTP status of a
+     *  refused attempt, 0 for any other, and is what a challenge read off a refusal routes on. */
     public record Attempt(ScrapeRung servedBy, WebExtraction.@Nullable FetchResult fetched,
-                          @Nullable String text, ScrapeReason reason, @Nullable String detail) {
+                          @Nullable String text, ScrapeReason reason, @Nullable String detail,
+                          int status) {
 
         public boolean usable() {
             return reason == ScrapeReason.OK;
@@ -69,15 +71,16 @@ public final class ScrapeLadder {
     }
 
     /**
-     * Whether {@link #climb} would issue a request for a rung-1 failure with this reason.
+     * Whether {@link #climb} would issue a request for a rung-1 failure with this reason,
+     * refused with {@code status} (0 when it was not refused).
      *
      * <p>A caller holding a budget must ask before claiming a slot: {@code climb} returns
      * without a request when the classifier names an uninstalled rung, so claiming first
      * spends the budget on a page nothing was attempted for and reports an escalation
      * that never happened.
      */
-    public static boolean wouldAttempt(ScrapeReason reason) {
-        return isInstalled(BlockClassifier.nextRung(reason, ScrapeRung.PLAIN));
+    public static boolean wouldAttempt(ScrapeReason reason, int status) {
+        return isInstalled(BlockClassifier.nextRung(reason, status, ScrapeRung.PLAIN));
     }
 
     /**
@@ -102,7 +105,7 @@ public final class ScrapeLadder {
         var attempted = plain.servedBy();
 
         while (true) {
-            var next = BlockClassifier.nextRung(last.reason(), attempted);
+            var next = BlockClassifier.nextRung(last.reason(), last.status(), attempted);
             if (!isInstalled(next)) return best;
 
             last = attempt(next, url, language);
@@ -120,20 +123,17 @@ public final class ScrapeLadder {
                     : ImpersonatedFetcher.fetch(url, impersonatedHeaders(language));
             var text = WebExtraction.toText(fetched);
             var obs = ScrapeObservation.of(fetched, text);
-            return new Attempt(rung, fetched, text, BlockClassifier.classify(obs), null);
+            return new Attempt(rung, fetched, text, BlockClassifier.classify(obs), null, 0);
         } catch (ScrapeSidecarException e) {
             // Ours, not the origin's — and the distinction this type exists to carry was
             // being thrown away by classifying its message: "sidecar returned HTTP 503"
             // matched the status pattern and reported a local outage as TRUST_BLOCK.
             var detail = e.getMessage();
             return new Attempt(rung, null, null, ScrapeReason.ERROR,
-                    detail == null || detail.isBlank() ? e.getClass().getSimpleName() : detail);
+                    detail == null || detail.isBlank() ? e.getClass().getSimpleName() : detail, 0);
         } catch (Exception e) {
-            var message = e.getMessage();
-            var detail = message == null || message.isBlank()
-                    ? e.getClass().getSimpleName() : message;
-            var obs = ScrapeObservation.failed(url, detail);
-            return new Attempt(rung, null, null, BlockClassifier.classify(obs), detail);
+            var obs = ScrapeObservation.failed(url, e);
+            return new Attempt(rung, null, null, BlockClassifier.classify(obs), obs.error(), obs.status());
         }
     }
 

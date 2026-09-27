@@ -10,6 +10,7 @@ import net.dankito.readability4j.Readability4J;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.apache.tika.Tika;
 import org.apache.tika.metadata.HttpHeaders;
@@ -23,6 +24,8 @@ import org.jsoup.select.NodeVisitor;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
+import services.scrape.BlockClassifier;
+import services.scrape.ScrapeObservation;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -153,6 +156,49 @@ public final class WebExtraction {
     }
 
     /**
+     * A final response of 400 or above (JCLAW-1304). The message is the one {@code web_fetch}
+     * has always reported; the status, a body prefix bounded at {@link ScrapeObservation#SCAN_LIMIT}
+     * and the headers {@link BlockClassifier} reads travel beside it for classification only.
+     */
+    public static final class HttpStatusException extends IOException {
+        private final int status;
+        private final byte[] body;
+        private final String contentType;
+        private final Map<String, String> headers;
+
+        public HttpStatusException(int status, String url, byte[] body, String contentType,
+                                   Map<String, String> headers) {
+            super("HTTP %d fetching %s".formatted(status, url));
+            this.status = status;
+            this.body = Arrays.copyOf(body, Math.min(body.length, ScrapeObservation.SCAN_LIMIT));
+            this.contentType = contentType;
+            this.headers = Map.copyOf(headers);
+        }
+
+        public int status() {
+            return status;
+        }
+
+        public byte[] body() {
+            return body;
+        }
+
+        public String contentType() {
+            return contentType;
+        }
+
+        public Map<String, String> headers() {
+            return headers;
+        }
+
+        /** The only constructor always supplies a message, so this narrows Throwable's @Nullable. */
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
+        }
+    }
+
+    /**
      * One HTTP exchange with redirects <em>not</em> followed — the transport a fetch
      * lane plugs in. Rung 1 supplies OkHttp; rung 2 supplies the TLS-impersonation
      * sidecar (JCLAW-1087).
@@ -169,32 +215,35 @@ public final class WebExtraction {
     /**
      * A single completed exchange. {@code location} is the raw {@code Location}
      * header and is non-null only on a 3xx; {@code body} is empty on one, because
-     * the redirect walk never reads it.
+     * the redirect walk never reads it. {@code headers} holds the ones
+     * {@link BlockClassifier} reads, keyed in lower case.
      *
      * <p>Explicit {@code equals}/{@code hashCode}/{@code toString} for the same
      * reason {@link FetchResult} has them: a {@code byte[]} component would
      * otherwise get reference equality that reads as value equality.
      */
-    public record Exchange(int status, byte[] body, String contentType, String location) {
+    public record Exchange(int status, byte[] body, String contentType, String location,
+                           Map<String, String> headers) {
 
         @Override
         public boolean equals(Object o) {
-            return o instanceof Exchange(int st, byte[] b, String ct, String loc)
+            return o instanceof Exchange(int st, byte[] b, String ct, String loc, Map<String, String> h)
                     && status == st
                     && Arrays.equals(body, b)
                     && Objects.equals(contentType, ct)
-                    && Objects.equals(location, loc);
+                    && Objects.equals(location, loc)
+                    && Objects.equals(headers, h);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(status, Arrays.hashCode(body), contentType, location);
+            return Objects.hash(status, Arrays.hashCode(body), contentType, location, headers);
         }
 
         @Override
         public String toString() {
-            return "Exchange[status=%d, body=%d bytes, contentType=%s, location=%s]"
-                    .formatted(status, body == null ? 0 : body.length, contentType, location);
+            return "Exchange[status=%d, body=%d bytes, contentType=%s, location=%s, headers=%s]"
+                    .formatted(status, body == null ? 0 : body.length, contentType, location, headers);
         }
     }
 
@@ -211,9 +260,24 @@ public final class WebExtraction {
                 var body = code >= 300 && code < 400
                         ? new byte[0]
                         : readBounded(response.body(), uri);
-                return new Exchange(code, body, contentType, response.header("Location"));
+                return new Exchange(code, body, contentType, response.header("Location"),
+                        classifiedHeaders(response, ""));
             }
         };
+    }
+
+    /**
+     * The response headers {@link BlockClassifier} reads, keyed in lower case. {@code prefix}
+     * is empty for an origin's own response and {@code "X-Upstream-"} for a sidecar's copy of
+     * one, the convention its {@code X-Upstream-Content-Type} already follows.
+     */
+    public static Map<String, String> classifiedHeaders(Response response, String prefix) {
+        var out = new LinkedHashMap<String, String>();
+        for (var name : BlockClassifier.RESPONSE_HEADERS) {
+            var value = response.header(prefix + name);
+            if (value != null) out.put(name, value);
+        }
+        return Map.copyOf(out);
     }
 
     public static FetchResult fetch(String url, OkHttpClient client, Map<String, String> headers)
@@ -271,7 +335,8 @@ public final class WebExtraction {
             }
 
             if (code >= 400) {
-                throw new IOException("HTTP %d fetching %s".formatted(code, current));
+                throw new HttpStatusException(code, current.toString(), exchange.body(),
+                        exchange.contentType(), exchange.headers());
             }
 
             return new FetchResult(exchange.body(), exchange.contentType(), current.toString());

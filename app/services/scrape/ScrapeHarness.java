@@ -72,9 +72,7 @@ public final class ScrapeHarness {
                 var fetched = WebExtraction.fetch(url, ScrapeProxy.client(CLIENT), HEADERS);
                 return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
             } catch (Exception e) {
-                var m = e.getMessage();
-                return ScrapeObservation.failed(url,
-                        m == null || m.isBlank() ? e.getClass().getSimpleName() : m);
+                return ScrapeObservation.failed(url, e);
             }
         };
     }
@@ -114,9 +112,7 @@ public final class ScrapeHarness {
                                 ScrapeLadder.DEFAULT_LANGUAGE));
                 return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
             } catch (Exception e) {
-                var m = e.getMessage();
-                return ScrapeObservation.failed(url,
-                        m == null || m.isBlank() ? e.getClass().getSimpleName() : m);
+                return ScrapeObservation.failed(url, e);
             }
         };
     }
@@ -140,9 +136,7 @@ public final class ScrapeHarness {
                 var fetched = RenderedFetcher.fetch(url);
                 return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
             } catch (Exception e) {
-                var m = e.getMessage();
-                return ScrapeObservation.failed(url,
-                        m == null || m.isBlank() ? e.getClass().getSimpleName() : m);
+                return ScrapeObservation.failed(url, e);
             }
         };
     }
@@ -166,7 +160,7 @@ public final class ScrapeHarness {
             var plain = rung1().fetch(url);
             var first = new ScrapeLadder.Attempt(
                     ScrapeRung.PLAIN, null, plain.extractedText(),
-                    BlockClassifier.classify(plain), plain.error());
+                    BlockClassifier.classify(plain), plain.error(), plain.status());
             var best = ScrapeLadder.climb(url, first);
             if (best.servedBy() == ScrapeRung.PLAIN) return plain;
             return best.fetched() == null
@@ -306,7 +300,7 @@ public final class ScrapeHarness {
         boolean ok = reason == ScrapeReason.OK;
         var detail = obs.failed() ? obs.resolvedError() : text;
         return new Result(e.url(), e.stratum(), e.vendor(), e.outcome(), e.rendering(),
-                ok, reason, BlockClassifier.nextRung(reason, attempted),
+                ok, reason, BlockClassifier.nextRung(reason, obs.status(), attempted),
                 BlockClassifier.hasPrerenderMarkers(obs),
                 text.length(), gt.titleSeen(text), ms,
                 ok ? null : detail.substring(0, Math.min(200, detail.length())).replace('\n', ' '));

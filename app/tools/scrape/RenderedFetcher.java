@@ -43,6 +43,8 @@ public final class RenderedFetcher {
 
     private static final String EVENT_CATEGORY = "scrape";
 
+    private static final String HTML = "text/html; charset=utf-8";
+
     /** A render is slow by nature: navigation, then a settle window for a challenge to
      *  resolve itself. Well above the sidecar's own per-render timeout so reaching this
      *  means the sidecar is wedged, not that the page was slow. */
@@ -107,26 +109,51 @@ public final class RenderedFetcher {
                 .build();
 
         try (var response = CLIENT.newCall(request).execute()) {
-            // Bounded like every other transport: a render settles into a DOM the origin
-            // controls the size of, and readTimeout is disabled here, so an unbounded
-            // read is the one place a page could push arbitrary bytes onto the heap.
-            var body = WebExtraction.readBounded(response.body(), Urls.parse(url));
-            if (!response.isSuccessful()) {
-                throw new ScrapeSidecarException("stealth sidecar returned HTTP %d for %s: %s"
-                        .formatted(response.code(), url,
-                                new String(body, StandardCharsets.UTF_8).strip()), null);
-            }
-            reportBlockedHosts(response, url);
-            WebExtraction.noteUpstreamTruncated(response.header("X-Upstream-Truncated"), url);
-            // "0" is the sidecar's own value for "navigation returned no response
-            // object", not a missing header — it is not an error.
-            var status = response.header("X-Upstream-Status", "0");
-            if (!"0".equals(status) && upstreamStatus(status, url) >= 400) {
-                throw new IOException("HTTP %s fetching %s".formatted(status, url));
-            }
-            return new WebExtraction.FetchResult(body, "text/html; charset=utf-8",
-                    finalUrl(response, url));
+            return rendered(response, url);
         }
+    }
+
+    /**
+     * The sidecar's answer to a render of {@code url}, in the shape the other rungs produce.
+     * Public because Play's tests live in the default package.
+     *
+     * @throws WebExtraction.HttpStatusException when the render ended on a status of 400 or
+     *         above, carrying the rendered body for the classifier
+     * @throws ScrapeSidecarException when the sidecar itself failed
+     */
+    public static WebExtraction.FetchResult rendered(Response response, String url)
+            throws IOException {
+        // Bounded like every other transport: a render settles into a DOM the origin
+        // controls the size of, and readTimeout is disabled here, so an unbounded
+        // read is the one place a page could push arbitrary bytes onto the heap.
+        var body = WebExtraction.readBounded(response.body(), Urls.parse(url));
+        if (!response.isSuccessful()) {
+            throw new ScrapeSidecarException("stealth sidecar returned HTTP %d for %s: %s"
+                    .formatted(response.code(), url,
+                            new String(body, StandardCharsets.UTF_8).strip()), null);
+        }
+        reportBlockedHosts(response, url);
+        WebExtraction.noteUpstreamTruncated(response.header("X-Upstream-Truncated"), url);
+        int status = renderedStatus(response, url);
+        if (status >= 400) {
+            throw new WebExtraction.HttpStatusException(status, url, body, HTML,
+                    WebExtraction.classifiedHeaders(response, "X-Upstream-"));
+        }
+        return new WebExtraction.FetchResult(body, HTML, finalUrl(response, url));
+    }
+
+    /**
+     * Where the settle window ended decides, when the sidecar reports it: an interstitial
+     * served 403 that resolves itself ends on 200, and the settled body is the real page.
+     * Without it, the first navigation's status decides, as it always did.
+     */
+    private static int renderedStatus(Response response, String url) {
+        // "0" is the sidecar's own value for "no navigation response": it reports nothing,
+        // and is not an error.
+        var settled = response.header("X-Settled-Status");
+        var status = settled == null || "0".equals(settled)
+                ? response.header("X-Upstream-Status", "0") : settled;
+        return upstreamStatus(status, url);
     }
 
     /**

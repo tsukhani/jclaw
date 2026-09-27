@@ -16,15 +16,22 @@ import play.test.UnitTest;
 import services.ConfigService;
 import services.FetchSidecarManager;
 import services.StealthSidecarManager;
+import services.scrape.BlockClassifier;
+import services.scrape.ScrapeObservation;
+import services.scrape.ScrapeReason;
 import tools.WebFetchTool;
+import utils.ToolErrorTemplates;
+import utils.WebExtraction;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 
@@ -770,5 +777,59 @@ class WebFetchToolTest extends UnitTest {
         var result = new WebFetchTool().execute("{\"url\":\"http://example.test/k\",\"mode\":\"html\"}", null);
 
         assertTrue(result.startsWith("<html>"), result);
+    }
+
+    // 10. Refused responses (JCLAW-1304)
+
+    private static final String CHALLENGE_PAGE = "<html><head><title>Just a moment...</title></head><body>"
+            + "<script>window._cf_chl_opt={cvId: '3',cType: 'managed',cRay: '8c4f0d2e'};</script></body></html>";
+
+    private static Response.Builder challenged() {
+        return new Response.Builder()
+                .code(403)
+                .message("Forbidden")
+                .addHeader("Content-Type", "text/html; charset=UTF-8")
+                .addHeader("cf-mitigated", "challenge")
+                .addHeader("Server", "cloudflare")
+                .body(ResponseBody.create(CHALLENGE_PAGE, MediaType.parse("text/html")));
+    }
+
+    @Test
+    void aRefusalReachesTheClassifierWithItsStatusBodyAndHeaders() throws Exception {
+        queue.enqueue(challenged());
+        var client = (OkHttpClient) CLIENT_FIELD.get(null);
+
+        var refusal = assertThrows(WebExtraction.HttpStatusException.class,
+                () -> WebExtraction.fetch("http://example.test/", client, Map.of()));
+
+        assertEquals("HTTP 403 fetching http://example.test/", refusal.getMessage());
+        assertEquals(403, refusal.status());
+        assertEquals(CHALLENGE_PAGE, new String(refusal.body(), StandardCharsets.UTF_8));
+        assertEquals(Map.of("cf-mitigated", "challenge"), refusal.headers(),
+                "only the headers the classifier reads travel with it");
+        assertEquals(ScrapeReason.JS_CHALLENGE,
+                BlockClassifier.classify(ScrapeObservation.failed("http://example.test/", refusal)));
+    }
+
+    @Test
+    void aRefusalKeepsItsBodyOnlyUpToTheClassifiersScanLimit() {
+        var refusal = new WebExtraction.HttpStatusException(403, "http://example.test/",
+                new byte[ScrapeObservation.SCAN_LIMIT + 10], "text/html", Map.of());
+        assertEquals(ScrapeObservation.SCAN_LIMIT, refusal.body().length);
+    }
+
+    @Test
+    void aRefusedChallengeLeavesTheAgentVisibleResultUnchanged() {
+        // Rungs off, so the refusal itself is the result rather than whatever a sidecar reads.
+        scrapeConfig.set(FetchSidecarManager.CFG_ENABLED, "false");
+        scrapeConfig.set(StealthSidecarManager.CFG_ENABLED, "false");
+        queue.enqueue(challenged());
+        var url = "http://example.test/";
+
+        var result = new WebFetchTool().executeRich("{\"url\":\"" + url + "\"}", null);
+
+        assertEquals(ToolRegistry.ToolResult.error(
+                ToolErrorTemplates.webFetchFailed(url, "HTTP 403 fetching " + url)), result);
+        assertFalse(result.text().contains("_cf_chl_opt"), "the body is the classifier's, not the agent's");
     }
 }

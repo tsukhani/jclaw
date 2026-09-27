@@ -124,7 +124,8 @@ public final class ImpersonatedFetcher {
                         Integer.parseInt(upstream),
                         body,
                         response.header("X-Upstream-Content-Type", ""),
-                        response.header("X-Upstream-Location"));
+                        response.header("X-Upstream-Location"),
+                        WebExtraction.classifiedHeaders(response, "X-Upstream-"));
             } catch (NumberFormatException e) {
                 throw new ScrapeSidecarException("fetch sidecar sent a non-numeric upstream status", e);
             }
