@@ -6,6 +6,7 @@ import services.StealthSidecarManager;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
+import tools.scrape.RenderedFetcher;
 import tools.scrape.ScrapeLadder;
 import utils.WebExtraction;
 
@@ -128,7 +129,6 @@ class ScrapeLadderTest extends UnitTest {
 
     @Test
     void aTurnstileGateIsRenderedWhenRungThreeIsInstalled() {
-        // JCLAW-1306: rung 3 waits a challenge out, and clicks a gate page behind scrape.stealth.solveTurnstile.
         assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.TURNSTILE));
         assertEquals(ScrapeRung.BROWSER,
                 BlockClassifier.nextRung(ScrapeReason.TURNSTILE, ScrapeRung.IMPERSONATE));
@@ -138,7 +138,7 @@ class ScrapeLadderTest extends UnitTest {
         assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.POLICY_BLOCK),
                 "a stated refusal is still never escalated, so never clicked");
 
-        assertEquals(tools.scrape.RenderedFetcher.available(),
+        assertEquals(RenderedFetcher.available(),
                 ScrapeLadder.wouldAttempt(ScrapeReason.TURNSTILE, 0),
                 "a Turnstile gate is attempted exactly when rung 3 is installed");
         config.set(StealthSidecarManager.CFG_ENABLED, "false");

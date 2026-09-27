@@ -366,7 +366,6 @@ def _header_safe(value):
 # reads as the English one does. ScrapeSidecarContractTest holds the two sides in step.
 _CF_CHALLENGE_OPTIONS = re.compile(r"_cf_chl_opt", re.IGNORECASE)
 _CF_CHALLENGE_TYPE = re.compile(r"ctype\s*:\s*['\"]([a-z-]+)['\"]", re.IGNORECASE)
-# Only a gate page's checkbox is clicked; a Turnstile widget inside a page with content never is.
 _CLICKABLE = ("managed", "interactive")
 _CHALLENGE_FRAME = "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/"
 _MAX_CLICKS = 3
