@@ -24,6 +24,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, ".cache")
 TRANCO_LATEST = "https://tranco-list.eu/api/lists/date/latest"
 
+# Domains a probe classifies but a render shows are not what their stratum claims. A rebuild
+# skips them; --replace swaps an existing entry for the next pick.
+EXCLUDED = {
+    "forms.gle": "its root is Google's Invalid Dynamic Link page, which settles on HTTP 400 "
+                 "after its client-side redirect: an error page, not an SPA (JCLAW-1303)",
+}
+
 # Tech-detection probes (Wappalyzer, BuiltWith) present as a browser for the same
 # reason we do: a bot UA trips crude UA-based blocking and misreports the tier.
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -251,6 +258,10 @@ def tranco_domains(sample_n, seed):
     if not os.path.exists(path):
         print("==> downloading Tranco %s" % list_id, file=sys.stderr)
         urllib.request.urlretrieve(meta["download"], path)
+    return list_id, sample_ranked(read_ranked(path), sample_n, seed)
+
+
+def read_ranked(path):
     # The download endpoint has served both a zip and bare text/csv; sniff rather
     # than trust either.
     with open(path, "rb") as fh:
@@ -260,8 +271,10 @@ def tranco_domains(sample_n, seed):
             raw = z.read(z.namelist()[0]).decode()
     else:
         raw = open(path, encoding="utf-8").read()
-    ranked = [row[1] for row in csv.reader(io.StringIO(raw)) if len(row) == 2]
+    return [row[1] for row in csv.reader(io.StringIO(raw)) if len(row) == 2]
 
+
+def sample_ranked(ranked, sample_n, seed):
     # Log-spaced bands, not the head. The top of any popularity list is big-tech
     # own-infrastructure and carries almost no third-party edge.
     bands, lo = [], 0
@@ -274,7 +287,7 @@ def tranco_domains(sample_n, seed):
     for b in bands:
         picked += rng.sample(b, min(per_band, len(b)))
     rng.shuffle(picked)
-    return list_id, picked
+    return picked
 
 
 def select(pool, want):
@@ -295,6 +308,53 @@ def select(pool, want):
                 out.append(q.pop(0))
         queues = [q for q in queues if q]
     return out
+
+
+def bare(url):
+    host = url.split("//", 1)[-1].split("/", 1)[0]
+    return host[4:] if host.startswith("www.") else host
+
+
+def replace(path, domain, sample_n):
+    """Swap one entry for the next domain its stratum would have taken: the best-ranked domain
+    after that stratum's last pick, in the corpus's own seeded sample, that probes into the
+    same stratum. Every other entry stays, so a baseline scored before the swap stays
+    comparable apart from the one site."""
+    if domain not in EXCLUDED:
+        sys.exit("add %s to EXCLUDED with its reason first, or a rebuild picks it again" % domain)
+    doc = json.load(open(path))
+    idx = next((i for i, e in enumerate(doc["entries"]) if bare(e["url"]) == domain), None)
+    if idx is None:
+        sys.exit("no corpus entry for %s" % domain)
+    old = doc["entries"][idx]
+    cache = os.path.join(CACHE, "tranco-%s.data" % doc["tranco_list_id"])
+    if not os.path.exists(cache):
+        sys.exit("the corpus's Tranco list %s is not cached at %s" % (doc["tranco_list_id"], cache))
+    sample = sample_ranked(read_ranked(cache), sample_n, doc["seed"])
+    if len(sample) != doc["sample_size"]:
+        sys.exit("--sample %d draws %d domains, not the corpus's %d: pass the build's --sample"
+                 % (sample_n, len(sample), doc["sample_size"]))
+    taken = {bare(e["url"]) for e in doc["entries"]}
+    last = max(e["rank"] for e in doc["entries"] if e["stratum"] == old["stratum"])
+    for rank, d in sorted(sample):
+        if rank <= last or d in taken or d in EXCLUDED:
+            continue
+        url, status, headers, body, truncated = probe(d)
+        text = visible_text(body)
+        vendor, outcome, rendering = classify(status, headers, body, text, truncated)
+        if stratum_of(vendor, outcome, rendering) != old["stratum"]:
+            continue
+        doc["entries"][idx] = {"url": url, "stratum": old["stratum"], "vendor": vendor,
+                               "outcome": outcome, "rendering": rendering, "rank": rank,
+                               "ground_truth": ground_truth(status, body, outcome, text)}
+        doc.setdefault("replaced", []).append({
+            "domain": domain, "by": d, "on": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "reason": EXCLUDED[domain]})
+        write_json(path, doc)
+        print("==> %s (rank %d) replaced by %s (rank %d) in %s"
+              % (domain, old["rank"], d, rank, old["stratum"]), file=sys.stderr)
+        return
+    sys.exit("no domain after rank %d probes into %s" % (last, old["stratum"]))
 
 
 def write_json(path, doc):
@@ -424,10 +484,17 @@ def main():
     ap.add_argument("--out", default=HERE)
     ap.add_argument("--recompute", action="store_true",
                     help="rewrite ground-truth floors from stored observations, no re-probe")
+    ap.add_argument("--replace", metavar="DOMAIN",
+                    help="swap one EXCLUDED entry for the next domain its stratum would take, "
+                         "keeping every other entry (needs the build's --sample)")
     ap.add_argument("--reclassify", action="store_true",
                     help="re-probe the EXISTING entries and refresh their labels, keeping "
                          "the same URL set so the baseline stays comparable (JCLAW-1091)")
     args = ap.parse_args()
+
+    if args.replace:
+        replace(os.path.join(args.out, "corpus.json"), args.replace, args.sample)
+        return
 
     if args.reclassify:
         reclassify(os.path.join(args.out, "corpus.json"), args.workers)
@@ -476,7 +543,7 @@ def main():
 
     corpus = []
     for stratum in STRATA:
-        pool = [r for r in results if r["stratum"] == stratum]
+        pool = [r for r in results if r["stratum"] == stratum and r["domain"] not in EXCLUDED]
         take = select(pool, args.per_stratum)
         if len(take) < args.per_stratum:
             print("!!  stratum %-18s only %d/%d — widen --sample"

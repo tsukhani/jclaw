@@ -21,6 +21,19 @@ python3 evals/scrape/build_corpus.py --sample 40000 --per-stratum 25
 Stdlib only — one-time data generation, not app code. Downloads the current Tranco list into
 `.cache/` (gitignored, ~22 MB) and probes concurrently. Roughly 20 minutes at `--workers 64`.
 
+A probe sees one response, not what a render settles on, so it can place a site in the wrong
+stratum. `EXCLUDED` in `build_corpus.py` lists each such domain with the reason a render gave;
+a rebuild never selects one, and `--replace` swaps an existing entry without touching the rest:
+
+```bash
+python3 evals/scrape/build_corpus.py --replace forms.gle --sample 40000
+```
+
+It takes the best-ranked domain after that stratum's last pick, in the corpus's own seeded
+sample (so `--sample` must reproduce the recorded `sample_size`), that probes into the same
+stratum, and records the swap under `replaced`. Every other entry stays, so a baseline scored
+before the swap differs from one scored after by that one site only.
+
 ## Three axes, not one difficulty ladder
 
 The first corpus stratified on a single "protection tier" that silently mixed three independent

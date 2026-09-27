@@ -956,16 +956,16 @@
       }
     },
     {
-      "url": "https://forms.gle",
+      "url": "https://www.leiniao.com",
       "stratum": "unprotected-spa",
       "vendor": "none",
       "outcome": "served",
       "rendering": "spa",
-      "rank": 145,
+      "rank": 953,
       "ground_truth": {
         "min_chars": 50,
-        "observed_text": 0,
-        "observed_html": 34774,
+        "observed_text": 7,
+        "observed_html": 2081,
         "reject_markers": [
           "/cdn-cgi/challenge-platform/",
           "just a moment",
@@ -4130,5 +4130,13 @@
     "unprotected-ssr": 27
   },
   "allocation_spread": 3,
-  "reclassified_on": "2026-08-21"
+  "reclassified_on": "2026-08-21",
+  "replaced": [
+    {
+      "domain": "forms.gle",
+      "by": "leiniao.com",
+      "on": "2026-09-27",
+      "reason": "its root is Google's Invalid Dynamic Link page, which settles on HTTP 400 after its client-side redirect: an error page, not an SPA (JCLAW-1303)"
+    }
+  ]
 }
