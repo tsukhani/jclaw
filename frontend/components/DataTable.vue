@@ -83,6 +83,8 @@ defineExpose({
 const tableRef = ref<HTMLElement | null>(null)
 
 function handleKeydown(e: KeyboardEvent) {
+  // Keys bubbling from a control inside the table (a sort button, a checkbox) belong to that control.
+  if (e.target !== e.currentTarget) return
   const rows = table.getRowModel().rows
   if (!rows.length) return
 
@@ -107,6 +109,12 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
   if (sorted === 'desc') return '↓'
   return ''
 }
+
+function ariaSort(sorted: false | 'asc' | 'desc') {
+  if (sorted === 'asc') return 'ascending'
+  if (sorted === 'desc') return 'descending'
+  return 'none'
+}
 </script>
 
 <template>
@@ -128,11 +136,16 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
           <TableHead
             v-for="header in headerGroup.headers"
             :key="header.id"
+            scope="col"
             class="px-4 py-2.5 text-xs text-fg-muted font-medium"
-            :class="{ 'cursor-pointer select-none hover:text-fg-strong': header.column.getCanSort() }"
-            @click="header.column.getToggleSortingHandler()?.($event)"
+            :aria-sort="header.column.getCanSort() ? ariaSort(header.column.getIsSorted()) : undefined"
           >
-            <div class="flex items-center gap-1">
+            <button
+              v-if="header.column.getCanSort()"
+              type="button"
+              class="flex items-center gap-1 select-none hover:text-fg-strong transition-colors"
+              @click="header.column.getToggleSortingHandler()?.($event)"
+            >
               <FlexRender
                 v-if="!header.isPlaceholder"
                 :render="header.column.columnDef.header"
@@ -141,9 +154,20 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
               <span
                 v-if="header.column.getIsSorted()"
                 class="text-fg-strong"
+                aria-hidden="true"
               >
                 {{ sortIcon(header.column.getIsSorted()) }}
               </span>
+            </button>
+            <div
+              v-else
+              class="flex items-center gap-1"
+            >
+              <FlexRender
+                v-if="!header.isPlaceholder"
+                :render="header.column.columnDef.header"
+                :props="header.getContext()"
+              />
             </div>
           </TableHead>
         </TableRow>

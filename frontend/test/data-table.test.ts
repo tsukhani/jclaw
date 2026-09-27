@@ -77,10 +77,44 @@ describe('DataTable', () => {
       props: { columns: testColumns as DataTableColumn<RowData>[], data: testData },
     })
     // Click the Name header to sort
-    const headers = component.findAll('th')
-    await headers[0]!.trigger('click')
+    await component.find('th button').trigger('click')
     // Should show an arrow indicator
     expect(component.text()).toMatch(/[↑↓]/)
+  })
+
+  it('makes each sortable header a button and reports its state through aria-sort', async () => {
+    const columns: DataTableColumn<TestRow>[] = [
+      ...testColumns,
+      { id: 'actions', header: 'Actions', enableSorting: false },
+    ]
+    const component = await mountSuspended(DataTable, {
+      props: { columns: columns as DataTableColumn<RowData>[], data: testData },
+    })
+    const [name, status, actions] = component.findAll('th')
+    // A <th> is not focusable; the button is what puts the sort on the Tab order.
+    expect(name!.find('button').attributes('type')).toBe('button')
+    expect(status!.find('button').exists()).toBe(true)
+    expect(actions!.find('button').exists()).toBe(false)
+    expect(actions!.attributes('aria-sort')).toBeUndefined()
+
+    expect(name!.attributes('aria-sort')).toBe('none')
+    await name!.find('button').trigger('click')
+    expect(name!.attributes('aria-sort')).toMatch(/^(ascending|descending)$/)
+    expect(status!.attributes('aria-sort')).toBe('none')
+  })
+
+  it('leaves Enter on a sort button to the button once a row is highlighted', async () => {
+    const component = await mountSuspended(DataTable, {
+      props: { columns: testColumns as DataTableColumn<RowData>[], data: testData },
+    })
+    const wrapper = component.find('[tabindex="0"]')
+    await wrapper.trigger('keydown', { key: 'ArrowDown' })
+    await component.find('th button').trigger('keydown', { key: 'Enter' })
+    expect(component.emitted('row-click')).toBeFalsy()
+
+    // The wrapper's own row navigation is unchanged.
+    await wrapper.trigger('keydown', { key: 'Enter' })
+    expect(component.emitted('row-click')![0]![0]).toEqual(testData[0])
   })
 })
 

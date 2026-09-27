@@ -382,7 +382,7 @@ describe('Conversations — server-side sort', () => {
 
     // DataTable runs in manualSorting mode: a header click emits sort-change,
     // which load() turns into sort/dir query params. Click the Channel header.
-    const channelHeader = component.findAll('th').find(th => th.text().includes('Channel'))!
+    const channelHeader = component.findAll('th button').find(b => b.text().includes('Channel'))!
     expect(channelHeader).toBeTruthy()
     await channelHeader.trigger('click')
     await vi.waitFor(() => expect(lastListQuery().sort).toBe('channelType'))
