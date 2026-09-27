@@ -70,6 +70,11 @@ public final class StealthSidecarManager {
         });
     }
 
+    /** Where the sidecar listens, whether or not it is running. */
+    public static String baseUrl() {
+        return DAEMON.baseUrl();
+    }
+
     public static String authToken() {
         return DAEMON.authToken();
     }

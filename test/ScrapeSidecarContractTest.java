@@ -79,7 +79,7 @@ class ScrapeSidecarContractTest extends UnitTest {
                                   "liveRunnable": live["runnable"],
                                   "brokenRunnable": broken["runnable"]}))
                 """);
-        var documented = List.of("kind", "profile", "profileCount", "profileKnown",
+        var documented = List.of("chromeMajor", "kind", "profile", "profileCount", "profileKnown",
                 "reason", "runnable");
         assertEquals(documented, keys(out, "broken"));
         assertEquals(documented, keys(out, "live"),
@@ -636,5 +636,335 @@ class ScrapeSidecarContractTest extends UnitTest {
         }
         assertTrue(out.get("inside").getAsBoolean(), "a click point outside its frame's box");
         assertTrue(out.get("tooSmall").isJsonNull());
+    }
+
+    // ==================== Browser sessions (JCLAW-1307) ====================
+
+    @Test
+    void theSessionRegistryCapsIsolatesAndReapsItsSessions() throws Exception {
+        // A fake session with an injected clock: what is asserted is the bookkeeping, which no browser changes.
+        var out = probe("sidecar/stealth", """
+                import sys, json
+                sys.path.insert(0, sys.argv[1])
+                import serve
+
+                class Clock:
+                    now = 1000.0
+                    def __call__(self):
+                        return self.now
+
+                built = []
+
+                class FakeSession:
+                    def __init__(self, host, pins, language, proxy):
+                        if host == "fails.example":
+                            raise RuntimeError("launch failed")
+                        self.host, self.closed, self.joined = host, False, False
+                        built.append(self)
+                    def close(self):
+                        self.closed = True
+                    def join(self, timeout):
+                        self.joined = True
+
+                clock = Clock()
+                reg = serve.SessionRegistry(2, 300, FakeSession, clock)
+                a = reg.open("a.example", {}, "en", None)
+                twin = reg.open("a.example", {}, "en", None)
+                refused = reg.open("b.example", {}, "en", None)
+                out = {"distinct": a != twin, "idLength": len(a), "refused": refused}
+
+                def outcome(sid, host):
+                    try:
+                        reg.acquire(sid, host)
+                        reg.release(sid)
+                        return "served"
+                    except KeyError:
+                        return "unknown"
+                    except PermissionError:
+                        return "refused"
+
+                out["own"] = outcome(a, "a.example")
+                out["otherHost"] = outcome(a, "b.example")
+                out["forged"] = outcome("not-an-id", "a.example")
+
+                reg.close(twin)
+                try:
+                    reg.open("fails.example", {}, "en", None)
+                    out["launchFailure"] = None
+                except RuntimeError as e:
+                    out["launchFailure"] = str(e)
+                b = reg.open("b.example", {}, "en", None)
+                out["afterFailure"] = b is not None
+                out["closedTwin"] = outcome(twin, "a.example")
+
+                # Idle expiry: a is busy across the idle window, b sits unused.
+                reg.acquire(a, "a.example")
+                clock.now += 301
+                out["reapedWhileBusy"] = sorted(reg.reap()) == [b]
+                reg.release(a)
+                clock.now += 299
+                out["reapedEarly"] = reg.reap()
+                clock.now += 2
+                out["reapedIdle"] = reg.reap() == [a]
+                out["afterReap"] = outcome(a, "a.example")
+                out["allClosed"] = all(s.closed for s in built)
+
+                # The sidecar exits: every session closes first.
+                exits = []
+                serve.os._exit = exits.append
+                last = serve.SessionRegistry(4, 300, FakeSession, clock)
+                for host in ("c.example", "d.example"):
+                    last.open(host, {}, "en", None)
+                serve._exit(last)
+                out["exitCode"] = exits
+                out["exitClosed"] = [s.closed and s.joined for s in built[-2:]]
+                out["exitLive"] = len(last)
+                out["defaults"] = [serve.DEFAULT_MAX_SESSIONS, serve.DEFAULT_SESSION_IDLE_MIN]
+                print("PROBE:" + json.dumps(out))
+                """);
+        assertTrue(out.get("distinct").getAsBoolean(), "two opens for one host are two sessions, never one shared");
+        assertTrue(out.get("idLength").getAsInt() >= 22, "an id another crawl could guess is not a boundary");
+        assertTrue(out.get("refused").isJsonNull(), "past the cap a session is refused, not queued");
+        assertEquals("served", out.get("own").getAsString());
+        assertEquals("refused", out.get("otherHost").getAsString(), "a session serves only its own host");
+        assertEquals("unknown", out.get("forged").getAsString());
+        assertEquals("launch failed", out.get("launchFailure").getAsString());
+        assertTrue(out.get("afterFailure").getAsBoolean(), "a launch that failed gives its slot back");
+        assertEquals("unknown", out.get("closedTwin").getAsString(), "a closed session serves nothing");
+
+        assertTrue(out.get("reapedWhileBusy").getAsBoolean(), "an idle session is reaped, one rendering is not");
+        assertEquals("[]", out.get("reapedEarly").toString(), "the idle clock restarts when a render ends");
+        assertTrue(out.get("reapedIdle").getAsBoolean());
+        assertEquals("unknown", out.get("afterReap").getAsString());
+        assertTrue(out.get("allClosed").getAsBoolean(), "every session that left the registry was closed");
+
+        assertEquals("[0]", out.get("exitCode").toString());
+        assertEquals("[true,true]", out.get("exitClosed").toString(), "an exiting sidecar closes each browser first");
+        assertEquals(0, out.get("exitLive").getAsInt());
+        assertEquals(RenderedFetcher.RENDER_SLOTS, out.getAsJsonArray("defaults").get(0).getAsInt(),
+                "no more idle session browsers than rendering ones");
+    }
+
+    @Test
+    void aSessionLaunchesOnceWithItsPinAndKeepsTheGatesOnItsContext() throws Exception {
+        // Patchright stubbed at the seams the session calls, so the launch, the context and the gate
+        // are the session's own code path; the loopback fixture run is the live half.
+        var out = probe("sidecar/stealth", """
+                import sys, json
+                sys.path.insert(0, sys.argv[1])
+                import serve
+
+                calls = {"launches": [], "routes": [], "contexts": [], "navigated": [], "closed": 0}
+                handlers = {}
+
+                class Route:
+                    def __init__(self, url):
+                        self.request = type("Request", (), {"url": url})()
+                        self.outcome = None
+                    def abort(self):
+                        self.outcome = "abort"
+                    def continue_(self):
+                        self.outcome = "continue"
+
+                class Page:
+                    def close(self):
+                        pass
+
+                class Context:
+                    def __init__(self):
+                        self.pages = []
+                    def route(self, pattern, handler):
+                        calls["routes"].append("route " + pattern)
+                        handlers["route"] = handler
+                    def route_web_socket(self, pattern, handler):
+                        calls["routes"].append("ws " + pattern)
+                    def new_page(self):
+                        page = Page()
+                        self.pages.append(page)
+                        return page
+
+                class Browser:
+                    def new_context(self, **options):
+                        calls["contexts"].append(sorted(options))
+                        return Context()
+                    def is_connected(self):
+                        return True
+                    def close(self):
+                        calls["closed"] += 1
+
+                class Playwright:
+                    def __enter__(self):
+                        return self
+                    def __exit__(self, *exc):
+                        return False
+
+                def launch(p, args, proxy=None):
+                    calls["launches"].append({"args": [a for a in args if a.startswith(("--host-resolver", "--lang"))],
+                                              "proxy": proxy})
+                    return Browser()
+
+                def navigate(context, page, url, *rest):
+                    calls["navigated"].append(url)
+                    if url.endswith("/a"):
+                        # The page reaches loopback and its own pinned host during the first render only.
+                        for target in ("http://127.0.0.1/admin", "https://example.com/style.css"):
+                            route = Route(target)
+                            handlers["route"](route)
+                            calls.setdefault("outcomes", []).append([target, route.outcome])
+                    return {"html": "<p>ok</p>", "status": 200, "settledStatus": 200, "url": url, "challenge": None}
+
+                serve.sync_playwright = Playwright
+                serve._launch = launch
+                serve._navigate = navigate
+                serve._host_allowed = lambda host, budget=None: False
+
+                session = serve.BrowserSession("example.com", {"example.com": "93.184.215.14"}, "de-DE",
+                                               {"server": "http://127.0.0.1:3128"})
+                first = session.render("https://example.com/a", 1000, 0, 0, False, "domcontentloaded", False)
+                second = session.render("https://example.com/b", 1000, 0, 0, False, "domcontentloaded", False)
+                session.close()
+                session.join(5)
+                try:
+                    session.render("https://example.com/c", 1000, 0, 0, False, "domcontentloaded", False)
+                    lost = False
+                except serve._SessionLost:
+                    lost = True
+                print("PROBE:" + json.dumps(dict(calls, first=sorted(first["blocked"]), second=sorted(second["blocked"]),
+                                               alive=session._thread.is_alive(), lost=lost)))
+                """);
+        assertEquals(1, out.getAsJsonArray("launches").size(), "two renders, one browser: " + out);
+        var launch = out.getAsJsonArray("launches").get(0).getAsJsonObject();
+        assertEquals("[\"--lang=de-DE\",\"--host-resolver-rules=MAP example.com 93.184.215.14\"]",
+                launch.get("args").toString(), "the pin validated at open is the launch's, for its whole life");
+        assertEquals("{\"server\":\"http://127.0.0.1:3128\"}", launch.get("proxy").toString());
+        assertEquals("[\"route **/*\",\"ws **/*\"]", out.get("routes").toString(),
+                "both gates on the context, once, so every page and popup of the session passes them");
+        assertEquals("[[\"screen\",\"service_workers\",\"viewport\"]]", out.get("contexts").toString(),
+                "one context, and no storage state or profile handed to it");
+        assertEquals("[[\"http://127.0.0.1/admin\",\"abort\"],[\"https://example.com/style.css\",\"continue\"]]",
+                out.get("outcomes").toString(), "the gate still aborts loopback and exempts only the pinned host");
+        assertEquals("[\"127.0.0.1\"]", out.get("first").toString());
+        assertEquals("[]", out.get("second").toString(), "each render reports only the hosts it was refused");
+        assertEquals(1, out.get("closed").getAsInt(), "closing the session closes its browser");
+        assertFalse(out.get("alive").getAsBoolean(), "and ends its thread");
+        assertTrue(out.get("lost").getAsBoolean(), "a closed session refuses a render rather than hanging it");
+    }
+
+    @Test
+    void theSessionRoutesKeepEveryScreenAndLetTheJvmRecover() throws Exception {
+        // The real handler on a spare port, with sessions that launch nothing.
+        var out = probe("sidecar/stealth", """
+                import sys, json, threading, urllib.request, urllib.error
+                sys.path.insert(0, sys.argv[1])
+                import serve
+                from http.server import ThreadingHTTPServer
+
+                renders = []
+
+                class FakeSession:
+                    def __init__(self, host, pins, language, proxy):
+                        self.host = host
+                        self.closed = False
+                    def render(self, url, timeout_ms, settle_ms, challenge_ms, solve, wait_until, clearance):
+                        renders.append({"url": url, "clearance": clearance})
+                        if url.endswith("/crashed"):
+                            raise serve._SessionLost("the browser exited")
+                        result = {"html": "<p>ok</p>", "status": 200, "settledStatus": 200, "url": url,
+                                  "challenge": "managed; cleared", "blocked": set()}
+                        if clearance:
+                            result.update({"clearance": "c1e4r", "userAgent": "Mozilla/5.0 Chrome/146.0.0.0"})
+                        return result
+                    def close(self):
+                        self.closed = True
+                    def join(self, timeout):
+                        pass
+
+                serve.sync_playwright = object()  # the fake sessions launch nothing
+                serve.Handler.token = None
+                serve.Handler.state = serve.SidecarState("patchright-chromium", 0, 4)
+                serve.Handler.sessions = serve.SessionRegistry(1, 300, FakeSession)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+
+                def post(path, body):
+                    req = urllib.request.Request("http://127.0.0.1:%d%s" % (server.server_address[1], path),
+                                                 data=json.dumps(body).encode(), method="POST",
+                                                 headers={"Content-Type": "application/json"})
+                    try:
+                        with urllib.request.urlopen(req) as r:
+                            return {"status": r.status, "headers": {k: v for k, v in r.headers.items() if k.startswith("X-")},
+                                    "body": r.read().decode()}
+                    except urllib.error.HTTPError as e:
+                        return {"status": e.code, "body": e.read().decode()}
+
+                out = {
+                    "foreignPin": post("/session/open", {"host": "example.com", "pins": {"other.example": "93.184.215.14"}})["status"],
+                    "privatePin": post("/session/open", {"host": "example.com", "pins": {"example.com": "10.0.0.1"}})["status"],
+                    "noHost": post("/session/open", {"pins": {}})["status"],
+                }
+                opened = post("/session/open", {"host": "Example.com", "pins": {"example.com": "93.184.215.14"}})
+                sid = json.loads(opened["body"])["id"]
+                out["opened"] = opened["status"]
+                out["atCap"] = post("/session/open", {"host": "other.example"})["status"]
+                out["unknown"] = post("/render", {"url": "https://example.com/", "session": "nope"})["status"]
+                out["otherHost"] = post("/render", {"url": "https://other.example/", "session": sid})["status"]
+                out["withPins"] = post("/render", {"url": "https://example.com/", "session": sid,
+                                                   "pins": {"example.com": "93.184.215.14"}})["status"]
+                out["plain"] = post("/render", {"url": "https://example.com/p", "session": sid})
+                out["asked"] = post("/render", {"url": "https://example.com/q", "session": sid, "clearance": True})
+                out["crashed"] = post("/render", {"url": "https://example.com/crashed", "session": sid})["status"]
+                out["afterCrash"] = post("/render", {"url": "https://example.com/r", "session": sid})["status"]
+                out["liveAfterCrash"] = len(serve.Handler.sessions)
+                again = json.loads(post("/session/open", {"host": "example.com"})["body"])["id"]
+                out["closed"] = json.loads(post("/session/close", {"id": again})["body"])["closed"]
+                out["closedTwice"] = json.loads(post("/session/close", {"id": again})["body"])["closed"]
+                out["renders"] = renders
+                server.shutdown()
+                print("PROBE:" + json.dumps(out))
+                """);
+        assertEquals(400, out.get("foreignPin").getAsInt(), "a session pins its own host and no other");
+        assertEquals(400, out.get("privatePin").getAsInt(), "a pin exempts its host from the gate, so it must be public");
+        assertEquals(400, out.get("noHost").getAsInt());
+        assertEquals(200, out.get("opened").getAsInt());
+        assertEquals(429, out.get("atCap").getAsInt(), "past the cap the JVM is told to render per page");
+        assertEquals(404, out.get("unknown").getAsInt(), "404 is what makes the JVM open a new session");
+        assertEquals(400, out.get("otherHost").getAsInt(), "a session serves only its own host");
+        assertEquals(400, out.get("withPins").getAsInt(), "a session render cannot bring a pin of its own");
+
+        var plain = out.getAsJsonObject("plain");
+        assertEquals(200, plain.get("status").getAsInt());
+        assertEquals("managed; cleared", plain.getAsJsonObject("headers").get("X-Challenge").getAsString());
+        assertFalse(plain.getAsJsonObject("headers").has("X-Clearance"), "the cookie leaves only when asked for");
+        var asked = out.getAsJsonObject("asked").getAsJsonObject("headers");
+        assertEquals("c1e4r", asked.get("X-Clearance").getAsString());
+        assertEquals("Mozilla/5.0 Chrome/146.0.0.0", asked.get("X-Clearance-User-Agent").getAsString());
+        assertEquals(List.of(false, true, false), out.getAsJsonArray("renders").asList().stream()
+                .map(r -> r.getAsJsonObject().get("clearance").getAsBoolean()).toList(),
+                "the flag reaches the session exactly as the JVM sent it");
+
+        assertEquals(404, out.get("crashed").getAsInt(), "a session whose browser died is gone, not failing");
+        assertEquals(404, out.get("afterCrash").getAsInt());
+        assertEquals(0, out.get("liveAfterCrash").getAsInt(), "and its slot is free for the reopen");
+        assertTrue(out.get("closed").getAsBoolean());
+        assertFalse(out.get("closedTwice").getAsBoolean(), "closing twice is harmless: a crawl's finally may");
+    }
+
+    @Test
+    void theFetchSidecarReportsTheChromeVersionItsProfileImpersonates() throws Exception {
+        // The resolver is passed in, so the answer does not depend on which curl_cffi this host has.
+        var out = probe("sidecar/fetch", """
+                import sys, json
+                sys.path.insert(0, sys.argv[1])
+                import serve
+                aliases = {"chrome": "chrome146", "chrome_android": "chrome131_android", "safari": "safari2601"}
+                resolve = lambda profile: aliases.get(profile, profile)
+                print("PROBE:" + json.dumps({p: serve.chrome_major(p, resolve) for p in
+                    ["chrome", "chrome146", "chrome133a", "chrome_android", "chrome131_android", "safari",
+                     "edge101", "firefox147", "chrome146x2"]}))
+                """);
+        assertEquals("{\"chrome\":146,\"chrome146\":146,\"chrome133a\":133,\"chrome_android\":null,"
+                        + "\"chrome131_android\":null,\"safari\":null,\"edge101\":null,\"firefox147\":null,"
+                        + "\"chrome146x2\":null}",
+                out.toString(), "only a desktop Chrome profile has a version a Chrome browser's clearance can match");
     }
 }

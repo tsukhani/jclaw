@@ -20,12 +20,17 @@ Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   (CLI) --self-check [--language L] -> renders a loopback fixture with the render's own launch and
         prints {language, channel, observed, problems}; exit 1 on a problem, 2 when it cannot run
   POST /render {url, pins?, language?, timeoutMs?, settleMs?, challengeMs?, solveTurnstile?,
-                waitUntil?, maxBytes?, proxy?}
+                waitUntil?, maxBytes?, proxy?, session?, clearance?}
         -> 200  rendered HTML; X-Upstream-Status / X-Settled-Status / X-Upstream-Url /
                 X-Challenge / X-Blocked-Hosts / X-Blocked-Hosts-Count / X-Upstream-Truncated
-                carry the outcome
+                carry the outcome, and X-Clearance / X-Clearance-User-Agent a session's
+                cf_clearance when `clearance` asked for it
         -> 400  {error}  malformed request
+        -> 404  {error}  the session is unknown, closed or lost
         -> 502  {error}  navigation failed
+  POST /session/open {host, pins?, language?, proxy?}
+        -> 200 {id}; 429 {error} when every session is open, and the JVM renders per page
+  POST /session/close {id} -> 200 {closed}
   POST /shutdown -> exits, so a restarted JVM can evict an orphan.
 
 Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM
@@ -65,8 +70,10 @@ import concurrent.futures
 import hmac
 import json
 import os
+import queue
 import random
 import re
+import secrets
 import socket
 import sys
 import threading
@@ -97,6 +104,14 @@ DEFAULT_IDENTITY = "patchright-chromium"
 # correctness. LocalSidecarDaemon passes a fixed argv and has no slot for this, so
 # the default is what the JVM gets; --max-concurrent exists for standalone runs.
 DEFAULT_MAX_CONCURRENT = 4
+# Each live session holds an idle Chromium beside the ones rendering (JCLAW-1307).
+DEFAULT_MAX_SESSIONS = 4
+# A crawl closes its own sessions; this reclaims the browser of one that never did.
+DEFAULT_SESSION_IDLE_MIN = 5.0
+_SESSION_REAP_INTERVAL_S = 15.0
+# How long an exiting sidecar waits for its sessions' browsers to close.
+_SESSION_CLOSE_BUDGET_S = 5.0
+_CLEARANCE_COOKIE = "cf_clearance"
 
 # Chromium's headless builds put "HeadlessChrome" in the User-Agent. Patchright
 # removes the CDP artifacts a JS challenge inspects, but the UA is plain text that
@@ -511,6 +526,327 @@ def _host_allowed(host, budget=None):
     return allowed
 
 
+class _RenderScope:
+    """What one render's gates report and spend."""
+
+    def __init__(self):
+        self.blocked = set()
+        self.budget = _ResolveBudget(_RESOLVE_BUDGET_S)
+
+
+def _install_gates(context, pins, scope):
+    """The route and WebSocket gates, on the CONTEXT: a popup the page opens is a separate Page with
+    no page-level handler, and service workers issue requests a page handler never sees at all.
+    `scope()` is the render in progress, which a session's context outlives."""
+
+    def gate(route):
+        # Pinned hosts are already guard-validated; anything else the page
+        # reaches for gets resolved and range-checked before it is allowed.
+        render = scope()
+        parts = urlsplit(route.request.url)
+        scheme = parts.scheme.lower()
+        if scheme in ("http", "https"):
+            # urlsplit, not string slicing: the hand-rolled split produced "[2606"
+            # for an IPv6 literal and "" for anything it could not parse, and an
+            # empty host then skipped the check entirely.
+            host = parts.hostname
+            if not host:
+                render.blocked.add(route.request.url[:80])
+                route.abort()
+                return
+            if host not in pins and not _host_allowed(host, render.budget):
+                render.blocked.add(host)
+                route.abort()
+                return
+        elif scheme not in ("data", "blob", "about"):
+            # data/blob/about reach no network and a page legitimately uses them.
+            # Everything else -- file:, ftp:, chrome-extension: -- has no business
+            # being fetched by a rendered page, and defaulting them to "allow" is
+            # the wrong way round for a security gate.
+            render.blocked.add(scheme + ":")
+            route.abort()
+            return
+        route.continue_()
+
+    def ws_gate(ws):
+        # page.route never sees WebSocket traffic -- it is a separate API -- so
+        # until this existed a page could open ws://127.0.0.1, read a loopback
+        # service and write the reply into the DOM we hand back.
+        render = scope()
+        host = urlsplit(ws.url).hostname
+        if not host or (host not in pins and not _host_allowed(host, render.budget)):
+            render.blocked.add(host or ws.url[:80])
+            return
+        ws.connect_to_server()
+
+    context.route("**/*", gate)
+    context.route_web_socket("**/*", ws_gate)
+
+
+def _navigate(context, page, url, timeout_ms, settle_ms, challenge_ms, solve, wait_until, language):
+    """Load `url` in `page` and wait out the settle window or a standing challenge."""
+    settled = {"status": 0, "mitigated": None}
+
+    def track(resp):
+        # goto's status is the FIRST navigation response, captured before
+        # the settle window; an interstitial that resolves itself navigates
+        # again inside it, and this records where that landed.
+        if resp.request.is_navigation_request() and resp.frame == page.main_frame:
+            settled["status"] = resp.status
+            settled["mitigated"] = resp.headers.get("cf-mitigated")
+
+    page.on("response", track)
+    _disguise(context, page, language)
+    response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+    challenge = _settle(page, settled, settle_ms, challenge_ms, solve)
+    return {"html": page.content(),
+            "status": response.status if response else 0,
+            "settledStatus": settled["status"],
+            "url": page.url,
+            "challenge": challenge}
+
+
+def _netloc(host):
+    return "[%s]" % host if ":" in host else host
+
+
+def _origin(host):
+    return "https://%s/" % _netloc(host)
+
+
+def _clearance(context, page, host):
+    """The cf_clearance the context would send to `host` and the User-Agent it was issued to, or {}.
+    A failure costs the handoff, never the render it follows."""
+    try:
+        cookies = [c for c in context.cookies(_origin(host)) if c["name"] == _CLEARANCE_COOKIE]
+        if not cookies:
+            return {}
+        return {"clearance": cookies[0]["value"],
+                "userAgent": page.evaluate("() => navigator.userAgent")}
+    except Exception as exc:
+        sys.stderr.write("[stealth-sidecar] clearance read failed for %s (%s: %s)\n"
+                         % (host, type(exc).__name__, exc))
+        return {}
+
+
+def session_host(value):
+    """The host a session serves, in the form urlsplit reports a URL's hostname. Raises ValueError."""
+    if not isinstance(value, str):
+        raise ValueError("host must be a string")
+    host = value.strip().lower()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not host or urlsplit("//" + _netloc(host)).hostname != host:
+        raise ValueError("host %r is not a host name or address" % value)
+    return host
+
+
+def _unsafe_pin(pins):
+    """The first pinned host whose address is not public, or None. A pin exempts its host from the
+    route gate, so an unvalidated one is a way around the gate rather than an input to it."""
+    for pinned_host, pinned_ip in pins.items():
+        if not is_public_ip(pinned_ip):
+            return pinned_host
+    return None
+
+
+class _SessionLost(Exception):
+    """The session's browser is gone, so the session is too."""
+
+
+class BrowserSession:
+    """One host's browser and context, kept across renders so its cookies are (JCLAW-1307).
+
+    Patchright's sync API binds each object to the thread that made it, so the browser lives on a
+    thread of its own and renders are handed to it one at a time. Its launch carries the pins it was
+    opened with, and its context the route and WebSocket gates, for its whole life. Nothing reaches
+    disk: the context has no user data dir.
+    """
+
+    def __init__(self, host, pins, language, proxy):
+        self.host, self.pins, self.language, self.proxy = host, pins, language, proxy
+        self._tasks = queue.SimpleQueue()
+        self._lock = threading.Lock()
+        self._done = False
+        self._scope = _RenderScope()
+        ready = concurrent.futures.Future()
+        self._thread = threading.Thread(target=self._run, args=(ready,), daemon=True,
+                                        name="stealth-session")
+        self._thread.start()
+        ready.result()
+
+    def render(self, url, timeout_ms, settle_ms, challenge_ms, solve, wait_until, clearance):
+        """Render `url` in this session's context. Raises _SessionLost once the browser is gone."""
+        done = concurrent.futures.Future()
+
+        def task(context):
+            self._scope = _RenderScope()
+            page = context.new_page()
+            try:
+                result = _navigate(context, page, url, timeout_ms, settle_ms, challenge_ms, solve,
+                                   wait_until, self.language)
+                result["blocked"] = self._scope.blocked
+                if clearance:
+                    result.update(_clearance(context, page, self.host))
+                return result
+            finally:
+                for opened in list(context.pages):  # the page and any popup it opened
+                    try:
+                        opened.close()
+                    except Exception:
+                        pass
+
+        with self._lock:
+            if self._done:
+                raise _SessionLost("the session is closed")
+            self._tasks.put((task, done))
+        return done.result()
+
+    def close(self):
+        """Ask the browser to close once the render in progress, if any, ends."""
+        with self._lock:
+            if not self._done:
+                self._tasks.put(None)
+
+    def join(self, timeout):
+        self._thread.join(timeout)
+
+    def _run(self, ready):
+        try:
+            with sync_playwright() as p:
+                browser = _launch(p, _launch_args(self.pins, self.language), self.proxy)
+                try:
+                    context = browser.new_context(**_CONTEXT_OPTIONS)
+                    _install_gates(context, self.pins, lambda: self._scope)
+                    ready.set_result(None)
+                    self._serve(browser, context)
+                finally:
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass  # already gone
+        except Exception as exc:
+            if not ready.done():
+                ready.set_exception(exc)
+            else:
+                sys.stderr.write("[stealth-sidecar] session for %s ended: %s: %s\n"
+                                 % (self.host, type(exc).__name__, exc))
+        finally:
+            with self._lock:
+                self._done = True
+            while True:
+                try:
+                    pending = self._tasks.get_nowait()
+                except queue.Empty:
+                    break
+                if pending is not None:
+                    pending[1].set_exception(_SessionLost("the session closed"))
+
+    def _serve(self, browser, context):
+        while True:
+            pending = self._tasks.get()
+            if pending is None:
+                return
+            task, done = pending
+            if not done.set_running_or_notify_cancel():
+                continue
+            try:
+                done.set_result(task(context))
+            except Exception as exc:
+                done.set_exception(exc if browser.is_connected()
+                                   else _SessionLost("the session's browser exited: %s" % exc))
+            if not browser.is_connected():
+                return
+
+
+class SessionRegistry:
+    """The live sessions, each serving the one host it was opened for (JCLAW-1307).
+
+    `factory(host, pins, language, proxy)` builds a session with close() and join(timeout); `clock`
+    is what idle time is measured on.
+    """
+
+    def __init__(self, max_sessions, idle_s, factory, clock=time.monotonic):
+        self.max_sessions, self.idle_s = max_sessions, idle_s
+        self._factory, self._clock = factory, clock
+        self._lock = threading.Lock()
+        self._live = {}
+        self._opening = 0
+
+    def open(self, host, pins, language, proxy):
+        """A new session's id, or None at the cap. Raises what building the session raised."""
+        with self._lock:
+            if len(self._live) + self._opening >= self.max_sessions:
+                return None
+            self._opening += 1
+        try:
+            session = self._factory(host, pins, language, proxy)
+        except BaseException:
+            with self._lock:
+                self._opening -= 1
+            raise
+        sid = secrets.token_urlsafe(18)
+        with self._lock:
+            self._opening -= 1
+            self._live[sid] = {"host": host, "session": session, "busy": 0,
+                               "used": self._clock()}
+        return sid
+
+    def acquire(self, sid, host):
+        """The session for a render of `host`, held against the reaper until release(). KeyError for
+        an id that is unknown or closed, PermissionError for one serving another host."""
+        with self._lock:
+            entry = self._live.get(sid)
+            if entry is None:
+                raise KeyError(sid)
+            if entry["host"] != host:
+                raise PermissionError("session serves %s, not %s" % (entry["host"], host))
+            entry["busy"] += 1
+            entry["used"] = self._clock()
+            return entry["session"]
+
+    def release(self, sid):
+        with self._lock:
+            entry = self._live.get(sid)
+            if entry is not None:
+                entry["busy"] -= 1
+                entry["used"] = self._clock()
+
+    def close(self, sid):
+        with self._lock:
+            entry = self._live.pop(sid, None)
+        if entry is None:
+            return False
+        entry["session"].close()
+        return True
+
+    def reap(self):
+        """Close every session left unused for idle_s, and return their ids."""
+        now = self._clock()
+        with self._lock:
+            idle = [sid for sid, e in self._live.items()
+                    if e["busy"] == 0 and now - e["used"] >= self.idle_s]
+            entries = [self._live.pop(sid) for sid in idle]
+        for entry in entries:
+            entry["session"].close()
+        return idle
+
+    def close_all(self, budget_s=_SESSION_CLOSE_BUDGET_S):
+        with self._lock:
+            entries = list(self._live.values())
+            self._live.clear()
+        for entry in entries:
+            entry["session"].close()
+        deadline = time.monotonic() + budget_s
+        for entry in entries:
+            entry["session"].join(max(0.0, deadline - time.monotonic()))
+        return len(entries)
+
+    def __len__(self):
+        with self._lock:
+            return len(self._live)
+
+
 def _active_channel():
     with _CHANNEL_LOCK:
         return _LAST_CHANNEL
@@ -603,8 +939,8 @@ class SidecarState:
         self.identity = identity
         self.idle_timeout_s = idle_timeout_s
         self.last_used = time.time()
-        # A browser is launched per render because the DNS pin is a launch argument
-        # and cannot be varied on a shared instance. Patchright's sync API is not
+        # Outside a session a browser is launched per render, because the DNS pin is a
+        # launch argument and cannot be varied on a shared instance. Patchright's sync API is not
         # thread-safe across threads, but one sync_playwright() context per thread is
         # fine (verified: three concurrent renders complete in ~1.2s), so renders run
         # in parallel behind a bound rather than a mutex — serializing them would make
@@ -640,6 +976,7 @@ def _require_token(ap):
 
 class Handler(BaseHTTPRequestHandler):
     state: SidecarState = None  # injected in main()
+    sessions: SessionRegistry = None  # injected in main()
     token = None  # shared secret; None only under --no-auth
 
     protocol_version = "HTTP/1.1"
@@ -700,12 +1037,79 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/shutdown":
             sys.stderr.write("[stealth-sidecar] shutdown requested — exiting\n")
             self._send_json(200, {"status": "bye"})
-            threading.Thread(target=lambda: (time.sleep(0.2), os._exit(0)), daemon=True).start()
+            threading.Thread(target=lambda: (time.sleep(0.2), _exit(self.sessions)),
+                             daemon=True).start()
             return
         if self.path == "/render":
             self._handle_render()
             return
+        if self.path == "/session/open":
+            self._handle_session_open()
+            return
+        if self.path == "/session/close":
+            self._handle_session_close()
+            return
         self._send_json(404, {"error": "unknown path %s" % self.path})
+
+    def _handle_session_open(self):
+        self.state.touch()
+        if sync_playwright is None:
+            self._send_json(502, {"error": "patchright unavailable (%s)" % _IMPORT_ERROR})
+            return
+        try:
+            req = self._read_json()
+            if not isinstance(req, dict):
+                raise TypeError("body must be a JSON object")
+            host = session_host(req.get("host"))
+            pins = req.get("pins") or {}
+            if not isinstance(pins, dict):
+                raise TypeError("pins must be a JSON object")
+            proxy = req.get("proxy")
+            if proxy is not None and not isinstance(proxy, dict):
+                raise TypeError("proxy must be a JSON object")
+            language = req.get("language") or DEFAULT_LANGUAGE
+            if not isinstance(language, str):
+                raise TypeError("language must be a string")
+        except Exception as exc:
+            self._send_json(400, {"error": "malformed request: %s" % exc})
+            return
+
+        foreign = [h for h in pins if not isinstance(h, str) or h.lower() != host]
+        if foreign:
+            self._send_json(400, {"error": "a session for %s cannot pin %s" % (host, foreign[0])})
+            return
+        unsafe = _unsafe_pin(pins)
+        if unsafe is not None:
+            self._send_json(400, {"error": "pin for %s is not a public address" % unsafe})
+            return
+        try:
+            launch_proxy = _launch_proxy(proxy)
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+            return
+
+        try:
+            sid = self.sessions.open(host, pins, language, launch_proxy)
+        except Exception as exc:
+            self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
+        if sid is None:
+            # The JVM renders this page with a browser of its own instead.
+            self._send_json(429, {"error": "all %d sessions are open" % self.sessions.max_sessions})
+            return
+        self._send_json(200, {"id": sid})
+
+    def _handle_session_close(self):
+        self.state.touch()
+        try:
+            req = self._read_json()
+            sid = req.get("id") if isinstance(req, dict) else None
+            if not isinstance(sid, str):
+                raise TypeError("id must be a string")
+        except Exception as exc:
+            self._send_json(400, {"error": "malformed request: %s" % exc})
+            return
+        self._send_json(200, {"closed": self.sessions.close(sid)})
 
     def _handle_render(self):
         self.state.touch()
@@ -741,6 +1145,12 @@ class Handler(BaseHTTPRequestHandler):
             max_bytes = HARD_MAX_BYTES if requested_bytes is None else int(requested_bytes)
             wait_until = req.get("waitUntil") or DEFAULT_WAIT_UNTIL
             language = req.get("language") or DEFAULT_LANGUAGE
+            session_id = req.get("session")
+            if session_id is not None and not isinstance(session_id, str):
+                raise TypeError("session must be a string")
+            clearance = req.get("clearance", False)
+            if not isinstance(clearance, bool):
+                raise TypeError("clearance must be true or false")
         except Exception as exc:
             self._send_json(400, {"error": "malformed request: %s" % exc})
             return
@@ -755,15 +1165,41 @@ class Handler(BaseHTTPRequestHandler):
             return
         max_bytes = min(max_bytes, HARD_MAX_BYTES)
 
-        # A pin exempts its host from the route gate, so an unvalidated one is a way
-        # around the gate rather than an input to it. The token proves the caller holds
-        # the sidecar's secret, not that SsrfGuard approved the pin — and --no-auth drops
-        # even that — so pins are re-checked rather than trusted.
-        for pinned_host, pinned_ip in pins.items():
-            if not is_public_ip(pinned_ip):
-                self._send_json(400, {
-                    "error": "pin for %s is not a public address" % pinned_host})
+        if session_id is not None:
+            if "pins" in req or "proxy" in req:
+                # A session launched with the pin and egress it was opened with, and keeps them.
+                self._send_json(400, {"error": "a session render takes no pins or proxy"})
                 return
+            try:
+                session = self.sessions.acquire(session_id, (urlsplit(url).hostname or ""))
+            except KeyError:
+                self._send_json(404, {"error": "unknown session"})
+                return
+            except (PermissionError, ValueError) as exc:
+                self._send_json(400, {"error": str(exc)})
+                return
+            try:
+                with self.state.render_slots:
+                    result = session.render(url, timeout_ms, settle_ms, challenge_ms, solve,
+                                            wait_until, clearance)
+            except _SessionLost:
+                self.sessions.close(session_id)
+                self._send_json(404, {"error": "unknown session"})
+                return
+            except Exception as exc:
+                self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
+                return
+            finally:
+                self.sessions.release(session_id)
+            self._send_rendered(url, result, max_bytes)
+            return
+
+        # The token proves the caller holds the sidecar's secret, not that SsrfGuard approved
+        # the pin — and --no-auth drops even that — so pins are re-checked rather than trusted.
+        unsafe = _unsafe_pin(pins)
+        if unsafe is not None:
+            self._send_json(400, {"error": "pin for %s is not a public address" % unsafe})
+            return
 
         try:
             launch_proxy = _launch_proxy(proxy)
@@ -773,16 +1209,17 @@ class Handler(BaseHTTPRequestHandler):
 
         with self.state.render_slots:
             try:
-                html, status, settled_status, final_url, blocked, challenge = self._render(
-                    url, pins, timeout_ms, settle_ms, challenge_ms, solve, wait_until, language,
-                    launch_proxy)
+                result = self._render(url, pins, timeout_ms, settle_ms, challenge_ms, solve,
+                                      wait_until, language, launch_proxy)
             except Exception as exc:
                 self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
                 return
+        self._send_rendered(url, result, max_bytes)
 
+    def _send_rendered(self, url, result, max_bytes):
         # Assembled before the first write, so a failure here is still answerable as 502.
         try:
-            body = html.encode("utf-8", "replace")
+            body = result["html"].encode("utf-8", "replace")
             truncated = len(body) > max_bytes
             if truncated:
                 # Re-decoding the slice drops a character the cut fell inside, rather
@@ -790,23 +1227,27 @@ class Handler(BaseHTTPRequestHandler):
                 body = body[:max_bytes].decode("utf-8", "ignore").encode("utf-8")
             headers = [
                 ("Content-Type", "text/html; charset=utf-8"),
-                ("X-Upstream-Status", str(status)),
+                ("X-Upstream-Status", str(result["status"])),
                 # Where the settle window ENDED, which differs from X-Upstream-Status
                 # when a challenge answered 4xx and then resolved itself client-side.
-                ("X-Settled-Status", str(settled_status)),
-                # Both values are origin-influenced — final_url comes from the page, and
+                ("X-Settled-Status", str(result["settledStatus"])),
+                # Both values are origin-influenced — the final URL comes from the page, and
                 # the blocked set from URLs it chose to request — and send_header raises
                 # on anything outside latin-1, which would drop the whole response.
-                ("X-Upstream-Url", _header_safe(final_url)),
+                ("X-Upstream-Url", _header_safe(result["url"])),
             ]
-            if challenge:
-                headers.append(("X-Challenge", challenge))
+            if result["challenge"]:
+                headers.append(("X-Challenge", result["challenge"]))
+            blocked = result["blocked"]
             if blocked:
                 # The list is clipped, so the count is the only way to tell twenty
                 # blocked hosts from two hundred.
                 headers.append(("X-Blocked-Hosts",
                                 _header_safe(",".join(sorted(blocked)[:20]))))
                 headers.append(("X-Blocked-Hosts-Count", str(len(blocked))))
+            if result.get("clearance"):
+                headers.append(("X-Clearance", _header_safe(result["clearance"])))
+                headers.append(("X-Clearance-User-Agent", _header_safe(result["userAgent"])))
             if truncated:
                 headers.append(("X-Upstream-Truncated", "true"))
             headers.append(("Content-Length", str(len(body))))
@@ -841,77 +1282,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _render(self, url, pins, timeout_ms, settle_ms, challenge_ms, solve, wait_until, language,
                 proxy=None):
-        blocked = set()
-        budget = _ResolveBudget(_RESOLVE_BUDGET_S)
-
-        def gate(route):
-            # Pinned hosts are already guard-validated; anything else the page
-            # reaches for gets resolved and range-checked before it is allowed.
-            parts = urlsplit(route.request.url)
-            scheme = parts.scheme.lower()
-            if scheme in ("http", "https"):
-                # urlsplit, not string slicing: the hand-rolled split produced "[2606"
-                # for an IPv6 literal and "" for anything it could not parse, and an
-                # empty host then skipped the check entirely.
-                host = parts.hostname
-                if not host:
-                    blocked.add(route.request.url[:80])
-                    route.abort()
-                    return
-                if host not in pins and not _host_allowed(host, budget):
-                    blocked.add(host)
-                    route.abort()
-                    return
-            elif scheme not in ("data", "blob", "about"):
-                # data/blob/about reach no network and a page legitimately uses them.
-                # Everything else -- file:, ftp:, chrome-extension: -- has no business
-                # being fetched by a rendered page, and defaulting them to "allow" is
-                # the wrong way round for a security gate.
-                blocked.add(scheme + ":")
-                route.abort()
-                return
-            route.continue_()
-
-        def ws_gate(ws):
-            # page.route never sees WebSocket traffic -- it is a separate API -- so
-            # until this existed a page could open ws://127.0.0.1, read a loopback
-            # service and write the reply into the DOM we hand back.
-            host = urlsplit(ws.url).hostname
-            if not host or (host not in pins and not _host_allowed(host, budget)):
-                blocked.add(host or ws.url[:80])
-                return
-            ws.connect_to_server()
-
+        scope = _RenderScope()
         with sync_playwright() as p:
             browser = _launch(p, _launch_args(pins, language), proxy)
             try:
-                # Routed on the CONTEXT, not the page: a popup the page opens is a
-                # separate Page with no page-level handler, and service workers issue
-                # requests the page handler never sees at all.
                 context = browser.new_context(**_CONTEXT_OPTIONS)
-                context.route("**/*", gate)
-                context.route_web_socket("**/*", ws_gate)
-                page = context.new_page()
-                settled = {"status": 0, "mitigated": None}
-
-                def track(resp):
-                    # goto's status is the FIRST navigation response, captured before
-                    # the settle window; an interstitial that resolves itself navigates
-                    # again inside it, and this records where that landed.
-                    if resp.request.is_navigation_request() and resp.frame == page.main_frame:
-                        settled["status"] = resp.status
-                        settled["mitigated"] = resp.headers.get("cf-mitigated")
-
-                page.on("response", track)
-                _disguise(context, page, language)
-                response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
-                challenge = _settle(page, settled, settle_ms, challenge_ms, solve)
-                return (page.content(),
-                        response.status if response else 0,
-                        settled["status"],
-                        page.url,
-                        blocked,
-                        challenge)
+                _install_gates(context, pins, lambda: scope)
+                result = _navigate(context, context.new_page(), url, timeout_ms, settle_ms,
+                                   challenge_ms, solve, wait_until, language)
+                result["blocked"] = scope.blocked
+                return result
             finally:
                 browser.close()
 
@@ -984,14 +1364,28 @@ def self_check(language):
             "problems": fingerprint_problems(observed, language)}
 
 
-def _idle_watcher(state):
+def _exit(sessions):
+    """Close every session's browser, within a bound, then exit."""
+    if sessions is not None:
+        sessions.close_all()
+    os._exit(0)
+
+
+def _idle_watcher(state, sessions):
     if state.idle_timeout_s <= 0:
         return
     while True:
         time.sleep(30)
         if time.time() - state.last_used > state.idle_timeout_s:
             sys.stderr.write("[stealth-sidecar] idle — exiting\n")
-            os._exit(0)
+            _exit(sessions)
+
+
+def _session_reaper(sessions):
+    while True:
+        time.sleep(_SESSION_REAP_INTERVAL_S)
+        for sid in sessions.reap():
+            sys.stderr.write("[stealth-sidecar] session %s… idle — closed\n" % sid[:6])
 
 
 def main():
@@ -1003,6 +1397,10 @@ def main():
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
     ap.add_argument("--max-concurrent", type=int, default=DEFAULT_MAX_CONCURRENT,
                     help="live headless browsers allowed at once")
+    ap.add_argument("--max-sessions", type=int, default=DEFAULT_MAX_SESSIONS,
+                    help="browser sessions allowed open at once, each serving one host")
+    ap.add_argument("--session-idle-min", type=float, default=DEFAULT_SESSION_IDLE_MIN,
+                    help="minutes an unused session stays open")
     ap.add_argument("--no-auth", action="store_true",
                     help="serve unauthenticated — for hand-running this sidecar without the JVM")
     ap.add_argument("--probe", action="store_true",
@@ -1032,8 +1430,12 @@ def main():
     os.makedirs(os.path.abspath(args.cache_dir), exist_ok=True)
     Handler.token = None if args.no_auth else _require_token(ap)
     Handler.state = SidecarState(args.model, args.idle_timeout_min * 60.0, args.max_concurrent)
+    Handler.sessions = SessionRegistry(args.max_sessions, args.session_idle_min * 60.0,
+                                       BrowserSession)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()
+    threading.Thread(target=_idle_watcher, args=(Handler.state, Handler.sessions),
+                     daemon=True).start()
+    threading.Thread(target=_session_reaper, args=(Handler.sessions,), daemon=True).start()
     sys.stderr.write("[stealth-sidecar] listening on http://%s:%d\n" % (args.host, args.port))
     try:
         server.serve_forever()

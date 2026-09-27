@@ -1,6 +1,7 @@
 package tools.scrape;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -23,6 +24,7 @@ import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.Optional;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -80,9 +82,23 @@ public final class RenderedFetcher {
             .readTimeout(Duration.ZERO)
             .build();
 
-    /** A rendered page, and the challenge the render met as the sidecar's {@code X-Challenge}
-     *  reported it — null when none stood. */
-    public record Render(WebExtraction.FetchResult fetched, @Nullable String challenge) {}
+    /** A rendered page, the challenge the render met as the sidecar's {@code X-Challenge} reported
+     *  it — null when none stood — and the cf_clearance a session render was asked for, when the
+     *  browser holds one. */
+    public record Render(WebExtraction.FetchResult fetched, @Nullable String challenge,
+                         ScrapeSessions.@Nullable Clearance clearance) {
+
+        public Render(WebExtraction.FetchResult fetched, @Nullable String challenge) {
+            this(fetched, challenge, null);
+        }
+    }
+
+    /** The sidecar no longer holds the session a render named (JCLAW-1307). */
+    public static final class SessionGoneException extends ScrapeSidecarException {
+        public SessionGoneException(String message) {
+            super(message, null);
+        }
+    }
 
     private RenderedFetcher() {}
 
@@ -114,9 +130,19 @@ public final class RenderedFetcher {
         // Authoritative check stays in the JVM. hostResolverRule throws every
         // SecurityException assertUrlSafe does, so an unsafe entry URL never reaches
         // the browser.
-        var pinRule = SsrfGuard.hostResolverRule(url);
-        var baseUrl = StealthSidecarManager.ensureRunning();
+        var pins = pins(SsrfGuard.hostResolverRule(url));
+        var request = post(StealthSidecarManager.ensureRunning(), "/render",
+                renderRequest(url, language, pins));
 
+        return inRenderSlot(() -> {
+            try (var response = CLIENT.newCall(request).execute()) {
+                return rendered(response, url);
+            }
+        });
+    }
+
+    /** A {@link SsrfGuard#hostResolverRule} as the sidecar's {@code pins} object. */
+    static JsonObject pins(Optional<String> pinRule) {
         var pins = new JsonObject();
         // "MAP <host> <ip>" — the sidecar rebuilds the flag, so the JVM never has to
         // know Chromium's argument syntax and the guard never has to emit it.
@@ -124,18 +150,77 @@ public final class RenderedFetcher {
             var parts = rule.split(" ");
             if (parts.length == 3) pins.addProperty(parts[1], parts[2]);
         });
+        return pins;
+    }
 
-        var request = new Request.Builder()
-                .url(baseUrl + "/render")
-                .header(LocalSidecarDaemon.AUTH_HEADER, StealthSidecarManager.authToken())
-                .post(RequestBody.create(renderRequest(url, language, pins).toString(), JSON))
-                .build();
+    /**
+     * Open a browser session serving {@code host} alone, launched with {@code pins} and
+     * {@code proxy} for its whole life (JCLAW-1307).
+     *
+     * @return the session's id, or null when every session the sidecar allows is open
+     */
+    static @Nullable String openSession(String host, JsonObject pins, String language,
+                                        @Nullable ScrapeProxy proxy) throws IOException {
+        var body = new JsonObject();
+        body.addProperty("host", host);
+        body.add("pins", pins);
+        body.addProperty("language", language);
+        if (proxy != null) body.add("proxy", proxy.toJson());
+        var request = post(StealthSidecarManager.ensureRunning(), "/session/open", body);
+        try (var response = CLIENT.newCall(request).execute()) {
+            if (response.code() == 429) return null;
+            var answer = response.body().string();
+            if (!response.isSuccessful()) {
+                throw new ScrapeSidecarException("stealth sidecar returned HTTP %d opening a session for %s: %s"
+                        .formatted(response.code(), host, answer.strip()), null);
+            }
+            try {
+                return JsonParser.parseString(answer).getAsJsonObject().get("id").getAsString();
+            } catch (RuntimeException e) {
+                throw new ScrapeSidecarException("stealth sidecar answered a session open with no id", e);
+            }
+        }
+    }
 
+    /**
+     * Render {@code url} in session {@code id}, holding one of the {@link #RENDER_SLOTS}. The caller
+     * has screened {@code url}.
+     *
+     * @param clearance whether to ask for the cf_clearance the browser holds for the session's host
+     * @throws SessionGoneException when the sidecar no longer holds the session
+     */
+    static Render renderInSession(String id, String url, boolean clearance) throws IOException {
+        var body = budgeted(url);
+        body.addProperty("session", id);
+        body.addProperty("clearance", clearance);
+        var request = post(StealthSidecarManager.ensureRunning(), "/render", body);
         return inRenderSlot(() -> {
             try (var response = CLIENT.newCall(request).execute()) {
+                if (response.code() == 404) throw new SessionGoneException("session gone for " + url);
                 return rendered(response, url);
             }
         });
+    }
+
+    /** Close session {@code id}. Never starts the sidecar: one that is not running holds no session. */
+    static void closeSession(String id) throws IOException {
+        var body = new JsonObject();
+        body.addProperty("id", id);
+        try (var response = CLIENT.newCall(post(StealthSidecarManager.baseUrl(), "/session/close", body))
+                .execute()) {
+            if (!response.isSuccessful()) {
+                throw new ScrapeSidecarException("stealth sidecar returned HTTP %d closing a session"
+                        .formatted(response.code()), null);
+            }
+        }
+    }
+
+    private static Request post(String baseUrl, String path, JsonObject body) {
+        return new Request.Builder()
+                .url(baseUrl + path)
+                .header(LocalSidecarDaemon.AUTH_HEADER, StealthSidecarManager.authToken())
+                .post(RequestBody.create(body.toString(), JSON))
+                .build();
     }
 
     /** One call to the sidecar. Public because Play's tests live in the default package. */
@@ -162,15 +247,21 @@ public final class RenderedFetcher {
 
     /** The body of one render request. Public because Play's tests live in the default package. */
     public static JsonObject renderRequest(String url, String language, JsonObject pins) {
-        var payload = new JsonObject();
-        payload.addProperty("url", url);
+        var payload = budgeted(url);
         payload.addProperty("language", language);
         payload.add("pins", pins);
+        ScrapeProxy.current().ifPresent(proxy -> payload.add("proxy", proxy.toJson()));
+        return payload;
+    }
+
+    /** What every render request carries, a session's included. */
+    private static JsonObject budgeted(String url) {
+        var payload = new JsonObject();
+        payload.addProperty("url", url);
         payload.addProperty("maxBytes", WebExtraction.maxBodyBytes());
         payload.addProperty("timeoutMs", NAVIGATION_TIMEOUT.toMillis());
         payload.addProperty("challengeMs", CHALLENGE_BUDGET.toMillis());
         payload.addProperty("solveTurnstile", StealthSidecarManager.solveTurnstile());
-        ScrapeProxy.current().ifPresent(proxy -> payload.add("proxy", proxy.toJson()));
         return payload;
     }
 
@@ -201,7 +292,14 @@ public final class RenderedFetcher {
             if (challenge != null) headers.put(ScrapeObservation.CHALLENGE_HEADER, challenge);
             throw new WebExtraction.HttpStatusException(status, url, body, HTML, headers);
         }
-        return new Render(new WebExtraction.FetchResult(body, HTML, finalUrl(response, url)), challenge);
+        return new Render(new WebExtraction.FetchResult(body, HTML, finalUrl(response, url)), challenge,
+                clearance(response));
+    }
+
+    private static ScrapeSessions.@Nullable Clearance clearance(Response response) {
+        var cookie = response.header("X-Clearance");
+        var userAgent = response.header("X-Clearance-User-Agent");
+        return cookie == null || userAgent == null ? null : new ScrapeSessions.Clearance(userAgent, cookie);
     }
 
     /**

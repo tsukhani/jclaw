@@ -30,7 +30,10 @@ public final class ScrapeLadder {
     /**
      * Rung 2 sends no {@code User-Agent}: curl_cffi supplies the header set matching the
      * profile it forges, and overriding it would pair a Chrome ClientHello with a
-     * non-Chrome agent string — a mismatch WAFs test for directly (JCLAW-1087).
+     * non-Chrome agent string — a mismatch WAFs test for directly (JCLAW-1087). The one
+     * exception is a clearance handed down from a crawl's browser, which carries that
+     * browser's User-Agent and is sent only when the profile's Chrome major matches it
+     * ({@link ScrapeSessions#rungTwo}).
      */
     public static Map<String, String> impersonatedHeaders(String language) {
         // Same "*;q=0.5" tail rung 1 sends: a bare preference invites a 406 from a site
@@ -80,7 +83,12 @@ public final class ScrapeLadder {
 
     /** Whether any rung above {@link ScrapeRung#PLAIN} could be attempted on this install. */
     public static boolean available() {
-        return ImpersonatedFetcher.available() || RenderedFetcher.available();
+        return available(null);
+    }
+
+    /** As {@link #available()}, for a crawl reaching the sidecars through {@code sessions}. */
+    public static boolean available(@Nullable ScrapeSessions sessions) {
+        return isInstalled(ScrapeRung.IMPERSONATE, sessions) || isInstalled(ScrapeRung.BROWSER, sessions);
     }
 
     /**
@@ -93,7 +101,12 @@ public final class ScrapeLadder {
      * that never happened.
      */
     public static boolean wouldAttempt(ScrapeReason reason, int status) {
-        return isInstalled(BlockClassifier.nextRung(reason, status, ScrapeRung.PLAIN));
+        return wouldAttempt(reason, status, null);
+    }
+
+    /** As {@link #wouldAttempt(ScrapeReason, int)}, for a crawl reaching the sidecars through {@code sessions}. */
+    public static boolean wouldAttempt(ScrapeReason reason, int status, @Nullable ScrapeSessions sessions) {
+        return isInstalled(BlockClassifier.nextRung(reason, status, ScrapeRung.PLAIN), sessions);
     }
 
     /**
@@ -111,6 +124,15 @@ public final class ScrapeLadder {
     /** As {@link #climb(String, Attempt)}, carrying the caller's language preference so
      *  an escalated page comes back in the language the unescalated one would have. */
     public static Attempt climb(String url, Attempt plain, String language) {
+        return climb(url, plain, language, null);
+    }
+
+    /**
+     * As {@link #climb(String, Attempt, String)} for one page of a crawl, which renders in
+     * {@code sessions} and asks it how rung 2 approaches the page's host (JCLAW-1307). Null is
+     * a lone fetch, which renders with a browser of its own.
+     */
+    public static Attempt climb(String url, Attempt plain, String language, @Nullable ScrapeSessions sessions) {
         if (plain.usable()) return plain;
 
         var best = plain;
@@ -120,10 +142,13 @@ public final class ScrapeLadder {
 
         while (true) {
             var next = BlockClassifier.nextRung(last.reason(), last.status(), attempted);
-            if (!isInstalled(next)) return best.withChallenge(challenge);
+            if (!isInstalled(next, sessions)) return best.withChallenge(challenge);
 
-            last = attempt(next, url, language);
+            var rungTwo = next == ScrapeRung.IMPERSONATE && sessions != null
+                    ? sessions.rungTwo(url) : ScrapeSessions.RungTwo.AS_USUAL;
             attempted = next;
+            if (rungTwo.skip()) continue;
+            last = attempt(next, url, language, sessions, rungTwo);
             if (last.usable()) return last;
             if (last.challenge() != null) challenge = last.challenge();
             best = better(best, last);
@@ -131,16 +156,19 @@ public final class ScrapeLadder {
     }
 
     /** Run one URL through {@code rung}, classifying the result the way the harness does. */
-    private static Attempt attempt(ScrapeRung rung, String url, String language) {
+    private static Attempt attempt(ScrapeRung rung, String url, String language,
+                                   @Nullable ScrapeSessions sessions, ScrapeSessions.RungTwo rungTwo) {
         try {
             WebExtraction.FetchResult fetched;
             String challenge = null;
             if (rung == ScrapeRung.BROWSER) {
-                var render = RenderedFetcher.render(url, language);
+                var render = sessions == null ? RenderedFetcher.render(url, language) : sessions.render(url, language);
                 fetched = render.fetched();
                 challenge = render.challenge();
             } else {
-                fetched = ImpersonatedFetcher.fetch(url, impersonatedHeaders(language));
+                var headers = impersonatedHeaders(language);
+                fetched = sessions == null ? ImpersonatedFetcher.fetch(url, headers)
+                        : sessions.impersonate(url, headers, rungTwo);
             }
             var text = WebExtraction.toText(fetched);
             var obs = ScrapeObservation.of(fetched, text);
@@ -171,10 +199,10 @@ public final class ScrapeLadder {
     }
 
     /** {@link ScrapeRung#NONE} and any rung whose sidecar is absent are both "stop here". */
-    private static boolean isInstalled(ScrapeRung rung) {
+    private static boolean isInstalled(ScrapeRung rung, @Nullable ScrapeSessions sessions) {
         return switch (rung) {
-            case IMPERSONATE -> ImpersonatedFetcher.available();
-            case BROWSER -> RenderedFetcher.available();
+            case IMPERSONATE -> sessions == null ? ImpersonatedFetcher.available() : sessions.impersonateAvailable();
+            case BROWSER -> sessions == null ? RenderedFetcher.available() : sessions.renderAvailable();
             case PLAIN, PROVIDER, NONE -> false;
         };
     }
