@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Rung 3: render through the stealth browser sidecar (JCLAW-1088).
@@ -63,6 +64,8 @@ public final class RenderedFetcher {
     /** How long a render polls a standing Cloudflare challenge, in place of its settle window
      *  (JCLAW-1306). */
     private static final Duration CHALLENGE_BUDGET = Duration.ofSeconds(45);
+
+    private static final Duration CLOSE_TIMEOUT = Duration.ofSeconds(10);
 
     /** serve.py's {@code DEFAULT_MAX_CONCURRENT}. A render queues for a slot here, where no timer
      *  runs, rather than in the sidecar against {@link #CALL_TIMEOUT}. Public because Play's tests
@@ -206,8 +209,10 @@ public final class RenderedFetcher {
     static void closeSession(String id) throws IOException {
         var body = new JsonObject();
         body.addProperty("id", id);
-        try (var response = CLIENT.newCall(post(StealthSidecarManager.baseUrl(), "/session/close", body))
-                .execute()) {
+        var call = CLIENT.newCall(post(StealthSidecarManager.baseUrl(), "/session/close", body));
+        // The sidecar only queues the browser's close, and the render budget would hold a crawl's end for minutes.
+        call.timeout().timeout(CLOSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        try (var response = call.execute()) {
             if (!response.isSuccessful()) {
                 throw new ScrapeSidecarException("stealth sidecar returned HTTP %d closing a session"
                         .formatted(response.code()), null);

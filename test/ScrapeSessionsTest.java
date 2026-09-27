@@ -374,6 +374,28 @@ class ScrapeSessionsTest extends UnitTest {
     }
 
     @Test
+    void aSessionRenderReadsTheClearanceOnlyWhenBothHeadersCame() throws Exception {
+        var url = "https://" + HOST + "/a";
+        assertEquals(new ScrapeSessions.Clearance(CHROME_146, "tok"), RenderedFetcher.rendered(
+                sidecarAnswer(url, "X-Clearance", "tok", "X-Clearance-User-Agent", CHROME_146), url).clearance());
+        assertNull(RenderedFetcher.rendered(sidecarAnswer(url, "X-Clearance", "tok"), url).clearance(),
+                "a cookie with no User-Agent to pair it with cannot be handed down coherently");
+        assertNull(RenderedFetcher.rendered(sidecarAnswer(url), url).clearance());
+        assertFalse(new ScrapeSessions.Clearance(CHROME_146, "tok").toString().contains("tok"),
+                "a logged clearance must not carry the cookie");
+    }
+
+    private static Response sidecarAnswer(String url, String... headers) {
+        var answer = new Response.Builder()
+                .request(new okhttp3.Request.Builder().url("http://127.0.0.1:9532/render").build())
+                .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .addHeader("X-Upstream-Status", "200").addHeader("X-Upstream-Url", url)
+                .body(ResponseBody.create(page("Rendered"), MediaType.parse("text/html")));
+        for (int i = 0; i < headers.length; i += 2) answer.addHeader(headers[i], headers[i + 1]);
+        return answer.build();
+    }
+
+    @Test
     void theClearanceGoesToItsHostOverHttpsAndNowhereElse() throws Exception {
         var sent = new ArrayList<String>();
         WebExtraction.Transport base = (uri, headers) -> {
