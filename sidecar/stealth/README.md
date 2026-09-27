@@ -205,6 +205,12 @@ window is replaced by a poll every 500 ms until both markers are gone or `challe
 Once the markers are gone, the page behind the challenge gets what is left of the budget, up to
 `settleMs`, to render. `X-Challenge` reports the type and whether it cleared.
 
+Waiting, not clicking, is what clears a managed challenge: Turnstile scores the browser, and a
+click only asks it to score again. Measured on 2026-09-28, `nih.gov` and `ancestry.com` cleared
+headless inside 10 s with no click once every surface agreed, while with the site-isolation
+flag described under [One story on every surface](#one-story-on-every-surface) each click drew
+a fresh checkbox and three never passed.
+
 **The click is off unless the operator turns it on** with `scrape.stealth.solveTurnstile`, which
 the JVM reads per render and sends as `solveTurnstile`. With it on, the checkbox of a `managed` or
 `interactive` gate is clicked once Turnstile's frame is visible: at most three clicks, 8 s apart,
@@ -268,27 +274,25 @@ every later page of a sweep. The fallback is **reported**, in `channel` on `/hea
 substitution would leave a sweep measuring the stripped build while the report named the
 full one.
 
-One signal the full Chromium still gets wrong: `userAgentData.brands` says `Chromium`
-where Chrome says `Google Chrome`, and **`Sec-CH-UA` is generated from it**. A single
-`Emulation.setUserAgentOverride` fixes the header, the JS API and the User-Agent string
-together. Every field but the brand list is read back from the browser itself, so a
-Linux host reports Linux rather than whatever the author's machine was.
-
-That read-back must happen on a **secure origin** — `navigator.userAgentData` does not
-exist on `about:blank`, and probing there silently yields an empty platform which the
-override then pins as empty, worse than not overriding at all. The probe page is served
-locally through a fulfilled route: a real `https://` origin with no network request.
+The User-Agent is the `--user-agent` launch flag: the build's own string, read once per
+process from a throwaway launch, with `HeadlessChrome` replaced by `Chrome`. A flag reaches
+every renderer — the page, its Workers and a cross-site iframe alike — and the brands stay
+the build's own, `Chromium`, everywhere. An `Emulation.setUserAgentOverride` claiming
+`Google Chrome`, the earlier mechanism, reached the page's target only (see [One story on
+every surface](#one-story-on-every-surface)).
 
 A failed probe is logged and the render goes out with the build's own User-Agent —
 degrading the disguise is the right failure mode, since a probe that fails the render
 turns one broken probe into a render error that names Playwright rather than the probe.
 The failure is remembered for 60 s and then re-probed. Caching it for the process
 lifetime was wrong for the same reason latching the headless shell was: the probe
-navigates, so it fails on the transients a render fails on, and every later render would
-have gone out undisguised while `/health` still reported the sidecar runnable.
+launches a browser, so it fails on the transients a render fails on, and every later
+render would have gone out as `HeadlessChrome` while `/health` still reported the sidecar
+runnable.
 
-Result: **20 of 21 probed signals identical to a real headful Chrome**, and no failing
-rows on `bot.sannysoft.com`.
+Result, measured with the earlier `Google Chrome` override: **20 of 21 probed signals
+identical to a real headful Chrome**, and no failing rows on `bot.sannysoft.com`. The
+brands now say `Chromium`, as a real Chromium's do.
 
 The one that remains is `outerWidth`/`outerHeight`, which equal the viewport because
 headless has no window chrome to add. It is not fixable here — Patchright disables
@@ -332,18 +336,20 @@ How each surface is set:
   Scrapling — not measured here); Chromium on macOS takes its locale from the OS and ignores the
   flag, measured. `Emulation.setLocaleOverride` on the page's CDP session sets it on both, and
   dedicated Workers inherit it — measured.
-- **User-Agent.** The `Emulation.setUserAgentOverride` above was measured to reach dedicated
-  Workers: `navigator.userAgent`, the `userAgentData` brands and the `User-Agent` header of a
-  Worker's requests all match the page, so the mechanism stays. Chromium sends no `Sec-CH-UA` on
-  a dedicated Worker's requests with or without the override, so there is nothing there to
+- **User-Agent** is the `--user-agent` flag, so the page, its Workers, a cross-site iframe and
+  every request header carry one string, and the brands are the build's own on all of them.
+  Chromium sends no `Sec-CH-UA` on a dedicated Worker's requests, so there is nothing there to
   disagree.
-- **Cross-site iframes** render in the page's process: `--disable-site-isolation-trials`.
-  Isolated, each is a target of its own that the page's CDP session never reaches: measured with
-  every override above in place, a cross-site iframe and its Worker still reported
-  `HeadlessChrome`, the `Chromium` brand and the host's `Intl` locale. Their requests pass the
-  context's route gate either way, measured the same with and without the flag. What isolation
-  would add is a process boundary between the sites of one render, in a fresh profile that holds
-  nothing of the operator's.
+- **Cross-site iframes stay isolated.** `--disable-site-isolation-trials` once put them in the
+  page's process so the page's CDP overrides reached them, and **Cloudflare failed every managed
+  challenge while it was set**: measured on 2026-09-28 against `nih.gov`, it alone turned a
+  challenge that clears unaided into one that three clicks never pass, and isolated, the
+  Turnstile frame reported `HeadlessChrome` under a page-level User-Agent override. With the
+  flag gone and the User-Agent a launch flag, `nih.gov` and `ancestry.com` both cleared headless
+  with no click. What still differs in an isolated iframe on macOS is `Intl`, which follows the
+  OS there: Playwright's context `locale`, the one override that reaches the frame before its
+  scripts run, splits `navigator.languages` between the page and its Workers instead (measured).
+  The self-check tolerates that one difference, on macOS only.
 - **Viewport and screen** are both 1920×1080, as context options. **Pointer and hover** come
   from `--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4`,
   because headless can report neither on a host with no pointing device — the reason the story

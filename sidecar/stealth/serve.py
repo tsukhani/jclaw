@@ -135,9 +135,9 @@ except Exception as exc:  # pragma: no cover - exercised only on a broken instal
     _IMPORT_ERROR = "%s: %s" % (type(exc).__name__, exc)
 
 _UA_LOCK = threading.Lock()
-_UA_OVERRIDE = None
-# A failed probe is retried, not cached forever: the probe navigates, so it fails on the
-# same transients a render does, and a permanent cache would strip the disguise from
+_UA = None
+# A failed probe is retried, not cached forever: the probe launches a browser, so it fails
+# on the same transients a render does, and a permanent cache would leave HeadlessChrome in
 # every later render on the strength of one of them.
 _UA_RETRY_S = 60.0
 _UA_RETRY_AT = 0.0
@@ -180,24 +180,9 @@ _FALLBACK_CHANNEL = "chromium-headless-shell"
 _CHANNEL_LOCK = threading.Lock()
 _LAST_CHANNEL = _CHANNEL
 
-# One signal the full Chromium still does not match: userAgentData.brands says
-# "Chromium" where Chrome says "Google Chrome", and Sec-CH-UA is generated from it.
-# Emulation.setUserAgentOverride fixes the header, the JS API and the UA string in one
-# call. Every field except the brand list is read back from the browser itself, so a
-# Linux host reports Linux rather than whatever the developer's machine was.
-#
-# The read-back has to happen on a SECURE origin: navigator.userAgentData does not
-# exist on about:blank, and probing there silently yielded an empty platform, which
-# the override then pinned as empty — worse than not overriding at all. The probe page
-# is served locally through a fulfilled route, so it is a real https origin with no
-# network request.
-_UA_PROBE = """async () => {
-  const d = navigator.userAgentData;
-  const hi = d ? await d.getHighEntropyValues(
-      ['architecture', 'bitness', 'model', 'platformVersion']) : {};
-  return {ua: navigator.userAgent, platform: d ? d.platform : '',
-          mobile: d ? d.mobile : false, ...hi};
-}"""
+# The User-Agent is a launch flag, and the brands stay the build's own. A page-level CDP override
+# never reaches a cross-site iframe — Turnstile's — which went on saying HeadlessChrome, and
+# --disable-site-isolation-trials, which spread it, is itself failed by Cloudflare (measured).
 
 # One story on every surface a challenge compares: frames, Workers, headers (JCLAW-1305, README).
 _SCREEN = {"width": 1920, "height": 1080}
@@ -206,9 +191,6 @@ _FINGERPRINT_ARGS = [
     # Headless can report no fine pointer and no hover on a host with no pointing device.
     "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,"
     "availablePointerTypes=4",
-    # Isolated, a cross-site iframe (Turnstile's) is a process the page's CDP overrides never
-    # reach: it reported HeadlessChrome and the host's Intl locale (measured).
-    "--disable-site-isolation-trials",
     # Neither route gate sees UDP. Each build honors one spelling and silently ignores the
     # other — the full Chromium this one, the headless-shell fallback the force one (measured).
     "--webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -223,11 +205,13 @@ def _accept_languages(language):
     return [language] if primary == language else [language, primary]
 
 
-def _launch_args(pins, language):
+def _launch_args(pins, language, user_agent=None):
     """Every flag a render launches with. Language is a flag rather than the context locale,
     which Playwright applies to the main thread only: a Worker kept the host's languages."""
     args = ["--lang=" + language, "--accept-lang=" + ",".join(_accept_languages(language))]
     args += _FINGERPRINT_ARGS
+    if user_agent:
+        args.append("--user-agent=" + user_agent)
     if pins:
         args.append("--host-resolver-rules="
                     + ",".join("MAP %s %s" % (h, ip) for h, ip in pins.items()))
@@ -235,14 +219,10 @@ def _launch_args(pins, language):
 
 
 def _disguise(context, page, language):
-    """The overrides no launch flag makes, sent before `page` navigates. Its iframes and
-    dedicated Workers inherit both (measured), so they stay in step with the page."""
-    cdp = context.new_cdp_session(page)
+    """The override no launch flag makes, sent before `page` navigates; its dedicated Workers
+    inherit it (measured)."""
     # Chromium on macOS takes Intl from the OS and ignores --lang (measured).
-    cdp.send("Emulation.setLocaleOverride", {"locale": language})
-    override = Handler._ua_override(context)
-    if override:
-        cdp.send("Emulation.setUserAgentOverride", override)
+    context.new_cdp_session(page).send("Emulation.setLocaleOverride", {"locale": language})
 
 
 _SURFACES_JS = """() => {
@@ -320,11 +300,12 @@ _FIXTURE_REQUESTS = ("/", "/echo/main", "/worker.js", "/echo/worker",
 _FIXTURE_CLIENT_HINTED = ("/", "/echo/main", "/frame")
 _FIXTURE_THREADS = (("worker", "the Worker"), ("frame", "a cross-site iframe"),
                     ("frameWorker", "the iframe's Worker"))
+_CROSS_SITE_THREADS = ("frame", "frameWorker")
 # Without the WebRTC flags the first datagram arrived ~100 ms after load (measured).
 _WEBRTC_WINDOW_S = 2.0
 
 
-def fingerprint_problems(observed, language):
+def fingerprint_problems(observed, language, platform=sys.platform):
     """Each way the self-check's observations disagree with one Chrome in `language`; empty
     when the page, its iframe, their Workers and every request header tell the same story."""
     main = observed.get("main")
@@ -336,14 +317,18 @@ def fingerprint_problems(observed, language):
     problems = []
     for key, label in _FIXTURE_THREADS:
         for field in ("userAgent", "brands", "language", "languages", "intl"):
+            # macOS gives an isolated iframe the OS's Intl; the one override that reaches it
+            # splits navigator.languages from the Workers' instead (README, measured).
+            if field == "intl" and key in _CROSS_SITE_THREADS and platform == "darwin":
+                continue
             if observed[key][field] != main[field]:
                 problems.append("%s's %s %r differs from the page's %r"
                                 % (label, field, observed[key][field], main[field]))
     for field, label in (("language", "navigator.language"), ("intl", "Intl")):
         if main[field].lower() != language.lower():
             problems.append("%s is %r, not %r" % (label, main[field], language))
-    if "HeadlessChrome" in main["userAgent"] or "Google Chrome" not in main["brands"]:
-        problems.append("the User-Agent is not Chrome's: %r %r"
+    if "HeadlessChrome" in main["userAgent"] or "HeadlessChrome" in main["brands"]:
+        problems.append("the User-Agent says HeadlessChrome: %r %r"
                         % (main["userAgent"], main["brands"]))
     for path in _FIXTURE_REQUESTS:
         sent = observed["headers"].get(path)
@@ -355,7 +340,7 @@ def fingerprint_problems(observed, language):
         tags = [t.split(";")[0].strip() for t in (sent["accept-language"] or "").split(",")]
         if tags != main["languages"]:
             problems.append("%s went out as Accept-Language %r" % (path, sent["accept-language"]))
-        if path in _FIXTURE_CLIENT_HINTED and "Google Chrome" not in (sent["sec-ch-ua"] or ""):
+        if path in _FIXTURE_CLIENT_HINTED and "HeadlessChrome" in (sent["sec-ch-ua"] or "HeadlessChrome"):
             problems.append("%s went out as Sec-CH-UA %r" % (path, sent["sec-ch-ua"]))
     size = [_SCREEN["width"], _SCREEN["height"]]
     if main["screen"] != size or main["viewport"] != size:
@@ -715,7 +700,7 @@ class BrowserSession:
     def _run(self, ready):
         try:
             with sync_playwright() as p:
-                browser = _launch(p, _launch_args(self.pins, self.language), self.proxy)
+                browser = _launch(p, _launch_args(self.pins, self.language, _user_agent(p, self.proxy)), self.proxy)
                 try:
                     context = browser.new_context(**_CONTEXT_OPTIONS)
                     _install_gates(context, self.pins, lambda: self._scope)
@@ -897,42 +882,25 @@ def _launch(p, args, proxy=None):
     return browser
 
 
-def _probe_ua(context):
-    """This build's UA metadata with the brand list corrected to Chrome, or None when the
-    probe fails — a UA with no Chrome/ token included, which the version split cannot
-    parse. A probe failure degrades the disguise; it must not fail the render."""
-    try:
-        page = context.new_page()
+def _user_agent(p, proxy=None):
+    """This build's own User-Agent without its HeadlessChrome token, probed once per process, or
+    None while a failed probe waits out _UA_RETRY_S — the render then goes ahead as it is."""
+    global _UA, _UA_RETRY_AT
+    with _UA_LOCK:
+        if _UA is not None or time.monotonic() < _UA_RETRY_AT:
+            return _UA
         try:
-            page.route("**/*", lambda r: r.fulfill(
-                status=200, content_type="text/html", body="<html></html>"))
-            page.goto("https://ua-probe.jclaw.invalid/",
-                      wait_until="domcontentloaded", timeout=15000)
-            info = page.evaluate(_UA_PROBE)
-        finally:
-            page.close()
-        ua = info["ua"].replace("HeadlessChrome/", "Chrome/")
-        full = ua.split("Chrome/")[1].split(" ")[0]
-    except Exception as exc:
-        sys.stderr.write("[stealth-sidecar] UA probe failed (%s: %s) — rendering with the "
-                         "browser's own User-Agent\n" % (type(exc).__name__, exc))
-        return None
-    major = full.split(".")[0]
-    return {
-        "userAgent": ua,
-        "userAgentMetadata": {
-            "brands": [{"brand": "Not=A?Brand", "version": "99"},
-                       {"brand": "Google Chrome", "version": major},
-                       {"brand": "Chromium", "version": major}],
-            "fullVersion": full,
-            "platform": info.get("platform") or "",
-            "platformVersion": info.get("platformVersion") or "",
-            "architecture": info.get("architecture") or "",
-            "bitness": info.get("bitness") or "",
-            "model": info.get("model") or "",
-            "mobile": bool(info.get("mobile")),
-        },
-    }
+            browser = _launch(p, [], proxy)
+            try:
+                _UA = browser.new_page().evaluate("navigator.userAgent").replace(
+                    "HeadlessChrome/", "Chrome/")
+            finally:
+                browser.close()
+        except Exception as exc:
+            sys.stderr.write("[stealth-sidecar] UA probe failed (%s: %s) — rendering with the "
+                             "browser's own User-Agent\n" % (type(exc).__name__, exc))
+            _UA_RETRY_AT = time.monotonic() + _UA_RETRY_S
+        return _UA
 
 
 class SidecarState:
@@ -1268,28 +1236,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    @staticmethod
-    def _ua_override(context):
-        """Chrome-shaped UA metadata built from this browser's own values. A success is
-        cached for the process; a failure only until _UA_RETRY_S has passed, so a
-        transient probe failure degrades one render's disguise rather than every later
-        one, without re-probing on every page in between."""
-        global _UA_OVERRIDE, _UA_RETRY_AT
-        with _UA_LOCK:
-            if _UA_OVERRIDE is not None or time.monotonic() < _UA_RETRY_AT:
-                return _UA_OVERRIDE
-            # Probed under the lock: concurrent renders would otherwise each run their
-            # own probe navigation, making the failure this retries more likely, not less.
-            _UA_OVERRIDE = _probe_ua(context)
-            if _UA_OVERRIDE is None:
-                _UA_RETRY_AT = time.monotonic() + _UA_RETRY_S
-            return _UA_OVERRIDE
-
     def _render(self, url, pins, timeout_ms, settle_ms, challenge_ms, solve, wait_until, language,
                 proxy=None):
         scope = _RenderScope()
         with sync_playwright() as p:
-            browser = _launch(p, _launch_args(pins, language), proxy)
+            browser = _launch(p, _launch_args(pins, language, _user_agent(p, proxy)), proxy)
             try:
                 context = browser.new_context(**_CONTEXT_OPTIONS)
                 _install_gates(context, pins, lambda: scope)
@@ -1345,7 +1296,7 @@ def self_check(language):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         with sync_playwright() as p:
-            browser = _launch(p, _launch_args({}, language))
+            browser = _launch(p, _launch_args({}, language, _user_agent(p)))
             try:
                 context = browser.new_context(**_CONTEXT_OPTIONS)
                 page = context.new_page()

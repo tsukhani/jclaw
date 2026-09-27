@@ -355,13 +355,13 @@ class ScrapeSidecarContractTest extends UnitTest {
                 print("PROBE:" + json.dumps({
                     "pinned": serve._launch_args({"example.com": "93.184.215.14"}, "de-DE"),
                     "bare": serve._launch_args({}, "en"),
+                    "agent": serve._launch_args({}, "en", "UA/1"),
                     "context": serve._CONTEXT_OPTIONS,
                 }))
                 """);
         assertEquals(List.of("--lang=de-DE", "--accept-lang=de-DE,de",
                         "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,"
                                 + "availablePointerTypes=4",
-                        "--disable-site-isolation-trials",
                         "--webrtc-ip-handling-policy=disable_non_proxied_udp",
                         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
                         "--host-resolver-rules=MAP example.com 93.184.215.14"),
@@ -370,6 +370,10 @@ class ScrapeSidecarContractTest extends UnitTest {
         assertEquals(List.of("--lang=en", "--accept-lang=en"), keys(out, "bare").subList(0, 2));
         assertFalse(keys(out, "bare").stream().anyMatch(a -> a.startsWith("--host-resolver-rules")),
                 "no pins, no MAP clause");
+        assertEquals("--user-agent=UA/1", keys(out, "agent").getLast(),
+                "a flag, not a page-level override, so a cross-site iframe carries it too");
+        assertFalse(keys(out, "pinned").stream().anyMatch(a -> a.startsWith("--disable-site-isolation-trials")),
+                "Cloudflare fails a managed challenge whenever this flag is set (sidecar README)");
         assertEquals("{\"service_workers\":\"block\",\"viewport\":{\"width\":1920,\"height\":1080},"
                         + "\"screen\":{\"width\":1920,\"height\":1080}}",
                 out.get("context").toString(), "no locale and no Accept-Language: the flags carry both");
@@ -384,11 +388,11 @@ class ScrapeSidecarContractTest extends UnitTest {
                 import serve
                 ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
-                surfaces = {"userAgent": ua, "brands": ["Not=A?Brand", "Google Chrome", "Chromium"],
+                surfaces = {"userAgent": ua, "brands": ["Chromium", "Not=A?Brand"],
                             "language": "de-DE", "languages": ["de-DE", "de", "en-US", "en"],
                             "intl": "de-DE"}
                 sent = {"user-agent": ua, "accept-language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
-                        "sec-ch-ua": '"Not=A?Brand";v="99", "Google Chrome";v="153", "Chromium";v="153"'}
+                        "sec-ch-ua": '"Chromium";v="153", "Not=A?Brand";v="99"'}
                 consistent = {
                     "main": dict(surfaces, screen=[1920, 1080], viewport=[1920, 1080],
                                  pointerFine=True, hover=True, navigatorOverrides=[]),
@@ -403,13 +407,13 @@ class ScrapeSidecarContractTest extends UnitTest {
                     "webrtcUdp": False,
                 }
 
-                def broken(path, value):
+                def broken(path, value, platform="linux"):
                     observed = copy.deepcopy(consistent)
                     target = observed
                     for key in path[:-1]:
                         target = target[key]
                     target[path[-1]] = value
-                    return serve.fingerprint_problems(observed, "de-DE")
+                    return serve.fingerprint_problems(observed, "de-DE", platform)
 
                 print("PROBE:" + json.dumps({
                     "consistent": serve.fingerprint_problems(consistent, "de-DE"),
@@ -420,7 +424,11 @@ class ScrapeSidecarContractTest extends UnitTest {
                             ["headers", "/echo/worker", "accept-language"], "de-DE, *;q=0.5"),
                         "a HeadlessChrome Worker": broken(
                             ["worker", "userAgent"], ua.replace("Chrome/", "HeadlessChrome/")),
-                        "the Chromium brand on the wire": broken(["headers", "/", "sec-ch-ua"], '"Chromium";v="153"'),
+                        "a HeadlessChrome brand on the wire": broken(
+                            ["headers", "/", "sec-ch-ua"], '"HeadlessChrome";v="153"'),
+                        "a HeadlessChrome brand": broken(["main", "brands"], ["HeadlessChrome", "Not=A?Brand"]),
+                        "on macOS, a page on the host's locale": broken(["main", "intl"], "en-GB", "darwin"),
+                        "on macOS, a Worker on the host's locale": broken(["worker", "intl"], "en-GB", "darwin"),
                         "the default viewport": broken(["main", "viewport"], [1280, 720]),
                         "no fine pointer": broken(["main", "pointerFine"], False),
                         "a script override": broken(["main", "navigatorOverrides"], ["webdriver"]),
@@ -432,6 +440,8 @@ class ScrapeSidecarContractTest extends UnitTest {
                         "a Worker that never answered": broken(["worker"], None),
                         "a request that never arrived": broken(["headers", "/echo/worker"], None),
                     },
+                    "macIframeIntl": broken(["frame", "intl"], "en-GB", "darwin")
+                                     + broken(["frameWorker", "intl"], "en-GB", "darwin"),
                 }))
                 """);
         assertEquals("[]", out.get("consistent").toString(),
@@ -439,6 +449,8 @@ class ScrapeSidecarContractTest extends UnitTest {
         for (var caught : out.getAsJsonObject("caught").entrySet()) {
             assertFalse(caught.getValue().getAsJsonArray().isEmpty(), "the check misses " + caught.getKey());
         }
+        assertEquals("[]", out.get("macIframeIntl").toString(),
+                "macOS gives an isolated iframe the OS's Intl, and nothing reaches it without a worse split");
     }
 
     // ==================== Cloudflare challenges (JCLAW-1306) ====================
@@ -817,6 +829,7 @@ class ScrapeSidecarContractTest extends UnitTest {
                 serve._launch = launch
                 serve._navigate = navigate
                 serve._host_allowed = lambda host, budget=None: False
+                serve._UA = "UA/1"  # probed once per process, not per session
 
                 session = serve.BrowserSession("example.com", {"example.com": "93.184.215.14"}, "de-DE",
                                                {"server": "http://127.0.0.1:3128"})
