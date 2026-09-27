@@ -391,7 +391,7 @@ if [ -x "$APP_DIR/jclaw.sh" ] && [ -z "$JCLAW_FORCE_REINSTALL" ]; then
     # the work: it already knows how to carry state, back up the database and
     # roll back, and reimplementing any of that here would give the two copies
     # a chance to disagree. Hands it the archive we just fetched (file://) so
-    # the ~400 MB is downloaded once, not twice.
+    # the ~190 MB is downloaded once, not twice.
     step "Existing install detected at $APP_DIR — fetching the upgrade helper"
     URL="${JCLAW_BUNDLE_URL:-$(resolve_url)}"
     TMP_DL=$(mktemp -d "${TMPDIR:-/tmp}/jclaw-install.XXXXXX")
@@ -431,7 +431,7 @@ step "Resolving release"
 URL=$(resolve_url)
 substep "$JCLAW_VERSION → ${DIM}$URL${RESET}"
 
-step "Downloading $ASSET ${DIM}(~400 MB, first run only)${RESET}"
+step "Downloading $ASSET ${DIM}(~190 MB, first run only)${RESET}"
 TMP_DL=$(mktemp -d "${TMPDIR:-/tmp}/jclaw-install.XXXXXX")
 ZIP="$TMP_DL/$ASSET"
 download "$URL" "$ZIP"

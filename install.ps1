@@ -282,7 +282,7 @@ Step 'Resolving release'
 $url = Resolve-Url
 Substep "$Version -> $url"
 
-Step "Downloading $Asset (~400 MB, first run only)"
+Step "Downloading $Asset (~190 MB, first run only)"
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("jclaw-install-" + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $zip = Join-Path $tmp $Asset

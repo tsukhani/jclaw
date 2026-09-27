@@ -5,7 +5,7 @@
 //
 // This is not the restart panel with a different verb. A restart goes down
 // within two seconds, so that panel can treat "backend stopped answering" as
-// the start signal. An upgrade downloads and unpacks a ~400 MB release BEFORE
+// the start signal. An upgrade downloads and unpacks a ~190 MB release BEFORE
 // it stops anything, so the instance stays fully usable for minutes after the
 // 202 — during which the only progress signal is the helper's status file.
 // Hence two tracking modes: read the status file while we can still reach it,
@@ -144,7 +144,7 @@ async function handleUpgrade() {
  */
 function watchUpgrade() {
   let consecutiveUp = 0
-  // Generous: this covers a ~400 MB download on a slow link plus the restart.
+  // Generous: this covers a ~190 MB download on a slow link plus the restart.
   // The helper's own health gate is what actually decides success or rollback,
   // so overrunning here only means the operator reloads by hand.
   const budget = 3600
