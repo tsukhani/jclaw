@@ -160,6 +160,10 @@ function buildRenderer(sectionId: string, suppressFirstH1: boolean) {
 
     return `<h${depth} id="${finalId}">${inner}</h${depth}>\n`
   }
+
+  // A code block wider than the section scrolls sideways; tabindex lets a keyboard reach that scroll (WCAG 2.1.1).
+  const renderCode = renderer.code.bind(renderer)
+  renderer.code = (token: Tokens.Code) => renderCode(token).replace('<pre>', '<pre tabindex="0">')
   return renderer
 }
 
