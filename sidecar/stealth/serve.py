@@ -219,7 +219,7 @@ def _disguise(context, page, language):
     """The overrides no launch flag makes, sent before `page` navigates. Its iframes and
     dedicated Workers inherit both (measured), so they stay in step with the page."""
     cdp = context.new_cdp_session(page)
-    # --lang moves Intl on Linux, but Chromium on macOS takes it from the OS (measured).
+    # Chromium on macOS takes Intl from the OS and ignores --lang (measured).
     cdp.send("Emulation.setLocaleOverride", {"locale": language})
     override = Handler._ua_override(context)
     if override:
