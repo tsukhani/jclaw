@@ -145,7 +145,7 @@ public final class RenderedFetcher {
     /**
      * Where the settle window ended decides, when the sidecar reports it: an interstitial
      * served 403 that resolves itself ends on 200, and the settled body is the real page.
-     * Without it, the first navigation's status decides, as it always did.
+     * Without it, the first navigation's status decides.
      */
     private static int renderedStatus(Response response, String url) {
         // "0" is the sidecar's own value for "no navigation response": it reports nothing,

@@ -80,9 +80,12 @@ public final class BlockClassifier {
     public static ScrapeReason classify(ScrapeObservation obs, int minChars) {
         if (obs == null) return ScrapeReason.ERROR;
         if (obs.failed()) {
-            var challenge = obs.status() >= 400 ? cloudflareChallenge(obs) : null;
-            return challenge != null ? challenge
-                    : classifyError(obs.resolvedError().toLowerCase(Locale.ROOT));
+            // Not from the message: it names the URL, and "timeout" or "robots.txt" in a path would decide.
+            if (obs.status() >= 400) {
+                var challenge = cloudflareChallenge(obs);
+                return challenge != null ? challenge : statusReason(obs.status());
+            }
+            return classifyError(obs.resolvedError().toLowerCase(Locale.ROOT));
         }
 
         var raw = obs.rawBody() == null ? "" : obs.rawBody();

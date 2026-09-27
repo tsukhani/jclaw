@@ -307,6 +307,18 @@ class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
+    void aRefusalIsClassifiedByItsStatusNotByWordsInItsUrl() {
+        for (var url : new String[] {"https://x.test/blog/request-timeouts", "https://x.test/robots.txt-guide"}) {
+            var refusal = new WebExtraction.HttpStatusException(403, url, new byte[0], "text/html", Map.of());
+            assertEquals(ScrapeReason.TRUST_BLOCK,
+                    BlockClassifier.classify(ScrapeObservation.failed(url, refusal)), url);
+            var dead = new WebExtraction.HttpStatusException(404, url, new byte[0], "text/html", Map.of());
+            assertEquals(ScrapeReason.NOT_FOUND,
+                    BlockClassifier.classify(ScrapeObservation.failed(url, dead)), url);
+        }
+    }
+
+    @Test
     void theChallengeTypeDecidesBetweenAJsChallengeAndTurnstile() {
         assertEquals(ScrapeReason.TURNSTILE, BlockClassifier.classify(refused(403,
                 challenge("interactive", "Un instant\u2026", ""), CF_CHALLENGE)));
