@@ -684,6 +684,7 @@ class ScrapeSidecarContractTest extends UnitTest {
                 twin = reg.open("a.example", {}, "en", None)
                 refused = reg.open("b.example", {}, "en", None)
                 out = {"distinct": a != twin, "idLength": len(a), "refused": refused}
+                out["capZero"] = serve.SessionRegistry(0, 300, FakeSession, clock).open("a.example", {}, "en", None)
 
                 def outcome(sid, host):
                     try:
@@ -737,6 +738,7 @@ class ScrapeSidecarContractTest extends UnitTest {
         assertTrue(out.get("distinct").getAsBoolean(), "two opens for one host are two sessions, never one shared");
         assertTrue(out.get("idLength").getAsInt() >= 22, "an id another crawl could guess is not a boundary");
         assertTrue(out.get("refused").isJsonNull(), "past the cap a session is refused, not queued");
+        assertTrue(out.get("capZero").isJsonNull(), "scrape.stealth.maxSessions=0 refuses every session");
         assertEquals("served", out.get("own").getAsString());
         assertEquals("refused", out.get("otherHost").getAsString(), "a session serves only its own host");
         assertEquals("unknown", out.get("forged").getAsString());

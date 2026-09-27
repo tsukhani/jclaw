@@ -10,11 +10,14 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.StealthSidecarManager;
 import services.Tx;
 import services.decision.DecisionSettings;
 import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
 import utils.HttpFactories;
+
+import java.util.List;
 
 class ConfigServiceTest extends UnitTest {
 
@@ -334,6 +337,22 @@ class ConfigServiceTest extends UnitTest {
         // Clearing the provider is how an operator turns the reranker back off without
         // hunting for the enabled flag; a blank must not trip the locality guard.
         assertNull(ConfigService.setWithSideEffects(memory.MemoryReranker.KEY_PROVIDER, ""));
+    }
+
+    @Test
+    void setWithSideEffectsRejectsASessionCapThatIsNotACount() {
+        var config = new ScrapeConfigGuard();
+        try {
+            config.delete(StealthSidecarManager.CFG_MAX_SESSIONS);
+            for (var value : List.of("-1", "four", "")) {
+                assertNotNull(ConfigService.setWithSideEffects(StealthSidecarManager.CFG_MAX_SESSIONS, value),
+                        "scrape.stealth.maxSessions=" + value + " must be refused");
+            }
+            assertNull(ConfigService.get(StealthSidecarManager.CFG_MAX_SESSIONS),
+                    "a refused value must not be persisted");
+        } finally {
+            config.restore();
+        }
     }
 
     // --- setWithSideEffects: recall knobs that poison ranking (JCLAW-970) ---

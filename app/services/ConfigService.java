@@ -349,6 +349,10 @@ public class ConfigService {
             return "memory.recall.minCosine must be a finite number between -1.0 and 1.0.";
         }
 
+        if (key.equals(StealthSidecarManager.CFG_MAX_SESSIONS) && !isIntAtLeast(value, 0)) {
+            return "scrape.stealth.maxSessions must be a non-negative integer; 0 turns crawl sessions off.";
+        }
+
         if (key.startsWith(WebScrapeSettings.PREFIX)) {
             var rejected = WebScrapeSettings.rejectionFor(key, value);
             if (rejected != null) {

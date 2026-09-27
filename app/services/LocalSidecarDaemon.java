@@ -21,6 +21,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -79,7 +80,18 @@ public final class LocalSidecarDaemon {
             String threadPrefix,
             String displayName,
             String startupHint,
-            BiFunction<String, Throwable, RuntimeException> fail) {}
+            BiFunction<String, Throwable, RuntimeException> fail,
+            Supplier<List<String>> extraArgs) {
+
+        /** A sidecar whose launch takes no options of its own. */
+        public Config(String sidecarSubdir, String cacheSubdir, String configPrefix, int defaultPort,
+                      int defaultStartupTimeoutS, String logChannel, String threadPrefix,
+                      String displayName, String startupHint,
+                      BiFunction<String, Throwable, RuntimeException> fail) {
+            this(sidecarSubdir, cacheSubdir, configPrefix, defaultPort, defaultStartupTimeoutS,
+                    logChannel, threadPrefix, displayName, startupHint, fail, List::of);
+        }
+    }
 
     private final Config cfg;
 
@@ -254,12 +266,13 @@ public final class LocalSidecarDaemon {
         }
         reapOrphanedSquatter();
         int idleMin = ConfigService.getInt(cfg.configPrefix() + ".idleTimeoutMinutes", 15);
-        var cmd = List.of("uv", "run", SERVE_SCRIPT,
+        var cmd = new ArrayList<>(List.of("uv", "run", SERVE_SCRIPT,
                 "--host", "127.0.0.1",
                 "--port", String.valueOf(port()),
                 "--model", model,
                 "--cache-dir", cacheDir(),
-                "--idle-timeout-min", String.valueOf(idleMin));
+                "--idle-timeout-min", String.valueOf(idleMin)));
+        cmd.addAll(cfg.extraArgs().get());
         // JCLAW-830: snapshot the stop generation before launching. If stop()
         // bumps it while the child is starting, the publish below aborts and
         // kills the orphan so stop()'s "no running process" intent holds.

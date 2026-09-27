@@ -4,6 +4,7 @@ import play.Play;
 import services.scrape.ScrapeSidecarException;
 
 import java.io.File;
+import java.util.List;
 
 /**
  * Lifecycle for the stealth rendering sidecar — escalation rung 3 (JCLAW-1088).
@@ -30,11 +31,14 @@ public final class StealthSidecarManager {
     /** Public because Play's tests live in the default package. */
     public static final String CFG_SOLVE_TURNSTILE = "scrape.stealth.solveTurnstile";
 
+    /** Public because Play's tests live in the default package. */
+    public static final String CFG_MAX_SESSIONS = "scrape.stealth.maxSessions";
+
     private static final LocalSidecarDaemon DAEMON = new LocalSidecarDaemon(new LocalSidecarDaemon.Config(
             "sidecar/stealth", "data/stealth-sidecar", "scrape.stealth", 9532, 300,
             "scrape", "stealth-sidecar", "stealth browser sidecar",
             "the first launch installs Patchright and may download a Chromium build",
-            ScrapeSidecarException::new));
+            ScrapeSidecarException::new, StealthSidecarManager::sessionArgs));
 
     private StealthSidecarManager() {}
 
@@ -53,6 +57,18 @@ public final class StealthSidecarManager {
      *  render; absent means off. */
     public static boolean solveTurnstile() {
         return ConfigService.getBoolean(CFG_SOLVE_TURNSTILE, false);
+    }
+
+    /**
+     * The sidecar's cap on live crawl sessions (JCLAW-1307) as launch arguments, read when it
+     * spawns. Absent keeps the sidecar's own default; 0 refuses every session, so each crawl
+     * falls back to a browser per render.
+     *
+     * <p>Public because Play's tests live in the default package.
+     */
+    public static List<String> sessionArgs() {
+        int cap = ConfigService.getInt(CFG_MAX_SESSIONS, -1);
+        return cap < 0 ? List.of() : List.of("--max-sessions", String.valueOf(cap));
     }
 
     /** Base URL of a healthy sidecar, spawning it if needed. Single-flight (JCLAW-830). */

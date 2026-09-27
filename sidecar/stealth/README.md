@@ -179,8 +179,9 @@ memory, and a session closes when:
 - the sidecar exits, on `/shutdown` or its own idle timeout, which closes every browser first
   (bounded at 5 s).
 
-At most `--max-sessions` (4) are open at once. Past that `/session/open` answers `429` and the
-crawl renders that page with a browser of its own. The bound is memory: each open session is a
+At most `--max-sessions` (4, or `scrape.stealth.maxSessions`) are open at once. Past that
+`/session/open` answers `429` and the crawl renders that page with a browser of its own, so `0`
+turns sessions off. The bound is memory: each open session is a
 live Chromium besides the ones rendering.
 
 Patchright's sync API binds each object to the thread that made it, so a session's browser
@@ -410,6 +411,7 @@ Keys live in the Config DB (Settings), not `conf/application.conf`; none is seed
 | `scrape.stealth.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the process exits after that long without a render |
 | `scrape.stealth.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
 | `scrape.stealth.solveTurnstile` | `false` | `StealthSidecarManager.solveTurnstile`, per render | `true` lets a render click a Cloudflare gate's checkbox — see [Cloudflare challenges](#cloudflare-challenges) |
+| `scrape.stealth.maxSessions` | `4` | `StealthSidecarManager.sessionArgs`, at spawn | passed as `--max-sessions`; `0` refuses every crawl session, so each page gets a browser of its own |
 
 `LocalSidecarDaemon` also reads `scrape.stealth.timeoutSeconds` (exported as
 `SIDECAR_REQUEST_TIMEOUT_SEC`) and `scrape.stealth.hfToken` (exported as `HF_TOKEN`) for every
@@ -418,8 +420,9 @@ sidecar it launches; this one reads neither variable, so the two keys have no ef
 `serve.py` flags: `--host` (`127.0.0.1`), `--port`, `--model` (`patchright-chromium` — the
 identity `/health` echoes and the JVM's health check expects), `--cache-dir`
 (`data/stealth-sidecar`), `--idle-timeout-min` (`15`), `--max-concurrent` (`4`; the daemon's
-argv has no slot for it, so the JVM always gets the default), `--max-sessions` (`4`) and
-`--session-idle-min` (`5`) on the same terms, `--no-auth`, `--probe`, `--self-check` with
+argv has no slot for it, so the JVM always gets the default), `--max-sessions` (`4`, set from
+`scrape.stealth.maxSessions`), `--session-idle-min` (`5`, on the same terms as
+`--max-concurrent`), `--no-auth`, `--probe`, `--self-check` with
 `--language` (`en`).
 
 ## Authentication
