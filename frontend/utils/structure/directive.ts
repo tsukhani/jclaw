@@ -92,7 +92,7 @@ function scan(el: HTMLElement, binding: DirectiveBinding<number | null>) {
     figureEl.dataset.structureClaimed = ''
     const host = document.createElement('div')
     host.className = 'structure-host'
-    figureEl.insertBefore(host, code)
+    code.before(host)
     code.hidden = true
     state.figures.set(figureEl, { host, code, source: spec, live: false })
     state.observer.observe(figureEl)

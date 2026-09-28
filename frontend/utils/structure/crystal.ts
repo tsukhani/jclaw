@@ -55,6 +55,16 @@ const sub = (p: Vec3, q: Vec3): Vec3 => [p[0] - q[0], p[1] - q[1], p[2] - q[2]]
 const cross = (p: Vec3, q: Vec3): Vec3 => [p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2], p[0] * q[1] - p[1] * q[0]]
 const dot = (p: Vec3, q: Vec3) => p[0] * q[0] + p[1] * q[1] + p[2] * q[2]
 
+function periodicOffsets(pos: Vec3, fc: Vec3, cell: { m: Mat3, inv: Mat3 }): Vec3[] {
+  const base = sub(mulv(cell.inv, pos), fc)
+  const n = base.map(Math.round)
+  const offsets: Vec3[] = []
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+    offsets.push(mulv(cell.m, [base[0] - n[0]! + i, base[1] - n[1]! + j, base[2] - n[2]! + k]))
+  }
+  return offsets
+}
+
 /**
  * Positions of the ligand atoms within contact distance of a center. With a cell, `sites` is the unit cell and every
  * periodic image counts, so a center at a cell edge still gets its whole shell; without one, only the given sites do.
@@ -65,17 +75,7 @@ export function ligandShell(center: Site, sites: Site[], cell?: { m: Mat3, inv: 
   for (const site of sites) {
     if (!isLigand(site.elem)) continue
     const cutoff = contactCutoff(center.elem, site.elem)
-    const offsets: Vec3[] = []
-    if (cell && fc) {
-      const base = sub(mulv(cell.inv, site.pos), fc)
-      const n = base.map(Math.round)
-      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
-        offsets.push(mulv(cell.m, [base[0] - n[0]! + i, base[1] - n[1]! + j, base[2] - n[2]! + k]))
-      }
-    }
-    else {
-      offsets.push(sub(site.pos, center.pos))
-    }
+    const offsets = cell && fc ? periodicOffsets(site.pos, fc, cell) : [sub(site.pos, center.pos)]
     for (const v of offsets) {
       const r = Math.hypot(...v)
       if (r > 0.1 && r <= cutoff) shell.push({ elem: site.elem, pos: [center.pos[0] + v[0], center.pos[1] + v[1], center.pos[2] + v[2]] })
@@ -84,21 +84,26 @@ export function ligandShell(center: Site, sites: Site[], cell?: { m: Mat3, inv: 
   return shell
 }
 
+function hullFace(points: Vec3[], i: number, j: number, k: number): Face | null {
+  const n = cross(sub(points[j]!, points[i]!), sub(points[k]!, points[i]!))
+  if (Math.hypot(...n) < 1e-9) return null
+  let above = 0, below = 0
+  for (let m = 0; m < points.length; m++) {
+    if (m === i || m === j || m === k) continue
+    const s = dot(n, sub(points[m]!, points[i]!))
+    if (s > 1e-6) above++
+    else if (s < -1e-6) below++
+  }
+  if (above && below) return null
+  return above ? [i, k, j] : [i, j, k]
+}
+
 /** Convex hull of a coordination shell by brute force: a triangle is a face when no point lies on its outer side. */
 export function hullFaces(points: Vec3[]): Face[] {
   const faces: Face[] = []
   for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) for (let k = j + 1; k < points.length; k++) {
-    const n = cross(sub(points[j]!, points[i]!), sub(points[k]!, points[i]!))
-    if (Math.hypot(...n) < 1e-9) continue
-    let above = 0, below = 0
-    for (let m = 0; m < points.length; m++) {
-      if (m === i || m === j || m === k) continue
-      const s = dot(n, sub(points[m]!, points[i]!))
-      if (s > 1e-6) above++
-      else if (s < -1e-6) below++
-    }
-    if (above && below) continue
-    faces.push(above ? [i, k, j] : [i, j, k])
+    const face = hullFace(points, i, j, k)
+    if (face) faces.push(face)
   }
   return faces
 }

@@ -22,7 +22,10 @@ let unmounted = false
 const fileUrl = computed(() => props.source.kind === 'file' && props.agentId != null
   ? workspaceFileUrl(props.agentId, props.source.path)
   : null)
-const label = computed(() => `3D structure${props.source.caption ? ` of ${props.source.caption}` : ''}, drag to rotate`)
+const label = computed(() => {
+  const subject = props.source.caption ? ` of ${props.source.caption}` : ''
+  return `3D structure${subject}, drag to rotate`
+})
 
 // 3Dmol wants concrete colors; reading them from the canvas frame keeps the view in step with the theme.
 function hex(cssColor: string): string {
