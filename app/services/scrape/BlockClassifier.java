@@ -58,6 +58,15 @@ public final class BlockClassifier {
             "bots are not allowed", "scraping is prohibited"
     };
 
+    /** Titles of the page a site serves, in place of itself, to a User-Agent it does not recognise. */
+    private static final String[] UNSUPPORTED_CLIENT_TITLES = {
+            "unsupported browser", "unsupported client", "browser not supported", "browser is not supported",
+            "update your browser", "upgrade your browser", "outdated browser"
+    };
+    /** Above this much text, a page titled that way is about browsers rather than a refusal of this one. */
+    private static final int UNSUPPORTED_CLIENT_MAX_CHARS = 2_000;
+    private static final Pattern TITLE = Pattern.compile("<title[^>]*>([^<]*)</title>");
+
     /**
      * Prerendering services serve rendered HTML to user agents they recognize as
      * crawlers. Measured on abundent.academy: 68 characters of text to a browser UA,
@@ -104,12 +113,21 @@ public final class BlockClassifier {
         if (thin && containsAny(raw, TURNSTILE_MARKERS)) return ScrapeReason.TURNSTILE;
         if (thin && containsAny(raw, CHALLENGE_MARKERS)) return ScrapeReason.JS_CHALLENGE;
         if (thin && containsAny(raw, POLICY_MARKERS)) return ScrapeReason.POLICY_BLOCK;
+        // canva.com answers an unrecognised User-Agent with a 200 "update your browser" page, which scored
+        // OK on rung 1, so the ladder never reached the browser that reads the site.
+        if (unsupportedClient(raw, obs.textLength())) return ScrapeReason.TRUST_BLOCK;
 
         if (!thin) return ScrapeReason.OK;
 
         // Content-free and no gate marker: the origin served us, there is simply nothing
         // server-rendered to read. A rendering gap, not an anti-bot one.
         return ScrapeReason.THIN_CONTENT;
+    }
+
+    private static boolean unsupportedClient(String raw, int textLength) {
+        if (textLength > UNSUPPORTED_CLIENT_MAX_CHARS) return false;
+        var title = TITLE.matcher(raw);
+        return title.find() && containsAny(title.group(1), UNSUPPORTED_CLIENT_TITLES);
     }
 
     /** Whether this origin serves rendered HTML to declared crawlers. See

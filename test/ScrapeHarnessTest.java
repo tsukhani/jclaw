@@ -84,6 +84,21 @@ class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
+    void anUnsupportedBrowserPageIsARefusalThatEscalates() {
+        // canva.com's answer to rung 1's User-Agent, served as a 200: it scored OK and the ladder stopped there.
+        var raw = "<html><head><title>unsupported client – canva</title></head><body><h1>please update your browser</h1>"
+                + "<p>it seems you are using an old or unsupported browser.</p></body></html>";
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(obs(raw, "u".repeat(920))));
+        assertEquals(ScrapeRung.IMPERSONATE, BlockClassifier.nextRung(ScrapeReason.TRUST_BLOCK, ScrapeRung.PLAIN));
+    }
+
+    @Test
+    void aLongPageAboutUpdatingBrowsersIsContent() {
+        var raw = "<html><head><title>how to update your browser</title></head><body><article>guide</article></body></html>";
+        assertEquals(ScrapeReason.OK, BlockClassifier.classify(obs(raw, ARTICLE_TEXT.repeat(2))));
+    }
+
+    @Test
     void aClientRenderedShellIsThinContentNotABlock() {
         // No gate marker, no text: the origin served us, there is simply nothing
         // server-rendered. A rendering gap, not an anti-bot one — and the distinction the
