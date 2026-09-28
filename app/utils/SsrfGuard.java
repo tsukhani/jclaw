@@ -9,8 +9,10 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -122,6 +124,32 @@ public final class SsrfGuard {
         return PERMITTED_ORIGIN.isBound() ? Optional.of(PERMITTED_ORIGIN.get()) : Optional.empty();
     }
 
+    /** The addresses {@link #callWithHostsForTest} answers with on the binding thread; never bound in production. */
+    private static final ScopedValue<Map<String, InetAddress>> TEST_HOSTS = ScopedValue.newInstance();
+
+    /**
+     * Test seam: run {@code body} with each hostname in {@code hosts} resolving to its IP literal on
+     * this thread only, so a test of the public-host path needs no DNS. Unlisted names resolve as
+     * usual. {@code CapabilityRulesTest} fails the build if anything in {@code app/} calls it.
+     *
+     * @throws IllegalArgumentException if a value is not an IP literal
+     */
+    public static <T, X extends Throwable> T callWithHostsForTest(
+            @NonNull Map<String, String> hosts, ScopedValue.@NonNull CallableOp<T, X> body) throws X {
+        var table = new HashMap<String, InetAddress>();
+        hosts.forEach((host, literal) -> table.put(host.toLowerCase(Locale.ROOT), InetAddress.ofLiteral(literal)));
+        return ScopedValue.where(TEST_HOSTS, Map.copyOf(table)).call(body);
+    }
+
+    /** {@link InetAddress#getAllByName}, answered from {@link #callWithHostsForTest}'s table when one is bound. */
+    private static InetAddress[] allByName(String host) throws UnknownHostException {
+        if (TEST_HOSTS.isBound()) {
+            var pinned = TEST_HOSTS.get().get(host.toLowerCase(Locale.ROOT));
+            if (pinned != null) return new InetAddress[] {pinned};
+        }
+        return InetAddress.getAllByName(host);
+    }
+
     /** {@code scheme://host:port}, lower-cased with the default port made explicit, or null without a scheme or host. */
     private static @Nullable String originOf(URI uri) {
         var scheme = uri.getScheme();
@@ -141,7 +169,7 @@ public final class SsrfGuard {
      * attacker-controlled DNS from mixing a safe and an unsafe IP.
      */
     public static final Dns SAFE_DNS = hostname -> {
-        InetAddress[] addrs = InetAddress.getAllByName(hostname);
+        InetAddress[] addrs = allByName(hostname);
         for (var addr : addrs) {
             if (isUnsafe(addr)) {
                 throw new UnknownHostException(
@@ -326,7 +354,7 @@ public final class SsrfGuard {
         if (host == null) return; // assertSafeScheme already threw for null host
         if (isLikelyIpLiteral(host)) return; // literal IPs were checked in assertSafeScheme
         try {
-            for (var addr : InetAddress.getAllByName(host)) {
+            for (var addr : allByName(host)) {
                 if (isUnsafe(addr)) {
                     throw new BlockedAddressException(
                             BLOCKED_ADDRESS_MSG
@@ -428,7 +456,7 @@ public final class SsrfGuard {
     public static List<InetAddress> resolveSafeAddresses(@NonNull String host) {
         InetAddress[] addresses;
         try {
-            addresses = InetAddress.getAllByName(host);
+            addresses = allByName(host);
         } catch (UnknownHostException e) {
             throw new SecurityException("SSRF guard: cannot resolve host: " + host, e);
         }
@@ -582,7 +610,7 @@ public final class SsrfGuard {
      * connect-time resolution.
      */
     public static final Dns PROVIDER_SAFE_DNS = hostname -> {
-        InetAddress[] addrs = InetAddress.getAllByName(hostname);
+        InetAddress[] addrs = allByName(hostname);
         for (var addr : addrs) {
             if (isBlockedForProvider(addr)) {
                 throw new UnknownHostException(

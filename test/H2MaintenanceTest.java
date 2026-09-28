@@ -66,6 +66,18 @@ class H2MaintenanceTest extends UnitTest {
         }
     }
 
+    /** Rows in {@code table}, or 0 when the rebuild never created it. */
+    private static long rowsOrNone(Path dir, String table) throws SQLException {
+        try (var c = open(dir); var s = c.createStatement(); var rs = s.executeQuery(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = 'PUBLIC' AND TABLE_NAME = '" + table + "'")) {
+            rs.next();
+            if (rs.getLong(1) == 0) {
+                return 0;
+            }
+        }
+        return count(dir, table);
+    }
+
     private static List<String> categories(Path dir) throws SQLException {
         var out = new ArrayList<String>();
         try (var c = open(dir); var s = c.createStatement(); var rs = s.executeQuery("SELECT category FROM prompt ORDER BY id")) {
@@ -271,16 +283,19 @@ class H2MaintenanceTest extends UnitTest {
 
         var m = H2Maintenance.repair(dir, "20260909T123000Z");
 
-        // Which rows a zeroed block costs depends on MVStore's layout, so this pins the invariants
-        // that must hold whatever it cost: every figure in the report is the rebuilt file's truth,
-        // and "ok" is claimed only when every table reached its reference count.
+        // Which rows a zeroed block costs depends on MVStore's layout, which follows the JVM's processor
+        // count: at six or fewer the block takes the schema with it and the rebuild creates no tables.
+        // So this pins the invariants that must hold whatever it cost: every figure in the report is the
+        // rebuilt file's truth, and "ok" is claimed only when every table reached its reference count.
         for (var t : m.tables()) {
-            assertEquals(t.restored(), count(dir, t.name().substring("PUBLIC.".length())), t.name());
+            assertEquals(t.restored(), rowsOrNone(dir, t.name().substring("PUBLIC.".length())), t.name());
             assertTrue(t.staged() >= t.restored(), t.name());
         }
         assertEquals(m.tables().stream().allMatch(H2Maintenance.TableResult::matches)
                 && m.failures().isEmpty() && m.scriptErrors() == 0, m.ok(), m.summary());
-        assertEquals(List.of("WRITING", "OTHER", "CODING"), categories(dir));
+        if (m.tables().stream().anyMatch(t -> t.name().equals("PUBLIC.PROMPT") && t.restored() > 0)) {
+            assertEquals(List.of("WRITING", "OTHER", "CODING"), categories(dir));
+        }
         assertTrue(Files.exists(dir.resolve(H2Maintenance.DATA_FILE + ".damaged-20260909T123000Z")));
     }
 

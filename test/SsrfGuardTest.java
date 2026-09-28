@@ -8,6 +8,7 @@ import utils.SsrfGuard;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -17,6 +18,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * construct addresses directly from literals and assert the classification.
  */
 class SsrfGuardTest extends UnitTest {
+
+    // example.com's long-standing public address, served in place of DNS: the public-host paths run without a resolver.
+    private static final Map<String, String> EXAMPLE_COM = Map.of("example.com", "93.184.215.14");
 
     // --- isUnsafe: blocked ranges ---
 
@@ -209,10 +213,11 @@ class SsrfGuardTest extends UnitTest {
 
     @Test
     void assertUrlSafeAcceptsPublicUrl() {
-        // localhost name and loopback IPs have been ruled out; a well-known
-        // public hostname should pass. Use example.com which resolves to
-        // public IPs across test environments.
-        SsrfGuard.assertUrlSafe("https://example.com/");
+        // localhost name and loopback IPs have been ruled out; a public hostname should pass.
+        SsrfGuard.callWithHostsForTest(EXAMPLE_COM, () -> {
+            SsrfGuard.assertUrlSafe("https://example.com/");
+            return null;
+        });
     }
 
     @Test
@@ -226,7 +231,7 @@ class SsrfGuardTest extends UnitTest {
 
     @Test
     void isUrlSafeNonThrowingReturnsTrueForPublic() {
-        assertTrue(SsrfGuard.isUrlSafe("https://example.com/"));
+        assertTrue(SsrfGuard.callWithHostsForTest(EXAMPLE_COM, () -> SsrfGuard.isUrlSafe("https://example.com/")));
     }
 
     // ── JCLAW-145: IPv6 link-local / ULA, IPv4 decimal integer form ──
@@ -328,7 +333,7 @@ class SsrfGuardTest extends UnitTest {
         // The pin resolves the host once, validates the IP, and hands back a
         // URL whose authority IS that literal IP — so the string validated is
         // byte-for-byte the string fetched (no hostname left to re-resolve).
-        var pinned = SsrfGuard.pinnedUrl("https://example.com/path?q=1#frag");
+        var pinned = SsrfGuard.callWithHostsForTest(EXAMPLE_COM, () -> SsrfGuard.pinnedUrl("https://example.com/path?q=1#frag"));
         var pinnedHost = URI.create(pinned).getHost();
         assertNotNull(pinnedHost, "pinned URL must have a host");
         assertFalse(pinnedHost.contains("example.com"),
@@ -469,7 +474,8 @@ class SsrfGuardTest extends UnitTest {
 
     @Test
     void aPinnedUrlKeepsTheCallersRawTail() {
-        var pinned = SsrfGuard.pinnedUrl("https://example.com/a[0]/p|q?family=Roboto|Open+Sans&off=100%#a^b");
+        var pinned = SsrfGuard.callWithHostsForTest(
+                EXAMPLE_COM, () -> SsrfGuard.pinnedUrl("https://example.com/a[0]/p|q?family=Roboto|Open+Sans&off=100%#a^b"));
         assertTrue(pinned.endsWith("/a[0]/p|q?family=Roboto|Open+Sans&off=100%#a^b"),
                 "the tail is not re-encoded: " + pinned);
         assertFalse(pinned.contains("example.com"), "the host is pinned to a literal: " + pinned);
@@ -480,7 +486,7 @@ class SsrfGuardTest extends UnitTest {
     void anAuthorityOnlyUrlPinsToJustTheAddress() {
         // There is no tail to carry over, and a rebuild that appended one would put the caller's
         // whole URL — scheme included — after the pinned host.
-        var pinned = SsrfGuard.pinnedUrl("https://example.com");
+        var pinned = SsrfGuard.callWithHostsForTest(EXAMPLE_COM, () -> SsrfGuard.pinnedUrl("https://example.com"));
         assertFalse(pinned.contains("example.com"), "the host is pinned to a literal: " + pinned);
         assertEquals(pinned.indexOf("://"), pinned.lastIndexOf("://"),
                 "nothing may be appended after the authority: " + pinned);

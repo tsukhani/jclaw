@@ -628,11 +628,13 @@ up an authority it was never granted fails `play autotest` with a `because` clau
 naming the capability.
 
 **Test-only seams** are the mirror image of a capability, and `CapabilityRulesTest`
-holds them too: seven methods `app/` may never call, enforced by
+holds them too: eight methods `app/` may never call, enforced by
 `noAppClassCallsATestOnlySeam`, with `everyScopedValueSeamInAppIsOnTheList` failing the build on a
 `public static *ForTest` method that binds a `ScopedValue` and is not on it. Each binds a `ScopedValue` for the dynamic extent of
 one call — `SsrfGuard.permitOriginForTest` (any http(s) IP-literal origin, so a
-loopback fixture passes the SSRF check), `JevPage.callWithCallLimitForTest` (any
+loopback fixture passes the SSRF check), `SsrfGuard.callWithHostsForTest` (hostnames
+answered from IP literals instead of DNS, so the public-host paths run without a resolver),
+`JevPage.callWithCallLimitForTest` (any
 positive frozen-page bound, in place of the 30 s default), `HttpFactories.runWith` /
 `callWith` (a canned transport), `AppClock.runWith` / `callWith` (a fixed clock) and
 `PlaywrightBrowserTool.callWithFailingScreenForTest` (every `BrowserScreenProxy` it opens fails to
