@@ -35,6 +35,7 @@ import {
   EyeIcon,
   FilmIcon,
   GlobeAltIcon,
+  GlobeEuropeAfricaIcon,
   HandRaisedIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
@@ -73,6 +74,7 @@ import SettingsOcrPanel from './SettingsOcrPanel.vue'
 import SettingsPerformancePanel from './SettingsPerformancePanel.vue'
 import SettingsPrintersPanel from './SettingsPrintersPanel.vue'
 import SettingsProvidersPanel from './SettingsProvidersPanel.vue'
+import SettingsProxyProvidersPanel from './SettingsProxyProvidersPanel.vue'
 import SettingsSearchPanel from './SettingsSearchPanel.vue'
 import SettingsShellPanel from './SettingsShellPanel.vue'
 import SettingsSkillsPanel from './SettingsSkillsPanel.vue'
@@ -134,6 +136,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'providers', title: 'LLM Providers', icon: CpuChipIcon, component: SettingsProvidersPanel },
       { id: 'decision-providers', title: 'Decision Providers', icon: ScaleIcon, component: SettingsDecisionProvidersPanel },
       { id: 'search', title: 'Search Providers', icon: MagnifyingGlassIcon, component: SettingsSearchPanel },
+      { id: 'proxy-providers', title: 'Proxy Providers', icon: GlobeEuropeAfricaIcon, component: SettingsProxyProvidersPanel },
     ],
   },
   {

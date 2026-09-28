@@ -8,8 +8,9 @@ import services.StealthSidecarManager;
 import java.util.regex.Pattern;
 
 /**
- * The {@code web_scrape.*} runtime keys, all edited in Settings &gt; Web Scraping, their defaults,
- * and the rules {@code ConfigService.setWithSideEffects} applies when one is written.
+ * The {@code web_scrape.*} runtime keys, their defaults, and the rules
+ * {@code ConfigService.setWithSideEffects} applies when one is written. Settings &gt; Web Scraping
+ * edits them, except the proxy's keys, which Settings &gt; Proxy Providers edits.
  */
 public final class WebScrapeSettings {
 

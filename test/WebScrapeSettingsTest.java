@@ -105,7 +105,9 @@ class WebScrapeSettingsTest extends UnitTest {
     @Test
     void everyWebScrapeKeyInTheCodeHasASettingsRow() throws IOException {
         var root = Path.of(Play.applicationPath.getAbsolutePath());
-        var panel = Files.readString(root.resolve("frontend/components/settings/SettingsWebScrapePanel.vue"));
+        // The proxy's keys live in Proxy Providers, which composes them from a provider's fields.
+        var panel = Files.readString(root.resolve("frontend/components/settings/SettingsWebScrapePanel.vue"))
+                + Files.readString(root.resolve("frontend/components/settings/SettingsProxyProvidersPanel.vue"));
         // Dotted segments included: web_scrape.proxy.url matched nothing under [a-z0-9-]+ alone.
         var literal = Pattern.compile("\"(web_scrape\\.[a-z0-9-]+(?:\\.[a-z0-9-]+)*)\"");
         var keys = new TreeSet<String>();
@@ -123,6 +125,6 @@ class WebScrapeSettingsTest extends UnitTest {
         namespaces.forEach(keys::remove);
         assertTrue(keys.size() >= 10, "the scan must find the keys it guards, found " + keys);
         var missing = keys.stream().filter(k -> !panel.contains("'" + k + "'")).toList();
-        assertEquals(List.of(), missing, "web_scrape keys with no row in Settings > Web Scraping");
+        assertEquals(List.of(), missing, "web_scrape keys in neither Settings > Web Scraping nor Proxy Providers");
     }
 }

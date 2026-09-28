@@ -46,6 +46,6 @@ Give a starting URL and the agent whose workspace receives the pages. Everything
 - **Crawl** options: stay on the starting URL's host, honour the site's `robots.txt`, add pages from its sitemaps, and the preferred language on sites that publish translations.
 - **Output**: Markdown, plain text, or JSON with one record per page, optionally with each page's metadata. **Fields to extract** collects named values from every page with CSS selectors (`h1`, `.price`, or `a.next@href` for an attribute), which makes the output JSON.
 
-The proxy and the number of pages fetched at once are machine-wide and stay in [Settings → Web Scraping](/guide#settings-web-scraping).
+The number of pages fetched at once is machine-wide and stays in [Settings → Web Scraping](/guide#settings-web-scraping), and the proxy in [Settings → Proxy Providers](/guide#settings-proxy-providers).
 
 If the server refuses a value, such as a selector that does not parse, the reason appears beside that field and no scrape starts. Otherwise the new scrape's page opens.

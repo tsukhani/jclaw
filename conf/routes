@@ -82,6 +82,10 @@ POST    /api/scrape-jobs/{id}/pause              ApiScrapeJobsController.pause
 POST    /api/scrape-jobs/{id}/resume             ApiScrapeJobsController.resume
 DELETE  /api/scrape-jobs/{id}                    ApiScrapeJobsController.delete
 
+# Scrape proxy (JCLAW-1323): one request through the saved web_scrape.proxy.* settings to an IP
+# echo, for Settings > Proxy Providers' Test connection. The keys themselves go through /api/config.
+POST    /api/scrape/proxy/test                   ApiScrapeProxyController.test
+
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
 GET     /api/tasks/stats                        ApiTaskStatsController.stats

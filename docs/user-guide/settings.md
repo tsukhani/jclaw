@@ -355,6 +355,51 @@ Web search engines available to the `web_search` tool. Drag rows to **reorder pr
 
 Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
 
+## Proxy Providers
+
+The proxy that `web_fetch` and `web_scrape` send their requests through. It covers every way a page is fetched: the plain fetch, the browser-impersonating fetch and the full browser render, as well as `robots.txt` and sitemap requests. Nothing outside scraping uses it. Choose one of three cards:
+
+- **None** connects directly. It clears the proxy's address and leaves the username and password stored but unused.
+- **DataImpulse** fills in DataImpulse's gateway and login syntax from a few fields.
+- **Manual** takes any proxy's address and credentials as they are.
+
+The card marked **saved** is the one in effect. Whichever card you use, only the `web_scrape.proxy.*` keys below are stored: a card writes the URL, username and password from its fields and reads them back when the page opens, and the **enabled** switch below the cards is the fourth. Saving a proxy also switches it on. A saved password stays with the host it was saved for: left blank, it is kept while the host stays the same, and saving a different host clears the stored username and password before the new URL is written, so a password never reaches another proxy. A proxy is shown in the DataImpulse card when its address is `http://gw.dataimpulse.com` on port 823 or on a sticky port from 10000 to 20000; any other address opens in Manual.
+
+**DataImpulse**
+
+Your login and password are under **Proxy Access** in the [DataImpulse dashboard](https://app.dataimpulse.com/).
+
+| Field             | Meaning                                                                                  |
+|-------------------|------------------------------------------------------------------------------------------|
+| login             | Your proxy login, as the dashboard shows it, without any parameters.                     |
+| password          | Your proxy password. Required unless one is already saved for DataImpulse; left blank, that one is kept. |
+| country           | Two-letter country codes, separated by commas: `de`, or `de,au`. Empty uses any country. |
+| rotation          | **Rotating** gives a new IP address for every request, on port 823. **Sticky** keeps one address for a session, on port 10000. |
+| session minutes   | Sticky only: how long one address is kept, 1 to 120. Empty uses DataImpulse's default of 30. |
+
+The card shows what it will save. Sticky, in the United States, for 45 minutes, for example, saves `http://gw.dataimpulse.com:10000` with the username `LOGIN__cr.us;sessttl.45`. It always connects over HTTP, which every kind of fetch can use: DataImpulse needs your login, and a `socks5://` proxy is used without credentials. A parameter added to the username by hand that the card does not show is kept when you save. DataImpulse's state, city, ZIP and ASN targeting cost extra, so the card does not offer them.
+
+A save with an empty login or one ending in an underscore, a missing password, a country that is not a two-letter code, or a session outside 1 to 120 minutes is refused beside the field, and nothing is written.
+
+**Manual**
+
+The Manual card edits the URL, username and password directly. A URL, username or password the backend would refuse is named beside its field before anything is written, and an empty URL is refused there too; choose None to connect directly.
+
+| Key                          | Default   | Meaning                                                                                  |
+|------------------------------|-----------|------------------------------------------------------------------------------------------|
+| `web_scrape.proxy.url`       | *(unset)* | Send `web_fetch` and `web_scrape` through this proxy, as `http://host:port` or `socks5://host:port`. Unset, they connect directly. Nothing outside scraping uses it. An `http://` proxy must allow `CONNECT` to any port, 80 included: rendered pages tunnel every connection through it, which Squid's default (443 only) refuses. |
+| `web_scrape.proxy.username`  | *(unset)* | Username for an `http://` proxy that asks for one.                                       |
+| `web_scrape.proxy.password`  | *(unset)* | Password for an `http://` proxy. Masked like every other secret, and never shown back.   |
+| `web_scrape.proxy.enabled`   | on        | Turn the proxy off without clearing its address.                                         |
+
+Credentials belong in the username and password settings, never in the URL, which is shown unmasked; a `socks5://` proxy is used without credentials. A proxy on this machine or your local network is fine; link-local, multicast and unspecified addresses are refused. Saving a `socks5://` address in the Manual card clears the stored username and password first.
+
+Behind a proxy, JClaw still checks every address before a request leaves, and refuses anything private or unresolvable. The proxy then looks the name up itself, so a DNS record that changes between the two lookups can reach whatever the proxy's own network can reach. That trade-off is accepted because the proxy is an exit you chose. With `socks5://`, the browser-impersonating fetch resolves names locally, which narrows it further.
+
+**Test connection**
+
+**Test connection** sends one request through the saved proxy to `http://api.ipify.org/` and shows the address it arrived from and how long it took. When the request is refused, the panel shows the status and reason it got, such as DataImpulse's `407 TRAFFIC_EXHAUSTED`, rather than a general failure. The request is plain `http` so that an `http://` proxy relays it itself and its answer reaches the panel. That also means a passing test does not show that the proxy allows `CONNECT`, which `https` pages and rendered pages need, to port 443 at least. It tests what is saved, not what is typed, and it is unavailable until a proxy is saved and switched on; with none, nothing is sent. Each test uses a little of a paid plan's traffic, and agents cannot run it.
+
 ## Transcription
 
 Pairs every audio attachment with a text transcript before it reaches the LLM. Audio-capable models still receive native audio; text-only models receive the transcript as text.
@@ -580,7 +625,7 @@ The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](
 
 ## Web Scraping
 
-Every setting the `web_scrape` tool reads, in five groups. Changes apply live; no restart needed.
+Every setting the `web_scrape` tool reads, in four groups, except the proxy, which is set in [Proxy Providers](#settings-proxy-providers). Changes apply live; no restart needed.
 
 **Crawl**
 
@@ -624,19 +669,6 @@ When a plain fetch is blocked, `web_fetch` and `web_scrape` retry the page with 
 | `web_scrape.impersonate.profile`     | `chrome` | The browser that client presents. `chrome` follows the newest Chrome it knows; pin one such as `chrome146` or `safari18_0` for the same fingerprint on every machine. |
 | `web_scrape.stealth.enabled`         | on       | Render a page that is still blocked in a stealth browser, the last step. Needs `uv`; the first use installs Patchright and may download a Chromium build. |
 | `web_scrape.stealth.solve-turnstile` | on       | Click the checkbox on a Cloudflare challenge page that waiting does not clear: at most three clicks, only inside Cloudflare's challenge frame. A checkbox inside an ordinary page is never clicked. |
-
-**Proxy**
-
-| Key                          | Default   | Meaning                                                                                  |
-|------------------------------|-----------|------------------------------------------------------------------------------------------|
-| `web_scrape.proxy.url`       | *(unset)* | Send `web_fetch` and `web_scrape` through this proxy, as `http://host:port` or `socks5://host:port`. Unset, they connect directly. Nothing outside scraping uses it. An `http://` proxy must allow `CONNECT` to any port, 80 included: rendered pages tunnel every connection through it, which Squid's default (443 only) refuses. |
-| `web_scrape.proxy.username`  | *(unset)* | Username for an `http://` proxy that asks for one.                                       |
-| `web_scrape.proxy.password`  | *(unset)* | Password for an `http://` proxy. Masked like every other secret, and never shown back.   |
-| `web_scrape.proxy.enabled`   | on        | Turn the proxy off without clearing its address.                                         |
-
-The proxy covers every way a page is fetched: the plain fetch, the browser-impersonating fetch and the full browser render, as well as `robots.txt` and sitemap requests. Credentials belong in the username and password settings, never in the URL, which is shown unmasked; a `socks5://` proxy is used without credentials. A proxy on this machine or your local network is fine; link-local, multicast and unspecified addresses are refused.
-
-Behind a proxy, JClaw still checks every address before a request leaves, and refuses anything private or unresolvable. The proxy then looks the name up itself, so a DNS record that changes between the two lookups can reach whatever the proxy's own network can reach. That trade-off is accepted because the proxy is an exit you chose. With `socks5://`, the browser-impersonating fetch resolves names locally, which narrows it further.
 
 ## Browser
 
