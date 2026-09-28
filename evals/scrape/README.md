@@ -53,6 +53,10 @@ They are genuinely independent. CloudFront in front does **not** mean CloudFront
 `vendor: none` means *no vendor this probe can fingerprint*. Plenty of WAFs stay quiet, so treat it
 as an upper bound on unprotected, never a guarantee.
 
+`vendor` names the blocker, not the CDN in front of it: DataDome behind Cloudflare or CloudFront is
+`datadome`. Nine entries were relabelled on that rule on 2026-09-28, so vendor rows from gates before
+then are not comparable with later ones; the strata, which the gate checks, did not change.
+
 ## Strata
 
 Six, 25 each. Stratified on what changes the **fix**, with vendor carried as metadata so the

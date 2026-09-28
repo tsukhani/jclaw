@@ -68,12 +68,15 @@ STRATA = ["unprotected-ssr", "unprotected-spa", "edge-served",
 # Edge vendors that announce themselves in the response. Detection is
 # fingerprint-based, so "none" means "no vendor I can identify" — an upper bound on
 # unprotected, never a guarantee of it.
+# The blocker before the CDN it sits behind: DataDome serves its refusals through
+# Cloudflare and CloudFront, whose headers would otherwise claim the site (JCLAW-1320).
 VENDORS = [
+    ("datadome",   lambda h, b: "x-datadome" in h or "datadome" in h.get("set-cookie", "")
+                                or "captcha-delivery.com" in b),
     ("cloudflare", lambda h, b: "cf-ray" in h),
     ("cloudfront", lambda h, b: "cloudfront" in h.get("server", "") or "x-amz-cf-id" in h),
     ("akamai",     lambda h, b: "akamai" in h.get("server", "")
                                 or any(k.startswith("x-akamai") for k in h)),
-    ("datadome",   lambda h, b: "x-datadome" in h or "datadome" in h.get("set-cookie", "")),
     ("imperva",    lambda h, b: "x-iinfo" in h or "incap_ses" in h.get("set-cookie", "")),
     ("sucuri",     lambda h, b: "x-sucuri-id" in h),
     ("fastly",     lambda h, b: "fastly" in h.get("server", "")),

@@ -3259,7 +3259,7 @@
     {
       "url": "https://researchgate.net",
       "stratum": "challenge",
-      "vendor": "cloudflare",
+      "vendor": "datadome",
       "outcome": "challenge",
       "rendering": null,
       "rank": 217,
@@ -3475,7 +3475,7 @@
     {
       "url": "https://reuters.com",
       "stratum": "interactive",
-      "vendor": "cloudfront",
+      "vendor": "datadome",
       "outcome": "interactive",
       "rendering": null,
       "rank": 274,
@@ -3583,7 +3583,7 @@
     {
       "url": "https://wsj.com",
       "stratum": "interactive",
-      "vendor": "cloudfront",
+      "vendor": "datadome",
       "outcome": "interactive",
       "rendering": null,
       "rank": 350,
@@ -3610,7 +3610,7 @@
     {
       "url": "https://g2.com",
       "stratum": "interactive",
-      "vendor": "cloudflare",
+      "vendor": "datadome",
       "outcome": "interactive",
       "rendering": null,
       "rank": 4046,
@@ -3718,7 +3718,7 @@
     {
       "url": "https://klook.com",
       "stratum": "interactive",
-      "vendor": "cloudflare",
+      "vendor": "datadome",
       "outcome": "interactive",
       "rendering": null,
       "rank": 6223,
@@ -3907,7 +3907,7 @@
     {
       "url": "https://shutterstock.com",
       "stratum": "interactive",
-      "vendor": "cloudfront",
+      "vendor": "datadome",
       "outcome": "interactive",
       "rendering": null,
       "rank": 1769,
@@ -3934,7 +3934,7 @@
     {
       "url": "https://petco.com",
       "stratum": "interactive",
-      "vendor": "cloudflare",
+      "vendor": "datadome",
       "outcome": "interactive",
       "rendering": null,
       "rank": 8310,
@@ -4015,7 +4015,7 @@
     {
       "url": "https://marketwatch.com",
       "stratum": "interactive",
-      "vendor": "cloudfront",
+      "vendor": "datadome",
       "outcome": "interactive",
       "rendering": null,
       "rank": 1833,
@@ -4042,7 +4042,7 @@
     {
       "url": "https://justanswer.com",
       "stratum": "challenge",
-      "vendor": "cloudflare",
+      "vendor": "datadome",
       "outcome": "challenge",
       "rendering": null,
       "rank": 9044,
